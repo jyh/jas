@@ -974,13 +974,13 @@ mod tests {
     // the EVEN-ODD rule, with orientation explicitly outside the
     // contract. So the normalizer must not read a set's rings as one
     // non-zero-wound region: doing so re-interprets the operand. The
-    // four tests below pin that, ring relation by ring relation, so a
+    // tests below pin that, ring relation by ring relation, so a
     // later widening of the scope cannot happen silently. The
     // disagreement between the two rules is written up in the module
     // docs as a spec question for the council.
 
     #[test]
-    fn overlapping_rings_cancel_by_winding() {
+    fn nested_co_oriented_rings_keep_the_hole() {
         // Two CCW rings of one set, one nested inside the other. Under
         // even-odd (the ratified PolygonSet contract) the inner ring is
         // a HOLE: a ray from a point inside it crosses two ring edges.
@@ -1000,7 +1000,7 @@ mod tests {
     }
 
     #[test]
-    fn opposed_nested_rings_keep_the_hole() {
+    fn nested_opposed_rings_keep_the_hole() {
         // The same nesting with the inner ring wound the other way.
         // Even-odd does not care about orientation, so the answer must
         // be identical to the co-oriented case above: both rings
