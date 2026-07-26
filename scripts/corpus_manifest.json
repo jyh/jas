@@ -47,6 +47,17 @@
       },
       "notes": "Reference-only BY DESIGN: the default-seeded artboard scenario drives interpreter panel/effect state that the ports cannot seed headlessly today; port-side panel-seeding is a named future decision. The ports gate artboard DOCUMENT semantics via the operations corpus (artboard_*.json) instead."
     },
+    "test_fixtures/character_apply": {
+      "kind": "fixtures",
+      "required_consumers": ["rust", "swift", "reference"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literal (read_fixture in src/cross_language_test.rs character_apply_panel_edit_corpus)",
+        "swift": "path literal (Tests/Panels/CharacterApplyCorpusTests.swift characterApplyCorpus)",
+        "reference": "os.path.join segments (workspace_interpreter/tests/test_character_apply.py)"
+      },
+      "notes": "CHARPANEL: the FIELD-SCOPED Character-panel apply law (transcripts/CHARACTER.md 'The field-scoped apply law'). Gates all THREE live implementations off one corpus: a panel edit names its field and only that field's attribute group is written, everything else preserved per element. Same defect class as the stroke_apply family, over sixteen attributes, plus a port divergence (Swift mitigated it in the panel VIEW, Rust not at all). The reference states the field -> group table (workspace_interpreter/character_law.py) and the ports mirror it. The reference arm additionally asserts the corpus REJECTS the whole-rebuild law it replaced, so the gate cannot pass vacuously. No scripts consumer: the law is a pure function pinned in-port, not an algorithm_roundtrip binary."
+    },
     "test_fixtures/concept_constraints": {
       "kind": "compiled",
       "required_consumers": ["rust", "swift", "reference", "scripts"],

@@ -437,28 +437,146 @@ defaults appear as absence.
 Shortcuts for Character panel actions (All Caps, Underline, etc.) are
 defined in `workspace/shortcuts.yaml` rather than here.
 
+## The field-scoped apply law
+
+**A Character-panel edit names the field the user just committed, and
+writes only what that field owns.** Every other character attribute is
+preserved from the element being edited, per element. An edit to a
+field that owns no element attribute writes nothing at all — not even
+an undo step.
+
+This is the law because the panel is not a picture of the selection.
+An apply that rebuilt the whole attribute set imposed values the user
+never chose on every control they did not touch, and over thirty-plus
+fields there is no such thing as a small clobber: nudging Tracking on
+a 30pt bold italic underlined Georgia run in French with a 4pt
+baseline shift, a 40pt leading, Crisp anti-aliasing, 15° rotation,
+120/90 glyph scales and Optical kerning reset all sixteen attributes
+to the panel's 12pt sans-serif defaults. This is the same defect
+class the Stroke panel had (STROKE.md "The field-scoped apply law",
+JYH 2026-07-24), found while that one was being fixed and banked in
+its follow-ups; it is fixed here the same way, off one shared corpus.
+(CHARPANEL, 2026-07-25.)
+
+The two ports had also drifted, which is the second half of the
+stone. Swift's panel view pushed its live selection mirror into panel
+state *before* the edit landed, so an edit arriving through a panel
+widget mostly survived; Rust had no such sync, so the same edit
+clobbered. A view-layer mirror is not a field-scoped apply: it does
+nothing for the per-range route, nothing for a caller that applies
+without going through the view, and it makes the two ports disagree
+about what an apply means. Both ports now implement ONE law with no
+port-specific preservation semantics.
+
+The attribute **groups** — a group is the set of attributes one field
+owns, and is a single attribute except where that is impossible:
+
+| Panel field | Writes |
+| --- | --- |
+| `font_family` | `font-family` |
+| `style_name` | the `font-weight` + `font-style` PAIR. Necessarily wide: the Style dropdown's entries (Regular / Italic / Bold / Bold Italic) each name a weight and a style together, and no control moves one without the other. An **unrecognised** style name writes NEITHER — leaving half the pair guessed is worse than leaving both alone. |
+| `font_size` | `font-size` **only** — never `line-height`. Auto leading is an ABSENT `line-height`, so preserving the attribute bit-for-bit keeps Auto alive and lets it re-derive against the new size. |
+| `leading` | `line-height`, empty when the committed leading equals the **element's** `font-size × 1.2` (the Auto value). |
+| `kerning` | the `kerning` attribute |
+| `tracking` | `letter-spacing` |
+| `vertical_scale` | the vertical glyph scale, and **only** the vertical |
+| `horizontal_scale` | the horizontal glyph scale, and **only** the horizontal |
+| `baseline_shift`, `superscript`, `subscript` | the one `baseline-shift` attribute, with the toggles taking precedence over the number (see §Selection model's mutual exclusion). Three fields sharing a single-attribute group is not a wide group. |
+| `character_rotation` | `rotate` |
+| `all_caps`, `small_caps` | the `text-transform` + `font-variant` PAIR. Necessarily wide: the two toggles are mutually exclusive, and turning All Caps ON has to clear a small-caps `font-variant` — which a one-attribute write cannot do. |
+| `underline`, `strikethrough` | the whole `text-decoration` token list. Necessarily wide for the same reason a dash array is: a CSS token list cannot be written a token at a time, so any decoration edit re-derives the list from both flags (alphabetical, so equality never depends on which toggle the user hit first). |
+| `language` | `xml:lang` |
+| `anti_aliasing` | the anti-alias mode, empty at the `Sharp` identity |
+| `snap_to_glyph_visible`, the six `snap_*` category flags, `touch_type_enabled`, `show_font_height_options`, `in_menu_font_previews` | nothing. These are UI-only state (§Panel state); toggling one must not push an undo step that changes nothing. |
+
+The two glyph scales are deliberately **separate** groups, for the
+reason the Stroke law's two arrowhead scales are: they are two
+independent inputs, so a shared group would let an edit of one stamp
+the panel's value for the other onto the element.
+
+**The Auto test reads the ELEMENT's font size, not the panel's.** The
+whole-rebuild law compared the committed leading against the *panel's*
+`font_size × 1.2`, which was harmless only because it rewrote the size
+in the same breath. Under the field-scoped law a leading edit must not
+consult a font-size field the user did not touch: a 30pt element with
+a leading of 36 is at its Auto ratio and goes back to an empty
+`line-height`, whatever the panel's own size field happens to say.
+The same ruling retires the Auto-leading **post-write hook** from the
+apply path — it stays as a display concern (keeping the Leading field
+tracking a committed size) but the apply no longer needs it, because
+`font_size` owning only the size means an absent `line-height`
+survives on its own.
+
+**Clearing the Leading field is Auto**, and the three implementations
+reach that one outcome from two different shapes. Swift and the
+reference hold the panel's leading as an OPTIONAL, so an absent
+leading is Auto directly. Rust holds a plain number and cannot
+represent absence, so its nullable-clear path materialises the
+ELEMENT's Auto value (its own `font-size × 1.2`) — which the law then
+recognises as Auto and writes as the empty attribute. Materialising
+from the element rather than from the panel's size field is what makes
+the two shapes agree: with a stale 12pt panel over a 30pt element, the
+panel-derived value (14.4) would have been written out as an explicit
+`14.4pt` while the other ports wrote nothing.
+
+The law governs both routes that write the document. The
+**whole-element** route lifts each selected element's own sixteen
+attributes, overwrites the edited group, and writes back — per
+element, so a mixed selection keeps each element's values. The
+**per-range** route (an active edit session with a character range)
+builds the same panel override template and then clears every field
+outside the group, so `merge_tspan_overrides` leaves the range's other
+attributes alone; groups with no tspan-level representation (the glyph
+scales, kerning) write nothing rather than stamping the panel's other
+attributes instead. The **caret** route primes the edit session's
+pending next-typed-character override and touches no document, so its
+replace-the-whole-template semantics are unchanged and remain banked
+with the display-vs-apply sync question.
+
+The law is stated in the live reference
+(`workspace_interpreter/character_law.py`: `CHARACTER_EDIT_GROUPS` is
+the field → group table, `character_with_group` the law) and pinned
+across all three live implementations by
+`test_fixtures/character_apply/panel_edit.json`, whose `expected` is a
+DELTA so "everything else is preserved" is stated directly. The
+reference arm additionally asserts the corpus REJECTS the
+whole-rebuild law it replaced, so the gate cannot pass vacuously.
+
 ## Panel-to-selection wiring status
 
 Fully wired in Rust, Swift, OCaml, and Python. Editing a Character-
 panel control (Size, Leading, a Caps toggle, Baseline Shift, …)
 updates the panel scope in the app's state store and then pushes the
-full attribute set onto the selected Text / TextPath elements via
-each app's `apply_character_panel_to_selection` pipeline. The inverse
-direction — panel widgets reflect the selected element's current
-attributes — lands through live overrides built on each render.
+edited field's attribute group onto the selected Text / TextPath
+elements via each app's `apply_character_panel_to_selection` pipeline
+(see §The field-scoped apply law — the FROZEN OCaml and Python ports
+still carry the pre-CHARPANEL whole-rebuild behaviour, per POLICY.md
+§1). The inverse direction — panel widgets reflect the selected
+element's current attributes — lands through live overrides built on
+each render.
 
 Per-app entry points:
 
-- **Rust** (`jas_dioxus`): `apply_character_panel_to_selection` in
-  `src/workspace/app_state.rs`. Panel-to-widget overrides are built
-  in `src/workspace/dock_panel.rs::build_live_panel_overrides`. The
+- **Reference** (`workspace_interpreter`): `character_law.py` states the
+  field → group table (`CHARACTER_EDIT_GROUPS`), the group → attribute
+  table (`CHARACTER_GROUP_ATTRS`), the panel-default fallbacks
+  (`CHARACTER_PANEL_FIELDS`, machine-checked against the generated
+  workspace bundle) and the law itself (`character_with_group`).
+- **Rust** (`jas_dioxus`): `apply_character_panel_to_selection(edited)`
+  in `src/workspace/app_state.rs`, over the pure `character_with_group`
+  + `CharacterEditGroup` in the same file. Panel-to-widget overrides
+  are built in
+  `src/workspace/dock_panel.rs::build_live_panel_overrides`. The
   widget dispatch refactor (Layer 1 below) lives in the generic
   `render_select / render_toggle / render_number_input /
   render_text_input` helpers in `src/interpreter/renderer.rs`,
-  switched by the enclosing panel's `panel_kind`.
-- **Swift** (`JasSwift`): `applyCharacterPanelToSelection` and the
-  `notifyPanelStateChanged` dispatcher in
-  `Sources/Interpreter/Effects.swift`; live overrides in
+  switched by the enclosing panel's `panel_kind`; each of those eight
+  commit sites passes the field key it just wrote.
+- **Swift** (`JasSwift`): `applyCharacterPanelToSelection(edited:)` and
+  the `notifyPanelStateChanged` dispatcher in
+  `Sources/Interpreter/Effects.swift`; the law
+  (`CharacterEditGroup` / `CharacterAttrs` / `characterWithGroup` /
+  `characterAttrsForGroup`) and the live overrides both in
   `Sources/Interpreter/CharacterPanelSync.swift`. Widget write-backs
   flow through `YamlElementView.commitPanelWrite` and the per-panel
   state scope lives on `Model.stateStore`.

@@ -1,0 +1,418 @@
+{
+  "_doc": [
+    "CHARPANEL: the FIELD-SCOPED Character-panel apply law, pinned across the",
+    "three LIVE implementations (the workspace_interpreter reference, Rust",
+    "jas_dioxus, Swift JasSwift). See transcripts/CHARACTER.md",
+    "'The field-scoped apply law'.",
+    "",
+    "THE LAW. A Character-panel edit names the field the user just committed.",
+    "Only the attribute GROUP that field owns is taken from panel state; every",
+    "other character attribute is preserved from the element being edited, per",
+    "element. The old law rebuilt the WHOLE attribute set from panel state on",
+    "every edit, so nudging Tracking on a 30pt bold italic underlined Georgia",
+    "run reset it to the panel's 12pt sans-serif defaults - sixteen attributes",
+    "clobbered by one edit (JYH, banked in transcripts/STROKE.md follow-ups",
+    "during STROKEWIDTH). Vector 'tracking_edit_preserves_the_rich_run' is that",
+    "exact repro and FAILS under the old law (it yields font_family",
+    "'sans-serif', not 'Georgia').",
+    "",
+    "THE GROUPS. font_family->font_family; style_name->the font_weight +",
+    "font_style PAIR (one dropdown names both, and an unrecognised name writes",
+    "NEITHER); font_size->font_size ONLY (never line_height: Auto leading is an",
+    "ABSENT line-height, so preserving it keeps Auto alive and lets it",
+    "re-derive against the new size); leading->line_height; kerning->kerning;",
+    "tracking->letter_spacing; vertical_scale->vertical_scale ONLY and",
+    "horizontal_scale->horizontal_scale ONLY (two independent inputs, so each",
+    "is its own group - grouping them would let one edit stamp the panel's",
+    "value for the other, the mistake the Stroke law's two arrowhead scales",
+    "already paid for); baseline_shift / superscript / subscript -> the single",
+    "baseline_shift attribute, toggles winning over the number;",
+    "character_rotation->rotate; all_caps and small_caps -> the text_transform",
+    "+ font_variant PAIR (their mutual exclusion cannot be expressed one",
+    "attribute at a time: turning All Caps ON must clear a small-caps",
+    "font_variant); underline and strikethrough -> the whole text_decoration",
+    "token list (a CSS token list cannot be written a token at a time, exactly",
+    "as a dash array cannot be written a slot at a time); language->xml_lang;",
+    "anti_aliasing->aa_mode. Every other panel field owns no element attribute",
+    "and writes NOTHING - the seven snap_* flags and the section-visibility",
+    "flags are UI-only state, and toggling one must not push an undo step that",
+    "changes nothing.",
+    "",
+    "SHAPE. Each vector is language-neutral. 'op' is always 'panel_edit'.",
+    "'edited' is the committed panel field key; unlike the Stroke panel there",
+    "is no flat-global spelling to normalize, because every Character control",
+    "binds panel.<field> only (workspace/panels/character.yaml). 'base' is the",
+    "element's existing character state as a flat attribute map, or the string",
+    "'rich_run' naming the shared map below; it is itself a DELTA over",
+    "'element_defaults'. 'panel' is a DELTA over 'panel_defaults' below - only",
+    "the fields the vector cares about. 'expected' is likewise a DELTA merged",
+    "over the effective base: the keys it names are what the edit CHANGED, and",
+    "every key it omits must come back unchanged. That is the whole point of",
+    "the law, so the delta form states it directly. An 'expected' of {} means",
+    "the edit wrote nothing that differs; an 'expected' of null means NO WRITE",
+    "REACHES THE DOCUMENT AT ALL (no undo step, element untouched).",
+    "",
+    "ATTRIBUTE NAMES are the element's SVG / CSS attributes per CHARACTER.md's",
+    "mapping table, not panel field names: the panel's 'leading' field writes",
+    "line_height, its 'tracking' field writes letter_spacing, and its",
+    "'style_name' dropdown writes font_weight + font_style. Empty string is",
+    "the identity value for every string attribute (CHARACTER.md's",
+    "identity-omission rule: a default is stored as absence)."
+  ],
+
+  "element_defaults": {
+    "_comment": "A plain 12pt element: every attribute at its identity value. Each port builds its Text / TextPath from this map merged with the vector's 'base', so no port's constructor defaults leak into the corpus.",
+    "font_family": "sans-serif",
+    "font_size": 12.0,
+    "font_weight": "normal",
+    "font_style": "normal",
+    "text_decoration": "",
+    "text_transform": "",
+    "font_variant": "",
+    "baseline_shift": "",
+    "line_height": "",
+    "letter_spacing": "",
+    "xml_lang": "",
+    "aa_mode": "",
+    "rotate": "",
+    "horizontal_scale": "",
+    "vertical_scale": "",
+    "kerning": ""
+  },
+
+  "panel_defaults": {
+    "_comment": "The Character panel sitting at the defaults workspace/panels/character.yaml declares - the state that used to be stamped over the whole selection on every edit.",
+    "font_family": "sans-serif",
+    "style_name": "Regular",
+    "font_size": 12.0,
+    "leading": 14.4,
+    "kerning": "Auto",
+    "tracking": 0.0,
+    "vertical_scale": 100.0,
+    "horizontal_scale": 100.0,
+    "baseline_shift": 0.0,
+    "character_rotation": 0.0,
+    "all_caps": false,
+    "small_caps": false,
+    "superscript": false,
+    "subscript": false,
+    "underline": false,
+    "strikethrough": false,
+    "language": "en",
+    "anti_aliasing": "Sharp"
+  },
+
+  "rich_run": {
+    "_comment": "JYH's repro element: a deliberately rich 30pt run where EVERY attribute differs from the panel defaults, so any whole-rebuild shows up as a diff. text_transform is uppercase with an empty font_variant because All Caps and Small Caps are mutually exclusive - the small-caps side is exercised by its own base.",
+    "font_family": "Georgia",
+    "font_size": 30.0,
+    "font_weight": "bold",
+    "font_style": "italic",
+    "text_decoration": "underline",
+    "text_transform": "uppercase",
+    "font_variant": "",
+    "baseline_shift": "4pt",
+    "line_height": "40pt",
+    "letter_spacing": "0.08em",
+    "xml_lang": "fr",
+    "aa_mode": "Crisp",
+    "rotate": "15",
+    "horizontal_scale": "120",
+    "vertical_scale": "90",
+    "kerning": "Optical"
+  },
+
+  "vectors": [
+    {
+      "name": "tracking_edit_preserves_the_rich_run",
+      "_comment": "JYH's EXACT repro. Rich 30pt run selected, panel at its 12pt defaults, user commits Tracking = 50. Only letter_spacing changes. Under the old whole-rebuild law all sixteen attributes came back at the panel defaults (font_family 'sans-serif', font_size 12, normal/normal, no decoration, no caps, no shift, Auto leading, no lang, no aa, no rotation, identity scales, no kerning) - this vector is the RED one.",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "tracking": 50.0 },
+      "edited": "tracking",
+      "expected": { "letter_spacing": "0.05em" }
+    },
+    {
+      "name": "tracking_zero_clears_letter_spacing",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "tracking": 0.0 },
+      "edited": "tracking",
+      "expected": { "letter_spacing": "" }
+    },
+    {
+      "name": "font_family_edit_writes_only_the_family",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "font_family": "Arial" },
+      "edited": "font_family",
+      "expected": { "font_family": "Arial" }
+    },
+    {
+      "name": "font_size_edit_writes_only_the_size",
+      "_comment": "The rich run carries an EXPLICIT line_height of 40pt. A size edit must leave it alone - the leading is the user's, not a function of the size.",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "font_size": 18.0 },
+      "edited": "font_size",
+      "expected": { "font_size": 18.0 }
+    },
+    {
+      "name": "font_size_edit_preserves_auto_leading",
+      "_comment": "Auto leading is an ABSENT line-height. Because font_size owns ONLY font_size, the empty attribute survives and Auto re-derives against the new size (18 x 1.2 = 21.6) with no post-write hook bumping the panel's leading in step. The whole-rebuild law needed that hook; the field-scoped law does not.",
+      "op": "panel_edit",
+      "base": { "font_size": 30.0, "line_height": "" },
+      "panel": { "font_size": 18.0, "leading": 36.0 },
+      "edited": "font_size",
+      "expected": { "font_size": 18.0 }
+    },
+    {
+      "name": "style_edit_writes_the_weight_and_style_pair",
+      "_comment": "The rich run is bold italic; the panel's Regular writes BOTH normal/normal. One dropdown, one pair - there is no control that moves the weight without the style.",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "style_name": "Regular" },
+      "edited": "style_name",
+      "expected": { "font_weight": "normal", "font_style": "normal" }
+    },
+    {
+      "name": "style_edit_bold_italic",
+      "op": "panel_edit",
+      "base": { "font_weight": "normal", "font_style": "normal" },
+      "panel": { "style_name": "Bold Italic" },
+      "edited": "style_name",
+      "expected": { "font_weight": "bold", "font_style": "italic" }
+    },
+    {
+      "name": "unknown_style_name_writes_neither_attribute",
+      "_comment": "An unrecognised Style entry leaves BOTH the weight and the style alone rather than guessing one half of the pair. Expected is the EMPTY delta: the write reaches the element and changes nothing.",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "style_name": "Ultra Condensed Whatever" },
+      "edited": "style_name",
+      "expected": {}
+    },
+    {
+      "name": "leading_edit_writes_only_the_line_height",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "leading": 50.0 },
+      "edited": "leading",
+      "expected": { "line_height": "50pt" }
+    },
+    {
+      "name": "leading_at_the_element_auto_ratio_restores_auto",
+      "_comment": "THE RULING: Auto is tested against the ELEMENT's font size, not the panel's. The rich run is 30pt, so a leading of 36 is exactly its Auto value and the attribute goes back to empty - even though the panel's own font_size field sits at the 12pt default (whose Auto value would be 14.4). Under the field-scoped law a leading edit must not consult a font-size field the user did not touch.",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "leading": 36.0 },
+      "edited": "leading",
+      "expected": { "line_height": "" }
+    },
+    {
+      "name": "kerning_named_mode_passes_through",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "kerning": "Metrics" },
+      "edited": "kerning",
+      "expected": { "kerning": "Metrics" }
+    },
+    {
+      "name": "kerning_numeric_is_thousandths_of_an_em",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "kerning": "50" },
+      "edited": "kerning",
+      "expected": { "kerning": "0.05em" }
+    },
+    {
+      "name": "kerning_auto_clears_the_attribute",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "kerning": "Auto" },
+      "edited": "kerning",
+      "expected": { "kerning": "" }
+    },
+    {
+      "name": "horizontal_scale_edit_leaves_the_vertical_scale",
+      "_comment": "The two scales are SEPARATE groups. The panel's vertical_scale sits at the 100 default while the element's is 90; a horizontal edit must not stamp the identity over it.",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "horizontal_scale": 150.0 },
+      "edited": "horizontal_scale",
+      "expected": { "horizontal_scale": "150" }
+    },
+    {
+      "name": "vertical_scale_edit_leaves_the_horizontal_scale",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "vertical_scale": 80.0 },
+      "edited": "vertical_scale",
+      "expected": { "vertical_scale": "80" }
+    },
+    {
+      "name": "scale_at_identity_clears_the_attribute",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "horizontal_scale": 100.0 },
+      "edited": "horizontal_scale",
+      "expected": { "horizontal_scale": "" }
+    },
+    {
+      "name": "baseline_shift_numeric_writes_points",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "baseline_shift": -2.5 },
+      "edited": "baseline_shift",
+      "expected": { "baseline_shift": "-2.5pt" }
+    },
+    {
+      "name": "superscript_toggle_wins_over_the_number",
+      "_comment": "Three FIELDS share the one baseline_shift attribute; the toggles take precedence over the numeric input (CHARACTER.md mutual exclusion). Sharing a single-attribute group is not a wide group.",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "superscript": true, "baseline_shift": 5.0 },
+      "edited": "superscript",
+      "expected": { "baseline_shift": "super" }
+    },
+    {
+      "name": "subscript_toggle_writes_sub",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "subscript": true },
+      "edited": "subscript",
+      "expected": { "baseline_shift": "sub" }
+    },
+    {
+      "name": "baseline_shift_zero_clears_the_attribute",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "baseline_shift": 0.0 },
+      "edited": "baseline_shift",
+      "expected": { "baseline_shift": "" }
+    },
+    {
+      "name": "rotation_edit_writes_only_the_rotate",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "character_rotation": -30.0 },
+      "edited": "character_rotation",
+      "expected": { "rotate": "-30" }
+    },
+    {
+      "name": "rotation_zero_clears_the_attribute",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "character_rotation": 0.0 },
+      "edited": "character_rotation",
+      "expected": { "rotate": "" }
+    },
+    {
+      "name": "all_caps_on_clears_a_small_caps_variant",
+      "_comment": "Why CASE is a two-attribute group: the element is small-caps, the user turns All Caps ON, and the exclusion rule requires text_transform AND font_variant to move together. A one-attribute write could not clear the variant.",
+      "op": "panel_edit",
+      "base": { "text_transform": "", "font_variant": "small-caps" },
+      "panel": { "all_caps": true, "small_caps": true },
+      "edited": "all_caps",
+      "expected": { "text_transform": "uppercase", "font_variant": "" }
+    },
+    {
+      "name": "all_caps_off_clears_the_transform",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "all_caps": false, "small_caps": false },
+      "edited": "all_caps",
+      "expected": { "text_transform": "" }
+    },
+    {
+      "name": "small_caps_on_with_all_caps_off",
+      "op": "panel_edit",
+      "base": { "text_transform": "", "font_variant": "" },
+      "panel": { "small_caps": true, "all_caps": false },
+      "edited": "small_caps",
+      "expected": { "font_variant": "small-caps" }
+    },
+    {
+      "name": "underline_edit_rewrites_the_whole_decoration_list",
+      "_comment": "Why DECORATION is one group: two toggles feed ONE CSS token list, which cannot be written a token at a time. The panel arrives with strikethrough already mirrored from the element, so committing underline keeps the line-through and adds the underline - alphabetical order, so equality never depends on which toggle the user hit first.",
+      "op": "panel_edit",
+      "base": { "text_decoration": "line-through" },
+      "panel": { "underline": true, "strikethrough": true },
+      "edited": "underline",
+      "expected": { "text_decoration": "line-through underline" }
+    },
+    {
+      "name": "underline_off_keeps_the_strikethrough",
+      "op": "panel_edit",
+      "base": { "text_decoration": "line-through underline" },
+      "panel": { "underline": false, "strikethrough": true },
+      "edited": "underline",
+      "expected": { "text_decoration": "line-through" }
+    },
+    {
+      "name": "strikethrough_edit_writes_the_decoration",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "underline": true, "strikethrough": true },
+      "edited": "strikethrough",
+      "expected": { "text_decoration": "line-through underline" }
+    },
+    {
+      "name": "language_edit_writes_only_the_lang",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "language": "de" },
+      "edited": "language",
+      "expected": { "xml_lang": "de" }
+    },
+    {
+      "name": "language_cleared_empties_the_lang",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "language": "" },
+      "edited": "language",
+      "expected": { "xml_lang": "" }
+    },
+    {
+      "name": "anti_aliasing_edit_writes_only_the_mode",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "anti_aliasing": "Smooth" },
+      "edited": "anti_aliasing",
+      "expected": { "aa_mode": "Smooth" }
+    },
+    {
+      "name": "anti_aliasing_sharp_is_the_identity",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "anti_aliasing": "Sharp" },
+      "edited": "anti_aliasing",
+      "expected": { "aa_mode": "" }
+    },
+    {
+      "name": "snap_baseline_toggle_writes_nothing",
+      "_comment": "A UI-only flag owns no element attribute, so the edit must not reach the document at all - not even an undo step that changes nothing. Under the old law it re-stamped the entire panel over the selection.",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { },
+      "edited": "snap_baseline",
+      "expected": null
+    },
+    {
+      "name": "snap_to_glyph_visible_toggle_writes_nothing",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { },
+      "edited": "snap_to_glyph_visible",
+      "expected": null
+    },
+    {
+      "name": "snap_anchor_point_toggle_writes_nothing",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { },
+      "edited": "snap_anchor_point",
+      "expected": null
+    }
+  ]
+}
