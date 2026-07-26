@@ -1,0 +1,75 @@
+{
+  "machine": "KENAI",
+  "chip": "AMD Ryzen 7 8700F 8-Core Processor",
+  "os": "Windows 11 Home 25H2 (build 26200)",
+  "backend": "dx12",
+  "adapter": "NVIDIA GeForce RTX 5060 Ti",
+  "device_type": "DiscreteGpu",
+  "mode": "offscreen",
+  "present_mode": "none (no surface)",
+  "antialiasing": "Area",
+  "width": 3200,
+  "height": 2000,
+  "seed": 6971763,
+  "warmup_secs": 2.0,
+  "measure_secs": 8.0,
+  "architecture_note": "Geometry encoded once into a retained vello::Scene per point; per frame a reused outer Scene is reset()+append(inner, camera) — re-encodes the command stream under the camera affine, not the geometry.",
+  "timing_note": "frame_ms = encode + render_to_texture + poll(Wait): fully serialized CPU+GPU, no pipelining",
+  "generated_unix": 1785095068,
+  "points": [
+    {
+      "elements": 10000,
+      "frames": 2759,
+      "avg_encode_ms": 0.12,
+      "p95_encode_ms": 0.15,
+      "avg_frame_ms": 2.9,
+      "p95_frame_ms": 3.22,
+      "fps": 344.99
+    },
+    {
+      "elements": 50000,
+      "frames": 1063,
+      "avg_encode_ms": 0.81,
+      "p95_encode_ms": 0.89,
+      "avg_frame_ms": 7.52,
+      "p95_frame_ms": 7.93,
+      "fps": 132.97
+    },
+    {
+      "elements": 100000,
+      "frames": 558,
+      "avg_encode_ms": 1.71,
+      "p95_encode_ms": 1.82,
+      "avg_frame_ms": 14.34,
+      "p95_frame_ms": 14.82,
+      "fps": 69.72
+    },
+    {
+      "elements": 250000,
+      "frames": 174,
+      "avg_encode_ms": 4.0,
+      "p95_encode_ms": 4.12,
+      "avg_frame_ms": 46.09,
+      "p95_frame_ms": 46.94,
+      "fps": 21.7
+    },
+    {
+      "elements": 500000,
+      "frames": 91,
+      "avg_encode_ms": 7.78,
+      "p95_encode_ms": 8.11,
+      "avg_frame_ms": 87.72,
+      "p95_frame_ms": 89.6,
+      "fps": 11.4
+    },
+    {
+      "elements": 800000,
+      "frames": 58,
+      "avg_encode_ms": 12.71,
+      "p95_encode_ms": 13.15,
+      "avg_frame_ms": 139.56,
+      "p95_frame_ms": 142.68,
+      "fps": 7.17
+    }
+  ]
+}
