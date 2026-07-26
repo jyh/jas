@@ -120,9 +120,9 @@ Files: `results/2026-07-23-m-series-metal.json` (windowed),
 `KENAI` | AMD Ryzen 7 8700F 8-Core | Windows 11 Home 25H2 (build 26200) |
 adapter **NVIDIA GeForce RTX 5060 Ti (DiscreteGpu)** — real hardware, not WARP.
 Offscreen at **3200×2000**, the Mac's exact resolution, so the two curves are
-directly comparable. Windowed is **not measured**: an ssh session has no
-interactive desktop, so surface creation fails with `Invalid surface`. That
-number needs a run from a logged-in desktop session.
+directly comparable. Both modes are measured; the windowed run needed a
+scheduled task inside the logged-on desktop session, because a plain ssh run has
+no desktop and fails with `Invalid surface`.
 
 | elements | frame avg (ms) | frame p95 (ms) | encode avg (ms) | fps |
 |---------:|---------------:|---------------:|----------------:|----:|
