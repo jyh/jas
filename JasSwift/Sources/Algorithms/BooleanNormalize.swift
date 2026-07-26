@@ -307,7 +307,20 @@ func rebuildFromArrangement(_ rings: BoolPolygonSet) -> BoolPolygonSet {
         outgoing[k.0].append(ki)
     }
     for vi in 0..<outgoing.count {
-        outgoing[vi].sort { angleOf($0) < angleOf($1) }
+        // Tie-break on span index, which is not decoration. Rust's
+        // counterpart uses `sort_by`, which is STABLE, so equal angles
+        // keep insertion order — and insertion above is by ascending
+        // span index. Swift's `sort` is NOT stable, so without this the
+        // two ports could order a tie differently and emit differently
+        // rotated rings from the same input. A conforming arrangement
+        // should never present a tie (two kept spans leaving one vertex
+        // in the same direction would be an unsplit collinear overlap),
+        // but "should never" is the sort of guarantee worth writing down
+        // rather than depending on silently.
+        outgoing[vi].sort {
+            let (a, b) = (angleOf($0), angleOf($1))
+            return a == b ? $0 < $1 : a < b
+        }
     }
 
     var used = Array(repeating: false, count: kept.count)
