@@ -746,15 +746,14 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     // Override fill/stroke colors from the active selection's fill /
     // stroke summary (so the Color panel's swatch reflects whatever
     // the user just clicked on the canvas), falling back to the tab
-    // / app-level defaults when nothing is selected. Empty string for
-    // "uniform but no fill" (the swatch renderer treats empty as the
-    // diagonal-line "no fill" indicator).
-    let (fill_string, stroke_string) = live_fill_stroke_strings(st);
-    if let Some(s) = fill_string {
-        m.insert("fill_color".into(), J::String(s));
+    // / app-level defaults when nothing is selected. `Null` for "the
+    // active attribute is None" — see live_fill_stroke_values.
+    let (fill_value, stroke_value) = live_fill_stroke_values(st);
+    if let Some(v) = fill_value {
+        m.insert("fill_color".into(), v);
     }
-    if let Some(s) = stroke_string {
-        m.insert("stroke_color".into(), J::String(s));
+    if let Some(v) = stroke_value {
+        m.insert("stroke_color".into(), v);
     }
 
     // Mutable swatch libraries for rendering
@@ -810,18 +809,33 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     m
 }
 
-/// Resolve the live `fill_color` / `stroke_color` strings from the active
+/// Resolve the live `fill_color` / `stroke_color` VALUES from the active
 /// selection's fill/stroke summary, falling back to the tab- / app-level
-/// default. `Some("")` means "uniform but explicitly no fill" (the swatch
-/// renderer draws the diagonal-line no-fill indicator, and a blob commit
-/// reads it as an empty hex → genuinely unfilled). `None` means leave the
-/// caller's existing value in place (Mixed selection, or NoSelection with
-/// no default — the workspace `#ffffff` default then stands). Shared by
-/// `build_live_state_map` (panel render) and `build_tool_state_map` (the
-/// per-tool bridge) so both agree on the white-by-default contract.
-pub(crate) fn live_fill_stroke_strings(
+/// default.
+///
+/// Three outcomes, and the middle one is the whole point:
+///
+/// * `Some(String("#rrggbb"))` — one colour is in force.
+/// * `Some(Null)` — the active attribute is explicitly NONE. This must be
+///   PUBLISHED, not omitted: `build_live_state_map` starts from the
+///   workspace defaults (`fill_color: "#ffffff"`), so omitting the key
+///   leaves white standing. That is how the Color panel's None controls
+///   (`cp_none_btn`, `cp_none_swatch`) came to clear the fill and move
+///   NOTHING a user could see — the swatch kept painting white and every
+///   `state.fill_color == null` guard in color.yaml (sliders / hex /
+///   colour bar disabled, Invert / Complement enabled) read a colour
+///   (CPTRIAGE). `build_appstate_ctx` — the action-dispatch reader of the
+///   same fact — has always mapped `None -> Null`, as do the reference
+///   interpreter and JasSwift's StateStore; this is the panel-render
+///   reader agreeing with them.
+/// * `None` — no single value (a Mixed selection). Leave the caller's
+///   existing value in place.
+///
+/// Shared by `build_live_state_map` (panel render) and
+/// `build_tool_state_map` (the per-tool bridge) so both agree.
+pub(crate) fn live_fill_stroke_values(
     st: &AppState,
-) -> (Option<String>, Option<String>) {
+) -> (Option<serde_json::Value>, Option<serde_json::Value>) {
     use crate::document::controller::{FillSummary, StrokeSummary};
     let (sel_fill_summary, sel_stroke_summary) = st.tab()
         .map(|t| (
@@ -829,27 +843,30 @@ pub(crate) fn live_fill_stroke_strings(
             crate::document::controller::selection_stroke_summary(t.model.document()),
         ))
         .unwrap_or((FillSummary::NoSelection, StrokeSummary::NoSelection));
-    let hex = |r: f64, g: f64, b: f64| format!("#{:02x}{:02x}{:02x}",
-        (r * 255.0).round() as u8, (g * 255.0).round() as u8, (b * 255.0).round() as u8);
-    let fill_string: Option<String> = match sel_fill_summary {
+    let hex = |r: f64, g: f64, b: f64| serde_json::Value::String(
+        format!("#{:02x}{:02x}{:02x}",
+            (r * 255.0).round() as u8, (g * 255.0).round() as u8,
+            (b * 255.0).round() as u8));
+    let none = serde_json::Value::Null;
+    let fill_value: Option<serde_json::Value> = match sel_fill_summary {
         FillSummary::Uniform(Some(f)) => { let (r, g, b, _) = f.color.to_rgba(); Some(hex(r, g, b)) }
-        FillSummary::Uniform(None) => Some(String::new()),
+        FillSummary::Uniform(None) => Some(none.clone()),
         FillSummary::Mixed => None,
-        FillSummary::NoSelection => st.tab()
+        FillSummary::NoSelection => Some(st.tab()
             .and_then(|t| t.model.default_fill)
             .or(st.app_default_fill)
-            .map(|f| { let (r, g, b, _) = f.color.to_rgba(); hex(r, g, b) }),
+            .map_or(none.clone(), |f| { let (r, g, b, _) = f.color.to_rgba(); hex(r, g, b) })),
     };
-    let stroke_string: Option<String> = match sel_stroke_summary {
+    let stroke_value: Option<serde_json::Value> = match sel_stroke_summary {
         StrokeSummary::Uniform(Some(s)) => { let (r, g, b, _) = s.color.to_rgba(); Some(hex(r, g, b)) }
-        StrokeSummary::Uniform(None) => Some(String::new()),
+        StrokeSummary::Uniform(None) => Some(none.clone()),
         StrokeSummary::Mixed => None,
-        StrokeSummary::NoSelection => st.tab()
+        StrokeSummary::NoSelection => Some(st.tab()
             .and_then(|t| t.model.default_stroke)
             .or(st.app_default_stroke)
-            .map(|s| { let (r, g, b, _) = s.color.to_rgba(); hex(r, g, b) }),
+            .map_or(none, |s| { let (r, g, b, _) = s.color.to_rgba(); hex(r, g, b) })),
     };
-    (fill_string, stroke_string)
+    (fill_value, stroke_value)
 }
 
 /// Lean app-state map for the per-tool bridge (`CanvasTool::sync_global_state`).
@@ -877,12 +894,12 @@ pub(crate) fn build_tool_state_map(
             m.insert((*k).to_string(), v.clone());
         }
     }
-    let (fill_string, stroke_string) = live_fill_stroke_strings(st);
-    if let Some(s) = fill_string {
-        m.insert("fill_color".into(), J::String(s));
+    let (fill_value, stroke_value) = live_fill_stroke_values(st);
+    if let Some(v) = fill_value {
+        m.insert("fill_color".into(), v);
     }
-    if let Some(s) = stroke_string {
-        m.insert("stroke_color".into(), J::String(s));
+    if let Some(v) = stroke_value {
+        m.insert("stroke_color".into(), v);
     }
     m
 }

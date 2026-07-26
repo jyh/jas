@@ -7484,6 +7484,27 @@ fn render_radio_group(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     }
 }
 
+/// Does a NULL from this colour bind mean "explicitly no paint", or "no
+/// such entry"?
+///
+/// The value cannot tell them apart, and they must render differently:
+/// `state.fill_color` is null because the user set the attribute to None
+/// (draw the red-diagonal indicator), while `panel.recent_colors.3` is null
+/// because that slot has never been filled (draw a hollow placeholder). So
+/// decide from the bind's own DECLARATION instead: a global `state.<key>`
+/// read whose `workspace/state.yaml` schema entry is a NULLABLE COLOUR
+/// carries the "none" meaning; every other bind keeps the placeholder.
+///
+/// Before CPTRIAGE the distinction rode on an empty-string sentinel that
+/// only one of the two producers emitted, which is how the Color panel's
+/// None controls came to change state and paint nothing.
+fn null_color_means_none(bind_expr: &str) -> bool {
+    let key = bind_expr.strip_prefix("state.").unwrap_or(bind_expr);
+    super::schema::get_entry(key).is_some_and(|e| {
+        e.nullable && matches!(e.field_type, super::schema::FieldType::Color)
+    })
+}
+
 fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     // Size resolution: top-level `size: "<small|medium|large>"` (used by
@@ -7512,12 +7533,15 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     };
 
     // Returns (color_string, explicit_none). explicit_none=true marks
-    // the "intentionally no fill / no stroke" case (eval returns the
-    // empty string), distinct from "missing bind / unset slot" which
-    // also returns empty but should render as a hollow placeholder
-    // rather than the red-diagonal "no fill" indicator. Bare hex
-    // strings without a leading '#' (recent_colors stores them that
-    // way) are also valid colors and need a '#' prepended.
+    // the "intentionally no fill / no stroke" case, distinct from
+    // "missing bind / unset slot" which also has no colour but renders as
+    // a hollow placeholder rather than the red-diagonal "no fill"
+    // indicator. Two producers encode the intentional case: an empty
+    // string (a dialog's hex field cleared), or NULL from a bind that
+    // declares a nullable state colour (`null_color_means_none` — the
+    // Color panel's fill / stroke swatches once the user clicks None).
+    // Bare hex strings without a leading '#' (recent_colors stores them
+    // that way) are also valid colors and need a '#' prepended.
     let (color, explicit_none) = if let Some(bind_color) = el.get("bind").and_then(|b| b.get("color")).and_then(|v| v.as_str()) {
         // Handle "#expr" pattern: "#dialog.hex" means "#" + eval("dialog.hex")
         if bind_color.starts_with('#') && bind_color.contains('.') {
@@ -7527,6 +7551,7 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 Value::Str(s) if !s.is_empty() => (format!("#{s}"), false),
                 Value::Color(c) => (c, false),
                 Value::Str(_) => (String::new(), true),
+                Value::Null => (String::new(), null_color_means_none(inner)),
                 _ => (String::new(), false),
             }
         } else {
@@ -7536,6 +7561,7 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 Value::Str(s) if s.starts_with('#') => (s, false),
                 Value::Str(s) if !s.is_empty() => (format!("#{s}"), false),
                 Value::Str(_) => (String::new(), true),
+                Value::Null => (String::new(), null_color_means_none(bind_color)),
                 _ => (String::new(), false),
             }
         }
@@ -14246,6 +14272,134 @@ mod tests {
         let ctx_out = serde_json::json!({ "panel": { "selected_brushes": ["acme/flat"] } });
         assert!(super::eval_selected_in(&el, &ctx_in), "tile is selected when its id is in the list");
         assert!(!super::eval_selected_in(&el, &ctx_out), "tile is not selected otherwise");
+    }
+
+    // ── CPTRIAGE: the Color panel's None controls were click-DEAD ─────
+    //
+    // `cp_none_btn` (set_fill_none) and `cp_none_swatch`
+    // (set_active_color_none) both write `fill_color: null`, which DID clear
+    // the default fill — and yet the behaviour_liveness sweep saw ZERO DOM
+    // movement from either click. The write was fine; the READ-BACK was not.
+    // The panel re-reads the fact through `build_live_state_map`, which
+    // starts from the workspace defaults (`fill_color: "#ffffff"`) and only
+    // OVERWROTE the key when a colour existed. With no colour there was
+    // nothing to overwrite with, so the default showed through: the swatch
+    // stayed white and every `state.fill_color == null` guard in color.yaml
+    // (sliders / hex / colour bar disabled; Invert / Complement enabled)
+    // read a colour. `build_appstate_ctx` — the ACTION-dispatch reader —
+    // has always mapped `None -> Null`, so the two readers of one fact
+    // disagreed inside the port; the reference interpreter and JasSwift both
+    // keep the null in their store. These tests pin the panel-render reader
+    // to the same answer, evaluating color.yaml's REAL bind expressions
+    // against the REAL render ctx.
+    fn build_color_render_ctx(st: &AppState) -> serde_json::Value {
+        use crate::workspace::dock_panel::{
+            build_live_panel_overrides, build_live_state_map, build_panel_state_subset,
+        };
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let mut panel_map: serde_json::Map<String, serde_json::Value> =
+            ws.panel_state_defaults("color_panel_content").into_iter().collect();
+        let overrides = build_live_panel_overrides(st);
+        for (k, v) in &overrides {
+            if panel_map.contains_key(k) {
+                panel_map.insert(k.clone(), v.clone());
+            }
+        }
+        let state = build_panel_state_subset("color", &build_live_state_map(st));
+        serde_json::json!({ "panel": panel_map, "state": state })
+    }
+
+    /// color.yaml, verbatim: the guard every slider / the hex field / the
+    /// colour bar binds to `disabled`.
+    const CP_DISABLED_GUARD: &str =
+        "if state.fill_on_top then state.fill_color == null \
+         else state.stroke_color == null";
+
+    #[test]
+    fn cptriage_none_click_is_visible_in_the_color_panel_ctx() {
+        let mut st = make_state_with_colors("ffffff", "000000");
+        let before = build_color_render_ctx(&st);
+        assert!(!expr::eval(CP_DISABLED_GUARD, &before).to_bool(),
+                "with a white fill the sliders start ENABLED");
+
+        // Exactly what cp_none_btn dispatches (fill_on_top is true).
+        dispatch_action("set_fill_none", &serde_json::Map::new(), &mut st);
+
+        let after = build_color_render_ctx(&st);
+        assert!(matches!(expr::eval("state.fill_color", &after), Value::Null),
+                "the fill swatch's own bind must resolve to null, not to the \
+                 workspace default — otherwise the swatch keeps painting white \
+                 and the click looks dead");
+        assert!(expr::eval(CP_DISABLED_GUARD, &after).to_bool(),
+                "sliders / hex / colour bar must disable once the fill is None");
+    }
+
+    #[test]
+    fn cptriage_stroke_none_click_is_visible_in_the_color_panel_ctx() {
+        let mut st = make_state_with_colors("ffffff", "000000");
+        st.fill_on_top = false;
+        dispatch_action("set_stroke_none", &serde_json::Map::new(), &mut st);
+        let after = build_color_render_ctx(&st);
+        assert!(matches!(expr::eval("state.stroke_color", &after), Value::Null),
+                "the stroke swatch's bind must resolve to null");
+        assert!(expr::eval(CP_DISABLED_GUARD, &after).to_bool(),
+                "with the stroke active and None, the controls disable too");
+    }
+
+    // The same fact reached from the OTHER direction: a selected element
+    // with no fill. That case already published the empty-string "none"
+    // encoding, so the swatch drew its indicator — but `== null` was still
+    // false, so the sliders stayed enabled against the spec. One encoding
+    // for one fact.
+    #[test]
+    fn cptriage_selected_element_without_fill_reports_none() {
+        use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
+        use crate::document::document::{Document, ElementSelection};
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        st.tabs[st.active_tab].model.set_document_for_test(Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![std::rc::Rc::new(rect)],
+                isolated_blending: false,
+                knockout_group: false,
+                common: CommonProps::default(),
+            })],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        });
+        let ctx = build_color_render_ctx(&st);
+        assert!(matches!(expr::eval("state.fill_color", &ctx), Value::Null),
+                "a uniform no-fill selection reports None as null");
+        assert!(expr::eval(CP_DISABLED_GUARD, &ctx).to_bool(),
+                "sliders / hex / colour bar disable for a no-fill selection");
+    }
+
+    // A null colour has TWO meanings and the value alone cannot tell them
+    // apart: `state.fill_color` null means "the user set this attribute to
+    // None" (draw the red-diagonal indicator), while
+    // `panel.recent_colors.3` null means "that slot is empty" (draw a
+    // hollow placeholder). The decision is read off the bind's declaration.
+    #[test]
+    fn cptriage_null_means_none_only_for_nullable_state_colours() {
+        assert!(null_color_means_none("state.fill_color"));
+        assert!(null_color_means_none("state.stroke_color"));
+        assert!(!null_color_means_none("panel.recent_colors.3"),
+                "an empty recent slot is a placeholder, not a None indicator");
+        assert!(!null_color_means_none("swatch.color"));
+        assert!(!null_color_means_none("stroke_dash_2"),
+                "nullable but not a colour");
+        assert!(!null_color_means_none("stroke_width"),
+                "a colour bind on a non-nullable field means nothing here");
     }
 }
 
