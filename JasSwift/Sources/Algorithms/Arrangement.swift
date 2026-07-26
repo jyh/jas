@@ -123,7 +123,9 @@ private func arrSnapParam(_ v: Double) -> Double {
 /// exactly on the vertex that caused it rather than on a rounded
 /// re-computation of it. That exactness is what lets the caller's vertex
 /// dedup fuse the two into one.
-func arrangementSplitPoints(
+/// Public so the AlgorithmRoundtrip corpus tool can use the same
+/// predicate for its ring-simplicity check.
+public func arrangementSplitPoints(
     _ a1: (Double, Double), _ a2: (Double, Double),
     _ b1: (Double, Double), _ b2: (Double, Double)
 ) -> [((Double, Double), Double, Double)] {

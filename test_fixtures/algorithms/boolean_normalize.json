@@ -5,7 +5,26 @@
   "vectors": [
     {
       "name": "simple_square_passthrough",
-      "input": [[[0,0],[10,0],[10,10],[0,10]]],
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ]
+        ]
+      ],
       "expected": {
         "area": 100.0,
         "ring_count": 1,
@@ -14,7 +33,22 @@
     },
     {
       "name": "simple_triangle_passthrough",
-      "input": [[[0,0],[10,0],[5,10]]],
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            5,
+            10
+          ]
+        ]
+      ],
       "expected": {
         "area": 50.0,
         "ring_count": 1,
@@ -32,7 +66,18 @@
     },
     {
       "name": "degenerate_two_vertices_dropped",
-      "input": [[[0,0],[10,0]]],
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ]
+        ]
+      ],
       "expected": {
         "area": 0.0,
         "ring_count": 0,
@@ -41,7 +86,26 @@
     },
     {
       "name": "figure_eight_becomes_two_triangles",
-      "input": [[[0,0],[10,10],[10,0],[0,10]]],
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            0,
+            10
+          ]
+        ]
+      ],
       "expected": {
         "area": 50.0,
         "ring_count": 2,
@@ -50,10 +114,373 @@
     },
     {
       "name": "consecutive_duplicates_deduped",
-      "input": [[[0,0],[0,0],[10,0],[10,10],[10,10],[0,10]]],
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ]
+        ]
+      ],
       "expected": {
         "area": 100.0,
         "ring_count": 1,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "t_junction_self_touch_bowtie",
+      "_derivation": "The bowtie with (5,5) as an explicit VERTEX of the ring rather than an interior crossing: the edge (10,0)-(0,10) passes exactly through the ring's own vertex. Inserting a vertex on a straight edge cannot change the region, so the answer equals the bowtie's: two CCW lobes (0,0),(5,5),(0,10) and (5,5),(10,0),(10,10), each of shoelace 50 hence area 25, total 50.",
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            5,
+            5
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            0,
+            10
+          ]
+        ]
+      ],
+      "expected": {
+        "area": 50.0,
+        "ring_count": 2,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "pinch_at_revisited_vertex",
+      "_derivation": "A ring visiting (5,5) twice \u2014 a pinch, not a crossing. Two triangles joined at (5,5), each of area 25, each wound exactly once, so both filled: 2 rings, total area 50.",
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            5,
+            5
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            5,
+            5
+          ],
+          [
+            0,
+            10
+          ]
+        ]
+      ],
+      "expected": {
+        "area": 50.0,
+        "ring_count": 2,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "collinear_self_retrace_slit",
+      "_derivation": "A 10x10 square whose top edge carries a slit run in to (5,5) and straight back out. The retraced span has winding +1 on both of its sides, so it is not a boundary and drops out; what remains is the square with the collinear vertex (5,10) retained. Shoelace on (0,0),(10,0),(10,10),(5,10),(0,10) = 200, area 100.",
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            5,
+            10
+          ],
+          [
+            5,
+            5
+          ],
+          [
+            5,
+            10
+          ],
+          [
+            0,
+            10
+          ]
+        ]
+      ],
+      "expected": {
+        "area": 100.0,
+        "ring_count": 1,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "retrograde_counter_wound_loop",
+      "_derivation": "A CCW 10x10 square with a CW 2x2 loop spliced into its interior through a slit from the corner. Inside the loop the winding is +1-1 = 0, so the loop survives as a HOLE of signed area -4; the slit is traversed both ways and drops out. Two rings; the corpus area metric is the even-odd NET region area, so 100 - 4 = 96.",
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            5,
+            2
+          ],
+          [
+            5,
+            4
+          ],
+          [
+            7,
+            4
+          ],
+          [
+            7,
+            2
+          ],
+          [
+            5,
+            2
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ]
+        ]
+      ],
+      "expected": {
+        "area": 96.0,
+        "ring_count": 2,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "co_rotating_spliced_loop",
+      "_derivation": "The same shape with the spliced loop wound the SAME way as the square. Inside it the winding is +1+1 = 2, non-zero, so the region is filled on both sides of the loop and the loop is not a boundary at all: one CCW ring of area 100. Companion of retrograde_counter_wound_loop \u2014 same slit, same loop, opposite winding, different answer.",
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            5,
+            2
+          ],
+          [
+            7,
+            2
+          ],
+          [
+            7,
+            4
+          ],
+          [
+            5,
+            4
+          ],
+          [
+            5,
+            2
+          ],
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ]
+        ]
+      ],
+      "expected": {
+        "area": 100.0,
+        "ring_count": 1,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "nested_co_oriented_rings_pass_through",
+      "_derivation": "Two CCW rings of one set, nested. Normalization is PER RING and the set's rings combine under boolean.rs's even-odd contract, so both simple rings pass through untouched and the hole survives: 2 rings, net even-odd area 400 - 100 = 300. A set-wide non-zero reading would instead delete the inner ring, which would break every donut expressed the natural way.",
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            20,
+            0
+          ],
+          [
+            20,
+            20
+          ],
+          [
+            0,
+            20
+          ]
+        ],
+        [
+          [
+            5,
+            5
+          ],
+          [
+            15,
+            5
+          ],
+          [
+            15,
+            15
+          ],
+          [
+            5,
+            15
+          ]
+        ]
+      ],
+      "expected": {
+        "area": 300.0,
+        "ring_count": 2,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "rings_sharing_a_collinear_edge_pass_through",
+      "_derivation": "Two CCW squares of one set sharing the full edge x=10, traced upward by one and downward by the other \u2014 an INTER-ring collinear overlap. Each ring is simple by itself, so both pass through: 2 rings, absolute areas 100 + 100 = 200.",
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            0,
+            10
+          ]
+        ],
+        [
+          [
+            10,
+            0
+          ],
+          [
+            20,
+            0
+          ],
+          [
+            20,
+            10
+          ],
+          [
+            10,
+            10
+          ]
+        ]
+      ],
+      "expected": {
+        "area": 200.0,
+        "ring_count": 2,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "zero_area_collinear_ring_dropped",
+      "_derivation": "Three collinear vertices enclose nothing, so the non-zero region is empty and the output must be empty.",
+      "input": [
+        [
+          [
+            0,
+            0
+          ],
+          [
+            5,
+            0
+          ],
+          [
+            10,
+            0
+          ]
+        ]
+      ],
+      "expected": {
+        "area": 0.0,
+        "ring_count": 0,
         "all_rings_simple": true
       }
     }
