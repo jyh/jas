@@ -1332,6 +1332,55 @@ mod tests {
         assert_eq!(diffs.len(), 1, "the rule must cost exactly one byte");
     }
 
+    /// `DONUT_NON_ZERO_HEX` with the fill-rule slot's `00` replaced by
+    /// `slot_hex`. Built from the PRE-fill_rule literal so the splice point
+    /// is derived from real bytes rather than an index counted by hand:
+    /// bump the TAG_PATH array header from 11 slots to 12, then insert the
+    /// slot just before the document's trailing `selected_layer` + two
+    /// empty arrays. Twin of JasSwift's `donutWithFillRuleSlot`.
+    fn donut_with_fill_rule_slot(slot_hex: &str) -> Vec<u8> {
+        let tail = "009090";
+        let head = DONUT_PRE_FILL_RULE_HEX.replace("919b07", "919c07");
+        let body = &head[..head.len() - tail.len()];
+        unhex(&format!("{body}{slot_hex}{tail}"))
+    }
+
+    #[test]
+    fn fill_rule_slot_splice_matches_the_writer() {
+        assert_eq!(hex(&donut_with_fill_rule_slot("00")), DONUT_NON_ZERO_HEX);
+        assert_eq!(hex(&donut_with_fill_rule_slot("01")), DONUT_EVEN_ODD_HEX);
+    }
+
+    /// A fill-rule slot that is not the exact EvenOdd integer tag must read
+    /// as NonZero without panicking -- the standing
+    /// `malformed_but_decodable_blob_errors_not_panics` contract, applied
+    /// to this slot. Rust already behaved this way; the pin exists because
+    /// JasSwift did NOT (its `asInt` called `fatalError` on nil / string /
+    /// array and truncated a float), and this is the statement the two
+    /// ports now have to keep agreeing on. Twin of JasSwift's
+    /// `binaryToleratesAMalformedFillRuleSlot`.
+    #[test]
+    fn binary_tolerates_a_malformed_fill_rule_slot() {
+        for (label, slot_hex) in [
+            ("msgpack nil", "c0"),
+            ("a string", "a178"),
+            ("an empty array", "90"),
+            ("a float64 1.0", "cb3ff0000000000000"),
+            ("an out-of-range tag", "07"),
+        ] {
+            let doc = binary_to_document(&donut_with_fill_rule_slot(slot_hex))
+                .unwrap_or_else(|e| panic!("{label} should still load: {e}"));
+            assert_eq!(
+                first_path_rule(&doc), FillRule::NonZero,
+                "a fill-rule slot holding {label} must read as NonZero"
+            );
+            match &*doc.layers[0].children().unwrap()[0] {
+                Element::Path(p) => assert_eq!(p.d.len(), 8, "{label} lost the geometry"),
+                other => panic!("expected Path for {label}, got {other:?}"),
+            }
+        }
+    }
+
     #[test]
     fn binary_reads_a_pre_fill_rule_blob() {
         let doc = binary_to_document(&unhex(DONUT_PRE_FILL_RULE_HEX))

@@ -106,6 +106,69 @@ private let donutPreFillRuleHex = "4a4153000200000094919800c2cb3ff00000000000000
     #expect(p.d.count == 8)
 }
 
+// MARK: - Tolerance of a hostile / corrupt fill-rule slot
+
+/// `donutNonZeroHex` with the fill-rule slot's `00` replaced by
+/// `slotHex`. Built from the PRE-fillRule literal so the splice point is
+/// derived from real bytes rather than an index counted by hand: bump the
+/// TAG_PATH array header from 11 slots to 12, then insert the slot just
+/// before the document's trailing `selected_layer` + two empty arrays.
+private func donutWithFillRuleSlot(_ slotHex: String) -> Data {
+    let tail = "009090"
+    let head = donutPreFillRuleHex
+        .replacingOccurrences(of: "919b07", with: "919c07")
+    let body = String(head.dropLast(tail.count))
+    return unhex(body + slotHex + tail)
+}
+
+/// The splice is only meaningful if it reproduces the real writer's bytes
+/// when handed the real tag, so check that before trusting the malformed
+/// variants below.
+@Test func fillRuleSlotSpliceMatchesTheWriter() {
+    #expect(hex(donutWithFillRuleSlot("00")) == donutNonZeroHex)
+    #expect(hex(donutWithFillRuleSlot("01")) == donutEvenOddHex)
+}
+
+/// A blob whose fill-rule slot is not an integer must read as `.nonzero`,
+/// not trap.
+///
+/// Rust's `unpack_fill_rule` is `v.as_i64().or_else(as_u64)` with
+/// `_ => NonZero`, so msgpack nil, a string, an array and even a float all
+/// fall through to NonZero there. Swift's version guarded only the Swift
+/// optional and then called `asInt`, which `fatalError`s on anything that
+/// is not an int or a float — so a corrupt or hostile localStorage blob
+/// TRAPPED the Swift app on a slot Rust merely shrugs at. jas_dioxus holds
+/// a standing contract that a malformed-but-decodable blob errors rather
+/// than panicking (`malformed_but_decodable_blob_errors_not_panics`);
+/// this slot is Swift's side of it.
+///
+/// The float case is included because it diverged the other way: `asInt`
+/// happily truncated a float64 1.0 to EvenOdd where Rust reads NonZero.
+///
+/// If the read ever traps again this test cannot report a failed
+/// expectation — `fatalError` aborts the whole test process. A crashed
+/// `swift test` run IS the signal.
+@Test func binaryToleratesAMalformedFillRuleSlot() throws {
+    let cases: [(String, String)] = [
+        ("msgpack nil", "c0"),
+        ("a string", "a178"),           // fixstr "x"
+        ("an empty array", "90"),
+        ("a float64 1.0", "cb3ff0000000000000"),
+        ("an out-of-range tag", "07"),  // positive fixint 7
+    ]
+    for (label, slotHex) in cases {
+        let doc = try binaryToDocument(donutWithFillRuleSlot(slotHex))
+        #expect(firstPathRule(doc) == .nonzero,
+                "a fill-rule slot holding \(label) must read as .nonzero")
+        // Not a default-shaped husk: the rest of the element survived.
+        guard case .path(let p) = doc.layers[0].children[0] else {
+            Issue.record("expected Path for \(label)")
+            return
+        }
+        #expect(p.d.count == 8, "\(label) lost the path geometry")
+    }
+}
+
 // MARK: - The corpus JSON boundary
 
 /// The corpus JSON boundary must round-trip the fill rule, not just emit

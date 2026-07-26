@@ -534,13 +534,22 @@ private func packFillRule(_ r: FillRule) -> MsgValue {
     vint(r == .evenodd ? fillRuleEvenOdd : fillRuleNonZero)
 }
 
-/// Read the fill rule from an optional trailing slot. `nil` (the slot is
-/// absent in a pre-fillRule blob) and any unrecognized tag both read as
-/// the app default, `.nonzero` — the value those documents were written
-/// with.
+/// Read the fill rule from an optional trailing slot. Only the exact
+/// integer tag `fillRuleEvenOdd` yields `.evenodd`; EVERYTHING else reads
+/// as the app default `.nonzero` — an absent slot (a pre-fillRule blob,
+/// written when nonzero was the only rule), an out-of-range tag, and any
+/// wrong-typed payload a corrupt or hostile blob might carry.
+///
+/// Deliberately does NOT go through `asInt`, which `fatalError`s on
+/// msgpack nil / string / array and truncates a float. Rust's
+/// `unpack_fill_rule` is `as_i64().or_else(as_u64)` with `_ => NonZero`,
+/// so it accepts none of those and traps on none of them; matching it here
+/// keeps the ports equal AND keeps jas_dioxus's standing contract that a
+/// malformed-but-decodable blob does not take the app down
+/// (`malformed_but_decodable_blob_errors_not_panics`).
 private func unpackFillRule(_ v: MsgValue?) -> FillRule {
-    guard let v else { return .nonzero }
-    return asInt(v) == fillRuleEvenOdd ? .evenodd : .nonzero
+    if case .some(.int(let n)) = v, n == fillRuleEvenOdd { return .evenodd }
+    return .nonzero
 }
 
 private func packWidthPoints(_ pts: [StrokeWidthPoint]) -> MsgValue {
