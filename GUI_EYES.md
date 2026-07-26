@@ -371,7 +371,11 @@ here after it is retracted, with the evidence that retracted it.
    saturates any app on the page. Proof that no app is involved: the same
    dispatch on a blank `data:text/html,<input>` page with nothing loaded
    produced **11543** of them, and supplying the text produces exactly one
-   keydown and one keypress. Fixed in `gui_probe.KEY_TEXT`; the same
+   keydown WHEREVER SOMETHING CONSUMES OR PREVENTS THE KEY (an input, a button,
+   or a handler calling preventDefault); on a bare focusable div with no
+   consumer Chrome still re-queues (13k+ trusted `key='Unidentified'`
+   measured), so the `text` is necessary, not sufficient — no path this
+   harness drives is such a surface. Fixed in `gui_probe.KEY_TEXT`; the same
    `--regress width_reset` scenario now runs with a **0.0s heartbeat**.
 
    Two WEDGESTORM diagnosis attempts were sent chasing this ghost. The real

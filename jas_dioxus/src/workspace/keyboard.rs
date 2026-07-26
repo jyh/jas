@@ -156,7 +156,9 @@ pub(crate) fn make_keydown_handler(
         // were MEASURED on this app, not assumed:
         //
         //   * a focused <button> — a dialog's OK, a dialog's close X, a
-        //     tab-strip button — is activated by Enter NATIVELY. Suppressing
+        //     pane Restore button (app.rs) — is activated by Enter NATIVELY.
+        //     (Document tabs are non-focusable divs, so they are not in this
+        //     set.) Suppressing
         //     the default while one has focus fires no click at all: File ▸
         //     Document Setup with OK focused reported defaultPrevented=true,
         //     zero click events, and the dialog would not close from the
@@ -761,12 +763,13 @@ mod tests {
 
     // THE REGRESSION PIN. A focused <button> activates on Enter natively —
     // that is how the keyboard clicks a dialog's OK, a dialog's close X, a
-    // tab-strip button. It is NOT an app surface, so the handler must leave
+    // native button (e.g. the pane Restore button). NOT an app surface, so the
+    // handler must leave
     // Enter's default alone while it has focus.
     #[test]
     fn a_focused_button_is_not_an_app_surface() {
         assert!(!is_app_key_surface("BUTTON", ""));          // dialog OK/Cancel
-        assert!(!is_app_key_surface("BUTTON", "tab_close")); // tab-strip button
+        assert!(!is_app_key_surface("BUTTON", "pane_restore")); // a native button
         assert!(!is_app_key_surface("A", "help_link"));      // links activate too
         assert!(!is_app_key_surface("SUMMARY", ""));         // and <details>
     }

@@ -84,7 +84,11 @@ VK = {"Enter": 13, "Backspace": 8, "Tab": 9, "Escape": 27, "Delete": 46}
 #
 # It is the DRIVER's artifact, not the app's: measured at 11543 keydowns on a
 # blank `data:text/html,<input>` page with no app loaded at all (and with the
-# text supplied, exactly 1 keydown + 1 keypress, app or no app). Backspace,
+# text supplied, 1 keydown wherever something CONSUMES or PREVENTS the key —
+# an <input>, a <button>, or a handler that calls preventDefault. On a bare
+# focusable div with no consumer, Chrome still re-queues (13k+ trusted
+# key='Unidentified' measured), so the text is NECESSARY, not sufficient; no
+# path this harness drives is such a surface). Backspace,
 # Tab and Delete do not storm — only these two.
 #
 # That storm is what two WEDGESTORM diagnosis attempts mistook for an app

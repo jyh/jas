@@ -968,7 +968,7 @@ def button_enter_activates(ctx: Ctx):
     where the focused element has no default action of its own.
 
     Enter on a focused <button> is a browser-native activation — it is how the
-    keyboard clicks a dialog's OK, a dialog's close X, a tab-strip button. A
+    keyboard clicks a dialog's OK, a dialog's close X, the pane Restore button. A
     root keydown handler that calls preventDefault for Enter on the strength of
     "no text field is focused" takes that away from every button in the app
     subtree, and the only visible symptom is the one a user reports: the dialog
@@ -1036,7 +1036,9 @@ def button_enter_activates(ctx: Ctx):
     ctx.want(ev.get("n") == 1 and ev.get("trusted") is True,
              f"exactly one TRUSTED Enter reached the page "
              f"({ev.get('n')} keydown(s) seen; thousands would mean the "
-             f"KEY_TEXT re-queue storm is back)")
+             f"KEY_TEXT re-queue storm would show here as key='Unidentified' — this\n"
+             f"             counter watches key=='Enter' only, so it bounds THIS key, not\n"
+             f"             that class; the activation assertion is what reds on a storm)")
     ctx.want(not still_open,
              "the focused OK button ACTIVATED on Enter — the dialog committed "
              "and closed; a handler that claims Enter's default action while a "
