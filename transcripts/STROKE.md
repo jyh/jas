@@ -517,13 +517,32 @@ written down here so the decision does not live only in a commit message:
   first element's profile scale. Correct fix is per-element re-derivation;
   needs a decision on what the panel's profile picker means across a
   mixed selection.
-- **The Character-panel clobber.** `applyCharacterPanelToSelection` /
-  `apply_character_panel_to_selection` take no `edited` field at all: they
-  read the whole panel scope and write it over the selected range on any
-  edit — the shape the Stroke panel just left behind. Nothing has been
-  reported yet, but the class of bug is identical (a panel field that does
-  not track the selection re-imposing itself on an unrelated edit) and the
-  fix is the same field-scoped move. Next panel in line.
+- ~~**The Character-panel clobber.**~~ **DONE** — CHARPANEL, 2026-07-25.
+  Both applies now take the committed `edited` field and write only its
+  attribute group, preserving the rest from the element per element, off a
+  shared corpus (`test_fixtures/character_apply/panel_edit.json`) and a
+  reference law + bridge (`workspace_interpreter/character_law.py`,
+  `effects.apply_character_panel_to_selection`). It carried one lesson
+  back for this list: with sixteen attributes over eighteen fields, three
+  groups turn out to be fed by more than ONE panel field, and a
+  field-scoped apply must read those groups' *sibling* fields from the
+  ELEMENT — reading them from panel state destroyed the element's
+  attribute (an Underline click erasing a `line-through`). The Stroke
+  law's own multi-field family, the dash pattern, is safe from that only
+  because every dash / gap slot round-trips through the panel's live
+  pull; if that pull is ever narrowed, the same sibling rule applies.
+  See `transcripts/CHARACTER.md` §The sibling rule.
+- **Next panel in line: PARAGRAPH.** `apply_paragraph_panel_to_selection`
+  / `applyParagraphPanelToSelection` still rebuild every paragraph
+  attribute from panel state on any write — one match arm away from the
+  Character apply in the same files — and both ports mitigate it with
+  precisely the pattern CHARPANEL condemned: a view-layer
+  `paragraphPanelLiveOverrides` push in Swift's `commitPanelWrite`, a
+  `sync_paragraph_panel_from_selection` in Rust. The fix is the same
+  field-scoped move plus the sibling rule for its own multi-field groups
+  (the seven alignment radios collapsing to one `text_align` /
+  `text_align_last` pair; `bullets` / `numbered_list` sharing
+  `jas_list_style`). Banked in CHARACTER.md's follow-ups too.
 - **Swift's `icon_button` effects: not every write notifies.** A YAML
   button's `effects:` reach the apply only through the effects that fire
   the `notify_panel_state_changed` hook — `set:` (per written key) and
