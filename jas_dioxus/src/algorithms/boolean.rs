@@ -1440,8 +1440,9 @@ fn connect_edges(events: &[SweepEvent], order: &[usize]) -> PolygonSet {
 /// least [`PINCH_MAP_THRESHOLD`] vertices and O(n^2) worst case below it,
 /// and each cut removes one duplicate vertex, so a ring with `p` pinches
 /// costs O(p * n) expected for a long ring and at most
-/// O(p * THRESHOLD^2) for a short one — the latter bounded by 8128
-/// comparisons per call, measured at 2.5 us. The pathological limit is
+/// O(p * THRESHOLD^2) for a short one — the latter bounded by 8001
+/// comparisons per call (the n=127 worst case; see
+/// [`PINCH_MAP_THRESHOLD`]), measured at 2.55 us. The pathological limit is
 /// O(n^2) either way, where a constant fraction of vertices is a pinch.
 /// The overwhelmingly common `p = 0` (one pass, no split) and the
 /// EXCLUDE-corner `p = 2` are linear on long rings. Worth stating because
@@ -1498,23 +1499,47 @@ fn vertex_key(v: &(f64, f64)) -> Option<(u64, u64)> {
 /// Ring length at which [`first_repeated_vertex`] switches from the
 /// pairwise scan to the index map.
 ///
-/// MEASURED, not assumed. Standalone benchmarks of the two bodies over
-/// pinch-free rings (the case both must scan to the end), best-of-5 runs,
-/// `rustc -O` and `swiftc -O` on an Apple-silicon laptop:
+/// MEASURED, not assumed, and the measurement is CHECKABLE: the harness
+/// lives at `scripts/benchmarks/pinch_dispatcher/` (`pinch_bench.rs` and
+/// `PinchBench.swift`), standalone and outside every build, so a reader
+/// can re-derive this table rather than trust it. Method: the two bodies
+/// over pinch-free rings (the case both must scan to the end), `rustc -O`
+/// and `swiftc -O` on an Apple-silicon laptop, iteration counts calibrated
+/// per case to at least 100 ms of work, best-of-5 timed repeats, and an
+/// opaque barrier on BOTH the argument and the result -- `black_box` in
+/// Rust; Swift has no equivalent, so the harness feeds the result into a
+/// global accumulator and passes the ring through an `@inline(never)`
+/// identity. Both halves of that Swift barrier are load-bearing: without
+/// them `swiftc -O` deletes the timed loop outright and the scan appears
+/// to cost 0.0 ns at every n.
 ///
 /// | n    | Rust scan | Rust map | Swift scan | Swift map |
 /// |------|-----------|----------|------------|-----------|
-/// | 4    | 2.6 ns    | 73 ns    | 2.4 ns     | 186 ns    |
-/// | 64   | 0.62 us   | 1.05 us  | 0.55 us    | 2.15 us   |
-/// | 128  | 2.51 us   | 2.05 us  | 2.26 us    | 4.10 us   |
-/// | 256  | 9.07 us   | 4.12 us  | 8.85 us    | 8.25 us   |
-/// | 4096 | 1875 us   | 67 us    | 1873 us    | 133 us    |
+/// | 4    | 3.6 ns    | 77 ns    | 9.3 ns     | 183 ns    |
+/// | 64   | 0.58 us   | 1.12 us  | 0.56 us    | 2.20 us   |
+/// | 127  | 2.55 us   | 2.41 us  | 2.23 us    | 4.21 us   |
+/// | 128  | 2.48 us   | 2.32 us  | 2.27 us    | 4.25 us   |
+/// | 256  | 9.15 us   | 4.58 us  | 9.05 us    | 8.36 us   |
+/// | 4096 | 1897 us   | 71.7 us  | 1886 us    | 139 us    |
 ///
-/// So the map is 28x SLOWER at n=4 (77x in Swift) and 28x FASTER at
-/// n=4096 (14x in Swift); the crossover is near n=110 in Rust and n=240
-/// in Swift. The single map version this replaces was therefore a real
-/// regression on the short rings, even though the absolute cost there was
-/// ~70 ns in Rust and ~180 ns in Swift.
+/// The n=4 row carries a caveat two earlier versions of this table did
+/// not. The scan at n=4 performs three comparisons, which costs at or
+/// below the harness floor: an empty-bodied call through the same barriers
+/// measures 0.7 ns in Rust and 7.7 ns in Swift, so nearly all of the Swift
+/// 9.3 ns and a fifth of the Rust 3.6 ns is harness rather than
+/// algorithm. The RATIO at n=4 is therefore not a reproducible quantity.
+/// This harness reads 21x (Rust) and 20x (Swift); an earlier version of
+/// this doc asserted 28x and 77x; a third, independent harness read 10.5x
+/// in Rust. Do not cite a ratio here. What all of them agree on, within
+/// about 10%, is the figure that is actually load-bearing: the map's
+/// ABSOLUTE cost on a short ring, ~75-80 ns in Rust and ~185 ns in Swift.
+/// That fixed cost -- not any ratio -- is what the map-only version this
+/// replaces paid on every short ring, and it is the whole reason the
+/// dispatcher exists.
+///
+/// The remaining rows do reproduce. The map overtakes the scan near n=128
+/// in Rust and near n=230 in Swift, and by n=4096 it is 26x faster in Rust
+/// and 14x in Swift.
 ///
 /// Which rings are short, computed rather than assumed. Rect and Polygon
 /// operands contribute a handful of vertices. An Ellipse is flattened by
@@ -1528,12 +1553,19 @@ fn vertex_key(v: &(f64, f64)) -> Option<(u64, u64)> {
 ///
 /// That is what makes 128 a good shared constant rather than merely a
 /// legible one: it puts small shapes and rect/polygon work on the scan and
-/// large ellipse results on the map, each on the side where it wins. It is
-/// also at or above Rust's crossover, and the most Swift can lose by
-/// switching at 128 instead of its own 240 is the n=128 row: 4.10 us
-/// against 2.26 us, under 2 us. In the other direction the scan's worst
-/// case below the threshold is 127*128/2 = 8128 comparisons, measured at
-/// 2.5 us. Both bounds are small and explicit.
+/// large ellipse results on the map, each on the side where it wins. It
+/// sits AT Rust's crossover rather than comfortably above it: repeating the
+/// search for the smallest n at which the map first wins landed on 120, 124
+/// and 132, and at n=127/128 the two bodies are within 10% of each other,
+/// so the choice costs little in either direction right at the boundary.
+/// The most Swift can lose by switching at 128 instead of its own ~230 is
+/// the n=128 row: 4.25 us against 2.27 us, still under 2 us. In the other
+/// direction the scan's worst case below the threshold is the longest ring
+/// it is ever handed, n=127, at 126*127/2 = 8001 comparisons, measured at
+/// 2.55 us in Rust and 2.23 us in Swift. (An earlier version of this line
+/// wrote 127*128/2 = 8128. That is the count for n=128 -- a length this
+/// threshold routes to the map, not to the scan.) Both bounds are small
+/// and explicit.
 ///
 /// The threshold cannot change WHAT is returned: both bodies return the
 /// same pair for every ring, which
