@@ -6085,7 +6085,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                         Some(PanelKind::Character) => {
                             set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
                             st.character_panel_post_write(&f);
-                            st.apply_character_panel_to_selection();
+                            st.apply_character_panel_to_selection(&f);
                         }
                         Some(PanelKind::Paragraph) => {
                             // Sync first so untouched fields hold the
@@ -6285,14 +6285,20 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                                 // Character panel ``leading`` is Auto when
                                 // the element's line_height is empty;
                                 // clearing the field re-derives the
-                                // Auto-tracked value (font_size × 1.2)
-                                // and the apply pipeline writes it back
-                                // out as the empty element attribute. No
-                                // other Character field is nullable yet.
+                                // Auto-tracked value from the ELEMENT's own
+                                // font size (× 1.2) and the apply pipeline
+                                // writes it back out as the empty element
+                                // attribute. Reading the element (not the
+                                // panel's size field) is what makes this
+                                // port's cleared leading equal to Swift's
+                                // and the reference's ABSENT leading, which
+                                // their optional panel state can express and
+                                // this one's plain f64 cannot. No other
+                                // Character field is nullable yet.
                                 if f == "leading" {
                                     st.character_panel.leading =
-                                        st.character_panel.font_size * 1.2;
-                                    st.apply_character_panel_to_selection();
+                                        st.character_auto_leading();
+                                    st.apply_character_panel_to_selection(&f);
                                 }
                             }
                             Some(PanelKind::Stroke) | None => {
@@ -6324,7 +6330,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                         Some(PanelKind::Character) => {
                             set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
                             st.character_panel_post_write(&f);
-                            st.apply_character_panel_to_selection();
+                            st.apply_character_panel_to_selection(&f);
                         }
                         Some(PanelKind::Paragraph) => {
                             st.sync_paragraph_panel_from_selection();
@@ -6541,7 +6547,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
                                     Some(PanelKind::Character) => {
                                         set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
                                         st.character_panel_post_write(&f);
-                                        st.apply_character_panel_to_selection();
+                                        st.apply_character_panel_to_selection(&f);
                                     }
                                     Some(PanelKind::Paragraph) => {
                                         st.sync_paragraph_panel_from_selection();
@@ -6672,7 +6678,7 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                                 Some(PanelKind::Character) => {
                                     set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
                                     st.character_panel_post_write(&f);
-                                    st.apply_character_panel_to_selection();
+                                    st.apply_character_panel_to_selection(&f);
                                 }
                                 Some(PanelKind::Paragraph) => {
                                     st.sync_paragraph_panel_from_selection();
@@ -6840,7 +6846,7 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                                     Some(PanelKind::Character) => {
                                         set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
                                         st.character_panel_post_write(&f);
-                                        st.apply_character_panel_to_selection();
+                                        st.apply_character_panel_to_selection(&f);
                                     }
                                     Some(PanelKind::Paragraph) => {
                                         st.sync_paragraph_panel_from_selection();
@@ -6977,7 +6983,7 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         Some(PanelKind::Character) => {
                                             set_character_field(&mut st.character_panel, &f, &json_val);
                                             st.character_panel_post_write(&f);
-                                            st.apply_character_panel_to_selection();
+                                            st.apply_character_panel_to_selection(&f);
                                         }
                                         Some(PanelKind::Paragraph) => {
                                             st.sync_paragraph_panel_from_selection();
@@ -7192,7 +7198,7 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                             Some(PanelKind::Character) => {
                                 set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
                                 st.character_panel_post_write(&f);
-                                st.apply_character_panel_to_selection();
+                                st.apply_character_panel_to_selection(&f);
                             }
                             Some(PanelKind::Paragraph) => {
                                 // Sync first so untouched fields hold the

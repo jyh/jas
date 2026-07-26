@@ -33,22 +33,22 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
             state.character_panel.all_caps = !state.character_panel.all_caps;
             // Mutual exclusion with Small Caps (CHARACTER.md).
             if state.character_panel.all_caps { state.character_panel.small_caps = false; }
-            state.apply_character_panel_to_selection();
+            state.apply_character_panel_to_selection("all_caps");
         }
         "toggle_small_caps" => {
             state.character_panel.small_caps = !state.character_panel.small_caps;
             if state.character_panel.small_caps { state.character_panel.all_caps = false; }
-            state.apply_character_panel_to_selection();
+            state.apply_character_panel_to_selection("small_caps");
         }
         "toggle_superscript" => {
             state.character_panel.superscript = !state.character_panel.superscript;
             if state.character_panel.superscript { state.character_panel.subscript = false; }
-            state.apply_character_panel_to_selection();
+            state.apply_character_panel_to_selection("superscript");
         }
         "toggle_subscript" => {
             state.character_panel.subscript = !state.character_panel.subscript;
             if state.character_panel.subscript { state.character_panel.superscript = false; }
-            state.apply_character_panel_to_selection();
+            state.apply_character_panel_to_selection("subscript");
         }
         _ => {}
     }

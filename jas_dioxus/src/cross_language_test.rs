@@ -4382,6 +4382,116 @@ mod tests {
         assert!(ran >= 25, "stroke_apply corpus ran only {} vectors", ran);
     }
 
+    // ── CHARPANEL: the field-scoped Character-panel apply law ──────
+    //
+    // Runs test_fixtures/character_apply/panel_edit.json — the shared corpus
+    // that pins this law across the three LIVE implementations (the
+    // workspace_interpreter reference, this port, and Swift JasSwift). The
+    // reference states the field -> attribute-group table
+    // (workspace_interpreter/character_law.py); `CharacterEditGroup` mirrors
+    // it.
+    //
+    // A vector's `expected` is a DELTA over its base: the keys it names are
+    // what the edit changed, and every key it omits must come back
+    // unchanged. That is the whole point of the law, so the corpus states it
+    // directly rather than re-listing whole attribute sets.
+
+    /// A fixture attribute map as `CharacterAttrs`. Every key is present in
+    /// the merged map (the corpus's `element_defaults` names all sixteen),
+    /// so no port's element-constructor defaults leak into the corpus.
+    fn character_attrs_from_json(
+        attrs: &serde_json::Value,
+    ) -> crate::workspace::app_state::CharacterAttrs {
+        let s = |k: &str| attrs[k].as_str().unwrap_or("").to_string();
+        crate::workspace::app_state::CharacterAttrs {
+            font_family: s("font_family"),
+            font_size: attrs["font_size"].as_f64().unwrap_or(12.0),
+            font_weight: s("font_weight"),
+            font_style: s("font_style"),
+            text_decoration: s("text_decoration"),
+            text_transform: s("text_transform"),
+            font_variant: s("font_variant"),
+            baseline_shift: s("baseline_shift"),
+            line_height: s("line_height"),
+            letter_spacing: s("letter_spacing"),
+            xml_lang: s("xml_lang"),
+            aa_mode: s("aa_mode"),
+            rotate: s("rotate"),
+            horizontal_scale: s("horizontal_scale"),
+            vertical_scale: s("vertical_scale"),
+            kerning: s("kerning"),
+        }
+    }
+
+    /// A fixture panel map as `CharacterPanelState`. Unlike the Stroke
+    /// corpus there is no panel-vs-global scope question: every Character
+    /// control binds `panel.<field>` only.
+    fn character_panel_from_json(
+        panel: &serde_json::Value,
+    ) -> crate::workspace::app_state::CharacterPanelState {
+        let mut cp = crate::workspace::app_state::CharacterPanelState::default();
+        let s = |k: &str| panel[k].as_str().map(|v| v.to_string());
+        if let Some(v) = s("font_family") { cp.font_family = v; }
+        if let Some(v) = s("style_name") { cp.style_name = v; }
+        if let Some(v) = panel["font_size"].as_f64() { cp.font_size = v; }
+        if let Some(v) = panel["leading"].as_f64() { cp.leading = v; }
+        if let Some(v) = s("kerning") { cp.kerning = v; }
+        if let Some(v) = panel["tracking"].as_f64() { cp.tracking = v; }
+        if let Some(v) = panel["vertical_scale"].as_f64() { cp.vertical_scale = v; }
+        if let Some(v) = panel["horizontal_scale"].as_f64() { cp.horizontal_scale = v; }
+        if let Some(v) = panel["baseline_shift"].as_f64() { cp.baseline_shift = v; }
+        if let Some(v) = panel["character_rotation"].as_f64() { cp.character_rotation = v; }
+        if let Some(v) = panel["all_caps"].as_bool() { cp.all_caps = v; }
+        if let Some(v) = panel["small_caps"].as_bool() { cp.small_caps = v; }
+        if let Some(v) = panel["superscript"].as_bool() { cp.superscript = v; }
+        if let Some(v) = panel["subscript"].as_bool() { cp.subscript = v; }
+        if let Some(v) = panel["underline"].as_bool() { cp.underline = v; }
+        if let Some(v) = panel["strikethrough"].as_bool() { cp.strikethrough = v; }
+        if let Some(v) = s("language") { cp.language = v; }
+        if let Some(v) = s("anti_aliasing") { cp.anti_aliasing = v; }
+        cp
+    }
+
+    #[test]
+    fn character_apply_panel_edit_corpus() {
+        use crate::workspace::app_state::{character_with_group, CharacterEditGroup};
+        let raw = read_fixture("character_apply/panel_edit.json");
+        let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let mut ran = 0usize;
+        for vec in corpus["vectors"].as_array().unwrap() {
+            let name = vec["name"].as_str().unwrap();
+            assert_eq!(vec["op"].as_str().unwrap(), "panel_edit",
+                       "character_apply '{}': unknown op", name);
+            // `base` is a literal attribute delta or the NAME of a shared
+            // one; either way it is a delta over `element_defaults`.
+            let base_delta = match &vec["base"] {
+                serde_json::Value::String(n) => corpus[n.as_str()].clone(),
+                other => other.clone(),
+            };
+            let base_attrs = merged(&corpus["element_defaults"], &base_delta);
+            let base = character_attrs_from_json(&base_attrs);
+            let edited = vec["edited"].as_str().unwrap();
+            let group = CharacterEditGroup::from_field(edited);
+            if vec["expected"].is_null() {
+                assert!(group.is_none(),
+                        "character_apply '{}': '{}' must own no group",
+                        name, edited);
+                ran += 1;
+                continue;
+            }
+            let group = group.unwrap_or_else(|| panic!(
+                "character_apply '{}': '{}' must own a group", name, edited));
+            let cp = character_panel_from_json(
+                &merged(&corpus["panel_defaults"], &vec["panel"]));
+            let got = character_with_group(base, &cp, group);
+            let want = character_attrs_from_json(
+                &merged(&base_attrs, &vec["expected"]));
+            assert_eq!(got, want, "character_apply panel_edit '{}'", name);
+            ran += 1;
+        }
+        assert!(ran >= 30, "character_apply corpus ran only {} vectors", ran);
+    }
+
     #[cfg(feature = "web")]
     #[test]
     fn state_defaults() {

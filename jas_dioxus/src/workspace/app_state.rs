@@ -601,6 +601,305 @@ pub(crate) struct CharacterPanelState {
     pub snap_anchor_point: bool,
 }
 
+/// The character attributes ONE Character-panel field owns.
+///
+/// A panel edit must write only the group it touched and preserve every
+/// other attribute from the element (see
+/// `AppState::apply_character_panel_to_selection`). Fields that move
+/// together stay in one group, and only where that is forced:
+///
+/// - `Style` is one dropdown naming a `font_weight` + `font_style` PAIR;
+///   there is no control that moves the weight without the style.
+/// - `Case` is the All Caps / Small Caps pair, whose mutual exclusion can
+///   only be expressed by writing `text_transform` and `font_variant`
+///   together — turning All Caps ON must clear a small-caps variant.
+/// - `Decoration` is the Underline / Strikethrough pair feeding ONE CSS
+///   token list, which cannot be written a token at a time.
+///
+/// The two glyph scales are deliberately SEPARATE groups (as the Stroke
+/// law's two arrowhead scales are), and `FontSize` owns only the size —
+/// never the leading, because Auto leading is an ABSENT `line-height` and
+/// preserving it keeps Auto alive across a size change.
+///
+/// Mirrors the reference `CHARACTER_EDIT_GROUPS`
+/// (`workspace_interpreter/character_law.py`), which states the table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CharacterEditGroup {
+    FontFamily,
+    Style,
+    FontSize,
+    Leading,
+    Kerning,
+    Tracking,
+    VerticalScale,
+    HorizontalScale,
+    BaselineShift,
+    Rotation,
+    Case,
+    Decoration,
+    Language,
+    AaMode,
+}
+
+impl CharacterEditGroup {
+    /// Map a Character-panel field key to the group it owns. `None` means
+    /// the key owns no element attribute, so editing it writes nothing to
+    /// the selection.
+    ///
+    /// Unlike the Stroke panel there is no flat-global spelling to
+    /// normalize: every Character control binds `panel.<field>` only
+    /// (`workspace/panels/character.yaml`).
+    pub(crate) fn from_field(key: &str) -> Option<Self> {
+        Some(match key {
+            "font_family" => Self::FontFamily,
+            "style_name" => Self::Style,
+            "font_size" => Self::FontSize,
+            "leading" => Self::Leading,
+            "kerning" => Self::Kerning,
+            "tracking" => Self::Tracking,
+            "vertical_scale" => Self::VerticalScale,
+            "horizontal_scale" => Self::HorizontalScale,
+            // Three fields, one attribute: the toggles win over the number.
+            "baseline_shift" | "superscript" | "subscript" => Self::BaselineShift,
+            "character_rotation" => Self::Rotation,
+            "all_caps" | "small_caps" => Self::Case,
+            "underline" | "strikethrough" => Self::Decoration,
+            "language" => Self::Language,
+            "anti_aliasing" => Self::AaMode,
+            // The seven snap_* flags and the section-visibility flags are
+            // UI-only state: toggling one must not push an undo step that
+            // changes nothing.
+            _ => return None,
+        })
+    }
+
+    /// The tspan override fields this group writes, applied to a template
+    /// tspan built by `build_panel_full_overrides`. Fields outside the
+    /// group are cleared to `None` so `merge_tspan_overrides` leaves the
+    /// range's existing values alone.
+    ///
+    /// Groups that own no tspan-level field (the glyph scales, kerning)
+    /// yield an override template with nothing set — a range write for
+    /// those fields is not yet expressible on a Tspan, and stamping the
+    /// panel's other attributes instead is exactly what this law forbids.
+    fn restrict_tspan_overrides(self, t: &mut crate::geometry::tspan::Tspan) {
+        use CharacterEditGroup as G;
+        let keep_family = matches!(self, G::FontFamily);
+        let keep_style = matches!(self, G::Style);
+        let keep_size = matches!(self, G::FontSize);
+        let keep_leading = matches!(self, G::Leading);
+        let keep_tracking = matches!(self, G::Tracking);
+        let keep_baseline = matches!(self, G::BaselineShift);
+        let keep_rotation = matches!(self, G::Rotation);
+        let keep_case = matches!(self, G::Case);
+        let keep_decoration = matches!(self, G::Decoration);
+        let keep_language = matches!(self, G::Language);
+        let keep_aa = matches!(self, G::AaMode);
+        if !keep_family { t.font_family = None; }
+        if !keep_style { t.font_weight = None; t.font_style = None; }
+        if !keep_size { t.font_size = None; }
+        if !keep_leading { t.line_height = None; }
+        if !keep_tracking { t.letter_spacing = None; }
+        if !keep_baseline { t.baseline_shift = None; }
+        if !keep_rotation { t.rotate = None; }
+        if !keep_case { t.text_transform = None; t.font_variant = None; }
+        if !keep_decoration { t.text_decoration = None; }
+        if !keep_language { t.xml_lang = None; }
+        if !keep_aa { t.jas_aa_mode = None; }
+    }
+}
+
+/// The character attributes a Character-panel edit can reach, lifted out
+/// of a Text / TextPath element as a flat record.
+///
+/// The two element types carry the same sixteen fields; this record is the
+/// shared shape the field-scoped law operates on, so `character_with_group`
+/// can be a pure function the conformance corpus drives directly. Names are
+/// the element's own (SVG / CSS) names, not panel field names.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct CharacterAttrs {
+    pub font_family: String,
+    pub font_size: f64,
+    pub font_weight: String,
+    pub font_style: String,
+    pub text_decoration: String,
+    pub text_transform: String,
+    pub font_variant: String,
+    pub baseline_shift: String,
+    pub line_height: String,
+    pub letter_spacing: String,
+    pub xml_lang: String,
+    pub aa_mode: String,
+    pub rotate: String,
+    pub horizontal_scale: String,
+    pub vertical_scale: String,
+    pub kerning: String,
+}
+
+/// Lift / lower the sixteen character attributes for either text element
+/// type. `TextElem` and `TextPathElem` declare the same field names, so
+/// one macro body serves both without a trait.
+macro_rules! character_attrs_for {
+    ($e:expr) => {
+        CharacterAttrs {
+            font_family: $e.font_family.clone(),
+            font_size: $e.font_size,
+            font_weight: $e.font_weight.clone(),
+            font_style: $e.font_style.clone(),
+            text_decoration: $e.text_decoration.clone(),
+            text_transform: $e.text_transform.clone(),
+            font_variant: $e.font_variant.clone(),
+            baseline_shift: $e.baseline_shift.clone(),
+            line_height: $e.line_height.clone(),
+            letter_spacing: $e.letter_spacing.clone(),
+            xml_lang: $e.xml_lang.clone(),
+            aa_mode: $e.aa_mode.clone(),
+            rotate: $e.rotate.clone(),
+            horizontal_scale: $e.horizontal_scale.clone(),
+            vertical_scale: $e.vertical_scale.clone(),
+            kerning: $e.kerning.clone(),
+        }
+    };
+}
+
+macro_rules! set_character_attrs {
+    ($e:expr, $a:expr) => {{
+        $e.font_family = $a.font_family.clone();
+        $e.font_size = $a.font_size;
+        $e.font_weight = $a.font_weight.clone();
+        $e.font_style = $a.font_style.clone();
+        $e.text_decoration = $a.text_decoration.clone();
+        $e.text_transform = $a.text_transform.clone();
+        $e.font_variant = $a.font_variant.clone();
+        $e.baseline_shift = $a.baseline_shift.clone();
+        $e.line_height = $a.line_height.clone();
+        $e.letter_spacing = $a.letter_spacing.clone();
+        $e.xml_lang = $a.xml_lang.clone();
+        $e.aa_mode = $a.aa_mode.clone();
+        $e.rotate = $a.rotate.clone();
+        $e.horizontal_scale = $a.horizontal_scale.clone();
+        $e.vertical_scale = $a.vertical_scale.clone();
+        $e.kerning = $a.kerning.clone();
+    }};
+}
+
+/// The element's `kerning` attribute for a Kerning combo entry. Named
+/// modes pass through verbatim; a numeric entry is 1/1000 em and
+/// serialises to `"{N}em"`. Empty / `"0"` / `"Auto"` all round-trip to an
+/// empty attribute, since Auto is the element default.
+pub(crate) fn kerning_attr(raw: &str) -> String {
+    match raw.trim() {
+        "" | "0" | "Auto" => String::new(),
+        "Optical" | "Metrics" => raw.trim().to_string(),
+        other => match other.parse::<f64>() {
+            Ok(n) if n == 0.0 => String::new(),
+            Ok(n) => format!("{}em", fmt_num(n / 1000.0)),
+            Err(_) => String::new(),
+        },
+    }
+}
+
+/// Overwrite `base`'s `group` attributes from the Character panel state,
+/// leaving every other attribute of `base` untouched.
+///
+/// Every derived value is computed against `base` where the element has a
+/// say — notably the `Leading` group's Auto test, which compares the
+/// panel's leading against the ELEMENT's `font_size * 1.2` rather than the
+/// panel's font size. The whole-rebuild law used the panel's, which was
+/// harmless only because it rewrote the size in the same breath; under the
+/// field-scoped law a leading edit must not consult a font-size field the
+/// user did not touch.
+///
+/// Mirrors the reference `character_with_group`
+/// (`workspace_interpreter/character_law.py`).
+pub(crate) fn character_with_group(
+    base: CharacterAttrs, cp: &CharacterPanelState, group: CharacterEditGroup,
+) -> CharacterAttrs {
+    use CharacterEditGroup as G;
+    let mut c = base;
+    match group {
+        G::FontFamily => c.font_family = cp.font_family.clone(),
+        G::Style => {
+            // Unknown style names leave BOTH halves of the pair alone
+            // rather than guessing one.
+            if let Some((fw, fst)) = parse_style_name(&cp.style_name) {
+                c.font_weight = fw;
+                c.font_style = fst;
+            }
+        }
+        G::FontSize => c.font_size = cp.font_size,
+        G::Leading => {
+            // Auto (an ABSENT line-height) is 120% of the ELEMENT's size.
+            let auto = c.font_size * 1.2;
+            c.line_height = if (cp.leading - auto).abs() < 1e-6 {
+                String::new()
+            } else {
+                format!("{}pt", fmt_num(cp.leading))
+            };
+        }
+        G::Kerning => c.kerning = kerning_attr(&cp.kerning),
+        G::Tracking => {
+            c.letter_spacing = if cp.tracking == 0.0 {
+                String::new()
+            } else {
+                format!("{}em", fmt_num(cp.tracking / 1000.0))
+            };
+        }
+        G::VerticalScale => {
+            c.vertical_scale = if cp.vertical_scale == 100.0 {
+                String::new()
+            } else {
+                fmt_num(cp.vertical_scale)
+            };
+        }
+        G::HorizontalScale => {
+            c.horizontal_scale = if cp.horizontal_scale == 100.0 {
+                String::new()
+            } else {
+                fmt_num(cp.horizontal_scale)
+            };
+        }
+        G::BaselineShift => {
+            c.baseline_shift = if cp.superscript {
+                "super".to_string()
+            } else if cp.subscript {
+                "sub".to_string()
+            } else if cp.baseline_shift != 0.0 {
+                format!("{}pt", fmt_num(cp.baseline_shift))
+            } else {
+                String::new()
+            };
+        }
+        G::Rotation => {
+            c.rotate = if cp.character_rotation == 0.0 {
+                String::new()
+            } else {
+                fmt_num(cp.character_rotation)
+            };
+        }
+        G::Case => {
+            c.text_transform = if cp.all_caps { "uppercase".into() } else { String::new() };
+            c.font_variant = if cp.small_caps && !cp.all_caps {
+                "small-caps".into()
+            } else {
+                String::new()
+            };
+        }
+        G::Decoration => {
+            c.text_decoration = text_decoration_from_flags(cp.underline, cp.strikethrough);
+        }
+        G::Language => c.xml_lang = cp.language.clone(),
+        G::AaMode => {
+            c.aa_mode = if cp.anti_aliasing == "Sharp" || cp.anti_aliasing.is_empty() {
+                String::new()
+            } else {
+                cp.anti_aliasing.clone()
+            };
+        }
+    }
+    c
+}
+
 /// Paragraph panel state fields — mirror the panel-local state
 /// declared in `workspace/panels/paragraph.yaml`. Written to by the
 /// renderer when the user edits a Paragraph panel control; read by
@@ -1724,24 +2023,14 @@ impl AppState {
         }
     }
 
-    /// Push the current Character panel state to the selected text
-    /// element(s). For an object-level selection (whole element), write
-    /// directly to the parent Text/TextPath's attributes so the canvas
-    /// renderer — which reads the parent's attributes — reflects the
-    /// change. Tspan-range writes (via
-    /// `Controller::set_character_attribute`) come back when partial
-    /// tspan selections are supported.
-    ///
-    /// Currently wires `font_family`, `font_size`, and `text_decoration`
-    /// (from the Underline / Strikethrough toggles). Remaining
     /// Whether the first selected Text / TextPath has an empty
     /// ``line_height`` (i.e. leading is in Auto mode = 120% of
-    /// font_size). Used by the dispatch sites that write
-    /// ``character_panel.font_size`` so they can keep
-    /// ``character_panel.leading`` tracking the new size while Auto
-    /// is in effect — without this, Character-panel-driven font
-    /// changes turn Auto into a stale numeric override on the next
-    /// apply.
+    /// font_size). Read by the panel's DISPLAY side so the Leading field
+    /// tracks a committed font size while Auto is in effect.
+    ///
+    /// The apply no longer depends on it: `CharacterEditGroup::FontSize`
+    /// owns only the size, so an absent `line-height` survives a size edit
+    /// and Auto re-derives against the new size on its own.
     pub(crate) fn character_element_has_auto_leading(&self) -> bool {
         use crate::geometry::element::Element;
         let Some(tab) = self.tab() else { return false; };
@@ -1753,112 +2042,76 @@ impl AppState {
         }
     }
 
+    /// The first selected Text / TextPath's own ``font_size``, or `None`
+    /// when the selection holds no text.
+    ///
+    /// The Leading group's Auto test is against the ELEMENT's size, and
+    /// this port's panel state cannot represent an ABSENT leading (its
+    /// `leading` is a plain `f64` where Swift and the reference hold an
+    /// optional). So the nullable-clear path materialises the element's
+    /// own Auto value here, which the law then recognises as Auto — the
+    /// same outcome the other two ports reach from absence.
+    pub(crate) fn character_element_font_size(&self) -> Option<f64> {
+        use crate::geometry::element::Element;
+        let tab = self.tab()?;
+        let es = tab.model.document().selection.first()?;
+        match tab.model.document().get_element(&es.path) {
+            Some(Element::Text(t)) => Some(t.font_size),
+            Some(Element::TextPath(tp)) => Some(tp.font_size),
+            _ => None,
+        }
+    }
+
+    /// The Auto leading value for the selected element: 120% of ITS font
+    /// size, falling back to the panel's when the selection holds no text.
+    pub(crate) fn character_auto_leading(&self) -> f64 {
+        self.character_element_font_size()
+            .unwrap_or(self.character_panel.font_size) * 1.2
+    }
+
     /// Post-write hook for Character-panel field dispatches. When the
     /// user changes ``font_size`` and the selected element's
     /// ``line_height`` is empty (Auto), bump ``character_panel.leading``
-    /// so the apply pipeline still resolves to the Auto-derived value
-    /// (= ``font_size × 1.2``) and the empty element attribute survives
-    /// the round-trip. Without this, Auto materialises into a stale
-    /// numeric override the moment the user nudges the size.
+    /// so the panel's Leading FIELD keeps displaying the Auto-derived
+    /// value (= ``font_size × 1.2``) instead of the pre-edit number.
+    ///
+    /// This is now display-only: the field-scoped apply writes only the
+    /// size, so the element's empty ``line-height`` survives on its own
+    /// (`CharacterEditGroup::FontSize`). Under the whole-rebuild law the
+    /// hook was load-bearing — without it Auto materialised into a stale
+    /// numeric override the moment the user nudged the size.
     pub(crate) fn character_panel_post_write(&mut self, key: &str) {
         if key == "font_size" && self.character_element_has_auto_leading() {
             self.character_panel.leading = self.character_panel.font_size * 1.2;
         }
     }
 
-    /// Character-panel fields (All Caps, Small Caps, Super/Sub,
-    /// kerning, tracking, scales, baseline shift, rotation, language,
-    /// anti-alias, Snap to Glyph) stay in panel-local state until their
-    /// SVG-attribute plumbing lands.
+    /// Push the Character panel state to the selected text element(s) —
+    /// FIELD-SCOPED.
     ///
-    /// No-op when no tab is active, when the selection is empty, or
-    /// when the selected element is not a Text / TextPath.
-    pub(crate) fn apply_character_panel_to_selection(&mut self) {
+    /// `edited` names the panel field the user just committed. Only the
+    /// [`CharacterEditGroup`] that field owns is taken from panel state;
+    /// every other character attribute is preserved from the element being
+    /// edited, per element. A field that owns no element attribute (the
+    /// seven `snap_*` flags, the section-visibility flags) writes NOTHING —
+    /// not even an undo step.
+    ///
+    /// This is the law because the panel is not a picture of the selection:
+    /// most of its controls display panel state, so an apply that rebuilt
+    /// the whole attribute set imposed values the user never chose. Nudging
+    /// Tracking on a 30pt bold italic underlined Georgia run reset it to the
+    /// panel's 12pt sans-serif defaults — sixteen attributes clobbered by
+    /// one edit. See `transcripts/CHARACTER.md` "The field-scoped apply
+    /// law"; the reference states the field → group table in
+    /// `workspace_interpreter/character_law.py`.
+    ///
+    /// No-op when no tab is active, when the selection is empty, or when
+    /// the selected element is not a Text / TextPath.
+    pub(crate) fn apply_character_panel_to_selection(&mut self, edited: &str) {
         use crate::geometry::element::Element;
+        // A field owning no element attribute must not reach the document.
+        let Some(group) = CharacterEditGroup::from_field(edited) else { return };
         let cp = self.character_panel.clone();
-        // Combine underline + strikethrough into the CSS
-        // `text-decoration` form. Empty when neither is set.
-        let text_decoration = text_decoration_from_flags(cp.underline, cp.strikethrough);
-        // All Caps and Small Caps are mutually exclusive per
-        // CHARACTER.md; if both bools are true we prefer All Caps
-        // (the panel should have enforced exclusion, but be safe).
-        let text_transform = if cp.all_caps { "uppercase" } else { "" }.to_string();
-        let font_variant = if cp.small_caps && !cp.all_caps { "small-caps" } else { "" }.to_string();
-        // Baseline shift: the super / sub toggles take precedence
-        // over the numeric pt value (CHARACTER.md mutual exclusion).
-        // Zero pt + no toggle renders as empty (omit attribute).
-        let baseline_shift = if cp.superscript {
-            "super".to_string()
-        } else if cp.subscript {
-            "sub".to_string()
-        } else if cp.baseline_shift != 0.0 {
-            format!("{}pt", fmt_num(cp.baseline_shift))
-        } else {
-            String::new()
-        };
-        // Leading → line-height. Auto (120% of font size) is
-        // represented as empty per CHARACTER.md, so a panel value at
-        // the Auto ratio omits the attribute.
-        let line_height = if (cp.leading - cp.font_size * 1.2).abs() < 1e-6 {
-            String::new()
-        } else {
-            format!("{}pt", fmt_num(cp.leading))
-        };
-        // Tracking (1/1000 em, signed) → letter-spacing in em. Zero
-        // means empty.
-        let letter_spacing = if cp.tracking == 0.0 {
-            String::new()
-        } else {
-            format!("{}em", fmt_num(cp.tracking / 1000.0))
-        };
-        // Language: xml:lang attribute. Blank panel field omits.
-        let xml_lang = cp.language.clone();
-        // Anti-aliasing: store the panel mode name verbatim. Empty =
-        // default (Sharp is the panel default, but we treat it as the
-        // implicit identity and only store when something different
-        // would appear on export).
-        let aa_mode = if cp.anti_aliasing == "Sharp" || cp.anti_aliasing.is_empty() {
-            String::new()
-        } else {
-            cp.anti_aliasing.clone()
-        };
-        // Style name → font_weight + font_style. Unknown style names
-        // leave the current weight/style alone (write None from
-        // parse_style_name).
-        let parsed_style = parse_style_name(&cp.style_name);
-        // Character rotation: degrees, signed, 0 omits the attribute.
-        let rotate = if cp.character_rotation == 0.0 {
-            String::new()
-        } else {
-            fmt_num(cp.character_rotation)
-        };
-        // V/H scale: identity (100%) omits.
-        let horizontal_scale = if cp.horizontal_scale == 100.0 {
-            String::new()
-        } else {
-            fmt_num(cp.horizontal_scale)
-        };
-        let vertical_scale = if cp.vertical_scale == 100.0 {
-            String::new()
-        } else {
-            fmt_num(cp.vertical_scale)
-        };
-        // Kerning combo_box: accepts Auto / Optical / Metrics (named
-        // modes, passed through verbatim) or a numeric string in
-        // 1/1000 em (converted to "{em}em"). Empty / "0" / "Auto" all
-        // omit since Auto is the element default.
-        let kerning = {
-            let raw = cp.kerning.trim();
-            match raw {
-                "" | "0" | "Auto" => String::new(),
-                "Optical" | "Metrics" => raw.to_string(),
-                other => match other.parse::<f64>() {
-                    Ok(n) if n == 0.0 => String::new(),
-                    Ok(n) => format!("{}em", fmt_num(n / 1000.0)),
-                    Err(_) => String::new(),
-                }
-            }
-        };
         let active_tool = self.active_tool;
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
 
@@ -1909,7 +2162,14 @@ impl AppState {
             })
         };
         if let Some((path, lo, hi)) = range_route {
-            let overrides = build_panel_full_overrides(&cp);
+            // Field-scoped here too: build the panel's override template,
+            // then clear every field outside the edited group so
+            // merge_tspan_overrides leaves the range's other attributes
+            // alone. Without the restriction a Tracking edit on a selected
+            // range stamped the panel's family / size / weight / decoration
+            // over it — the same clobber as the whole-element route.
+            let mut overrides = build_panel_full_overrides(&cp);
+            group.restrict_tspan_overrides(&mut overrides);
             let doc = tab.model.document().clone();
             if let Some(elem) = doc.get_element(&path) {
                 let new_elem = match elem {
@@ -1953,49 +2213,22 @@ impl AppState {
         let mut acc_doc = tab.model.document().clone();
         let mut changed = false;
         for path in target_paths {
+            // PER ELEMENT: the group's attributes come from panel state and
+            // every other attribute is lifted from THIS element, so a
+            // multi-element selection keeps each element's own values.
             let new_elem = match acc_doc.get_element(&path) {
                 Some(Element::Text(t)) => {
+                    let attrs = character_with_group(
+                        character_attrs_for!(t), &cp, group);
                     let mut new_t = t.clone();
-                    new_t.font_family = cp.font_family.clone();
-                    new_t.font_size = cp.font_size;
-                    new_t.text_decoration = text_decoration.clone();
-                    new_t.text_transform = text_transform.clone();
-                    new_t.font_variant = font_variant.clone();
-                    new_t.baseline_shift = baseline_shift.clone();
-                    new_t.line_height = line_height.clone();
-                    new_t.letter_spacing = letter_spacing.clone();
-                    new_t.xml_lang = xml_lang.clone();
-                    new_t.aa_mode = aa_mode.clone();
-                    new_t.rotate = rotate.clone();
-                    new_t.horizontal_scale = horizontal_scale.clone();
-                    new_t.vertical_scale = vertical_scale.clone();
-                    new_t.kerning = kerning.clone();
-                    if let Some((fw, fst)) = parsed_style.clone() {
-                        new_t.font_weight = fw;
-                        new_t.font_style = fst;
-                    }
+                    set_character_attrs!(new_t, attrs);
                     Some(Element::Text(new_t))
                 }
                 Some(Element::TextPath(tp)) => {
+                    let attrs = character_with_group(
+                        character_attrs_for!(tp), &cp, group);
                     let mut new_tp = tp.clone();
-                    new_tp.font_family = cp.font_family.clone();
-                    new_tp.font_size = cp.font_size;
-                    new_tp.text_decoration = text_decoration.clone();
-                    new_tp.text_transform = text_transform.clone();
-                    new_tp.font_variant = font_variant.clone();
-                    new_tp.baseline_shift = baseline_shift.clone();
-                    new_tp.line_height = line_height.clone();
-                    new_tp.letter_spacing = letter_spacing.clone();
-                    new_tp.xml_lang = xml_lang.clone();
-                    new_tp.aa_mode = aa_mode.clone();
-                    new_tp.rotate = rotate.clone();
-                    new_tp.horizontal_scale = horizontal_scale.clone();
-                    new_tp.vertical_scale = vertical_scale.clone();
-                    new_tp.kerning = kerning.clone();
-                    if let Some((fw, fst)) = parsed_style.clone() {
-                        new_tp.font_weight = fw;
-                        new_tp.font_style = fst;
-                    }
+                    set_character_attrs!(new_tp, attrs);
                     Some(Element::TextPath(new_tp))
                 }
                 _ => None,
@@ -4347,7 +4580,7 @@ mod oplog_bracket_tests {
         assert!(!st.tabs[st.active_tab].model.can_undo());
 
         st.character_panel.font_size = 48.0;
-        st.apply_character_panel_to_selection();
+        st.apply_character_panel_to_selection("font_size");
 
         // Change landed.
         match st.tab().unwrap().model.document().get_element(&vec![0, 0]).unwrap() {
@@ -4465,40 +4698,99 @@ mod character_panel_apply_tests {
         }
     }
 
+    /// CHARPANEL: a deliberately RICH text element — every character
+    /// attribute differs from the Character panel's default, so a
+    /// whole-rebuild apply shows up as a diff on every one of them.
+    /// Mirrors the corpus's shared `rich_text`
+    /// (`test_fixtures/character_apply/panel_edit.json`).
+    fn rich_text() -> TextElem {
+        let mut t = TextElem::from_string(
+            0.0, 0.0, "hello", "Georgia", 30.0,
+            "bold", "italic", "underline", 0.0, 0.0,
+            Some(Fill::new(Color::BLACK)), None, CommonProps::default(),
+        );
+        t.text_transform = "uppercase".into();
+        t.font_variant = String::new();
+        t.baseline_shift = "4pt".into();
+        t.line_height = "40pt".into();
+        t.letter_spacing = "0.08em".into();
+        t.xml_lang = "fr".into();
+        t.aa_mode = "Crisp".into();
+        t.rotate = "15".into();
+        t.horizontal_scale = "120".into();
+        t.vertical_scale = "90".into();
+        t.kerning = "Optical".into();
+        t
+    }
+
+    /// CHARPANEL red repro: the rich element is selected, the panel sits
+    /// at its defaults (which is where it sits for every control the
+    /// display does not mirror), the user commits ONE field — Tracking.
+    /// Only `letter_spacing` may change; every other character attribute
+    /// must come back bit-for-bit.
+    #[test]
+    fn tracking_edit_preserves_every_other_character_attr() {
+        let rich = rich_text();
+        let mut st = state_with_element(Element::Text(rich.clone()), true);
+        st.character_panel.tracking = 50.0;
+        st.apply_character_panel_to_selection("tracking");
+        let t = get_text(&st);
+        assert_eq!(t.letter_spacing, "0.05em", "the edited field lands");
+        assert_eq!(t.font_family, rich.font_family, "font_family preserved");
+        assert_eq!(t.font_size, rich.font_size, "font_size preserved");
+        assert_eq!(t.font_weight, rich.font_weight, "font_weight preserved");
+        assert_eq!(t.font_style, rich.font_style, "font_style preserved");
+        assert_eq!(t.text_decoration, rich.text_decoration, "text_decoration preserved");
+        assert_eq!(t.text_transform, rich.text_transform, "text_transform preserved");
+        assert_eq!(t.font_variant, rich.font_variant, "font_variant preserved");
+        assert_eq!(t.baseline_shift, rich.baseline_shift, "baseline_shift preserved");
+        assert_eq!(t.line_height, rich.line_height, "line_height preserved");
+        assert_eq!(t.xml_lang, rich.xml_lang, "xml_lang preserved");
+        assert_eq!(t.aa_mode, rich.aa_mode, "aa_mode preserved");
+        assert_eq!(t.rotate, rich.rotate, "rotate preserved");
+        assert_eq!(t.horizontal_scale, rich.horizontal_scale, "horizontal_scale preserved");
+        assert_eq!(t.vertical_scale, rich.vertical_scale, "vertical_scale preserved");
+        assert_eq!(t.kerning, rich.kerning, "kerning preserved");
+    }
+
     /// Build a default-panel state over a 12pt Text, run the provided
-    /// mutation on the Character panel, apply, and return the element.
-    fn apply_and_get(modify: impl FnOnce(&mut CharacterPanelState)) -> TextElem {
+    /// mutation on the Character panel, commit `edited`, and return the
+    /// element. The apply is FIELD-SCOPED, so every case must name the
+    /// field the user committed.
+    fn apply_and_get(
+        edited: &str, modify: impl FnOnce(&mut CharacterPanelState),
+    ) -> TextElem {
         let mut st = state_with_element(Element::Text(text12()), true);
         modify(&mut st.character_panel);
-        st.apply_character_panel_to_selection();
+        st.apply_character_panel_to_selection(edited);
         get_text(&st)
     }
 
     // ── font_size ────────────────────────────────────────────────
     #[test]
     fn font_size_24_on_12pt_text() {
-        let t = apply_and_get(|cp| cp.font_size = 24.0);
+        let t = apply_and_get("font_size", |cp| cp.font_size = 24.0);
         assert_eq!(t.font_size, 24.0);
     }
 
     // ── style_name -> font_weight / font_style ───────────────────
     #[test]
     fn style_bold() {
-        let t = apply_and_get(|cp| cp.style_name = "Bold".into());
+        let t = apply_and_get("style_name", |cp| cp.style_name = "Bold".into());
         assert_eq!(t.font_weight, "bold");
         assert_eq!(t.font_style, "normal");
     }
 
     #[test]
     fn style_italic() {
-        let t = apply_and_get(|cp| cp.style_name = "Italic".into());
+        let t = apply_and_get("style_name", |cp| cp.style_name = "Italic".into());
         assert_eq!(t.font_weight, "normal");
         assert_eq!(t.font_style, "italic");
     }
 
     #[test]
     fn style_bold_italic() {
-        let t = apply_and_get(|cp| cp.style_name = "Bold Italic".into());
+        let t = apply_and_get("style_name", |cp| cp.style_name = "Bold Italic".into());
         assert_eq!(t.font_weight, "bold");
         assert_eq!(t.font_style, "italic");
     }
@@ -4511,7 +4803,7 @@ mod character_panel_apply_tests {
         base.font_style = "italic".into();
         let mut st = state_with_element(Element::Text(base), true);
         st.character_panel.style_name = "Regular".into();
-        st.apply_character_panel_to_selection();
+        st.apply_character_panel_to_selection("style_name");
         let t = get_text(&st);
         assert_eq!(t.font_weight, "normal");
         assert_eq!(t.font_style, "normal");
@@ -4520,21 +4812,21 @@ mod character_panel_apply_tests {
     // ── caps / small-caps ────────────────────────────────────────
     #[test]
     fn all_caps() {
-        let t = apply_and_get(|cp| cp.all_caps = true);
+        let t = apply_and_get("all_caps", |cp| cp.all_caps = true);
         assert_eq!(t.text_transform, "uppercase");
         assert_eq!(t.font_variant, "");
     }
 
     #[test]
     fn small_caps() {
-        let t = apply_and_get(|cp| cp.small_caps = true);
+        let t = apply_and_get("small_caps", |cp| cp.small_caps = true);
         assert_eq!(t.font_variant, "small-caps");
         assert_eq!(t.text_transform, "");
     }
 
     #[test]
     fn all_caps_wins_over_small_caps() {
-        let t = apply_and_get(|cp| { cp.all_caps = true; cp.small_caps = true; });
+        let t = apply_and_get("all_caps", |cp| { cp.all_caps = true; cp.small_caps = true; });
         assert_eq!(t.text_transform, "uppercase");
         assert_eq!(t.font_variant, "");
     }
@@ -4542,19 +4834,19 @@ mod character_panel_apply_tests {
     // ── text-decoration ──────────────────────────────────────────
     #[test]
     fn underline_only() {
-        let t = apply_and_get(|cp| cp.underline = true);
+        let t = apply_and_get("underline", |cp| cp.underline = true);
         assert_eq!(t.text_decoration, "underline");
     }
 
     #[test]
     fn strikethrough_only() {
-        let t = apply_and_get(|cp| cp.strikethrough = true);
+        let t = apply_and_get("strikethrough", |cp| cp.strikethrough = true);
         assert_eq!(t.text_decoration, "line-through");
     }
 
     #[test]
     fn underline_and_strikethrough_alphabetical() {
-        let t = apply_and_get(|cp| { cp.underline = true; cp.strikethrough = true; });
+        let t = apply_and_get("underline", |cp| { cp.underline = true; cp.strikethrough = true; });
         assert_eq!(t.text_decoration, "line-through underline");
     }
 
@@ -4562,147 +4854,150 @@ mod character_panel_apply_tests {
     #[test]
     fn leading_auto_empties_line_height() {
         // Default leading 14.4 == 12 * 1.2 (Auto) -> empty.
-        let t = apply_and_get(|_cp| {});
+        let t = apply_and_get("leading", |_cp| {});
         assert_eq!(t.line_height, "");
     }
 
     #[test]
     fn leading_explicit_writes_pt() {
-        let t = apply_and_get(|cp| cp.leading = 20.0);
+        let t = apply_and_get("leading", |cp| cp.leading = 20.0);
         assert_eq!(t.line_height, "20pt");
     }
 
     // ── tracking -> letter-spacing ───────────────────────────────
     #[test]
     fn tracking_zero_empties() {
-        let t = apply_and_get(|_cp| {});
+        let t = apply_and_get("tracking", |_cp| {});
         assert_eq!(t.letter_spacing, "");
     }
 
     #[test]
     fn tracking_25_is_0025em() {
-        let t = apply_and_get(|cp| cp.tracking = 25.0);
+        let t = apply_and_get("tracking", |cp| cp.tracking = 25.0);
         assert_eq!(t.letter_spacing, "0.025em");
     }
 
     // ── kerning ──────────────────────────────────────────────────
     #[test]
     fn kerning_default_empties() {
-        let t = apply_and_get(|_cp| {});
+        let t = apply_and_get("kerning", |_cp| {});
         assert_eq!(t.kerning, "");
     }
 
     #[test]
     fn kerning_auto_empties() {
-        let t = apply_and_get(|cp| cp.kerning = "Auto".into());
+        let t = apply_and_get("kerning", |cp| cp.kerning = "Auto".into());
         assert_eq!(t.kerning, "");
     }
 
     #[test]
     fn kerning_zero_string_empties() {
-        let t = apply_and_get(|cp| cp.kerning = "0".into());
+        let t = apply_and_get("kerning", |cp| cp.kerning = "0".into());
         assert_eq!(t.kerning, "");
     }
 
     #[test]
     fn kerning_50_is_005em() {
-        let t = apply_and_get(|cp| cp.kerning = "50".into());
+        let t = apply_and_get("kerning", |cp| cp.kerning = "50".into());
         assert_eq!(t.kerning, "0.05em");
     }
 
     #[test]
     fn kerning_optical_passes_through() {
-        let t = apply_and_get(|cp| cp.kerning = "Optical".into());
+        let t = apply_and_get("kerning", |cp| cp.kerning = "Optical".into());
         assert_eq!(t.kerning, "Optical");
     }
 
     #[test]
     fn kerning_metrics_passes_through() {
-        let t = apply_and_get(|cp| cp.kerning = "Metrics".into());
+        let t = apply_and_get("kerning", |cp| cp.kerning = "Metrics".into());
         assert_eq!(t.kerning, "Metrics");
     }
 
     // ── baseline-shift ───────────────────────────────────────────
     #[test]
     fn baseline_shift_zero_empties() {
-        let t = apply_and_get(|_cp| {});
+        let t = apply_and_get("baseline_shift", |_cp| {});
         assert_eq!(t.baseline_shift, "");
     }
 
     #[test]
     fn baseline_shift_numeric_pt() {
-        let t = apply_and_get(|cp| cp.baseline_shift = 3.0);
+        let t = apply_and_get("baseline_shift", |cp| cp.baseline_shift = 3.0);
         assert_eq!(t.baseline_shift, "3pt");
     }
 
     #[test]
     fn baseline_shift_super_wins() {
-        let t = apply_and_get(|cp| { cp.superscript = true; cp.baseline_shift = 5.0; });
+        let t = apply_and_get("superscript", |cp| { cp.superscript = true; cp.baseline_shift = 5.0; });
         assert_eq!(t.baseline_shift, "super");
     }
 
     #[test]
     fn baseline_shift_sub() {
-        let t = apply_and_get(|cp| cp.subscript = true);
+        let t = apply_and_get("subscript", |cp| cp.subscript = true);
         assert_eq!(t.baseline_shift, "sub");
     }
 
     // ── character rotation ───────────────────────────────────────
     #[test]
     fn rotation_zero_empties() {
-        let t = apply_and_get(|_cp| {});
+        let t = apply_and_get("character_rotation", |_cp| {});
         assert_eq!(t.rotate, "");
     }
 
     #[test]
     fn rotation_15() {
-        let t = apply_and_get(|cp| cp.character_rotation = 15.0);
+        let t = apply_and_get("character_rotation", |cp| cp.character_rotation = 15.0);
         assert_eq!(t.rotate, "15");
     }
 
     // ── h/v scale ────────────────────────────────────────────────
     #[test]
     fn scale_identity_empties() {
-        let t = apply_and_get(|_cp| {});
+        // Each scale is its own group, so the identity has to be committed
+        // through its own field — one apply cannot clear both.
+        let t = apply_and_get("horizontal_scale", |_cp| {});
         assert_eq!(t.horizontal_scale, "");
+        let t = apply_and_get("vertical_scale", |_cp| {});
         assert_eq!(t.vertical_scale, "");
     }
 
     #[test]
     fn horizontal_scale_120() {
-        let t = apply_and_get(|cp| cp.horizontal_scale = 120.0);
+        let t = apply_and_get("horizontal_scale", |cp| cp.horizontal_scale = 120.0);
         assert_eq!(t.horizontal_scale, "120");
     }
 
     #[test]
     fn vertical_scale_120() {
-        let t = apply_and_get(|cp| cp.vertical_scale = 120.0);
+        let t = apply_and_get("vertical_scale", |cp| cp.vertical_scale = 120.0);
         assert_eq!(t.vertical_scale, "120");
     }
 
     // ── language / anti-aliasing ─────────────────────────────────
     #[test]
     fn language_fr() {
-        let t = apply_and_get(|cp| cp.language = "fr".into());
+        let t = apply_and_get("language", |cp| cp.language = "fr".into());
         assert_eq!(t.xml_lang, "fr");
     }
 
     #[test]
     fn anti_aliasing_sharp_empties() {
-        let t = apply_and_get(|cp| cp.anti_aliasing = "Sharp".into());
+        let t = apply_and_get("anti_aliasing", |cp| cp.anti_aliasing = "Sharp".into());
         assert_eq!(t.aa_mode, "");
     }
 
     #[test]
     fn anti_aliasing_crisp_passes_through() {
-        let t = apply_and_get(|cp| cp.anti_aliasing = "Crisp".into());
+        let t = apply_and_get("anti_aliasing", |cp| cp.anti_aliasing = "Crisp".into());
         assert_eq!(t.aa_mode, "Crisp");
     }
 
     // ── end-to-end: font_family write + no-op on empty selection ─
     #[test]
     fn font_family_written_to_selected_text() {
-        let t = apply_and_get(|cp| cp.font_family = "Arial".into());
+        let t = apply_and_get("font_family", |cp| cp.font_family = "Arial".into());
         assert_eq!(t.font_family, "Arial");
     }
 
@@ -4713,7 +5008,7 @@ mod character_panel_apply_tests {
         // undo step.
         let mut st = state_with_element(Element::Text(text12()), false);
         st.character_panel.font_family = "Arial".into();
-        st.apply_character_panel_to_selection();
+        st.apply_character_panel_to_selection("font_family");
         let t = get_text(&st);
         assert_eq!(t.font_family, "sans-serif", "empty selection must not write");
         assert!(!st.tabs[st.active_tab].model.can_undo(),
@@ -4730,7 +5025,7 @@ mod character_panel_apply_tests {
         );
         let mut st = state_with_element(Element::TextPath(tp), true);
         st.character_panel.underline = true;
-        st.apply_character_panel_to_selection();
+        st.apply_character_panel_to_selection("underline");
         match st.tab().unwrap().model.document().get_element(&vec![0usize, 0]).unwrap() {
             Element::TextPath(t) => assert_eq!(t.text_decoration, "underline"),
             other => panic!("expected TextPath, got {other:?}"),
@@ -4825,6 +5120,35 @@ mod character_panel_apply_tests {
         st.character_panel.leading = 14.4;
         st.character_panel_post_write("tracking");
         assert_eq!(st.character_panel.leading, 14.4);
+    }
+
+    // ── the leading-clear path equals an ABSENT leading ──────────
+    #[test]
+    fn clearing_leading_restores_auto_from_the_elements_own_size() {
+        // The nullable length_input clear sets panel.leading to the
+        // element's Auto value; the Leading group then recognises it as
+        // Auto and writes the empty attribute. Reading the ELEMENT's size
+        // (not the panel's) is what makes this port's cleared leading equal
+        // to the absent leading Swift and the reference can represent: the
+        // panel here sits at its stale 12pt default while the element is
+        // 30pt with an explicit 40pt line-height.
+        let mut t = text12();
+        t.font_size = 30.0;
+        t.line_height = "40pt".into();
+        let mut st = state_with_element(Element::Text(t), true);
+        assert_eq!(st.character_panel.font_size, 12.0, "panel size is stale");
+        st.character_panel.leading = st.character_auto_leading();
+        assert_eq!(st.character_panel.leading, 36.0, "= the ELEMENT's 30 x 1.2");
+        st.apply_character_panel_to_selection("leading");
+        assert_eq!(get_text(&st).line_height, "",
+                   "a cleared leading restores Auto, not the panel's 14.4pt");
+    }
+
+    #[test]
+    fn auto_leading_falls_back_to_the_panel_when_no_text_is_selected() {
+        let st = state_with_element(Element::Text(text12()), false);
+        assert_eq!(st.character_element_font_size(), None);
+        assert_eq!(st.character_auto_leading(), 12.0 * 1.2);
     }
 
     #[test]
