@@ -1330,7 +1330,14 @@ impl Default for CharacterPanelState {
             style_name: "Regular".into(),
             font_size: 12.0,
             leading: 14.4,
-            kerning: String::new(),
+            // "Auto" — the workspace-declared default, not an empty string.
+            // Both spell the same element attribute (`kerning_attr` maps ""
+            // and "Auto" to empty alike), which is why the drift survived
+            // unnoticed until `character_panel_defaults_match_the_workspace`
+            // compared the struct against the bundle; the DISPLAY told them
+            // apart, showing a blank Kerning combo with no selection where
+            // the other two ports showed "Auto".
+            kerning: "Auto".into(),
             tracking: 0.0,
             vertical_scale: 100.0,
             horizontal_scale: 100.0,
@@ -5225,7 +5232,18 @@ mod character_panel_apply_tests {
     // ── kerning ──────────────────────────────────────────────────
     #[test]
     fn kerning_default_empties() {
+        // The untouched default is "Auto" (the workspace's declared value,
+        // gated by `character_panel_defaults_match_the_workspace`), which
+        // `kerning_attr` maps to the empty attribute.
         let t = apply_and_get("kerning", |_cp| {});
+        assert_eq!(t.kerning, "");
+    }
+
+    #[test]
+    fn kerning_empty_string_empties() {
+        // The pre-gate default. Kept as a case because "" is still reachable
+        // from a cleared combo entry, and it must mean what "Auto" means.
+        let t = apply_and_get("kerning", |cp| cp.kerning = String::new());
         assert_eq!(t.kerning, "");
     }
 
@@ -5465,6 +5483,43 @@ mod character_panel_apply_tests {
         st.character_panel.leading = 14.4;
         st.character_panel_post_write("tracking");
         assert_eq!(st.character_panel.leading, 14.4);
+    }
+
+    #[test]
+    fn font_size_commit_then_deselect_shows_the_bumped_auto_leading() {
+        // THE CROSS-PORT PIN. Commit font_size 24 on an Auto-leading element
+        // in the sequence the renderer uses (set field -> post_write ->
+        // apply), then clear the selection: with nothing selected the panel
+        // has no element to pull from and the Leading FIELD reads stored
+        // state (dock_panel's no-selection branch), so both ports must hold
+        // 28.8. Paired with Swift's
+        // `fontSizeCommitThenDeselectShowsTheBumpedAutoLeading`.
+        //
+        // Spelled as `24.0 * 1.2` rather than 28.8 because both ports
+        // evaluate that product in IEEE double and land on the same bits; the
+        // pin is that they agree.
+        let mut st = state_with_element(Element::Text(text12()), true);
+        st.character_panel.font_size = 24.0;
+        st.character_panel.leading = 14.4;
+        st.character_panel_post_write("font_size");
+        st.apply_character_panel_to_selection("font_size");
+        // The apply is field-scoped, so Auto survives on the element itself.
+        let t = match st.tab().unwrap().model.document().get_element(&vec![0, 0]) {
+            Some(Element::Text(t)) => t.clone(),
+            _ => panic!("expected a Text at [0, 0]"),
+        };
+        assert_eq!(t.font_size, 24.0);
+        assert_eq!(t.line_height, "", "Auto is an ABSENT line-height");
+        // Now the selection clears — the display falls back to stored state.
+        // A selection-only write is not an undoable edit, so it goes through
+        // the unbracketed setter (see `Model::set_document`'s guard).
+        let mut doc = st.tab().unwrap().model.document().clone();
+        doc.selection.clear();
+        st.tabs[st.active_tab].model.set_document_unbracketed(
+            doc, crate::document::model::NonUndoableIntent::Selection);
+        assert!(!st.character_element_has_auto_leading(),
+                "no selection means no element to pull from");
+        assert_eq!(st.character_panel.leading, 24.0 * 1.2);
     }
 
     // ── the leading-clear path equals an ABSENT leading ──────────

@@ -4492,6 +4492,117 @@ mod tests {
         assert!(ran >= 40, "character_apply corpus ran only {} vectors", ran);
     }
 
+    // ── the panel defaults are the WORKSPACE's, machine-checked ─────
+    //
+    // The other two arms already gate this: the reference compares
+    // CHARACTER_PANEL_FIELDS against workspace.json
+    // (test_character_apply.py, TestTheFallbacksAreTheWorkspaceDefaults) and
+    // Swift compares characterPanelDefaults the same way
+    // (CharacterApplyCorpusTests, fallbacksMatchTheWorkspace). This port had
+    // no equivalent check on `CharacterPanelState::default()` — and it had
+    // already drifted: the struct's kerning default was `String::new()` where
+    // the workspace declares "Auto". That was harmless in the APPLY only
+    // because `kerning_attr` maps "" and "Auto" to the same empty attribute,
+    // i.e. precisely the silent drift the other arms' gates exist to catch —
+    // and it was visible in the DISPLAY, where a no-selection panel showed a
+    // blank Kerning combo against the other ports' "Auto".
+    //
+    // `leading` is the one field where this arm's expectation is the INVERSE
+    // of the other two. There the fallback table omits it deliberately —
+    // absence is the sentinel for "no committed leading, take the element's
+    // Auto value". This port's `leading` is a plain `f64` that cannot be
+    // absent, so it must carry the declared 14.4 like any other field, and
+    // the Auto value gets materialised instead (see
+    // `character_panel_post_write` / the nullable-clear path).
+
+    /// `CharacterPanelState::default()` as a field-name -> value map, so the
+    /// struct can be compared against the bundle key by key.
+    ///
+    /// Spelled out field by field on purpose: a field added to the struct
+    /// without a line here fails the key-set assertion below, which is half
+    /// of what the gate is for.
+    fn character_panel_default_map()
+        -> std::collections::BTreeMap<&'static str, serde_json::Value>
+    {
+        use serde_json::json;
+        let d = crate::workspace::app_state::CharacterPanelState::default();
+        let mut m = std::collections::BTreeMap::new();
+        m.insert("font_family", json!(d.font_family));
+        m.insert("style_name", json!(d.style_name));
+        m.insert("font_size", json!(d.font_size));
+        m.insert("leading", json!(d.leading));
+        m.insert("kerning", json!(d.kerning));
+        m.insert("tracking", json!(d.tracking));
+        m.insert("vertical_scale", json!(d.vertical_scale));
+        m.insert("horizontal_scale", json!(d.horizontal_scale));
+        m.insert("baseline_shift", json!(d.baseline_shift));
+        m.insert("character_rotation", json!(d.character_rotation));
+        m.insert("all_caps", json!(d.all_caps));
+        m.insert("small_caps", json!(d.small_caps));
+        m.insert("superscript", json!(d.superscript));
+        m.insert("subscript", json!(d.subscript));
+        m.insert("underline", json!(d.underline));
+        m.insert("strikethrough", json!(d.strikethrough));
+        m.insert("language", json!(d.language));
+        m.insert("anti_aliasing", json!(d.anti_aliasing));
+        m.insert("snap_to_glyph_visible", json!(d.snap_to_glyph_visible));
+        m.insert("snap_baseline", json!(d.snap_baseline));
+        m.insert("snap_x_height", json!(d.snap_x_height));
+        m.insert("snap_glyph_bounds", json!(d.snap_glyph_bounds));
+        m.insert("snap_proximity_guides", json!(d.snap_proximity_guides));
+        m.insert("snap_angular_guides", json!(d.snap_angular_guides));
+        m.insert("snap_anchor_point", json!(d.snap_anchor_point));
+        m
+    }
+
+    /// Two declared defaults are the same value even when the bundle boxed an
+    /// integral default as an integer (`12`) where the struct holds `12.0`.
+    /// Mirrors Swift's `sameWorkspaceValue`.
+    fn same_workspace_value(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+        match (a.as_f64(), b.as_f64()) {
+            (Some(x), Some(y)) if !a.is_boolean() && !b.is_boolean() => x == y,
+            _ => a == b,
+        }
+    }
+
+    #[test]
+    fn character_panel_defaults_match_the_workspace() {
+        let bundle = std::fs::read_to_string("../workspace/workspace.json")
+            .expect("read workspace.json bundle");
+        let ws: serde_json::Value = serde_json::from_str(&bundle)
+            .expect("workspace.json must parse");
+        let state = ws["panels"]["character_panel_content"]["state"]
+            .as_object()
+            .expect("character_panel_content must declare panel state");
+        let declared: std::collections::BTreeMap<String, serde_json::Value> =
+            state.iter().map(|(k, v)| {
+                let d = if v.is_object() {
+                    v.get("default").cloned().unwrap_or(serde_json::Value::Null)
+                } else {
+                    v.clone()
+                };
+                (k.clone(), d)
+            }).collect();
+        let ours = character_panel_default_map();
+
+        // Both directions: a workspace field the struct forgot, and a struct
+        // field the workspace never declared, are both drift.
+        let ours_keys: std::collections::BTreeSet<&str> =
+            ours.keys().copied().collect();
+        let ws_keys: std::collections::BTreeSet<&str> =
+            declared.keys().map(String::as_str).collect();
+        assert_eq!(ours_keys, ws_keys,
+                   "CharacterPanelState fields and the workspace-declared \
+                    character panel state must be the same set");
+
+        for (field, want) in &declared {
+            let got = &ours[field.as_str()];
+            assert!(same_workspace_value(got, want),
+                    "{}: CharacterPanelState::default() has {} but the \
+                     workspace declares {}", field, got, want);
+        }
+    }
+
     #[cfg(feature = "web")]
     #[test]
     fn state_defaults() {
