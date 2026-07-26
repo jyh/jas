@@ -124,17 +124,27 @@ directly comparable. Both modes are measured; the windowed run needed a
 scheduled task inside the logged-on desktop session, because a plain ssh run has
 no desktop and fails with `Invalid surface`.
 
-| elements | frame avg (ms) | frame p95 (ms) | encode avg (ms) | fps |
-|---------:|---------------:|---------------:|----------------:|----:|
-| 10,000   | 2.90   | 3.22   | 0.12  | 345.0 |
-| 50,000   | 7.52   | 7.93   | 0.81  | 133.0 |
-| 100,000  | 14.34  | 14.82  | 1.71  | **69.7** |
-| 250,000  | 46.09  | 46.94  | 4.00  | 21.7  |
-| 500,000  | 87.72  | 89.60  | 7.78  | 11.4  |
-| 800,000  | 139.56 | 142.68 | 12.71 | 7.2   |
+| elements | frame avg (ms) | frame p95 (ms) | encode avg (ms) | **cpu avg (ms)** | fps | **cpu fraction** |
+|---------:|---------------:|---------------:|----------------:|-----------------:|----:|-----------------:|
+| 10,000   | 2.93   | 3.30   | 0.13  | 1.48   | 341.8 | 0.50 |
+| 50,000   | 7.55   | 8.21   | 0.84  | 5.97   | 132.4 | 0.79 |
+| 100,000  | 14.28  | 14.72  | 1.65  | 11.14  | **70.0** | 0.78 |
+| 250,000  | 46.66  | 47.70  | 3.92  | 37.34  | 21.4  | 0.80 |
+| 500,000  | 88.26  | 90.32  | 7.79  | 70.58  | 11.3  | 0.80 |
+| 800,000  | 141.25 | 144.49 | 12.87 | 112.95 | 7.1   | 0.80 |
 
-File: `results/2026-07-26-rtx5060ti-dx12-offscreen.json`. Re-run three times;
-frame times reproduce within 0.3% (800k within 2%).
+File: `results/2026-07-26-rtx5060ti-dx12-offscreen.json`. Re-run four times; frame
+times reproduce within 0.3% (800k within 2%).
+
+`cpu avg` is encode **plus** `render_to_texture` — everything the CPU does before
+it hands off and waits — and `cpu fraction` is its share of the frame. Read the
+gap between the `encode` and `cpu` columns: at 800k the encode metric reports
+12.87 ms while the CPU actually spends 112.95 ms, so **`encode` alone
+under-reports CPU by 6.8–11.4× across the ladder.** Everything in that gap is
+inside Vello's resolve and buffer upload. And `cpu fraction` settling at
+**0.78–0.80** from 50k up is the rig measuring, by itself, the same quantity that
+external process-CPU sampling put at 0.82 and that the pipelining ceiling implies
+independently — see finding #3.
 
 ### Windowed — AutoNoVsync, GPU-pipelined (the real present path)
 
@@ -284,13 +294,19 @@ the performance lever, when we need one, is on the CPU side.
    incrementally update the scene instead of re-appending it every frame, and use
    the idle cores. GPU headroom is abundant on both platforms.
 
-   A caveat on the rig's own instrumentation, worth knowing before trusting the
-   `encode` column as "the CPU cost": it **under-reports CPU by roughly 8×**. At
-   800k, `enc_avg` is 12.7 ms but the process burns ~114 ms of CPU per 139.6 ms
-   frame, so ~100 ms of CPU is inside `render_to_texture` — Vello's resolve and
-   buffer upload — which the rig never separately times. `enc_avg` is only the
-   `Scene::append` slice. Splitting `render_to_texture` into resolve-vs-submit is
-   the obvious next instrument.
+   **The rig now measures this itself.** Originally only `encode` (the
+   `Scene::append` slice) was timed, and it **under-reports CPU by 6.8–11.4×** —
+   at 800k it reads 12.87 ms against 112.95 ms actually spent. So a `cpu_ms` span
+   (encode + `render_to_texture`, stopping before any wait) and a derived
+   `cpu_fraction` were added, identical in both modes. kenai self-reports
+   `cpu_fraction` **0.78–0.80** from 50k up, converging with the external 0.82
+   from two other directions. Anyone reading these numbers should use the `cpu`
+   column, not `encode`, as "the CPU cost".
+
+   *Not yet measured cleanly:* the Mac's `cpu_fraction`. A spot check read ~0.50,
+   consistent with its ~2× pipelining gain, but it was taken while the machine was
+   compiling two worktrees, so it is contaminated and is deliberately not tabled.
+   The Mac tables above predate the metric and need one quiet re-run.
 
 ---
 

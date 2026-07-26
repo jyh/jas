@@ -181,13 +181,16 @@ pub fn run_offscreen(cfg: &SweepConfig) -> Vec<PointResult> {
             renderer
                 .render_to_texture(&device, &queue, &outer, &view, &render_params(w, h))
                 .expect("render_to_texture failed");
+            // Everything up to here is CPU: encode, then Vello's resolve + upload +
+            // submit. What follows is purely waiting on the GPU.
+            let cpu_ms = fstart.elapsed().as_secs_f64() * 1000.0;
             device
                 .poll(wgpu::PollType::wait_indefinitely())
                 .expect("device poll failed");
             let frame_ms = fstart.elapsed().as_secs_f64() * 1000.0;
 
             if point_elapsed >= cfg.warmup {
-                accum.push(encode_ms, frame_ms);
+                accum.push(encode_ms, cpu_ms, frame_ms);
             }
         }
         let r = accum.finish();
@@ -398,6 +401,11 @@ impl WindowApp {
         renderer
             .render_to_texture(device, queue, &self.outer, target_view, &render_params(w, h))
             .expect("render_to_texture");
+        // The same span as offscreen measures, deliberately: encode + Vello's
+        // resolve/upload/submit. It stops BEFORE `get_current_texture`, which can
+        // block on the swapchain — that is a wait, not CPU work, and charging it
+        // here would make the two modes incomparable.
+        let cpu_ms = fstart.elapsed().as_secs_f64() * 1000.0;
 
         match surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(st)
@@ -423,7 +431,7 @@ impl WindowApp {
         if let Some(prev) = self.last_frame {
             let frame_ms = (now - prev).as_secs_f64() * 1000.0;
             if point_elapsed >= self.cfg.warmup {
-                self.accum.push(encode_ms, frame_ms);
+                self.accum.push(encode_ms, cpu_ms, frame_ms);
             }
         }
         self.last_frame = Some(now);
@@ -447,15 +455,22 @@ pub fn run_windowed(cfg: &SweepConfig) -> (Vec<PointResult>, u32, u32) {
 
 fn print_row(r: &PointResult) {
     println!(
-        "{:>9}  {:>7}  {:>10.2}  {:>10.2}  {:>10.2}  {:>10.2}  {:>8.1}",
-        r.elements, r.frames, r.avg_encode_ms, r.p95_encode_ms, r.avg_frame_ms, r.p95_frame_ms, r.fps
+        "{:>9}  {:>7}  {:>9.2}  {:>9.2}  {:>10.2}  {:>10.2}  {:>8.1}  {:>7.2}",
+        r.elements,
+        r.frames,
+        r.avg_encode_ms,
+        r.avg_cpu_ms,
+        r.avg_frame_ms,
+        r.p95_frame_ms,
+        r.fps,
+        r.cpu_fraction
     );
 }
 
 pub fn print_header() {
     println!(
-        "{:>9}  {:>7}  {:>10}  {:>10}  {:>10}  {:>10}  {:>8}",
-        "elements", "frames", "enc_avg", "enc_p95", "frame_avg", "frame_p95", "fps"
+        "{:>9}  {:>7}  {:>9}  {:>9}  {:>10}  {:>10}  {:>8}  {:>7}",
+        "elements", "frames", "enc_avg", "cpu_avg", "frame_avg", "frame_p95", "fps", "cpu_fr"
     );
-    println!("{}", "-".repeat(78));
+    println!("{}", "-".repeat(88));
 }
