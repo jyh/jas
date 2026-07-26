@@ -7357,7 +7357,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "disabled"
+        ],
         "style": [
           "size"
         ]
@@ -8291,7 +8293,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "disabled"
+        ],
         "style": [
           "size"
         ]
