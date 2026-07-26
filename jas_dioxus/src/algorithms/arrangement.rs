@@ -2,10 +2,6 @@
 //! the epsilon policy that [`crate::algorithms::planar`] and
 //! [`crate::algorithms::boolean_normalize`] both build on.
 //!
-// Module-wide allow: this is a support module for two algorithms that
-// are themselves tested but not yet wired into the document model.
-#![allow(dead_code)]
-//!
 //! # Why one module
 //!
 //! Both the planar-graph extractor and the ring normalizer need the
