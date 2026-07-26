@@ -104,8 +104,12 @@ Files: `results/2026-07-23-m-series-metal.json` (windowed),
 
 - **Pipelining ≈ 2× at scale.** Windowed (pipelined) roughly doubles offscreen
   (serialized) throughput past 250k (250k: 56.7 vs 32.0 fps; 500k: 30.4 vs 17.8),
-  because the CPU `append` overlaps GPU work and there is no `poll(Wait)`
-  barrier. Offscreen is therefore a conservative *floor*.
+  because the CPU work overlaps GPU work and there is no `poll(Wait)` barrier.
+  Offscreen is therefore a conservative *floor*. Finding #3 explains the size of
+  that gain in hindsight: the achievable speedup is `(cpu+gpu)/max(cpu,gpu)`, so a
+  2× gain means the Mac's frame is close to an even CPU/GPU split — which a later
+  spot check confirmed (`cpu_fraction` ≈ 0.50, though on a busy machine). The same
+  arithmetic predicts kenai's much smaller 1.2×, because kenai's frame is ~80% CPU.
 - **Windowed fast-end is noisy.** At ≤100k the windowed distribution is bimodal
   (`frame_avg` ~7–10 ms but `frame_p95` ~17 ms, the ~60 Hz compositor beat);
   macOS partially throttles even under `AutoNoVsync`, so windowed fps below 100k
