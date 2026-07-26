@@ -568,31 +568,37 @@ func allRingsSimple(_ ps: BoolPolygonSet) -> Bool {
     ps.allSatisfy { isRingSimple($0) }
 }
 
+/// Check that a ring is simple: no two of its edges meet except where
+/// consecutive edges share their one common vertex.
+///
+/// Deliberately the full arrangement predicate rather than a
+/// proper-crossing test. A proper-crossing test reports true for a ring
+/// carrying a T-junction (a vertex sitting in another edge's interior) or
+/// a collinear self-overlap (an edge doubling back along itself), because
+/// neither is a strict interior crossing — so the corpus's
+/// all_rings_simple flag used to stay green on exactly the degeneracies
+/// the normalizer exists to remove. Mirrors `is_ring_simple` in
+/// jas_dioxus/src/bin/algorithm_roundtrip.rs.
 func isRingSimple(_ ring: BoolRing) -> Bool {
     let n = ring.count
     guard n >= 3 else { return true }
     for i in 0..<n {
-        let (ax1, ay1) = ring[i]
-        let (ax2, ay2) = ring[(i + 1) % n]
-        if i + 2 >= n { continue }
-        for j in (i + 2)..<n {
-            if i == 0 && j == n - 1 { continue }
-            let (bx1, by1) = ring[j]
-            let (bx2, by2) = ring[(j + 1) % n]
-            if properCrossing(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2) { return false }
+        for j in (i + 1)..<n {
+            let adjacent = j == i + 1 || (i == 0 && j == n - 1)
+            let pts = arrangementSplitPoints(
+                ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])
+            if adjacent {
+                // Consecutive edges legitimately meet at exactly their
+                // shared vertex, and nowhere else.
+                if pts.count != 1 { return false }
+            } else if !pts.isEmpty {
+                return false
+            }
         }
     }
     return true
 }
 
-func properCrossing(_ ax1: Double, _ ay1: Double, _ ax2: Double, _ ay2: Double,
-                    _ bx1: Double, _ by1: Double, _ bx2: Double, _ by2: Double) -> Bool {
-    let d1 = crossProduct(bx2 - bx1, by2 - by1, ax1 - bx1, ay1 - by1)
-    let d2 = crossProduct(bx2 - bx1, by2 - by1, ax2 - bx1, ay2 - by1)
-    let d3 = crossProduct(ax2 - ax1, ay2 - ay1, bx1 - ax1, by1 - ay1)
-    let d4 = crossProduct(ax2 - ax1, ay2 - ay1, bx2 - ax1, by2 - ay1)
-    return d1 * d2 < 0 && d3 * d4 < 0
-}
 
 func crossProduct(_ ux: Double, _ uy: Double, _ vx: Double, _ vy: Double) -> Double {
     ux * vy - uy * vx

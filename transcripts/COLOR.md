@@ -216,6 +216,28 @@ is `none`:
 When no document is open, the panel is fully disabled (all controls
 greyed).
 
+Every one of those disabled / enabled states is a `state.fill_color ==
+null` (or `state.stroke_color == null`) test, so an app's panel-render
+`state` scope must be able to SAY null. Publishing a colour or omitting
+the key is not enough: the scope starts from the `workspace/state.yaml`
+defaults, where `fill_color` is `#ffffff`, so an omitted key leaves white
+standing and the comparison can never be true. The three outcomes are
+distinct and all three must be expressible — a colour, an explicit null
+for "none", and *absent* for a MIXED selection, where absent correctly
+means "leave the caller's value alone" and the controls stay live because
+a colour edit applies to the whole selection. Both active ports got this
+wrong once (CPTRIAGE); it is now pinned cross-language by the
+`fill_stroke_none` action-corpus case's `expected_panel_state` block, and
+the per-widget triage record is in COLOR_TESTS.md.
+
+What is pinned is the SCOPE, not yet the swatch. With the scope agreed the
+two active ports still DRAW a none differently: Rust marks the fill /
+stroke swatch with the red-diagonal no-paint indicator, deciding
+none-from-empty-slot by the bind's own declaration, while Swift's swatch
+renders an explicit none as a plain transparent square — indistinguishable
+from an empty recent-colour slot. That half is unfixed and banked by name
+in COLOR_TESTS.md.
+
 ## Color bar
 
 `COLOR_BAR` is a 64 px tall 2-D gradient rendered at the bottom of the

@@ -75,6 +75,28 @@ ALT, CTRL, META, SHIFT = 1, 2, 4, 8
 # as editing commands inside a focused <input>.
 VK = {"Enter": 13, "Backspace": 8, "Tab": 9, "Escape": 27, "Delete": 46}
 
+# THE KEYS THAT STORM. Enter and Escape carry a legacy control character as
+# their text ("\r", "\x1b"). Dispatched through `Input.dispatchKeyEvent` with a
+# virtual key code but WITHOUT that text, Chrome (150.0.7871) never completes
+# the key and re-queues it forever: ONE dispatched Enter became 8757 further
+# trusted `key="Unidentified"` keydowns, and one Escape 10589 — enough to
+# saturate the renderer and make a perfectly healthy app miss its heartbeat.
+#
+# It is the DRIVER's artifact, not the app's: measured at 11543 keydowns on a
+# blank `data:text/html,<input>` page with no app loaded at all (and with the
+# text supplied, 1 keydown wherever something CONSUMES or PREVENTS the key —
+# an <input>, a <button>, or a handler that calls preventDefault. On a bare
+# focusable div with no consumer, Chrome still re-queues (13k+ trusted
+# key='Unidentified' measured), so the text is NECESSARY, not sufficient; no
+# path this harness drives is such a surface). Backspace,
+# Tab and Delete do not storm — only these two.
+#
+# That storm is what two WEDGESTORM diagnosis attempts mistook for an app
+# livelock. Supplying the text is the whole fix: the key arrives once, and its
+# keypress reaches the browser's default action, which is what makes Enter
+# COMMIT a focused field (an input's `change` event).
+KEY_TEXT = {"Enter": "\r", "Escape": "\x1b"}
+
 
 class ProbeFailure(AssertionError):
     """A visual/DOM fact did not hold. Carries the numbers that disproved it."""
@@ -266,7 +288,14 @@ class GuiProbe:
                         if (t.get("type") == "page"
                                 and t.get("url", "").startswith(self.serve_url)):
                             return Cdp(t["webSocketDebuggerUrl"])
-            except OSError:
+            # A Chrome that is still coming up answers /json with an empty or
+            # truncated body as readily as it refuses the connection, and
+            # `json.load` raises ValueError for that, not OSError. Both are the
+            # same "not ready yet" and both must be RETRIED: the liveness sweep
+            # launches one instance per widget, and an unretried decode error
+            # there surfaced as a bare `JSONDecodeError` scored as a check
+            # FAILURE — a launch race wearing a defect's clothes.
+            except (OSError, ValueError):
                 pass
             time.sleep(0.4)
         raise ProbeFailure(f"could not attach to {self.serve_url} over CDP "
@@ -310,6 +339,11 @@ class GuiProbe:
         risky step turns "mystery hang" into a named result, and returns the
         round-trip latency so a check can also assert the app is not merely
         *crawling*.
+
+        It says the main thread stopped, and NOT whose fault that is: an input
+        this driver dispatched can saturate the renderer all by itself (see
+        `KEY_TEXT`, which cost two diagnosis waves). Treat a red here as "the
+        page stopped answering", and pin the cause before naming the app.
         """
         start = time.time()
         try:
@@ -318,8 +352,11 @@ class GuiProbe:
         except Exception as e:
             raise ProbeFailure(
                 f"{what} stopped answering within {timeout}s "
-                f"({type(e).__name__}) — the main thread is wedged (livelock or "
-                f"panic), not merely slow") from None
+                f"({type(e).__name__}): the page stopped answering. This does "
+                f"NOT name a cause — an input THIS DRIVER dispatched can "
+                f"saturate the renderer by itself (see KEY_TEXT, which cost "
+                f"two diagnosis waves), so rule the driver out before calling "
+                f"it an app livelock or panic") from None
         finally:
             try:
                 self.cdp.set_timeout(30.0)
@@ -443,8 +480,15 @@ class GuiProbe:
 
     def key(self, key: str, code: str | None = None, *, mods: int = 0,
             text: str | None = None):
+        """Press and release one key, the way a keyboard delivers it.
+
+        Enter and Escape default to their control-character `text` (see
+        `KEY_TEXT`): without it Chrome re-queues them forever, and that storm —
+        not the app — is what made the driver see wedges.
+        """
         code = code or (f"Key{key.upper()}" if key.isalpha() and len(key) == 1
                         else key)
+        text = text if text is not None else KEY_TEXT.get(key)
         p = dict(key=key, code=code, modifiers=mods)
         if text:
             p.update(text=text, unmodifiedText=text.lower())
@@ -469,6 +513,13 @@ class GuiProbe:
         Backspace: the app claims both as Select-All / Delete at the document
         level, so those never reach the field (verified — they append instead
         of replacing, yielding values like "1 pt5").
+
+        The Enter really does commit (it did not before `KEY_TEXT`: a textless
+        Enter produced no keypress, so no `change` event, and the value sat raw
+        in the DOM until some later click blurred the field). The returned
+        value is therefore the app's — a length input reads back normalized,
+        `"5 pt"` for an entered `"5"`, which is only possible if the write went
+        through app state and re-rendered.
         """
         self.click(target, clicks=3)
         self.type_text(text)
@@ -477,8 +528,16 @@ class GuiProbe:
         return self.value(target)
 
     def focus_app(self):
-        """Give the root keyboard div focus so keys reach its onkeydown."""
-        self.cdp.evaluate("document.querySelector('div[tabindex]').focus()")
+        """Give the root keyboard div focus so keys reach its onkeydown.
+
+        Prefers the wrapper's own id (`keyboard::APP_ROOT_ID`) over "the first
+        div with a tabindex", which was only ever true by layout accident; the
+        selector remains as a fallback so the probe still drives a build that
+        predates the id.
+        """
+        self.cdp.evaluate(
+            "(document.getElementById('jas-app-root')"
+            "||document.querySelector('div[tabindex]')).focus()")
 
     # --- canvas -----------------------------------------------------------
 

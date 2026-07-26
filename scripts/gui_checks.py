@@ -25,6 +25,13 @@ EACH CHECK IS A DEFECT CLASS, NOT A WIDGET
                            widget live in the DOM must move something
   arrowhead_reflects_scale a head's rendered size must match the panel's
                            Scale field                (JYH's half-size head)
+  brush_promotes_line      applying a brush to a Line must thicken its ink
+                                                    (Line→Path promotion)
+  canvas_transform_balance a brushed repaint must leave the canvas transform
+                           where it found it       (the receding artboard)
+  button_enter_activates   a focused native button must still activate on
+                           Enter — the app may not claim a key's default
+                           action out from under the element that owns it
 
 FAULT INJECTION (`--regress MODE`)
 ----------------------------------
@@ -48,17 +55,34 @@ is a usage error (exit 2), never a fake red.
                                                 the SAME pristine probe that
                                                 clicks it, so the sweep must
                                                 report that widget DEAD
-  width_reset          stroke_width_invariance  a second Stroke-panel weight
-                                                commit while selected — on this
-                                                build a livelock (see
-                                                GUI_EYES.md §Findings)
+  dead_brush_tile      brush_promotes_line      strip `data-dioxus-id` from
+                                                every brush tile, so the click
+                                                applies no brush and the Line
+                                                is never promoted
+  width_reset          stroke_width_invariance  commit 1pt through the panel's
+                                                own production path during the
+                                                unrelated edit: it injects the
+                                                OBSERVABLE the escape produced,
+                                                not the escape's cause — caught
+                                                by the INVARIANCE assertion
   thin_stroke          stroke_width_invariance  draw the probe stroke at 1pt
-                                                when the check asked for 5pt
+                                                when the check asked for 5pt —
+                                                the same check's ABSOLUTE
+                                                assertion
   arrow_scale_lie      arrowhead_reflects_scale overwrite the end-scale field's
                                                 DOM value to 200 while the head
                                                 stays at its true 100% — the
                                                 panel then claims a scale the
                                                 canvas never rendered
+  leaked_ctx_save      canvas_transform_balance push one un-restored save() +
+                                                transform onto the live canvas
+                                                context, the class the brushed
+                                                early `return` used to leak
+  enter_default_stolen button_enter_activates   prevent Enter's default from a
+                                                capturing document listener,
+                                                regardless of what has focus —
+                                                the over-broad suppression that
+                                                killed native button activation
 
 SCORING (`--regress`). The verdict is INVERTED, but not blindly — a red for
 the wrong reason proves nothing:
@@ -111,8 +135,11 @@ class Ctx:
         # A factory for ADDITIONAL pristine app instances. The liveness sweep
         # needs one per widget: clicking widgets serially in a single instance
         # accumulates document/panel state, and that accumulation — not any one
-        # widget — is what produced a 200-record mutation storm and then a
-        # wedge during development. Isolation makes every verdict attributable.
+        # widget — is what produced a 200-record mutation storm during
+        # development (an unresponsive instance followed; that part was never
+        # root-caused, and this driver has since been caught manufacturing
+        # unresponsiveness of its own — see gui_probe.KEY_TEXT). The mutation
+        # storm alone earns the isolation: it makes every verdict attributable.
         self.new_probe = new_probe
         self.opts = opts or {}
         self.notes: list[str] = []
@@ -212,12 +239,23 @@ def _fault_dead_sweep(p: GuiProbe):
 def _fault_width_reset(p: GuiProbe):
     """Reproduce the 5pt → 1pt reset as a side effect of an unrelated edit.
 
-    NOTE (finding, 2026-07-24): on this build the injected user action — a
-    SECOND Stroke-panel weight commit made while an object is selected — does
-    not merely change the width, it WEDGES the app (see
-    GUI_EYES.md §Findings). The check still goes red, via `heartbeat`, whose
-    message ("the main thread is wedged") is the mode's marker. Use
-    `thin_stroke` for a wedge-free teeth demonstration of the same measurement.
+    We cannot make a healthy build reset the width by itself, so we inject the
+    OBSERVABLE the escape produced — the rendered stroke is 1pt after an edit
+    that had nothing to do with the weight — by committing 1pt through the
+    panel's own production path at that exact moment. The check must then go
+    red at its INVARIANCE assertion, the one that names the defect class.
+
+    This is the mode that gives that assertion teeth: `thin_stroke` trips the
+    check's ABSOLUTE assertion (a 5pt stroke measures thick) before the
+    unrelated edit is ever made, so the two are complementary, not redundant.
+
+    HISTORY (2026-07-25): this fault used to carry the marker "the main thread
+    is wedged", because the injected commit really did stop the app answering.
+    That wedge was the DRIVER's: `set_field`'s Enter was dispatched without its
+    control-character text, and Chrome then re-queued it into thousands of
+    trusted keydowns (gui_probe.KEY_TEXT — reproduced on a blank page with no
+    app loaded). With that fixed the app rides the injection with a flat
+    heartbeat, and the fault reds where it always should have.
     """
     p.set_field("stk_weight", "1")
 
@@ -225,8 +263,9 @@ def _fault_width_reset(p: GuiProbe):
 def _fault_thin_stroke(p: GuiProbe):
     """No browser-side mutation: `draw_probe_line` draws the stroke at 1pt when
     this mode is armed, so the 5pt-thickness assertion fails at 2.0px vs the
-    4.0px floor — the wedge-free proof the canvas measurement tells fat from
-    thin, exactly the observation JYH made by eye."""
+    4.0px floor — the proof the canvas measurement tells fat from thin, exactly
+    the observation JYH made by eye. Trips the check's ABSOLUTE assertion;
+    `width_reset` trips its INVARIANCE assertion."""
 
 
 def _fault_arrow_scale_lie(p: GuiProbe):
@@ -271,7 +310,7 @@ FAULTS = {
     "dead_sweep": Fault(_fault_dead_sweep, "behavior_liveness",
                         DEAD_SWEEP_TARGET),
     "width_reset": Fault(_fault_width_reset, "stroke_width_invariance",
-                         "the main thread is wedged"),
+                         "stroke thickness is INVARIANT"),
     "thin_stroke": Fault(_fault_thin_stroke, "stroke_width_invariance",
                          "5pt stroke renders thick"),
     "arrow_scale_lie": Fault(_fault_arrow_scale_lie, "arrowhead_reflects_scale",
@@ -284,6 +323,13 @@ FAULTS = {
     "leaked_ctx_save": Fault(lambda p: _fault_leaked_ctx_save(p),
                              "canvas_transform_balance",
                              "the canvas transform is balanced"),
+    # KEYCLEAN: owns button_enter_activates. Re-injects the over-broad
+    # Enter suppression — a root handler claiming the key's default action
+    # while a <button> has focus — so the dialog's OK button goes dead and
+    # the check reds with its own marker.
+    "enter_default_stolen": Fault(lambda p: _fault_enter_default_stolen(p),
+                                  "button_enter_activates",
+                                  "ACTIVATED on Enter"),
 }
 
 
@@ -891,6 +937,138 @@ def canvas_transform_balance(ctx: Ctx):
              "the canvas transform is balanced after a brushed render + "
              "repaints (an unbalanced save/restore would compound here — "
              "the receding-artboard cascade)")
+
+
+# ---------------------------------------------------------------------------
+# KEYCLEAN (2026-07-25): a focused native button keeps its Enter activation
+# ---------------------------------------------------------------------------
+
+def _fault_enter_default_stolen(p: GuiProbe):
+    """Re-inject the over-broad Enter suppression this check exists to forbid.
+
+    KEYCLEAN's first cut called preventDefault for Enter/Escape from the root
+    keydown handler whenever a TEXT FIELD did not hold focus — and a focused
+    <button> is not a text field, so Enter's NATIVE activation died with it
+    (measured: Document Setup's OK button reported defaultPrevented=true and
+    fired no click, and the dialog stayed open). A capturing document-level
+    keydown listener that prevents Enter regardless of what holds focus is that
+    same claim at the same layer — Dioxus delegates the app's keydown from the
+    document root — so the check must go red on it.
+    """
+    p.cdp.evaluate(
+        "(()=>{document.addEventListener('keydown',e=>{"
+        "if(e.key==='Enter')e.preventDefault();},true);return true;})()")
+
+
+@check("button_enter_activates",
+       "a focused native button still activates on Enter (its default action "
+       "is left to it)")
+def button_enter_activates(ctx: Ctx):
+    """KEYCLEAN (2026-07-25): the app may claim a key's DEFAULT ACTION only
+    where the focused element has no default action of its own.
+
+    Enter on a focused <button> is a browser-native activation — it is how the
+    keyboard clicks a dialog's OK, a dialog's close X, the pane Restore button. A
+    root keydown handler that calls preventDefault for Enter on the strength of
+    "no text field is focused" takes that away from every button in the app
+    subtree, and the only visible symptom is the one a user reports: the dialog
+    will not close from the keyboard.
+
+    Asserts the END-TO-END user-visible fact (the dialog commits and closes),
+    not the mechanism, so it catches the loss whichever layer causes it — a
+    root suppression, a swallowed keypress, a handler that stops propagation.
+    The `defaultPrevented` reading below is evidence, asserted after the
+    behavior so a red always names the behavior first.
+
+    Coverage note: focus is placed with `el.focus()` rather than by walking Tab
+    into the modal. Tab order inside a freshly opened dialog is its own
+    question (and its own check, if it earns one); what this check pins is what
+    happens to Enter ONCE a native button holds focus.
+    """
+    p = ctx.p
+
+    # File ▸ Document Setup — a modal with a real <button> footer. Menu titles
+    # and items render as TEXT (the menu bar emits no per-item DOM id), so both
+    # are text-addressed; the mnemonic markers are stripped by the renderer, so
+    # "Document Set&up..." reads as "Document Setup...".
+    _click_by_text(p, "css:.jas-menu-title", "File")
+    time.sleep(0.3)
+    ctx.want(_click_by_text(p, "css:.jas-menu-item", "Document Setup"),
+             "File ▸ Document Setup is present in the File menu")
+    time.sleep(0.4)
+    # The dialog's own fields carry spec ids; the footer buttons do not, so the
+    # dialog's OPEN/CLOSED state is read from a field and OK is found by text.
+    ctx.want(p.exists("ds_bleed_top"),
+             "the Document Setup dialog is open (its Bleed Top field is live)")
+
+    focused = p.cdp.evaluate(
+        "(()=>{const b=[...document.querySelectorAll('button')]"
+        ".find(e=>(e.textContent||'').trim()==='OK');if(!b)return null;"
+        "b.focus();const a=document.activeElement;"
+        "return [a.tagName,(a.textContent||'').trim(),a.id||''];})()")
+    ctx.want(focused is not None, "the dialog renders an OK <button>")
+    ctx.note(f"focused element: <{focused[0]}> text={focused[1]!r} "
+             f"id={focused[2]!r}")
+    ctx.want(focused[0] == "BUTTON" and focused[1] == "OK",
+             "the dialog's OK <button> holds DOM focus")
+
+    # Evidence instrument: a passive bubble-phase listener, so it reads
+    # defaultPrevented AFTER the app's own handler has had the event. It also
+    # counts the keydowns, which pins the KEY_TEXT storm class (a textless
+    # Enter re-queued thousands of trusted keydowns) at the same time.
+    p.cdp.evaluate(
+        "(()=>{window.__jasEnter={n:0,prevented:null,trusted:null};"
+        "document.addEventListener('keydown',e=>{if(e.key!=='Enter')return;"
+        "window.__jasEnter.n++;if(window.__jasEnter.prevented===null){"
+        "window.__jasEnter.prevented=e.defaultPrevented;"
+        "window.__jasEnter.trusted=e.isTrusted;}});return true;})()")
+
+    ctx.inject("enter_default_stolen")
+    p.key("Enter")                      # trusted, and carrying its "\r" text
+    time.sleep(0.5)
+    ev = p.cdp.evaluate("window.__jasEnter") or {}
+    ctx.note(f"Enter: {ev.get('n')} keydown(s) trusted={ev.get('trusted')} "
+             f"defaultPrevented={ev.get('prevented')}")
+    still_open = p.exists("ds_bleed_top")
+    ctx.note(f"dialog after Enter: {'STILL OPEN' if still_open else 'closed'}")
+    ctx.shot("button_enter_activates")
+
+    ctx.want(ev.get("n") == 1 and ev.get("trusted") is True,
+             f"exactly one TRUSTED Enter reached the page "
+             f"({ev.get('n')} keydown(s) seen; thousands would mean the "
+             f"KEY_TEXT re-queue storm would show here as key='Unidentified' — this\n"
+             f"             counter watches key=='Enter' only, so it bounds THIS key, not\n"
+             f"             that class; the activation assertion is what reds on a storm)")
+    ctx.want(not still_open,
+             "the focused OK button ACTIVATED on Enter — the dialog committed "
+             "and closed; a handler that claims Enter's default action while a "
+             "<button> has focus kills native activation and the dialog stays "
+             "open with no click ever firing")
+    ctx.want(ev.get("prevented") is False,
+             f"Enter's default action was left to the element that owns it "
+             f"(defaultPrevented={ev.get('prevented')})")
+
+    # The OTHER half of the same law, so this check also pins the suppression
+    # itself rather than only its limit: on the app's OWN surface — the root
+    # wrapper, where focus lands from a canvas click — nothing else owns Enter,
+    # and the app does claim it. Asserted last so a red always reports the
+    # user-visible loss (above) before the mechanism.
+    p.focus_app()
+    surface = p.cdp.evaluate(
+        "(()=>{window.__jasEnter={n:0,prevented:null,trusted:null};"
+        "const a=document.activeElement;return [a.tagName,a.id||''];})()")
+    ctx.note(f"app surface focused: <{surface[0]}> id={surface[1]!r}")
+    ctx.want(surface[1] == "jas-app-root",
+             "the root keyboard wrapper holds focus (its id is the surface "
+             "the app matches on)")
+    p.key("Enter")
+    time.sleep(0.3)
+    ev2 = p.cdp.evaluate("window.__jasEnter") or {}
+    ctx.note(f"Enter on the app surface: defaultPrevented={ev2.get('prevented')}")
+    ctx.want(ev2.get("prevented") is True,
+             "with the app's own surface focused the app DOES claim Enter's "
+             "default (nothing else owns it there) — the suppression is gated, "
+             "not removed")
 
 
 # ---------------------------------------------------------------------------

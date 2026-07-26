@@ -1605,10 +1605,24 @@ public class Controller {
     /// `rotate`, `horizontal_scale`, `vertical_scale`, `kerning`.
     /// Unknown keys are silently ignored.
     public func setSelectionTextAttributes(_ attrs: [String: Any]) {
+        setSelectionTextAttributes(perElement: { _ in attrs })
+    }
+
+    /// Apply a PER-ELEMENT character-attribute dict to every selected Text /
+    /// TextPath. `build` receives each element, so a field-scoped
+    /// Character-panel apply can derive its values from THAT element — the
+    /// Leading group's Auto test reads the element's own font size, which one
+    /// shared dict cannot express across a mixed selection. Keys the dict
+    /// omits are left untouched on the element.
+    public func setSelectionTextAttributes(
+        perElement build: (Element) -> [String: Any]
+    ) {
         var doc = model.document
         if doc.selection.isEmpty { return }
+        var changed = false
         for es in doc.selection {
             let elem = doc.getElement(es.path)
+            let attrs = build(elem)
             let newElem: Element
             switch elem {
             case .text(let t):
@@ -1619,8 +1633,12 @@ public class Controller {
                 continue
             }
             doc = doc.replaceElement(es.path, with: newElem)
+            changed = true
         }
-        model.editDocument(doc)
+        // Nothing in the selection was text, so there is no edit — and an
+        // edit that changes nothing must not become an undo step. Matches
+        // the Rust apply's `if changed` guard.
+        if changed { model.editDocument(doc) }
     }
 
     /// Apply a character-attribute dict onto a single `Text`, returning

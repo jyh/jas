@@ -211,6 +211,42 @@ Element-type handling for operands:
 - **Compound shapes**: evaluate the live tree to a polygon set and use that as the operand. Destructive operations on compound shapes discard their trees.
 - **Rasters, images, symbols, and other non-geometric elements**: skipped silently; a status-bar message reports how many elements were skipped.
 
+### Fill rule: an open ruling
+
+**Status: needs a council ruling.** This subsection states a contradiction found in the implementation, records what was implemented in the meantime and why, and names the alternative. It is not a settled specification.
+
+The specification above says operands and results are "polygon sets (rings of points)" without ever saying which fill rule reads those rings. Two parts of the implementation filled that silence differently:
+
+- `algorithms/boolean` defines a `PolygonSet` as a flat list of rings under the **even-odd** rule, with ring orientation explicitly outside the contract. Under even-odd a ring nested in another is a hole regardless of which way either is wound, and two overlapping rings are their symmetric difference.
+- `algorithms/boolean_normalize` — the pre-pass that turns self-intersecting user input into simple rings — documented itself as working under the **non-zero winding** rule, which is what a single self-intersecting subpath means (and what SVG `fill-rule="nonzero"` means). Under non-zero, a nested co-oriented ring is *solid*, and two overlapping co-oriented rings are their *union*.
+
+The two rules disagree on exactly the cases one would call inter-ring winding cancellation, so a set-wide reading had to be chosen. **What is implemented today:** non-zero **within** a single ring, even-odd **between** rings. The normalizer resolves each ring's self-intersections against itself alone and passes inter-ring relations through untouched, leaving nesting and overlap to the boolean sweep, which is the component whose contract already covers them.
+
+**Evidence for that choice, measured.** Making the normalizer read a whole polygon set as one non-zero-wound region deletes the inner ring of every donut, because a hole drawn the natural way — two co-oriented rings — has winding 2 in the middle and reads as solid. Forcing that reading turns 7 unit tests red: three in `algorithms::boolean` (`intersect_with_holed_polygon_preserves_hole`, `exclude_involution_square_with_inside`, `exclude_associative_three_squares`) plus the four inter-ring pass-through tests that exist to pin this very boundary. The normalizer is wired into the boolean operand pipeline, so this is not a hypothetical: a set-wide non-zero reading silently destroys holes in ordinary artwork.
+
+**The alternative, and why it is a council question.** The per-ring split is a defensible reading of "a subpath means non-zero, a set means even-odd", but it is a *choice made in a module comment*, not a ratified rule, and it has a visible consequence: a document whose path carries `fill-rule="nonzero"` across multiple subpaths cannot be expressed as an operand, because the operand type has no place to say so. The alternative is for `PolygonSet` to **carry the document's fill rule** rather than fix one. That is a schema decision, not a normalizer decision — it changes the operand type every port shares, the SVG import/export path, and what a compound path means as an operand — which is why it is raised here rather than settled in code. Until it is ruled on, the even-odd-between-rings reading stands, and the pass-through tests in both ports keep it from drifting.
+
+### Multi-ring results: a live port divergence
+
+**Status: a known prime-directive divergence with a user-facing bug. Fix recipe below.**
+
+A boolean result is often multi-ring: EXCLUDE of two overlapping rectangles is one outer ring plus an inner ring cutting out the overlap, and SUBTRACT of an inner shape is a donut. The two active ports materialise that differently:
+
+- **Rust** (`Controller::apply_destructive_boolean`) emits a single `PathElem` carrying every ring as a subpath, with `fill_rule: FillRule::EvenOdd`, so the renderer honours the boolean semantics.
+- **Swift** (`applyDestructiveBoolean`) emits **N independent `Polygon` elements**, one per ring. Each fills its own area on its own, and Swift's `Path` element has no `fillRule` field at all — the concept does not exist anywhere in the Swift sources.
+
+The consequence is not cosmetic: **any boolean result with a hole has its hole filled in Swift today.** The inner ring becomes an ordinary filled polygon painted over the region it was supposed to remove. Rust draws the donut; Swift draws the disc.
+
+This also blocks a separate, already-derived correctness fix. The `exclude_overlapping_squares` corpus vector pins `ring_count: 2` — the derived-correct answer, two L-shapes touching only at two isolated points — while both ports emit one self-touching twelve-vertex ring, because `connect_edges` cannot tell which of two touching regions it is on at a pinch vertex. A split-at-repeated-vertex post-pass fixes it exactly and region-preservingly (the cut gives loops of 75 + 75), and is prototyped. Landing it first would change a one-ring result into a two-ring result, which each port then materialises by a different rule — so it would break the `boolean_exclude_overlapping_rects` action golden differently in Rust and in Swift.
+
+**Unblock recipe, in order:**
+
+1. Add `fill_rule` to Swift's `Path` element, mirroring Rust's `FillRule` (`nonzero` default, `evenodd`), additive so existing documents stay valid.
+2. Change `applyDestructiveBoolean` to emit **one even-odd `Path`** for multi-ring results, matching Rust ring for ring and keeping the single-ring case a `Polygon` as both ports already do. This alone fixes the filled-hole bug.
+3. Land the prototyped pinch-split in both ports together.
+4. Regenerate `test_fixtures/actions/boolean_exclude_overlapping_rects_expected.json` **once**, after both ports agree.
+5. Delete the `_known_gap` / `_known_gap_keys` holdout on `exclude_overlapping_squares` in `test_fixtures/algorithms/boolean.json`, which puts its `ring_count` back under the golden oracle. The oracle self-check will fail if the holdout is left behind once the ports reproduce the pinned value.
+
 ## Boolean Options dialog
 
 A modal dialog, reached from the panel menu's "Boolean Options…" item. It edits three document-level preferences that every boolean operation consults.
@@ -401,6 +437,17 @@ Every one of the 13 corresponding actions writes this field as its last effect, 
 ### Persistence
 
 Document state means Repeat survives panel close/reopen and document save/load. A document reopened tomorrow still remembers its last boolean op.
+
+## Open rulings and follow-ups
+
+The index of what this document leaves unsettled. Each entry says where the detail lives; the detail is not duplicated here.
+
+| Item | Status | Detail |
+| --- | --- | --- |
+| **Which fill rule reads a polygon set** | Needs a council ruling | [Fill rule: an open ruling](#fill-rule-an-open-ruling) — even-odd between rings is implemented and test-pinned; the alternative (a `PolygonSet` carrying the document's fill rule) is a schema decision. |
+| **Multi-ring results differ between the ports** | Known divergence; live bug; recipe written | [Multi-ring results: a live port divergence](#multi-ring-results-a-live-port-divergence) — Swift fills the holes of every boolean result. Blocks the prototyped pinch-split fix. |
+| **OUTLINE operation** | Deferred, unblock trigger named | [Terminology](#terminology) — waits on the planar-graph / DCEL primitive for the Shape Builder tool. |
+| **Trap operation** | Deferred, unblock trigger named | [Terminology](#terminology) — waits on a physical printing model (spot colors, separations, press output). |
 
 ## Testing
 

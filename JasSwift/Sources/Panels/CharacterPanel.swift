@@ -98,13 +98,10 @@ public enum CharacterPanel {
         if !store.hasPanel(pid), let ws = WorkspaceData.load() {
             store.initPanel(pid, defaults: ws.panelStateDefaults(pid))
         }
-        // Sync from selection so untouched fields keep current values
-        // when the apply pipeline reads them back. Mirrors
-        // ``commitPanelWrite``.
-        if applyToSelection,
-           let overrides = characterPanelLiveOverrides(model: model) {
-            for (k, v) in overrides { store.setPanel(pid, k, v) }
-        }
+        // No selection sync here: the apply is field-scoped and takes a
+        // multi-field group's siblings from the ELEMENT, so pushing the live
+        // overrides into the store would only re-introduce this port's own
+        // preservation semantics (CHARPANEL — see ``commitPanelWrite``).
         let cur = (store.getPanel(pid, key) as? Bool) ?? false
         let newVal = !cur
         store.setPanel(pid, key, newVal)
@@ -113,8 +110,12 @@ public enum CharacterPanel {
         }
         model.panelStateVersion &+= 1
         if applyToSelection {
+            // The apply is field-scoped: name the field this menu item
+            // wrote, so only that field's attribute group reaches the
+            // selection.
             applyCharacterPanelToSelection(
-                store: store, controller: Controller(model: model))
+                store: store, controller: Controller(model: model),
+                edited: key)
         }
     }
 }

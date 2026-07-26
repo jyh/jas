@@ -1455,7 +1455,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         ctx.saveGState()
         // H/V scale wraps the whole text draw around the element's
         // (x, y) origin. Character rotation is *per-glyph* (matches
-        // SVG's <text rotate="N"> spec and Illustrator's Character
+        // SVG's <text rotate="N"> spec and the Character panel's
         // Rotation field): each glyph rotates around its own baseline,
         // leaving the overall layout horizontal.
         let hScale = parseScalePercent(v.horizontalScale)
@@ -2219,7 +2219,7 @@ private func elemChildren(_ e: Element) -> [Element] {
 private let artboardBorderColor = CGColor(gray: 0.2, alpha: 1.0)
 /// Pasteboard (canvas background outside artboards). Medium gray so
 /// white artboards stand out as "paper on a layout table." Hardcoded
-/// pending the Phase-D theme threading; matches Illustrator's
+/// pending the Phase-D theme threading; follows the vector-illustration
 /// pasteboard convention rather than the dock theme.
 private let canvasBackgroundColor = CGColor(gray: 0.47, alpha: 1.0)
 /// Default fill drawn for an artboard whose `fill` is `.transparent`.
@@ -2444,57 +2444,68 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjec
     for es in doc.selection {
         let path = es.path
         guard !path.isEmpty else { continue }
-        ctx.saveGState()
-        var node: Element = .layer(doc.layers[path[0]])
-        if path.count > 1 {
-            applyTransform(ctx, doc.layers[path[0]].transform)
-            for idx in path[1..<path.count - 1] {
-                let children = elemChildren(node)
-                node = children[idx]
-                switch node {
-                case .group(let g): applyTransform(ctx, g.transform)
-                case .layer(let l): applyTransform(ctx, l.transform)
-                default: break
+        // The element-transform pass runs in its own `do` scope with a
+        // `defer`ed restore: the two `guard`s below abandon the iteration
+        // from the MIDDLE of the saved span, and a deferred restore covers
+        // those paths as well as the fall-through (the Rust twin uses an
+        // RAII CtxSaveGuard for the same reason — WEDGESTORM, 2026-07-25:
+        // one leaked save per frame compounds the view transform on every
+        // later repaint). The scope must END here rather than at the end of
+        // the loop body: the handle pass below MUST draw in the popped
+        // state (view transform only), never under the element transform.
+        do {
+            ctx.saveGState()
+            defer { ctx.restoreGState() }
+            var node: Element = .layer(doc.layers[path[0]])
+            if path.count > 1 {
+                applyTransform(ctx, doc.layers[path[0]].transform)
+                for idx in path[1..<path.count - 1] {
+                    let children = elemChildren(node)
+                    node = children[idx]
+                    switch node {
+                    case .group(let g): applyTransform(ctx, g.transform)
+                    case .layer(let l): applyTransform(ctx, l.transform)
+                    default: break
+                    }
                 }
+                guard let lastIdx = path.last else { continue }
+                let children = elemChildren(node)
+                guard lastIdx < children.count else { continue }
+                node = children[lastIdx]
             }
-            guard let lastIdx = path.last else { ctx.restoreGState(); continue }
-            let children = elemChildren(node)
-            guard lastIdx < children.count else { ctx.restoreGState(); continue }
-            node = children[lastIdx]
+            // Apply the selected element's own transform
+            switch node {
+            case .line(let v): applyTransform(ctx, v.transform)
+            case .rect(let v): applyTransform(ctx, v.transform)
+            case .circle(let v): applyTransform(ctx, v.transform)
+            case .ellipse(let v): applyTransform(ctx, v.transform)
+            case .polyline(let v): applyTransform(ctx, v.transform)
+            case .polygon(let v): applyTransform(ctx, v.transform)
+            case .path(let v): applyTransform(ctx, v.transform)
+            case .text(let v): applyTransform(ctx, v.transform)
+            case .textPath(let v): applyTransform(ctx, v.transform)
+            case .group(let v): applyTransform(ctx, v.transform)
+            case .layer(let v): applyTransform(ctx, v.transform)
+            case .live(let v): applyTransform(ctx, v.transform)
+            }
+            drawElementOverlay(ctx, node, kind: es.kind,
+                               outlineScale: selectionOutlineScale(doc, path))
+            // Key-object indicator: thicker accent outline around the
+            // element's bounds so the user can see which selected element
+            // is currently the Align panel's key. Drawn on top of the
+            // normal selection overlay so it never disappears.
+            if let kp = keyObjectPath, kp == path {
+                let b = node.bounds
+                ctx.setStrokeColor(selectionColor)
+                ctx.setLineWidth(3.0)
+                ctx.setLineDash(phase: 0, lengths: [])
+                // Inflate by ~3pt so it sits visibly outside the normal
+                // selection outline.
+                ctx.addRect(CGRect(x: b.x - 3, y: b.y - 3,
+                                   width: b.width + 6, height: b.height + 6))
+                ctx.strokePath()
+            }
         }
-        // Apply the selected element's own transform
-        switch node {
-        case .line(let v): applyTransform(ctx, v.transform)
-        case .rect(let v): applyTransform(ctx, v.transform)
-        case .circle(let v): applyTransform(ctx, v.transform)
-        case .ellipse(let v): applyTransform(ctx, v.transform)
-        case .polyline(let v): applyTransform(ctx, v.transform)
-        case .polygon(let v): applyTransform(ctx, v.transform)
-        case .path(let v): applyTransform(ctx, v.transform)
-        case .text(let v): applyTransform(ctx, v.transform)
-        case .textPath(let v): applyTransform(ctx, v.transform)
-        case .group(let v): applyTransform(ctx, v.transform)
-        case .layer(let v): applyTransform(ctx, v.transform)
-        case .live(let v): applyTransform(ctx, v.transform)
-        }
-        drawElementOverlay(ctx, node, kind: es.kind,
-                           outlineScale: selectionOutlineScale(doc, path))
-        // Key-object indicator: thicker accent outline around the
-        // element's bounds so the user can see which selected element
-        // is currently the Align panel's key. Drawn on top of the
-        // normal selection overlay so it never disappears.
-        if let kp = keyObjectPath, kp == path {
-            let b = node.bounds
-            ctx.setStrokeColor(selectionColor)
-            ctx.setLineWidth(3.0)
-            ctx.setLineDash(phase: 0, lengths: [])
-            // Inflate by ~3pt so it sits visibly outside the normal
-            // selection outline.
-            ctx.addRect(CGRect(x: b.x - 3, y: b.y - 3,
-                               width: b.width + 6, height: b.height + 6))
-            ctx.strokePath()
-        }
-        ctx.restoreGState()
         // Control-point handles: FIXED size at element-transformed positions,
         // drawn under the VIEW (pan/zoom) transform only — the element
         // transform was restored above — so the element's transform moves the

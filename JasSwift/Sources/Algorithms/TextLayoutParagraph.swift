@@ -57,8 +57,9 @@ public func buildParagraphSegments(
                 wordSpacingMax: t.jasWordSpacingMax ?? 133,
                 lastLineAlign: lla,
                 hyphenate: t.jasHyphenate ?? false,
-                // Defaults match Illustrator / InDesign Hyphenation
-                // dialog: 6 / 2 / 2. The previous 3 / 1 / 1 was loose
+                // Defaults match the Hyphenation dialog professional
+                // illustration / page-layout applications ship with:
+                // 6 / 2 / 2. The previous 3 / 1 / 1 was loose
                 // enough that the sample pattern set produced "T-rump"
                 // (matching ".un1" / "1ru" patterns at min_before=1).
                 hyphenateMinWord: Int(t.jasHyphenateMinWord ?? 6),
@@ -67,7 +68,8 @@ public func buildParagraphSegments(
                 hyphenateBias: Int(t.jasHyphenateBias ?? 0),
                 // Capitalized words (proper nouns: "Trump", "London")
                 // are excluded from hyphenation by default, mirroring
-                // Illustrator / InDesign / MS Word — even with a real
+                // professional illustration, page-layout and word
+                // processing applications — even with a real
                 // pattern dictionary, breaking proper nouns reads
                 // poorly to most readers.
                 hyphenateCapitalized: t.jasHyphenateCapitalized ?? false)

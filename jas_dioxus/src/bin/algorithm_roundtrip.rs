@@ -864,51 +864,44 @@ fn polygon_set_area(ps: &PolygonSet) -> f64 {
     total
 }
 
-/// Check that no pair of non-adjacent edges in a ring intersect.
+/// Check that a ring is simple: no two of its edges meet except where
+/// consecutive edges share their one common vertex.
+///
+/// This deliberately uses the full arrangement predicate rather than a
+/// proper-crossing test. A proper-crossing test reports `true` for a
+/// ring carrying a T-junction (a vertex sitting in another edge's
+/// interior) or a collinear self-overlap (an edge doubling back along
+/// itself), because neither is a strict interior crossing — so the
+/// corpus's `all_rings_simple` flag used to stay green on exactly the
+/// degeneracies the normalizer exists to remove. Mirrors
+/// `isRingSimple` in JasSwift/ToolsAlgorithm/AlgorithmRoundtrip.swift.
 fn is_ring_simple(ring: &Ring) -> bool {
+    use jas_dioxus::algorithms::arrangement::split_points;
     let n = ring.len();
     if n < 3 {
         return true;
     }
     for i in 0..n {
-        let (ax1, ay1) = ring[i];
-        let (ax2, ay2) = ring[(i + 1) % n];
-        for j in (i + 2)..n {
-            if i == 0 && j == n - 1 {
-                continue; // skip adjacent pair wrapping around
-            }
-            let (bx1, by1) = ring[j];
-            let (bx2, by2) = ring[(j + 1) % n];
-            if proper_crossing(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2) {
+        for j in (i + 1)..n {
+            let adjacent = j == i + 1 || (i == 0 && j == n - 1);
+            let pts = split_points(
+                ring[i],
+                ring[(i + 1) % n],
+                ring[j],
+                ring[(j + 1) % n],
+            );
+            if adjacent {
+                // Consecutive edges legitimately meet at exactly their
+                // shared vertex, and nowhere else.
+                if pts.len() != 1 {
+                    return false;
+                }
+            } else if !pts.is_empty() {
                 return false;
             }
         }
     }
     true
-}
-
-fn proper_crossing(
-    ax1: f64,
-    ay1: f64,
-    ax2: f64,
-    ay2: f64,
-    bx1: f64,
-    by1: f64,
-    bx2: f64,
-    by2: f64,
-) -> bool {
-    let d1 = cross(bx2 - bx1, by2 - by1, ax1 - bx1, ay1 - by1);
-    let d2 = cross(bx2 - bx1, by2 - by1, ax2 - bx1, ay2 - by1);
-    let d3 = cross(ax2 - ax1, ay2 - ay1, bx1 - ax1, by1 - ay1);
-    let d4 = cross(ax2 - ax1, ay2 - ay1, bx2 - ax1, by2 - ay1);
-    if d1 * d2 < 0.0 && d3 * d4 < 0.0 {
-        return true;
-    }
-    false
-}
-
-fn cross(ux: f64, uy: f64, vx: f64, vy: f64) -> f64 {
-    ux * vy - uy * vx
 }
 
 fn all_rings_simple(ps: &PolygonSet) -> bool {

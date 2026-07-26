@@ -189,6 +189,23 @@ final class YamlTool: CanvasTool {
         store.getTool(spec.id, key)
     }
 
+    /// The workspace `state.fill_color` / `state.stroke_color` defaults, which
+    /// ``syncAppState`` re-bases on when the selection is MIXED — the value
+    /// Rust's `build_tool_state_map` lands there, since it rebuilds the bridged
+    /// keys from `state_defaults()` on every call before overlaying the live
+    /// fill / stroke.
+    ///
+    /// A `static let` is initialized lazily exactly once per process, which is
+    /// the point: `WorkspaceData.load()` re-reads and re-parses the whole
+    /// bundle, and `syncAppState` runs on the per-dispatch (mousemove) path.
+    /// White / black are the bundle's own values, restated only as the fallback
+    /// for a bundle that failed to load.
+    private static let bridgedColorDefaults: (fill: Any, stroke: Any) = {
+        let defaults = WorkspaceData.load()?.stateDefaults() ?? [:]
+        return (defaults["fill_color"] ?? "#ffffff",
+                defaults["stroke_color"] ?? "#000000")
+    }()
+
     /// Read a GLOBAL `state.<key>` value out of this tool's own store.
     /// Primary use: tests observing handler-owned globals the
     /// transform-tool family writes mid-gesture (e.g.
@@ -216,25 +233,31 @@ final class YamlTool: CanvasTool {
     /// scale/rotate/shear tools mid-gesture) from being clobbered: they
     /// simply aren't in `bridgedStateKeys`.
     ///
-    /// `fill_color` / `stroke_color` come from the model's tab-level
-    /// default fill / stroke, defaulting to white `#ffffff` (the
-    /// workspace `state.fill_color` default) when there is no app default
-    /// — NOT nil. A genuine "no fill" only arises when the user
-    /// explicitly clears fill on a selection (out of scope for the blob
-    /// brush, which always paints from the active fill). The blob-brush
-    /// tip params + stroke brush slug/overrides ride `model.stateStore`,
-    /// where the Color / Brushes panels write them, so they are copied
-    /// from there when present.
+    /// `fill_color` / `stroke_color` come from ``liveFillStrokeValues`` — the
+    /// SINGLE source for that fact, shared with the panel-render scope
+    /// (``liveAppStateOverrides``) exactly as Rust shares
+    /// `live_fill_stroke_values` between `build_tool_state_map` and
+    /// `build_live_state_map`. This bridge used to resolve the fact itself,
+    /// mapping the model's default fill to white when it was `nil`, so the two
+    /// readers answered one fact two ways: a paint the user had explicitly
+    /// cleared was None to the Color panel and `#ffffff` to the next tool
+    /// commit, and the selection — which the panel honours and this did not —
+    /// was invisible to a commit made with something selected (CPTRIAGE).
+    /// A MIXED selection has no single value, and the bridge then re-bases the
+    /// key on its workspace default, mirroring Rust's rebuild-from-defaults.
+    ///
+    /// The blob-brush tip params + stroke brush slug/overrides ride
+    /// `model.stateStore`, where the Color / Brushes panels write them, so they
+    /// are copied from there when present.
     ///
     /// Called per-dispatch (at the top of `dispatch`, before `runEffects`)
     /// so a Color-panel fill change WHILE the blob brush is active is seen
     /// by the very next paint commit. Reuses the existing `store.set`
     /// path the seed helper used.
     func syncAppState(_ model: Model) {
-        store.set("fill_color",
-                  model.defaultFill.map { "#" + $0.color.toHex() } ?? "#ffffff")
-        store.set("stroke_color",
-                  model.defaultStroke.map { "#" + $0.color.toHex() } ?? "#ffffff")
+        let (fill, stroke) = liveFillStrokeValues(model: model)
+        store.set("fill_color", fill ?? YamlTool.bridgedColorDefaults.fill)
+        store.set("stroke_color", stroke ?? YamlTool.bridgedColorDefaults.stroke)
         // The remaining bridged keys (blob brush tip params + stroke
         // brush slug/overrides) live on the shared model state store; copy
         // each through only when present so an absent key falls back to

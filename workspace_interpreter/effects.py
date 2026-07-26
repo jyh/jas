@@ -1178,6 +1178,100 @@ def stroke_panel_state(store: StateStore) -> dict:
     return out
 
 
+def character_panel_state(store: StateStore) -> dict:
+    """The Character panel's fields as the law's panel map.
+
+    PANEL scope only — unlike Stroke there is no flat-global spelling to fall
+    back to, because every Character control binds ``panel.<field>``
+    (``workspace/panels/character.yaml``). A field the store does not hold is
+    left ABSENT so the law applies its own declared default
+    (:data:`workspace_interpreter.character_law.CHARACTER_PANEL_FIELDS`),
+    which is what keeps ``leading``'s "no committed leading" sentinel
+    expressible. Mirrors the Swift ``characterPanelField``.
+    """
+    from workspace_interpreter.character_law import CHARACTER_PANEL_FIELDS
+    out = {}
+    for field in CHARACTER_PANEL_FIELDS:
+        val = store.get_panel("character_panel_content", field)
+        if val is not None:
+            out[field] = val
+    return out
+
+
+#: The sixteen character attributes, in the order the law names them. Both
+#: reference text element types declare all sixteen under these exact names,
+#: so lifting and lowering is one loop rather than two hand-written maps.
+_CHARACTER_ELEM_ATTRS: tuple[str, ...] = (
+    "font_family", "font_size", "font_weight", "font_style",
+    "text_decoration", "text_transform", "font_variant", "baseline_shift",
+    "line_height", "letter_spacing", "xml_lang", "aa_mode", "rotate",
+    "horizontal_scale", "vertical_scale", "kerning",
+)
+
+
+def _character_attrs_of(elem) -> dict | None:
+    """``elem``'s character attributes as the law's flat map, or ``None`` when
+    it is not a text element. ``text_decoration`` normalises CSS ``none`` to
+    the law's empty identity."""
+    from geometry.element import Text, TextPath
+    if not isinstance(elem, (Text, TextPath)):
+        return None
+    out = {a: getattr(elem, a) for a in _CHARACTER_ELEM_ATTRS}
+    if out["text_decoration"] == "none":
+        out["text_decoration"] = ""
+    return out
+
+
+def apply_character_panel_to_selection(
+    store: StateStore, controller, edited: str,
+) -> None:
+    """Apply ONE Character-panel edit to the selected text element(s).
+
+    ``edited`` is the panel field key the user just committed
+    (``"tracking"``, ``"underline"``, ``"font_size"``, ...). Only that
+    field's attribute group is taken from panel state; every other character
+    attribute is preserved FROM THE ELEMENT BEING EDITED, per element — and
+    for the three groups fed by more than one field, so are the SIBLING
+    fields. See :mod:`workspace_interpreter.character_law` for the group
+    table and the sibling rule, and ``transcripts/CHARACTER.md`` for the
+    English law.
+
+    A field that owns no element attribute (the seven ``snap_*`` flags, the
+    section-visibility flags) writes NOTHING — not even an undo step.
+
+    This bridge exists because the Stroke law's one reference-only divergence
+    (a lossy colour round trip) hid at exactly this level: the law was right
+    and the wiring around it was not. Everything here routes through
+    :func:`~workspace_interpreter.character_law.character_with_field` rather
+    than re-deriving any part of the mapping.
+    """
+    import dataclasses
+
+    from workspace_interpreter.character_law import (
+        character_edit_group, character_with_field,
+    )
+
+    if character_edit_group(edited) is None:
+        return
+    panel = character_panel_state(store)
+    model = controller.model
+    doc = model.document
+    new_doc = doc
+    for es in doc.selection:
+        try:
+            elem = new_doc.get_element(es.path)
+        except Exception:
+            continue
+        base = _character_attrs_of(elem)
+        if base is None:
+            continue
+        attrs = character_with_field(base, panel, edited)
+        new_doc = new_doc.replace_element(
+            es.path, dataclasses.replace(elem, **attrs))
+    if new_doc is not doc:
+        model.edit_document(new_doc)
+
+
 def apply_stroke_panel_to_selection(
     store: StateStore, controller, edited: str,
 ) -> None:

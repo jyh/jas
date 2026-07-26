@@ -21,15 +21,20 @@ import Testing
 /// Build a Model whose single selected element is a Text with the
 /// given baseline attributes, ready for applyCharacterPanelToSelection.
 private func charModelWithSelectedText(
-    fontSize: Double = 12
+    fontSize: Double = 12,
+    decoration: String = "",
+    transform: String = "",
+    variant: String = "",
+    baselineShift: String = ""
 ) -> Model {
     let model = Model()
     let text = Element.text(Text(
         x: 0, y: 0, content: "hello",
         fontFamily: "serif", fontSize: fontSize,
         fontWeight: "normal", fontStyle: "normal",
-        textDecoration: "", textTransform: "", fontVariant: "",
-        baselineShift: "", lineHeight: "", letterSpacing: "",
+        textDecoration: decoration, textTransform: transform,
+        fontVariant: variant,
+        baselineShift: baselineShift, lineHeight: "", letterSpacing: "",
         xmlLang: "", aaMode: "", rotate: "",
         horizontalScale: "", verticalScale: "", kerning: ""))
     model.setDocumentForTest(Document(
@@ -39,14 +44,16 @@ private func charModelWithSelectedText(
     return model
 }
 
-/// Seed the production Character panel scope with `keys`, run apply,
-/// and return the resulting selected Text element.
+/// Seed the production Character panel scope with `keys`, commit `edited`,
+/// and return the resulting selected Text element. The apply is FIELD-SCOPED,
+/// so every case names the field the user committed.
 private func applyCharPanel(
-    _ model: Model, _ keys: [String: Any]
+    _ model: Model, _ keys: [String: Any], edited: String
 ) -> Text {
     model.stateStore.initPanel("character_panel_content", defaults: keys)
     applyCharacterPanelToSelection(store: model.stateStore,
-                                    controller: Controller(model: model))
+                                    controller: Controller(model: model),
+                                    edited: edited)
     guard case .text(let t) = model.document.getElement([0, 0]) else {
         fatalError("expected Text at [0,0]")
     }
@@ -58,26 +65,26 @@ private func applyCharPanel(
 @Test func charFontSize24On12pt() {
     // panel font_size=24 on a 12pt text -> element font_size == 24.
     let m = charModelWithSelectedText(fontSize: 12)
-    let t = applyCharPanel(m, ["font_size": 24.0])
+    let t = applyCharPanel(m, ["font_size": 24.0], edited: "font_size")
     #expect(t.fontSize == 24)
 }
 
 // MARK: - style_name -> font_weight + font_style
 
 @Test func charStyleBold() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["style_name": "Bold"])
+    let t = applyCharPanel(charModelWithSelectedText(), ["style_name": "Bold"], edited: "style_name")
     #expect(t.fontWeight == "bold")
     #expect(t.fontStyle == "normal")
 }
 
 @Test func charStyleItalic() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["style_name": "Italic"])
+    let t = applyCharPanel(charModelWithSelectedText(), ["style_name": "Italic"], edited: "style_name")
     #expect(t.fontWeight == "normal")
     #expect(t.fontStyle == "italic")
 }
 
 @Test func charStyleBoldItalic() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["style_name": "Bold Italic"])
+    let t = applyCharPanel(charModelWithSelectedText(), ["style_name": "Bold Italic"], edited: "style_name")
     #expect(t.fontWeight == "bold")
     #expect(t.fontStyle == "italic")
 }
@@ -90,7 +97,7 @@ private func applyCharPanel(
     m.setDocumentForTest(Document(layers: [Layer(children: [text])],
                               selectedLayer: 0,
                               selection: [ElementSelection(path: [0, 0])]))
-    let t = applyCharPanel(m, ["style_name": "Regular"])
+    let t = applyCharPanel(m, ["style_name": "Regular"], edited: "style_name")
     #expect(t.fontWeight == "normal")
     #expect(t.fontStyle == "normal")
 }
@@ -98,21 +105,26 @@ private func applyCharPanel(
 // MARK: - all_caps / small_caps -> text_transform / font_variant
 
 @Test func charAllCaps() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["all_caps": true])
+    let t = applyCharPanel(charModelWithSelectedText(), ["all_caps": true], edited: "all_caps")
     #expect(t.textTransform == "uppercase")
     #expect(t.fontVariant == "")
 }
 
 @Test func charSmallCaps() {
     let t = applyCharPanel(charModelWithSelectedText(),
-                           ["small_caps": true, "all_caps": false])
+                           ["small_caps": true, "all_caps": false],
+                           edited: "small_caps")
     #expect(t.fontVariant == "small-caps")
     #expect(t.textTransform == "")
 }
 
 @Test func charAllCapsWinsOverSmallCaps() {
-    let t = applyCharPanel(charModelWithSelectedText(),
-                           ["all_caps": true, "small_caps": true])
+    // The element is small-caps and the user turns All Caps ON: the exclusion
+    // requires text_transform AND font_variant to move together. The sibling
+    // comes from the element, so the panel names only the committed field.
+    let t = applyCharPanel(charModelWithSelectedText(variant: "small-caps"),
+                           ["all_caps": true],
+                           edited: "all_caps")
     #expect(t.textTransform == "uppercase")
     #expect(t.fontVariant == "")
 }
@@ -120,20 +132,99 @@ private func applyCharPanel(
 // MARK: - underline / strikethrough -> text_decoration
 
 @Test func charUnderline() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["underline": true])
+    let t = applyCharPanel(charModelWithSelectedText(), ["underline": true], edited: "underline")
     #expect(t.textDecoration == "underline")
 }
 
 @Test func charStrikethrough() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["strikethrough": true])
+    let t = applyCharPanel(charModelWithSelectedText(), ["strikethrough": true], edited: "strikethrough")
     #expect(t.textDecoration == "line-through")
 }
 
 @Test func charUnderlineAndStrikethroughAlphabetical() {
-    // Both flags -> "line-through underline" (alphabetical order).
-    let t = applyCharPanel(charModelWithSelectedText(),
-                           ["underline": true, "strikethrough": true])
+    // The list is alphabetical whichever toggle got there first — and the
+    // token the user did NOT commit comes from the ELEMENT, so the panel is
+    // left at its false strikethrough default on purpose.
+    let t = applyCharPanel(charModelWithSelectedText(decoration: "line-through"),
+                           ["underline": true],
+                           edited: "underline")
     #expect(t.textDecoration == "line-through underline")
+}
+
+// MARK: - the sibling rule (CHARPANEL repair)
+//
+// A multi-field group's SIBLING fields are read from the element, never from
+// panel state — which the law does not oblige the panel to have mirrored.
+// This port used to get there via its view layer's live-override push; that
+// push is gone, so these cases gate the LAW.
+
+@Test func charUnderliningAStruckElementKeepsTheLineThrough() {
+    // The reported data loss, end to end through the production apply.
+    let t = applyCharPanel(charModelWithSelectedText(decoration: "line-through"),
+                           ["underline": true], edited: "underline")
+    #expect(t.textDecoration == "line-through underline")
+}
+
+@Test func charUnUnderliningKeepsTheLineThrough() {
+    let t = applyCharPanel(
+        charModelWithSelectedText(decoration: "line-through underline"),
+        ["underline": false], edited: "underline")
+    #expect(t.textDecoration == "line-through")
+}
+
+@Test func charStrikingAnUnderlinedElementKeepsTheUnderline() {
+    let t = applyCharPanel(charModelWithSelectedText(decoration: "underline"),
+                           ["strikethrough": true], edited: "strikethrough")
+    #expect(t.textDecoration == "line-through underline")
+}
+
+@Test func charAllCapsOffKeepsASmallCapsVariant() {
+    let t = applyCharPanel(charModelWithSelectedText(variant: "small-caps"),
+                           ["all_caps": false], edited: "all_caps")
+    #expect(t.fontVariant == "small-caps")
+    #expect(t.textTransform == "")
+}
+
+@Test func charSmallCapsOffKeepsTheAllCaps() {
+    let t = applyCharPanel(charModelWithSelectedText(transform: "uppercase"),
+                           ["small_caps": false], edited: "small_caps")
+    #expect(t.textTransform == "uppercase")
+}
+
+@Test func charSmallCapsOnReplacesTheAllCaps() {
+    // The ruling on a conflict: the COMMITTED toggle wins. This is the case
+    // the two ports disagreed on — the view mirror made the element's All Caps
+    // win here and the click no-oped.
+    let t = applyCharPanel(charModelWithSelectedText(transform: "uppercase"),
+                           ["small_caps": true], edited: "small_caps")
+    #expect(t.textTransform == "")
+    #expect(t.fontVariant == "small-caps")
+}
+
+@Test func charSuperscriptOffKeepsTheElementsNumericShift() {
+    let t = applyCharPanel(charModelWithSelectedText(baselineShift: "4pt"),
+                           ["superscript": false], edited: "superscript")
+    #expect(t.baselineShift == "4pt")
+}
+
+@Test func charSuperscriptOffKeepsTheElementsSubscript() {
+    let t = applyCharPanel(charModelWithSelectedText(baselineShift: "sub"),
+                           ["superscript": false], edited: "superscript")
+    #expect(t.baselineShift == "sub")
+}
+
+@Test func charAZeroNumberDefersToTheElementsSuperscript() {
+    // 0 is exactly what the numeric input DISPLAYS while super is set, so
+    // committing it carries no intent.
+    let t = applyCharPanel(charModelWithSelectedText(baselineShift: "super"),
+                           ["baseline_shift": 0.0], edited: "baseline_shift")
+    #expect(t.baselineShift == "super")
+}
+
+@Test func charAnExplicitNumberReplacesTheSuperscript() {
+    let t = applyCharPanel(charModelWithSelectedText(baselineShift: "super"),
+                           ["baseline_shift": 6.0], edited: "baseline_shift")
+    #expect(t.baselineShift == "6pt")
 }
 
 // MARK: - leading -> line_height
@@ -141,7 +232,8 @@ private func applyCharPanel(
 @Test func charLeadingAutoEmpties() {
     // leading == font_size*1.2 (Auto) -> line_height "".
     let t = applyCharPanel(charModelWithSelectedText(fontSize: 12),
-                           ["font_size": 12.0, "leading": 14.4])
+                           ["font_size": 12.0, "leading": 14.4],
+                           edited: "leading")
     #expect(t.lineHeight == "")
 }
 
@@ -149,20 +241,20 @@ private func applyCharPanel(
     // leading=20 (off Auto) -> "20pt".
     let m = charModelWithSelectedText(fontSize: 12)
     // Element carries an explicit line_height so we can see it change.
-    let t = applyCharPanel(m, ["font_size": 12.0, "leading": 20.0])
+    let t = applyCharPanel(m, ["font_size": 12.0, "leading": 20.0], edited: "leading")
     #expect(t.lineHeight == "20pt")
 }
 
 // MARK: - tracking -> letter_spacing
 
 @Test func charTrackingZeroEmpties() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["tracking": 0.0])
+    let t = applyCharPanel(charModelWithSelectedText(), ["tracking": 0.0], edited: "tracking")
     #expect(t.letterSpacing == "")
 }
 
 @Test func charTrackingPositive() {
     // tracking=25 -> 25/1000 em = "0.025em".
-    let t = applyCharPanel(charModelWithSelectedText(), ["tracking": 25.0])
+    let t = applyCharPanel(charModelWithSelectedText(), ["tracking": 25.0], edited: "tracking")
     #expect(t.letterSpacing == "0.025em")
 }
 
@@ -170,91 +262,103 @@ private func applyCharPanel(
 
 @Test func charKerningPositive() {
     // kerning=50 (numeric string, combo_box commits strings) -> "0.05em".
-    let t = applyCharPanel(charModelWithSelectedText(), ["kerning": "50"])
+    let t = applyCharPanel(charModelWithSelectedText(), ["kerning": "50"], edited: "kerning")
     #expect(t.kerning == "0.05em")
 }
 
 @Test func charKerningAutoEmpties() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["kerning": "Auto"])
+    let t = applyCharPanel(charModelWithSelectedText(), ["kerning": "Auto"], edited: "kerning")
     #expect(t.kerning == "")
 }
 
 @Test func charKerningNamedPassesThrough() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["kerning": "Optical"])
+    let t = applyCharPanel(charModelWithSelectedText(), ["kerning": "Optical"], edited: "kerning")
     #expect(t.kerning == "Optical")
 }
 
 // MARK: - baseline_shift
 
 @Test func charBaselineShiftZeroEmpties() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["baseline_shift": 0.0])
+    let t = applyCharPanel(charModelWithSelectedText(), ["baseline_shift": 0.0], edited: "baseline_shift")
     #expect(t.baselineShift == "")
 }
 
 @Test func charBaselineShiftNumeric() {
     // baseline_shift=3 -> "3pt".
-    let t = applyCharPanel(charModelWithSelectedText(), ["baseline_shift": 3.0])
+    let t = applyCharPanel(charModelWithSelectedText(), ["baseline_shift": 3.0], edited: "baseline_shift")
     #expect(t.baselineShift == "3pt")
 }
 
 @Test func charBaselineShiftSuperWins() {
     // superscript wins over numeric -> "super".
     let t = applyCharPanel(charModelWithSelectedText(),
-                           ["superscript": true, "baseline_shift": 5.0])
+                           ["superscript": true, "baseline_shift": 5.0],
+                           edited: "superscript")
     #expect(t.baselineShift == "super")
 }
 
 @Test func charBaselineShiftSub() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["subscript": true])
+    let t = applyCharPanel(charModelWithSelectedText(), ["subscript": true], edited: "subscript")
     #expect(t.baselineShift == "sub")
 }
 
 // MARK: - character_rotation -> rotate
 
 @Test func charRotationZeroEmpties() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["character_rotation": 0.0])
+    let t = applyCharPanel(charModelWithSelectedText(), ["character_rotation": 0.0], edited: "character_rotation")
     #expect(t.rotate == "")
 }
 
 @Test func charRotationNumeric() {
     // character_rotation=15 -> "15".
-    let t = applyCharPanel(charModelWithSelectedText(), ["character_rotation": 15.0])
+    let t = applyCharPanel(charModelWithSelectedText(), ["character_rotation": 15.0], edited: "character_rotation")
     #expect(t.rotate == "15")
 }
 
 // MARK: - horizontal / vertical scale
 
 @Test func charScaleIdentityEmpties() {
-    let t = applyCharPanel(charModelWithSelectedText(),
-                           ["horizontal_scale": 100.0, "vertical_scale": 100.0])
-    #expect(t.horizontalScale == "")
-    #expect(t.verticalScale == "")
+    // Each scale is its own group, so the identity has to be committed
+    // through its own field — one apply cannot clear both.
+    let h = applyCharPanel(charModelWithSelectedText(),
+                           ["horizontal_scale": 100.0],
+                           edited: "horizontal_scale")
+    #expect(h.horizontalScale == "")
+    let v = applyCharPanel(charModelWithSelectedText(),
+                           ["vertical_scale": 100.0],
+                           edited: "vertical_scale")
+    #expect(v.verticalScale == "")
 }
 
 @Test func charScaleOffIdentity() {
-    // horizontal_scale=120, vertical_scale=90 -> "120" / "90".
-    let t = applyCharPanel(charModelWithSelectedText(),
-                           ["horizontal_scale": 120.0, "vertical_scale": 90.0])
-    #expect(t.horizontalScale == "120")
-    #expect(t.verticalScale == "90")
+    // horizontal_scale=120, vertical_scale=90 -> "120" / "90", each through
+    // its own commit.
+    let h = applyCharPanel(charModelWithSelectedText(),
+                           ["horizontal_scale": 120.0, "vertical_scale": 90.0],
+                           edited: "horizontal_scale")
+    #expect(h.horizontalScale == "120")
+    let v = applyCharPanel(charModelWithSelectedText(),
+                           ["horizontal_scale": 120.0, "vertical_scale": 90.0],
+                           edited: "vertical_scale")
+    #expect(v.verticalScale == "90")
 }
 
 // MARK: - language -> xml_lang
 
 @Test func charLanguage() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["language": "fr"])
+    let t = applyCharPanel(charModelWithSelectedText(), ["language": "fr"], edited: "language")
     #expect(t.xmlLang == "fr")
 }
 
 // MARK: - anti_aliasing -> aa_mode
 
 @Test func charAntiAliasingSharpEmpties() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["anti_aliasing": "Sharp"])
+    let t = applyCharPanel(charModelWithSelectedText(), ["anti_aliasing": "Sharp"], edited: "anti_aliasing")
     #expect(t.aaMode == "")
 }
 
 @Test func charAntiAliasingNonDefault() {
-    let t = applyCharPanel(charModelWithSelectedText(), ["anti_aliasing": "Crisp"])
+    let t = applyCharPanel(charModelWithSelectedText(), ["anti_aliasing": "Crisp"], edited: "anti_aliasing")
     #expect(t.aaMode == "Crisp")
 }
 
@@ -262,13 +366,13 @@ private func applyCharPanel(
 
 @Test func charEndToEndFontFamilyWrite() {
     let m = charModelWithSelectedText()
-    let t = applyCharPanel(m, ["font_family": "Arial", "font_size": 12.0])
+    let t = applyCharPanel(m, ["font_family": "Arial", "font_size": 12.0], edited: "font_family")
     #expect(t.fontFamily == "Arial")
 }
 
 @Test func charEndToEndUnderlineWrite() {
     let m = charModelWithSelectedText()
-    let t = applyCharPanel(m, ["underline": true, "font_size": 12.0])
+    let t = applyCharPanel(m, ["underline": true, "font_size": 12.0], edited: "underline")
     #expect(t.textDecoration == "underline")
 }
 
@@ -283,7 +387,8 @@ private func applyCharPanel(
     model.stateStore.initPanel("character_panel_content",
                                defaults: ["font_family": "Arial"])
     applyCharacterPanelToSelection(store: model.stateStore,
-                                    controller: Controller(model: model))
+                                    controller: Controller(model: model),
+                                    edited: "font_family")
     guard case .text(let t) = model.document.getElement([0, 0]) else {
         #expect(Bool(false), "expected Text"); return
     }

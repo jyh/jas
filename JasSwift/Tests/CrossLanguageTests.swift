@@ -2673,6 +2673,12 @@ private let actionFixtures = [
     "place_instance.json",
     "place_concept_instance.json",
     "menu_object_ops.json",
+    // CPTRIAGE: the fill_stroke None verbs. The FIRST cases to carry an
+    // `expected_panel_state` block — the document golden alone cannot see the
+    // defect these were written for (a None that the panel-render state reader
+    // never republished, so the Color panel's guards kept reading the old
+    // colour). See ``assertActionPanelState``.
+    "fill_stroke_none.json",
 ]
 
 /// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml
@@ -2751,15 +2757,77 @@ private func runActionModel(_ tc: [String: Any]) -> Model {
     return model
 }
 
+/// OPTIONAL second assertion: `expected_panel_state`.
+///
+/// The document is not the only thing an action moves. A `fill_stroke` verb
+/// writes an APP-LEVEL fact, and every panel that reads it back does so through
+/// the port's panel-render state reader — Swift's ``buildLiveStateMap``, Rust's
+/// `build_live_state_map`. Those readers are native per-port code that no
+/// document golden touches, and they drifted: `set_fill_none` cleared the fill
+/// in both ports while the panel-render reader kept publishing the workspace
+/// default `#ffffff` (CPTRIAGE), so `color.yaml`'s fifteen slider `disabled`
+/// guards, the hex field, the colour bar and Invert / Complement all read a
+/// colour that was no longer there and NOTHING a user could see moved.
+///
+/// So a case may pin the state scope the panels actually render against. The
+/// block is a SUBSET assertion — name only the keys under test — and `null` is
+/// a real expectation, not "absent": publishing NSNull is the whole point,
+/// because the map starts from the workspace defaults and an omitted key leaves
+/// the default standing.
+///
+/// Cases without the block are unaffected. Mirrors Rust's
+/// `assert_action_panel_state`.
+private func assertActionPanelState(_ tc: [String: Any], _ model: Model) {
+    guard let expected = tc["expected_panel_state"] as? [String: Any] else { return }
+    let name = tc["name"] as! String
+    guard let ws = WorkspaceData.load() else {
+        #expect(Bool(false), "Action test '\(name)': workspace bundle failed to load")
+        return
+    }
+    let live = buildLiveStateMap(ws: ws, model: model)
+    for (key, want) in expected {
+        // ABSENT is not NULL, and the docstring above says so: the reader must
+        // PUBLISH the key. Asserting presence separately is what lets a `null`
+        // expectation catch the regression it was written for — a port that
+        // stops seeding / overlaying and omits the key instead. Coalescing the
+        // two would read that omission as a published null.
+        #expect(
+            live.index(forKey: key) != nil,
+            """
+            Action test '\(name)': the panel-render state map has no key \
+            '\(key)' at all. The corpus pins its VALUE, so the key must be \
+            published — an absent key leaves whatever the caller had (here the \
+            workspace default) standing.
+            """
+        )
+        let got = live[key] ?? NSNull()
+        // Compare through the shared canonical serializer so null / string /
+        // number all read the same way the Rust arm reads them.
+        let gotCanon = keyCanonValue(got)
+        let wantCanon = keyCanonValue(want)
+        #expect(
+            gotCanon == wantCanon,
+            """
+            Action test '\(name)': panel-render state.\(key) is \(gotCanon) but \
+            the corpus pins \(wantCanon). The panels read this map, so a wrong \
+            value here is a control that renders against a fact the action \
+            already changed.
+            """
+        )
+    }
+}
+
 /// Mirror of `assertGestureTest`: replay the action sequence and compare the
 /// canonical document JSON against the pinned golden, dumping EXPECTED/ACTUAL on
-/// mismatch. Mirrors Rust `assert_action_test`.
+/// mismatch. Then apply the case's optional `expected_panel_state` block.
+/// Mirrors Rust `assert_action_test`.
 private func assertActionTest(_ tc: [String: Any]) {
     let name = tc["name"] as! String
     let expectedFile = tc["expected_json"] as! String
     let expected = readFixture("actions/\(expectedFile)")
         .trimmingCharacters(in: .whitespacesAndNewlines)
-    let actual = documentToTestJson(runActionModel(tc).document)
+    let model = runActionModel(tc)
+    let actual = documentToTestJson(model.document)
 
     if actual != expected {
         print("=== EXPECTED (\(name)) ===")
@@ -2768,6 +2836,7 @@ private func assertActionTest(_ tc: [String: Any]) {
         print(actual)
     }
     #expect(actual == expected, "Action test '\(name)' failed: canonical JSON mismatch")
+    assertActionPanelState(tc, model)
 }
 
 /// Inc-2 of the shared action-fixture corpus: replay each fixture's action

@@ -378,7 +378,9 @@ fn draw_one(
     center_at_end: bool,
 ) {
     if scale <= 0.0 { return; }
-    ctx.save();
+    // Guarded: the head's own frame (translate/rotate/scale) pops when this
+    // function returns, on every path (see ctx_guard::CtxSaveGuard).
+    let _ctx_guard = super::ctx_guard::CtxSaveGuard::new(ctx);
     ctx.translate(x, y).ok();
     ctx.rotate(angle).ok();
     if center_at_end {
@@ -403,7 +405,7 @@ fn draw_one(
             ctx.stroke();
         }
     }
-    ctx.restore();
+    // The head's frame pops via `_ctx_guard`'s Drop.
 }
 
 #[cfg(test)]

@@ -382,18 +382,32 @@ private func runOne(
     // call-site behavior from before the tool-state scope was
     // introduced.
     if let pairs = effect["set"] as? [String: Any] {
+        // Evaluate every right-hand side ONCE, keeping an explicit YAML `null`
+        // as `NSNull()` rather than as a Swift `nil`.
+        //
+        // The distinction cannot survive the store: `StateStore.set(k, nil)`
+        // assigns nil into a `[String: Any]`, which DELETES the key, so a
+        // write of null and a key nobody ever wrote read back identically.
+        // Anything downstream that needs to know which of the two happened
+        // must be told here, while the difference still exists — see the
+        // colour hook below. The two writer branches unwrap NSNull back to nil
+        // before they touch the store, so what the store holds is byte-for-byte
+        // what it held before.
+        var evaluated: [String: Any] = [:]
+        for (key, expr) in pairs {
+            evaluated[key] = valueToAny(evalExpr(expr, store: store, ctx: ctx))
+                ?? NSNull()
+        }
         if schema {
-            // Schema-driven: evaluate expressions first, then coerce+validate
-            var evaluated: [String: Any] = [:]
-            for (key, expr) in pairs {
-                let val = evalExpr(expr, store: store, ctx: ctx)
-                evaluated[key] = valueToAny(val)
-            }
-            applySetSchemadriven(evaluated, store: store, diagnostics: &diagnostics)
+            // Schema-driven: coerce + validate. Null-valued keys were never
+            // present in this dict (the old code built it with `nil` values,
+            // which a Swift dictionary drops), so filter them back out.
+            applySetSchemadriven(evaluated.filter { !($0.value is NSNull) },
+                                 store: store, diagnostics: &diagnostics)
         } else {
-            for (key, expr) in pairs {
-                let value = evalExpr(expr, store: store, ctx: ctx)
-                setByScopedTarget(store: store, rawTarget: key, value: valueToAny(value))
+            for (key, value) in evaluated {
+                setByScopedTarget(store: store, rawTarget: key,
+                                  value: value is NSNull ? nil : value)
             }
         }
         // Fire the panel-write hook if any `panel.X` key was touched.
@@ -425,10 +439,35 @@ private func runOne(
         // Color Panel does this directly via ColorPanel.setActiveColor;
         // the YAML route writes through set: which lands here. Host
         // registers "apply_active_color" if it wants the propagation.
-        let wroteActiveColor = pairs.keys.contains { $0 == "fill_color" || $0 == "stroke_color" }
-        if wroteActiveColor,
+        //
+        // The hook is fired ONCE PER COLOUR KEY WRITTEN, and is handed that
+        // key together with the value just written, so it applies exactly the
+        // attribute the effect named. It used to fire once, with nothing, and
+        // apply whichever attribute `fill_on_top` pointed at after re-reading
+        // the store — three ways wrong at once:
+        //
+        //   * `set_stroke_none` writes stroke_color, but with the fill on top
+        //     the hook applied the FILL, so asking for no stroke removed the
+        //     fill instead;
+        //   * the re-read of a key the effect had just set to null came back
+        //     ABSENT (the store deletes on a nil write) and the old code read
+        //     absent as "none" — which is also what it read for a key nobody
+        //     had ever written;
+        //   * `reset_fill_stroke` writes both keys in one `set:` and had only
+        //     one of them applied.
+        //
+        // Rust's `set_app_state_field` has always been called per key with the
+        // value in hand; this is Swift agreeing (CPTRIAGE). Sorted so a
+        // multi-key write applies in a deterministic order.
+        let wroteColorKeys = evaluated.keys
+            .filter { colorStateKey($0) != nil }
+            .sorted()
+        if !wroteColorKeys.isEmpty,
            let hook = platformEffects["apply_active_color"] {
-            _ = hook("", ctx, store)
+            for key in wroteColorKeys {
+                _ = hook(ColorWrite(key: colorStateKey(key)!,
+                                    value: evaluated[key]!), ctx, store)
+            }
         }
         // Active-tool writes (the tool-alternates flyout's
         // `set: { active_tool }`) must switch the live canvas tool.
@@ -1532,7 +1571,37 @@ private func _parseEmValue(_ s: String) -> Double? {
     return Double(trimmed)
 }
 
-func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
+/// Push the Character panel state to the selected text element(s) —
+/// FIELD-SCOPED.
+///
+/// `edited` names the panel field the user just committed. Only the
+/// `CharacterEditGroup` that field owns is taken from panel state; every
+/// other character attribute is preserved from the element being edited, per
+/// element. A field that owns no element attribute (the seven `snap_*` flags,
+/// the section-visibility flags) writes NOTHING — not even an undo step.
+///
+/// This is the law because the panel is not a picture of the selection:
+/// nudging Tracking on a 30pt bold italic underlined Georgia run used to
+/// reset it to the panel's 12pt sans-serif defaults — sixteen attributes
+/// clobbered by one edit. The panel view's live-override push
+/// (`commitPanelWrite`) mitigated that for edits arriving through the panel
+/// widgets, but it is not the same thing as a field-scoped apply: it does
+/// nothing for the per-range route or for any caller that applies without
+/// going through the view. See `transcripts/CHARACTER.md` "The field-scoped
+/// apply law"; the reference states the field → group table in
+/// `workspace_interpreter/character_law.py`.
+func applyCharacterPanelToSelection(
+    store: StateStore, controller: Controller, edited: String
+) {
+    // A field owning no element attribute must not reach the document.
+    guard let group = CharacterEditGroup.fromField(edited) else { return }
+    applyCharacterPanelGroupToSelection(store: store, controller: controller,
+                                        group: group)
+}
+
+private func applyCharacterPanelGroupToSelection(
+    store: StateStore, controller: Controller, group: CharacterEditGroup
+) {
     // Caret-only edit session: prime the session's pending override so
     // the next-typed character picks up the new attrs, then return
     // WITHOUT rewriting the element. A bare caret has no character range
@@ -1542,10 +1611,19 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
     // which returns early after priming the pending override.
     if let session = controller.model.currentEditSession,
        !session.hasSelection {
-        let p = store.getPanelState("character_panel_content")
+        var p = store.getPanelState("character_panel_content")
         let doc = controller.model.document
         if pathIsValid(doc, session.path) {
             let elem = doc.getElement(session.path)
+            // The group's SIBLING fields come from the element here too (see
+            // characterPanelWithElementSiblings), so priming the next-typed
+            // character cannot drop a decoration token the element has.
+            // Restricting the template to the edited group is banked in
+            // CHARACTER.md's follow-ups: replacing the WHOLE template is this
+            // route's existing semantic.
+            if let base = CharacterAttrs(element: elem) {
+                p = characterPanelWithElementSiblings(p, base: base, group: group)
+            }
             let template = buildPanelPendingTemplate(p, elem)
             session.clearPendingOverride()
             if let tpl = template {
@@ -1561,12 +1639,28 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
     // rest of the edited element is left untouched.
     if let session = controller.model.currentEditSession,
        session.hasSelection {
-        let p = store.getPanelState("character_panel_content")
+        // A group with no tspan-level representation can express nothing on a
+        // range, so it must not push an undo step that changes nothing — the
+        // same clause a UI-only field gets.
+        if !group.writesTspanField { return }
+        var p = store.getPanelState("character_panel_content")
         let doc = controller.model.document
         if pathIsValid(doc, session.path) {
             let elem = doc.getElement(session.path)
             let (lo, hi) = session.selectionRange
-            let overrides = buildPanelFullOverrides(p)
+            // Field-scoped here too: build the panel's override template,
+            // then clear every field outside the edited group so
+            // mergeTspanOverrides leaves the range's other attributes alone.
+            // Without the restriction a Tracking edit on a selected range
+            // stamped the panel's family / size / weight / decoration over
+            // it — the same clobber as the whole-element route. The edited
+            // group's SIBLING fields come from the ELEMENT, never from panel
+            // state (characterPanelWithElementSiblings).
+            if let base = CharacterAttrs(element: elem) {
+                p = characterPanelWithElementSiblings(p, base: base, group: group)
+            }
+            let overrides = restrictTspanOverrides(buildPanelFullOverrides(p),
+                                                   to: group)
             let newElem: Element?
             switch elem {
             case .text(let t):
@@ -1590,107 +1684,17 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
         }
     }
 
-    let p = store.getPanelState("character_panel_content")
-    var attrs: [String: Any] = [:]
-
-    if let v = p["font_family"] as? String { attrs["font_family"] = v }
-    if let v = (p["font_size"] as? NSNumber)?.doubleValue { attrs["font_size"] = NSNumber(value: v) }
-
-    // style_name → font_weight + font_style
-    if let style = p["style_name"] as? String {
-        switch style.trimmingCharacters(in: .whitespaces) {
-        case "Regular":
-            attrs["font_weight"] = "normal"; attrs["font_style"] = "normal"
-        case "Italic":
-            attrs["font_weight"] = "normal"; attrs["font_style"] = "italic"
-        case "Bold":
-            attrs["font_weight"] = "bold"; attrs["font_style"] = "normal"
-        case "Bold Italic", "Italic Bold":
-            attrs["font_weight"] = "bold"; attrs["font_style"] = "italic"
-        default: break
-        }
-    }
-
-    // underline + strikethrough → text_decoration
-    let underline = p["underline"] as? Bool ?? false
-    let strikethrough = p["strikethrough"] as? Bool ?? false
-    let tdTokens = [
-        strikethrough ? "line-through" : nil,
-        underline ? "underline" : nil,
-    ].compactMap { $0 }
-    attrs["text_decoration"] = tdTokens.isEmpty ? "" : tdTokens.joined(separator: " ")
-
-    // all_caps / small_caps
-    let allCaps = p["all_caps"] as? Bool ?? false
-    let smallCaps = p["small_caps"] as? Bool ?? false
-    attrs["text_transform"] = allCaps ? "uppercase" : ""
-    attrs["font_variant"] = (smallCaps && !allCaps) ? "small-caps" : ""
-
-    // super / sub + numeric baseline_shift
-    let superOn = p["superscript"] as? Bool ?? false
-    let subOn = p["subscript"] as? Bool ?? false
-    let bsNum = (p["baseline_shift"] as? NSNumber)?.doubleValue ?? 0.0
-    if superOn {
-        attrs["baseline_shift"] = "super"
-    } else if subOn {
-        attrs["baseline_shift"] = "sub"
-    } else if bsNum != 0.0 {
-        attrs["baseline_shift"] = _fmtNum(bsNum) + "pt"
-    } else {
-        attrs["baseline_shift"] = ""
-    }
-
-    // leading → line_height: empty at 120% Auto default
-    let fsNum = (p["font_size"] as? NSNumber)?.doubleValue ?? 12.0
-    let leading = (p["leading"] as? NSNumber)?.doubleValue ?? (fsNum * 1.2)
-    attrs["line_height"] = abs(leading - fsNum * 1.2) < 1e-6
-        ? "" : _fmtNum(leading) + "pt"
-
-    // tracking (1/1000 em) → letter_spacing
-    let tracking = (p["tracking"] as? NSNumber)?.doubleValue ?? 0.0
-    attrs["letter_spacing"] = tracking == 0.0 ? "" : _fmtNum(tracking / 1000.0) + "em"
-
-    // kerning combo_box: Auto / Optical / Metrics pass through
-    // verbatim; numeric-string entry is 1/1000 em. Empty / "0" /
-    // "Auto" all omit (the element default). Legacy Number bindings
-    // also land here via the NSNumber branch.
-    if let s = p["kerning"] as? String {
-        let trimmed = s.trimmingCharacters(in: .whitespaces)
-        switch trimmed {
-        case "", "0", "Auto": attrs["kerning"] = ""
-        case "Optical", "Metrics": attrs["kerning"] = trimmed
-        default:
-            if let n = Double(trimmed) {
-                attrs["kerning"] = n == 0.0 ? "" : _fmtNum(n / 1000.0) + "em"
-            } else {
-                attrs["kerning"] = ""
-            }
-        }
-    } else {
-        let kerning = (p["kerning"] as? NSNumber)?.doubleValue ?? 0.0
-        attrs["kerning"] = kerning == 0.0 ? "" : _fmtNum(kerning / 1000.0) + "em"
-    }
-
-    // character_rotation (degrees)
-    let rot = (p["character_rotation"] as? NSNumber)?.doubleValue ?? 0.0
-    attrs["rotate"] = rot == 0.0 ? "" : _fmtNum(rot)
-
-    // vertical / horizontal scale (percent; identity = 100)
-    let vScale = (p["vertical_scale"] as? NSNumber)?.doubleValue ?? 100.0
-    let hScale = (p["horizontal_scale"] as? NSNumber)?.doubleValue ?? 100.0
-    attrs["vertical_scale"] = vScale == 100.0 ? "" : _fmtNum(vScale)
-    attrs["horizontal_scale"] = hScale == 100.0 ? "" : _fmtNum(hScale)
-
-    // language → xml_lang; anti_aliasing → aa_mode (Sharp default empties)
-    if let v = p["language"] as? String { attrs["xml_lang"] = v }
-    if let v = p["anti_aliasing"] as? String {
-        attrs["aa_mode"] = (v == "Sharp" || v.isEmpty) ? "" : v
-    }
-
-    // Apply. No-op when nothing in the selection is text. setSelectionText-
-    // Attributes -> editDocument self-brackets one undo step.
+    // Whole-element route. PER ELEMENT: the group's attributes come from
+    // panel state and every other attribute is lifted from THIS element, so
+    // a multi-element selection keeps each element's own values (and the
+    // Leading group's Auto test reads each element's own font size).
+    // setSelectionTextAttributes -> editDocument self-brackets one undo step,
+    // and is a no-op when nothing in the selection is text.
     if !controller.model.document.selection.isEmpty {
-        controller.setSelectionTextAttributes(attrs)
+        controller.setSelectionTextAttributes(perElement: { elem in
+            guard let base = CharacterAttrs(element: elem) else { return [:] }
+            return characterAttrsForGroup(base, store: store, group: group)
+        })
     }
 }
 
@@ -2180,7 +2184,21 @@ public func notifyPanelStateChanged(
 ) {
     switch panelId {
     case "character_panel_content":
-        applyCharacterPanelToSelection(store: store, controller: Controller(model: model))
+        // Without a named field there is nothing to apply: the Character
+        // apply is field-scoped, and guessing which control changed is
+        // exactly what clobbered the element's font, size and decoration.
+        if let edited {
+            // Auto-leading is a DISPLAY concern, and it runs BEFORE the apply
+            // — the same position Rust gives it (`set_character_field` →
+            // `character_panel_post_write` → `apply_character_panel_to_
+            // selection`, renderer.rs). It only ever rewrites stored
+            // `leading`, which the FONT_SIZE group does not read, so the
+            // order is observable in panel state and nowhere else.
+            characterPanelPostWrite(store: store, model: model, key: edited)
+            applyCharacterPanelToSelection(
+                store: store, controller: Controller(model: model),
+                edited: edited)
+        }
     case "paragraph_panel_content":
         applyParagraphPanelToSelection(store: store, controller: Controller(model: model))
     case "stroke_panel_content":
@@ -2305,40 +2323,89 @@ private func anyEqual(_ a: Any?, _ b: Any?) -> Bool {
     }
 }
 
-/// Read fill_color / stroke_color from the global store and apply the
-/// active one (per fill_on_top) to the selected canvas element. Used
-/// by the apply_active_color platform-effect hook so the YAML
-/// set_active_color action — and any other set: write that touches
-/// fill_color or stroke_color — propagates to the selection. Mirrors
-/// the inline behavior of ColorPanel.setActiveColor.
-public func applyActiveColorFromStore(store: StateStore, model: Model) {
-    let fillOnTop = (store.get("fill_on_top") as? Bool) ?? true
+/// One app-level colour write, as handed to the `apply_active_color` hook.
+///
+/// A struct rather than a dictionary so the key cannot be misspelled and the
+/// `value`'s "NSNull means the user chose None" convention has one documented
+/// home. `value` is the EVALUATED right-hand side of the `set:` pair — a hex
+/// string, or `NSNull()` for an explicit null.
+public struct ColorWrite {
+    /// `"fill_color"` or `"stroke_color"`.
+    public let key: String
+    /// Hex string, or `NSNull()` for "no paint".
+    public let value: Any
+    public init(key: String, value: Any) {
+        self.key = key
+        self.value = value
+    }
+}
+
+/// The app-level colour key a `set:` target names, or nil when it names
+/// something else. Accepts the scoped spellings a YAML author may write
+/// (`$state.fill_color`, `state.fill_color`) alongside the bare global, matching
+/// what ``setByScopedTarget`` actually writes.
+func colorStateKey(_ rawTarget: String) -> String? {
+    var t = rawTarget
+    if t.hasPrefix("$") { t = String(t.dropFirst()) }
+    if t.hasPrefix("state.") { t = String(t.dropFirst("state.".count)) }
+    return (t == "fill_color" || t == "stroke_color") ? t : nil
+}
+
+/// Apply ONE app-level colour write to both default tiers and the selection.
+///
+/// This is the propagation half of `set: { fill_color: … }` — the store holds
+/// the value for expressions to read, and the paint has to reach the document.
+/// Used by the `apply_active_color` platform-effect hook, so the YAML
+/// `set_active_color` / `set_fill_none` / `set_stroke_none` /
+/// `reset_fill_stroke` actions all land. Mirrors the inline behavior of
+/// `ColorPanel.setActiveColor` and, key-for-key, the Rust
+/// `set_app_state_field` `"fill_color"` / `"stroke_color"` arms.
+///
+/// The attribute comes from `write.key` — the key the effect WROTE. It used to
+/// come from `fill_on_top`, which answers a different question (which swatch
+/// the user is editing), and the value used to be re-read from the store, which
+/// cannot report an explicit null. See the `apply_active_color` fan-out in
+/// ``runOne`` for what that cost (CPTRIAGE).
+public func applyActiveColorWrite(model: Model, write: ColorWrite) {
     let ctrl = Controller(model: model)
-    if fillOnTop {
-        let raw = store.get("fill_color")
-        if let hex = raw as? String, let color = Color.fromHex(hex) {
+    let isFill = write.key == "fill_color"
+    let color: Color? = (write.value as? String).flatMap(Color.fromHex)
+    if color == nil && !(write.value is NSNull) {
+        // Neither a parseable colour nor an explicit null — say nothing rather
+        // than clear the paint. Matches Rust's "unparseable hex: leave
+        // everything alone" arm.
+        return
+    }
+    if isFill {
+        if let color = color {
             // Colour-ONLY, exactly like ColorPanel.setActiveColor: the
             // element's fill opacity is preserved (STROKEWIDTH).
+            model.appDefaultFill = ColorPanel.recolorFill(model.appDefaultFill, color)
             model.defaultFill = ColorPanel.recolorFill(model.defaultFill, color)
             if !model.document.selection.isEmpty {
                 ctrl.mapSelectionFill { ColorPanel.recolorFill($0, color) }
             }
-        } else if raw == nil || raw is NSNull {
+        } else {
+            // BOTH tiers, as Rust's `fill_color` arm clears both: the app tier
+            // is what a no-selection read falls back to, so leaving it standing
+            // would answer the user's None with the seeded white.
+            model.appDefaultFill = nil
             model.defaultFill = nil
             if !model.document.selection.isEmpty {
                 ctrl.setSelectionFill(nil)
             }
         }
     } else {
-        let raw = store.get("stroke_color")
-        if let hex = raw as? String, let color = Color.fromHex(hex) {
+        if let color = color {
             // Colour-ONLY: width / cap / join / dash / arrowheads and the
             // stroke opacity all stay as they are, per element.
+            model.appDefaultStroke = ColorPanel.recolorStroke(model.appDefaultStroke, color)
             model.defaultStroke = ColorPanel.recolorStroke(model.defaultStroke, color)
             if !model.document.selection.isEmpty {
                 ctrl.mapSelectionStroke { ColorPanel.recolorStroke($0, color) }
             }
-        } else if raw == nil || raw is NSNull {
+        } else {
+            model.appDefaultStroke = nil
             model.defaultStroke = nil
             if !model.document.selection.isEmpty {
                 ctrl.setSelectionStroke(nil)
@@ -2599,8 +2666,12 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         // Swatches Panel). Pushes the active-color change to the
         // selected canvas element so the YAML route matches the
         // direct ColorPanel.setActiveColor path.
-        "apply_active_color": { _, _, store in
-            applyActiveColorFromStore(store: store, model: model)
+        // The hook value is a ``ColorWrite`` — the colour key the effect wrote
+        // plus the value it wrote; runEffects fires it once per such key.
+        "apply_active_color": { write, _, _ in
+            if let write = write as? ColorWrite {
+                applyActiveColorWrite(model: model, write: write)
+            }
             return nil
         },
         // Mirror a YAML `set: { active_tool }` write (tool-alternates

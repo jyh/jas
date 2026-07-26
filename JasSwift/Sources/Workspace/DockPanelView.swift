@@ -221,7 +221,16 @@ public struct PanelGroupView: View {
     /// resolves here. When no model is present (unit tests) falls
     /// back to fresh yaml defaults.
     private func buildPanelCtx(ws: WorkspaceData, contentId: String) -> [String: Any] {
-        var stateMap = ws.stateDefaults()
+        // The `state` scope is the workspace defaults with the LIVE app-level
+        // facts overlaid — the active fill / stroke colour (with an explicit
+        // null for "none") and which of the two is on top. Every panel gets
+        // them, exactly as the Rust dock's `build_live_state_map` does: the
+        // Color panel's `disabled` / `enabled_when` guards are the loudest
+        // readers, but any panel may test `state.fill_color`. Before this the
+        // scope was the static defaults alone, so `state.fill_color` was
+        // always `"#ffffff"` and `state.fill_color == null` could never be
+        // true no matter what the user had chosen (CPTRIAGE).
+        var stateMap = buildLiveStateMap(ws: ws, model: model)
         let icons = ws.icons()
         let swatchLibs = ws.swatchLibraries()
         var panelMap: [String: Any]

@@ -514,10 +514,8 @@ private let blue = Color(r: 0, g: 0, b: 1)
 // must behave exactly like the Color panel's own commit.
 @Test func yamlStrokeColorWriteKeepsEveryOtherAttribute() {
     let model = strokeModel(richStroke())
-    let store = model.stateStore
-    store.set("fill_on_top", false)
-    store.set("stroke_color", "#0000ff")
-    applyActiveColorFromStore(store: store, model: model)
+    applyActiveColorWrite(
+        model: model, write: ColorWrite(key: "stroke_color", value: "#0000ff"))
     let s = strokeAt(model, 0)
     #expect(s.color == blue)
     #expect(s.width == 5.0, "5pt line must STAY 5pt")
@@ -534,10 +532,8 @@ private let blue = Color(r: 0, g: 0, b: 1)
         layers: [Layer(children: [rect])],
         selectedLayer: 0,
         selection: [ElementSelection(path: [0, 0])]))
-    let store = model.stateStore
-    store.set("fill_on_top", true)
-    store.set("fill_color", "#0000ff")
-    applyActiveColorFromStore(store: store, model: model)
+    applyActiveColorWrite(
+        model: model, write: ColorWrite(key: "fill_color", value: "#0000ff"))
     let f = model.document.getElement([0, 0]).fill
     #expect(f?.color == blue)
     #expect(f?.opacity == 0.25)

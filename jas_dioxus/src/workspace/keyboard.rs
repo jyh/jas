@@ -33,6 +33,63 @@ fn event_targets_input(evt: &Event<KeyboardData>) -> bool {
     false
 }
 
+/// The DOM id of the root wrapper div that carries `onkeydown` / `onkeyup`
+/// (see `app.rs`). It is the app's primary keyboard surface: it holds
+/// `tabindex="0"`, and clicking the canvas — or any non-focusable chrome —
+/// moves focus here, because the browser focuses the nearest focusable
+/// ancestor.
+pub(crate) const APP_ROOT_ID: &str = "jas-app-root";
+
+/// The DOM id of the drawing canvas (see `app.rs`). It carries no `tabindex`
+/// today, so it cannot itself be the active element; it is named here so the
+/// app's keyboard surfaces are stated by INTENT rather than left to depend on
+/// that fact staying true.
+pub(crate) const CANVAS_ID: &str = "jas-canvas";
+
+/// Pure half of [`focus_on_app_surface`]: given the focused element's tag name
+/// and id, is that one of the app's OWN keyboard surfaces — an element with no
+/// native action of its own for the keys this handler claims?
+///
+/// An ALLOWLIST of two named surfaces, deliberately, rather than a blocklist of
+/// the elements that DO own a key: a blocklist has to enumerate `<button>`,
+/// `<a href>`, `<summary>`, `contenteditable`, `<input>`/`<textarea>`/`<select>`
+/// … and silently steals the key from whatever it forgets. The allowlist can
+/// only ever be too conservative, which costs a browser default the app did not
+/// need — never a widget's own behavior.
+// The wasm focus read below is the only production caller and it is compiled
+// out on the host, so a host build sees this as dead outside its tests.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+fn is_app_key_surface(tag: &str, id: &str) -> bool {
+    if id == APP_ROOT_ID || id == CANVAS_ID {
+        return true;
+    }
+    // Nothing focused: focus sits at the document default, where no element
+    // owns a default action, so there is none to take away.
+    matches!(tag.to_ascii_uppercase().as_str(), "BODY" | "HTML")
+}
+
+/// Does focus rest on one of the app's own keyboard surfaces?
+///
+/// The guard on suppressing a key's browser default: the default action of a
+/// key belongs to whatever element has focus, so the app may claim it only
+/// where the focused element has no default action of its own. See
+/// [`is_app_key_surface`] for why this is an allowlist.
+fn focus_on_app_surface() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(doc) = web_sys::window().and_then(|w| w.document()) {
+            return match doc.active_element() {
+                Some(el) => is_app_key_surface(&el.tag_name(), &el.id()),
+                // No active element at all — as with body focus, nothing owns
+                // the key.
+                None => true,
+            };
+        }
+    }
+    // Native builds have no browser default action to suppress.
+    false
+}
+
 /// Check if any specific element currently holds focus (i.e. not just
 /// the document body fallback). The app-wide Tab handler uses this to
 /// decide whether to call preventDefault — if a real element has
@@ -82,6 +139,45 @@ pub(crate) fn make_keydown_handler(
         // (Cmd+Z, Cmd+C, …) still pass through to the app handler.
         if event_targets_input(&evt) && !cmd {
             return;
+        }
+
+        // Enter and Escape are keys this app acts on: below, both commit or
+        // cancel the active tool's session, and Escape steps out of mask
+        // isolation / mask editing. The other keys this handler claims also
+        // suppress the browser's default action — the Cmd chords, Tab
+        // panel-cycling, every key the text-session path just below consumes —
+        // while these two did not. Suppress it here too, so a key the app
+        // handles is consistently a key the browser does not also act on.
+        //
+        // BUT ONLY ON THE APP'S OWN KEYBOARD SURFACE, and that gate is the
+        // load-bearing part. The default action of a key belongs to whatever
+        // element has focus, so the app may claim it only where the focused
+        // element has no default action of its own. Both halves of that law
+        // were MEASURED on this app, not assumed:
+        //
+        //   * a focused <button> — a dialog's OK, a dialog's close X, a
+        //     pane Restore button (app.rs) — is activated by Enter NATIVELY.
+        //     (Document tabs are non-focusable divs, so they are not in this
+        //     set.) Suppressing
+        //     the default while one has focus fires no click at all: File ▸
+        //     Document Setup with OK focused reported defaultPrevented=true,
+        //     zero click events, and the dialog would not close from the
+        //     keyboard. (`scripts/gui_checks.py::button_enter_activates` pins
+        //     exactly this, and `--regress enter_default_stolen` re-injects the
+        //     over-broad claim.)
+        //   * a focused field commits through its `change` event, and in Chrome
+        //     that event is part of the DEFAULT ACTION of the Enter keypress:
+        //     with the default prevented, a length input keeps the raw text "3"
+        //     and no `change` ever fires, where an untouched Enter commits and
+        //     the field redisplays "3 pt".
+        //
+        // The gate covers both, and covers the Cmd/Ctrl+Enter field chords that
+        // KEYBOARD_SHORTCUTS.md §Transform panel specifies (Shift/Alt/Ctrl +
+        // Enter apply a value with the field focused) — those skip the
+        // input-focus return above, because it exempts `!cmd` only, and reach
+        // here with a field focused, where the gate declines.
+        if matches!(key, Key::Enter | Key::Escape) && focus_on_app_surface() {
+            evt.prevent_default();
         }
 
         // If the active tool is in a text-editing session, route the
@@ -642,5 +738,57 @@ pub(crate) fn make_keyup_handler(
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The allowlist's two members, and the reason each is on it.
+    #[test]
+    fn the_root_wrapper_and_the_canvas_are_app_surfaces() {
+        assert!(is_app_key_surface("DIV", APP_ROOT_ID));
+        assert!(is_app_key_surface("CANVAS", CANVAS_ID));
+    }
+
+    #[test]
+    fn no_focused_element_is_an_app_surface() {
+        // Body / HTML is where focus sits before anything claims it; no
+        // element owns a default action there, so there is none to take.
+        assert!(is_app_key_surface("BODY", ""));
+        assert!(is_app_key_surface("HTML", ""));
+        assert!(is_app_key_surface("body", ""));   // tag case is normalized
+    }
+
+    // THE REGRESSION PIN. A focused <button> activates on Enter natively —
+    // that is how the keyboard clicks a dialog's OK, a dialog's close X, a
+    // native button (e.g. the pane Restore button). NOT an app surface, so the
+    // handler must leave
+    // Enter's default alone while it has focus.
+    #[test]
+    fn a_focused_button_is_not_an_app_surface() {
+        assert!(!is_app_key_surface("BUTTON", ""));          // dialog OK/Cancel
+        assert!(!is_app_key_surface("BUTTON", "pane_restore")); // a native button
+        assert!(!is_app_key_surface("A", "help_link"));      // links activate too
+        assert!(!is_app_key_surface("SUMMARY", ""));         // and <details>
+    }
+
+    #[test]
+    fn focused_fields_are_not_app_surfaces() {
+        // The same law that keeps a field's commit-on-Enter working: Chrome
+        // delivers the field's `change` as part of Enter's default action.
+        assert!(!is_app_key_surface("INPUT", "stk_weight"));
+        assert!(!is_app_key_surface("TEXTAREA", ""));
+        assert!(!is_app_key_surface("SELECT", "stk_end_arrowhead"));
+    }
+
+    #[test]
+    fn a_focusable_panel_div_is_not_an_app_surface() {
+        // Icon-buttons are focusable divs that synthesize their own click.
+        // They are not on the allowlist: only the two named surfaces are, so
+        // a widget kind added later cannot silently lose its own key handling.
+        assert!(!is_app_key_surface("DIV", "stk_link_arrowhead_scale"));
+        assert!(!is_app_key_surface("DIV", ""));
     }
 }

@@ -23,11 +23,14 @@
 //! # Pipeline
 //!
 //!   1. Collect all line segments from all input polylines.
-//!   2. Find every segment-segment intersection (naive O(n²) for
-//!      now; Bentley-Ottmann later if profiling demands it).
+//!   2. Split every segment at every arrangement-relevant meeting
+//!      with every other segment — proper crossings, T-junctions and
+//!      collinear-overlap ends alike — via
+//!      [`crate::algorithms::arrangement::split_points`] (naive O(n²)
+//!      for now; Bentley-Ottmann later if profiling demands it).
 //!   3. Snap nearby intersection points and shared endpoints into
-//!      single vertices, using the same epsilon strategy as
-//!      [`crate::algorithms::boolean_normalize`].
+//!      single vertices, using the epsilon policy documented in
+//!      [`crate::algorithms::arrangement`].
 //!   4. **Prune** vertices of degree 1 iteratively. Any edge with a
 //!      degree-1 endpoint can't bound a face, so it (and any pendant
 //!      tree it belongs to) is removed before topology construction.
@@ -39,17 +42,25 @@
 //!      bounded face's parent is the smallest enclosing face. Even
 //!      depth = outer region; odd depth = hole inside its parent.
 //!
+//! # Degenerate input
+//!
+//! Handled, each pinned by a unit test with a hand-derived expected
+//! answer (see the tests at the bottom of this file):
+//!
+//!   - **T-junctions** — a polyline vertex landing in the interior of
+//!     another polyline's edge. Step 2 splits the edge there, so the
+//!     junction becomes a real degree-3 vertex.
+//!   - **Collinear overlap** — two polylines retracing the same span.
+//!     Step 2 splits both at the overlap ends; step 5's undirected
+//!     edge set then fuses the doubled span into one edge.
+//!
 //! # Deferred / not yet handled
 //!
 //!   - Bézier curves (caller flattens to polylines first).
-//!   - T-junctions where one polyline's interior passes exactly
-//!     through another polyline's vertex. Same limitation as
-//!     `boolean_normalize`; documented as `#[ignore]` tests.
-//!   - Collinear segment overlap (two polylines retracing the same
-//!     line). Same.
 //!   - Incremental rebuild on stroke add/remove. Full rebuild only.
 //!   - Spatial acceleration (R-tree / BVH) for hit testing.
 
+use crate::algorithms::arrangement::{add_or_find_vertex, dist, split_points, VERT_EPS};
 use std::collections::BTreeSet;
 
 // ---------------------------------------------------------------------------
@@ -179,16 +190,20 @@ impl PlanarGraph {
             seg_params[si].push((1.0, vb));
         }
 
-        // ----- 4. Naive O(n²) proper-interior intersection -----
-        // Same epsilon strategy as boolean_normalize: strict (0,1)
-        // for both parameters. Endpoint coincidences are already
-        // captured by step 2-3's vertex snap.
+        // ----- 4. Naive O(n²) pairwise splitting -----
+        // [`split_points`] reports every arrangement-relevant meeting
+        // of two segments: proper interior crossings, T-junctions (an
+        // endpoint of one lying in the interior of the other),
+        // endpoint coincidences, and — for collinear pairs — the two
+        // ends of the overlap span. Splitting at all of them is what
+        // makes the arrangement *conforming*: after this step no
+        // segment's interior contains another segment's vertex, and
+        // no two segments overlap over a span.
         for i in 0..segments.len() {
             for j in (i + 1)..segments.len() {
                 let (a1, a2) = segments[i];
                 let (b1, b2) = segments[j];
-                if let Some((p, s, t)) = intersect_proper(a1, a2, b1, b2)
-                {
+                for (p, s, t) in split_points(a1, a2, b1, b2) {
                     let v = add_or_find_vertex(&mut vert_pts, p);
                     seg_params[i].push((s, v));
                     seg_params[j].push((t, v));
@@ -592,70 +607,6 @@ impl PlanarGraph {
 // Numerical helpers
 // ---------------------------------------------------------------------------
 
-/// Vertex coincidence and zero-length tolerance, in input units.
-const VERT_EPS: f64 = 1e-9;
-
-/// Parameter-band epsilon for [`intersect_proper`]; matches
-/// [`crate::algorithms::boolean_normalize`].
-const PARAM_EPS: f64 = 1e-9;
-
-/// Determinant tolerance for parallel-segment rejection in
-/// [`intersect_proper`]; matches `boolean_normalize`.
-const DENOM_EPS: f64 = 1e-12;
-
-fn dist(a: Point, b: Point) -> f64 {
-    let dx = a.0 - b.0;
-    let dy = a.1 - b.1;
-    (dx * dx + dy * dy).sqrt()
-}
-
-/// Linear-search vertex dedup: return the index of an existing
-/// vertex within [`VERT_EPS`] of `pt`, or insert and return a new
-/// index.
-fn add_or_find_vertex(verts: &mut Vec<Point>, pt: Point) -> usize {
-    for (i, v) in verts.iter().enumerate() {
-        if dist(*v, pt) < VERT_EPS {
-            return i;
-        }
-    }
-    verts.push(pt);
-    verts.len() - 1
-}
-
-/// Parametric line-line intersection requiring a strictly interior
-/// crossing on both segments. Mirrors
-/// `boolean_normalize::segment_proper_intersection`.
-///
-/// Returns `(point, s, t)` where `s` is the parameter on the first
-/// segment and `t` is the parameter on the second.
-fn intersect_proper(
-    a1: Point,
-    a2: Point,
-    b1: Point,
-    b2: Point,
-) -> Option<(Point, f64, f64)> {
-    let dxa = a2.0 - a1.0;
-    let dya = a2.1 - a1.1;
-    let dxb = b2.0 - b1.0;
-    let dyb = b2.1 - b1.1;
-    let denom = dxa * dyb - dya * dxb;
-    if denom.abs() < DENOM_EPS {
-        return None;
-    }
-    let dxab = a1.0 - b1.0;
-    let dyab = a1.1 - b1.1;
-    let s = (dxb * dyab - dyb * dxab) / denom;
-    let t = (dxa * dyab - dya * dxab) / denom;
-    if s <= PARAM_EPS
-        || s >= 1.0 - PARAM_EPS
-        || t <= PARAM_EPS
-        || t >= 1.0 - PARAM_EPS
-    {
-        return None;
-    }
-    Some(((a1.0 + s * dxa, a1.1 + s * dya), s, t))
-}
-
 /// Winding number of a polygon around a point. Half-open rule on
 /// the upward/downward edge classification avoids double-counting
 /// when the test ray passes exactly through a polygon vertex.
@@ -837,20 +788,90 @@ mod tests {
         assert!((total_top_level_area(&g) - 200.0).abs() < AREA_EPS);
     }
 
-    // ----- 7. T-junction (deferred) -----
+    // ----- 7. T-junctions -----
 
     #[test]
-    #[ignore = "T-junctions where one polyline's vertex lands on another's interior not yet supported"]
     fn t_junction_creates_vertex() {
         // A horizontal segment from (0,0) to (10,0), and a vertical
         // segment from (5,0) to (5,5). The vertical's endpoint sits
         // exactly on the horizontal's interior. Both are open
         // polylines, so the whole thing should prune to nothing.
+        //
+        // Derivation: the T-vertex at (5,0) raises that point to
+        // degree 3, but (0,0), (10,0) and (5,5) are all degree 1.
+        // The iterative degree-1 prune eats (0,0)-(5,0), (5,0)-(10,0)
+        // and (5,0)-(5,5) in turn, leaving nothing. Zero faces either
+        // way — this case pins that splitting at the T does not
+        // *invent* a face. The T-split's observable consequences are
+        // pinned by the two chord tests below.
         let g = PlanarGraph::build(&[
             segment((0.0, 0.0), (10.0, 0.0)),
             segment((5.0, 0.0), (5.0, 5.0)),
         ]);
         assert_eq!(g.face_count(), 0);
+    }
+
+    #[test]
+    fn t_junction_chord_splits_square_into_two_halves() {
+        // A closed 10x10 square plus an open chord from (0,5) to
+        // (10,5). BOTH chord endpoints are T-junctions: (0,5) lies in
+        // the interior of the square's left edge (0,10)-(0,0), and
+        // (10,5) lies in the interior of its right edge (10,0)-(10,10).
+        //
+        // Derivation. Splitting both side edges at y=5 gives the
+        // vertex set {(0,0),(10,0),(10,5),(10,10),(0,10),(0,5)} with
+        // (0,5) and (10,5) at degree 3 and every other vertex at
+        // degree 2 — nothing prunes. The chord cuts the square into
+        // two 10-wide, 5-tall rectangles, so:
+        //   face_count = 2, each of area 10*5 = 50, total 100.
+        // Without the T-split the chord's endpoints are isolated
+        // degree-1 vertices, the chord prunes away, and the square
+        // survives as a single face of area 100.
+        let g = PlanarGraph::build(&[
+            closed_square(0.0, 0.0, 10.0),
+            segment((0.0, 5.0), (10.0, 5.0)),
+        ]);
+        assert_eq!(g.face_count(), 2);
+        let top = g.top_level_faces();
+        assert_eq!(top.len(), 2);
+        for f in &top {
+            assert!(
+                (g.face_net_area(*f).abs() - 50.0).abs() < AREA_EPS,
+                "expected each half to have area 50, got {}",
+                g.face_net_area(*f)
+            );
+        }
+        assert!((total_top_level_area(&g) - 100.0).abs() < AREA_EPS);
+    }
+
+    #[test]
+    fn t_junction_corner_to_edge_chord_splits_25_75() {
+        // Closed 10x10 square plus a chord from the corner (0,0) to
+        // (10,5). The chord's tail coincides with an existing square
+        // vertex (plain vertex snap); its head is a T-junction on the
+        // interior of the right edge.
+        //
+        // Derivation. The chord cuts off the triangle
+        // (0,0)-(10,0)-(10,5): area = 1/2 * base 10 * height 5 = 25.
+        // The remainder is the quadrilateral
+        // (0,0)-(10,5)-(10,10)-(0,10), area 100 - 25 = 75. Shoelace
+        // check on the quad: 0*5-10*0 + 10*10-10*5 + 10*10-0*10
+        // + 0*0-0*10 = 0 + 50 + 100 + 0 = 150, half = 75. So
+        //   face_count = 2 with areas {25, 75}, total 100.
+        let g = PlanarGraph::build(&[
+            closed_square(0.0, 0.0, 10.0),
+            segment((0.0, 0.0), (10.0, 5.0)),
+        ]);
+        assert_eq!(g.face_count(), 2);
+        let mut areas: Vec<f64> = g
+            .top_level_faces()
+            .into_iter()
+            .map(|f| g.face_net_area(f).abs())
+            .collect();
+        areas.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(areas.len(), 2);
+        assert!((areas[0] - 25.0).abs() < AREA_EPS, "areas: {:?}", areas);
+        assert!((areas[1] - 75.0).abs() < AREA_EPS, "areas: {:?}", areas);
     }
 
     // ----- 8. Concentric squares (containment / holes) -----
@@ -1062,14 +1083,82 @@ mod tests {
         assert_eq!(g.faces[hole_hit.0].parent, Some(outer_hit));
     }
 
-    // ----- Deferred / known limitations -----
+    // ----- 18. Collinear overlap -----
 
     #[test]
-    #[ignore = "collinear self-overlap not yet supported (mirrors boolean_normalize)"]
     fn collinear_overlap() {
-        // Two polylines that share part of an edge in the same
-        // direction. Not yet handled.
+        // A closed 10x10 square plus a closed rectangle [2,8]x[0,5]
+        // whose bottom edge lies *along* the square's bottom edge:
+        // the span y=0, x in [2,8] is traced twice, once by each
+        // polyline.
+        //
+        // Derivation. Splitting the square's bottom edge at x=2 and
+        // x=8 makes the doubled span a single shared atomic edge
+        // (0,0)-(2,0), (2,0)-(8,0), (8,0)-(10,0). The arrangement then
+        // has two bounded faces that *share* that span, neither
+        // containing the other:
+        //   - the inner rectangle, area 6*5 = 30;
+        //   - the square minus the rectangle, area 100 - 30 = 70.
+        // Shoelace check on the notched octagon
+        // (0,0),(2,0),(2,5),(8,5),(8,0),(10,0),(10,10),(0,10):
+        //   0 + 10 - 30 - 40 + 0 + 100 + 100 + 0 = 140, half = 70.
+        // So face_count = 2, BOTH top-level (depth 1), total area 100.
+        //
+        // Without collinear splitting the two polylines stay separate
+        // components: the rectangle is mis-classified as a *hole* of
+        // the square (one top-level face of net area 70), which is
+        // wrong — the two regions are adjacent, not nested.
+        let g = PlanarGraph::build(&[
+            closed_square(0.0, 0.0, 10.0),
+            vec![
+                (2.0, 0.0),
+                (8.0, 0.0),
+                (8.0, 5.0),
+                (2.0, 5.0),
+                (2.0, 0.0),
+            ],
+        ]);
+        assert_eq!(g.face_count(), 2);
+        let top = g.top_level_faces();
+        assert_eq!(top.len(), 2, "both regions are top-level, not nested");
+        for f in &top {
+            assert_eq!(g.faces[f.0].holes.len(), 0, "neither region has a hole");
+        }
+        let mut areas: Vec<f64> =
+            top.iter().map(|&f| g.face_net_area(f).abs()).collect();
+        areas.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert!((areas[0] - 30.0).abs() < AREA_EPS, "areas: {:?}", areas);
+        assert!((areas[1] - 70.0).abs() < AREA_EPS, "areas: {:?}", areas);
+        assert!((total_top_level_area(&g) - 100.0).abs() < AREA_EPS);
     }
+
+    #[test]
+    fn collinear_partial_overlap_of_two_squares_keeps_two_faces() {
+        // Square A = [0,10]x[0,10]; square B = [10,20]x[3,13]. Their
+        // boundaries share the collinear span x=10, y in [3,10] — a
+        // *partial* edge overlap (B's left edge runs y=13 down to y=3,
+        // A's right edge y=0 up to y=10).
+        //
+        // Derivation: the two squares meet along a segment but their
+        // interiors are disjoint (A is x<=10, B is x>=10), so the
+        // bounded faces are exactly A and B: face_count = 2, areas
+        // 100 and 100, both top-level. Splitting the shared span at
+        // y=3 and y=10 is what makes them one connected arrangement
+        // rather than two overlapping components; the areas are the
+        // same either way, so this case pins that the split does not
+        // *change* the answer for touching-but-not-overlapping input.
+        let g = PlanarGraph::build(&[
+            closed_square(0.0, 0.0, 10.0),
+            closed_square(10.0, 3.0, 10.0),
+        ]);
+        assert_eq!(g.face_count(), 2);
+        assert_eq!(g.top_level_faces().len(), 2);
+        for f in g.top_level_faces() {
+            assert!((g.face_net_area(f).abs() - 100.0).abs() < AREA_EPS);
+        }
+    }
+
+    // ----- Deferred / known limitations -----
 
     #[test]
     #[ignore = "incremental rebuild not yet supported"]

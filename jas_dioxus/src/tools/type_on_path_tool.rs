@@ -13,6 +13,7 @@
 
 use web_sys::CanvasRenderingContext2d;
 
+use crate::canvas::ctx_guard::CtxSaveGuard;
 use crate::document::controller::Controller;
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
@@ -763,18 +764,21 @@ impl CanvasTool for TypeOnPathTool {
             ctx.set_fill_style_str(&sel_color);
             for g in &lay.glyphs {
                 if g.idx < lo || g.idx >= hi { continue; }
-                ctx.save();
+                // Per-glyph frame, RAII-scoped to this loop iteration (the
+                // `continue` above sits BEFORE the save, so the guarded span
+                // is exactly the former save/restore span).
+                let _ctx_guard = CtxSaveGuard::new(ctx);
                 ctx.translate(g.cx, g.cy).ok();
                 ctx.rotate(g.angle).ok();
                 ctx.fill_rect(-g.width / 2.0, -tp.font_size * 0.8, g.width, tp.font_size);
-                ctx.restore();
             }
         }
 
         // Caret.
         if cursor_visible(session.blink_epoch_ms)
             && let Some((cx, cy, angle)) = lay.cursor_pos(session.insertion) {
-                ctx.save();
+                // The caret's rotated frame pops at the end of this branch.
+                let _ctx_guard = CtxSaveGuard::new(ctx);
                 ctx.translate(cx, cy).ok();
                 ctx.rotate(angle).ok();
                 ctx.set_stroke_style_str(&caret_color);
@@ -783,7 +787,6 @@ impl CanvasTool for TypeOnPathTool {
                 ctx.move_to(0.0, -tp.font_size * 0.8);
                 ctx.line_to(0.0, tp.font_size * 0.2);
                 ctx.stroke();
-                ctx.restore();
             }
     }
 }

@@ -44,6 +44,29 @@ ALGORITHMS = {
 # Known per-language algorithm exclusions (pre-existing bugs to fix separately)
 SKIP_LANG_ALGO = set()
 
+# Strategies whose fixtures pin a SUBSET of the emitted result keys, and so
+# get the key-by-key oracle pass instead of the whole-object one. See the
+# comment at that pass for why these families need an oracle at all.
+ORACLE_PARTIAL_STRATEGIES = ("property_planar", "exact_boolean")
+
+# The oracle holdout is PER GOLDEN KEY OF ONE VECTOR, never per strategy.
+# Keying it by strategy — as an earlier revision did — silently disarms a
+# whole family: `boolean` and `boolean_normalize` share the "exact_boolean"
+# strategy, so holding the strategy out to tolerate ONE gap key in
+# boolean.json also left all 42 of boolean_normalize.json's hand-derived
+# golden checks unrun, with nothing in the output saying so.
+#
+# A vector declares a holdout with BOTH keys below: `_known_gap` (prose:
+# what the ports emit instead, why, and what unblocks the fix) and
+# `_known_gap_keys` (the exact `expected` keys held out). Every other key
+# of that same vector, and every other vector of that fixture, stays
+# gated. The pair is self-policing — a listed key that is absent from
+# `expected`, or that the reference app now REPRODUCES, is reported as a
+# failure telling you to delete the holdout. So a closed gap cannot sit
+# around pretending to still be open.
+KNOWN_GAP_KEY = "_known_gap"
+KNOWN_GAP_KEYS_KEY = "_known_gap_keys"
+
 
 # ---------------------------------------------------------------
 # Language runners
@@ -293,8 +316,10 @@ def main():
         # four and stays green. Where a fixture pins a golden (`expected` per
         # case, or `translations` per align vector), also assert the reference
         # app reproduces it. Restricted to the simple tolerance/exact
-        # strategies; the boolean/planar/shape strategies carry differently
-        # shaped goldens compared by their own logic.
+        # strategies; the shape strategy carries a differently shaped golden
+        # compared by its own logic, and the strategies listed in
+        # ORACLE_PARTIAL_STRATEGIES (today: property_planar and
+        # exact_boolean) get the partial-golden pass immediately below.
         has_name_wrapper = (
             len(ref_output) == 0
             or (isinstance(ref_output[0], dict) and "name" in ref_output[0])
@@ -330,6 +355,71 @@ def main():
                         print(f"    expected: {json.dumps(golden, sort_keys=True)[:200]}")
                         print(f"    {ref_lang}:   {json.dumps(body, sort_keys=True)[:200]}")
                     failed += 1
+
+        # Partial-golden oracle for the strategies in
+        # ORACLE_PARTIAL_STRATEGIES. Their `expected` blocks pin a SUBSET of
+        # the emitted result keys (area / ring_count / all_rings_simple /
+        # face_count / face_areas_sorted / sample_points), so compare key by
+        # key rather than whole-object. This matters most for the degenerate-
+        # geometry vectors: T-junctions, collinear overlap, retrograde loops
+        # and inter-ring cancellation are SHARED limitations, so an
+        # app-vs-app comparison is blind to them — wrong-vs-wrong compares
+        # green. Only a pinned, hand-derived expectation catches that.
+        if strategy in ORACLE_PARTIAL_STRATEGIES:
+            with open(fixture_path) as fh:
+                fixture_cases = json.load(fh).get("vectors", [])
+            gold_tol = tol if tol is not None else 1e-6
+            for idx, out_vec in enumerate(ref_output):
+                if idx >= len(fixture_cases):
+                    break
+                case = fixture_cases[idx]
+                golden = case.get("expected")
+                if not isinstance(golden, dict):
+                    continue
+                body = out_vec["result"] if has_name_wrapper else out_vec
+                name = case.get("name", f"#{idx}")
+                gap_keys = case.get(KNOWN_GAP_KEYS_KEY) or []
+                if case.get(KNOWN_GAP_KEY) and not gap_keys:
+                    print(f"  FAIL: {algo}/{name} [has {KNOWN_GAP_KEY} but no "
+                          f"{KNOWN_GAP_KEYS_KEY}: say which keys it holds out]")
+                    failed += 1
+                for key, want in golden.items():
+                    if key in gap_keys:
+                        # A documented derived-correct golden the ports do
+                        # not reproduce yet: announced, never silent, and
+                        # held out alone so its siblings stay gated. If the
+                        # port now MATCHES, the gap is closed and the
+                        # holdout must go — that is a failure, not a pass.
+                        if key in body and values_close(want, body[key], gold_tol):
+                            print(f"  FAIL: {algo}/{name}.{key} [held out as a "
+                                  f"known gap but {ref_lang} now reproduces it: "
+                                  f"delete the {KNOWN_GAP_KEY} holdout]")
+                            failed += 1
+                        else:
+                            print(f"  KNOWN-GAP: {algo}/{name}.{key} "
+                                  f"[oracle held out, see {KNOWN_GAP_KEY} in "
+                                  f"{algo}.json]")
+                        continue
+                    if key not in body:
+                        print(f"  FAIL: {algo}/{name} [oracle: {ref_lang} "
+                              f"emits no '{key}']")
+                        failed += 1
+                        continue
+                    if values_close(want, body[key], gold_tol):
+                        passed += 1
+                    else:
+                        print(f"  FAIL: {algo}/{name}.{key} "
+                              f"[oracle: {ref_lang} vs pinned expected]")
+                        if args.verbose:
+                            print(f"    expected: {json.dumps(want)[:200]}")
+                            print(f"    {ref_lang}:   {json.dumps(body[key])[:200]}")
+                        failed += 1
+                for key in gap_keys:
+                    if key not in golden:
+                        print(f"  FAIL: {algo}/{name} [{KNOWN_GAP_KEYS_KEY} "
+                              f"names '{key}', which is not in expected: "
+                              f"a stale holdout]")
+                        failed += 1
 
         # Run each comparison language
         for lang in compare_langs:

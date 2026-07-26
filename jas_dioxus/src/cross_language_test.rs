@@ -1110,6 +1110,12 @@ mod tests {
         // invokes (see run_action_model). Mirrors the Python
         // _MENU_NATIVE_HANDLERS intercept.
         "menu_object_ops.json",
+        // CPTRIAGE: the fill_stroke None verbs. The FIRST cases to carry an
+        // `expected_panel_state` block — the document golden alone cannot see
+        // the defect these were written for (a None that the panel-render
+        // state reader never republished, so the Color panel's guards kept
+        // reading the old colour). See `assert_action_panel_state`.
+        "fill_stroke_none.json",
     ];
 
     /// Run an action fixture and return the resulting `AppState`.
@@ -1132,15 +1138,70 @@ mod tests {
         document_to_test_json(st.tabs[st.active_tab].model.document())
     }
 
+    /// OPTIONAL second assertion: `expected_panel_state`.
+    ///
+    /// The document is not the only thing an action moves. A `fill_stroke`
+    /// verb writes an APP-LEVEL fact, and every panel that reads it back
+    /// does so through the port's panel-render state reader — Rust's
+    /// `build_live_state_map`, Swift's `buildLiveStateMap`. Those readers
+    /// are native per-port code that no document golden touches, and they
+    /// drifted: `set_fill_none` cleared the fill in both ports while the
+    /// Rust reader kept publishing the workspace default `#ffffff`
+    /// (CPTRIAGE), so `color.yaml`'s fifteen slider `disabled` guards, the
+    /// hex field, the colour bar and Invert / Complement all read a colour
+    /// that was no longer there and NOTHING a user could see moved.
+    ///
+    /// So a case may pin the state scope the panels actually render
+    /// against. The block is a SUBSET assertion — name only the keys under
+    /// test — and `null` is a real expectation, not "absent": publishing
+    /// Null is the whole point, because the map starts from the workspace
+    /// defaults and an omitted key leaves the default standing.
+    ///
+    /// Cases without the block are unaffected. Mirrors Swift's
+    /// `assertActionPanelState`.
+    fn assert_action_panel_state(
+        tc: &serde_json::Value, st: &crate::workspace::app_state::AppState,
+    ) {
+        let Some(expected) = tc.get("expected_panel_state").and_then(|v| v.as_object())
+        else { return };
+        let name = tc["name"].as_str().unwrap();
+        let live = crate::workspace::dock_panel::build_live_state_map(st);
+        for (key, want) in expected {
+            // ABSENT is not NULL, and the docstring above says so: the reader
+            // must PUBLISH the key. Asserting presence separately is what lets
+            // a `null` expectation catch the regression it was written for — a
+            // port that stops seeding / overlaying and omits the key instead.
+            // Coalescing the two would read that omission as a published null.
+            assert!(
+                live.contains_key(key),
+                "Action test '{}': the panel-render state map has no key {:?} \
+                 at all. The corpus pins its VALUE, so the key must be \
+                 published — an absent key leaves whatever the caller had \
+                 (here the workspace default) standing.",
+                name, key,
+            );
+            let got = &live[key];
+            assert_eq!(
+                got, want,
+                "Action test '{}': panel-render state.{} is {} but the corpus \
+                 pins {}. The panels read this map, so a wrong value here is a \
+                 control that renders against a fact the action already changed.",
+                name, key, got, want,
+            );
+        }
+    }
+
     /// Mirror of `assert_gesture_test`: replay the action sequence and
     /// compare the canonical document JSON against the pinned golden,
-    /// dumping EXPECTED/ACTUAL on mismatch.
+    /// dumping EXPECTED/ACTUAL on mismatch. Then apply the case's optional
+    /// `expected_panel_state` block.
     fn assert_action_test(tc: &serde_json::Value) {
         let name = tc["name"].as_str().unwrap();
         let expected_file = tc["expected_json"].as_str().unwrap();
         let expected = read_fixture(&format!("actions/{}", expected_file));
         let expected = expected.trim();
-        let actual = run_action_test(tc);
+        let st = run_action_model(tc);
+        let actual = document_to_test_json(st.tabs[st.active_tab].model.document());
 
         if actual != expected {
             eprintln!("=== EXPECTED ({}) ===", name);
@@ -1149,6 +1210,7 @@ mod tests {
             eprintln!("{}", actual);
             panic!("Action test '{}' failed: canonical JSON mismatch", name);
         }
+        assert_action_panel_state(tc, &st);
     }
 
     #[test]
@@ -4380,6 +4442,227 @@ mod tests {
             ran += 1;
         }
         assert!(ran >= 25, "stroke_apply corpus ran only {} vectors", ran);
+    }
+
+    // ── CHARPANEL: the field-scoped Character-panel apply law ──────
+    //
+    // Runs test_fixtures/character_apply/panel_edit.json — the shared corpus
+    // that pins this law across the three LIVE implementations (the
+    // workspace_interpreter reference, this port, and Swift JasSwift). The
+    // reference states the field -> attribute-group table
+    // (workspace_interpreter/character_law.py); `CharacterEditGroup` mirrors
+    // it.
+    //
+    // A vector's `expected` is a DELTA over its base: the keys it names are
+    // what the edit changed, and every key it omits must come back
+    // unchanged. That is the whole point of the law, so the corpus states it
+    // directly rather than re-listing whole attribute sets.
+
+    /// A fixture attribute map as `CharacterAttrs`. Every key is present in
+    /// the merged map (the corpus's `element_defaults` names all sixteen),
+    /// so no port's element-constructor defaults leak into the corpus.
+    fn character_attrs_from_json(
+        attrs: &serde_json::Value,
+    ) -> crate::workspace::app_state::CharacterAttrs {
+        let s = |k: &str| attrs[k].as_str().unwrap_or("").to_string();
+        crate::workspace::app_state::CharacterAttrs {
+            font_family: s("font_family"),
+            font_size: attrs["font_size"].as_f64().unwrap_or(12.0),
+            font_weight: s("font_weight"),
+            font_style: s("font_style"),
+            text_decoration: s("text_decoration"),
+            text_transform: s("text_transform"),
+            font_variant: s("font_variant"),
+            baseline_shift: s("baseline_shift"),
+            line_height: s("line_height"),
+            letter_spacing: s("letter_spacing"),
+            xml_lang: s("xml_lang"),
+            aa_mode: s("aa_mode"),
+            rotate: s("rotate"),
+            horizontal_scale: s("horizontal_scale"),
+            vertical_scale: s("vertical_scale"),
+            kerning: s("kerning"),
+        }
+    }
+
+    /// A fixture panel map as `CharacterPanelState`. Unlike the Stroke
+    /// corpus there is no panel-vs-global scope question: every Character
+    /// control binds `panel.<field>` only.
+    fn character_panel_from_json(
+        panel: &serde_json::Value,
+    ) -> crate::workspace::app_state::CharacterPanelState {
+        let mut cp = crate::workspace::app_state::CharacterPanelState::default();
+        let s = |k: &str| panel[k].as_str().map(|v| v.to_string());
+        if let Some(v) = s("font_family") { cp.font_family = v; }
+        if let Some(v) = s("style_name") { cp.style_name = v; }
+        if let Some(v) = panel["font_size"].as_f64() { cp.font_size = v; }
+        if let Some(v) = panel["leading"].as_f64() { cp.leading = v; }
+        if let Some(v) = s("kerning") { cp.kerning = v; }
+        if let Some(v) = panel["tracking"].as_f64() { cp.tracking = v; }
+        if let Some(v) = panel["vertical_scale"].as_f64() { cp.vertical_scale = v; }
+        if let Some(v) = panel["horizontal_scale"].as_f64() { cp.horizontal_scale = v; }
+        if let Some(v) = panel["baseline_shift"].as_f64() { cp.baseline_shift = v; }
+        if let Some(v) = panel["character_rotation"].as_f64() { cp.character_rotation = v; }
+        if let Some(v) = panel["all_caps"].as_bool() { cp.all_caps = v; }
+        if let Some(v) = panel["small_caps"].as_bool() { cp.small_caps = v; }
+        if let Some(v) = panel["superscript"].as_bool() { cp.superscript = v; }
+        if let Some(v) = panel["subscript"].as_bool() { cp.subscript = v; }
+        if let Some(v) = panel["underline"].as_bool() { cp.underline = v; }
+        if let Some(v) = panel["strikethrough"].as_bool() { cp.strikethrough = v; }
+        if let Some(v) = s("language") { cp.language = v; }
+        if let Some(v) = s("anti_aliasing") { cp.anti_aliasing = v; }
+        cp
+    }
+
+    #[test]
+    fn character_apply_panel_edit_corpus() {
+        use crate::workspace::app_state::{character_with_group, CharacterEditGroup};
+        let raw = read_fixture("character_apply/panel_edit.json");
+        let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let mut ran = 0usize;
+        for vec in corpus["vectors"].as_array().unwrap() {
+            let name = vec["name"].as_str().unwrap();
+            assert_eq!(vec["op"].as_str().unwrap(), "panel_edit",
+                       "character_apply '{}': unknown op", name);
+            // `base` is a literal attribute delta or the NAME of a shared
+            // one; either way it is a delta over `element_defaults`.
+            let base_delta = match &vec["base"] {
+                serde_json::Value::String(n) => corpus[n.as_str()].clone(),
+                other => other.clone(),
+            };
+            let base_attrs = merged(&corpus["element_defaults"], &base_delta);
+            let base = character_attrs_from_json(&base_attrs);
+            let edited = vec["edited"].as_str().unwrap();
+            let group = CharacterEditGroup::from_field(edited);
+            if vec["expected"].is_null() {
+                assert!(group.is_none(),
+                        "character_apply '{}': '{}' must own no group",
+                        name, edited);
+                ran += 1;
+                continue;
+            }
+            let group = group.unwrap_or_else(|| panic!(
+                "character_apply '{}': '{}' must own a group", name, edited));
+            let cp = character_panel_from_json(
+                &merged(&corpus["panel_defaults"], &vec["panel"]));
+            let got = character_with_group(base, &cp, group);
+            let want = character_attrs_from_json(
+                &merged(&base_attrs, &vec["expected"]));
+            assert_eq!(got, want, "character_apply panel_edit '{}'", name);
+            ran += 1;
+        }
+        assert!(ran >= 40, "character_apply corpus ran only {} vectors", ran);
+    }
+
+    // ── the panel defaults are the WORKSPACE's, machine-checked ─────
+    //
+    // The other two arms already gate this: the reference compares
+    // CHARACTER_PANEL_FIELDS against workspace.json
+    // (test_character_apply.py, TestTheFallbacksAreTheWorkspaceDefaults) and
+    // Swift compares characterPanelDefaults the same way
+    // (CharacterApplyCorpusTests, fallbacksMatchTheWorkspace). This port had
+    // no equivalent check on `CharacterPanelState::default()` — and it had
+    // already drifted: the struct's kerning default was `String::new()` where
+    // the workspace declares "Auto". That was harmless in the APPLY only
+    // because `kerning_attr` maps "" and "Auto" to the same empty attribute,
+    // i.e. precisely the silent drift the other arms' gates exist to catch —
+    // and it was visible in the DISPLAY, where a no-selection panel showed a
+    // blank Kerning combo against the other ports' "Auto".
+    //
+    // `leading` is the one field where this arm's expectation is the INVERSE
+    // of the other two. There the fallback table omits it deliberately —
+    // absence is the sentinel for "no committed leading, take the element's
+    // Auto value". This port's `leading` is a plain `f64` that cannot be
+    // absent, so it must carry the declared 14.4 like any other field, and
+    // the Auto value gets materialised instead (see
+    // `character_panel_post_write` / the nullable-clear path).
+
+    /// `CharacterPanelState::default()` as a field-name -> value map, so the
+    /// struct can be compared against the bundle key by key.
+    ///
+    /// Spelled out field by field on purpose: a field added to the struct
+    /// without a line here fails the key-set assertion below, which is half
+    /// of what the gate is for.
+    fn character_panel_default_map()
+        -> std::collections::BTreeMap<&'static str, serde_json::Value>
+    {
+        use serde_json::json;
+        let d = crate::workspace::app_state::CharacterPanelState::default();
+        let mut m = std::collections::BTreeMap::new();
+        m.insert("font_family", json!(d.font_family));
+        m.insert("style_name", json!(d.style_name));
+        m.insert("font_size", json!(d.font_size));
+        m.insert("leading", json!(d.leading));
+        m.insert("kerning", json!(d.kerning));
+        m.insert("tracking", json!(d.tracking));
+        m.insert("vertical_scale", json!(d.vertical_scale));
+        m.insert("horizontal_scale", json!(d.horizontal_scale));
+        m.insert("baseline_shift", json!(d.baseline_shift));
+        m.insert("character_rotation", json!(d.character_rotation));
+        m.insert("all_caps", json!(d.all_caps));
+        m.insert("small_caps", json!(d.small_caps));
+        m.insert("superscript", json!(d.superscript));
+        m.insert("subscript", json!(d.subscript));
+        m.insert("underline", json!(d.underline));
+        m.insert("strikethrough", json!(d.strikethrough));
+        m.insert("language", json!(d.language));
+        m.insert("anti_aliasing", json!(d.anti_aliasing));
+        m.insert("snap_to_glyph_visible", json!(d.snap_to_glyph_visible));
+        m.insert("snap_baseline", json!(d.snap_baseline));
+        m.insert("snap_x_height", json!(d.snap_x_height));
+        m.insert("snap_glyph_bounds", json!(d.snap_glyph_bounds));
+        m.insert("snap_proximity_guides", json!(d.snap_proximity_guides));
+        m.insert("snap_angular_guides", json!(d.snap_angular_guides));
+        m.insert("snap_anchor_point", json!(d.snap_anchor_point));
+        m
+    }
+
+    /// Two declared defaults are the same value even when the bundle boxed an
+    /// integral default as an integer (`12`) where the struct holds `12.0`.
+    /// Mirrors Swift's `sameWorkspaceValue`.
+    fn same_workspace_value(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+        match (a.as_f64(), b.as_f64()) {
+            (Some(x), Some(y)) if !a.is_boolean() && !b.is_boolean() => x == y,
+            _ => a == b,
+        }
+    }
+
+    #[test]
+    fn character_panel_defaults_match_the_workspace() {
+        let bundle = std::fs::read_to_string("../workspace/workspace.json")
+            .expect("read workspace.json bundle");
+        let ws: serde_json::Value = serde_json::from_str(&bundle)
+            .expect("workspace.json must parse");
+        let state = ws["panels"]["character_panel_content"]["state"]
+            .as_object()
+            .expect("character_panel_content must declare panel state");
+        let declared: std::collections::BTreeMap<String, serde_json::Value> =
+            state.iter().map(|(k, v)| {
+                let d = if v.is_object() {
+                    v.get("default").cloned().unwrap_or(serde_json::Value::Null)
+                } else {
+                    v.clone()
+                };
+                (k.clone(), d)
+            }).collect();
+        let ours = character_panel_default_map();
+
+        // Both directions: a workspace field the struct forgot, and a struct
+        // field the workspace never declared, are both drift.
+        let ours_keys: std::collections::BTreeSet<&str> =
+            ours.keys().copied().collect();
+        let ws_keys: std::collections::BTreeSet<&str> =
+            declared.keys().map(String::as_str).collect();
+        assert_eq!(ours_keys, ws_keys,
+                   "CharacterPanelState fields and the workspace-declared \
+                    character panel state must be the same set");
+
+        for (field, want) in &declared {
+            let got = &ours[field.as_str()];
+            assert!(same_workspace_value(got, want),
+                    "{}: CharacterPanelState::default() has {} but the \
+                     workspace declares {}", field, got, want);
+        }
     }
 
     #[cfg(feature = "web")]

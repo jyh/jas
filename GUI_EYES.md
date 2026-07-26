@@ -92,6 +92,10 @@ Baselines are supported (`--shot-dir`, element-clipped PNGs are ~1 KB) but are
 | `chain_visible` | declared-checked must be *visibly* checked (the pair assertion) |
 | `tile_click_responds` | a declared-clickable tile must actually respond |
 | `behavior_liveness` | the generic sweep — every declared-clickable widget in the DOM must move something |
+| `arrowhead_reflects_scale` | a head's rendered size must match the scale the panel field shows |
+| `brush_promotes_line` | applying a brush to a Line must thicken its ink (the Line→Path promotion) |
+| `canvas_transform_balance` | a brushed repaint must leave the canvas transform exactly where it found it |
+| `button_enter_activates` | a focused native `<button>` must still activate on Enter — the app may claim a key's default action only where the focused element has none of its own |
 
 ### The generic sweep is the one that scales
 
@@ -103,9 +107,11 @@ trusted click and requires a meaningful DOM mutation.
 
 It runs **one pristine app instance per widget**. That is not paranoia: clicking
 widgets serially in a shared instance accumulates document and panel state, and
-during development that accumulation produced a 200-record mutation storm and
-then a wedge — which the sweep then blamed on the *next* widget. Isolation makes
-every verdict attributable.
+during development that accumulation produced a 200-record mutation storm — which
+the sweep then blamed on the *next* widget. Isolation makes every verdict
+attributable. (An unresponsive instance followed that storm; see §Findings 2 —
+that half was never root-caused, and this driver has since been caught
+manufacturing unresponsiveness of its own.)
 
 A `DEAD` verdict is **not self-interpreting**. It can mean "declared clickable
 and never wired" (the bug) or "a correct identity operation in the stock scene"
@@ -145,8 +151,12 @@ and a bare `--regress dead_tile` exited nonzero on a perfectly healthy app.)
 | `invisible_highlight` | `chain_visible` | a stylesheet override neutralises the checked highlight — `data-checked` still flips, nothing paints |
 | `dead_tile` | `tile_click_responds` | strips the clicked swatch's `data-dioxus-id`, so Dioxus's delegated dispatch can no longer resolve the handler: declared, rendered, unwired |
 | `dead_sweep` | `behavior_liveness` | strips `data-dioxus-id` from one in-scope swept widget (`stk_link_arrowhead_scale`) **in the same pristine probe that clicks it**, so the sweep reports exactly that widget `DEAD` |
-| `thin_stroke` | `stroke_width_invariance` | draws the probe stroke at 1pt when the check asked for 5pt |
-| `width_reset` | `stroke_width_invariance` | commits a second Stroke-panel weight edit while an object is selected (on this build a livelock — see §Findings) |
+| `dead_brush_tile` | `brush_promotes_line` | strips `data-dioxus-id` from every brush tile, so the click applies no brush and the Line is never promoted |
+| `thin_stroke` | `stroke_width_invariance` | draws the probe stroke at 1pt when the check asked for 5pt — trips the check's *absolute* assertion |
+| `width_reset` | `stroke_width_invariance` | drives the rendered width to 1pt across the unrelated edit — trips the check's *invariance* assertion, the one that names the escape |
+| `arrow_scale_lie` | `arrowhead_reflects_scale` | overwrites the end-scale field's DOM value to 200 while the head stays at its true 100%, so the panel claims a scale the canvas never rendered |
+| `leaked_ctx_save` | `canvas_transform_balance` | pushes one un-restored `save()` + transform onto the live canvas context — the class the brushed-path early `return` used to leak |
+| `enter_default_stolen` | `button_enter_activates` | prevents Enter's default from a **capturing document listener, regardless of what holds focus** — the over-broad suppression that killed native button activation (Dioxus delegates the app's keydown from the document root, so this is the same claim at the same layer) |
 
 **Scoring is not a blind inversion** — a red for the wrong reason proves
 nothing. Each mode declares a *marker* (a fragment of its owning check's own
@@ -221,6 +231,26 @@ def dash_gap_renders(ctx: Ctx):
   document level (Select All / Delete), so they append instead of replacing,
   yielding values like `"1 pt5"`. `set_field()` triple-clicks to select the
   value inside the input, then types — which is also what a user does.
+* **A key dispatched without its `text` can storm the browser.** `Enter` and
+  `Escape` carry a legacy control character (`\r`, `\x1b`). Sent through
+  `Input.dispatchKeyEvent` with a virtual key code but no `text`, Chrome
+  re-queues them without limit — one Enter measured 8757 further trusted
+  `key="Unidentified"` keydowns, one Escape 10589, **on a blank page with no app
+  loaded**. Nothing else in `VK` (Backspace, Tab, Delete) does this. Beyond
+  burning the main thread, a textless Enter produces no `keypress`, so it never
+  triggers the browser default that fires an input's `change` — the field the
+  driver "committed" quietly did not commit until something later blurred it.
+  `gui_probe.KEY_TEXT` supplies the text; see §Findings 1 for what believing the
+  storm cost.
+* **A key's default action belongs to whatever element has focus.** A root
+  handler that calls `preventDefault` on Enter because "no text field is
+  focused" also kills the NATIVE Enter activation of every `<button>` in its
+  subtree — measured on this app: File ▸ Document Setup with OK focused reported
+  `defaultPrevented=true`, fired no click, and the dialog would not close from
+  the keyboard, while Space on the same button still worked. Suppress a default
+  only where the focused element has no default of its own (`keyboard.rs` gates
+  on an allowlist of the app's own surfaces); `button_enter_activates` is the
+  gate, `--regress enter_default_stolen` its teeth.
 * **Use `hit_target()`** to confirm the widget is really the topmost element at
   its own centre before believing a click did nothing.
 * **Never let mutation noise evict mutation signal.** The liveness observer
@@ -328,25 +358,39 @@ It checks **correctness, not feel**. Staying on JYH's manual floor:
 
 ## Findings from building it
 
-The harness found these while being validated. **None is fixed here** — this
-wave built tooling, and two of the three touch files owned by a parallel wave.
+What the harness reported while being validated, kept honest: a finding stays
+here after it is retracted, with the evidence that retracted it.
 
-1. **A second Stroke-panel weight commit made while an object is selected wedges
-   the app.** Repro: set `stk_weight` (nothing selected) → draw a line → select
-   it → set `stk_weight` again. No JS or wasm exception is raised and the window
-   does not blank; the main thread's latency escalates 0.0s → 2.8s → 19.2s → no
-   response, which is a **livelock, not a panic** — the signature of an unbounded
-   panel↔selection binding feedback loop. Direction is irrelevant (5→1 and 5→9
-   both wedge). A *single* weight edit with a selection is fine, so the trigger
-   needs the panel's own state dirtied by a prior explicit edit. This is
-   plausibly the same defect family as the 5pt→1pt complaint that motivated the
-   wave. Reproduce with
-   `./scripts/gui_drive.sh --check stroke_width_invariance --regress width_reset`.
+1. ~~**A second Stroke-panel weight commit made while an object is selected
+   wedges the app.**~~ **RETRACTED 2026-07-25 — the wedge was this harness's,
+   not the app's.** The finding was real as an observation (latency 0.0s →
+   2.8s → 19.2s → no response) and wrong as a diagnosis. `set_field` committed
+   with an Enter dispatched through `Input.dispatchKeyEvent` *without* its
+   control-character `text`; Chrome never completes such a key and re-queues it,
+   so one Enter became **8757 trusted `key="Unidentified"` keydowns** — which
+   saturates any app on the page. Proof that no app is involved: the same
+   dispatch on a blank `data:text/html,<input>` page with nothing loaded
+   produced **11543** of them, and supplying the text produces exactly one
+   keydown WHEREVER SOMETHING CONSUMES OR PREVENTS THE KEY (an input, a button,
+   or a handler calling preventDefault); on a bare focusable div with no
+   consumer Chrome still re-queues (13k+ trusted `key='Unidentified'`
+   measured), so the `text` is necessary, not sufficient — no path this
+   harness drives is such a surface. Fixed in `gui_probe.KEY_TEXT`; the same
+   `--regress width_reset` scenario now runs with a **0.0s heartbeat**.
+
+   Two WEDGESTORM diagnosis attempts were sent chasing this ghost. The real
+   defect behind JYH's receding-artboard cascade was a leaked `ctx.save()` in
+   the brushed-path render (fixed at `e4622b87`, pinned by
+   `canvas_transform_balance`). **Lesson: a driver artifact and an app defect
+   are indistinguishable from inside the driver.** Before believing the app is
+   wedged, reproduce the input on a page the app does not own.
 2. **Serial clicking degenerates.** Clicking ~5 declared-clickable widgets in one
    instance took `align_to_key_object_button` from 3 DOM mutations to a
-   200-record storm and a 1.35s heartbeat, then a wedge on the next click. In a
-   pristine instance that widget is healthy. Whether a user could reach this
-   state is unknown; the accumulation itself is the finding.
+   200-record storm and a 1.35s heartbeat. In a pristine instance that widget is
+   healthy. Whether a user could reach this state is unknown; the accumulation
+   itself is the finding. (An unresponsive instance followed it; that part was
+   never root-caused, and after finding 1 no unresponsiveness observed *through*
+   this driver should be attributed to the app without independent evidence.)
 3. **16 of 21 `cp_` widgets report DEAD in the stock scene** and need triage.
    Most look like correct identity operations (empty recent-colour slots, an
    already-active mode), but `cp_gradient_btn`, `cp_none_btn` and

@@ -1075,7 +1075,7 @@ struct FillStrokeWidget: View {
             // upper-right of the icon. The horizontal leg points
             // left (toward the fill square) with an arrow head;
             // the vertical leg points down (toward the stroke
-            // square) with another arrow head. Mirrors Illustrator's
+            // square) with another arrow head. The standard
             // swap-fill-stroke affordance.
             Button(action: swapColors) {
                 SwiftUI.Canvas { context, _ in
@@ -1121,7 +1121,8 @@ struct FillStrokeWidget: View {
             // INACTIVE one first (behind) and the active one second
             // (on top). Without this, switching active swapped the
             // squares' positions instead of just changing what's on
-            // top — surprising and against Illustrator convention.
+            // top — surprising, and against the convention every
+            // vector illustration application follows.
             if model.fillOnTop {
                 fillStrokeSquare(isFill: false)
                     .position(x: offset + squareSize / 2, y: offset + squareSize / 2)
@@ -1170,7 +1171,7 @@ struct FillStrokeWidget: View {
                         .border(SwiftUI.Color.gray.opacity(0.5), width: 0.5)
                 } else {
                     // Stroke square: thick colored border, transparent
-                    // center (hollow ring). Matches Illustrator's
+                    // center (hollow ring). The standard
                     // stroke-swatch convention; the user can see the
                     // fill behind through the center when stroke is
                     // on top.

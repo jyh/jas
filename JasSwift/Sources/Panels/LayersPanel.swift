@@ -142,6 +142,18 @@ public enum LayersPanel {
             "active_document": activeDoc,
             "panel": panel,
             "param": params,
+            // The `state` namespace — the workspace defaults with the live
+            // app-level facts overlaid, the same scope the panels render
+            // against. Without it an action's `state.*` read had NO ctx entry
+            // to resolve against and fell through to the raw store, which is
+            // seeded with nothing: every `state.X` in an action's effects read
+            // null. So `set_active_color`'s `if state.fill_on_top` took the
+            // ELSE branch and recoloured the stroke when the fill was on top,
+            // and `set_fill_type_solid`'s `state.fill_color == null` guard was
+            // unconditionally true. Rust's `dispatch_action` has always built
+            // this from AppState (`build_appstate_ctx`); this is Swift agreeing
+            // (CPTRIAGE).
+            "state": buildLiveStateMap(ws: ws, model: model),
         ]
 
         runLayersPanelEffects(effects, actionName: actionName, ctx: ctx,
@@ -783,6 +795,26 @@ public enum LayersPanel {
             "geometry.export_pdf": geometryExportPdfHandler,
             "list_push": listPushHandler,
             "pop": popHandler,
+            // A `set:` write of fill_color / stroke_color has to LEAVE the
+            // store: it is an app-level fact whose home is the model
+            // (`model.defaultFill` / `defaultStroke`, plus the selection).
+            // `runEffects` fires this hook for exactly those keys, and the
+            // panel-body dispatcher has always registered it (via
+            // `alignPlatformEffects`) — but this dispatcher, the GENERIC one
+            // behind the menu commands, the dialog footers, the Artboards panel
+            // and the `--test-fifo action <name>` channel, did not. So
+            // `set_fill_none` / `set_stroke_none` / `set_active_color` reached
+            // the store and stopped there: the document kept its old paint and
+            // the panels kept reading it, while the store alone disagreed
+            // (CPTRIAGE, found by the fill_stroke_none action fixture). Same
+            // closure `alignPlatformEffects` installs, so the two dispatchers
+            // now answer a colour write identically.
+            "apply_active_color": { write, _, _ in
+                if let write = write as? ColorWrite {
+                    applyActiveColorWrite(model: model, write: write)
+                }
+                return nil
+            },
         ]
         // Align panel operations (ALIGN.md). Each fires a same-named platform
         // effect (actions.yaml: effects [snapshot, {align_left: true}]); the
