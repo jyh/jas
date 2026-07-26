@@ -266,9 +266,11 @@ consults. It is not certified exhaustive.
 
 **Resolve all three tiers, and are converged across the ports:** the
 panel-render `state` scope; the action-dispatch scope; the three
-dialog-seeding sites (`openToolbarColorPicker`; `openYamlDialogFromMenu` →
+dialog-seeding sites, all of which now bottom out in `liveFillStrokeValues`
+(`openToolbarColorPicker` and `openYamlDialogFromMenu` through
 `dialogStateScope`; the `fill_stroke_widget` double-click →
-`open_color_picker`, now all through `colorPickerSeedContext`); the toolbar
+`open_color_picker` through `colorPickerSeedContext`, which layers on
+`dialogStateScope`); the toolbar
 squares; the Color panel's SLIDERS; the Color panel's channel WRITE path,
 which is not the same code as the sliders that display it; and the Color
 panel's mode-switch SEED. Every one after the first two was caught
