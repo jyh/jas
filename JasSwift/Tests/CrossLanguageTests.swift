@@ -1961,6 +1961,54 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     #expect(bar == panelChannels(rf: rf, gf: gf, bf: bf))
 }
 
+/// The colour bar must produce the same COLOUR VALUE in both ports, not merely
+/// the same channel readings once the panel has re-derived them.
+///
+/// Rust's `render_color_bar` maps the pointer through `hsb_to_rgb` and stores
+/// `Color::rgb` of the quantised triple. This port stored `Color.hsb` of the
+/// float h/s/b instead, so the two ports' documents held different colours for
+/// the same click — and the float path that closes the gap is not even the same
+/// float path (`hsbToRgbComponents`' hi/f/p/q/t form vs `hsbToRgb`'s c/x/m
+/// form), so "they agree after rounding" was never something to rely on.
+///
+/// Also pins the CLAMPING, which differed in kind: Rust clamps the derived hue
+/// to 0...360 and the vertical parameter to 0...1, while this port clamped the
+/// pixel coordinates to width-1 / height-1 first. A drag that leaves the bar
+/// below its bottom edge is the visible case — Rust answers black, and this port
+/// used to answer 2% brightness.
+@Test func colorBarProducesTheQuantisedRgbBothPortsStore() {
+    // Bar geometry as Rust hardcodes it: 200 wide, 64 tall.
+    let w: CGFloat = 200, h: CGFloat = 64
+
+    // x=1, y=1: hue 1.8°, sat 3.125%, brightness 99.375%. hsbToRgb of that
+    // triple is (253, 246, 245) — the same three bytes Rust stores.
+    let (r, g, b, a) = ColorBarView.colorAt(x: 1, y: 1, width: w, height: h).toRgba()
+    #expect((quantise8(r), quantise8(g), quantise8(b)) == (253, 246, 245))
+    #expect(a == 1.0)
+    // And it is stored AS rgb, so nothing downstream can re-read a float h/s/b.
+    #expect(ColorBarView.colorAt(x: 1, y: 1, width: w, height: h)
+                == Color.rgb(r: 253.0 / 255.0, g: 246.0 / 255.0, b: 245.0 / 255.0, a: 1.0))
+
+    // Bottom edge and below: brightness clamps to 0, i.e. black — not the 2%
+    // that clamping the coordinate to height-1 used to leave behind.
+    for y in [h, h + 40] {
+        let c = ColorBarView.colorAt(x: 30, y: y, width: w, height: h)
+        #expect(c == Color.rgb(r: 0, g: 0, b: 0, a: 1.0), "y=\(y) should be black")
+    }
+    // Right edge: hue clamps to 360, which hsbToRgb's last arm reads as red —
+    // at the bar's waist, where saturation is full and brightness is 80%.
+    #expect(ColorBarView.colorAt(x: w, y: h / 2, width: w, height: h)
+                == Color.rgb(r: 204.0 / 255.0, g: 0, b: 0, a: 1.0))
+    #expect(ColorBarView.colorAt(x: w + 10, y: h, width: w, height: h)
+                == Color.rgb(r: 0, g: 0, b: 0, a: 1.0))
+    // Top-left is white (saturation 0, brightness 100).
+    #expect(ColorBarView.colorAt(x: 0, y: 0, width: w, height: h)
+                == Color.rgb(r: 1.0, g: 1.0, b: 1.0, a: 1.0))
+    // A zero-width bar must not divide by zero (Rust's `width.max(1.0)`).
+    #expect(ColorBarView.colorAt(x: 0, y: 0, width: 0, height: h)
+                == Color.rgb(r: 1.0, g: 1.0, b: 1.0, a: 1.0))
+}
+
 // MARK: - Expression-language conformance (shared corpus)
 
 /// Loads the compiled corpus from test_fixtures/expressions/conformance.json
