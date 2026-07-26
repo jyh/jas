@@ -306,9 +306,17 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         if len(node.args) != 3:
             return Value.null()
         args = [eval_node(a, ctx) for a in node.args]
-        r = int(args[0].value) if args[0].type == ValueType.NUMBER else 0
-        g = int(args[1].value) if args[1].type == ValueType.NUMBER else 0
-        b = int(args[2].value) if args[2].type == ValueType.NUMBER else 0
+        # saturate_u8, not int(): a channel outside i64 (or non-finite) makes
+        # int() raise here and traps Swift's UInt8(_:), where Rust's `as u8`
+        # saturates. Route all three through the one rule (risk R9).
+        def _u8(a):
+            return (
+                color_util.saturate_u8(float(a.value))
+                if a.type == ValueType.NUMBER
+                else 0
+            )
+
+        r, g, b = _u8(args[0]), _u8(args[1]), _u8(args[2])
         return Value.color(color_util.rgb_to_hex(r, g, b))
 
     # hsb: (h, s, b) → color
@@ -327,10 +335,14 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
         if len(node.args) != 4:
             return Value.null()
         args = [eval_node(a, ctx) for a in node.args]
-        cv = float(args[0].value) / 100.0 if args[0].type == ValueType.NUMBER else 0
-        mv = float(args[1].value) / 100.0 if args[1].type == ValueType.NUMBER else 0
-        yv = float(args[2].value) / 100.0 if args[2].type == ValueType.NUMBER else 0
-        kv = float(args[3].value) / 100.0 if args[3].type == ValueType.NUMBER else 0
+        # Each channel is clamped to its documented 0-100 range BEFORE the
+        # arithmetic -- see color_util.clamp_channel for why input-clamping and
+        # not output-saturation (risk R9).
+        def _ch(a):
+            v = float(a.value) if a.type == ValueType.NUMBER else 0.0
+            return color_util.clamp_channel(v, 0.0, 100.0) / 100.0
+
+        cv, mv, yv, kv = _ch(args[0]), _ch(args[1]), _ch(args[2]), _ch(args[3])
         r = round((1 - cv) * (1 - kv) * 255)
         g = round((1 - mv) * (1 - kv) * 255)
         b = round((1 - yv) * (1 - kv) * 255)
@@ -342,6 +354,7 @@ def _eval_func(node: FuncCall, ctx: dict) -> Value:
             return Value.null()
         arg = eval_node(node.args[0], ctx)
         kv = float(arg.value) if arg.type == ValueType.NUMBER else 0
+        kv = color_util.clamp_channel(kv, 0.0, 100.0)
         v = round((1 - kv / 100) * 255)
         return Value.color(color_util.rgb_to_hex(v, v, v))
 

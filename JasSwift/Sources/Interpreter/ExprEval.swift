@@ -1013,8 +1013,13 @@ private func colorArg(_ val: Value) -> String {
     }
 }
 
+/// The `rgb()` builtin's channel conversion — Rust's `val_to_u8` is `*n as u8`.
+///
+/// The outer clamp of the previous `UInt8(clamping: Int(n))` was fine; the INNER
+/// `Int(n)` was the defect, trapping on NaN, ±infinity, and any |n| >= 2^63
+/// (e.g. `rgb(10000000000000000000, 0, 0)`) where Rust saturates. Risk R9.
 private func valToUInt8(_ v: Value) -> UInt8 {
-    if case .number(let n) = v { return UInt8(clamping: Int(n)) }
+    if case .number(let n) = v { return saturatingUInt8(n) }
     return 0
 }
 
@@ -1132,10 +1137,14 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
     case "cmyk":
         guard args.count == 4 else { return .null }
         let vals = args.map { evalNode($0, ctx) }
-        let c = valToDouble(vals[0]) / 100.0
-        let m = valToDouble(vals[1]) / 100.0
-        let y = valToDouble(vals[2]) / 100.0
-        let k = valToDouble(vals[3]) / 100.0
+        // Each channel is clamped to its documented 0-100 range BEFORE the
+        // arithmetic — see clampChannel for why input-clamping and not
+        // output-saturation (risk R9). With the inputs in 0...1 each product is
+        // in 0...255, so the conversions below cannot be out of range.
+        let c = clampChannel(valToDouble(vals[0]), 0.0, 100.0) / 100.0
+        let m = clampChannel(valToDouble(vals[1]), 0.0, 100.0) / 100.0
+        let y = clampChannel(valToDouble(vals[2]), 0.0, 100.0) / 100.0
+        let k = clampChannel(valToDouble(vals[3]), 0.0, 100.0) / 100.0
         let r = UInt8(((1.0 - c) * (1.0 - k) * 255.0).rounded())
         let g = UInt8(((1.0 - m) * (1.0 - k) * 255.0).rounded())
         let b = UInt8(((1.0 - y) * (1.0 - k) * 255.0).rounded())
@@ -1144,7 +1153,7 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
     // grayscale: (k) -> color  (k is 0-100, 0=white, 100=black)
     case "grayscale":
         guard args.count == 1 else { return .null }
-        let k = valToDouble(evalNode(args[0], ctx))
+        let k = clampChannel(valToDouble(evalNode(args[0], ctx)), 0.0, 100.0)
         let v = UInt8(((1.0 - k / 100.0) * 255.0).rounded())
         return Value.colorValue(rgbToHex(v, v, v))
 

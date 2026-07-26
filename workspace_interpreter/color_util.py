@@ -44,8 +44,53 @@ def rgb_to_hsb(r: int, g: int, b: int) -> tuple[int, int, int]:
     return (hue, round(s * 100), round(v * 100))
 
 
+def saturate_u8(v: float) -> int:
+    """Convert a float to 0..255 the way Rust's ``v as u8`` does.
+
+    Truncate toward zero, saturate at both bounds, NaN -> 0. Spelled out as a
+    function because the other ports' native conversions differ: Rust's ``as``
+    saturates, and Swift's ``UInt8(_:)`` / ``Int(_:)`` are precondition failures
+    outside range, so both must be routed through this one rule to agree.
+    Risk R9, transcripts/CORPUS_CENSUS.md section 7.
+    """
+    if v != v:  # NaN
+        return 0
+    if v <= 0.0:
+        return 0
+    if v >= 255.0:
+        return 255
+    return int(v)
+
+
+def clamp_channel(v: float, lo: float, hi: float) -> float:
+    """Clamp one colour channel into [lo, hi], mapping NaN to lo.
+
+    The colour primitives document their channels' ranges (hsb 0-360 / 0-100,
+    cmyk and grayscale 0-100) and this is how they enforce them: clamp the
+    INPUT, before any arithmetic. Clamping the input rather than saturating the
+    output is what makes the ports equal by construction. The formulas are
+    monotonic per channel, so for ONE out-of-range channel the two approaches
+    agree; they diverge when two channels overflow with signs that multiply back
+    positive -- unclamped, cmyk(150, 0, 0, 150) computes
+    (1-1.5)*(1-1.5)*255 = +63.75, a bogus mid-grey that looks like a real
+    colour, where clamping gives black. Risk R9, transcripts/CORPUS_CENSUS.md
+    section 7.
+    """
+    if v != v:  # NaN
+        return lo
+    return max(lo, min(hi, v))
+
+
 def hsb_to_rgb(h: float, s: float, b: float) -> tuple[int, int, int]:
-    """Convert HSB (h:0-359, s:0-100, b:0-100) to RGB (0-255)."""
+    """Convert HSB (h:0-360, s:0-100, b:0-100) to RGB (0-255).
+
+    Channels outside those ranges are clamped (see clamp_channel). Hue's upper
+    bound is 360, not 359: 360 is the wrap point that the colour corpus pins as
+    identical to 0 (torgb_hue_360_is_red).
+    """
+    h = clamp_channel(h, 0.0, 360.0)
+    s = clamp_channel(s, 0.0, 100.0)
+    b = clamp_channel(b, 0.0, 100.0)
     s1 = s / 100.0
     b1 = b / 100.0
     c = b1 * s1

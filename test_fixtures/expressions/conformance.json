@@ -301,6 +301,76 @@
     "type": "color"
   },
   {
+    "expr": "cmyk(150, 0, 0, 150)",
+    "expected": "#000000",
+    "type": "color"
+  },
+  {
+    "expr": "cmyk(200, 0, 0, 200)",
+    "expected": "#000000",
+    "type": "color"
+  },
+  {
+    "expr": "cmyk(150, 150, 150, 150)",
+    "expected": "#000000",
+    "type": "color"
+  },
+  {
+    "expr": "cmyk(1000000, 0, 0, 1000000)",
+    "expected": "#000000",
+    "type": "color"
+  },
+  {
+    "expr": "cmyk(150, 0, 0, 0)",
+    "expected": "#00ffff",
+    "type": "color"
+  },
+  {
+    "expr": "cmyk(-50, 0, 0, 0)",
+    "expected": "#ffffff",
+    "type": "color"
+  },
+  {
+    "expr": "grayscale(150)",
+    "expected": "#000000",
+    "type": "color"
+  },
+  {
+    "expr": "grayscale(-50)",
+    "expected": "#ffffff",
+    "type": "color"
+  },
+  {
+    "expr": "hsb(0, 200, 200)",
+    "expected": "#ff0000",
+    "type": "color"
+  },
+  {
+    "expr": "hsb(0, -10, 100)",
+    "expected": "#ffffff",
+    "type": "color"
+  },
+  {
+    "expr": "hsb(360, 100, 100)",
+    "expected": "#ff0000",
+    "type": "color"
+  },
+  {
+    "expr": "hsb(400, 100, 100)",
+    "expected": "#ff0000",
+    "type": "color"
+  },
+  {
+    "expr": "hsb(-10, 100, 100)",
+    "expected": "#ff0000",
+    "type": "color"
+  },
+  {
+    "expr": "rgb(10000000000000000000, 0, 0)",
+    "expected": "#ff0000",
+    "type": "color"
+  },
+  {
     "expr": "hsb_h(hsb(0, 100, 100))",
     "expected": 0,
     "type": "number"

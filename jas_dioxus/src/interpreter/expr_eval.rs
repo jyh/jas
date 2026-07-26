@@ -581,10 +581,13 @@ fn eval_func(
                 .iter()
                 .map(|a| eval_inner(a, ctx, scope, store_cb))
                 .collect();
-            let c = val_to_f64(&vals[0]) / 100.0;
-            let m = val_to_f64(&vals[1]) / 100.0;
-            let y = val_to_f64(&vals[2]) / 100.0;
-            let k = val_to_f64(&vals[3]) / 100.0;
+            // Each channel is clamped to its documented 0-100 range BEFORE the
+            // arithmetic — see color_util::clamp_channel for why input-clamping
+            // and not output-saturation (risk R9).
+            let c = color_util::clamp_channel(val_to_f64(&vals[0]), 0.0, 100.0) / 100.0;
+            let m = color_util::clamp_channel(val_to_f64(&vals[1]), 0.0, 100.0) / 100.0;
+            let y = color_util::clamp_channel(val_to_f64(&vals[2]), 0.0, 100.0) / 100.0;
+            let k = color_util::clamp_channel(val_to_f64(&vals[3]), 0.0, 100.0) / 100.0;
             let r = ((1.0 - c) * (1.0 - k) * 255.0).round() as u8;
             let g = ((1.0 - m) * (1.0 - k) * 255.0).round() as u8;
             let b = ((1.0 - y) * (1.0 - k) * 255.0).round() as u8;
@@ -596,7 +599,11 @@ fn eval_func(
             if args.len() != 1 {
                 return Value::Null;
             }
-            let k = val_to_f64(&eval_inner(&args[0], ctx, scope, store_cb));
+            let k = color_util::clamp_channel(
+                val_to_f64(&eval_inner(&args[0], ctx, scope, store_cb)),
+                0.0,
+                100.0,
+            );
             let v = ((1.0 - k / 100.0) * 255.0).round() as u8;
             Value::color(&color_util::rgb_to_hex(v, v, v))
         }

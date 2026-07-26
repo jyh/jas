@@ -49,8 +49,35 @@ pub fn rgb_to_hsb(r: u8, g: u8, b: u8) -> (i32, i32, i32) {
     (hue, (s * 100.0).round() as i32, (v * 100.0).round() as i32)
 }
 
-/// Convert HSB (h:0-359, s:0-100, b:0-100) to RGB (0-255).
+/// Clamp one colour channel into `lo..=hi`, mapping NaN to `lo`.
+///
+/// The colour primitives document their channels' ranges (`hsb` 0-360 / 0-100,
+/// `cmyk` and `grayscale` 0-100) and this is how they enforce them: clamp the
+/// INPUT, before any arithmetic. Clamping the input rather than saturating the
+/// output is what makes the ports equal by construction. The formulas are
+/// monotonic per channel, so for ONE out-of-range channel the two approaches
+/// agree; they diverge when two channels overflow with signs that multiply back
+/// positive — unclamped, `cmyk(150, 0, 0, 150)` computes
+/// `(1-1.5)*(1-1.5)*255 = +63.75`, a bogus mid-grey that looks like a real
+/// colour, where clamping gives black. NaN maps to `lo` for the same reason:
+/// it is the one answer both ports can spell identically, where a cast would
+/// saturate NaN to 0 in Rust and trap in Swift. Risk R9, transcripts/CORPUS_CENSUS.md §7.
+pub fn clamp_channel(v: f64, lo: f64, hi: f64) -> f64 {
+    if v.is_nan() {
+        return lo;
+    }
+    v.clamp(lo, hi)
+}
+
+/// Convert HSB (h:0-360, s:0-100, b:0-100) to RGB (0-255).
+///
+/// Channels outside those ranges are clamped (see [`clamp_channel`]). Hue's
+/// upper bound is 360, not 359: 360 is the wrap point that the colour corpus
+/// pins as identical to 0 (`torgb_hue_360_is_red`).
 pub fn hsb_to_rgb(h: f64, s: f64, b: f64) -> (u8, u8, u8) {
+    let h = clamp_channel(h, 0.0, 360.0);
+    let s = clamp_channel(s, 0.0, 100.0);
+    let b = clamp_channel(b, 0.0, 100.0);
     let s1 = s / 100.0;
     let b1 = b / 100.0;
     let c = b1 * s1;
