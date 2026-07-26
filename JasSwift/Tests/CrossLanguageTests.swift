@@ -2679,6 +2679,13 @@ private let actionFixtures = [
     // never republished, so the Color panel's guards kept reading the old
     // colour). See ``assertActionPanelState``.
     "fill_stroke_none.json",
+    // COLORTIERS: the action-dispatch `state` scope is SELECTION-AWARE.
+    // `set_fill_type_solid` on a stroke-only SELECTION must read that
+    // selection's None and paint it; Rust's `build_appstate_ctx` used to read
+    // the app default alone, so the click was a silent no-op there and painted
+    // here. The second case pins the Mixed outcome (the declared default
+    // stands — absent is not null).
+    "fill_stroke_action_scope.json",
 ]
 
 /// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml

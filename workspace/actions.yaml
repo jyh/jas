@@ -521,7 +521,12 @@ actions:
       Sets the active attribute (fill or stroke, per fill_on_top) to solid
       color mode. If the active color is currently null, restores it to black
       (#000000). If it already has a solid color this is a no-op — the fill
-      type is already solid.
+      type is already solid. "The active color" is the one state.fill_color /
+      state.stroke_color names, so with a shape selected this asks about THAT
+      SHAPE's fill: clicking Solid on a stroke-only shape paints its fill
+      black. With nothing selected it asks about the default fill, and with a
+      mixed selection the guard sees the default standing in scope and the
+      click is a no-op.
     category: fill_stroke
     effects:
       - if:
