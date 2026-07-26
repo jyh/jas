@@ -111,6 +111,12 @@ public func colorPanelWriteScope(
 ) -> [String: Any] {
     var scope = store.getPanelState("color_panel_content")
     if let overrides = colorPanelLiveOverrides(model: model) {
+        // Rust's equivalent overlay only writes keys the panel map already
+        // declares (`panel_map.contains_key`); this merges unconditionally. The
+        // maps are identical today because `color.yaml` declares all eleven
+        // channels plus `hex`, but the guard is what KEEPS them identical, and
+        // nothing here would notice a twelfth channel added to one port.
+        // Banked for a ruling in COLOR_TESTS.md rather than mirrored blind.
         for (k, v) in overrides where k != edited { scope[k] = v }
     }
     return scope
@@ -125,6 +131,12 @@ public func colorPanelWriteScope(
 /// quantised to 8 bits the same way — so both ports store the same RGB for a
 /// given channel triple. (This arm used to build `Color.hsb` instead, which
 /// keeps the h / s / b it was handed; Rust has only the RGB.)
+///
+/// "For a given channel triple" is a weaker claim than it reads as, and round 3
+/// leaned on the strong version: the TRIPLE arrives from
+/// ``colorPanelWriteScope``'s overlay, and that overlay was where the ports
+/// actually diverged. This arm being a faithful mirror did not stop the two
+/// ports committing different colours. See ``panelChannels(for:)``.
 public func colorFromColorPanelScope(_ panel: [String: Any]) -> Color? {
     func num(_ key: String) -> Double {
         (panel[key] as? Double)

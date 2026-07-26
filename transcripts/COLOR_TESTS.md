@@ -45,10 +45,20 @@ _Last synced: 2026-04-19_
   handler updates mode, `is_checked` predicate matches active mode. View
   rendering and widget wiring not covered.
 
-**Swift — no dedicated Color panel auto-tests.**
-ColorPanel scaffolding present in `JasSwift/Sources/Panels/ColorPanel.swift`
-but no tests exercise it. State management covered transitively in
-`StateStoreTests.swift`.
+**Swift — `JasSwift/Tests/Interpreter/ColorPanelSyncTests.swift`.**
+The tier resolution, the channel write path, the commit-vs-live arm, the
+HSB/RGB/CMYK/grayscale arms of `colorFromColorPanelScope` and the
+mode-switch seed. (This entry read "no dedicated Color panel auto-tests"
+until the COLORTIERS wave; the count is deliberately not restated, per the
+counting rule at the head of the reader register in COLOR.md.)
+
+**Cross-language — `test_fixtures/algorithms/color_convert.json`.**
+rgb→hsb, hsb→rgb, rgb→cmyk and the Color panel's quantise-first channel
+derivation, run against both active ports by
+`scripts/cross_language_algorithms.py --algo color_convert` and against the
+pinned goldens in-port by Rust's `algorithm_color_convert_vectors` and
+Swift's `algorithmColorConvertVectors`. Added by COLORTIERS repair 4; before
+it, no fixture family in the corpus touched colour at all.
 
 **OCaml — no dedicated Color panel auto-tests.**
 Color conversion utilities defined (`lib/interpreter/color_util.ml`/`.mli`)
@@ -186,13 +196,19 @@ because each port was self-consistent and they disagreed. JYH ruled
    Mixed) agree across the two scopes and the two ports. Gated
    cross-language by `test_fixtures/actions/fill_stroke_action_scope.json`.
 
-Seven more readers of the same fact were hand-rolling it from
-`model.defaultFill` and were routed through the one reader. The first four
-landed in the wave and its first repair; the last three in repair 2, after
-the lens found that the first repair had converged the panel's DISPLAY and
-left its WRITE path behind — which for one scenario was worse than before
-it, because the two halves of one panel then disagreed with each other
-instead of agreeing on the same wrong answer:
+The readers below were each hand-rolling the same fact from
+`model.defaultFill` and were routed through the one reader. They are listed,
+not counted: the count in this file and the one in COLOR.md disagreed with
+each other and with the wave report through four rounds. COLOR.md now
+carries the classified list of every three-tier reader, every deliberate
+two-tier reader and every remaining single-tier one, along with the grep
+that re-derives the candidate set — read that as the register and this as
+the case history. The first four landed in the wave and its first repair;
+the rest in repair 2 and repair 3, after the lens found that the first
+repair had converged the panel's DISPLAY and left its WRITE path behind —
+which for one scenario was worse than before it, because the two halves of
+one panel then disagreed with each other instead of agreeing on the same
+wrong answer:
 
 * the two Swift dialog-seeding sites (`openToolbarColorPicker`,
   `openYamlDialogFromMenu` → `dialogStateScope`), which opened the picker
@@ -228,14 +244,38 @@ instead of agreeing on the same wrong answer:
   drag mixed with `color.yaml`'s stored white) where Rust commits
   **800000**. The mode-switch seed (`ColorPanel.dispatch`) had the same
   gap and mixed with white too. Now `colorPanelWriteScope` +
-  `colorFromColorPanelScope` (a mirror of `compute_color_from_panel`, its
-  HSB arm through `hsbToRgb` so both ports store the same 8-bit RGB),
+  `colorFromColorPanelScope` (a mirror of `compute_color_from_panel`),
   applied in one place — `notifyPanelStateChanged`'s Color branch, whose
   `terminal` flag picks commit over live. The store-only
   `ColorPanel.colorFromPanelState` is deleted rather than left standing as
   a second answer. Pinned by four tests in `ColorPanelSyncTests.swift`
   and Rust's
-  `colortiers_channel_drag_reads_the_app_tier_after_a_new_document`;
+  `colortiers_channel_drag_reads_the_app_tier_after_a_new_document`.
+
+  Repair 3 said of this that the HSB arm goes "through `hsbToRgb` so both
+  ports store the same 8-bit RGB". The arm did; the sentence did not
+  follow, and was false as shipped. Wiring the write path onto the panel's
+  display OVERLAY made that overlay a write, and the overlay derived
+  hue / saturation / brightness from the FLOAT colour where Rust derives
+  them from the quantised 8-bit triple — so the same drag committed
+  `664040` here against `664141` there, and a colour-bar click then
+  Brightness→40 committed `665959` against `665a5a`. Converged in repair 4
+  (`panelChannels`, the twin of `color_util::panel_channels`) and gated
+  where it should have been from the start: `test_fixtures/algorithms/`
+  had 25 families and none for colour, so nothing held either port's
+  conversions to anything. `color_convert.json` now does, with a
+  `panel_channels` family whose whole subject is the ORDER — quantise
+  first, convert second — and six of whose sixteen vectors are chosen so a
+  float-first reader answers differently.
+
+  The `.hsb`-represented colour is the one case that family cannot reach
+  (a fixture vector is a float RGB triple; `toHsba()` on a `.hsb`
+  short-circuits and never touches RGB), so the two reachable `.hsb`
+  producers are pinned in-port instead:
+  `panelChannelsQuantisesBeforeConvertingAnHsbColor` for Complement, which
+  is `.hsb` in both ports, and
+  `colorBarProducesTheQuantisedRgbBothPortsStore` for the colour bar,
+  which Rust always stored as quantised RGB and this port now does too;
 * the app-tier WRITE on a channel commit. Rust's `set_active_color`
   updates the app tier first and the tab tier second; Swift's
   `ColorPanel.setActiveColor` wrote only the tab tier, so a colour dragged
@@ -336,6 +376,69 @@ widget a user would click to test it does not go through the seam. The
 fix is to route these buttons through the YAML actions — the same
 native-widget retirement `fill_stroke_widget` is waiting on — not to
 patch their hand-rolled tiers.
+
+### Banked, NOT fixed (repair 4): the overlay merges where Rust guards
+
+Swift's `colorPanelWriteScope` merges every override key unconditionally;
+Rust's write path is handed `ctx.get("panel")`, whose overlay only
+overwrites keys the panel map already declares (`panel_map.contains_key`).
+Benign today because `color.yaml` declares all eleven channels plus `hex`,
+so the two maps have identical key sets — but the guard is exactly what
+keeps them identical, and there is nothing on either side that would notice
+a twelfth channel added to one port. **Ruling needed:** mirror the guard in
+Swift, or pin the key-set equality with a test that fails when either
+port's channel list moves.
+
+Beside it: `"mode"` has two homes across the ports (the layout in Swift,
+`AppState::color_panel_mode` in Rust) and `ColorPanel.dispatch` hand-syncs
+them into panel state. **Ruling needed:** whether that hand-sync should
+become one owner, as the other panel-state facts are.
+
+### Banked, NOT fixed (repair 4): the mode-switch seed is a fourth derivation
+
+`ColorPanel.seedSliders` computes the same channels a fourth time, in
+floats, with its own CMYK arm and no rounding — and Rust has no
+mode-switch seed at all, because its overlay recomputes every channel on
+every render. It cannot be observed today: the overlay overwrites all
+eleven channels on render and all but the `edited` one on write, and the
+`edited` one is by definition the value the user just typed. **Ruling
+needed:** delete the seed and let the overlay carry it (matching Rust), or
+route it through `panelChannels` so the fourth copy is at least the same
+arithmetic. Repair 4 did neither, on the charter's fix-only-what-is-listed
+rule.
+
+### Banked, NOT fixed (repair 4): new elements take paint from one tier
+
+A newly drawn element reads `model.defaultFill` / `defaultStroke` alone,
+with no app fallback — `buildElement` and `makePathFromCommands` in Swift,
+the same reads in Rust's `yaml_tool.rs`. So after File > New the Color
+panel shows the colour held above the canvases while a new rect draws with
+NO fill. **Both ports do this identically**, so it is not a parity break
+and repair 4 left it alone. But it is the largest remaining single-tier
+reader of the active paint, and the wave's own premise — one fact, one
+answer — implies it should be counted. **Ruling needed:** does "the active
+paint" govern what a new element is drawn with, or is the document tier
+deliberately the only seed for new geometry?
+
+### Banked, NOT fixed (repair 4): two swap paths, two tiers, inside Rust
+
+`AppState::swap_fill_stroke` (the X key, and Swift's
+`Controller.swapFillStrokeColors`) reads the DOCUMENT tier. The YAML
+`swap:` effect reads and writes the APP tier, through
+`get_app_state_field` / `set_app_state_field`. Both are "swap fill and
+stroke". **Ruling needed:** which tier a swap operates on, so the two paths
+can be made one.
+
+### CORRECTION (repair 4): `active_color()` is no longer single-tier
+
+Round 4's brief listed `AppState::active_color()` as reaching the app tier
+only when there is no tab, with Invert / Complement greying out after
+File > New in both ports. That is stale. `active_color()` carries
+`.or_else(app_default_*)`, `ColorPanel.activeDefaultPaintColor` mirrors it,
+and both are green under
+`colortiers_invert_stays_available_after_a_new_document` and
+`colorPanelInvertStaysAvailableAfterFileNew`. Nothing to rule on; recorded
+so the item is not banked a second time.
 
 ### The 13 proven identity operations (correct DEAD)
 
