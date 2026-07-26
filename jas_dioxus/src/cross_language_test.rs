@@ -1110,6 +1110,12 @@ mod tests {
         // invokes (see run_action_model). Mirrors the Python
         // _MENU_NATIVE_HANDLERS intercept.
         "menu_object_ops.json",
+        // CPTRIAGE: the fill_stroke None verbs. The FIRST cases to carry an
+        // `expected_panel_state` block — the document golden alone cannot see
+        // the defect these were written for (a None that the panel-render
+        // state reader never republished, so the Color panel's guards kept
+        // reading the old colour). See `assert_action_panel_state`.
+        "fill_stroke_none.json",
     ];
 
     /// Run an action fixture and return the resulting `AppState`.
@@ -1132,15 +1138,57 @@ mod tests {
         document_to_test_json(st.tabs[st.active_tab].model.document())
     }
 
+    /// OPTIONAL second assertion: `expected_panel_state`.
+    ///
+    /// The document is not the only thing an action moves. A `fill_stroke`
+    /// verb writes an APP-LEVEL fact, and every panel that reads it back
+    /// does so through the port's panel-render state reader — Rust's
+    /// `build_live_state_map`, Swift's `buildLiveStateMap`. Those readers
+    /// are native per-port code that no document golden touches, and they
+    /// drifted: `set_fill_none` cleared the fill in both ports while the
+    /// Rust reader kept publishing the workspace default `#ffffff`
+    /// (CPTRIAGE), so `color.yaml`'s fifteen slider `disabled` guards, the
+    /// hex field, the colour bar and Invert / Complement all read a colour
+    /// that was no longer there and NOTHING a user could see moved.
+    ///
+    /// So a case may pin the state scope the panels actually render
+    /// against. The block is a SUBSET assertion — name only the keys under
+    /// test — and `null` is a real expectation, not "absent": publishing
+    /// Null is the whole point, because the map starts from the workspace
+    /// defaults and an omitted key leaves the default standing.
+    ///
+    /// Cases without the block are unaffected. Mirrors Swift's
+    /// `assertActionPanelState`.
+    fn assert_action_panel_state(
+        tc: &serde_json::Value, st: &crate::workspace::app_state::AppState,
+    ) {
+        let Some(expected) = tc.get("expected_panel_state").and_then(|v| v.as_object())
+        else { return };
+        let name = tc["name"].as_str().unwrap();
+        let live = crate::workspace::dock_panel::build_live_state_map(st);
+        for (key, want) in expected {
+            let got = live.get(key).unwrap_or(&serde_json::Value::Null);
+            assert_eq!(
+                got, want,
+                "Action test '{}': panel-render state.{} is {} but the corpus \
+                 pins {}. The panels read this map, so a wrong value here is a \
+                 control that renders against a fact the action already changed.",
+                name, key, got, want,
+            );
+        }
+    }
+
     /// Mirror of `assert_gesture_test`: replay the action sequence and
     /// compare the canonical document JSON against the pinned golden,
-    /// dumping EXPECTED/ACTUAL on mismatch.
+    /// dumping EXPECTED/ACTUAL on mismatch. Then apply the case's optional
+    /// `expected_panel_state` block.
     fn assert_action_test(tc: &serde_json::Value) {
         let name = tc["name"].as_str().unwrap();
         let expected_file = tc["expected_json"].as_str().unwrap();
         let expected = read_fixture(&format!("actions/{}", expected_file));
         let expected = expected.trim();
-        let actual = run_action_test(tc);
+        let st = run_action_model(tc);
+        let actual = document_to_test_json(st.tabs[st.active_tab].model.document());
 
         if actual != expected {
             eprintln!("=== EXPECTED ({}) ===", name);
@@ -1149,6 +1197,7 @@ mod tests {
             eprintln!("{}", actual);
             panic!("Action test '{}' failed: canonical JSON mismatch", name);
         }
+        assert_action_panel_state(tc, &st);
     }
 
     #[test]
