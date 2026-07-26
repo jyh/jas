@@ -2768,48 +2768,30 @@ fn draw_artboard_fills(ctx: &CanvasRenderingContext2d, doc: &Document) {
 
 /// Z-layer 4: fade overlay — ARTBOARDS.md §Canvas appearance.
 ///
-/// When `doc.artboard_options.fade_region_outside_artboard` is on,
-/// paints a 50%-opacity canvas-gray mask over every screen region
-/// not inside any artboard. The effect dims elements that live
-/// outside the printable areas.
+/// Deliberate no-op, matching the Swift port's `drawFadeOverlay`
+/// (`JasSwift/Sources/Canvas/CanvasSubwindow.swift`): the gray pasteboard
+/// plus opaque-white artboard fills already give the "outside the printable
+/// area" contrast the option asks for, and the only implementation tried —
+/// fill the canvas with 50% gray, then punch the artboards out with the
+/// `destination-out` composite — was actively wrong. destination-out writes
+/// alpha=0, so it holed the white artboard fills and showed the canvas
+/// element's own background through the artboards (the "white canvas → dark
+/// artboard" smoke regression in both ports).
 ///
-/// Implementation: fill the entire canvas in the fade color, then
-/// punch out each artboard via the `destination-out` composite
-/// operation (which subtracts the filled rect from the mask).
-/// Canvas state is saved and restored so the composite change
-/// doesn't leak into later passes.
+/// The z-order slot and the call are kept so the documented layer stays
+/// visible and `fade_region_outside_artboard` (a real document option that
+/// round-trips through SVG and the op log) has somewhere to land. A real
+/// implementation must be non-destructive: darken ONLY the pasteboard
+/// region, e.g. fill an even-odd path of the canvas rect minus every
+/// artboard rect, or composite a separate raster mask built before the
+/// artboard fill pass. Both ports stay no-ops until then, so the display
+/// lists match.
 fn draw_fade_overlay(
-    ctx: &CanvasRenderingContext2d,
-    doc: &Document,
-    width: f64,
-    height: f64,
+    _ctx: &CanvasRenderingContext2d,
+    _doc: &Document,
+    _width: f64,
+    _height: f64,
 ) {
-    // Disabled while the pasteboard is theme-gray and artboards are
-    // painted opaque white: this routine's destination-out punches
-    // alpha=0 holes through the white artboard fills, leaving
-    // canvas-DOM-bg gray inside the artboards. Reinstate when the
-    // fade can target only the pasteboard region (e.g. via a
-    // separate raster mask drawn before the artboard fill pass).
-    let _ = (ctx, doc, width, height);
-    return;
-    #[allow(unreachable_code)]
-    if !doc.artboard_options.fade_region_outside_artboard {
-        return;
-    }
-    if doc.artboards.is_empty() {
-        return;
-    }
-    let _ctx_guard = CtxSaveGuard::new(ctx);
-    // Fill the full canvas with 50% theme-gray.
-    ctx.set_fill_style_str("rgba(160,160,160,0.5)");
-    ctx.fill_rect(0.0, 0.0, width, height);
-    // Punch out each artboard.
-    ctx.set_global_composite_operation("destination-out").ok();
-    ctx.set_fill_style_str("rgba(0,0,0,1)");
-    for ab in &doc.artboards {
-        ctx.fill_rect(ab.x, ab.y, ab.width, ab.height);
-    }
-    // The composite state pops via `_ctx_guard`'s Drop.
 }
 
 fn draw_artboard_borders(ctx: &CanvasRenderingContext2d, doc: &Document) {
