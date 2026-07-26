@@ -82,7 +82,10 @@ for all 21 declared-clickable `cp_` ids, is below.
 `recent_colors` `[]`, stroke 1pt butt/miter/undashed.
 
 **The sweep reported 16 DEAD of 21. That resolves as 13 + 3:** thirteen
-correct identity operations and three real defects.
+correct identity operations and three real defects. (Eighteen of the 21
+were clicked at all: `cp_eyedropper` is not present in the stock scene and
+the two overlapping swatches are skipped as occluded. Sixteen of those
+eighteen came back DEAD, leaving two LIVE.)
 
 ### The 3 real defects (all fixed)
 
@@ -97,6 +100,31 @@ further Swift divergences on the same fact — the generic action
 dispatcher's missing `apply_active_color` hook, its missing `state`
 namespace, and the hook applying `fill_on_top`'s attribute instead of the
 key the effect wrote. All fixed; see the CPTRIAGE commits.
+
+### Banked, NOT fixed: the render halves still differ
+
+The SCOPE halves now agree: both ports publish a colour, an explicit
+null, or nothing at all. The RENDER halves do not, and the fix above did
+not touch them.
+
+Rust decides none-vs-placeholder from the BIND DECLARATION.
+`null_color_means_none` (`jas_dioxus/src/interpreter/renderer.rs:7495`)
+asks the `state.yaml` schema whether the bound key is a NULLABLE COLOUR,
+so a null from `state.fill_color` draws the red-diagonal "no paint"
+indicator while a null from `panel.recent_colors.3` draws a hollow
+placeholder — the value alone cannot tell those apart. Swift's
+`renderColorSwatch` has no analogue: its `bind.color` switch
+(`JasSwift/Sources/Interpreter/YamlPanelBodyView.swift:2106-2114`) sends
+every non-colour result to `.clear` and nothing reads the schema, so an
+explicit None and an empty recent-colour slot render IDENTICALLY, a
+transparent square with no indicator. A Swift user who clicks None now
+gets correct guards and a correctly-null scope, and still no visible
+"none" mark on the swatch itself.
+
+Pre-existing — it predates this wave, which changed only the readers —
+and left for whoever owns the swatch renderer. So neither COLOR.md's
+none-state paragraph nor `LiveStateMap`'s "three outcomes" comment claims
+the whole contract is at parity; both say scope-only, and point here.
 
 ### The 13 proven identity operations (correct DEAD)
 
@@ -152,12 +180,26 @@ capability, not a Color-panel fix. Until it exists both ids belong in
 `SWEEP_SKIP` with occlusion as the stated reason — a documented hole, not
 a silent one.
 
-### The remaining 2 of 21
+### The remaining 3 of 21
 
-- `cp_hex` — already in `SWEEP_SKIP`: a text field, not a button. Clicking
-  it correctly does nothing; typing is what it is for (Session E).
+That closes the population exactly: 3 defects + 13 identity + 2 occluded
++ these 3 = 21.
+
 - `cp_swap_btn` and `cp_black_swatch` are genuinely LIVE in the stock
   scene (white↔black swap; white→black commit) and need no triage.
+- `cp_eyedropper` is never REACHED. It lives in the `color_picker`
+  DIALOG (`workspace/dialogs/color_picker.yaml`), which the stock scene
+  does not open, so the sweep's present-filter (`ctx.p.exists`) drops it
+  before any click. Its verdict is UNMEASURED, not DEAD; gating it needs a
+  precondition that opens the dialog first, which no `SWEEP_PRECONDITION`
+  recipe can express today (they are click sequences on present widgets).
+
+**`cp_hex` is not one of the 21.** It is a `text_input`
+(`color.yaml:462`) and declares no `event: click`, so
+`declared_clickable_ids()` never yields it and the sweep never clicks it.
+Its `SWEEP_SKIP` entry ("text field, not a button") is defensive — kept in
+case the field ever gains a click handler, harmless while it has none.
+Typing is what the field is for (Session E).
 
 ### Transfer note — the same widget family, twice more
 
@@ -168,8 +210,9 @@ template is the same declaration with a different `id_prefix`:
 - the **toolbar** instance (`workspace/layout.yaml`, `params: { size: 56 }`,
   empty prefix) — bare ids `fill_swatch`, `stroke_swatch`, `swap_btn`,
   `reset_btn`, `solid_btn`, `gradient_btn`, `none_btn`;
-- the **Swatches panel** instance (`workspace/panels/swatches.yaml`) under
-  its `sp_`-neighbouring prefix.
+- the **Swatches panel** instance (`workspace/panels/swatches.yaml:207`,
+  `params: { id_prefix: "sp_", size: 50 }`) — ids `sp_fill_swatch`,
+  `sp_stroke_swatch`, and so on.
 
 So triaging the bare-prefix and Swatches-panel instances is mostly
 transcription, not fresh judgement — the occlusion geometry, the

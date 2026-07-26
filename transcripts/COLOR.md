@@ -230,6 +230,14 @@ wrong once (CPTRIAGE); it is now pinned cross-language by the
 `fill_stroke_none` action-corpus case's `expected_panel_state` block, and
 the per-widget triage record is in COLOR_TESTS.md.
 
+What is pinned is the SCOPE, not yet the swatch. With the scope agreed the
+two active ports still DRAW a none differently: Rust marks the fill /
+stroke swatch with the red-diagonal no-paint indicator, deciding
+none-from-empty-slot by the bind's own declaration, while Swift's swatch
+renders an explicit none as a plain transparent square — indistinguishable
+from an empty recent-colour slot. That half is unfixed and banked by name
+in COLOR_TESTS.md.
+
 ## Color bar
 
 `COLOR_BAR` is a 64 px tall 2-D gradient rendered at the bottom of the

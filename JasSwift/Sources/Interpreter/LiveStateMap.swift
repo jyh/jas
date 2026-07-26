@@ -59,6 +59,13 @@ import Foundation
 /// evaluator is ctx-only (``evaluate(_:context:)`` never consults the store),
 /// so nothing downstream can rescue an unpublished null — the overlay is the
 /// only chance.
+///
+/// The parity claim here is about the SCOPE and stops there. Rendering an
+/// explicit none is still divergent: Rust's `render_color_swatch` draws the
+/// red-diagonal no-paint indicator (deciding none-from-empty-slot by the bind's
+/// declaration, `null_color_means_none`), while ``YamlPanelBodyView`` renders it
+/// as a plain transparent square, the same as an empty recent-colour slot.
+/// Unfixed and banked by name in transcripts/COLOR_TESTS.md.
 public func liveFillStrokeValues(model: Model?) -> (fill: Any?, stroke: Any?) {
     guard let model = model else { return (nil, nil) }
     let fill: Any? = {
