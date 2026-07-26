@@ -199,8 +199,9 @@ public func colorPanelWriteColor(
 /// (pinned by `colorPanelInvertStaysDisabledForAnExplicitNone`). The NATIVE
 /// None buttons clear only the document tier, in both ports, so after one of
 /// those this answers the app tier — the same answer the panel's own swatch and
-/// sliders already give for that state, since they resolve the same two tiers.
-/// That half-none is banked in COLOR_TESTS.md; it is not introduced here.
+/// sliders already give for that state, since with nothing selected they fall
+/// through to that same tier. That half-none is banked in COLOR_TESTS.md; it is
+/// not introduced here.
 public func activeDefaultPaintColor(model: Model) -> Color? {
     let fromDocument: Color? = model.fillOnTop
         ? model.defaultFill?.color

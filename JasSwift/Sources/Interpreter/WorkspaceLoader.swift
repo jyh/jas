@@ -31,11 +31,18 @@ class WorkspaceData {
     /// `workspace/*.yaml` before a run, never during one.
     private static let cached: WorkspaceData? = parse()
 
-    /// Load the workspace from a JSON file or embedded fallback.
+    /// The parsed workspace bundle, or `nil` if it could not be found or parsed.
     ///
-    /// Tries to read from the development file path first
-    /// (../../workspace/workspace.json relative to JasSwift),
-    /// then falls back to an embedded empty workspace.
+    /// There is no embedded fallback: ``parse()`` tries two development file
+    /// paths, then `Bundle.main`, then `return nil`. So the `nil` is real and
+    /// every caller has to handle it — no source-tree call site force-unwraps
+    /// this today.
+    ///
+    /// The result is CACHED, `nil` included, so a failure is permanent for the
+    /// process where it used to be retried on every call. That is correct for
+    /// the one thing that can change it — the bundle is a build product,
+    /// regenerated from `workspace/*.yaml` before a run, never during one — but
+    /// it means a run that starts without a readable bundle stays that way.
     static func load() -> WorkspaceData? {
         cached
     }

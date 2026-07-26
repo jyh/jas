@@ -247,19 +247,35 @@ differs (6px Rust, 3px Swift) and is banked in COLOR_TESTS.md.
 
 Where the DEFAULT colours live is settled too: fill and stroke defaults
 are WORKSPACE state, not document state, so File > New carries the
-colour the user is mid-flow with rather than reseeding — and every reader
-of the active paint resolves the SAME three tiers, selection → document
-default → app default. That includes the ones easy to forget: a dialog's
-seed, the toolbar squares, and the Color panel's own sliders (each of
-which was caught answering it its own way). And an ACTION's
-`state.fill_color` is read with the SELECTION in view — clicking Solid
-with a shape selected asks whether THAT shape's fill is none, not
-whether the app default is. Both are pinned cross-language by
-`test_fixtures/actions/fill_stroke_action_scope.json`; the record is in
-COLOR_TESTS.md. Swift's NATIVE toolbar "C" / "/" mode buttons predate the
-ruling and still write the tab tier by hand — banked in COLOR_TESTS.md,
-with why it means no user-level check can confirm the action-scope half
-in Swift yet.
+colour the user is mid-flow with rather than reseeding.
+
+The tiers are selection → document default → app default, and the list of
+readers that resolve all three is longer than it looks. Six do: the
+panel-render `state` scope, the action-dispatch scope, a dialog's seed, the
+toolbar squares, the Color panel's SLIDERS, and — a seventh reader hiding
+behind the sixth — the Color panel's own WRITE path, which is not the same
+code as the sliders that display it. Each of the last four was caught
+answering the question its own way; the record of which, and of what each
+answered instead, is in COLOR_TESTS.md.
+
+Two readers stop at the two DEFAULT tiers on purpose, identically in both
+ports: the panel menu's **Invert** and **Complement**, and their
+enabled state, operate on the default paint and do not consult the
+selection. Whether they SHOULD is an open question, banked in
+COLOR_TESTS.md.
+
+Two do not follow the rule at all, both banked in COLOR_TESTS.md rather
+than fixed: Swift's NATIVE toolbar "C" / "/" mode buttons, which predate
+the ruling and write the tab tier by hand (which is why no user-level
+check can confirm the action-scope half in Swift yet), and both ports'
+NATIVE None buttons, which clear the document tier only and so produce a
+"none" that every three-tier reader still sees as the app tier's colour.
+
+And an ACTION's `state.fill_color` is read with the SELECTION in view —
+clicking Solid with a shape selected asks whether THAT shape's fill is
+none, not whether the app default is. Both that and the tier order are
+pinned cross-language by
+`test_fixtures/actions/fill_stroke_action_scope.json`.
 
 ## Color bar
 

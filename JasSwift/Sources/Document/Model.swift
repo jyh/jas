@@ -319,24 +319,41 @@ public class Model: ObservableObject {
     /// reader and writer keeps working and a File > New carries the value
     /// forward.
     ///
-    /// Read in exactly ONE place — ``liveFillStrokeValues``'s no-selection arm,
-    /// `tab tier ?? app tier`, mirroring Rust's `.or(st.app_default_fill)`. That
-    /// is what makes a FRESH launch with an empty canvas publish `"#ffffff"`
-    /// rather than null; without the tier, `state.fill_color == null` was true
-    /// at launch and the Color panel opened with its fifteen sliders, hex field
-    /// and colour bar DISABLED and Invert / Complement greyed, while Rust opened
-    /// them live (CPTRIAGE).
+    /// The reason it exists: ``liveFillStrokeValues``'s no-selection arm reads
+    /// `tab tier ?? app tier`, mirroring Rust's `.or(st.app_default_fill)`, and
+    /// that is what makes a FRESH launch with an empty canvas publish
+    /// `"#ffffff"` rather than null. Without the tier, `state.fill_color == null`
+    /// was true at launch and the Color panel opened with its fifteen sliders,
+    /// hex field and colour bar DISABLED and Invert / Complement greyed, while
+    /// Rust opened them live (CPTRIAGE).
     ///
-    /// Being read only under a `nil` tab tier gives its writers a simple law: a
-    /// writer that sets the tab tier to a COLOUR need not touch this (the tab
-    /// tier wins), but a writer that CLEARS the tab tier must clear this too, or
-    /// the paint the user just cleared reads back as the seed. The two YAML
-    /// colour routes do exactly that (``applyActiveColorWrite`` and the
-    /// `set_active_color_none` intercept in ``YamlPanelBodyView``), matching the
-    /// Rust `fill_color` / `stroke_color` arms of `set_app_state_field`; Rust's
-    /// NATIVE widget paths (`set_active_to_none`, `reset_fill_stroke_defaults`,
+    /// Two more functions read it directly, each added when the reader it serves
+    /// was caught answering the tier question its own way (COLORTIERS):
+    /// ``resolveActivePaintColor`` (the Color panel's slider display, its
+    /// channel-write path and its mode-switch seed) and
+    /// ``activeDefaultPaintColor`` (the panel menu's Invert / Complement and
+    /// their enabled state). The dialog seeds reach it indirectly, through
+    /// ``colorPickerSeedContext`` → ``dialogStateScope``.
+    ///
+    /// Every reader consults it only after the DOCUMENT-owned tiers have yielded
+    /// nothing — which is not the same as "only when the tab tier is nil":
+    /// ``resolveActivePaintColor`` falls through to it for an explicit
+    /// `Uniform(None)` selection as well, matching Rust's `and_then` → `or_else`
+    /// chain. That gives its writers a simple law: a writer that sets the tab tier to a COLOUR need
+    /// not touch this (the tab tier wins), but a writer that CLEARS the tab tier
+    /// must clear this too, or the paint the user just cleared reads back as the
+    /// seed. The two YAML colour routes do exactly that
+    /// (``applyActiveColorWrite`` and the `set_active_color_none` intercept in
+    /// ``YamlPanelBodyView``), matching the Rust `fill_color` / `stroke_color`
+    /// arms of `set_app_state_field`; so does
+    /// ``ColorPanel/setActiveColor(_:model:)``, which writes this tier on every
+    /// terminal commit exactly as Rust's `set_active_color` does — while the
+    /// LIVE arm leaves it alone, as `set_active_color_live` does. Rust's NATIVE
+    /// widget paths (`set_active_to_none`, `reset_fill_stroke_defaults`,
     /// `swap_fill_stroke`) write only their tab tier, and so do this port's, so
-    /// the two ports agree there as well.
+    /// the two ports agree there as well — and a none from one of those is a
+    /// HALF none, invisible to every reader here, which is banked in
+    /// COLOR_TESTS.md.
     ///
     /// The setters announce through ``objectWillChange`` so a write re-renders
     /// the observing views exactly as the former `@Published` storage did.
