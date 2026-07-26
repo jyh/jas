@@ -541,7 +541,13 @@ actions:
     description: >
       Sets the active attribute (fill or stroke, per fill_on_top) to gradient
       fill mode. Currently a placeholder — gradient editing is not yet
-      implemented.
+      implemented, so this action declares NO effects and a dispatch is a
+      silent no-op. Because of that, the control that invokes it (the
+      fill/stroke widget's Gradient button) is rendered DISABLED rather than
+      merely inert: an enabled control that can never do anything is a dead
+      control. The behavior stays declared on the button, so the wiring is
+      already in place when this action grows effects — at which point the
+      button's bind.disabled comes off in the same change.
     category: fill_stroke
     effects: []
 

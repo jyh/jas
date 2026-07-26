@@ -668,7 +668,7 @@
       ]
     },
     "set_fill_type_gradient": {
-      "description": "Sets the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. Currently a placeholder \u2014 gradient editing is not yet implemented.\n",
+      "description": "Sets the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. Currently a placeholder \u2014 gradient editing is not yet implemented, so this action declares NO effects and a dispatch is a silent no-op. Because of that, the control that invokes it (the fill/stroke widget's Gradient button) is rendered DISABLED rather than merely inert: an enabled control that can never do anything is a dead control. The behavior stays declared on the button, so the wiring is already in place when this action grows effects \u2014 at which point the button's bind.disabled comes off in the same change.\n",
       "category": "fill_stroke",
       "effects": []
     },
@@ -7854,7 +7854,7 @@
                       "id": "gradient_btn",
                       "type": "icon_button",
                       "summary": "Gradient",
-                      "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, matching the way the native toolbar widget has always drawn it and the \"Coming soon\" treatment of the Artboards panel's Rearrange button. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                      "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
                       "icon": "fill_gradient",
                       "style": {
                         "size": 13.44
@@ -13812,7 +13812,7 @@
                         "id": "cp_gradient_btn",
                         "type": "icon_button",
                         "summary": "Gradient",
-                        "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, matching the way the native toolbar widget has always drawn it and the \"Coming soon\" treatment of the Artboards panel's Rearrange button. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                        "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
                         "icon": "fill_gradient",
                         "style": {
                           "size": 11.52
@@ -20114,7 +20114,7 @@
                         "id": "sp_gradient_btn",
                         "type": "icon_button",
                         "summary": "Gradient",
-                        "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, matching the way the native toolbar widget has always drawn it and the \"Coming soon\" treatment of the Artboards panel's Rearrange button. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                        "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
                         "icon": "fill_gradient",
                         "style": {
                           "size": 12
@@ -37987,7 +37987,7 @@
                 "id": "${id_prefix}gradient_btn",
                 "type": "icon_button",
                 "summary": "Gradient",
-                "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, matching the way the native toolbar widget has always drawn it and the \"Coming soon\" treatment of the Artboards panel's Rearrange button. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
                 "icon": "fill_gradient",
                 "style": {
                   "size": "${mode_btn_size}"

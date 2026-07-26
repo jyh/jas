@@ -98,11 +98,12 @@ fill_stroke_widget:
               click could only be a silent no-op. An enabled control that can
               never do anything is a dead control — it renders with a pointer
               cursor and full contrast, and a user who clicks it learns
-              nothing. Greyed out until gradient fill lands, matching the way
-              the native toolbar widget has always drawn it and the
-              "Coming soon" treatment of the Artboards panel's Rearrange
-              button. The click behavior stays declared so the wiring is
-              already in place when the action grows effects.
+              nothing. Greyed out until gradient fill lands, following the
+              house treatment of a deferred control: the "Coming soon" state
+              of the Artboards panel's Rearrange button, and the disabled
+              "Create New Swatch..." row in the Color panel's own menu. The
+              click behavior stays declared so the wiring is already in place
+              when the action grows effects.
             icon: fill_gradient
             style: { size: "${mode_btn_size}" }
             bind:
