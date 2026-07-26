@@ -136,6 +136,49 @@ number needs a run from a logged-in desktop session.
 File: `results/2026-07-26-rtx5060ti-dx12-offscreen.json`. Re-run three times;
 frame times reproduce within 0.3% (800k within 2%).
 
+### Windowed — AutoNoVsync, GPU-pipelined (the real present path)
+
+Physical window **2400×1500**. Driven from the interactive desktop via a
+`LogonType Interactive` scheduled task — see "Windows invocation" below, since a
+plain ssh run cannot do this.
+
+| elements | frame avg (ms) | frame p95 (ms) | encode avg (ms) | fps | pipelining gain |
+|---------:|---------------:|---------------:|----------------:|----:|----------------:|
+| 10,000   | 1.76   | 1.89   | 0.14  | 567.4 | 1.65× |
+| 50,000   | 6.48   | 6.80   | 0.86  | 154.3 | 1.16× |
+| 100,000  | 11.74  | 12.20  | 1.69  | **85.2** | 1.22× |
+| 250,000  | 33.79  | 38.02  | 3.96  | 29.6  | 1.36× |
+| 500,000  | 74.99  | 76.29  | 7.86  | 13.3  | 1.17× |
+| 800,000  | 117.97 | 119.79 | 13.06 | 8.5   | 1.18× |
+
+File: `results/2026-07-26-rtx5060ti-dx12-windowed.json`.
+
+Two things to read here.
+
+**Windows measures the present path more cleanly than macOS does.** kenai's
+windowed curve is strictly monotone and its p95 tracks its average closely
+(1.76/1.89, 11.74/12.20). The Mac's windowed run is bimodal at the fast end —
+`frame_p95` pinned near 17 ms, the ~60 Hz compositor beat — and *non-monotone*
+(its 10k reads slower than its 50k), because macOS partially throttles even under
+`AutoNoVsync`. kenai's 567 fps at 10k shows no refresh cap whatsoever. So on
+Windows the windowed number is trustworthy at every point on the ladder, and on
+the Mac only above 100k.
+
+**The pipelining gain independently confirms finding #3.** Overlapping CPU and
+GPU can only hide the GPU portion of a frame, so the achievable speedup is
+`(cpu+gpu)/max(cpu,gpu)`. kenai gains just **1.16–1.36×** where the Mac gains up
+to 2×. Solving that back: kenai's frame is ~82% unhideable CPU — which is the
+*same 82%* the process-CPU measurement found independently (0.82 of 16 cores
+busy). Two unrelated instruments agreeing on one number is the strongest evidence
+in this document that the workload is CPU bound. The Mac's larger gain is
+consistent too: its encode is ~2× faster and its window is 1.8× the pixels, so a
+proportionally larger share of its frame is GPU work available to hide.
+
+A note on the resolution mismatch: kenai's window is 2400×1500 against the Mac's
+3200×2000, so the windowed tables are not pixel-matched the way the offscreen ones
+are. Per finding #3 this is worth ~2%, well below the gaps being discussed — but
+the offscreen tables remain the comparison of record.
+
 ### kenai vs the Mac — the crossover
 
 | elements | kenai ms | Mac ms | kenai/Mac | encode ratio | ns/element (kenai, Mac) |
@@ -162,13 +205,12 @@ dual-channel DDR5), and it sets the shape of the whole high end.
 
 **PASS_WITH_CAVEATS, now on both platforms.**
 
-- **60fps @ 100k — PASS on Metal and on D3D12.** Mac: 79 fps serialized offscreen,
-  115 fps (avg) on the real windowed present path. kenai: **69.7 fps** serialized
-  offscreen — the conservative floor, at full retina 3200×2000, on real discrete
-  hardware. Both clear the bar; the Mac clears it with more room. kenai's windowed
-  number is unmeasured (no interactive desktop over ssh), and since windowed ran
-  ~1.5× offscreen on the Mac at 100k, kenai's real present path is expected to be
-  comfortably higher than 69.7 — but that is an expectation, not a measurement.
+- **60fps @ 100k — PASS on Metal and on D3D12, in both modes.** Mac: 79 fps
+  serialized offscreen, 115 fps windowed. kenai: **69.7 fps** serialized offscreen
+  at retina 3200×2000, and **85.2 fps** on the real windowed present path. All four
+  numbers clear the bar; the Mac clears it with more room. Both platforms are
+  measured on real hardware (`device_type` = IntegratedGpu / DiscreteGpu), not a
+  software rasterizer.
 - **Graceful (non-cliff) degradation — PASS within the reachable range, on both.**
   Offscreen frame time grows smoothly and roughly linearly with element count —
   Mac 12.6 → 31 → 56 → 87 ms and kenai 14.3 → 46 → 88 → 140 ms across
@@ -215,7 +257,7 @@ the performance lever, when we need one, is on the CPU side.
 
 3. **This rig is single-thread CPU bound, not GPU bound — it is not really a GPU
    benchmark.** Discovered on kenai 2026-07-26, where the GPU could be
-   instrumented directly (`nvidia-smi` sampled during runs). Three independent
+   instrumented directly (`nvidia-smi` sampled during runs). Four independent
    measurements agree:
 
    - **GPU utilization 21–46%**, and the driver *downclocks* under load —
@@ -227,6 +269,13 @@ the performance lever, when we need one, is on the CPU side.
    - **4× the pixels costs 1.4–3.5%.** Going from 1600×1000 to 3200×2000 (1.6 →
      6.4 Mpx) changed frame time by +3.5% at 100k and +1.4% at 800k. Cost tracks
      element count, not pixels, so rasterization is not the limiter either.
+   - **The pipelining gain agrees, from the opposite direction.** Overlapping CPU
+     and GPU can only hide the GPU portion, so the ceiling is
+     `(cpu+gpu)/max(cpu,gpu)`. kenai's windowed mode gains only 1.16–1.36× over
+     serialized offscreen, which solves back to a frame that is ~82% unhideable
+     CPU — the *same 82%* the process-CPU measurement found by a completely
+     different route. Two unrelated instruments landing on one number is the
+     strongest single piece of evidence here.
 
    Two consequences. First, **the Mac-vs-kenai gap above is a CPU comparison**,
    not a verdict on either GPU — the RTX 5060 Ti and the M5 Pro GPU are both
@@ -274,11 +323,33 @@ Pick the one backend you mean.
 # kenai — the curve of record, matching the Mac's resolution exactly
 cargo run --release -- --backend dx12 --mode offscreen --width 3200 --height 2000
 
-# Windowed on Windows needs an INTERACTIVE DESKTOP. Over ssh, surface creation
-# fails with `Invalid surface` — an ssh session has no desktop to present into.
-# Run this from a logged-in session, not a remote shell.
+# Windowed on Windows needs an INTERACTIVE DESKTOP. Straight over ssh this fails
+# with `Invalid surface` — an ssh session has no desktop to present into.
 cargo run --release -- --backend dx12 --mode windowed
 ```
+
+**Driving a windowed run remotely anyway.** If a desktop session is logged on
+(check `Get-Process explorer | Select SessionId`), a scheduled task with
+`LogonType Interactive` runs *in* that session and can create a surface, which is
+how the windowed table above was measured over ssh. Redirect stdout, because you
+cannot see the task's console:
+
+```powershell
+$rig = "C:\Users\jyh\projects\claude\jas\prototypes\scaling_rig"
+$cmd = "/c cd /d `"$rig`" && target\release\scaling_rig.exe --backend dx12 " +
+       "--mode windowed --out win.json > `"$rig\win_log.txt`" 2>&1"
+$a = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $cmd
+$p = New-ScheduledTaskPrincipal -UserId "jyh" -LogonType Interactive -RunLevel Highest
+Register-ScheduledTask -TaskName RigWindowed -Action $a -Principal $p
+Start-ScheduledTask -TaskName RigWindowed     # then poll .State until Ready
+Unregister-ScheduledTask -TaskName RigWindowed -Confirm:$false
+```
+
+**PowerShell traps that will cost you a run.** `Select-Object -First N` on a
+long-running command *terminates the upstream pipeline* — it kills the benchmark
+mid-sweep, and you will fetch a stale JSON without noticing. And `a,b,c` is an
+array literal, so `--points 10000,50000` arrives as separate arguments and clap
+rejects it; quote it as `"10000,50000"`.
 
 Every results file records `machine`, `chip`, `os`, `adapter` and `device_type`,
 so a record proves which box and which GPU produced it — and in particular proves

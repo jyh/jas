@@ -1,0 +1,75 @@
+{
+  "machine": "KENAI",
+  "chip": "AMD Ryzen 7 8700F 8-Core Processor",
+  "os": "Windows 11 Home 25H2 (build 26200)",
+  "backend": "dx12",
+  "adapter": "NVIDIA GeForce RTX 5060 Ti",
+  "device_type": "DiscreteGpu",
+  "mode": "windowed",
+  "present_mode": "AutoNoVsync",
+  "antialiasing": "Area",
+  "width": 2400,
+  "height": 1500,
+  "seed": 6971763,
+  "warmup_secs": 2.0,
+  "measure_secs": 8.0,
+  "architecture_note": "Geometry encoded once into a retained vello::Scene per point; per frame a reused outer Scene is reset()+append(inner, camera) — re-encodes the command stream under the camera affine, not the geometry.",
+  "timing_note": "frame_ms = steady-state inter-frame interval (true throughput, GPU-pipelined); encode_ms = Scene::append CPU time",
+  "generated_unix": 1785095625,
+  "points": [
+    {
+      "elements": 10000,
+      "frames": 4540,
+      "avg_encode_ms": 0.14,
+      "p95_encode_ms": 0.16,
+      "avg_frame_ms": 1.76,
+      "p95_frame_ms": 1.89,
+      "fps": 567.38
+    },
+    {
+      "elements": 50000,
+      "frames": 1235,
+      "avg_encode_ms": 0.86,
+      "p95_encode_ms": 0.93,
+      "avg_frame_ms": 6.48,
+      "p95_frame_ms": 6.8,
+      "fps": 154.28
+    },
+    {
+      "elements": 100000,
+      "frames": 682,
+      "avg_encode_ms": 1.69,
+      "p95_encode_ms": 1.82,
+      "avg_frame_ms": 11.74,
+      "p95_frame_ms": 12.2,
+      "fps": 85.15
+    },
+    {
+      "elements": 250000,
+      "frames": 238,
+      "avg_encode_ms": 3.96,
+      "p95_encode_ms": 4.15,
+      "avg_frame_ms": 33.79,
+      "p95_frame_ms": 38.02,
+      "fps": 29.59
+    },
+    {
+      "elements": 500000,
+      "frames": 108,
+      "avg_encode_ms": 7.86,
+      "p95_encode_ms": 8.24,
+      "avg_frame_ms": 74.99,
+      "p95_frame_ms": 76.29,
+      "fps": 13.33
+    },
+    {
+      "elements": 800000,
+      "frames": 68,
+      "avg_encode_ms": 13.06,
+      "p95_encode_ms": 13.42,
+      "avg_frame_ms": 117.97,
+      "p95_frame_ms": 119.79,
+      "fps": 8.48
+    }
+  ]
+}
