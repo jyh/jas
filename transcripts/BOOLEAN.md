@@ -287,11 +287,15 @@ Two related arms of the same shape, disclosed here so the class stays visibly op
 
 **And Rust is not uniformly the generous port.** `path_erase_at_rect` (`effects.rs:4436`) rebuilds with `common: CommonProps::default()`, discarding all 9 of `CommonProps`' fields — `opacity`, `mode`, `transform`, `locked`, `visibility`, `mask`, `tool_origin`, `name`, `id` — where Swift's `pathEraseAtRect` forwards `opacity`, `transform`, `locked`, `visibility`, `blendMode` and `mask`. So Swift loses the stroke profile and identity on an edit while Rust loses the appearance and identity on an erase. Whoever takes this stone should fix both directions, not pick a winner.
 
-### Swift's `Polygon` has no `toolOrigin` field at all
+### Swift's `Polygon` has no `toolOrigin` field at all — and SVG import reaches it
 
-**Status: BANKED 2026-07-26.** A model-shape asymmetry rather than a behaviour bug, and likely unreachable today.
+**Status: BANKED 2026-07-26.** Recorded first as "a model-shape asymmetry, likely unreachable"; that was wrong, and the correction is the interesting part.
 
-Rust's `PolygonElem` carries `common: CommonProps`, which includes `tool_origin`; Swift's `Polygon` (`Element.swift:2927`) has no such property, so a `tool_origin` on a Polygon is lossy in Swift at **every** boundary — SVG, binary codec, every copy helper — not at one site. It is probably unreachable in practice: the only writer of `tool_origin` is the blob brush, which stamps it onto Paths. That "probably" is exactly what a ruling should replace, because a boolean result whose single ring materialises as a `Polygon` is one plausible future writer.
+Rust's `PolygonElem` carries `common: CommonProps`, which includes `tool_origin`; Swift's `Polygon` (`Element.swift:2926`) has no such property, so a `tool_origin` on a Polygon is lossy in Swift at **every** boundary — SVG, binary codec, every copy helper — not at one site.
+
+The tempting dismissal is that nothing writes it: the only in-app writer of `tool_origin` is the blob brush (four sites, all writing the literal `"blob_brush"`), and it stamps Paths. **But SVG import writes it too, and it writes it generically.** Rust's `parse_element` (`svg.rs:1569`) computes `let common = parse_common(node)` **once, before matching on the tag**, and `parse_common` (`:1283`) reads `jas:tool-origin` unconditionally — so the `"polygon"` arm (`:1628`) hands that `common` straight into `PolygonElem`. Swift's `parseElement` reads `jas:tool-origin` only inside its `"path"` arm (`Svg.swift:1349`); its `"polygon"` arm (`:1340`) has nowhere to put it.
+
+So: **open an SVG containing `<polygon jas:tool-origin="…">` in both ports and Rust preserves the tag while Swift silently drops it.** That is a live prime-directive divergence on import, reachable by a hand-authored or third-party file, not a latent model asymmetry. It is banked rather than fixed only because this round's charter is closed; it is the smallest of the three stones and the fix is additive (a `toolOrigin` on Swift's `Polygon`, plus the import arm and the copy helpers).
 
 ## Boolean Options dialog
 
@@ -494,7 +498,7 @@ The index of what this document leaves unsettled. Each entry says where the deta
 | **Multi-ring results differ between the ports** | **FIXED 2026-07-26** | [Multi-ring results: FIXED 2026-07-26](#multi-ring-results-fixed-2026-07-26) — both ports emit one even-odd Path, Swift's canvas honours it, the pinch-split landed and the `ring_count` oracle holdout is retired. |
 | **Does a path EDIT preserve the declared rule?** | **OPEN — needs a ruling** | [Does a path EDIT preserve the declared rule? OPEN — needs a ruling](#does-a-path-edit-preserve-the-declared-rule-open--needs-a-ruling) — Swift preserves, Rust writes `NonZero` at all five rebuild sites, so an anchor edit floods an even-odd hole in Rust and not in Swift. Unpinned in both ports (probe-verified). Ruling "preserve" costs five Rust sites. |
 | **The field family at the same helper** | **BANKED — its own stone** | [The same helper drops a whole family of fields](#the-same-helper-drops-a-whole-family-of-fields--larger-than-the-fill-rule-half) — `pathWithCommands` drops 6 of 18 fields across 8 call sites; `withMask` / `withWidthPoints` drop 7 and 9. Rust's `path_erase_at_rect` drops all 9 `CommonProps` fields in the other direction. |
-| **Swift `Polygon` has no `toolOrigin`** | **BANKED — likely unreachable today** | [Swift's `Polygon` has no `toolOrigin` field at all](#swifts-polygon-has-no-toolorigin-field-at-all) — model-shape asymmetry against Rust's `PolygonElem.common`; lossy at every boundary, but only the blob brush writes `tool_origin` and it writes onto Paths. |
+| **Swift `Polygon` has no `toolOrigin`** | **BANKED — reachable, smallest of the three** | [Swift's `Polygon` has no `toolOrigin` field at all — and SVG import reaches it](#swifts-polygon-has-no-toolorigin-field-at-all--and-svg-import-reaches-it) — Rust's `parse_common` reads `jas:tool-origin` before the tag match, so its `<polygon>` arm keeps the tag and Swift's drops it. Live import divergence; additive fix. |
 | **OUTLINE operation** | Deferred, unblock trigger named | [Terminology](#terminology) — waits on the planar-graph / DCEL primitive for the Shape Builder tool. |
 | **Trap operation** | Deferred, unblock trigger named | [Terminology](#terminology) — waits on a physical printing model (spot colors, separations, press output). |
 

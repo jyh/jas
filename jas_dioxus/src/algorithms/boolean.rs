@@ -1525,21 +1525,21 @@ fn vertex_key(v: &(f64, f64)) -> Option<(u64, u64)> {
 /// The n=4 row carries a caveat two earlier versions of this table did
 /// not. The scan at n=4 performs three comparisons, which costs at or
 /// below the harness floor: an empty-bodied call through the same barriers
-/// measures 0.7 ns in Rust and 7.7 ns in Swift, so nearly all of the Swift
-/// 9.3 ns and a fifth of the Rust 3.6 ns is harness rather than
-/// algorithm. The RATIO at n=4 is therefore not a reproducible quantity.
-/// This harness reads 21x (Rust) and 20x (Swift); an earlier version of
-/// this doc asserted 28x and 77x; a third, independent harness read 10.5x
-/// in Rust. Do not cite a ratio here. What all of them agree on, within
-/// about 10%, is the figure that is actually load-bearing: the map's
-/// ABSOLUTE cost on a short ring, ~75-80 ns in Rust and ~185 ns in Swift.
-/// That fixed cost -- not any ratio -- is what the map-only version this
-/// replaces paid on every short ring, and it is the whole reason the
-/// dispatcher exists.
+/// measures 0.6-0.7 ns in Rust and 7.7-8.8 ns in Swift, so nearly all of
+/// the Swift 9.3 ns and about a fifth of the Rust 3.6 ns is harness rather
+/// than algorithm. The RATIO at n=4 is therefore not a reproducible
+/// quantity. This harness reads 20-21x in both languages; an earlier
+/// version of this doc asserted 28x and 77x; a third, independent harness
+/// read 10.5x in Rust. Do not cite a ratio here. What all of them agree
+/// on is the figure that is actually load-bearing: the map's ABSOLUTE cost
+/// on a short ring, 73-84 ns in Rust and 183-196 ns in Swift across every
+/// run any of the three harnesses has recorded. That fixed cost -- not any
+/// ratio -- is what the map-only version this replaces paid on every short
+/// ring, and it is the whole reason the dispatcher exists.
 ///
-/// The remaining rows do reproduce. The map overtakes the scan near n=128
-/// in Rust and near n=230 in Swift, and by n=4096 it is 26x faster in Rust
-/// and 14x in Swift.
+/// The remaining rows do reproduce, within about 10% run to run. The map
+/// overtakes the scan near n=125 in Rust and near n=230 in Swift, and by
+/// n=4096 it is 26-27x faster in Rust and 14x in Swift.
 ///
 /// Which rings are short, computed rather than assumed. Rect and Polygon
 /// operands contribute a handful of vertices. An Ellipse is flattened by
@@ -1554,12 +1554,13 @@ fn vertex_key(v: &(f64, f64)) -> Option<(u64, u64)> {
 /// That is what makes 128 a good shared constant rather than merely a
 /// legible one: it puts small shapes and rect/polygon work on the scan and
 /// large ellipse results on the map, each on the side where it wins. It
-/// sits AT Rust's crossover rather than comfortably above it: repeating the
-/// search for the smallest n at which the map first wins landed on 120, 124
-/// and 132, and at n=127/128 the two bodies are within 10% of each other,
-/// so the choice costs little in either direction right at the boundary.
+/// sits AT Rust's crossover rather than comfortably above it: five repeats
+/// of the search for the smallest n at which the map first wins returned
+/// 120, 120, 120, 124 and 132, and at n=127/128 the two bodies are within
+/// 10% of each other, so the choice costs little in either direction right
+/// at the boundary. (Swift's four repeats returned 224, 228, 228, 232.)
 /// The most Swift can lose by switching at 128 instead of its own ~230 is
-/// the n=128 row: 4.25 us against 2.27 us, still under 2 us. In the other
+/// the n=128 row: 4.25 us against 2.27 us, about 2 us. In the other
 /// direction the scan's worst case below the threshold is the longest ring
 /// it is ever handed, n=127, at 126*127/2 = 8001 comparisons, measured at
 /// 2.55 us in Rust and 2.23 us in Swift. (An earlier version of this line
