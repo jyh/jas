@@ -105,3 +105,33 @@ private let donutPreFillRuleHex = "4a4153000200000094919800c2cb3ff00000000000000
     }
     #expect(p.d.count == 8)
 }
+
+// MARK: - The corpus JSON boundary
+
+/// The corpus JSON boundary must round-trip the fill rule, not just emit
+/// it. The serializer has written `fill_rule` since the rule joined Path,
+/// but the parser hardcoded `.nonzero` — so a corpus vector COULD NOT
+/// express an even-odd path: any fixture declaring one would fail its own
+/// json -> doc -> json round trip. Symmetric with Rust (both ports
+/// emitted and neither parsed), so this was a write-only boundary rather
+/// than a parity break, and it is fixed in both ports together. Twin of
+/// Rust's `fill_rule_round_trips_through_test_json`.
+@Test func fillRuleRoundTripsThroughTestJson() {
+    for rule in [FillRule.nonzero, FillRule.evenodd] {
+        let path = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 0),
+                                         .lineTo(10, 10), .closePath],
+                                     fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+                                     fillRule: rule))
+        let doc = Document(layers: [Layer(children: [path])], selectedLayer: 0)
+        let json = documentToTestJson(doc)
+        let back = testJsonToDocument(json)
+        guard case .path(let p) = back.layers[0].children[0] else {
+            Issue.record("expected Path")
+            return
+        }
+        #expect(p.fillRule == rule, "test_json dropped \(rule)")
+        // Canonicality: the fixture form is a fixed point, which is what
+        // every corpus golden comparison relies on.
+        #expect(documentToTestJson(back) == json)
+    }
+}

@@ -975,10 +975,15 @@ package func parseElement(_ v: Any?) -> Element {
                                 opacity: opacity, transform: transform, locked: locked,
                                 visibility: visibility, name: name, id: id))
     case "path":
+        // Absent `fill_rule` means the `nonzero` default, matching the
+        // serializer's identity-omission convention.
+        let pathFillRule: FillRule =
+            (d["fill_rule"] as? String) == "evenodd" ? .evenodd : .nonzero
         return .path(Path(d: parsePathCommands(d["d"]),
                           fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                           opacity: opacity, transform: transform, locked: locked,
-                          visibility: visibility, name: name, id: id))
+                          visibility: visibility, name: name, id: id,
+                          fillRule: pathFillRule))
     case "text":
         let tspans = parseTspansOrLegacy(d)
         return .text(Text(x: parseF(d["x"]), y: parseF(d["y"]),

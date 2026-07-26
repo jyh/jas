@@ -1187,7 +1187,13 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
-            fill_rule: crate::geometry::element::FillRule::NonZero,
+            // Absent means the `nonzero` default, matching the
+            // serializer's identity-omission convention.
+            fill_rule: if v["fill_rule"].as_str() == Some("evenodd") {
+                crate::geometry::element::FillRule::EvenOdd
+            } else {
+                crate::geometry::element::FillRule::NonZero
+            },
         }),
         "text" => Element::Text(TextElem {
             x: parse_f(&v["x"]),
@@ -1576,6 +1582,57 @@ mod tests {
         assert!(json.contains("\"type\":\"layer\""));
         assert!(json.contains("\"selected_layer\":0"));
         assert!(json.contains("\"selection\":[]"));
+    }
+
+    /// The corpus JSON boundary must round-trip the fill rule, not just
+    /// emit it. The serializer has written `fill_rule` since the rule
+    /// joined PathElem, but `parse_element` hardcoded NonZero — so a
+    /// corpus vector COULD NOT express an even-odd path: any fixture
+    /// declaring one would fail its own json -> doc -> json round trip.
+    /// Symmetric with Swift (both ports emitted and neither parsed), so
+    /// this was a write-only boundary rather than a parity break, and it
+    /// is fixed in both ports together.
+    #[test]
+    fn fill_rule_round_trips_through_test_json() {
+        use crate::geometry::element::FillRule;
+        for rule in [FillRule::NonZero, FillRule::EvenOdd] {
+            let path = Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 10.0, y: 0.0 },
+                    PathCommand::LineTo { x: 10.0, y: 10.0 },
+                    PathCommand::ClosePath,
+                ],
+                fill: Some(Fill::new(Color::BLACK)),
+                stroke: None,
+                width_points: vec![],
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+                fill_rule: rule,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+            });
+            let layer = Element::Layer(LayerElem {
+                children: vec![Rc::new(path)],
+                isolated_blending: false,
+                knockout_group: false,
+                common: CommonProps::default(),
+            });
+            let doc = Document {
+                layers: vec![layer], selected_layer: 0, ..Document::default()
+            };
+            let json = document_to_test_json(&doc);
+            let back = test_json_to_document(&json);
+            match &*back.layers[0].children().unwrap()[0] {
+                Element::Path(p) => assert_eq!(p.fill_rule, rule,
+                    "test_json dropped {rule:?}"),
+                other => panic!("expected Path, got {other:?}"),
+            }
+            // Canonicality: the fixture form is a fixed point, which is
+            // what every corpus golden comparison relies on.
+            assert_eq!(document_to_test_json(&back), json);
+        }
     }
 
     #[test]
