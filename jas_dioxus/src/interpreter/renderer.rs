@@ -14623,6 +14623,87 @@ mod tests {
         assert_eq!(overrides["bl"], serde_json::json!(0));
     }
 
+    // The WRITE half of the same reader. A slider's `oninput` / `onchange` and
+    // a value box's `onchange` all hand `compute_color_from_panel` the map
+    // `ctx.get("panel")` holds — the panel defaults ALREADY overlaid by
+    // `build_live_panel_overrides` — so the dragged channel mixes with the
+    // channels of the active PAINT, not with `color.yaml`'s stored ones.
+    //
+    // This arm was already correct; the pin exists to hold JasSwift's
+    // `colorPanelChannelDragReadsTheAppTierAfterFileNew` honest. That port's
+    // write path was a SECOND reader with no app tier, so after File > New its
+    // panel displayed the app tier's red while a Brightness drag on the same
+    // panel computed from the store's white and committed mid GREY (808080)
+    // where this one commits dark red (800000) — COLORTIERS repair 2.
+    #[test]
+    fn colortiers_channel_drag_reads_the_app_tier_after_a_new_document() {
+        use crate::workspace::app_state::TabState;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let mut params = serde_json::Map::new();
+        params.insert("color".into(), serde_json::json!("#ff0000"));
+        dispatch_action("set_active_color", &params, &mut st);
+        st.add_tab(TabState::new());
+
+        let ctx = build_color_render_ctx(&st);
+        let panel = ctx.get("panel").expect("the render ctx carries the panel map");
+        // color.yaml's stored HSB channels are WHITE (h=0 s=0 b=100): a write
+        // path reading them alone mixes the drag with white.
+        assert_eq!(panel["s"], serde_json::json!(100),
+                   "the overlay has already replaced the stored s=0 with the \
+                    app tier's red");
+        let color = compute_color_from_panel("b", 50.0, panel)
+            .expect("hsb is a known mode");
+        assert_eq!(color.to_hex(), "800000",
+                   "Brightness 50 on RED is dark red; on color.yaml's stored \
+                    white it would be mid grey");
+    }
+
+    // Invert / Complement and their enabled state read `active_color()`, which
+    // reached the app tier only when there was NO tab — so after File > New
+    // (fresh tab, empty per-document tier, colour held above the tabs) both
+    // greyed out while the panel beside them displayed the colour. Symmetric
+    // with JasSwift before COLORTIERS repair 2; fixed in both ports together.
+    #[test]
+    fn colortiers_invert_stays_available_after_a_new_document() {
+        use crate::workspace::app_state::TabState;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let mut params = serde_json::Map::new();
+        params.insert("color".into(), serde_json::json!("#ff0000"));
+        dispatch_action("set_active_color", &params, &mut st);
+        st.add_tab(TabState::new());
+        assert!(st.tab().unwrap().model.default_fill.is_none(),
+                "the fresh tab's own tier is empty");
+        assert_eq!(st.active_color().map(|c| c.to_hex()),
+                   Some("ff0000".to_string()),
+                   "the same tiers the panel displays, so Invert operates on \
+                    the colour the user can SEE");
+    }
+
+    // …and the tier is a seed, not a floor: the YAML None route clears BOTH
+    // tiers, so `active_color()` still answers None there and color.yaml's
+    // menu keeps Invert / Complement disabled (COLOR.md, None state).
+    #[test]
+    fn colortiers_invert_is_still_disabled_for_an_explicit_none() {
+        use crate::workspace::app_state::TabState;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        dispatch_action("set_fill_none", &serde_json::Map::new(), &mut st);
+        assert!(st.app_default_fill.is_none(), "the None route clears both tiers");
+        assert!(st.active_color().is_none(),
+                "no tier resolves, so Invert / Complement stay greyed");
+    }
+
     // A null colour has TWO meanings and the value alone cannot tell them
     // apart: `state.fill_color` null means "the user set this attribute to
     // None" (draw the red-diagonal indicator), while
