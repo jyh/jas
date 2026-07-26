@@ -230,13 +230,24 @@ wrong once (CPTRIAGE); it is now pinned cross-language by the
 `fill_stroke_none` action-corpus case's `expected_panel_state` block, and
 the per-widget triage record is in COLOR_TESTS.md.
 
-What is pinned is the SCOPE, not yet the swatch. With the scope agreed the
-two active ports still DRAW a none differently: Rust marks the fill /
-stroke swatch with the red-diagonal no-paint indicator, deciding
-none-from-empty-slot by the bind's own declaration, while Swift's swatch
-renders an explicit none as a plain transparent square — indistinguishable
-from an empty recent-colour slot. That half is unfixed and banked by name
-in COLOR_TESTS.md.
+The SWATCH follows the same rule. Both active ports mark a none with the
+red-diagonal no-paint indicator over a white face, and both decide
+none-from-an-empty-slot by the BIND's own declaration rather than by the
+value: a null from a bind naming a nullable `state` colour means "no
+paint", while a null from `panel.recent_colors.3` means "that slot is
+empty" and draws a hollow placeholder. An empty string carries the "no
+paint" meaning too (a dialog's hex field cleared). Swift used to render
+every non-colour as a transparent square, making an explicit none and an
+empty slot identical; closed by COLORTIERS.
+
+Where the DEFAULT colours live is settled too: fill and stroke defaults
+are WORKSPACE state, not document state, so File > New carries the
+colour the user is mid-flow with rather than reseeding. And an ACTION's
+`state.fill_color` is read with the SELECTION in view — clicking Solid
+with a shape selected asks whether THAT shape's fill is none, not
+whether the app default is. Both are pinned cross-language by
+`test_fixtures/actions/fill_stroke_action_scope.json`; the record is in
+COLOR_TESTS.md.
 
 ## Color bar
 

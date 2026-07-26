@@ -101,30 +101,62 @@ dispatcher's missing `apply_active_color` hook, its missing `state`
 namespace, and the hook applying `fill_on_top`'s attribute instead of the
 key the effect wrote. All fixed; see the CPTRIAGE commits.
 
-### Banked, NOT fixed: the render halves still differ
+### CLOSED by COLORTIERS: the render halves agree too
 
-The SCOPE halves now agree: both ports publish a colour, an explicit
-null, or nothing at all. The RENDER halves do not, and the fix above did
-not touch them.
+Banked by this census as "the SCOPE halves agree, the RENDER halves do
+not". They now agree.
 
-Rust decides none-vs-placeholder from the BIND DECLARATION.
-`null_color_means_none` (`jas_dioxus/src/interpreter/renderer.rs:7495`)
-asks the `state.yaml` schema whether the bound key is a NULLABLE COLOUR,
-so a null from `state.fill_color` draws the red-diagonal "no paint"
-indicator while a null from `panel.recent_colors.3` draws a hollow
-placeholder — the value alone cannot tell those apart. Swift's
-`renderColorSwatch` has no analogue: its `bind.color` switch
-(`JasSwift/Sources/Interpreter/YamlPanelBodyView.swift:2106-2114`) sends
-every non-colour result to `.clear` and nothing reads the schema, so an
-explicit None and an empty recent-colour slot render IDENTICALLY, a
-transparent square with no indicator. A Swift user who clicks None now
-gets correct guards and a correctly-null scope, and still no visible
-"none" mark on the swatch itself.
+Rust decides none-vs-placeholder from the BIND DECLARATION:
+`null_color_means_none` asks the `state.yaml` schema whether the bound
+key is a NULLABLE COLOUR, so a null from `state.fill_color` draws the
+red-diagonal "no paint" indicator while a null from
+`panel.recent_colors.3` draws a hollow placeholder — the value alone
+cannot tell those apart. Swift's `renderColorSwatch` sent every
+non-colour result to `.clear`, so an explicit None and an empty
+recent-colour slot rendered IDENTICALLY, and a CLEARED hex field (the
+empty-string encoding Rust also reads as none) rendered as BLACK.
 
-Pre-existing — it predates this wave, which changed only the readers —
-and left for whoever owns the swatch renderer. So neither COLOR.md's
-none-state paragraph nor `LiveStateMap`'s "three outcomes" comment claims
-the whole contract is at parity; both say scope-only, and point here.
+Swift now carries the same `nullColorMeansNone` — reading the same
+schema table — plus the empty-string arm, the white face and the red
+diagonal. Pinned by `nullMeansNoneOnlyForNullableStateColours`
+(JasSwift/Tests/Interpreter/LiveStateMapTests.swift), the mirror of
+Rust's `cptriage_null_means_none_only_for_nullable_state_colours`.
+
+### CLOSED by COLORTIERS: the two architectural asymmetries
+
+The census banked two items as design questions rather than defects,
+because each port was self-consistent and they disagreed. JYH ruled
+2026-07-26: **each port was right about one thing, adopt both.**
+
+1. **Where do default colours live?** Fill/stroke defaults are WORKSPACE
+   state, not document state — they belong with brush size and the
+   active tool. Set a red, hit File > New, and you are mid-flow and
+   expect red. Rust's app-global tier was right; Swift's tier moved off
+   `Model` (one per canvas) onto `WorkspaceState`, above the canvases,
+   which installs it into every canvas it adopts. Cold launch is
+   unchanged: white fill, black stroke. Gated by
+   `appDefaultsSurviveFileNew` / `appDefaultsAreOneTierNotACopyPerCanvas`
+   / `coldLaunchStillOpensBlackAndWhite`, mirrored by Rust's
+   `colortiers_app_default_survives_a_new_document`.
+2. **Should the ACTION-dispatch scope be selection-aware?** Yes —
+   clicking Solid with a shape selected asks "is THE SELECTION's fill
+   none?". Swift's ctx already was; Rust's `build_appstate_ctx` read
+   `st.app_default_fill` alone, so clicking Solid on a stroke-only shape
+   was a silent no-op there and painted here. Rust now sources both
+   colour keys from `action_fill_stroke_values` — the panel reader's
+   `live_fill_stroke_values` composed with the workspace defaults — so
+   all three outcomes (colour / explicit null / the default standing for
+   Mixed) agree across the two scopes and the two ports. Gated
+   cross-language by `test_fixtures/actions/fill_stroke_action_scope.json`.
+
+Two more readers of the same fact were hand-rolling it from
+`model.defaultFill` and were routed through the one reader in the same
+wave: the two Swift dialog-seeding sites (`openToolbarColorPicker`,
+`openYamlDialogFromMenu` → `dialogStateScope`), which opened the picker
+on WHITE where Rust opened it on the selection's colour; and the native
+`FillStrokeWidget` squares, which skipped the app tier entirely and so
+drew the NO-PAINT indicator on a cold launch while the Color panel one
+reader away showed white.
 
 ### The 13 proven identity operations (correct DEAD)
 
