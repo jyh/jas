@@ -429,6 +429,34 @@ deliberately the only seed for new geometry?
 stroke". **Ruling needed:** which tier a swap operates on, so the two paths
 can be made one.
 
+### Banked, NOT fixed (repair 4): the reference rounds halves the other way
+
+Found while choosing the corpus's grid, and it is not a Rust-vs-Swift
+matter: the LIVE reference interpreter rounds halves to EVEN (Python's
+builtin `round`) where both active ports round halves AWAY FROM ZERO
+(`f64::round`, `Double.rounded()`). So for any colour whose derived channel
+lands exactly on x.5 the spec's executable meaning and the two apps
+disagree by one:
+
+    workspace_interpreter.color_util.rgb_to_hsb(7, 7, 8) -> (240, 12, 3)
+    both active ports                                    -> (240, 13, 3)
+
+(`(8/255 - 7/255) / (8/255) * 100` is exactly 12.5.) The same fault line
+runs through `hsb_to_rgb` and `rgb_to_cmyk`, and through every other
+reference conversion that rounds.
+
+`color_convert.json` does NOT encode this: the derivation script reports
+every golden that lands on a half boundary, and the vector that would have
+carried it was moved to (7, 7, 9). So the corpus is honest about the
+convention it pins rather than picking a side silently — but the
+disagreement is still there, one `round()` away from any colour a user
+happens to land on. **Ruling needed:** does the reference adopt
+half-away-from-zero (it is the spec's executable meaning, so the ports
+would be conforming to it rather than the reverse), or is the reference's
+convention the correct one and both active ports need a rounding helper? The
+answer decides whether `color_convert.json` can ever be run with
+`--lang python` as a third comparison, which today it cannot.
+
 ### CORRECTION (repair 4): `active_color()` is no longer single-tier
 
 Round 4's brief listed `AppState::active_color()` as reaching the app tier
