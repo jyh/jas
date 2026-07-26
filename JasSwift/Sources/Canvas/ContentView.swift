@@ -1186,17 +1186,22 @@ struct FillStrokeWidget: View {
                         )
                 }
             } else {
-                // None state: white with red diagonal line
+                // None state: a white face with the red diagonal across it —
+                // drawn by the SHARED ``swatchNoneDiagonalPath`` /
+                // ``swatchNoneDiagonalLineWidth``, not hand-rolled here. This
+                // is the third place the same indicator is drawn (the YAML
+                // `color_swatch` renderer and Rust's `NONE_DIAG_SVG` are the
+                // others) and it used to be the odd one out: a flat
+                // `lineWidth: 2` on a 28pt square is 7.1% where both of the
+                // others draw 8%.
                 ZStack {
                     Rectangle()
                         .fill(SwiftUI.Color.white)
                         .frame(width: squareSize, height: squareSize)
-                    SwiftUI.Path { path in
-                        path.move(to: CGPoint(x: 0, y: squareSize))
-                        path.addLine(to: CGPoint(x: squareSize, y: 0))
-                    }
-                    .stroke(SwiftUI.Color.red, lineWidth: 2)
-                    .frame(width: squareSize, height: squareSize)
+                    swatchNoneDiagonalPath(size: squareSize)
+                        .stroke(SwiftUI.Color.red,
+                                lineWidth: swatchNoneDiagonalLineWidth(size: squareSize))
+                        .frame(width: squareSize, height: squareSize)
                 }
             }
         }
