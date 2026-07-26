@@ -6,14 +6,35 @@
 /// panel keeps showing whatever values were stored at the last write,
 /// so selecting a differently-colored shape leaves the sliders stale.
 ///
-/// Resolution: selection's uniform fill / stroke → tab default → app
-/// default. Returns `nil` when nothing resolves (panel falls back to
-/// stored panel state).
+/// Resolution, tier for tier with Rust: the selection's uniform fill /
+/// stroke → the per-document default → the APP default. Returns `nil`
+/// only when none of the three resolves, and then the panel falls back
+/// to its stored state.
+///
+/// The app tier is the whole reason this comment exists. This reader
+/// used to stop at the per-document default, which was unreachable
+/// while that tier was reseeded per canvas — and became reachable the
+/// moment the app tier moved above the canvases (COLORTIERS): set a red
+/// with nothing selected, File > New, and the new canvas's own tier is
+/// empty while the app tier holds red. Rust answered red, this port
+/// answered "nothing resolved" and the sliders / hex showed
+/// `color.yaml`'s stored 255/255/255 — beside a fill swatch, one reader
+/// away, painting red. One fact must have one answer.
+///
+/// An explicit None (`Uniform(nil)`) yields nothing from the document
+/// tiers and so falls THROUGH to the app tier, matching Rust's
+/// `and_then` → `.or_else` chain exactly. Nothing a user reads changes:
+/// `color.yaml`'s slider / hex / colour-bar `disabled` guards test
+/// `state.fill_color == null` and disable the controls regardless. But
+/// the numbers the disabled controls hold are the same numbers in both
+/// ports, which is what the prime directive asks.
 
 import Foundation
 
 public func colorPanelLiveOverrides(model: Model) -> [String: Any]? {
-    let resolved: Color? = {
+    // The two document-owned tiers: the selection, else the per-document
+    // default. Mirrors Rust's `st.tab().and_then { … }`.
+    let fromDocument: Color? = {
         if model.fillOnTop {
             switch selectionFillSummary(model.document) {
             case .uniform(let f?): return f.color
@@ -28,7 +49,11 @@ public func colorPanelLiveOverrides(model: Model) -> [String: Any]? {
             }
         }
     }()
-    guard let color = resolved else { return nil }
+    // …and Rust's `.or_else(|| st.app_default_fill … )`.
+    let fromAppTier: Color? = model.fillOnTop
+        ? model.appDefaultFill?.color
+        : model.appDefaultStroke?.color
+    guard let color = fromDocument ?? fromAppTier else { return nil }
 
     let (rf, gf, bf, _) = color.toRgba()
     let r = Int((rf * 255.0).rounded())

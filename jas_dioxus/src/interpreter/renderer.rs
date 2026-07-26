@@ -14521,6 +14521,37 @@ mod tests {
                     inherits the colour the user is mid-flow with");
     }
 
+    // The Color panel's SLIDERS are a second reader of the same tiers, and
+    // `build_live_panel_overrides` resolves them itself (it needs the channel
+    // decomposition, not the hex). So it gets the same pin: after File > New
+    // the answer can only come from the tier above the tabs. This is the arm
+    // that holds JasSwift's `colorPanelSlidersReadTheAppTierAfterFileNew`
+    // honest — that reader had NO app tier and fell back to color.yaml's
+    // stored 255/255/255 while its own fill swatch painted red (COLORTIERS
+    // repair).
+    #[test]
+    fn colortiers_panel_sliders_read_the_app_tier_after_a_new_document() {
+        use crate::workspace::app_state::TabState;
+        use crate::workspace::dock_panel::build_live_panel_overrides;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let mut params = serde_json::Map::new();
+        params.insert("color".into(), serde_json::json!("#ff0000"));
+        dispatch_action("set_active_color", &params, &mut st);
+        st.add_tab(TabState::new());
+        assert!(st.tab().unwrap().model.default_fill.is_none(),
+                "the fresh tab's own tier is empty — only the tier above answers");
+        let overrides = build_live_panel_overrides(&st);
+        assert_eq!(overrides["hex"], serde_json::json!("ff0000"),
+                   "the sliders read the app tier, exactly as the swatch does");
+        assert_eq!(overrides["r"], serde_json::json!(255));
+        assert_eq!(overrides["g"], serde_json::json!(0));
+        assert_eq!(overrides["bl"], serde_json::json!(0));
+    }
+
     // A null colour has TWO meanings and the value alone cannot tell them
     // apart: `state.fill_color` null means "the user set this attribute to
     // None" (draw the red-diagonal indicator), while
