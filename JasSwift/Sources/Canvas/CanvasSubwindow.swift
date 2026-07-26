@@ -394,10 +394,16 @@ private func makeCGGradient(_ g: Gradient) -> CGGradient? {
 /// Fill the current path with a Gradient. Saves and restores ctx state.
 /// The path is clipped (consumed) by this call — the caller must
 /// re-add the path if a subsequent stroke is needed.
-private func fillCurrentPathWithGradient(_ ctx: CGContext, _ g: Gradient, _ bbox: CGRect) {
+///
+/// The clip carries the path's DECLARED fill rule: a gradient paints
+/// only where the rule says the path is inside, so an even-odd path
+/// keeps its holes instead of having them flooded. `ctx.clip()` without
+/// a rule means winding, which is why this argument is not optional.
+private func fillCurrentPathWithGradient(_ ctx: CGContext, _ g: Gradient, _ bbox: CGRect,
+                                         _ fillRule: FillRule) {
     guard let cgGradient = makeCGGradient(g) else { return }
     ctx.saveGState()
-    ctx.clip()
+    ctx.clip(using: fillRule == .evenodd ? .evenOdd : .winding)
     switch g.type {
     case .linear:
         let rad = g.angle * .pi / 180
@@ -755,7 +761,12 @@ private func fillStrokeOrOutline(
 /// strokeGradient is set, replaces the path with its stroked outline
 /// and fills that with the gradient (CGContext gradient APIs are
 /// fill-oriented).
-private func fillStrokeOrOutline(
+///
+/// Every branch that paints an interior takes `fillRule`. Internal (not
+/// private) so Tests/Canvas/GradientFillRuleTests.swift can pixel-check
+/// that: CGContext state is the only place the winding rule is
+/// observable, so there is nothing to assert from outside.
+func fillStrokeOrOutline(
     _ ctx: CGContext,
     _ fill: Fill?,
     _ stroke: Stroke?,
@@ -773,7 +784,7 @@ private func fillStrokeOrOutline(
     let strokeIsGradient = strokeGradient.flatMap(makeCGGradient) != nil
     if let g = fillGradient, makeCGGradient(g) != nil {
         let savedPath = ctx.path
-        fillCurrentPathWithGradient(ctx, g, bbox)
+        fillCurrentPathWithGradient(ctx, g, bbox, fillRule)
         if let stroke = stroke {
             if let p = savedPath { ctx.addPath(p) }
             if strokeIsGradient, let sg = strokeGradient {
@@ -788,7 +799,7 @@ private func fillStrokeOrOutline(
         let savedPath = ctx.path
         if let fill = fill {
             setFill(ctx, fill)
-            ctx.fillPath()
+            ctx.fillPath(using: fillRule == .evenodd ? .evenOdd : .winding)
             if let p = savedPath { ctx.addPath(p) }
         }
         fillStrokedPathWithGradient(ctx, stroke: stroke, gradient: sg, bbox: bbox)
@@ -822,7 +833,11 @@ private func fillStrokedPathWithGradient(
         ctx.setLineDash(phase: 0, lengths: stroke.dashPattern.map { CGFloat($0) })
     }
     ctx.replacePathWithStrokedPath()
-    fillCurrentPathWithGradient(ctx, gradient, bbox)
+    // The stroked OUTLINE is new geometry, not the element's interior: its
+    // regions are all positively wound, so it fills with the winding rule
+    // whatever the element declares. Even-odd here would cancel the
+    // overlaps a stroke naturally produces (joins, self-crossings).
+    fillCurrentPathWithGradient(ctx, gradient, bbox, .nonzero)
     ctx.restoreGState()
 }
 
