@@ -5,13 +5,15 @@ import Testing
 ///
 /// Swift has no equivalent of Rust's `PathElem { d, ..p.clone() }`, so
 /// every Swift edit of a Path is an open-coded rebuild that restates
-/// each field by hand. Rust cannot lose a field on these paths at all —
+/// each field by hand. Most of the Rust twins CANNOT lose a field:
 /// `clear_ids` (element.rs) and `assign_id` (controller.rs) mutate
-/// `common` in place, `apply_appearance` mutates `common_mut()`,
-/// `simplify_selection` writes `fill_rule: p.fill_rule`, and
-/// `blob_brush_commit_erasing` uses `..pe.clone()`. Swift's rebuilds are
-/// the divergence risk, and this file is their pin (PRIME DIRECTIVE:
-/// jas_dioxus and JasSwift must agree exactly).
+/// `common` in place, `apply_appearance` mutates `common_mut()`, and
+/// `blob_brush_commit_erasing` uses `..pe.clone()`. The exception is
+/// `simplify_selection`, which spells `fill_rule: p.fill_rule` out by hand
+/// and so could regress — hence the Rust-side guard
+/// `simplify_selection_preserves_even_odd_fill_rule`. Swift's rebuilds are
+/// the larger divergence risk, and this file is their pin (PRIME
+/// DIRECTIVE: jas_dioxus and JasSwift must agree exactly).
 ///
 /// The FIRST line of defence is not this file: `Path.init` takes
 /// `fillRule` with NO DEFAULT, so a rebuild that forgets it does not
@@ -165,12 +167,12 @@ private func modelWith(_ children: [Element], selected: [ElementPath] = []) -> M
 
 // MARK: - 3. Ad-hoc rebuild sites (not copy helpers)
 
-/// The sites below are not `with*` helpers — they are open-coded
-/// `Path(d: ..., fill: v.fill, ..., fillRule: .nonzero)` rebuilds inside feature code, which
-/// is why the helper battery above could not see them. Rust performs the
-/// same edits by `..p.clone()` / `common.clone()` / `common_mut()`, so in
-/// Rust no field can be dropped; each Swift rebuild must restate every
-/// field by hand.
+/// The sites below are not `with*` helpers — they are Path initializer
+/// calls open-coded inside feature code, which is why the helper battery
+/// above could not see them. The eyedropper and blob-brush edits are
+/// `..p.clone()` / `common_mut()` mutations in Rust, so Rust cannot drop a
+/// field there at all; each Swift rebuild must restate every field by
+/// hand.
 
 @Test func fillRuleSurvivesSimplifySelection() {
     // Controller.simplifySelection §Path arm. Rust's simplify_selection

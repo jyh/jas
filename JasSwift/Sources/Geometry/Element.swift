@@ -3225,8 +3225,11 @@ public struct Path: Equatable {
     /// field by hand; a defaulted `fillRule` let such a rebuild compile
     /// while silently reinterpreting the artwork (refilling the holes of
     /// an even-odd boolean result). Requiring the argument makes the
-    /// compiler, not a reviewer, enumerate the sites. Fresh-construction
-    /// sites pass `.nonzero`; rebuild sites pass the source's rule.
+    /// compiler, not a reviewer, enumerate the sites. A rebuild site passes
+    /// the source's rule; a fresh-construction site states the rule its
+    /// geometry means — `.nonzero` at every such site today except
+    /// `Controller.applyDestructiveBoolean`, which stamps
+    /// `boolResultFillRule`.
     public let fillRule: FillRule
 
     public init(d: [PathCommand],

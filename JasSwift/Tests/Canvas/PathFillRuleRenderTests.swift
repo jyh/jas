@@ -4,13 +4,17 @@ import Testing
 @testable import JasLib
 
 /// The `.path` arm of `drawElementBody` paints the element's interior in
-/// FOUR places, not one. Only the last of them routes through
-/// `fillStrokeOrOutline` (and so reads `fillRule`); the other three are
-/// bare `ctx.fillPath()` calls that precede a special stroke renderer:
+/// FOUR places, not one. Only the last routes through
+/// `fillStrokeOrOutline`; the other three are their own fill calls,
+/// each preceding a special stroke renderer:
 ///
 ///   - the strokeBrush branch (a resolved brush owns the stroke),
 ///   - the widthPoints branch (variable-width profile),
 ///   - the dashAlignAnchors branch (anchor-aligned dashes).
+///
+/// All four read `fillRule` now. Until this file existed the three above
+/// called a bare `ctx.fillPath()`, which means winding, so an even-odd
+/// path had its holes flooded whenever any of those strokes was in play.
 ///
 /// jas_dioxus has no such split: its legacy Path arm emits the fill ONCE
 /// at the top with `match e.fill_rule` and only then chooses a stroke
@@ -19,11 +23,12 @@ import Testing
 /// on that single fill_rule-honouring fill. Applying a calligraphic
 /// brush, a variable-width profile, or anchor-aligned dashes to an
 /// even-odd boolean result therefore kept the hole in Rust and flooded it
-/// in Swift — a live parity divergence.
+/// in Swift — a live parity divergence, not a latent one.
 ///
 /// These are pixel tests because CGContext winding state is not
-/// observable from outside; they drive `drawElement` directly, which is
-/// the only way to reach the three branches.
+/// observable from outside. They drive `drawElement`, the entry point that
+/// reaches the branches: `drawElementBody` is private, and no
+/// display-list or document-level assertion can see a winding rule.
 
 // MARK: - Harness
 

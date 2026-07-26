@@ -941,17 +941,27 @@ struct BoolVertexKey: Hashable {
 ///
 /// So the map is 77x SLOWER at n=4 (28x in Rust) and 14x FASTER at
 /// n=4096 (28x in Rust); the crossover is near n=240 in Swift and n=110
-/// in Rust. An ordinary boolean result - rect / ellipse / polygon
-/// operands, EXCLUDE corners - sits far below either. The single map
-/// version this replaces was therefore a real regression on the common
-/// case, even though the absolute cost was ~180 ns.
+/// in Rust. The single map version this replaces was therefore a real
+/// regression on the short rings, even though the absolute cost there was
+/// ~180 ns in Swift and ~70 ns in Rust.
 ///
-/// 128 is chosen as the one shared constant because it is at or above
-/// Rust's crossover, and the most Swift can lose by using the map from
-/// 128 rather than its own 240 is the n=128 row: 4.10 us against 2.26 us,
-/// under 2 us. In the other direction the scan's worst case below the
-/// threshold is 127*128/2 = 8128 comparisons, measured at 2.3-2.5 us.
-/// Both bounds are small and explicit.
+/// Which rings are short, computed rather than assumed. Rect and Polygon
+/// operands contribute a handful of vertices. An Ellipse is flattened by
+/// ellipseToRing to ceil(pi * sqrt(r / 2p)) vertices (min 8) for major
+/// radius r at the boolean precision, whose default is 0.0283 - so 30
+/// vertices at r=5, 42 at r=10, 94 at r=50, 133 at r=100, 296 at r=500.
+/// Ellipse-driven results are therefore NOT all short: the n=128 boundary
+/// falls at r ~ 94 pt, which is ordinary artwork. (An earlier draft of
+/// this doc asserted they all sat far below the crossover. They do not.)
+///
+/// That is what makes 128 a good shared constant rather than merely a
+/// legible one: it puts small shapes and rect/polygon work on the scan and
+/// large ellipse results on the map, each on the side where it wins. It is
+/// also at or above Rust's crossover, and the most Swift can lose by
+/// switching at 128 instead of its own 240 is the n=128 row: 4.10 us
+/// against 2.26 us, under 2 us. In the other direction the scan's worst
+/// case below the threshold is 127*128/2 = 8128 comparisons, measured at
+/// 2.3 us. Both bounds are small and explicit.
 ///
 /// The threshold cannot change WHAT is returned: both bodies return the
 /// same pair for every ring, which

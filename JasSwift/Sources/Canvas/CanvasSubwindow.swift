@@ -775,11 +775,13 @@ private func fillStrokeOrOutline(
 /// function only: the `.path` arm of `drawElementBody` paints interiors in
 /// three further places that never reach here (brushed stroke, variable
 /// width, anchor-aligned dashes), and those pass `v.fillRule` to
-/// `cgFillRule` themselves. Grepping `cgFillRule` finds every fill that
-/// reads a Path element's declared rule. The other bare `fillPath()` calls
-/// in this file paint things that carry no rule: brush outline polygons,
-/// a Rect, live-element rings, and selection handles — each matching what
-/// jas_dioxus does at the same site.
+/// `cgFillRule` themselves. Within THIS FILE, grepping `cgFillRule` finds
+/// every fill that reads a Path element's declared rule; the remaining bare
+/// `fillPath()` calls here paint brush outline polygons, a Rect,
+/// live-element rings and selection handles, none of which carry a rule,
+/// and jas_dioxus fills each of those with a bare `ctx.fill()` too. Says
+/// nothing about other files: PDF export, for one, ignores the rule
+/// entirely — symmetrically in both ports.
 ///
 /// Internal (not private) so Tests/Canvas/GradientFillRuleTests.swift can
 /// pixel-check the branches here: CGContext state is the only place the

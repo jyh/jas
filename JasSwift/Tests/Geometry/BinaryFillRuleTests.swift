@@ -178,7 +178,10 @@ private func donutWithFillRuleSlot(_ slotHex: String) -> Data {
 /// json -> doc -> json round trip. Symmetric with Rust (both ports
 /// emitted and neither parsed), so this was a write-only boundary rather
 /// than a parity break, and it is fixed in both ports together. Twin of
-/// Rust's `fill_rule_round_trips_through_test_json`.
+/// Rust's `fill_rule_round_trips_through_test_json`, whose doc records
+/// exactly which corpus fixtures do mention a fill rule (three of them,
+/// none reachable through this parser) and corrects an earlier commit
+/// message that claimed there were none.
 @Test func fillRuleRoundTripsThroughTestJson() {
     for rule in [FillRule.nonzero, FillRule.evenodd] {
         let path = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 0),

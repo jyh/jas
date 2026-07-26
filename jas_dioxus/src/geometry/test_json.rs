@@ -1592,6 +1592,29 @@ mod tests {
     /// Symmetric with Swift (both ports emitted and neither parsed), so
     /// this was a write-only boundary rather than a parity break, and it
     /// is fixed in both ports together.
+    ///
+    /// Which corpus fixtures the fix could have moved, stated accurately
+    /// because an earlier commit message got this wrong. THREE fixtures
+    /// mention a fill rule today:
+    ///
+    ///   test_fixtures/actions/boolean_exclude_overlapping_rects_expected.json
+    ///     declares `"fill_rule":"evenodd"` on its Path. Teaching the
+    ///     PARSER to read the key cannot move it: `assert_action_test`
+    ///     (cross_language_test.rs) compares
+    ///     `document_to_test_json(result)` against the golden as TEXT and
+    ///     never parses the golden back, so only the serializer's output
+    ///     is under test and the serializer already emitted the key.
+    ///   test_fixtures/algorithms/boolean.json and boolean_normalize.json
+    ///     carry `a_fill_rule` / `b_fill_rule` (and `fill_rule`) as
+    ///     algorithm-level OPERAND rules. Those are read by the algorithms
+    ///     harness straight into a ruled polygon set, never through this
+    ///     Path parser.
+    ///
+    /// The earlier claim was "no corpus fixture declares fill_rule today
+    /// (grepped test_fixtures/expected/*.json)". The conclusion (no golden
+    /// changes) survives, the evidence did not: `expected/` holds the
+    /// SVG-parse goldens, which is the one family that has no fill_rule in
+    /// it. Grep all of `test_fixtures/`, not one subdirectory.
     #[test]
     fn fill_rule_round_trips_through_test_json() {
         use crate::geometry::element::FillRule;
