@@ -265,9 +265,11 @@ def main():
             "scripts/derive_color_convert_goldens.py, not captured from a "
             "port -- run it to re-derive this file. Every "
             "rounding is half AWAY from zero, which is what Rust's f64::round "
-            "and Swift's Double.rounded() do; the two half-boundary vectors "
-            "(torgb_half_boundary_*) land on x.5 and both conventions agree "
-            "there, so no golden encodes a rounding the ports do not share."
+            "and Swift's Double.rounded() do. Several vectors land exactly "
+            "on x.5 -- the deliberate torgb_half_boundary_* pair, and also "
+            "the 127.5 components in panel_grey_from_float and "
+            "panel_saturating_over_one -- and half-away-from-zero is shared "
+            "by both ports, so no golden encodes a rounding they disagree on."
         ),
         "vectors": vectors,
     }

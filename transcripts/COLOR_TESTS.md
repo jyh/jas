@@ -411,7 +411,7 @@ rule.
 
 A newly drawn element reads `model.defaultFill` / `defaultStroke` alone,
 with no app fallback — `buildElement` and `makePathFromCommands` in Swift,
-the same reads in Rust's `yaml_tool.rs`. So after File > New the Color
+the same reads in Rust's `interpreter/effects.rs` (`model.default_fill` at 977, 1036, 1157, into `build_element_from_spec`/`resolve_fill_field` at 2623-2722; `tools/yaml_tool.rs` carries only a historical comment). So after File > New the Color
 panel shows the colour held above the canvases while a new rect draws with
 NO fill. **Both ports do this identically**, so it is not a parity break
 and repair 4 left it alone. But it is the largest remaining single-tier

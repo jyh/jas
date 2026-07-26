@@ -4666,8 +4666,12 @@ fn path_paintbrush_edit_commit(
         new_cmds.push(*cmd);
     }
 
-    // Preserve all non-`d` attributes per §Edit gesture preservation
-    // rules.
+    // Carries over most non-`d` attributes, but NOT all: fill_gradient,
+    // stroke_gradient and fill_rule are reset below rather than forwarded.
+    // That is a divergence from Swift's `pathWithCommands`, which forwards the
+    // rule — banked in transcripts/BOOLEAN.md pending a ruling on whether a path
+    // EDIT should preserve the declared fill rule. Do not restate this as
+    // "preserves all non-`d` attributes"; it does not.
     let new_elem = Element::Path(PathElem {
         d: new_cmds,
         fill: target_path_elem.fill,
