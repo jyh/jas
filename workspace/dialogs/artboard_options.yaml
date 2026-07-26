@@ -23,7 +23,18 @@ artboard_options:
     state but does not alter Width / Height edits (drag-resize is
     not wired). update_while_dragging persists but has no observable
     effect in Flask. video_ruler_pixel_aspect_ratio round-trips but
-    does not distort the canvas.
+    does not distort the canvas. fade_region_outside_artboard
+    round-trips and is op-logged, but no native port paints a fade
+    for it; its toggle stays ENABLED rather than greyed, because it
+    edits real document state that survives undo/redo and
+    serialization, so a click is not a no-op — only the canvas
+    render is deferred. That is the same treatment
+    video_ruler_pixel_aspect_ratio gets in this Dialogue, and it is
+    the opposite of a control whose action declares no effects at
+    all (those are marked disabled; see the fill/stroke widget's
+    Gradient button). ARTBOARDS.md §Document-global display toggles
+    carries why the first fade implementation was withdrawn and what
+    a correct one requires.
 
   modal: true
   width: 380
@@ -373,6 +384,21 @@ artboard_options:
       - id: ao_fade_region
         type: toggle
         label: "Fade region outside Artboard"
+        description: >
+          Document-wide toggle: when on, the canvas region outside the
+          union of all artboard bounds is meant to render dimmed, so the
+          printable areas read brighter than the pasteboard. The RENDER is
+          deferred — no native port paints a fade today — but the toggle is
+          deliberately left enabled, not greyed, because it is not a dead
+          control: OK writes the value through
+          doc.set_artboard_options_field, so it is op-logged, undoable, and
+          carried by the document serialization, and the Dialogue shows the
+          stored state on reopen. Only the canvas effect is missing.
+          Enabling this control also gates update_while_dragging below.
+          ARTBOARDS.md §Document-global display toggles records why the
+          first fade implementation (50% gray fill punched out with
+          destination-out, which holed the white artboard fills) was
+          withdrawn, and what a non-destructive reinstatement requires.
         bind:
           checked: "dialog.fade_region_outside_artboard"
 

@@ -38,8 +38,12 @@ Canvas Z-order, back to front:
 1. Canvas background (theme gray).
 2. Artboard fills, painted in list order (later wins in overlaps).
 3. Document element tree.
-4. Fade overlay (if `fade_region_outside_artboard` is on) — applied to elements
-   outside the union of all artboard bounds.
+4. Fade overlay (if `fade_region_outside_artboard` is on) — would apply to the
+   region outside the union of all artboard bounds. **Currently paints nothing
+   in any native port**: the slot is reserved and the call site exists, but the
+   routine is a deliberate no-op. See §Document-global display toggles for what
+   the option does do, why the first implementation was withdrawn, and what a
+   correct one requires.
 5. Artboard borders (thin, 1px screen-space).
 6. Accent borders for panel-selected artboards (2px outside the default border,
    theme accent color; total visual thickness 3px).
@@ -90,15 +94,43 @@ distortion) is phase-1 deferred.
 
 **Document-global display toggles.**
 
-- `fade_region_outside_artboard` (default on) — when on, a 50%-opacity mask of
-  the theme canvas color is painted over every region not inside the union of
-  artboard bounds. Elements outside render faded; the canvas background is
-  unchanged underneath. When off, elements render at full opacity everywhere.
+- `fade_region_outside_artboard` (default on) — **intended** behavior: when on,
+  the region outside the union of artboard bounds is dimmed, so the printable
+  areas read brighter than the pasteboard; when off, everything renders at full
+  contrast. **Render deferred — no native port paints anything for this option
+  today.** What the option DOES do is real and gated: it is document state, the
+  Artboard Options Dialogue's Global toggle edits it through
+  `doc.set_artboard_options_field`, so it takes part in the op log and in
+  undo/redo, and it round-trips through the cross-language document
+  serialization. It does NOT survive an SVG round-trip — SVG has no artboards
+  concept, so a parsed SVG resets `artboard_options` to defaults (see
+  §At-least-one-artboard invariant).
+
+  Why the render was withdrawn: the first implementation filled the whole
+  canvas with 50%-opacity theme gray and then punched the artboards back out
+  with a `destination-out` composite. `destination-out` writes alpha = 0, so it
+  did not "unfade" the artboards, it holed them — the opaque white artboard
+  fills underneath were erased and the canvas element's own backing showed
+  through, giving a dark artboard on a light canvas. All four native ports hit
+  that as a smoke regression and all four independently disabled the routine.
+  Nothing in the ports' current display lists differs on this option, which is
+  why the deferral is parity-safe.
+
+  What a reinstatement must do: darken ONLY the pasteboard, non-destructively.
+  Two admissible shapes — fill a single even-odd path of the canvas rect minus
+  every artboard rect (one fill, no compositing, correct under overlapping
+  artboards because even-odd already handles the union), or build the mask in a
+  separate layer/raster before the artboard fill pass and composite it under
+  the fills. Either way the mask must never touch pixels inside an artboard.
+  The z-order slot (layer 4) and the call site are kept in every port so the
+  reinstatement is a body, not a re-wiring.
 - `update_while_dragging` (default on) — when on, the Artboard Tool re-renders
   the dragged artboard, any contained elements (per the Move/Copy Artwork
   rule), and the fade region continuously during a drag. When off, only an
   outline-preview rectangle updates and the artboard snaps to its new
-  geometry on mouseup. See ARTBOARD_TOOL.md §Update while dragging for the
+  geometry on mouseup. (The "and the fade region" clause is part of the
+  contract a reinstated fade must honour; with the fade a no-op it has no
+  observable effect today.) See ARTBOARD_TOOL.md §Update while dragging for the
   per-state rendering contract.
 
 Elements' visibility modes (preview / outline / invisible) and layer lock state
@@ -644,6 +676,11 @@ alignment modes, Rearrange-based list reordering.
   change; since the Dialogue never opens in phase 1, the dot remains lit.
 - **`video_ruler_pixel_aspect_ratio` visual effect** — value persists and
   round-trips; no non-square-pixel distortion in canvas rendering.
+- **`fade_region_outside_artboard` visual effect** — value persists,
+  round-trips and is op-logged, and the Global toggle stays live; the canvas
+  paints nothing for it in any native port. The withdrawn `destination-out`
+  implementation and the requirements for a correct one are recorded under
+  §Document-global display toggles.
 - **Printing** — semantics pinned in the Printing forward-reference
   paragraph; no implementation.
 

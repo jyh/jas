@@ -2779,13 +2779,18 @@ fn draw_artboard_fills(ctx: &CanvasRenderingContext2d, doc: &Document) {
 /// artboard" smoke regression in both ports).
 ///
 /// The z-order slot and the call are kept so the documented layer stays
-/// visible and `fade_region_outside_artboard` (a real document option that
-/// round-trips through SVG and the op log) has somewhere to land. A real
+/// visible and `fade_region_outside_artboard` has somewhere to land. That
+/// option is real document state: `doc.set_artboard_options_field` writes it
+/// (`op_apply.rs`), so it is op-logged and undoable, and `test_json.rs`
+/// carries it in the cross-language document serialization. It does NOT
+/// round-trip through SVG — `geometry/svg.rs` resets `artboard_options` to
+/// defaults on parse, since SVG has no artboards concept. A real
 /// implementation must be non-destructive: darken ONLY the pasteboard
 /// region, e.g. fill an even-odd path of the canvas rect minus every
 /// artboard rect, or composite a separate raster mask built before the
 /// artboard fill pass. Both ports stay no-ops until then, so the display
-/// lists match.
+/// lists match. Spec: ARTBOARDS.md §Document-global display toggles, which
+/// records the deferral rather than promising the mask.
 fn draw_fade_overlay(
     _ctx: &CanvasRenderingContext2d,
     _doc: &Document,
