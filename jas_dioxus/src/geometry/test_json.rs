@@ -1873,7 +1873,7 @@ mod tests {
         };
         let mut d = Document::default();
         d.print_preferences.color_management = ColorManagement {
-            document_profile: "Adobe RGB (1998)".to_string(),
+            document_profile: "sRGB IEC61966-2.1".to_string(),
             color_handling: ColorHandling::PostscriptColorManagement,
             printer_profile: "U.S. Web Coated (SWOP) v2".to_string(),
             rendering_intent: RenderingIntent::Saturation,
@@ -1885,7 +1885,7 @@ mod tests {
                 "json:\n{json}");
         assert!(json.contains("\"rendering_intent\":\"saturation\""),
                 "json:\n{json}");
-        assert!(json.contains("\"document_profile\":\"Adobe RGB (1998)\""),
+        assert!(json.contains("\"document_profile\":\"sRGB IEC61966-2.1\""),
                 "json:\n{json}");
         let d2 = test_json_to_document(&json);
         assert_eq!(d2.print_preferences.color_management,
@@ -2026,7 +2026,7 @@ mod tests {
                 raster_effects_resolution: 600.0,
             },
             color_management: ColorManagement {
-                document_profile: "Adobe RGB (1998)".to_string(),
+                document_profile: "sRGB IEC61966-2.1".to_string(),
                 color_handling: ColorHandling::PostscriptColorManagement,
                 printer_profile: "U.S. Web Coated (SWOP) v2".to_string(),
                 rendering_intent: RenderingIntent::Perceptual,

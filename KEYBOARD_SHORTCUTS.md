@@ -33,7 +33,7 @@
 | Place a file in the document | Shift \+ Ctrl \+ P | Shift \+ Command \+ P |
 | Open the File Information dialog box | Alt \+ Shift \+ Ctrl \+ I | Option \+ Shift \+ Command \+ I |
 | Open the Document Setup dialog box | Alt \+ Ctrl \+ P | Option \+ Command \+ P |
-| Browse in Adobe Bridge | Alt \+ Ctrl \+ O | Option \+ Command \+ O |
+| Browse in the companion asset-browser application | Alt \+ Ctrl \+ O | Option \+ Command \+ O |
 | Close the document window | Ctrl \+ W | Command \+ W |
 | Save changes made to the document | Ctrl \+ S | Command  \+ S |
 | Open the Save As dialog box | Shift \+ Ctrl \+ S | Shift \+ Command \+ S |

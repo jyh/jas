@@ -1455,7 +1455,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         ctx.saveGState()
         // H/V scale wraps the whole text draw around the element's
         // (x, y) origin. Character rotation is *per-glyph* (matches
-        // SVG's <text rotate="N"> spec and Illustrator's Character
+        // SVG's <text rotate="N"> spec and the Character panel's
         // Rotation field): each glyph rotates around its own baseline,
         // leaving the overall layout horizontal.
         let hScale = parseScalePercent(v.horizontalScale)
@@ -2219,7 +2219,7 @@ private func elemChildren(_ e: Element) -> [Element] {
 private let artboardBorderColor = CGColor(gray: 0.2, alpha: 1.0)
 /// Pasteboard (canvas background outside artboards). Medium gray so
 /// white artboards stand out as "paper on a layout table." Hardcoded
-/// pending the Phase-D theme threading; matches Illustrator's
+/// pending the Phase-D theme threading; follows the vector-illustration
 /// pasteboard convention rather than the dock theme.
 private let canvasBackgroundColor = CGColor(gray: 0.47, alpha: 1.0)
 /// Default fill drawn for an artboard whose `fill` is `.transparent`.

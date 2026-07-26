@@ -175,8 +175,9 @@ pub fn build_segments_from_text(
                 word_spacing_max: t.jas_word_spacing_max.unwrap_or(133.0),
                 last_line_align,
                 hyphenate: t.jas_hyphenate.unwrap_or(false),
-                // Defaults match Illustrator / InDesign Hyphenation
-                // dialog: 6 / 2 / 2. The previous 3 / 1 / 1 was loose
+                // Defaults match the Hyphenation dialog professional
+                // illustration / page-layout applications ship with:
+                // 6 / 2 / 2. The previous 3 / 1 / 1 was loose
                 // enough that the sample pattern set produced "T-rump"
                 // (matching ".un1" / "1ru" patterns at min_before=1).
                 hyphenate_min_word: t.jas_hyphenate_min_word.unwrap_or(6.0) as usize,
@@ -185,7 +186,8 @@ pub fn build_segments_from_text(
                 hyphenate_bias: t.jas_hyphenate_bias.unwrap_or(0.0) as u8,
                 // Capitalized words (proper nouns: "Trump", "London")
                 // are excluded from hyphenation by default, mirroring
-                // Illustrator / InDesign / MS Word — even with a real
+                // professional illustration, page-layout and word
+                // processing applications — even with a real
                 // pattern dictionary, breaking proper nouns reads
                 // poorly to most readers.
                 hyphenate_capitalized: t.jas_hyphenate_capitalized.unwrap_or(false),

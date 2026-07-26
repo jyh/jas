@@ -4087,7 +4087,7 @@ mod tests {
         use crate::document::print_preferences::*;
         let mut doc = Document::default();
         doc.print_preferences.color_management = ColorManagement {
-            document_profile: "Adobe RGB (1998)".to_string(),
+            document_profile: "sRGB IEC61966-2.1".to_string(),
             color_handling: ColorHandling::PostscriptColorManagement,
             printer_profile: "U.S. Web Coated (SWOP) v2".to_string(),
             rendering_intent: RenderingIntent::Saturation,
@@ -4097,7 +4097,7 @@ mod tests {
         assert!(svg.contains("<jas:color-management"), "svg:\n{svg}");
         assert!(svg.contains("color-handling=\"postscript_color_management\""), "svg:\n{svg}");
         assert!(svg.contains("rendering-intent=\"saturation\""), "svg:\n{svg}");
-        assert!(svg.contains("Adobe RGB (1998)"), "svg:\n{svg}");
+        assert!(svg.contains("sRGB IEC61966-2.1"), "svg:\n{svg}");
         let parsed = svg_to_document(&svg);
         assert_eq!(parsed.print_preferences.color_management,
                    doc.print_preferences.color_management);

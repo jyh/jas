@@ -186,7 +186,8 @@ pub struct ParagraphSegment {
     /// per-hyphen Penalty value in the composer.
     pub hyphenate_bias: u8,
     /// `jas:hyphenate-capitalized` — when false (the default in
-    /// Illustrator / InDesign / Word), proper nouns and other
+    /// professional illustration, page-layout and word processing
+    /// applications), proper nouns and other
     /// words starting with an uppercase letter are NOT broken at
     /// hyphenation candidates. Avoids breaks like "T-rump".
     pub hyphenate_capitalized: bool,
@@ -1120,8 +1121,9 @@ fn justify_layout(
         // exists at that cap, retry with a much looser cap so the
         // paragraph still justifies — falling all the way back to
         // ragged-left would be visually worse than a too-loose body
-        // line. Mirrors Illustrator / InDesign behavior of allowing
-        // looser spacing rather than abandoning justify entirely.
+        // line. Mirrors professional illustration / page-layout
+        // behavior: allow looser spacing rather than abandon justify
+        // entirely.
         let mut opts = Opts::default();
         let breaks = match compose(&items, &[max_width], &opts) {
             Some(b) => b,

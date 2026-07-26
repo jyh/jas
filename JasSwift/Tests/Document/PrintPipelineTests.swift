@@ -237,7 +237,7 @@ import Testing
 
 @Test func colorManagementRoundTripsThroughPrintPreferences() {
     let c = ColorManagement(
-        documentProfile: "Adobe RGB (1998)",
+        documentProfile: "sRGB IEC61966-2.1",
         colorHandling: .postscriptColorManagement,
         printerProfile: "U.S. Web Coated (SWOP) v2",
         renderingIntent: .saturation,

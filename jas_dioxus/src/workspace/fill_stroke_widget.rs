@@ -12,7 +12,8 @@ use crate::geometry::element::{Color, Fill, Stroke};
 /// Inline SVG diagonal: a single red stroke from lower-left to
 /// upper-right, sized to fill its parent square. Drawn as an overlay
 /// on top of a "None" fill or stroke square so the user sees the
-/// standard Illustrator / Photoshop "no fill" indicator. Uses
+/// "no paint" indicator standard across illustration and image
+/// editors: a red slash through an empty swatch. Uses
 /// dangerous_inner_html because Dioxus rsx! emits `svg` / `line`
 /// tags into the HTML namespace by default; the browser then ignores
 /// them. The other SVG icons in this codebase use the same pattern.

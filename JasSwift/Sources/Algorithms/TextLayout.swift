@@ -592,7 +592,8 @@ public struct ParagraphSegment: Equatable {
     /// penalty value in the composer.
     public var hyphenateBias: Int
     /// `jas:hyphenate-capitalized` — when false (the default in
-    /// Illustrator / InDesign / Word), proper nouns and other
+    /// professional illustration, page-layout and word processing
+    /// applications), proper nouns and other
     /// words starting with an uppercase letter are NOT broken at
     /// hyphenation candidates. Avoids breaks like "T-rump".
     public var hyphenateCapitalized: Bool
@@ -1035,8 +1036,9 @@ func justifyLayoutSegment(_ content: String, maxWidth: Double,
         // exists at that cap, retry with a much looser cap so the
         // paragraph still justifies — falling all the way back to
         // ragged-left would be visually worse than a too-loose body
-        // line. Mirrors Illustrator / InDesign behavior of allowing
-        // looser spacing rather than abandoning justify entirely.
+        // line. Mirrors professional illustration / page-layout
+        // behavior: allow looser spacing rather than abandon justify
+        // entirely.
         let breaksOrNil: [KPBreak]? =
             kpCompose(items: items, lineWidths: lineWidths)
                 ?? kpCompose(items: items, lineWidths: lineWidths,

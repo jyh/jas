@@ -69,7 +69,7 @@ pub enum OutputMode {
     Separations,
 }
 
-/// Film emulsion side (PRINT.md §Phase 3). Names mirror Adobe's
+/// Film emulsion side (PRINT.md §Phase 3). Names mirror the prepress
 /// "Emulsion Up" / "Emulsion Down" — film output convention; for
 /// PDF output this currently has no rendering effect, but the
 /// on-disk shape is stable.
@@ -242,7 +242,7 @@ impl Default for Advanced {
 }
 
 /// Color-handling mode for the Color Management tab (PRINT.md §Phase 5).
-/// Three Adobe-standard choices: let the app, let the printer, or
+/// The three industry-standard choices: let the app, let the printer, or
 /// hand the data straight to the PostScript driver. PDF output
 /// honours the choice for ``RenderingIntent`` only — full ICC profile
 /// management is a Phase 5+ deferral.

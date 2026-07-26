@@ -42,7 +42,7 @@ pub struct DocumentSetup {
     pub transparency_flattener_preset:
         crate::document::print_preferences::FlattenerPreset,
     /// When true, the PDF emitter discards 100%-white overprint
-    /// colors per Adobe convention (eliminates accidental knockout
+    /// colors, per prepress convention (eliminates accidental knockout
     /// from white text on a black background being marked
     /// overprint). Stored only in v1.
     pub discard_white_overprint: bool,

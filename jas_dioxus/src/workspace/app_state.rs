@@ -3241,8 +3241,8 @@ pub(crate) fn build_panel_pending_template(
 
 /// Format a number for CSS length/value output: integers have no
 /// decimal, fractions drop trailing zeros. Matches the visual form
-/// users expect in Illustrator-style number fields (e.g. `14.4pt`,
-/// `0.025em`, `5pt`).
+/// users expect in a vector illustration application's numeric fields
+/// (e.g. `14.4pt`, `0.025em`, `5pt`).
 pub(crate) fn fmt_num(n: f64) -> String {
     if n == n.trunc() {
         format!("{}", n as i64)
