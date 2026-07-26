@@ -869,6 +869,35 @@ pub(crate) fn live_fill_stroke_values(
     (fill_value, stroke_value)
 }
 
+/// The `state.fill_color` / `state.stroke_color` pair as a scope that has no
+/// map to overlay onto sees them: `live_fill_stroke_values` composed with the
+/// workspace `state.yaml` defaults, so the Mixed outcome (`None`) leaves the
+/// DECLARED default standing instead of inventing a null.
+///
+/// That composition is exactly what `build_live_state_map` performs — it starts
+/// from `state_defaults()` and overlays — so a caller that builds its `state`
+/// namespace key-by-key (the action-dispatch ctx, `build_appstate_ctx`) gets the
+/// same three outcomes from the same source rather than answering one fact its
+/// own way. It used to answer from `st.app_default_fill` ALONE: with a
+/// stroke-only shape SELECTED, `set_fill_type_solid`'s
+/// `state.fill_color == null` guard read the app default's white and the click
+/// silently did nothing, while JasSwift — whose action ctx has always been the
+/// selection-aware map — painted the selection (COLORTIERS).
+pub(crate) fn action_fill_stroke_values(
+    st: &AppState,
+) -> (serde_json::Value, serde_json::Value) {
+    let (fill_value, stroke_value) = live_fill_stroke_values(st);
+    let default_for = |key: &str| -> serde_json::Value {
+        Workspace::load()
+            .and_then(|w| w.state_defaults().get(key).cloned())
+            .unwrap_or(serde_json::Value::Null)
+    };
+    (
+        fill_value.unwrap_or_else(|| default_for("fill_color")),
+        stroke_value.unwrap_or_else(|| default_for("stroke_color")),
+    )
+}
+
 /// Lean app-state map for the per-tool bridge (`CanvasTool::sync_global_state`).
 /// Carries only the global `state.*` keys a tool's commit-effects read —
 /// the live fill/stroke (white `#ffffff` workspace default when nothing is

@@ -2306,14 +2306,21 @@ fn build_appstate_ctx(
     st: &crate::workspace::app_state::AppState,
 ) -> serde_json::Value {
     let tool_name = st.active_tool.panel_state_name();
-    let fill_color = match st.app_default_fill {
-        None => serde_json::Value::Null,
-        Some(f) => serde_json::Value::String(format!("#{}", f.color.to_hex())),
-    };
-    let stroke_color = match st.app_default_stroke {
-        None => serde_json::Value::Null,
-        Some(s) => serde_json::Value::String(format!("#{}", s.color.to_hex())),
-    };
+    // SELECTION-AWARE, and it has to be: an action's `state.fill_color` asks
+    // about the paint the click will CHANGE, and with something selected that
+    // is the SELECTION's paint, not the app default's. Clicking Solid on a
+    // stroke-only shape used to read `st.app_default_fill` alone — white —
+    // so `set_fill_type_solid`'s `state.fill_color == null` guard was false
+    // and the click was a silent no-op, while JasSwift (whose action ctx is
+    // the same selection-aware map its panels render against) painted the
+    // selection black. One fact, two answers; JYH ruled Swift right
+    // (COLORTIERS). `action_fill_stroke_values` is that one source — the
+    // panel-render reader's `live_fill_stroke_values` composed with the
+    // workspace defaults — so all three outcomes agree here and there:
+    // a colour / an explicit null for None / the declared default standing
+    // for Mixed.
+    let (fill_color, stroke_color) =
+        crate::workspace::dock_panel::action_fill_stroke_values(st);
     // Expose every stroke-panel field that appears in YAML state.*
     // expressions (workspace/panels/stroke.yaml's state map at the
     // bottom of the file enumerates them). Without these,
@@ -14382,6 +14389,136 @@ mod tests {
                 "a uniform no-fill selection reports None as null");
         assert!(expr::eval(CP_DISABLED_GUARD, &ctx).to_bool(),
                 "sliders / hex / colour bar disable for a no-fill selection");
+    }
+
+    // ── COLORTIERS: each port was right about one thing ───────────────
+    //
+    // JYH ruled 2026-07-26 on the two architectural asymmetries the CPTRIAGE
+    // sweep banked. Half 2 is Rust's to adopt: the ACTION-dispatch `state`
+    // scope must be SELECTION-AWARE. Clicking Solid with a shape selected
+    // asks "is THE SELECTION's fill none?", and `build_appstate_ctx` used to
+    // answer from `st.app_default_fill` alone — so on a stroke-only shape the
+    // guard read white, the click was a silent no-op, and JasSwift (already
+    // selection-aware) painted it. Cross-language pin:
+    // test_fixtures/actions/fill_stroke_action_scope.json.
+
+    /// A one-rect document with the given paint, selected, installed in `st`.
+    fn select_one_rect(st: &mut AppState, fill: Option<Fill>, stroke: Option<Stroke>) {
+        use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
+        use crate::document::document::{Document, ElementSelection};
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill, stroke,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        st.tabs[st.active_tab].model.set_document_for_test(Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![std::rc::Rc::new(rect)],
+                isolated_blending: false,
+                knockout_group: false,
+                common: CommonProps::default(),
+            })],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        });
+    }
+
+    #[test]
+    fn colortiers_action_scope_reads_the_selection_not_the_app_default() {
+        // App default fill: white. Selection: a stroke-only rect. The two
+        // disagree, and the action must believe the selection.
+        let mut st = make_state_with_colors("ffffff", "000000");
+        select_one_rect(&mut st, None, Some(Stroke::new(Color::BLACK, 1.0)));
+        let ctx = build_appstate_ctx(&serde_json::Map::new(), &st);
+        assert!(matches!(expr::eval("state.fill_color", &ctx), Value::Null),
+                "the ACTION scope must report the SELECTION's None, not the \
+                 app default's white — set_fill_type_solid's guard is exactly \
+                 this comparison");
+
+        // And the click therefore lands: Solid restores black on the selection.
+        dispatch_action("set_fill_type_solid", &serde_json::Map::new(), &mut st);
+        let doc = st.tabs[st.active_tab].model.document();
+        let fill = crate::document::controller::selection_fill_summary(doc);
+        assert!(matches!(fill,
+                    crate::document::controller::FillSummary::Uniform(Some(f))
+                        if f.color.to_hex() == "000000"),
+                "clicking Solid on a stroke-only selection paints it black");
+    }
+
+    #[test]
+    fn colortiers_action_scope_leaves_the_default_standing_for_mixed() {
+        // Mixed is the THIRD outcome and it is not None: the reader publishes
+        // nothing, so the declared workspace default stands and Solid is a
+        // no-op (a colour edit would apply to the whole selection).
+        use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
+        use crate::document::document::{Document, ElementSelection};
+        let mut st = make_state_with_colors("ffffff", "000000");
+        st.tabs.push(crate::workspace::app_state::TabState::new());
+        st.active_tab = st.tabs.len() - 1;
+        let rect = |fill: Option<Fill>| Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        st.tabs[st.active_tab].model.set_document_for_test(Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![
+                    std::rc::Rc::new(rect(Some(Fill::new(Color::from_hex("ff0000").unwrap())))),
+                    std::rc::Rc::new(rect(None)),
+                ],
+                isolated_blending: false,
+                knockout_group: false,
+                common: CommonProps::default(),
+            })],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0]),
+                            ElementSelection::all(vec![0, 1])],
+            ..Document::default()
+        });
+        let ctx = build_appstate_ctx(&serde_json::Map::new(), &st);
+        assert_eq!(expr::eval("state.fill_color", &ctx).to_string_coerce(), "#ffffff",
+                   "Mixed publishes nothing, so the workspace default stands — \
+                    absent is not null");
+    }
+
+    // Half 1 is SWIFT's to adopt, and this is the shape it adopts: the app
+    // tier lives ABOVE the tabs, so File > New carries the user's colour
+    // forward. Set a red with nothing selected, hit New, and you are mid-flow
+    // — nobody thinks of "current fill" as a property of the file. Mirrored by
+    // JasSwift's `appDefaultsSurviveFileNew` (JasSwift/Tests/Interpreter/
+    // LiveStateMapTests.swift), which is the arm this pin exists to hold
+    // honest.
+    #[test]
+    fn colortiers_app_default_survives_a_new_document() {
+        use crate::workspace::app_state::TabState;
+        use crate::workspace::dock_panel::build_live_state_map;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        // Nothing selected: the colour lands on the defaults, not a shape.
+        let mut params = serde_json::Map::new();
+        params.insert("color".into(), serde_json::json!("#ff0000"));
+        dispatch_action("set_active_color", &params, &mut st);
+        assert_eq!(build_live_state_map(&st)["fill_color"], serde_json::json!("#ff0000"));
+
+        // File > New (menu_bar.rs's "new" arm, verbatim).
+        st.add_tab(TabState::new());
+        assert_eq!(st.tabs.len(), 2, "the new document is its own tab");
+        assert!(st.tab().unwrap().model.default_fill.is_none(),
+                "the fresh tab's own tier starts empty — the answer below can \
+                 only come from the tier ABOVE the tabs");
+        assert_eq!(build_live_state_map(&st)["fill_color"], serde_json::json!("#ff0000"),
+                   "the fill/stroke defaults are WORKSPACE state: a new document \
+                    inherits the colour the user is mid-flow with");
     }
 
     // A null colour has TWO meanings and the value alone cannot tell them
