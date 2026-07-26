@@ -382,18 +382,32 @@ private func runOne(
     // call-site behavior from before the tool-state scope was
     // introduced.
     if let pairs = effect["set"] as? [String: Any] {
+        // Evaluate every right-hand side ONCE, keeping an explicit YAML `null`
+        // as `NSNull()` rather than as a Swift `nil`.
+        //
+        // The distinction cannot survive the store: `StateStore.set(k, nil)`
+        // assigns nil into a `[String: Any]`, which DELETES the key, so a
+        // write of null and a key nobody ever wrote read back identically.
+        // Anything downstream that needs to know which of the two happened
+        // must be told here, while the difference still exists — see the
+        // colour hook below. The two writer branches unwrap NSNull back to nil
+        // before they touch the store, so what the store holds is byte-for-byte
+        // what it held before.
+        var evaluated: [String: Any] = [:]
+        for (key, expr) in pairs {
+            evaluated[key] = valueToAny(evalExpr(expr, store: store, ctx: ctx))
+                ?? NSNull()
+        }
         if schema {
-            // Schema-driven: evaluate expressions first, then coerce+validate
-            var evaluated: [String: Any] = [:]
-            for (key, expr) in pairs {
-                let val = evalExpr(expr, store: store, ctx: ctx)
-                evaluated[key] = valueToAny(val)
-            }
-            applySetSchemadriven(evaluated, store: store, diagnostics: &diagnostics)
+            // Schema-driven: coerce + validate. Null-valued keys were never
+            // present in this dict (the old code built it with `nil` values,
+            // which a Swift dictionary drops), so filter them back out.
+            applySetSchemadriven(evaluated.filter { !($0.value is NSNull) },
+                                 store: store, diagnostics: &diagnostics)
         } else {
-            for (key, expr) in pairs {
-                let value = evalExpr(expr, store: store, ctx: ctx)
-                setByScopedTarget(store: store, rawTarget: key, value: valueToAny(value))
+            for (key, value) in evaluated {
+                setByScopedTarget(store: store, rawTarget: key,
+                                  value: value is NSNull ? nil : value)
             }
         }
         // Fire the panel-write hook if any `panel.X` key was touched.
@@ -425,10 +439,35 @@ private func runOne(
         // Color Panel does this directly via ColorPanel.setActiveColor;
         // the YAML route writes through set: which lands here. Host
         // registers "apply_active_color" if it wants the propagation.
-        let wroteActiveColor = pairs.keys.contains { $0 == "fill_color" || $0 == "stroke_color" }
-        if wroteActiveColor,
+        //
+        // The hook is fired ONCE PER COLOUR KEY WRITTEN, and is handed that
+        // key together with the value just written, so it applies exactly the
+        // attribute the effect named. It used to fire once, with nothing, and
+        // apply whichever attribute `fill_on_top` pointed at after re-reading
+        // the store — three ways wrong at once:
+        //
+        //   * `set_stroke_none` writes stroke_color, but with the fill on top
+        //     the hook applied the FILL, so asking for no stroke removed the
+        //     fill instead;
+        //   * the re-read of a key the effect had just set to null came back
+        //     ABSENT (the store deletes on a nil write) and the old code read
+        //     absent as "none" — which is also what it read for a key nobody
+        //     had ever written;
+        //   * `reset_fill_stroke` writes both keys in one `set:` and had only
+        //     one of them applied.
+        //
+        // Rust's `set_app_state_field` has always been called per key with the
+        // value in hand; this is Swift agreeing (CPTRIAGE). Sorted so a
+        // multi-key write applies in a deterministic order.
+        let wroteColorKeys = evaluated.keys
+            .filter { colorStateKey($0) != nil }
+            .sorted()
+        if !wroteColorKeys.isEmpty,
            let hook = platformEffects["apply_active_color"] {
-            _ = hook("", ctx, store)
+            for key in wroteColorKeys {
+                _ = hook(ColorWrite(key: colorStateKey(key)!,
+                                    value: evaluated[key]!), ctx, store)
+            }
         }
         // Active-tool writes (the tool-alternates flyout's
         // `set: { active_tool }`) must switch the live canvas tool.
@@ -2284,40 +2323,82 @@ private func anyEqual(_ a: Any?, _ b: Any?) -> Bool {
     }
 }
 
-/// Read fill_color / stroke_color from the global store and apply the
-/// active one (per fill_on_top) to the selected canvas element. Used
-/// by the apply_active_color platform-effect hook so the YAML
-/// set_active_color action — and any other set: write that touches
-/// fill_color or stroke_color — propagates to the selection. Mirrors
-/// the inline behavior of ColorPanel.setActiveColor.
-public func applyActiveColorFromStore(store: StateStore, model: Model) {
-    let fillOnTop = (store.get("fill_on_top") as? Bool) ?? true
+/// One app-level colour write, as handed to the `apply_active_color` hook.
+///
+/// A struct rather than a dictionary so the key cannot be misspelled and the
+/// `value`'s "NSNull means the user chose None" convention has one documented
+/// home. `value` is the EVALUATED right-hand side of the `set:` pair — a hex
+/// string, or `NSNull()` for an explicit null.
+public struct ColorWrite {
+    /// `"fill_color"` or `"stroke_color"`.
+    public let key: String
+    /// Hex string, or `NSNull()` for "no paint".
+    public let value: Any
+    public init(key: String, value: Any) {
+        self.key = key
+        self.value = value
+    }
+}
+
+/// The app-level colour key a `set:` target names, or nil when it names
+/// something else. Accepts the scoped spellings a YAML author may write
+/// (`$state.fill_color`, `state.fill_color`) alongside the bare global, matching
+/// what ``setByScopedTarget`` actually writes.
+func colorStateKey(_ rawTarget: String) -> String? {
+    var t = rawTarget
+    if t.hasPrefix("$") { t = String(t.dropFirst()) }
+    if t.hasPrefix("state.") { t = String(t.dropFirst("state.".count)) }
+    return (t == "fill_color" || t == "stroke_color") ? t : nil
+}
+
+/// Apply ONE app-level colour write to the model default and the selection.
+///
+/// This is the propagation half of `set: { fill_color: … }` — the store holds
+/// the value for expressions to read, and the paint has to reach the document.
+/// Used by the `apply_active_color` platform-effect hook, so the YAML
+/// `set_active_color` / `set_fill_none` / `set_stroke_none` /
+/// `reset_fill_stroke` actions all land. Mirrors the inline behavior of
+/// `ColorPanel.setActiveColor` and, key-for-key, the Rust
+/// `set_app_state_field` `"fill_color"` / `"stroke_color"` arms.
+///
+/// The attribute comes from `write.key` — the key the effect WROTE. It used to
+/// come from `fill_on_top`, which answers a different question (which swatch
+/// the user is editing), and the value used to be re-read from the store, which
+/// cannot report an explicit null. See the `apply_active_color` fan-out in
+/// ``runOne`` for what that cost (CPTRIAGE).
+public func applyActiveColorWrite(model: Model, write: ColorWrite) {
     let ctrl = Controller(model: model)
-    if fillOnTop {
-        let raw = store.get("fill_color")
-        if let hex = raw as? String, let color = Color.fromHex(hex) {
+    let isFill = write.key == "fill_color"
+    let color: Color? = (write.value as? String).flatMap(Color.fromHex)
+    if color == nil && !(write.value is NSNull) {
+        // Neither a parseable colour nor an explicit null — say nothing rather
+        // than clear the paint. Matches Rust's "unparseable hex: leave
+        // everything alone" arm.
+        return
+    }
+    if isFill {
+        if let color = color {
             // Colour-ONLY, exactly like ColorPanel.setActiveColor: the
             // element's fill opacity is preserved (STROKEWIDTH).
             model.defaultFill = ColorPanel.recolorFill(model.defaultFill, color)
             if !model.document.selection.isEmpty {
                 ctrl.mapSelectionFill { ColorPanel.recolorFill($0, color) }
             }
-        } else if raw == nil || raw is NSNull {
+        } else {
             model.defaultFill = nil
             if !model.document.selection.isEmpty {
                 ctrl.setSelectionFill(nil)
             }
         }
     } else {
-        let raw = store.get("stroke_color")
-        if let hex = raw as? String, let color = Color.fromHex(hex) {
+        if let color = color {
             // Colour-ONLY: width / cap / join / dash / arrowheads and the
             // stroke opacity all stay as they are, per element.
             model.defaultStroke = ColorPanel.recolorStroke(model.defaultStroke, color)
             if !model.document.selection.isEmpty {
                 ctrl.mapSelectionStroke { ColorPanel.recolorStroke($0, color) }
             }
-        } else if raw == nil || raw is NSNull {
+        } else {
             model.defaultStroke = nil
             if !model.document.selection.isEmpty {
                 ctrl.setSelectionStroke(nil)
@@ -2578,8 +2659,12 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         // Swatches Panel). Pushes the active-color change to the
         // selected canvas element so the YAML route matches the
         // direct ColorPanel.setActiveColor path.
-        "apply_active_color": { _, _, store in
-            applyActiveColorFromStore(store: store, model: model)
+        // The hook value is a ``ColorWrite`` — the colour key the effect wrote
+        // plus the value it wrote; runEffects fires it once per such key.
+        "apply_active_color": { write, _, _ in
+            if let write = write as? ColorWrite {
+                applyActiveColorWrite(model: model, write: write)
+            }
             return nil
         },
         // Mirror a YAML `set: { active_tool }` write (tool-alternates
