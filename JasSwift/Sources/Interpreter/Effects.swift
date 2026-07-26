@@ -2351,7 +2351,7 @@ func colorStateKey(_ rawTarget: String) -> String? {
     return (t == "fill_color" || t == "stroke_color") ? t : nil
 }
 
-/// Apply ONE app-level colour write to the model default and the selection.
+/// Apply ONE app-level colour write to both default tiers and the selection.
 ///
 /// This is the propagation half of `set: { fill_color: … }` — the store holds
 /// the value for expressions to read, and the paint has to reach the document.
@@ -2380,11 +2380,16 @@ public func applyActiveColorWrite(model: Model, write: ColorWrite) {
         if let color = color {
             // Colour-ONLY, exactly like ColorPanel.setActiveColor: the
             // element's fill opacity is preserved (STROKEWIDTH).
+            model.appDefaultFill = ColorPanel.recolorFill(model.appDefaultFill, color)
             model.defaultFill = ColorPanel.recolorFill(model.defaultFill, color)
             if !model.document.selection.isEmpty {
                 ctrl.mapSelectionFill { ColorPanel.recolorFill($0, color) }
             }
         } else {
+            // BOTH tiers, as Rust's `fill_color` arm clears both: the app tier
+            // is what a no-selection read falls back to, so leaving it standing
+            // would answer the user's None with the seeded white.
+            model.appDefaultFill = nil
             model.defaultFill = nil
             if !model.document.selection.isEmpty {
                 ctrl.setSelectionFill(nil)
@@ -2394,11 +2399,13 @@ public func applyActiveColorWrite(model: Model, write: ColorWrite) {
         if let color = color {
             // Colour-ONLY: width / cap / join / dash / arrowheads and the
             // stroke opacity all stay as they are, per element.
+            model.appDefaultStroke = ColorPanel.recolorStroke(model.appDefaultStroke, color)
             model.defaultStroke = ColorPanel.recolorStroke(model.defaultStroke, color)
             if !model.document.selection.isEmpty {
                 ctrl.mapSelectionStroke { ColorPanel.recolorStroke($0, color) }
             }
         } else {
+            model.appDefaultStroke = nil
             model.defaultStroke = nil
             if !model.document.selection.isEmpty {
                 ctrl.setSelectionStroke(nil)

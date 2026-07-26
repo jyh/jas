@@ -1283,8 +1283,15 @@ struct YamlElementView: View {
             // fill (or stroke). Without the selection write, the swatch
             // appeared inert when the user expected the rectangle's
             // fill to clear.
+            //
+            // The APP tier goes too, as it does in `applyActiveColorWrite` and
+            // in Rust's `fill_color` / `stroke_color` arms: it is what a
+            // no-selection read falls back to, so clearing only the document
+            // tier would answer this click with the seeded white whenever
+            // nothing is selected (see `Model.appDefaultFill`).
             let ctrl = Controller(model: model)
             if model.fillOnTop {
+                model.appDefaultFill = nil
                 model.defaultFill = nil
                 if !model.document.selection.isEmpty {
                     // One undo step: withTxn opens the bracket, setSelectionFill
@@ -1292,6 +1299,7 @@ struct YamlElementView: View {
                     model.withTxn { ctrl.setSelectionFill(nil) }
                 }
             } else {
+                model.appDefaultStroke = nil
                 model.defaultStroke = nil
                 if !model.document.selection.isEmpty {
                     model.withTxn { ctrl.setSelectionStroke(nil) }

@@ -39,6 +39,22 @@ import Foundation
 /// * `nil` — no single value (a MIXED selection). Leave the caller's existing
 ///   value in place; a panel cannot show one colour for many.
 ///
+/// With NOTHING selected the answer is the default paint, resolved down two
+/// tiers — the per-document ``Model/defaultFill`` (seeded `nil`) and then the
+/// app-level ``Model/appDefaultFill`` (seeded WHITE) — mirroring Rust's
+/// `tab.model.default_fill.or(st.app_default_fill)`. Only when BOTH are absent
+/// is the answer None, which is what keeps a fresh launch's live controls live
+/// and still lets a user's explicit None reach the panel: the YAML colour
+/// routes clear both tiers together (see ``Model/appDefaultFill``).
+///
+/// This is the SINGLE SOURCE for the fact. Both readers call it — the panel
+/// scope through ``liveAppStateOverrides``, and the per-tool bridge through
+/// ``YamlTool/syncAppState`` — because they must not be able to answer one fact
+/// two ways: the bridge used to map a `nil` default to `"#ffffff"` on its own,
+/// so a cleared fill was None to the panel and white to the next tool commit.
+/// Mirrors Rust, where `build_live_state_map` and `build_tool_state_map` share
+/// `live_fill_stroke_values` for the same reason.
+///
 /// Mirrors Rust's `live_fill_stroke_values` outcome-for-outcome. Swift's
 /// evaluator is ctx-only (``evaluate(_:context:)`` never consults the store),
 /// so nothing downstream can rescue an unpublished null — the overlay is the
@@ -51,7 +67,8 @@ public func liveFillStrokeValues(model: Model?) -> (fill: Any?, stroke: Any?) {
         case .uniform(nil): return NSNull()
         case .mixed: return nil
         case .noSelection:
-            return model.defaultFill.map { "#" + $0.color.toHex() } ?? NSNull()
+            let paint = model.defaultFill ?? model.appDefaultFill
+            return paint.map { "#" + $0.color.toHex() } ?? NSNull()
         }
     }()
     let stroke: Any? = {
@@ -60,7 +77,8 @@ public func liveFillStrokeValues(model: Model?) -> (fill: Any?, stroke: Any?) {
         case .uniform(nil): return NSNull()
         case .mixed: return nil
         case .noSelection:
-            return model.defaultStroke.map { "#" + $0.color.toHex() } ?? NSNull()
+            let paint = model.defaultStroke ?? model.appDefaultStroke
+            return paint.map { "#" + $0.color.toHex() } ?? NSNull()
         }
     }()
     return (fill, stroke)

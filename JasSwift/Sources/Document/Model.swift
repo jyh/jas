@@ -299,6 +299,33 @@ public class Model: ObservableObject {
     @Published public var filename: String
     @Published public var defaultFill: Fill? = nil
     @Published public var defaultStroke: Stroke? = Stroke(color: .black)
+    /// The APP-level default fill / stroke — the tier BELOW ``defaultFill`` /
+    /// ``defaultStroke``, which are per-document (Rust's `Model.default_fill`,
+    /// seeded `nil` / black, exactly as above). Mirrors Rust's
+    /// `AppState.app_default_fill` / `app_default_stroke`, seeded WHITE / black
+    /// there and here; it lives on `Model` because this port has one long-lived
+    /// `Model` where Rust has an `AppState` above its tabs.
+    ///
+    /// Read in exactly ONE place — ``liveFillStrokeValues``'s no-selection arm,
+    /// `tab tier ?? app tier`, mirroring Rust's `.or(st.app_default_fill)`. That
+    /// is what makes a FRESH launch with an empty canvas publish `"#ffffff"`
+    /// rather than null; without the tier, `state.fill_color == null` was true
+    /// at launch and the Color panel opened with its fifteen sliders, hex field
+    /// and colour bar DISABLED and Invert / Complement greyed, while Rust opened
+    /// them live (CPTRIAGE).
+    ///
+    /// Being read only under a `nil` tab tier gives its writers a simple law: a
+    /// writer that sets the tab tier to a COLOUR need not touch this (the tab
+    /// tier wins), but a writer that CLEARS the tab tier must clear this too, or
+    /// the paint the user just cleared reads back as the seed. The two YAML
+    /// colour routes do exactly that (``applyActiveColorWrite`` and the
+    /// `set_active_color_none` intercept in ``YamlPanelBodyView``), matching the
+    /// Rust `fill_color` / `stroke_color` arms of `set_app_state_field`; Rust's
+    /// NATIVE widget paths (`set_active_to_none`, `reset_fill_stroke_defaults`,
+    /// `swap_fill_stroke`) write only their tab tier, and so do this port's, so
+    /// the two ports agree there as well.
+    @Published public var appDefaultFill: Fill? = Fill(color: .white)
+    @Published public var appDefaultStroke: Stroke? = Stroke(color: .black)
     @Published public var fillOnTop: Bool = true
     /// Per-document list of recently committed colors (hex strings, no #), newest first. Max 10.
     @Published public var recentColors: [String] = []

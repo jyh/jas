@@ -146,6 +146,42 @@ private let blackStroke = Stroke(color: Color(r: 0, g: 0, b: 0))
             "Mixed is not None: the controls stay live")
 }
 
+// NOTHING SELECTED is a fourth outcome for the reader and the one a FRESH
+// LAUNCH is in. It resolves down two tiers — the per-document default, then the
+// app-level default, seeded white — so the controls open LIVE, exactly as Rust
+// opens them (`tab.model.default_fill.or(st.app_default_fill)`). Publishing null
+// here disabled fifteen sliders, the hex field and the colour bar on an empty
+// canvas and greyed Invert / Complement, which is the wave's own defect shape
+// reintroduced one tier down. Pinned cross-language by the
+// `nothing_selected_*` cases in test_fixtures/actions/fill_stroke_none.json.
+@Test func emptyCanvasOpensWithTheSeededAppDefault() {
+    let model = Model()
+    #expect(model.defaultFill == nil, "the per-document tier starts empty")
+    let ctx = colorRenderCtx(model)
+    #expect(evaluate("state.fill_color", context: ctx).toStringCoerce() == "#ffffff",
+            "the app tier is what a fresh launch publishes")
+    #expect(evaluate("state.stroke_color", context: ctx).toStringCoerce() == "#000000")
+    #expect(evaluate(cpDisabledGuard, context: ctx).toBool() == false,
+            "a fresh launch's sliders / hex / colour bar are ENABLED")
+    #expect(evaluate(cpInvertEnabledWhen, context: ctx).toBool() == true,
+            "and Invert / Complement are available")
+}
+
+// The tier is a SEED, not a floor: the None verbs clear it along with the
+// document tier, so a user who chooses None with nothing selected still reaches
+// the panel. A hardcoded `?? "#ffffff"` fallback would pass the test above and
+// fail this one.
+@Test func fillNoneWithNothingSelectedStillPublishesNull() {
+    let model = Model()
+    LayersPanel.dispatchYamlAction("set_fill_none", model: model)
+    let ctx = colorRenderCtx(model)
+    #expect(evaluate("state.fill_color", context: ctx).isNull,
+            "clearing the paint with an empty selection must clear BOTH tiers")
+    #expect(evaluate(cpDisabledGuard, context: ctx).toBool() == true)
+    #expect(evaluate("state.stroke_color", context: ctx).toStringCoerce() == "#000000",
+            "the stroke tier is untouched")
+}
+
 // The reader is derived from the model, so the verbs that write the fact have
 // to reach the model. `set_fill_none` through the GENERIC dispatcher used to
 // stop at the store — no `apply_active_color` hook was registered there — so
