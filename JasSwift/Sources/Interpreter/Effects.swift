@@ -1532,7 +1532,37 @@ private func _parseEmValue(_ s: String) -> Double? {
     return Double(trimmed)
 }
 
-func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
+/// Push the Character panel state to the selected text element(s) —
+/// FIELD-SCOPED.
+///
+/// `edited` names the panel field the user just committed. Only the
+/// `CharacterEditGroup` that field owns is taken from panel state; every
+/// other character attribute is preserved from the element being edited, per
+/// element. A field that owns no element attribute (the seven `snap_*` flags,
+/// the section-visibility flags) writes NOTHING — not even an undo step.
+///
+/// This is the law because the panel is not a picture of the selection:
+/// nudging Tracking on a 30pt bold italic underlined Georgia run used to
+/// reset it to the panel's 12pt sans-serif defaults — sixteen attributes
+/// clobbered by one edit. The panel view's live-override push
+/// (`commitPanelWrite`) mitigated that for edits arriving through the panel
+/// widgets, but it is not the same thing as a field-scoped apply: it does
+/// nothing for the per-range route or for any caller that applies without
+/// going through the view. See `transcripts/CHARACTER.md` "The field-scoped
+/// apply law"; the reference states the field → group table in
+/// `workspace_interpreter/character_law.py`.
+func applyCharacterPanelToSelection(
+    store: StateStore, controller: Controller, edited: String
+) {
+    // A field owning no element attribute must not reach the document.
+    guard let group = CharacterEditGroup.fromField(edited) else { return }
+    applyCharacterPanelGroupToSelection(store: store, controller: controller,
+                                        group: group)
+}
+
+private func applyCharacterPanelGroupToSelection(
+    store: StateStore, controller: Controller, group: CharacterEditGroup
+) {
     // Caret-only edit session: prime the session's pending override so
     // the next-typed character picks up the new attrs, then return
     // WITHOUT rewriting the element. A bare caret has no character range
@@ -1566,7 +1596,14 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
         if pathIsValid(doc, session.path) {
             let elem = doc.getElement(session.path)
             let (lo, hi) = session.selectionRange
-            let overrides = buildPanelFullOverrides(p)
+            // Field-scoped here too: build the panel's override template,
+            // then clear every field outside the edited group so
+            // mergeTspanOverrides leaves the range's other attributes alone.
+            // Without the restriction a Tracking edit on a selected range
+            // stamped the panel's family / size / weight / decoration over
+            // it — the same clobber as the whole-element route.
+            let overrides = restrictTspanOverrides(buildPanelFullOverrides(p),
+                                                   to: group)
             let newElem: Element?
             switch elem {
             case .text(let t):
@@ -1590,107 +1627,17 @@ func applyCharacterPanelToSelection(store: StateStore, controller: Controller) {
         }
     }
 
-    let p = store.getPanelState("character_panel_content")
-    var attrs: [String: Any] = [:]
-
-    if let v = p["font_family"] as? String { attrs["font_family"] = v }
-    if let v = (p["font_size"] as? NSNumber)?.doubleValue { attrs["font_size"] = NSNumber(value: v) }
-
-    // style_name → font_weight + font_style
-    if let style = p["style_name"] as? String {
-        switch style.trimmingCharacters(in: .whitespaces) {
-        case "Regular":
-            attrs["font_weight"] = "normal"; attrs["font_style"] = "normal"
-        case "Italic":
-            attrs["font_weight"] = "normal"; attrs["font_style"] = "italic"
-        case "Bold":
-            attrs["font_weight"] = "bold"; attrs["font_style"] = "normal"
-        case "Bold Italic", "Italic Bold":
-            attrs["font_weight"] = "bold"; attrs["font_style"] = "italic"
-        default: break
-        }
-    }
-
-    // underline + strikethrough → text_decoration
-    let underline = p["underline"] as? Bool ?? false
-    let strikethrough = p["strikethrough"] as? Bool ?? false
-    let tdTokens = [
-        strikethrough ? "line-through" : nil,
-        underline ? "underline" : nil,
-    ].compactMap { $0 }
-    attrs["text_decoration"] = tdTokens.isEmpty ? "" : tdTokens.joined(separator: " ")
-
-    // all_caps / small_caps
-    let allCaps = p["all_caps"] as? Bool ?? false
-    let smallCaps = p["small_caps"] as? Bool ?? false
-    attrs["text_transform"] = allCaps ? "uppercase" : ""
-    attrs["font_variant"] = (smallCaps && !allCaps) ? "small-caps" : ""
-
-    // super / sub + numeric baseline_shift
-    let superOn = p["superscript"] as? Bool ?? false
-    let subOn = p["subscript"] as? Bool ?? false
-    let bsNum = (p["baseline_shift"] as? NSNumber)?.doubleValue ?? 0.0
-    if superOn {
-        attrs["baseline_shift"] = "super"
-    } else if subOn {
-        attrs["baseline_shift"] = "sub"
-    } else if bsNum != 0.0 {
-        attrs["baseline_shift"] = _fmtNum(bsNum) + "pt"
-    } else {
-        attrs["baseline_shift"] = ""
-    }
-
-    // leading → line_height: empty at 120% Auto default
-    let fsNum = (p["font_size"] as? NSNumber)?.doubleValue ?? 12.0
-    let leading = (p["leading"] as? NSNumber)?.doubleValue ?? (fsNum * 1.2)
-    attrs["line_height"] = abs(leading - fsNum * 1.2) < 1e-6
-        ? "" : _fmtNum(leading) + "pt"
-
-    // tracking (1/1000 em) → letter_spacing
-    let tracking = (p["tracking"] as? NSNumber)?.doubleValue ?? 0.0
-    attrs["letter_spacing"] = tracking == 0.0 ? "" : _fmtNum(tracking / 1000.0) + "em"
-
-    // kerning combo_box: Auto / Optical / Metrics pass through
-    // verbatim; numeric-string entry is 1/1000 em. Empty / "0" /
-    // "Auto" all omit (the element default). Legacy Number bindings
-    // also land here via the NSNumber branch.
-    if let s = p["kerning"] as? String {
-        let trimmed = s.trimmingCharacters(in: .whitespaces)
-        switch trimmed {
-        case "", "0", "Auto": attrs["kerning"] = ""
-        case "Optical", "Metrics": attrs["kerning"] = trimmed
-        default:
-            if let n = Double(trimmed) {
-                attrs["kerning"] = n == 0.0 ? "" : _fmtNum(n / 1000.0) + "em"
-            } else {
-                attrs["kerning"] = ""
-            }
-        }
-    } else {
-        let kerning = (p["kerning"] as? NSNumber)?.doubleValue ?? 0.0
-        attrs["kerning"] = kerning == 0.0 ? "" : _fmtNum(kerning / 1000.0) + "em"
-    }
-
-    // character_rotation (degrees)
-    let rot = (p["character_rotation"] as? NSNumber)?.doubleValue ?? 0.0
-    attrs["rotate"] = rot == 0.0 ? "" : _fmtNum(rot)
-
-    // vertical / horizontal scale (percent; identity = 100)
-    let vScale = (p["vertical_scale"] as? NSNumber)?.doubleValue ?? 100.0
-    let hScale = (p["horizontal_scale"] as? NSNumber)?.doubleValue ?? 100.0
-    attrs["vertical_scale"] = vScale == 100.0 ? "" : _fmtNum(vScale)
-    attrs["horizontal_scale"] = hScale == 100.0 ? "" : _fmtNum(hScale)
-
-    // language → xml_lang; anti_aliasing → aa_mode (Sharp default empties)
-    if let v = p["language"] as? String { attrs["xml_lang"] = v }
-    if let v = p["anti_aliasing"] as? String {
-        attrs["aa_mode"] = (v == "Sharp" || v.isEmpty) ? "" : v
-    }
-
-    // Apply. No-op when nothing in the selection is text. setSelectionText-
-    // Attributes -> editDocument self-brackets one undo step.
+    // Whole-element route. PER ELEMENT: the group's attributes come from
+    // panel state and every other attribute is lifted from THIS element, so
+    // a multi-element selection keeps each element's own values (and the
+    // Leading group's Auto test reads each element's own font size).
+    // setSelectionTextAttributes -> editDocument self-brackets one undo step,
+    // and is a no-op when nothing in the selection is text.
     if !controller.model.document.selection.isEmpty {
-        controller.setSelectionTextAttributes(attrs)
+        controller.setSelectionTextAttributes(perElement: { elem in
+            guard let base = CharacterAttrs(element: elem) else { return [:] }
+            return characterAttrsForGroup(base, store: store, group: group)
+        })
     }
 }
 
@@ -2180,7 +2127,14 @@ public func notifyPanelStateChanged(
 ) {
     switch panelId {
     case "character_panel_content":
-        applyCharacterPanelToSelection(store: store, controller: Controller(model: model))
+        // Without a named field there is nothing to apply: the Character
+        // apply is field-scoped, and guessing which control changed is
+        // exactly what clobbered the element's font, size and decoration.
+        if let edited {
+            applyCharacterPanelToSelection(
+                store: store, controller: Controller(model: model),
+                edited: edited)
+        }
     case "paragraph_panel_content":
         applyParagraphPanelToSelection(store: store, controller: Controller(model: model))
     case "stroke_panel_content":

@@ -113,8 +113,12 @@ public enum CharacterPanel {
         }
         model.panelStateVersion &+= 1
         if applyToSelection {
+            // The apply is field-scoped: name the field this menu item
+            // wrote, so only that field's attribute group reaches the
+            // selection.
             applyCharacterPanelToSelection(
-                store: store, controller: Controller(model: model))
+                store: store, controller: Controller(model: model),
+                edited: key)
         }
     }
 }

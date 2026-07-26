@@ -1605,10 +1605,23 @@ public class Controller {
     /// `rotate`, `horizontal_scale`, `vertical_scale`, `kerning`.
     /// Unknown keys are silently ignored.
     public func setSelectionTextAttributes(_ attrs: [String: Any]) {
+        setSelectionTextAttributes(perElement: { _ in attrs })
+    }
+
+    /// Apply a PER-ELEMENT character-attribute dict to every selected Text /
+    /// TextPath. `build` receives each element, so a field-scoped
+    /// Character-panel apply can derive its values from THAT element — the
+    /// Leading group's Auto test reads the element's own font size, which one
+    /// shared dict cannot express across a mixed selection. Keys the dict
+    /// omits are left untouched on the element.
+    public func setSelectionTextAttributes(
+        perElement build: (Element) -> [String: Any]
+    ) {
         var doc = model.document
         if doc.selection.isEmpty { return }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
+            let attrs = build(elem)
             let newElem: Element
             switch elem {
             case .text(let t):

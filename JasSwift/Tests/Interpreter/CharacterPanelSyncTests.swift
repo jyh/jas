@@ -154,7 +154,8 @@ import Testing
         "baseline_shift": 0.0, "character_rotation": 0.0,
     ])
     applyCharacterPanelToSelection(store: model.stateStore,
-                                    controller: Controller(model: model))
+                                    controller: Controller(model: model),
+                                    edited: "leading")
     guard case .text(let t) = model.document.getElement([0, 0]) else {
         #expect(Bool(false), "expected Text"); return
     }
@@ -188,7 +189,8 @@ import Testing
         "baseline_shift": 0.0, "character_rotation": 0.0,
     ])
     applyCharacterPanelToSelection(store: model.stateStore,
-                                    controller: Controller(model: model))
+                                    controller: Controller(model: model),
+                                    edited: "leading")
     guard case .text(let t) = model.document.getElement([0, 0]) else {
         #expect(Bool(false), "expected Text"); return
     }
@@ -222,7 +224,8 @@ import Testing
                               selection: [ElementSelection(path: [0, 0])]))
     model.stateStore.initPanel("character_panel_content",
                                defaults: ["font_family": "Arial", "font_size": 12.0])
-    notifyPanelStateChanged("character_panel_content", store: model.stateStore, model: model)
+    notifyPanelStateChanged("character_panel_content", store: model.stateStore,
+                            model: model, edited: "font_family")
     if case .text(let t) = model.document.getElement([0, 0]) {
         #expect(t.fontFamily == "Arial")
     } else {
@@ -263,7 +266,8 @@ import Testing
     for mode in ["Auto", "", "0"] {
         model.stateStore.initPanel("character_panel_content", defaults: ["kerning": mode])
         applyCharacterPanelToSelection(store: model.stateStore,
-                                        controller: Controller(model: model))
+                                        controller: Controller(model: model),
+                                        edited: "kerning")
         if case .text(let t) = model.document.getElement([0, 0]) {
             #expect(t.kerning == "", "mode \(mode) should clear kerning")
         }
@@ -271,14 +275,16 @@ import Testing
     // Named mode passes through verbatim.
     model.stateStore.initPanel("character_panel_content", defaults: ["kerning": "Optical"])
     applyCharacterPanelToSelection(store: model.stateStore,
-                                    controller: Controller(model: model))
+                                    controller: Controller(model: model),
+                                    edited: "kerning")
     if case .text(let t) = model.document.getElement([0, 0]) {
         #expect(t.kerning == "Optical")
     }
     // Numeric string converts to "{N}em".
     model.stateStore.initPanel("character_panel_content", defaults: ["kerning": "25"])
     applyCharacterPanelToSelection(store: model.stateStore,
-                                    controller: Controller(model: model))
+                                    controller: Controller(model: model),
+                                    edited: "kerning")
     if case .text(let t) = model.document.getElement([0, 0]) {
         #expect(t.kerning == "0.025em")
     }
@@ -316,7 +322,8 @@ import Testing
         "underline": false, "strikethrough": false,
     ])
     applyCharacterPanelToSelection(store: model.stateStore,
-                                    controller: Controller(model: model))
+                                    controller: Controller(model: model),
+                                    edited: "language")
     guard case .text(let t) = model.document.getElement([0, 0]) else {
         #expect(Bool(false), "expected Text"); return
     }
@@ -324,8 +331,11 @@ import Testing
 }
 
 @Test func applyCharacterPanelWritesAttrsToSelection() {
-    // Direct test of the pipeline: seed panel scope with new values,
-    // call apply — the selected text picks them up.
+    // Direct test of the pipeline: seed panel scope with new values, then
+    // commit each field in turn. The apply is FIELD-SCOPED, so four
+    // attributes take four commits — one apply can only write the group the
+    // named field owns. (That is the point: the panel no longer stamps the
+    // other three on every edit.)
     let model = Model()
     let text = Element.text(Text(x: 0, y: 0, content: "hi",
                                   fontFamily: "Helvetica", fontSize: 12))
@@ -339,8 +349,11 @@ import Testing
         "superscript": false, "subscript": false,
         "underline": true, "strikethrough": false,
     ])
-    applyCharacterPanelToSelection(store: model.stateStore,
-                                    controller: Controller(model: model))
+    for field in ["font_family", "font_size", "all_caps", "underline"] {
+        applyCharacterPanelToSelection(store: model.stateStore,
+                                        controller: Controller(model: model),
+                                        edited: field)
+    }
     guard case .text(let t) = model.document.getElement([0, 0]) else {
         #expect(Bool(false), "expected Text"); return
     }
@@ -442,7 +455,8 @@ import Testing
         "character_rotation": 0.0,
     ])
     applyCharacterPanelToSelection(store: model.stateStore,
-                                    controller: Controller(model: model))
+                                    controller: Controller(model: model),
+                                    edited: "style_name")
     // Session picked up pending; element untouched.
     #expect(session.hasPendingOverride)
     #expect(session.pendingCharStart == 3)
@@ -478,7 +492,8 @@ import Testing
         "character_rotation": 0.0,
     ])
     applyCharacterPanelToSelection(store: model.stateStore,
-                                    controller: Controller(model: model))
+                                    controller: Controller(model: model),
+                                    edited: "style_name")
     // Bare caret pending stays empty.
     #expect(!session.hasPendingOverride)
     // Element-level weight is unchanged; the range picks up bold via
