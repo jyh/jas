@@ -255,6 +255,44 @@ That also blocked a separate, already-derived correctness fix. The `exclude_over
 4. Regenerate `test_fixtures/actions/boolean_exclude_overlapping_rects_expected.json` **once**, after both ports agree — **done**; the two ports' canonical JSON was byte-identical before the golden was touched.
 5. Delete the `_known_gap` / `_known_gap_keys` holdout on `exclude_overlapping_squares` in `test_fixtures/algorithms/boolean.json`, putting its `ring_count` back under the golden oracle — **done**; the cross-language algorithm gate reports no known-gap line and one more passing key.
 
+### Does a path EDIT preserve the declared rule? OPEN — needs a ruling
+
+**Status: BANKED 2026-07-26, unfixed on purpose.** This is a behaviour question, not a defect with an obvious repair, and answering it one way changes five Rust call sites. It is written up here rather than fixed because the fourth round of this feature is the wrong place to decide semantics. Everything below was verified in the tree at this commit; each count states how it was taken.
+
+**The divergence.** The two ports disagree about what a path *edit* does to the path's `fill_rule`, and they disagree in the direction that undoes the very corruption this feature was built to stop.
+
+- **Swift preserves it.** All eight of `YamlToolEffects.swift`'s path-`d` rewrites go through one helper, `pathWithCommands` (`:1594`), which forwards `pe.fillRule`.
+- **Rust discards it.** Every one of the five Rust path-edit rebuilds writes `fill_rule: FillRule::NonZero` as a literal.
+
+On identical input — a two-ring even-odd path — `delete_anchor_near` therefore returns **even-odd in Swift and non-zero in Rust**. So deleting one anchor from an even-odd boolean result **floods its holes in Rust and keeps them in Swift**: the same artwork corruption the fill-rule work existed to prevent, now asymmetric and pointing the other way.
+
+**The sites, counted mechanically.** Swift: `grep -o pathWithCommands JasSwift/Sources/Tools/YamlToolEffects.swift | wc -l` reports 9 occurrences; one is the declaration at `:1594`, so 8 are calls, in six functions — `pathDeleteAnchorNear` (`:1618`), `pathInsertAnchorOnSegmentNear` (`:1663`), `pathEraseAtRect` (`:1737`), `pathCommitAnchorEdit` (`:1911`, `:1918`, `:1927`), `paintbrushEditCommit` (`:2143`), `pathSmoothAtCursor` (`:2191`). Rust: `grep -c 'fill_rule' jas_dioxus/src/interpreter/effects.rs` reports 12 literal `FillRule::NonZero` writes; classified by reading each one, 4 are `#[cfg(test)]` fixtures (`:7269`, `:7546`, `:7601`, `:9759`), 2 are fresh `add_element` constructions from a point buffer with no source path (`:1083`, `:1217`), 1 is the blob-brush merge (`:4954`, which deletes N elements and inserts one new unified path with a fresh `CommonProps` — a construction, not a `d` rewrite, and the only borderline case), and the remaining **5 are rewrites of an existing `PathElem`**: `path_erase_at_rect` (`:4436`), `path_paintbrush_edit_commit` (`:4681`), `path_smooth_at_cursor` (`:5469`), `path_insert_anchor_on_segment_near` (`:5587`), `path_delete_anchor_near` (`:5620`). 4 + 2 + 1 + 5 = 12.
+
+**Neither side is pinned.** Verified by probe, both reverted afterwards:
+
+- Rewriting Swift's `pathWithCommands` to `fillRule: .nonzero` and running `swift test`: **2428 tests, all pass.** Swift's preservation is behaviour no test asserts.
+- Rewriting Rust's `:5620` to `fill_rule: pe.fill_rule` and running `cargo test --lib`: **2552 pass, 0 fail.** Rust's discarding is equally unpinned.
+
+**The ruling needed: should a path EDIT preserve the declared fill rule?** Preserving is the defensible reading — the artist did not ask to change the rule by dragging an anchor, and the rule is a property of the path, not of the last operation applied to it. But it *is* a behaviour choice, and it is not free: ruling "preserve" means changing five Rust sites, and each is a place where someone might argue the edit produces a genuinely new path.
+
+**One thing worth recording about how this was missed.** An earlier round of this feature removed the default from Swift's `Path.init` so that the compiler, not a reviewer, would enumerate the rebuild sites. That trick was **one-sided in effect only, not in principle**: Rust's struct literals already require every field, so Rust's compiler enumerated these five sites too — and at each one a human answered the question by typing `NonZero`. A compiler can force the question to be asked. It cannot notice that the answer was wrong.
+
+### The same helper drops a whole family of fields — larger than the fill-rule half
+
+**Status: BANKED 2026-07-26.** Its own stone; the fill-rule question above is one field out of this set.
+
+`pathWithCommands` forwards 12 of `Path`'s 18 stored properties. The 6 it drops are **`widthPoints`, `strokeBrush`, `strokeBrushOverrides`, `toolOrigin`, `name`, `id`** — so on **every** anchor edit, insert, erase, smooth or paintbrush commit, a variable-width or brushed path loses its stroke profile *and* its identity. Rust's twins forward all six. (Counts: `Path` has 18 stored properties by `grep -c 'public let'` over the struct body in `Element.swift`; 18 − 12 = 6.)
+
+Two related arms of the same shape, disclosed here so the class stays visibly open on live paths: `withMask` (`Element.swift:2371`) drops 7 in its `.path` arm (the 6 above minus `widthPoints`, plus `fillGradient` and `strokeGradient`), and `withWidthPoints` (`:2424`) drops 9 (those 7 plus `blendMode` and `mask`). The identical shape in `Controller.movePathHandle` **was** fixed, in "FILLRULE: a handle drag stops rewriting the rest of the path", and its pin (`Tests/Document/MovePathHandleFieldsTests.swift`) is a `Mirror`-driven walk that would work verbatim for these three.
+
+**And Rust is not uniformly the generous port.** `path_erase_at_rect` (`effects.rs:4436`) rebuilds with `common: CommonProps::default()`, discarding all 9 of `CommonProps`' fields — `opacity`, `mode`, `transform`, `locked`, `visibility`, `mask`, `tool_origin`, `name`, `id` — where Swift's `pathEraseAtRect` forwards `opacity`, `transform`, `locked`, `visibility`, `blendMode` and `mask`. So Swift loses the stroke profile and identity on an edit while Rust loses the appearance and identity on an erase. Whoever takes this stone should fix both directions, not pick a winner.
+
+### Swift's `Polygon` has no `toolOrigin` field at all
+
+**Status: BANKED 2026-07-26.** A model-shape asymmetry rather than a behaviour bug, and likely unreachable today.
+
+Rust's `PolygonElem` carries `common: CommonProps`, which includes `tool_origin`; Swift's `Polygon` (`Element.swift:2927`) has no such property, so a `tool_origin` on a Polygon is lossy in Swift at **every** boundary — SVG, binary codec, every copy helper — not at one site. It is probably unreachable in practice: the only writer of `tool_origin` is the blob brush, which stamps it onto Paths. That "probably" is exactly what a ruling should replace, because a boolean result whose single ring materialises as a `Polygon` is one plausible future writer.
+
 ## Boolean Options dialog
 
 A modal dialog, reached from the panel menu's "Boolean Options…" item. It edits three document-level preferences that every boolean operation consults.
@@ -454,6 +492,9 @@ The index of what this document leaves unsettled. Each entry says where the deta
 | --- | --- | --- |
 | **Which fill rule reads a polygon set** | **RULED 2026-07-26** | [Fill rule: the polygon set carries it](#fill-rule-the-polygon-set-carries-it) — the set carries its source's declared rule; results declare even-odd. Inter-ring winding cancellation implemented in both ports as a consequence. |
 | **Multi-ring results differ between the ports** | **FIXED 2026-07-26** | [Multi-ring results: FIXED 2026-07-26](#multi-ring-results-fixed-2026-07-26) — both ports emit one even-odd Path, Swift's canvas honours it, the pinch-split landed and the `ring_count` oracle holdout is retired. |
+| **Does a path EDIT preserve the declared rule?** | **OPEN — needs a ruling** | [Does a path EDIT preserve the declared rule? OPEN — needs a ruling](#does-a-path-edit-preserve-the-declared-rule-open--needs-a-ruling) — Swift preserves, Rust writes `NonZero` at all five rebuild sites, so an anchor edit floods an even-odd hole in Rust and not in Swift. Unpinned in both ports (probe-verified). Ruling "preserve" costs five Rust sites. |
+| **The field family at the same helper** | **BANKED — its own stone** | [The same helper drops a whole family of fields](#the-same-helper-drops-a-whole-family-of-fields--larger-than-the-fill-rule-half) — `pathWithCommands` drops 6 of 18 fields across 8 call sites; `withMask` / `withWidthPoints` drop 7 and 9. Rust's `path_erase_at_rect` drops all 9 `CommonProps` fields in the other direction. |
+| **Swift `Polygon` has no `toolOrigin`** | **BANKED — likely unreachable today** | [Swift's `Polygon` has no `toolOrigin` field at all](#swifts-polygon-has-no-toolorigin-field-at-all) — model-shape asymmetry against Rust's `PolygonElem.common`; lossy at every boundary, but only the blob brush writes `tool_origin` and it writes onto Paths. |
 | **OUTLINE operation** | Deferred, unblock trigger named | [Terminology](#terminology) — waits on the planar-graph / DCEL primitive for the Shape Builder tool. |
 | **Trap operation** | Deferred, unblock trigger named | [Terminology](#terminology) — waits on a physical printing model (spot colors, separations, press output). |
 
