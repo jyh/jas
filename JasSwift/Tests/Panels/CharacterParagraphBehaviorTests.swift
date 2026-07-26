@@ -21,15 +21,20 @@ import Testing
 /// Build a Model whose single selected element is a Text with the
 /// given baseline attributes, ready for applyCharacterPanelToSelection.
 private func charModelWithSelectedText(
-    fontSize: Double = 12
+    fontSize: Double = 12,
+    decoration: String = "",
+    transform: String = "",
+    variant: String = "",
+    baselineShift: String = ""
 ) -> Model {
     let model = Model()
     let text = Element.text(Text(
         x: 0, y: 0, content: "hello",
         fontFamily: "serif", fontSize: fontSize,
         fontWeight: "normal", fontStyle: "normal",
-        textDecoration: "", textTransform: "", fontVariant: "",
-        baselineShift: "", lineHeight: "", letterSpacing: "",
+        textDecoration: decoration, textTransform: transform,
+        fontVariant: variant,
+        baselineShift: baselineShift, lineHeight: "", letterSpacing: "",
         xmlLang: "", aaMode: "", rotate: "",
         horizontalScale: "", verticalScale: "", kerning: ""))
     model.setDocumentForTest(Document(
@@ -114,8 +119,11 @@ private func applyCharPanel(
 }
 
 @Test func charAllCapsWinsOverSmallCaps() {
-    let t = applyCharPanel(charModelWithSelectedText(),
-                           ["all_caps": true, "small_caps": true],
+    // The element is small-caps and the user turns All Caps ON: the exclusion
+    // requires text_transform AND font_variant to move together. The sibling
+    // comes from the element, so the panel names only the committed field.
+    let t = applyCharPanel(charModelWithSelectedText(variant: "small-caps"),
+                           ["all_caps": true],
                            edited: "all_caps")
     #expect(t.textTransform == "uppercase")
     #expect(t.fontVariant == "")
@@ -134,11 +142,89 @@ private func applyCharPanel(
 }
 
 @Test func charUnderlineAndStrikethroughAlphabetical() {
-    // Both flags -> "line-through underline" (alphabetical order).
-    let t = applyCharPanel(charModelWithSelectedText(),
-                           ["underline": true, "strikethrough": true],
+    // The list is alphabetical whichever toggle got there first — and the
+    // token the user did NOT commit comes from the ELEMENT, so the panel is
+    // left at its false strikethrough default on purpose.
+    let t = applyCharPanel(charModelWithSelectedText(decoration: "line-through"),
+                           ["underline": true],
                            edited: "underline")
     #expect(t.textDecoration == "line-through underline")
+}
+
+// MARK: - the sibling rule (CHARPANEL repair)
+//
+// A multi-field group's SIBLING fields are read from the element, never from
+// panel state — which the law does not oblige the panel to have mirrored.
+// This port used to get there via its view layer's live-override push; that
+// push is gone, so these cases gate the LAW.
+
+@Test func charUnderliningAStruckElementKeepsTheLineThrough() {
+    // The reported data loss, end to end through the production apply.
+    let t = applyCharPanel(charModelWithSelectedText(decoration: "line-through"),
+                           ["underline": true], edited: "underline")
+    #expect(t.textDecoration == "line-through underline")
+}
+
+@Test func charUnUnderliningKeepsTheLineThrough() {
+    let t = applyCharPanel(
+        charModelWithSelectedText(decoration: "line-through underline"),
+        ["underline": false], edited: "underline")
+    #expect(t.textDecoration == "line-through")
+}
+
+@Test func charStrikingAnUnderlinedElementKeepsTheUnderline() {
+    let t = applyCharPanel(charModelWithSelectedText(decoration: "underline"),
+                           ["strikethrough": true], edited: "strikethrough")
+    #expect(t.textDecoration == "line-through underline")
+}
+
+@Test func charAllCapsOffKeepsASmallCapsVariant() {
+    let t = applyCharPanel(charModelWithSelectedText(variant: "small-caps"),
+                           ["all_caps": false], edited: "all_caps")
+    #expect(t.fontVariant == "small-caps")
+    #expect(t.textTransform == "")
+}
+
+@Test func charSmallCapsOffKeepsTheAllCaps() {
+    let t = applyCharPanel(charModelWithSelectedText(transform: "uppercase"),
+                           ["small_caps": false], edited: "small_caps")
+    #expect(t.textTransform == "uppercase")
+}
+
+@Test func charSmallCapsOnReplacesTheAllCaps() {
+    // The ruling on a conflict: the COMMITTED toggle wins. This is the case
+    // the two ports disagreed on — the view mirror made the element's All Caps
+    // win here and the click no-oped.
+    let t = applyCharPanel(charModelWithSelectedText(transform: "uppercase"),
+                           ["small_caps": true], edited: "small_caps")
+    #expect(t.textTransform == "")
+    #expect(t.fontVariant == "small-caps")
+}
+
+@Test func charSuperscriptOffKeepsTheElementsNumericShift() {
+    let t = applyCharPanel(charModelWithSelectedText(baselineShift: "4pt"),
+                           ["superscript": false], edited: "superscript")
+    #expect(t.baselineShift == "4pt")
+}
+
+@Test func charSuperscriptOffKeepsTheElementsSubscript() {
+    let t = applyCharPanel(charModelWithSelectedText(baselineShift: "sub"),
+                           ["superscript": false], edited: "superscript")
+    #expect(t.baselineShift == "sub")
+}
+
+@Test func charAZeroNumberDefersToTheElementsSuperscript() {
+    // 0 is exactly what the numeric input DISPLAYS while super is set, so
+    // committing it carries no intent.
+    let t = applyCharPanel(charModelWithSelectedText(baselineShift: "super"),
+                           ["baseline_shift": 0.0], edited: "baseline_shift")
+    #expect(t.baselineShift == "super")
+}
+
+@Test func charAnExplicitNumberReplacesTheSuperscript() {
+    let t = applyCharPanel(charModelWithSelectedText(baselineShift: "super"),
+                           ["baseline_shift": 6.0], edited: "baseline_shift")
+    #expect(t.baselineShift == "6pt")
 }
 
 // MARK: - leading -> line_height

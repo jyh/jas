@@ -333,31 +333,18 @@ struct YamlElementView: View {
     /// fire the `notify_panel_state_changed` hook. No-op when the
     /// target key / panelId / store isn't available.
     ///
-    /// For panels whose visible state is driven by selection overrides
-    /// (Character panel), sync the overrides into the store *first* so
-    /// that the apply-to-selection pipeline sees the complete shown
-    /// state. Without this the user's single-field edit would push
-    /// stale stored defaults for every *other* attr back onto the
-    /// selected element, undoing attrs they hadn't touched.
+    /// The Character panel used to PUSH `characterPanelLiveOverrides` into
+    /// the store here, so that the apply pipeline — which rebuilt the whole
+    /// attribute set from panel state — saw the selection's values for the
+    /// fields the user had not touched. That mitigation is gone: the apply is
+    /// field-scoped and reads a multi-field group's siblings from the ELEMENT
+    /// (CHARPANEL, `characterWithGroup`). Keeping the push would have left
+    /// this port with preservation semantics the law never stated and the Rust
+    /// port never had — which is how the two ports came to disagree about what
+    /// the same click meant. The live overrides remain a PULL, merged into the
+    /// panel's render scope by `DockPanelView.buildPanelCtx`.
     private func commitPanelWrite(key: String, value: Any?) {
         guard let model = model, let pid = panelId else { return }
-        if pid == "character_panel_content",
-           let overrides = characterPanelLiveOverrides(model: model) {
-            for (k, v) in overrides { model.stateStore.setPanel(pid, k, v) }
-            // Auto-leading tracks font size unless explicitly
-            // overridden. When the user edits font_size and the
-            // selected element's line_height is empty (Auto), bump
-            // panel.leading to newSize * 1.2 so the apply pipeline
-            // still derives line_height = "" and Auto is preserved.
-            // Without this, characterPanelLiveOverrides materialises
-            // Auto into oldSize * 1.2; the apply then sees a stale
-            // numeric leading and writes it as an explicit override.
-            if key == "font_size",
-               characterElementHasAutoLeading(model: model),
-               let n = (value as? NSNumber)?.doubleValue {
-                model.stateStore.setPanel(pid, "leading", n * 1.2)
-            }
-        }
         // Paragraph panel — Phase 4. Sync the live wrapper attrs
         // first so untouched fields hold the selection's current
         // values, then apply mutual exclusion side effects (clear

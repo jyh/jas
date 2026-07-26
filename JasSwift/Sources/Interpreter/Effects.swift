@@ -1572,10 +1572,19 @@ private func applyCharacterPanelGroupToSelection(
     // which returns early after priming the pending override.
     if let session = controller.model.currentEditSession,
        !session.hasSelection {
-        let p = store.getPanelState("character_panel_content")
+        var p = store.getPanelState("character_panel_content")
         let doc = controller.model.document
         if pathIsValid(doc, session.path) {
             let elem = doc.getElement(session.path)
+            // The group's SIBLING fields come from the element here too (see
+            // characterPanelWithElementSiblings), so priming the next-typed
+            // character cannot drop a decoration token the element has.
+            // Restricting the template to the edited group is banked in
+            // CHARACTER.md's follow-ups: replacing the WHOLE template is this
+            // route's existing semantic.
+            if let base = CharacterAttrs(element: elem) {
+                p = characterPanelWithElementSiblings(p, base: base, group: group)
+            }
             let template = buildPanelPendingTemplate(p, elem)
             session.clearPendingOverride()
             if let tpl = template {
@@ -1591,7 +1600,11 @@ private func applyCharacterPanelGroupToSelection(
     // rest of the edited element is left untouched.
     if let session = controller.model.currentEditSession,
        session.hasSelection {
-        let p = store.getPanelState("character_panel_content")
+        // A group with no tspan-level representation can express nothing on a
+        // range, so it must not push an undo step that changes nothing — the
+        // same clause a UI-only field gets.
+        if !group.writesTspanField { return }
+        var p = store.getPanelState("character_panel_content")
         let doc = controller.model.document
         if pathIsValid(doc, session.path) {
             let elem = doc.getElement(session.path)
@@ -1601,7 +1614,12 @@ private func applyCharacterPanelGroupToSelection(
             // mergeTspanOverrides leaves the range's other attributes alone.
             // Without the restriction a Tracking edit on a selected range
             // stamped the panel's family / size / weight / decoration over
-            // it — the same clobber as the whole-element route.
+            // it — the same clobber as the whole-element route. The edited
+            // group's SIBLING fields come from the ELEMENT, never from panel
+            // state (characterPanelWithElementSiblings).
+            if let base = CharacterAttrs(element: elem) {
+                p = characterPanelWithElementSiblings(p, base: base, group: group)
+            }
             let overrides = restrictTspanOverrides(buildPanelFullOverrides(p),
                                                    to: group)
             let newElem: Element?

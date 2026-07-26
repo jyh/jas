@@ -134,7 +134,118 @@ struct CharacterApplyCorpusTests {
             #expect(got == want, "character_apply panel_edit '\(name)'")
             ran += 1
         }
-        #expect(ran >= 30, "character_apply corpus ran only \(ran) vectors")
+        #expect(ran >= 40, "character_apply corpus ran only \(ran) vectors")
+    }
+
+    @Test("the sibling normalization agrees with the law")
+    func siblingNormalizationAgreesWithTheLaw() {
+        // ONE rule, two representations. `characterPanelWithElementSiblings`
+        // exists because the tspan builders read the panel dict instead of a
+        // base, so it must be exactly the law's own sibling read: normalising
+        // the panel first may never change the law's answer.
+        let corpus = characterApplyCorpus()
+        let defaults = corpus["element_defaults"] as! [String: Any]
+        let rich = charMerged(defaults, corpus["rich_run"] as! [String: Any])
+        let bases: [[String: Any]] = [
+            rich,
+            charMerged(rich, ["text_decoration": "line-through"]),
+            charMerged(rich, ["text_decoration": "line-through underline"]),
+            charMerged(rich, ["text_transform": "", "font_variant": "small-caps"]),
+            charMerged(rich, ["baseline_shift": "super"]),
+            charMerged(rich, ["baseline_shift": "sub"]),
+            charMerged(rich, ["baseline_shift": ""]),
+        ]
+        let fields = ["all_caps", "small_caps", "underline", "strikethrough",
+                      "baseline_shift", "superscript", "subscript",
+                      "font_family", "leading", "tracking"]
+        for baseMap in bases {
+            let base = charAttrsFromFixture(baseMap)
+            for field in fields {
+                guard let group = CharacterEditGroup.fromField(field) else {
+                    Issue.record("\(field) must own a group"); continue
+                }
+                for flag in [false, true] {
+                    let panel: [String: Any] = [
+                        "all_caps": flag, "small_caps": flag,
+                        "underline": flag, "strikethrough": flag,
+                        "superscript": flag, "subscript": flag,
+                        "baseline_shift": flag ? 3.0 : 0.0,
+                    ]
+                    let direct = StateStore()
+                    seedCharacterPanel(direct, panel)
+                    let want = characterWithGroup(base, store: direct, group: group)
+                    let normalized = StateStore()
+                    seedCharacterPanel(normalized, characterPanelWithElementSiblings(
+                        panel, base: base, group: group))
+                    let got = characterWithGroup(base, store: normalized, group: group)
+                    #expect(got == want,
+                            "\(field) (flag=\(flag)) disagrees for \(baseMap)")
+                }
+            }
+        }
+    }
+
+    @Test("restrictTspanOverrides keeps exactly its own group's fields")
+    func restrictKeepsOnlyItsOwnGroupsFields() {
+        // The keep list is hand-written, so it is pinned field by field
+        // against the group table. Mirrors the Rust
+        // restrict_tspan_overrides_keeps_exactly_its_own_groups_fields.
+        func full() -> Tspan {
+            Tspan(id: 1, content: "x",
+                  baselineShift: 4.0,
+                  fontFamily: "Georgia", fontSize: 30.0,
+                  fontStyle: "italic", fontVariant: "small-caps",
+                  fontWeight: "bold", jasAaMode: "Crisp",
+                  letterSpacing: 0.08, lineHeight: 40.0, rotate: 15.0,
+                  textDecoration: ["underline"], textTransform: "uppercase",
+                  xmlLang: "fr")
+        }
+        func setFields(_ t: Tspan) -> [String] {
+            var out: [String] = []
+            if t.fontFamily != nil { out.append("font_family") }
+            if t.fontSize != nil { out.append("font_size") }
+            if t.fontWeight != nil { out.append("font_weight") }
+            if t.fontStyle != nil { out.append("font_style") }
+            if t.lineHeight != nil { out.append("line_height") }
+            if t.letterSpacing != nil { out.append("letter_spacing") }
+            if t.baselineShift != nil { out.append("baseline_shift") }
+            if t.rotate != nil { out.append("rotate") }
+            if t.textTransform != nil { out.append("text_transform") }
+            if t.fontVariant != nil { out.append("font_variant") }
+            if t.textDecoration != nil { out.append("text_decoration") }
+            if t.xmlLang != nil { out.append("xml_lang") }
+            if t.jasAaMode != nil { out.append("jas_aa_mode") }
+            return out.sorted()
+        }
+        let cases: [(String, [String])] = [
+            ("font_family", ["font_family"]),
+            ("style_name", ["font_style", "font_weight"]),
+            ("font_size", ["font_size"]),
+            ("leading", ["line_height"]),
+            ("tracking", ["letter_spacing"]),
+            ("baseline_shift", ["baseline_shift"]),
+            ("superscript", ["baseline_shift"]),
+            ("subscript", ["baseline_shift"]),
+            ("character_rotation", ["rotate"]),
+            ("all_caps", ["font_variant", "text_transform"]),
+            ("small_caps", ["font_variant", "text_transform"]),
+            ("underline", ["text_decoration"]),
+            ("strikethrough", ["text_decoration"]),
+            ("language", ["xml_lang"]),
+            ("anti_aliasing", ["jas_aa_mode"]),
+            // The three with no tspan representation clear everything.
+            ("kerning", []),
+            ("vertical_scale", []),
+            ("horizontal_scale", []),
+        ]
+        for (field, want) in cases {
+            guard let group = CharacterEditGroup.fromField(field) else {
+                Issue.record("\(field) must own a group"); continue
+            }
+            #expect(setFields(restrictTspanOverrides(full(), to: group)) == want,
+                    "\(field)")
+            #expect(group.writesTspanField == !want.isEmpty, "\(field)")
+        }
     }
 
     @Test("every group writes only its own attributes")
@@ -338,4 +449,104 @@ private let charPanelDefaults: [String: Any] = [
     // The element level is untouched either way.
     #expect(t.fontFamily == "Georgia")
     #expect(t.fontSize == 30)
+}
+
+// MARK: - the sibling rule on the per-range route
+
+/// A "hello" Text with the given element-level decoration and a live edit
+/// session selecting [1, 4) — "ell".
+private func modelWithTextRange(
+    decoration: String = "", fontFamily: String = "Georgia"
+) -> Model {
+    let model = Model()
+    let text = Element.text(Text(
+        x: 0, y: 0, tspans: [Tspan(id: 1, content: "hello")],
+        fontFamily: fontFamily, fontSize: 30,
+        fontWeight: "bold", fontStyle: "italic",
+        textDecoration: decoration))
+    model.setDocumentForTest(Document(
+        layers: [Layer(children: [text])],
+        selectedLayer: 0,
+        selection: [ElementSelection(path: [0, 0])]))
+    let session = TextEditSession(path: [0, 0], target: .text,
+                                  content: "hello", insertion: 1)
+    session.setInsertion(4, extend: true)
+    model.currentEditSession = session
+    return model
+}
+
+@Test func charRangeDecorationEditKeepsTheElementsStrikethrough() {
+    // The sibling rule reaches the per-range route too: the element is struck
+    // through, the panel's strikethrough flag is false, and underlining the
+    // range must not drop the line-through.
+    let model = modelWithTextRange(decoration: "line-through")
+    model.stateStore.initPanel("character_panel_content",
+                               defaults: charPanelDefaults.merging(
+                                ["underline": true]) { _, b in b })
+    applyCharacterPanelToSelection(store: model.stateStore,
+                                   controller: Controller(model: model),
+                                   edited: "underline")
+    guard case .text(let t) = model.document.getElement([0, 0]) else {
+        Issue.record("expected Text"); return
+    }
+    guard let ranged = t.tspans.first(where: { $0.content == "ell" }) else {
+        Issue.record("the range was split out"); return
+    }
+    #expect(ranged.textDecoration?.sorted() == ["line-through", "underline"])
+}
+
+@Test func charRangeEditOfAGroupWithNoTspanFieldWritesNothing() {
+    // Tspan carries no kerning mode, so a per-range Kerning edit can express
+    // nothing — and must not push an undo step that changes nothing.
+    let model = modelWithTextRange()
+    let before = model.document.getElement([0, 0])
+    model.stateStore.initPanel("character_panel_content",
+                               defaults: charPanelDefaults.merging(
+                                ["kerning": "Optical"]) { _, b in b })
+    applyCharacterPanelToSelection(store: model.stateStore,
+                                   controller: Controller(model: model),
+                                   edited: "kerning")
+    #expect(model.document.getElement([0, 0]) == before,
+            "the range must not even be split, and the element is not written")
+    #expect(!model.canUndo,
+            "a group with no tspan field pushes no undo step")
+}
+
+@Test func charApplyToANonTextSelectionPushesNoUndoStep() {
+    // The whole-element route is a no-op when nothing selected is text. Rust
+    // guarded this with `if changed`; Swift committed an empty edit.
+    let model = Model()
+    model.setDocumentForTest(Document(
+        layers: [Layer(children: [.rect(Rect(x: 0, y: 0, width: 10, height: 10))])],
+        selectedLayer: 0,
+        selection: [ElementSelection(path: [0, 0])]))
+    model.stateStore.initPanel("character_panel_content",
+                               defaults: charPanelDefaults.merging(
+                                ["font_family": "Arial"]) { _, b in b })
+    applyCharacterPanelToSelection(store: model.stateStore,
+                                   controller: Controller(model: model),
+                                   edited: "font_family")
+    #expect(!model.canUndo, "a non-text selection pushes no undo step")
+}
+
+@Test func charEveryUiOnlyFieldPushesNoUndoStep() {
+    // All nine of them, with panel state loaded with values that WOULD clobber.
+    for field in ["snap_baseline", "snap_x_height", "snap_glyph_bounds",
+                  "snap_proximity_guides", "snap_angular_guides",
+                  "snap_anchor_point", "snap_to_glyph_visible",
+                  "touch_type_enabled", "in_menu_font_previews"] {
+        let rich = richText()
+        let model = modelWithRichText()
+        model.stateStore.initPanel("character_panel_content",
+                                   defaults: charPanelDefaults.merging(
+                                    ["font_family": "Arial", "all_caps": true]) { _, b in b })
+        applyCharacterPanelToSelection(store: model.stateStore,
+                                       controller: Controller(model: model),
+                                       edited: field)
+        guard case .text(let t) = model.document.getElement([0, 0]) else {
+            Issue.record("expected Text"); return
+        }
+        #expect(t == rich, "\(field) must leave the element untouched")
+        #expect(!model.canUndo, "\(field) pushed an undo step")
+    }
 }

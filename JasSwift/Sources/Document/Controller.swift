@@ -1619,6 +1619,7 @@ public class Controller {
     ) {
         var doc = model.document
         if doc.selection.isEmpty { return }
+        var changed = false
         for es in doc.selection {
             let elem = doc.getElement(es.path)
             let attrs = build(elem)
@@ -1632,8 +1633,12 @@ public class Controller {
                 continue
             }
             doc = doc.replaceElement(es.path, with: newElem)
+            changed = true
         }
-        model.editDocument(doc)
+        // Nothing in the selection was text, so there is no edit — and an
+        // edit that changes nothing must not become an undo step. Matches
+        // the Rust apply's `if changed` guard.
+        if changed { model.editDocument(doc) }
     }
 
     /// Apply a character-attribute dict onto a single `Text`, returning
