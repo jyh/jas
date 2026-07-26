@@ -62,6 +62,135 @@ colors behavior, modal dialog flow, theming, cross-panel regressions.
 
 ---
 
+## Behaviour-liveness sweep — the `cp_` triage census
+
+_CPTRIAGE, 2026-07-25. This is the durable record of the triage; the
+sweep's own note in `scripts/gui_checks.py` only says `cp_` is untriaged._
+
+`scripts/gui_checks.py`'s `dead_sweep` clicks every declared-clickable
+widget in a scope on the stock scene and reports LIVE / DEAD / WEDGED by
+counting meaningful DOM mutations. A `DEAD` verdict is **not**
+self-interpreting: it means "this click changed nothing", which is a BUG
+when the control was never wired and CORRECT when the control is an
+identity operation in the state the stock scene happens to start in.
+Separating the two is a once-per-widget human judgement. That judgement,
+for all 21 declared-clickable `cp_` ids, is below.
+
+**Stock scene, as the sweep finds it** (proved from
+`workspace/state.yaml` + `color.yaml`'s panel `state`): `fill_color`
+`#ffffff`, `stroke_color` `#000000`, `fill_on_top` `true`, `mode` `hsb`,
+`recent_colors` `[]`, stroke 1pt butt/miter/undashed.
+
+**The sweep reported 16 DEAD of 21. That resolves as 13 + 3:** thirteen
+correct identity operations and three real defects.
+
+### The 3 real defects (all fixed)
+
+| Widget | Defect | Fix |
+| --- | --- | --- |
+| `cp_none_btn` | `set_fill_none` cleared the fill and NOTHING a user could see moved. The write was fine; the panel-render READER could not say "none" — it published a colour or omitted the key, and an omitted key leaves the workspace default `#ffffff` standing. So the swatch kept painting white and all fifteen `state.fill_color == null` guards read a colour. | Rust: `live_fill_stroke_values` gained a third outcome, a PUBLISHED Null. Swift: `buildLiveStateMap` / `liveFillStrokeValues` — the panel scope was the static defaults alone. |
+| `cp_none_swatch` | Same defect, reached through `set_active_color_none`. | Same fix — one reader, both controls. |
+| `cp_gradient_btn` | Genuinely dead, not an identity op: `set_fill_type_gradient` declares `effects: []`, so no state exists in which the click does anything, yet it rendered with a pointer cursor and full contrast. | `bind: { disabled: "true" }` in `fill_stroke_widget.yaml`. The click behavior stays declared, so the wiring is in place when the action grows effects. |
+
+Writing the shared corpus case for the first two then turned up three
+further Swift divergences on the same fact — the generic action
+dispatcher's missing `apply_active_color` hook, its missing `state`
+namespace, and the hook applying `fill_on_top`'s attribute instead of the
+key the effect wrote. All fixed; see the CPTRIAGE commits.
+
+### The 13 proven identity operations (correct DEAD)
+
+Each is a no-op **because of its own declared guard**, in the stock
+scene's state. None is a bug.
+
+| Widget(s) | Guard that makes it a no-op |
+| --- | --- |
+| `cp_recent_0` … `cp_recent_9` (10) | `condition: "panel.recent_colors.N != null"` — `recent_colors` is `[]`, so every slot's click condition is false. Empty slots are also drawn as hollow placeholders, which is the correct rendering. |
+| `cp_white_swatch` | `set_active_color` with `#ffffff`; the active fill already IS `#ffffff`. |
+| `cp_solid_btn` | `set_fill_type_solid` is guarded by `state.fill_color == null` — false, because the fill is a solid colour already. Its whole job is un-noneing. |
+| `cp_reset_btn` | `reset_fill_stroke` writes `#ffffff` / `#000000` / width 1.0 / butt / miter / no dash / `fill_on_top: true` — byte-for-byte the stock state. |
+
+### Verified `SWEEP_PRECONDITION` recipes
+
+Prefer a precondition over a `SWEEP_SKIP`: it turns an untestable skip
+into real coverage. These four are checked against the declarations and
+are what `cp_` needs to be gated honestly.
+
+| Widget | Precondition | Why it un-no-ops |
+| --- | --- | --- |
+| `cp_solid_btn` | `["cp_none_btn"]` | None first, so `state.fill_color == null` is TRUE and the restore-to-black arm runs. |
+| `cp_reset_btn` | `["cp_black_swatch"]` | Any real colour change first, so reset has something to undo. `cp_none_btn` works too. |
+| `cp_recent_0` | `["cp_black_swatch"]` | Committing a colour pushes it onto `recent_colors`, so slot 0 becomes non-null and its click condition passes. |
+| `cp_recent_1` | `["cp_black_swatch", "cp_white_swatch"]` | Two DISTINCT commits are needed — `list_push` is `unique: true`, so the same colour twice moves-to-front rather than filling slot 1. |
+
+`cp_recent_2` … `cp_recent_9` follow the same shape (N distinct commits)
+and are not worth eight recipes; slots 0 and 1 prove the mechanism and
+the `unique: true` semantics.
+
+### Missing probe capability: click a widget at a named corner
+
+`cp_fill_swatch` and `cp_stroke_swatch` cannot be gated by the current
+probe, and their sweep verdicts are not trustworthy. The two squares
+**overlap by design** — the widget's whole affordance is the offset pair,
+`fill` at 9%/9% and `stroke` at 33%/33%, each 55% of `size`, with
+`z_index` bound to `state.fill_on_top`. At `size: 48` the fill spans
+4.3–30.7 and the stroke 15.8–42.2, so each square's CENTRE lies inside
+the other's bounds and the one on top occludes it. A centre-click on
+`cp_stroke_swatch` therefore lands on the fill square whenever the fill
+is on top, which it is in the stock scene.
+
+They are also mutually blocked: `cp_fill_swatch`'s click is
+`set: { fill_on_top: true }`, already true, so making it non-trivial
+requires `fill_on_top: false` first — which means clicking
+`cp_stroke_swatch`, whose centre is the occluded one. No ordering of
+centre-clicks unwedges the pair.
+
+What is needed is a probe verb for **"click widget at named corner"**
+(e.g. `top_left` for the fill square, `bottom_right` for the stroke), so
+each square is struck where only it is present. That is a `gui_probe.py`
+capability, not a Color-panel fix. Until it exists both ids belong in
+`SWEEP_SKIP` with occlusion as the stated reason — a documented hole, not
+a silent one.
+
+### The remaining 2 of 21
+
+- `cp_hex` — already in `SWEEP_SKIP`: a text field, not a button. Clicking
+  it correctly does nothing; typing is what it is for (Session E).
+- `cp_swap_btn` and `cp_black_swatch` are genuinely LIVE in the stock
+  scene (white↔black swap; white→black commit) and need no triage.
+
+### Transfer note — the same widget family, twice more
+
+`fill_stroke_widget.yaml` is instantiated three times, and the `cp_`
+verdicts above transfer to the other two almost verbatim, because the
+template is the same declaration with a different `id_prefix`:
+
+- the **toolbar** instance (`workspace/layout.yaml`, `params: { size: 56 }`,
+  empty prefix) — bare ids `fill_swatch`, `stroke_swatch`, `swap_btn`,
+  `reset_btn`, `solid_btn`, `gradient_btn`, `none_btn`;
+- the **Swatches panel** instance (`workspace/panels/swatches.yaml`) under
+  its `sp_`-neighbouring prefix.
+
+So triaging the bare-prefix and Swatches-panel instances is mostly
+transcription, not fresh judgement — the occlusion geometry, the
+already-true `fill_on_top` identity, and the disabled gradient button are
+properties of the template. `gradient.yaml`'s `grad_fill_stroke_widget`
+is the one exception: it is `type: fill_stroke_widget`, a native widget
+render, not the template expansion.
+
+### Promoting `cp_` into the gate is a HANDOFF
+
+`SWEEP_DEFAULT_SCOPES` in `scripts/gui_checks.py` is `("align_", "stk_")`.
+Adding `"cp_"` — together with the four `SWEEP_PRECONDITION` entries and
+the two occlusion `SWEEP_SKIP` entries above — is the remaining step, and
+it belongs to the **`gui_checks.py` owner**, not to this wave. That file
+is owned by another wave and was deliberately left untouched here, which
+is why this census lives in the Color transcript instead of in the note
+beside the sweep. The note there still reads "UNTRIAGED: cp_ (21 …)"; it
+should be updated to point here when the promotion lands.
+
+---
+
 ## Default setup
 
 Unless a session or test says otherwise:
