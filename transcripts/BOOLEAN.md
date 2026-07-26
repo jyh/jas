@@ -230,26 +230,30 @@ Element-type handling for operands:
 
 **Superseded reading, for the record.** Before the ruling the tree contradicted itself: `algorithms/boolean` declared even-odd with orientation outside the contract, while `algorithms/boolean_normalize` documented its input as non-zero winding. The interim resolution was a hybrid — non-zero *within* a ring, even-odd *between* rings — chosen because a naive set-wide non-zero reading deletes the inner ring of every donut drawn the natural way (two co-oriented rings, winding 2 in the middle) and turned seven unit tests red. That hybrid is now gone: the same donut is a hole when the document says `evenodd` and a solid when it says `nonzero`, and both are pinned.
 
-### Multi-ring results: a live port divergence
+### Multi-ring results: FIXED 2026-07-26
 
-**Status: a known prime-directive divergence with a user-facing bug. Fix recipe below.**
+**Status: closed.** The divergence and the user-facing bug below are fixed in both ports, the pinch-split has landed, and the `exclude_overlapping_squares` `ring_count` holdout is retired — that oracle key is live. This subsection is kept as the record of what was wrong and why the fix had the shape it did; the past tense marks what no longer holds.
+
+**What is true now.** Both ports emit a **single even-odd `Path`** for a multi-ring boolean result and keep the single-ring case a `Polygon`. Swift's `Path` carries `fillRule`, imports and exports it in SVG, propagates it through every copy helper, and the canvas fills with `CGPathFillRule.evenOdd` when the path declares it — so the hole survives in the model *and* on screen. The rule stamped is `boolResultFillRule` / `RESULT_FILL_RULE`, clause 4 of the carried-rule law. The action goldens now carry `fill_rule` whenever it is not the `nonzero` default, so a golden can no longer be blind to a port filling a hole.
+
+The pinch-split is `boolean.rs`'s `split_pinched_rings` / `Boolean.swift`'s `splitPinchedRings`, a post-pass on `connect_edges` output: it cuts any ring that visits a vertex twice at the repeat, which is region-preserving by construction (no vertex invented or moved, and the two loops' signed areas sum to the original's). `exclude` of the two corner-overlapping squares now yields the derived-correct 75 + 75 over two simple rings, and `boolean_exclude_overlapping_rects_expected.json` was regenerated **once**, after both ports agreed byte for byte.
+
+**The original diagnosis, for the record.**
 
 A boolean result is often multi-ring: EXCLUDE of two overlapping rectangles is one outer ring plus an inner ring cutting out the overlap, and SUBTRACT of an inner shape is a donut. The two active ports materialise that differently:
 
 - **Rust** (`Controller::apply_destructive_boolean`) emits a single `PathElem` carrying every ring as a subpath, with `fill_rule: FillRule::EvenOdd`, so the renderer honours the boolean semantics.
 - **Swift** (`applyDestructiveBoolean`) emits **N independent `Polygon` elements**, one per ring. Each fills its own area on its own, and Swift's `Path` element has no `fillRule` field at all — the concept does not exist anywhere in the Swift sources.
 
-The consequence is not cosmetic: **any boolean result with a hole has its hole filled in Swift today.** The inner ring becomes an ordinary filled polygon painted over the region it was supposed to remove. Rust draws the donut; Swift draws the disc.
+The consequence was not cosmetic: **any boolean result with a hole had its hole filled in Swift.** The inner ring became an ordinary filled polygon painted over the region it was supposed to remove. Rust drew the donut; Swift drew the disc.
 
-This also blocks a separate, already-derived correctness fix. The `exclude_overlapping_squares` corpus vector pins `ring_count: 2` — the derived-correct answer, two L-shapes touching only at two isolated points — while both ports emit one self-touching twelve-vertex ring, because `connect_edges` cannot tell which of two touching regions it is on at a pinch vertex. A split-at-repeated-vertex post-pass fixes it exactly and region-preservingly (the cut gives loops of 75 + 75), and is prototyped. Landing it first would change a one-ring result into a two-ring result, which each port then materialises by a different rule — so it would break the `boolean_exclude_overlapping_rects` action golden differently in Rust and in Swift.
+That also blocked a separate, already-derived correctness fix. The `exclude_overlapping_squares` corpus vector pins `ring_count: 2` — the derived-correct answer, two L-shapes touching only at two isolated points — while both ports emitted one self-touching twelve-vertex ring, because `connect_edges` cannot tell which of two touching regions it is on at a pinch vertex. Landing the split first would have changed a one-ring result into a two-ring result, which each port then materialised by a *different* rule — so it would have broken the `boolean_exclude_overlapping_rects` action golden differently in Rust and in Swift. Hence the ordering below, which is the order the fix was actually landed in:
 
-**Unblock recipe, in order:**
-
-1. Add `fill_rule` to Swift's `Path` element, mirroring Rust's `FillRule` (`nonzero` default, `evenodd`), additive so existing documents stay valid.
-2. Change `applyDestructiveBoolean` to emit **one even-odd `Path`** for multi-ring results, matching Rust ring for ring and keeping the single-ring case a `Polygon` as both ports already do. This alone fixes the filled-hole bug.
-3. Land the prototyped pinch-split in both ports together.
-4. Regenerate `test_fixtures/actions/boolean_exclude_overlapping_rects_expected.json` **once**, after both ports agree.
-5. Delete the `_known_gap` / `_known_gap_keys` holdout on `exclude_overlapping_squares` in `test_fixtures/algorithms/boolean.json`, which puts its `ring_count` back under the golden oracle. The oracle self-check will fail if the holdout is left behind once the ports reproduce the pinned value.
+1. Add `fill_rule` to Swift's `Path` element, mirroring Rust's `FillRule` (`nonzero` default, `evenodd`), additive so existing documents stay valid — **done**, including SVG import/export and propagation through every copy helper.
+2. Change `applyDestructiveBoolean` to emit **one even-odd `Path`** for multi-ring results, matching Rust ring for ring and keeping the single-ring case a `Polygon` as both ports already do — **done**, and the canvas honours the rule, without which the model would be right and the screen still wrong.
+3. Land the pinch-split in both ports together — **done** (`split_pinched_rings` / `splitPinchedRings`).
+4. Regenerate `test_fixtures/actions/boolean_exclude_overlapping_rects_expected.json` **once**, after both ports agree — **done**; the two ports' canonical JSON was byte-identical before the golden was touched.
+5. Delete the `_known_gap` / `_known_gap_keys` holdout on `exclude_overlapping_squares` in `test_fixtures/algorithms/boolean.json`, putting its `ring_count` back under the golden oracle — **done**; the cross-language algorithm gate reports no known-gap line and one more passing key.
 
 ## Boolean Options dialog
 
@@ -449,7 +453,7 @@ The index of what this document leaves unsettled. Each entry says where the deta
 | Item | Status | Detail |
 | --- | --- | --- |
 | **Which fill rule reads a polygon set** | **RULED 2026-07-26** | [Fill rule: the polygon set carries it](#fill-rule-the-polygon-set-carries-it) — the set carries its source's declared rule; results declare even-odd. Inter-ring winding cancellation implemented in both ports as a consequence. |
-| **Multi-ring results differ between the ports** | Known divergence; live bug; recipe written | [Multi-ring results: a live port divergence](#multi-ring-results-a-live-port-divergence) — Swift fills the holes of every boolean result. Blocks the prototyped pinch-split fix. |
+| **Multi-ring results differ between the ports** | **FIXED 2026-07-26** | [Multi-ring results: FIXED 2026-07-26](#multi-ring-results-fixed-2026-07-26) — both ports emit one even-odd Path, Swift's canvas honours it, the pinch-split landed and the `ring_count` oracle holdout is retired. |
 | **OUTLINE operation** | Deferred, unblock trigger named | [Terminology](#terminology) — waits on the planar-graph / DCEL primitive for the Shape Builder tool. |
 | **Trap operation** | Deferred, unblock trigger named | [Terminology](#terminology) — waits on a physical printing model (spot colors, separations, press output). |
 

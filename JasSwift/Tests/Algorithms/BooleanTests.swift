@@ -613,3 +613,115 @@ private func totalArea(_ ps: BoolPolygonSet) -> Double {
     // result, named in one place rather than left as a literal.
     #expect(boolResultFillRule == .evenodd)
 }
+
+
+// MARK: - The pinch split (BOOLEAN.md multi-ring section)
+//
+// Twins of `exclude_of_corner_overlapping_squares_gives_two_simple_lobes`
+// and `splitting_a_pinched_ring_preserves_the_region` in
+// jas_dioxus/src/algorithms/boolean.rs, derivations included.
+
+private func shoelaceT(_ ring: BoolRing) -> Double {
+    if ring.count < 3 { return 0 }
+    var sum = 0.0
+    let n = ring.count
+    for i in 0..<n {
+        let (x1, y1) = ring[i]
+        let (x2, y2) = ring[(i + 1) % n]
+        sum += x1 * y2 - x2 * y1
+    }
+    return sum / 2.0
+}
+
+/// Rotate a ring so its lexicographically smallest vertex is first, so a
+/// test can pin a vertex sequence without pinning where the walk started.
+private func rotatedT(_ ring: BoolRing) -> BoolRing {
+    let n = ring.count
+    var best = 0
+    for i in 1..<n {
+        let b = ring[best]
+        let q = ring[i]
+        if q.0 < b.0 || (q.0 == b.0 && q.1 < b.1) { best = i }
+    }
+    return (0..<n).map { ring[(best + $0) % n] }
+}
+
+private func hasRepeatT(_ ring: BoolRing) -> Bool {
+    for j in 1..<max(ring.count, 1) {
+        for i in 0..<j where ring[i] == ring[j] { return true }
+    }
+    return false
+}
+
+private func ringsEqualT(_ a: BoolRing, _ b: BoolRing) -> Bool {
+    a.count == b.count && zip(a, b).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
+}
+
+@Test func excludeOfCornerOverlappingSquaresGivesTwoSimpleLobes() {
+    // The case that used to be a corpus known-gap. EXCLUDE of [0,10]^2
+    // and [5,15]^2: the overlap [5,10]^2 drops out, leaving two L-shapes
+    // that touch ONLY at the isolated points (10,5) and (5,10).
+    //
+    // Derivation, from first principles rather than from the
+    // implementation:
+    //   lower-left L = [0,10]^2 minus [5,10]^2, boundary
+    //     (0,0) (10,0) (10,5) (5,5) (5,10) (0,10)
+    //     shoelace 0 + 50 + 25 + 25 + 50 + 0 = 150 -> area 75
+    //   upper-right L = [5,15]^2 minus [5,10]^2, boundary
+    //     (10,5) (15,5) (15,15) (5,15) (5,10) (10,10)
+    //     shoelace -25 + 150 + 150 - 25 - 50 - 50 = 150 -> area 75
+    // 75 + 75 = 150 = 100 + 100 - 2*25, as XOR demands. Two rings, both
+    // simple. The sweep alone returns ONE twelve-vertex ring visiting
+    // each pinch twice - same region, wrong topology - because
+    // connectEdges cannot tell which lobe it is on at a pinch.
+    let a: BoolPolygonSet = [[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]]
+    let b: BoolPolygonSet = [[(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)]]
+    let out = booleanExclude(a, b)
+    #expect(out.count == 2)
+    let got = out.map { rotatedT($0) }.sorted { x, y in
+        if x[0].0 != y[0].0 { return x[0].0 < y[0].0 }
+        return x[0].1 < y[0].1
+    }
+    #expect(ringsEqualT(got[0], [
+        (0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (5.0, 5.0), (5.0, 10.0), (0.0, 10.0),
+    ]))
+    #expect(ringsEqualT(got[1], [
+        (5.0, 10.0), (10.0, 10.0), (10.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0),
+    ]))
+    for r in out {
+        #expect(abs(abs(shoelaceT(r)) - 75.0) < EPS)
+        #expect(!hasRepeatT(r))
+    }
+}
+
+@Test func splittingAPinchedRingPreservesTheRegion() {
+    // The post-pass in isolation, on a hand-built pinch: two unit
+    // squares joined at (1,1), traced as ONE ring visiting (1,1) twice.
+    //   (0,0) (1,0) (1,1) (2,1) (2,2) (1,2) (1,1) (0,1)
+    //
+    // Derivation. Cutting at the repeat gives the span between the two
+    // occurrences - (1,1) (2,1) (2,2) (1,2), the upper-right unit
+    // square, shoelace -1 + 2 + 2 - 1 = 2 -> area 1 - and the remainder
+    // with the duplicate kept once - (0,0) (1,0) (1,1) (0,1), the
+    // lower-left unit square, area 1. Two rings of 1, total 2, exactly
+    // the original's total: the cut invents no geometry.
+    let pinched: BoolRing = [
+        (0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (2.0, 1.0),
+        (2.0, 2.0), (1.0, 2.0), (1.0, 1.0), (0.0, 1.0),
+    ]
+    let before = abs(shoelaceT(pinched))
+    let out = splitPinchedRings([pinched])
+    #expect(out.count == 2)
+    let after = out.map { abs(shoelaceT($0)) }.reduce(0, +)
+    #expect(abs(after - before) < EPS)
+    #expect(abs(after - 2.0) < EPS)
+    for r in out {
+        #expect(abs(abs(shoelaceT(r)) - 1.0) < EPS)
+        #expect(!hasRepeatT(r))
+    }
+    // A ring with no repeat is returned untouched, in place.
+    let clean: BoolRing = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+    let kept = splitPinchedRings([clean])
+    #expect(kept.count == 1)
+    #expect(ringsEqualT(kept[0], clean))
+}

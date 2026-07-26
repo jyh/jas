@@ -830,5 +830,73 @@ func connectEdges(_ events: [BoolSweepEvent], _ order: [Int]) -> BoolPolygonSet 
         }
     }
 
-    return result
+    // Split any ring that revisits a vertex. See splitPinchedRings: the
+    // walk above cannot tell which of two regions touching at a pinch
+    // vertex it is on, so it produces one self-touching ring where the
+    // answer is two simple ones.
+    return splitPinchedRings(result)
+}
+
+/// Cut every ring that visits the same vertex twice into the separate
+/// loops it really is. Port of Rust `split_pinched_rings`.
+///
+/// WHY THE SWEEP NEEDS THIS. connectEdges walks the result boundary
+/// edge by edge, and at a vertex where two output regions touch at a
+/// single point it cannot tell which region it is on: both regions'
+/// edges are incident to that one vertex. So it walks into one lobe,
+/// back out through the pinch, and on into the other, returning ONE
+/// ring that visits the pinch twice. The region is right - area and
+/// every sample point are correct - but the ring is not simple, and
+/// EVERY BoolPolygonSet consumer assumes simple rings (the normalizer's
+/// fast path, the even-odd renderer, the refit). EXCLUDE of two squares
+/// overlapping at a corner is the canonical case: twelve vertices
+/// visiting (10,5) and (5,10) twice, where the answer is two L-shapes
+/// of 75 touching only at those two isolated points.
+///
+/// WHY IT IS EXACT. Cutting at the repeat is region-preserving by
+/// construction. If a ring reads `... a, X, b ... c, X, d ...` then the
+/// span from the first X up to (not including) the second is a closed
+/// loop on its own - it starts and ends at X - and the remainder, with
+/// the duplicate X kept once, is another. No vertex is invented, none
+/// is moved, and the two loops' signed areas sum to the original's.
+/// The recursion handles a ring with several pinches (EXCLUDE has two).
+///
+/// Order is fixed - lobe before remainder, first repeat by (j, i) - so
+/// Rust and Swift emit the same rings in the same sequence, which the
+/// exact-comparison corpus requires.
+func splitPinchedRings(_ rings: BoolPolygonSet) -> BoolPolygonSet {
+    var out: BoolPolygonSet = []
+    for ring in rings {
+        splitPinchedRing(ring, &out)
+    }
+    return out
+}
+
+private func splitPinchedRing(_ ring: BoolRing, _ out: inout BoolPolygonSet) {
+    if ring.count < 3 { return }
+    guard let (i, j) = firstRepeatedVertex(ring) else {
+        out.append(ring)
+        return
+    }
+    // ring[i] == ring[j], i < j.
+    let lobe: BoolRing = Array(ring[i..<j])
+    var rest: BoolRing = Array(ring[0..<i])
+    rest.append(contentsOf: ring[j...])
+    splitPinchedRing(lobe, &out)
+    splitPinchedRing(rest, &out)
+}
+
+/// The first repeated vertex of `ring` as (i, j) with i < j and
+/// ring[i] == ring[j], scanning j ascending then i ascending so the
+/// choice is total and port-independent. Exact equality is the right
+/// test: the sweep's vertices come from snap-rounded input and
+/// arrangement splits, so a revisited vertex is bit-identical.
+private func firstRepeatedVertex(_ ring: BoolRing) -> (Int, Int)? {
+    guard ring.count > 1 else { return nil }
+    for j in 1..<ring.count {
+        for i in 0..<j {
+            if ring[i] == ring[j] { return (i, j) }
+        }
+    }
+    return nil
 }

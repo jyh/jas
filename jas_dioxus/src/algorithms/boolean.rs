@@ -1399,7 +1399,81 @@ fn connect_edges(events: &[SweepEvent], order: &[usize]) -> PolygonSet {
         }
     }
 
-    result
+    // Split any ring that revisits a vertex. See
+    // [`split_pinched_rings`]: the walk above cannot tell which of two
+    // regions touching at a pinch vertex it is on, so it produces one
+    // self-touching ring where the answer is two simple ones.
+    split_pinched_rings(&result)
+}
+
+/// Cut every ring that visits the same vertex twice into the separate
+/// loops it really is.
+///
+/// **Why the sweep needs this.** [`connect_edges`] walks the result
+/// boundary edge by edge, and at a vertex where two output regions
+/// touch at a single point it has no way to tell which region it is
+/// on: both regions' edges are incident to that one vertex. So it
+/// walks into one lobe, back out through the pinch, and on into the
+/// other, returning ONE ring that visits the pinch twice. The region
+/// is right — area and every sample point are correct — but the ring
+/// is not simple, and *every* `PolygonSet` consumer assumes simple
+/// rings (the normalizer's fast path, the even-odd renderer, the
+/// refit). EXCLUDE of two squares overlapping at a corner is the
+/// canonical case: twelve vertices visiting (10,5) and (5,10) twice,
+/// where the answer is two L-shapes of 75 touching only at those two
+/// isolated points.
+///
+/// **Why it is exact.** Cutting at the repeat is region-preserving by
+/// construction. If a ring reads `… a, X, b … c, X, d …` then the span
+/// from the first `X` up to (not including) the second is a closed loop
+/// on its own — it starts and ends at `X` — and the remainder, with the
+/// duplicate `X` kept once, is another. No vertex is invented, none is
+/// moved, and the two loops' signed areas sum to the original's, so the
+/// region is untouched. The recursion handles a ring with several
+/// pinches (the EXCLUDE case has two).
+///
+/// Order is fixed — lobe before remainder, first repeat by `(j, i)` —
+/// so Rust and Swift emit the same rings in the same sequence, which is
+/// what the exact-comparison corpus requires.
+fn split_pinched_rings(rings: &PolygonSet) -> PolygonSet {
+    let mut out = PolygonSet::new();
+    for ring in rings {
+        split_pinched_ring(ring, &mut out);
+    }
+    out
+}
+
+fn split_pinched_ring(ring: &Ring, out: &mut PolygonSet) {
+    if ring.len() < 3 {
+        return;
+    }
+    match first_repeated_vertex(ring) {
+        None => out.push(ring.clone()),
+        Some((i, j)) => {
+            // ring[i] == ring[j], i < j.
+            let lobe: Ring = ring[i..j].to_vec();
+            let mut rest: Ring = ring[..i].to_vec();
+            rest.extend_from_slice(&ring[j..]);
+            split_pinched_ring(&lobe, out);
+            split_pinched_ring(&rest, out);
+        }
+    }
+}
+
+/// The first repeated vertex of `ring` as `(i, j)` with `i < j` and
+/// `ring[i] == ring[j]`, scanning `j` ascending then `i` ascending so
+/// the choice is total and port-independent. Exact equality is the
+/// right test: the sweep's vertices come from snap-rounded input and
+/// arrangement splits, so a revisited vertex is bit-identical.
+fn first_repeated_vertex(ring: &Ring) -> Option<(usize, usize)> {
+    for j in 1..ring.len() {
+        for i in 0..j {
+            if ring[i] == ring[j] {
+                return Some((i, j));
+            }
+        }
+    }
+    None
 }
 
 /// Return a deep copy of every ring in `ps` that has at least 3
@@ -1458,6 +1532,152 @@ mod tests {
             &RuledPolygonSet::even_odd(b),
         );
         assert_eq!(nz.len(), 1, "non-zero fills the middle: {:?}", nz);
+    }
+
+    // ----------- The pinch split (BOOLEAN.md multi-ring section) -----------
+
+    /// Shoelace signed area of one ring.
+    fn shoelace(ring: &Ring) -> f64 {
+        let n = ring.len();
+        if n < 3 {
+            return 0.0;
+        }
+        let mut sum = 0.0;
+        for i in 0..n {
+            let (x1, y1) = ring[i];
+            let (x2, y2) = ring[(i + 1) % n];
+            sum += x1 * y2 - x2 * y1;
+        }
+        sum / 2.0
+    }
+
+    /// Rotate a ring so its lexicographically smallest vertex is first,
+    /// so a test can pin a vertex sequence without pinning where the
+    /// walk happened to start.
+    fn rotated(ring: &Ring) -> Ring {
+        let n = ring.len();
+        let mut best = 0usize;
+        for i in 1..n {
+            if ring[i] < ring[best] {
+                best = i;
+            }
+        }
+        (0..n).map(|k| ring[(best + k) % n]).collect()
+    }
+
+    #[test]
+    fn exclude_of_corner_overlapping_squares_gives_two_simple_lobes() {
+        // The case that used to be a corpus known-gap. EXCLUDE of
+        // [0,10]^2 and [5,15]^2: the overlap [5,10]^2 drops out, leaving
+        // two L-shapes that touch ONLY at the isolated points (10,5)
+        // and (5,10).
+        //
+        // Derivation, from first principles rather than from the
+        // implementation:
+        //   lower-left L = [0,10]^2 minus [5,10]^2, boundary
+        //     (0,0) (10,0) (10,5) (5,5) (5,10) (0,10)
+        //     shoelace 0 + 50 + 25 + 25 + 50 + 0 = 150 -> area 75
+        //   upper-right L = [5,15]^2 minus [5,10]^2, boundary
+        //     (10,5) (15,5) (15,15) (5,15) (5,10) (10,10)
+        //     shoelace -25 + 150 + 150 - 25 - 50 - 50 = 150 -> area 75
+        // 75 + 75 = 150 = 100 + 100 - 2*25, as XOR demands. Two rings,
+        // both simple. The sweep alone returns ONE twelve-vertex ring
+        // visiting each pinch twice — same region, wrong topology —
+        // because connect_edges cannot tell which lobe it is on at a
+        // pinch; the split-at-repeated-vertex post-pass fixes it
+        // exactly.
+        let a: PolygonSet =
+            vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]];
+        let b: PolygonSet = vec![vec![
+            (5.0, 5.0),
+            (15.0, 5.0),
+            (15.0, 15.0),
+            (5.0, 15.0),
+        ]];
+        let out = boolean_exclude(&a, &b);
+        assert_eq!(out.len(), 2, "expected two lobes, got {:?}", out);
+        let mut got: Vec<Ring> = out.iter().map(rotated).collect();
+        got.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        assert_eq!(
+            got,
+            vec![
+                vec![
+                    (0.0, 0.0),
+                    (10.0, 0.0),
+                    (10.0, 5.0),
+                    (5.0, 5.0),
+                    (5.0, 10.0),
+                    (0.0, 10.0)
+                ],
+                vec![
+                    (5.0, 10.0),
+                    (10.0, 10.0),
+                    (10.0, 5.0),
+                    (15.0, 5.0),
+                    (15.0, 15.0),
+                    (5.0, 15.0)
+                ],
+            ]
+        );
+        for r in &out {
+            assert!(
+                (shoelace(r).abs() - 75.0).abs() < 1e-9,
+                "each lobe is 75: {:?}",
+                r
+            );
+            assert!(
+                first_repeated_vertex(r).is_none(),
+                "lobe still self-touching: {:?}",
+                r
+            );
+        }
+    }
+
+    #[test]
+    fn splitting_a_pinched_ring_preserves_the_region() {
+        // The post-pass in isolation, on a hand-built pinch: two unit
+        // squares joined at (1,1), traced as ONE ring that visits (1,1)
+        // twice.
+        //   (0,0) (1,0) (1,1) (2,1) (2,2) (1,2) (1,1) (0,1)
+        //
+        // Derivation. Cutting at the repeat gives the span between the
+        // two occurrences — (1,1) (2,1) (2,2) (1,2), the upper-right
+        // unit square, shoelace 1*1-2*1 + 2*2-2*1 + 2*2-1*2 + 1*1-1*2
+        //   = -1 + 2 + 2 - 1 = 2 -> area 1 — and the remainder with the
+        // duplicate kept once — (0,0) (1,0) (1,1) (0,1), the
+        // lower-left unit square, area 1. Two rings of 1, total 2,
+        // exactly the original's total: the cut invents no geometry.
+        let pinched: Ring = vec![
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (1.0, 1.0),
+            (2.0, 1.0),
+            (2.0, 2.0),
+            (1.0, 2.0),
+            (1.0, 1.0),
+            (0.0, 1.0),
+        ];
+        let before = shoelace(&pinched).abs();
+        let out = split_pinched_rings(&vec![pinched]);
+        assert_eq!(out.len(), 2, "expected two loops, got {:?}", out);
+        let after: f64 = out.iter().map(|r| shoelace(r).abs()).sum();
+        assert!(
+            (after - before).abs() < 1e-9,
+            "area changed: {} -> {}",
+            before,
+            after
+        );
+        assert!((after - 2.0).abs() < 1e-9);
+        for r in &out {
+            assert!((shoelace(r).abs() - 1.0).abs() < 1e-9, "{:?}", r);
+            assert!(first_repeated_vertex(r).is_none());
+        }
+        // A ring with no repeat is returned untouched, in place.
+        let clean: Ring = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)];
+        assert_eq!(
+            split_pinched_rings(&vec![clean.clone()]),
+            vec![clean]
+        );
     }
 
     #[test]
