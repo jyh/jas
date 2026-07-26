@@ -33,6 +33,26 @@
     "font_variant); underline and strikethrough -> the whole text_decoration",
     "token list (a CSS token list cannot be written a token at a time, exactly",
     "as a dash array cannot be written a slot at a time); language->xml_lang;",
+    "",
+    "THE SIBLING RULE. Three groups are fed by more than one panel FIELD:",
+    "DECORATION (underline + strikethrough), CASE (all_caps + small_caps) and",
+    "BASELINE_SHIFT (baseline_shift + superscript + subscript). For those, the",
+    "committed field is read from PANEL STATE and every SIBLING field is read",
+    "from the ELEMENT being edited - never from panel state, which the law does",
+    "not guarantee has been mirrored from the selection. (Before CHARPANEL's",
+    "repair only Swift's panel VIEW pushed such a mirror, so the ports read",
+    "different data and Rust destroyed the sibling's attribute: element",
+    "line-through + Underline clicked wrote a bare 'underline'.) Where the",
+    "committed field and an element-read sibling conflict, the COMMITTED field",
+    "wins - it is the one the user just chose. The one exception is a numeric",
+    "field at its identity: committing 0 into Baseline Shift carries no intent",
+    "(0 is what the input displays while super / sub is set), so the element's",
+    "super / sub stands. Vectors whose _comment says STALE-SIBLING",
+    "DISCRIMINATOR fail against a law that reads siblings from panel state;",
+    "the reference arm asserts that rejection, and every multi-field-group",
+    "vector's 'panel' delta names at most its own 'edited' field so no vector",
+    "can go green on a mirrored sibling it was handed.",
+    "",
     "anti_aliasing->aa_mode. Every other panel field owns no element attribute",
     "and writes NOTHING - the seven snap_* flags and the section-visibility",
     "flags are UI-only state, and toggling one must not push an undo step that",
@@ -267,11 +287,11 @@
       "expected": { "baseline_shift": "-2.5pt" }
     },
     {
-      "name": "superscript_toggle_wins_over_the_number",
-      "_comment": "Three FIELDS share the one baseline_shift attribute; the toggles take precedence over the numeric input (CHARACTER.md mutual exclusion). Sharing a single-attribute group is not a wide group.",
+      "name": "superscript_toggle_wins_over_the_elements_number",
+      "_comment": "Three FIELDS share the one baseline_shift attribute, so the two the user did NOT commit are read from the ELEMENT: the element carries a 4pt numeric shift and the committed Superscript toggle overrides it. The panel names only the committed field - it is under no obligation to have mirrored the other two.",
       "op": "panel_edit",
       "base": "rich_run",
-      "panel": { "superscript": true, "baseline_shift": 5.0 },
+      "panel": { "superscript": true },
       "edited": "superscript",
       "expected": { "baseline_shift": "super" }
     },
@@ -284,12 +304,56 @@
       "expected": { "baseline_shift": "sub" }
     },
     {
+      "name": "subscript_on_replaces_a_superscript",
+      "_comment": "The COMMITTED field wins over its exclusion siblings: the element is superscript, the user commits Subscript, sub lands. The element-read sibling decides only what happens to the fields the user did NOT touch.",
+      "op": "panel_edit",
+      "base": { "baseline_shift": "super" },
+      "panel": { "subscript": true },
+      "edited": "subscript",
+      "expected": { "baseline_shift": "sub" }
+    },
+    {
       "name": "baseline_shift_zero_clears_the_attribute",
       "op": "panel_edit",
       "base": "rich_run",
       "panel": { "baseline_shift": 0.0 },
       "edited": "baseline_shift",
       "expected": { "baseline_shift": "" }
+    },
+    {
+      "name": "superscript_off_keeps_the_elements_numeric_shift",
+      "_comment": "STALE-SIBLING DISCRIMINATOR. Turning Superscript off on an element carrying a 4pt shift must leave the 4pt alone, because the number is read from the ELEMENT. A law that read the panel's number instead finds its 0.0 default and destroys the shift - which is what the ports did before CHARPANEL's repair.",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "superscript": false },
+      "edited": "superscript",
+      "expected": { }
+    },
+    {
+      "name": "superscript_off_keeps_the_elements_subscript",
+      "_comment": "STALE-SIBLING DISCRIMINATOR, one sibling over: the element is subscript, the user turns Superscript off, and sub survives.",
+      "op": "panel_edit",
+      "base": { "baseline_shift": "sub" },
+      "panel": { "superscript": false },
+      "edited": "superscript",
+      "expected": { }
+    },
+    {
+      "name": "a_zero_number_defers_to_the_elements_superscript",
+      "_comment": "STALE-SIBLING DISCRIMINATOR, and the ruling that resolves number-vs-toggle precedence under field scoping: 0 is exactly what the numeric input DISPLAYS while super / sub is set, so committing 0 carries no intent and the element's superscript stands. An explicit non-zero number does replace it (next vector).",
+      "op": "panel_edit",
+      "base": { "baseline_shift": "super" },
+      "panel": { "baseline_shift": 0.0 },
+      "edited": "baseline_shift",
+      "expected": { }
+    },
+    {
+      "name": "an_explicit_number_replaces_the_superscript",
+      "op": "panel_edit",
+      "base": { "baseline_shift": "super" },
+      "panel": { "baseline_shift": 6.0 },
+      "edited": "baseline_shift",
+      "expected": { "baseline_shift": "6pt" }
     },
     {
       "name": "rotation_edit_writes_only_the_rotate",
@@ -309,10 +373,10 @@
     },
     {
       "name": "all_caps_on_clears_a_small_caps_variant",
-      "_comment": "Why CASE is a two-attribute group: the element is small-caps, the user turns All Caps ON, and the exclusion rule requires text_transform AND font_variant to move together. A one-attribute write could not clear the variant.",
+      "_comment": "Why CASE is a two-attribute group: the element is small-caps, the user turns All Caps ON, and the exclusion rule requires text_transform AND font_variant to move together. A one-attribute write could not clear the variant. The panel names ONLY all_caps; the small-caps sibling is read from the element.",
       "op": "panel_edit",
       "base": { "text_transform": "", "font_variant": "small-caps" },
-      "panel": { "all_caps": true, "small_caps": true },
+      "panel": { "all_caps": true },
       "edited": "all_caps",
       "expected": { "text_transform": "uppercase", "font_variant": "" }
     },
@@ -320,42 +384,80 @@
       "name": "all_caps_off_clears_the_transform",
       "op": "panel_edit",
       "base": "rich_run",
-      "panel": { "all_caps": false, "small_caps": false },
+      "panel": { "all_caps": false },
       "edited": "all_caps",
       "expected": { "text_transform": "" }
+    },
+    {
+      "name": "all_caps_off_keeps_a_small_caps_variant",
+      "_comment": "STALE-SIBLING DISCRIMINATOR. The element is small-caps with no transform; turning All Caps off must leave the variant alone. A law that read the panel's small_caps finds its false default and clears it.",
+      "op": "panel_edit",
+      "base": { "text_transform": "", "font_variant": "small-caps" },
+      "panel": { "all_caps": false },
+      "edited": "all_caps",
+      "expected": { }
     },
     {
       "name": "small_caps_on_with_all_caps_off",
       "op": "panel_edit",
       "base": { "text_transform": "", "font_variant": "" },
-      "panel": { "small_caps": true, "all_caps": false },
+      "panel": { "small_caps": true },
       "edited": "small_caps",
       "expected": { "font_variant": "small-caps" }
     },
     {
+      "name": "small_caps_on_replaces_the_all_caps",
+      "_comment": "The COMMITTED field wins over its exclusion sibling: the element is uppercase, the user commits Small Caps, the transform clears and the variant lands. This is the vector the two ports disagreed on before CHARPANEL's repair - Swift's view mirror let the element's All Caps win and the click no-oped, Rust honoured the click. The click wins.",
+      "op": "panel_edit",
+      "base": { "text_transform": "uppercase", "font_variant": "" },
+      "panel": { "small_caps": true },
+      "edited": "small_caps",
+      "expected": { "text_transform": "", "font_variant": "small-caps" }
+    },
+    {
+      "name": "small_caps_off_keeps_the_all_caps",
+      "_comment": "STALE-SIBLING DISCRIMINATOR. Turning Small Caps off on an uppercase element must leave the uppercase: all_caps is read from the ELEMENT. A law that read the panel's all_caps finds its false default and destroys the transform.",
+      "op": "panel_edit",
+      "base": { "text_transform": "uppercase", "font_variant": "" },
+      "panel": { "small_caps": false },
+      "edited": "small_caps",
+      "expected": { }
+    },
+    {
       "name": "underline_edit_rewrites_the_whole_decoration_list",
-      "_comment": "Why DECORATION is one group: two toggles feed ONE CSS token list, which cannot be written a token at a time. The panel arrives with strikethrough already mirrored from the element, so committing underline keeps the line-through and adds the underline - alphabetical order, so equality never depends on which toggle the user hit first.",
+      "_comment": "Why DECORATION is one group: two toggles feed ONE CSS token list, which cannot be written a token at a time. STALE-SIBLING DISCRIMINATOR: the panel names only underline (its strikethrough flag sits at the false default) and the line-through survives because the SIBLING flag is read from the element. Alphabetical order, so equality never depends on which toggle the user hit first.",
       "op": "panel_edit",
       "base": { "text_decoration": "line-through" },
-      "panel": { "underline": true, "strikethrough": true },
+      "panel": { "underline": true },
       "edited": "underline",
       "expected": { "text_decoration": "line-through underline" }
     },
     {
       "name": "underline_off_keeps_the_strikethrough",
+      "_comment": "STALE-SIBLING DISCRIMINATOR. Un-underlining must not un-strike.",
       "op": "panel_edit",
       "base": { "text_decoration": "line-through underline" },
-      "panel": { "underline": false, "strikethrough": true },
+      "panel": { "underline": false },
       "edited": "underline",
       "expected": { "text_decoration": "line-through" }
     },
     {
       "name": "strikethrough_edit_writes_the_decoration",
+      "_comment": "STALE-SIBLING DISCRIMINATOR the other way round: the element is underlined, the panel's underline flag sits at false, and committing Strikethrough must ADD to the list rather than replace it.",
       "op": "panel_edit",
       "base": "rich_run",
-      "panel": { "underline": true, "strikethrough": true },
+      "panel": { "strikethrough": true },
       "edited": "strikethrough",
       "expected": { "text_decoration": "line-through underline" }
+    },
+    {
+      "name": "strikethrough_off_keeps_the_underline",
+      "_comment": "STALE-SIBLING DISCRIMINATOR. Un-striking must not un-underline.",
+      "op": "panel_edit",
+      "base": { "text_decoration": "line-through underline" },
+      "panel": { "strikethrough": false },
+      "edited": "strikethrough",
+      "expected": { "text_decoration": "underline" }
     },
     {
       "name": "language_edit_writes_only_the_lang",

@@ -3,7 +3,9 @@
 A Character-panel edit NAMES the field the user just committed. Only the
 attribute group that field owns is taken from panel state; every other
 character attribute is preserved from the element being edited, PER
-ELEMENT.
+ELEMENT. And where a group is fed by more than one panel field, the fields
+the user did NOT commit are read from THE ELEMENT too — see
+:data:`MULTI_FIELD_GROUPS`.
 
 Before CHARPANEL (2026-07-25) every implementation rebuilt the WHOLE
 character attribute set from panel state on any Character-panel write, so
@@ -20,6 +22,12 @@ alongside the Rust ``character_with_group`` (jas_dioxus
 (``Interpreter/CharacterPanelSync.swift``). The English law lives in
 ``transcripts/CHARACTER.md``.
 
+The ports spell this module's :func:`character_with_field` as
+``character_with_group(base, panel, group)``, because their group enum
+carries the committed field for the three multi-field groups; Python has no
+such tagged group, so the field key IS the parameter. The two spellings are
+the same function.
+
 This module is deliberately PURE and dict-shaped. A character state is a
 flat attribute map (:data:`CHARACTER_ATTRS`) using the language-neutral
 names the conformance fixture uses — the SVG/CSS attribute names the Text /
@@ -30,13 +38,13 @@ Unlike the Stroke panel there is NO flat-global spelling to normalize: every
 Character control binds ``panel.<field>`` only (``workspace/panels/
 character.yaml``), so a field key needs no ``stroke_``-style prefix strip.
 
-Also unlike the Stroke law, this module has no platform BRIDGE beside it:
-the reference interpreter carries no Character-panel apply wiring (there is
-no ``apply_character_panel_to_selection`` in ``effects.py``), so the law
-itself is the whole of the reference's statement. If that wiring lands, it
-must route through :func:`character_with_group` rather than re-deriving the
-mapping — the bridge is where the Stroke law's one reference-only divergence
-(a lossy colour round trip) hid.
+The platform BRIDGE beside this law is
+:func:`workspace_interpreter.effects.apply_character_panel_to_selection`,
+mirroring the Stroke law's — the bridge is where the Stroke law's one
+reference-only divergence (a lossy colour round trip) hid, so Character gets
+a reference gate at that level too. Anything that applies a Character edit
+must route through :func:`character_with_field` rather than re-deriving the
+mapping.
 """
 
 from __future__ import annotations
@@ -214,6 +222,34 @@ def character_edit_group(key: str) -> str | None:
     return CHARACTER_EDIT_GROUPS.get(key)
 
 
+#: The groups fed by MORE THAN ONE panel field — derived from the table
+#: above, never hand-listed. These are the only groups where "the edit names
+#: its field" leaves anything open: the group's OTHER fields still have a say
+#: in the attribute being written, and the law reads those from THE ELEMENT.
+#:
+#: THE SIBLING RULE. The committed field comes from panel state; every
+#: sibling field of its group comes from the element being edited. Panel
+#: state is NOT a picture of the selection — most Character controls display
+#: panel-local state, and nothing in this law obliges the panel to have
+#: mirrored the element before an edit lands. Reading a sibling from the
+#: panel therefore destroys the element's attribute: with
+#: ``text-decoration: line-through`` on the element and the panel's
+#: strikethrough flag sitting at its ``False`` default, an Underline click
+#: wrote a bare ``underline`` and the strikethrough was gone. (Only the Swift
+#: port's panel VIEW pushed a mirror, which is why the two ports also
+#: disagreed about what the same click meant — CHARPANEL repair, 2026-07-25.)
+#:
+#: Where the committed field and an element-read sibling CONFLICT, the
+#: committed field wins: it is the one the user just chose. The single
+#: exception is a numeric field at its identity — committing ``0`` into
+#: Baseline Shift carries no intent, because ``0`` is exactly what that input
+#: displays while super / sub is set, so the element's super / sub stands.
+MULTI_FIELD_GROUPS: frozenset[str] = frozenset(
+    g for g in CHARACTER_GROUP_ATTRS
+    if sum(1 for v in CHARACTER_EDIT_GROUPS.values() if v == g) > 1
+)
+
+
 # ---------------------------------------------------------------------------
 # The panel-field fallbacks
 # ---------------------------------------------------------------------------
@@ -299,6 +335,56 @@ def text_decoration_from_flags(underline: bool, strikethrough: bool) -> str:
     return " ".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# The attribute -> flag inverses (the element side of the sibling rule)
+# ---------------------------------------------------------------------------
+#
+# One per multi-field group. These are what make "the sibling comes from the
+# element" executable: they read the element's attribute back into the panel
+# flags that feed it. The ports mirror them (Rust `text_decoration_flags` /
+# `case_flags` / `baseline_shift_state`, Swift the same names), and the panel
+# DISPLAY mirror uses the same derivation — that is the point, there is one
+# rule and it lives in the law.
+
+def decoration_flags(text_decoration: str) -> tuple[bool, bool]:
+    """``(underline, strikethrough)`` implied by a CSS ``text-decoration``
+    token list. Order-insensitive; ``none`` and ``""`` both mean neither."""
+    toks = str(text_decoration or "").split()
+    return ("underline" in toks, "line-through" in toks)
+
+
+def case_flags(text_transform: str, font_variant: str) -> tuple[bool, bool]:
+    """``(all_caps, small_caps)`` implied by ``text-transform`` /
+    ``font-variant``."""
+    return (str(text_transform or "") == "uppercase",
+            str(font_variant or "") == "small-caps")
+
+
+def baseline_shift_state(baseline_shift: str) -> tuple[bool, bool, float]:
+    """``(superscript, subscript, numeric_pt)`` implied by ``baseline-shift``.
+
+    The three are mutually exclusive on the element: a ``super`` / ``sub``
+    keyword carries no number, and a number carries neither keyword.
+    """
+    val = str(baseline_shift or "").strip()
+    if val == "super":
+        return (True, False, 0.0)
+    if val == "sub":
+        return (False, True, 0.0)
+    return (False, False, parse_pt(val))
+
+
+def parse_pt(s: str) -> float:
+    """``"4pt"`` / ``"4"`` -> 4.0; anything unparseable -> 0.0."""
+    val = str(s or "").strip()
+    if val.endswith("pt"):
+        val = val[:-2]
+    try:
+        return float(val)
+    except ValueError:
+        return 0.0
+
+
 def kerning_attr(raw: str) -> str:
     """The element's ``kerning`` attribute for a Kerning combo entry.
 
@@ -322,21 +408,35 @@ def kerning_attr(raw: str) -> str:
 # The law
 # ---------------------------------------------------------------------------
 
-def character_with_group(
-    base: dict[str, Any] | None, panel: dict[str, Any], group: str,
+def character_with_field(
+    base: dict[str, Any] | None, panel: dict[str, Any], field: str,
 ) -> dict[str, Any]:
-    """``base`` with ``group``'s attributes overwritten from ``panel`` and
-    every other attribute left exactly as it was.
+    """``base`` with the group ``field`` owns overwritten, and every other
+    attribute left exactly as it was.
 
-    Every derived value is computed against ``base`` where the element has a
-    say — notably the LEADING group's Auto test, which compares the panel's
-    leading against the ELEMENT's ``font_size × 1.2`` rather than the
-    panel's font size. The whole-rebuild law used the panel's, which was
-    harmless only because it rewrote the size in the same breath; under the
-    field-scoped law a leading edit must not consult a font-size field the
-    user did not touch.
+    ``field`` is the panel field the user COMMITTED. It must own a group:
+    callers check :func:`character_edit_group` first, because a field owning
+    no group writes nothing at all — not even an undo step — and that is a
+    decision about whether to touch the document, not about values. An
+    unknown field here yields ``base`` unchanged.
+
+    Only the committed field is read from ``panel``. Everything else comes
+    from ``base``:
+
+    * every attribute outside the group, trivially — that is field scoping;
+    * the SIBLING fields of a multi-field group (:data:`MULTI_FIELD_GROUPS`),
+      read back out of ``base``'s own attributes by the inverses above;
+    * and the values a derivation needs from the element — notably the
+      LEADING group's Auto test, which compares the panel's leading against
+      the ELEMENT's ``font_size × 1.2`` rather than the panel's font size.
+      The whole-rebuild law used the panel's, which was harmless only because
+      it rewrote the size in the same breath; under the field-scoped law a
+      leading edit must not consult a font-size field the user did not touch.
     """
+    group = CHARACTER_EDIT_GROUPS.get(field)
     c = normalize_character(base)
+    if group is None:
+        return c
     if group == FONT_FAMILY:
         c["font_family"] = str(_field(panel, "font_family"))
     elif group == STYLE:
@@ -366,24 +466,54 @@ def character_with_group(
         h = _num(panel, "horizontal_scale")
         c["horizontal_scale"] = "" if h == 100.0 else fmt_num(h)
     elif group == BASELINE_SHIFT:
-        if _flag(panel, "superscript"):
+        # THREE fields, one attribute: the two the user did not commit come
+        # from the element. A toggle turned OFF therefore falls back to the
+        # element's other keyword or its own numeric shift instead of wiping
+        # the attribute with the panel's 0.
+        sup, sub, num = baseline_shift_state(c["baseline_shift"])
+        if field == "superscript":
+            sup = _flag(panel, "superscript")
+            sub = False if sup else sub
+        elif field == "subscript":
+            sub = _flag(panel, "subscript")
+            sup = False if sub else sup
+        else:
+            num = _num(panel, "baseline_shift")
+            # An explicit shift replaces super / sub; a committed 0 does not,
+            # because 0 is what the input displays while super / sub is set.
+            if num != 0.0:
+                sup = sub = False
+        if sup:
             c["baseline_shift"] = "super"
-        elif _flag(panel, "subscript"):
+        elif sub:
             c["baseline_shift"] = "sub"
         else:
-            bs = _num(panel, "baseline_shift")
-            c["baseline_shift"] = "" if bs == 0.0 else f"{fmt_num(bs)}pt"
+            c["baseline_shift"] = "" if num == 0.0 else f"{fmt_num(num)}pt"
     elif group == ROTATION:
         rot = _num(panel, "character_rotation")
         c["rotate"] = "" if rot == 0.0 else fmt_num(rot)
     elif group == CASE:
-        all_caps = _flag(panel, "all_caps")
-        small_caps = _flag(panel, "small_caps")
+        # The sibling toggle comes from the element, so turning one off
+        # cannot clear the other's attribute; the committed toggle turned ON
+        # still wins the exclusion.
+        all_caps, small_caps = case_flags(c["text_transform"], c["font_variant"])
+        if field == "all_caps":
+            all_caps = _flag(panel, "all_caps")
+        else:
+            small_caps = _flag(panel, "small_caps")
+            all_caps = False if small_caps else all_caps
         c["text_transform"] = "uppercase" if all_caps else ""
         c["font_variant"] = "small-caps" if (small_caps and not all_caps) else ""
     elif group == DECORATION:
+        # One token list, two fields: the token the user did not commit is
+        # read off the element, so underlining never un-strikes.
+        underline, strikethrough = decoration_flags(c["text_decoration"])
+        if field == "underline":
+            underline = _flag(panel, "underline")
+        else:
+            strikethrough = _flag(panel, "strikethrough")
         c["text_decoration"] = text_decoration_from_flags(
-            _flag(panel, "underline"), _flag(panel, "strikethrough"))
+            underline, strikethrough)
     elif group == LANGUAGE:
         c["xml_lang"] = str(_field(panel, "language"))
     elif group == AA_MODE:
