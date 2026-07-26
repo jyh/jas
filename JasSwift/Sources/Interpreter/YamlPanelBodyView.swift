@@ -334,7 +334,12 @@ struct YamlElementView: View {
     /// port never had — which is how the two ports came to disagree about what
     /// the same click meant. The live overrides remain a PULL, merged into the
     /// panel's render scope by `DockPanelView.buildPanelCtx`.
-    private func commitPanelWrite(key: String, value: Any?) {
+    /// `terminal` marks a finished edit (slider pointer-up, Enter / blur in a
+    /// value box) as opposed to a live drag tick; it is passed straight through
+    /// to ``notifyPanelStateChanged``, whose Color branch is the only reader.
+    private func commitPanelWrite(
+        key: String, value: Any?, terminal: Bool = false
+    ) {
         guard let model = model, let pid = panelId else { return }
         // Paragraph panel — Phase 4. Sync the live wrapper attrs
         // first so untouched fields hold the selection's current
@@ -372,7 +377,7 @@ struct YamlElementView: View {
         // field-scoped (it writes only that field's group and preserves
         // the rest from the element). See applyStrokePanelToSelection.
         notifyPanelStateChanged(pid, store: model.stateStore, model: model,
-                                edited: key)
+                                edited: key, terminal: terminal)
     }
 
     /// Dispatch a widget edit to the right state container based on the
@@ -385,52 +390,41 @@ struct YamlElementView: View {
     private func commitWidgetWrite(target: WriteTarget, value: Any?) {
         switch target.scope {
         case .panel:
-            commitPanelWrite(key: target.key, value: value)
-            // Color panel terminal commits push to the recent-colors
-            // strip. notifyPanelStateChanged already updated the
-            // active color via setActiveColorLive (no recent push);
-            // here we re-fire setActiveColor with the post-commit
-            // panel state so the entry lands in recent. Both the hex
-            // text input and the H / S / B / R / G / B / C / M / Y / K
-            // numeric inputs commit on Enter / blur via this path.
-            if panelId == "color_panel_content", let model = model {
-                // Hex commit: parse the typed hex directly so the
-                // committed color reflects what the user typed
-                // (colorFromPanelState reads h/s/b/r/g/bl per the
-                // mode — those are stale after a hex edit since the
-                // hex commit doesn't ripple back to the other
-                // channels). In Web Safe RGB mode, snap each
-                // channel to the nearest multiple of 51 first
-                // (0/51/102/153/204/255).
-                if target.key == "hex" {
-                    if let hexStr = value as? String,
-                       var color = ColorPanel.colorFromHex(hexStr)
-                    {
-                        let mode = model.stateStore.getPanel(
-                            "color_panel_content", "mode") as? String
-                        if mode == "web_safe_rgb" {
-                            let (r, g, b, _) = color.toRgba()
-                            func snap(_ v: Double) -> Double {
-                                let n = (v * 255.0 / 51.0).rounded() * 51.0
-                                return min(max(n, 0), 255) / 255.0
-                            }
-                            color = Color.rgb(
-                                r: snap(r), g: snap(g), b: snap(b), a: 1.0)
-                        }
-                        ColorPanel.setActiveColor(color, model: model)
+            // A Color panel channel box (H / S / B / R / G / Bl / C / M / Y / K)
+            // commits on Enter / blur, which is a TERMINAL write: the store
+            // holds the typed value, and commitPanelWrite's notify hook
+            // recomputes the paint through the one overlaid reader and pushes it
+            // with `setActiveColor` (one undo step, recent strip, app tier).
+            // Mirrors Rust's `PanelKind::Color` arm in render_number_input's
+            // onchange handler, which likewise computes from the overlaid panel
+            // map and calls `set_active_color`.
+            let colorChannelKeys: Set<String> = [
+                "h", "s", "b", "r", "g", "bl", "c", "m", "y", "k",
+            ]
+            let isColorChannel = panelId == "color_panel_content"
+                && colorChannelKeys.contains(target.key)
+            commitPanelWrite(key: target.key, value: value,
+                             terminal: isColorChannel)
+            // The HEX field is not a channel: the typed string is the whole
+            // colour, and a hex edit does not ripple back into h/s/b/r/g/bl, so
+            // the channel reader would answer with the PREVIOUS colour. Parse
+            // the string instead. In Web Safe RGB mode snap each channel to the
+            // nearest multiple of 51 (0/51/102/153/204/255) first.
+            if panelId == "color_panel_content", target.key == "hex",
+               let model = model, let hexStr = value as? String,
+               var color = ColorPanel.colorFromHex(hexStr)
+            {
+                let mode = model.stateStore.getPanel(
+                    "color_panel_content", "mode") as? String
+                if mode == "web_safe_rgb" {
+                    let (r, g, b, _) = color.toRgba()
+                    func snap(_ v: Double) -> Double {
+                        let n = (v * 255.0 / 51.0).rounded() * 51.0
+                        return min(max(n, 0), 255) / 255.0
                     }
-                } else {
-                    let colorChannelKeys: Set<String> = [
-                        "h", "s", "b", "r", "g", "bl",
-                        "c", "m", "y", "k",
-                    ]
-                    if colorChannelKeys.contains(target.key),
-                       let color = ColorPanel.colorFromPanelState(
-                            store: model.stateStore)
-                    {
-                        ColorPanel.setActiveColor(color, model: model)
-                    }
+                    color = Color.rgb(r: snap(r), g: snap(g), b: snap(b), a: 1.0)
                 }
+                ColorPanel.setActiveColor(color, model: model)
             }
         case .dialog:
             onDialogWrite?(target.key, value)
@@ -1440,119 +1434,26 @@ struct YamlElementView: View {
         }
     }
 
-    /// Apply a slider write to the panel state and, when this is a
-    /// Color panel slider (panel.h / .s / .b / .r / .g / .bl /
-    /// .c / .m / .y / .k / .hex), recompute the active color and
-    /// either set it live (drag) or commit it (release).
+    /// Apply a slider write to the panel state. On a Color panel slider the
+    /// stored value IS the colour edit: ``commitPanelWrite`` fires
+    /// ``notifyPanelStateChanged``, whose Color branch recomputes the paint
+    /// through the one overlaid reader and applies it — live on a drag tick,
+    /// committed on release (`commit`). There is no colour arithmetic here; the
+    /// slider knows only which field it writes.
     private func handleSliderWrite(
         target: WriteTarget?, value: Double,
         panelId: String?, model: Model?, commit: Bool
     ) {
-        guard let target = target, let model = model else { return }
+        guard let target = target, model != nil else { return }
         switch target.scope {
         case .panel:
-            // For color panel sliders: the panel store may hold stale
-            // h/s/b/r/g/bl/c/m/y/k from before the live override
-            // refreshed the eval ctx. Seed all the OTHER channels
-            // from the active color first so the new color computed
-            // from panel state mixes the dragged channel with the
-            // current (live) sibling values, instead of the YAML
-            // default zeros.
-            if panelId == "color_panel_content",
-               let active = activeColor(model: model)
-            {
-                let modeStr = (model.stateStore.getPanel(
-                    "color_panel_content", "mode") as? String) ?? "hsb"
-                let mode: ColorPanelMode = {
-                    switch modeStr {
-                    case "grayscale": return .grayscale
-                    case "rgb": return .rgb
-                    case "cmyk": return .cmyk
-                    case "web_safe_rgb": return .webSafeRgb
-                    default: return .hsb
-                    }
-                }()
-                ColorPanel.seedSliders(from: active, mode: mode,
-                                       store: model.stateStore)
-            }
-            // commitPanelWrite stores the value, bumps
-            // panelStateVersion (so SwiftUI re-renders bound
-            // widgets like the matching number_input next to the
-            // slider), and fires the notify hook. Skipping it left
+            // commitPanelWrite stores the value, bumps panelStateVersion (so
+            // SwiftUI re-renders bound widgets like the matching number_input
+            // next to the slider), and fires the notify hook. Skipping it left
             // the slider's value invisible to its sibling input.
-            commitPanelWrite(key: target.key, value: value)
-            if panelId == "color_panel_content" {
-                applyColorPanelStateToActiveColor(model: model, commit: commit)
-            }
+            commitPanelWrite(key: target.key, value: value, terminal: commit)
         case .dialog:
             onDialogWrite?(target.key, value)
-        }
-    }
-
-    private func activeColor(model: Model) -> Color? {
-        if model.fillOnTop {
-            switch selectionFillSummary(model.document) {
-            case .uniform(let f?): return f.color
-            case .uniform(nil): return nil
-            default: return model.defaultFill?.color
-            }
-        } else {
-            switch selectionStrokeSummary(model.document) {
-            case .uniform(let s?): return s.color
-            case .uniform(nil): return nil
-            default: return model.defaultStroke?.color
-            }
-        }
-    }
-
-    /// Read the Color panel's current mode + slider state, derive
-    /// the corresponding RGB color, and push it through ColorPanel
-    /// (live during drag, commit on release).
-    private func applyColorPanelStateToActiveColor(
-        model: Model, commit: Bool
-    ) {
-        let panelState = model.stateStore.getPanelState("color_panel_content")
-        let mode = (panelState["mode"] as? String) ?? "hsb"
-        func num(_ key: String) -> Double {
-            (panelState[key] as? Double)
-                ?? (panelState[key] as? Int).map { Double($0) }
-                ?? 0
-        }
-        // Color enum stores components in [0, 1] for s/b/r/g/b/c/m/y/k
-        // and hue in [0, 360). The YAML sliders run 0..100 (or 0..255
-        // for r/g/b), so divide before constructing.
-        let color: Color = {
-            switch mode {
-            case "grayscale":
-                let k = num("k") / 100.0
-                return Color.rgb(r: 1.0 - k, g: 1.0 - k, b: 1.0 - k, a: 1.0)
-            case "rgb", "web_safe_rgb":
-                return Color.rgb(
-                    r: num("r") / 255.0,
-                    g: num("g") / 255.0,
-                    b: num("bl") / 255.0,
-                    a: 1.0
-                )
-            case "cmyk":
-                let c = num("c") / 100.0, mk = num("m") / 100.0
-                let y = num("y") / 100.0, k = num("k") / 100.0
-                let r = (1.0 - c) * (1.0 - k)
-                let g = (1.0 - mk) * (1.0 - k)
-                let b = (1.0 - y) * (1.0 - k)
-                return Color.rgb(r: r, g: g, b: b, a: 1.0)
-            default:  // hsb
-                return Color.hsb(
-                    h: num("h"),
-                    s: num("s") / 100.0,
-                    b: num("b") / 100.0,
-                    a: 1.0
-                )
-            }
-        }()
-        if commit {
-            ColorPanel.setActiveColor(color, model: model)
-        } else {
-            ColorPanel.setActiveColorLive(color, model: model)
         }
     }
 

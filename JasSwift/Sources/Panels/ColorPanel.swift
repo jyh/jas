@@ -32,13 +32,17 @@ public enum ColorPanel {
                 }
                 let store = model.stateStore
                 store.setPanel("color_panel_content", "mode", yamlMode)
-                // Seed the destination mode's sliders from the
-                // current active color — without this, switching
-                // modes shows the YAML defaults (0/0/255 for RGB
-                // etc.) regardless of the actual color.
-                let active: Color = (model.fillOnTop
-                    ? model.defaultFill?.color
-                    : model.defaultStroke?.color)
+                // Seed the destination mode's sliders from the current active
+                // color — without this, switching modes shows the YAML defaults
+                // (0/0/255 for RGB etc.) regardless of the actual color.
+                //
+                // Through ``resolveActivePaintColor``, the same reader the
+                // panel's render overlay and its write path use: the hand-rolled
+                // `defaultFill?.color ?? white` here had no app tier, so after
+                // File > New a mode switch seeded WHITE and the next drag mixed
+                // the dragged channel with white's channels (COLORTIERS
+                // repair 2).
+                let active = resolveActivePaintColor(model: model)
                     ?? Color.rgb(r: 1, g: 1, b: 1, a: 1)
                 seedSliders(from: active, mode: mode, store: store)
                 model.panelStateVersion &+= 1
@@ -51,14 +55,14 @@ public enum ColorPanel {
             layoutApply(&layout, opClosePanel(addr))
         case "invert_active_color":
             guard let model = model else { return }
-            if let color = model.fillOnTop ? model.defaultFill?.color : model.defaultStroke?.color {
+            if let color = activeDefaultPaintColor(model: model) {
                 let (r, g, b, _) = color.toRgba()
                 let inverted = Color.rgb(r: 1.0 - r, g: 1.0 - g, b: 1.0 - b, a: 1.0)
                 setActiveColor(inverted, model: model)
             }
         case "complement_active_color":
             guard let model = model else { return }
-            if let color = model.fillOnTop ? model.defaultFill?.color : model.defaultStroke?.color {
+            if let color = activeDefaultPaintColor(model: model) {
                 let (h, s, br, _) = color.toHsba()
                 guard s > 0.001 else { return }
                 let newH = (h + 180.0).truncatingRemainder(dividingBy: 360.0)
@@ -77,15 +81,16 @@ public enum ColorPanel {
         return false
     }
 
-    /// Query whether a menu command is enabled. Invert / Complement
-    /// need an active color (fill or stroke per `fillOnTop`) to
-    /// operate on; gray them out when the active attribute is none.
+    /// Query whether a menu command is enabled. Invert / Complement need an
+    /// active color (fill or stroke per `fillOnTop`) to operate on; gray them
+    /// out when the active attribute is none. Same reader as the two commands
+    /// themselves and as Rust's `is_enabled` (`state.active_color().is_some()`),
+    /// so the enabled state cannot disagree with what the command would do.
     public static func isEnabled(_ cmd: String, model: Model?) -> Bool {
         switch cmd {
         case "invert_active_color", "complement_active_color":
             guard let m = model else { return true }
-            let c: Color? = m.fillOnTop ? m.defaultFill?.color : m.defaultStroke?.color
-            return c != nil
+            return activeDefaultPaintColor(model: m) != nil
         default: return true
         }
     }
@@ -102,6 +107,15 @@ public enum ColorPanel {
     public static func setActiveColor(_ color: Color, model: Model) {
         let ctrl = Controller(model: model)
         if model.fillOnTop {
+            // The APP tier first, exactly as Rust's `set_active_color` does
+            // ("Always update app-level defaults", before the per-tab write).
+            // A colour committed on a slider / the hex field / the colour bar is
+            // the same workspace-level fact as one clicked on a swatch, so it
+            // has to survive File > New the same way; writing only the document
+            // tier lost it at the next New (COLORTIERS repair 2). The LIVE arm
+            // below deliberately does NOT write it — neither does Rust's
+            // `set_active_color_live` — so a mid-drag tick cannot leak forward.
+            model.appDefaultFill = recolorFill(model.appDefaultFill, color)
             model.defaultFill = recolorFill(model.defaultFill, color)
             if !model.document.selection.isEmpty {
                 // editDocument self-brackets the apply into ONE undo step
@@ -111,6 +125,7 @@ public enum ColorPanel {
                 ctrl.mapSelectionFill { recolorFill($0, color) }
             }
         } else {
+            model.appDefaultStroke = recolorStroke(model.appDefaultStroke, color)
             model.defaultStroke = recolorStroke(model.defaultStroke, color)
             if !model.document.selection.isEmpty {
                 ctrl.mapSelectionStroke { recolorStroke($0, color) }
@@ -187,47 +202,6 @@ public enum ColorPanel {
         _recentColorsLock.lock()
         defer { _recentColorsLock.unlock() }
         _recentColorsListeners.append(cb)
-    }
-
-    /// Read the Color panel's current mode + slider/hex state and
-    /// derive the corresponding RGB color. Returns nil when the
-    /// panel has no stored state yet (initial render).
-    public static func colorFromPanelState(store: StateStore) -> Color? {
-        let s = store.getPanelState("color_panel_content")
-        let mode = (s["mode"] as? String) ?? "hsb"
-        func num(_ k: String) -> Double {
-            (s[k] as? Double)
-                ?? (s[k] as? Int).map { Double($0) }
-                ?? 0
-        }
-        switch mode {
-        case "grayscale":
-            let k = num("k") / 100.0
-            return Color.rgb(r: 1.0 - k, g: 1.0 - k, b: 1.0 - k, a: 1.0)
-        case "rgb", "web_safe_rgb":
-            return Color.rgb(
-                r: num("r") / 255.0,
-                g: num("g") / 255.0,
-                b: num("bl") / 255.0,
-                a: 1.0
-            )
-        case "cmyk":
-            let c = num("c") / 100.0, mk = num("m") / 100.0
-            let y = num("y") / 100.0, k = num("k") / 100.0
-            return Color.rgb(
-                r: (1.0 - c) * (1.0 - k),
-                g: (1.0 - mk) * (1.0 - k),
-                b: (1.0 - y) * (1.0 - k),
-                a: 1.0
-            )
-        default:  // hsb
-            return Color.hsb(
-                h: num("h"),
-                s: num("s") / 100.0,
-                b: num("b") / 100.0,
-                a: 1.0
-            )
-        }
     }
 
     /// Parse a 6-char hex string (with or without `#`) into a Color.
