@@ -160,6 +160,31 @@ fn lookup_brush(slug: &str) -> Option<serde_json::Value> {
     })
 }
 
+/// Balanced `ctx.save()`: the paired `restore()` runs when this guard
+/// drops — on ANY scope exit, including early `return`s. Rust's RAII is
+/// the `with`-block equivalent: the type system enforces the balance a
+/// comment can only request. Motivated by WEDGESTORM (2026-07-25): a
+/// brushed-path branch `return`ed between a manual save() and the
+/// function-end restore(), leaking one save per brushed frame; every
+/// later repaint then compounded the view transform on the leaked state
+/// (the receding-artboard cascade). Bind to a NAMED variable
+/// (`let _ctx_guard = ...`); binding to bare `_` drops IMMEDIATELY and
+/// restores on the spot.
+struct CtxSaveGuard<'a>(&'a CanvasRenderingContext2d);
+
+impl<'a> CtxSaveGuard<'a> {
+    fn new(ctx: &'a CanvasRenderingContext2d) -> Self {
+        ctx.save();
+        Self(ctx)
+    }
+}
+
+impl Drop for CtxSaveGuard<'_> {
+    fn drop(&mut self) {
+        self.0.restore();
+    }
+}
+
 /// If the brush JSON describes a Calligraphic brush, extract its
 /// angle / roundness / size into the native struct. Other brush types
 /// return None in Phase 1 — the renderer falls back to plain stroke
@@ -1180,7 +1205,8 @@ fn draw_element_body(
     // than replace it. ctx.save() saves the current alpha; ctx.restore()
     // pops it back when this element finishes.
     let parent_alpha = ctx.global_alpha();
-    ctx.save();
+    // RAII-balanced save: restores on every exit path (see CtxSaveGuard).
+    let _ctx_guard = CtxSaveGuard::new(ctx);
     apply_transform(ctx, elem.transform());
     // Counter-scale the element's own stroke at the SOURCE: rebind `elem` to a
     // copy whose stroke width is divided by the accumulated element-transform
@@ -1590,17 +1616,22 @@ fn draw_element_body(
             // filled polygon using the element's stroke colour. Skips
             // the native stroke / arrowhead pipeline below. See
             // BRUSHES.md §Stroke styling interaction.
-            if !outline && e.stroke_brush.is_some() {
+            //
+            // MUST NOT `return` here: the per-element prologue did
+            // ctx.save() and the epilogue restore() is the last line of
+            // this function — an early return leaks the save, and every
+            // later repaint then compounds the view transform on the
+            // leaked state (the whole scene re-draws smaller/offset each
+            // frame — the "receding artboard cascade"). Gate the native
+            // stroke + arrowhead sections on this flag instead.
+            let stroke_brushed = if !outline && e.stroke_brush.is_some() {
                 ctx.set_global_alpha(base_alpha * stroke_op);
-                if draw_brushed_path(ctx, e, outline) {
-                    // Handled; skip native stroke + arrowheads for this
-                    // path (the brush renderer owns the entire stroke
-                    // appearance).
-                    return;
-                }
-                // Fall through to native stroke when the slug didn't
-                // resolve or the brush type isn't supported yet.
-            }
+                // False when the slug didn't resolve or the brush type
+                // isn't supported yet → fall through to native stroke.
+                draw_brushed_path(ctx, e, outline)
+            } else {
+                false
+            };
             // Stroke uses an arc-length-trimmed path to accommodate arrowheads:
             // walk in from each armed end by the setback along arc length, split
             // the straddled segment (de Casteljau), drop the tail. Replaces the
@@ -1608,7 +1639,7 @@ fn draw_element_body(
             // past the head at large setbacks). An empty result means the setbacks
             // meet-or-exceed the length -> heads-only, no stroke; every draw path
             // below no-ops on empty cmds, and the arrowheads still draw off `e.d`.
-            if outline || e.stroke.is_some() {
+            if !stroke_brushed && (outline || e.stroke.is_some()) {
                 let trimmed = if !outline {
                     if let Some(s) = e.stroke.as_ref() {
                         let start_sb = super::arrowheads::arrow_setback(
@@ -1666,7 +1697,7 @@ fn draw_element_body(
             // each head's footprint (from the trim cut-point to the original
             // endpoint), so end-hooks and degenerate micro-segments can't swing
             // it. See the orientation contract on draw_arrowheads.
-            if !outline {
+            if !stroke_brushed && !outline {
                 if let Some(s) = e.stroke.as_ref() {
                     let color = css_color(&s.color);
                     let center = s.arrow_align == ArrowAlign::CenterAtEnd;
@@ -2131,7 +2162,7 @@ fn draw_element_body(
             }
         }
     }
-    ctx.restore();
+    // restore happens via _ctx_guard's Drop.
 }
 
 // ---------------------------------------------------------------------------

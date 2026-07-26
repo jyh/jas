@@ -278,6 +278,12 @@ FAULTS = {
                              "matches the panel's Scale field"),
     "dead_brush_tile": Fault(_fault_dead_brush_tile, "brush_promotes_line",
                              "THICKER band"),
+    # WEDGESTORM: owns canvas_transform_balance. Re-injects the leaked-save
+    # class the render fix removed; the at-rest transform then diverges and
+    # the check reds with its own marker.
+    "leaked_ctx_save": Fault(lambda p: _fault_leaked_ctx_save(p),
+                             "canvas_transform_balance",
+                             "the canvas transform is balanced"),
 }
 
 
@@ -814,6 +820,79 @@ def declared_clickable_ids() -> tuple[list[str], list[str]]:
 
 # ---------------------------------------------------------------------------
 # Runner
+# ---------------------------------------------------------------------------
+# WEDGESTORM (resolved 2026-07-25): the canvas transform must stay balanced
+# ---------------------------------------------------------------------------
+
+def _fault_leaked_ctx_save(p: GuiProbe):
+    """Reintroduce the WEDGESTORM leak class: push one un-restored save()
+    onto the live canvas context and apply a small transform, exactly what
+    render.rs's brushed-path early `return` used to leak (the save/restore
+    imbalance whose compounding produced the receding-artboard cascade).
+    Subsequent repaints then run on the leaked state and the at-rest
+    transform diverges from its baseline."""
+    p.cdp.evaluate(
+        "(()=>{const c=document.getElementById('jas-canvas');"
+        "if(!c)return false;const x=c.getContext('2d');"
+        "x.save();x.translate(30,25);x.scale(0.9,0.9);return true;})()")
+
+
+@check("canvas_transform_balance",
+       "a brushed repaint leaves the canvas transform exactly where it found it")
+def canvas_transform_balance(ctx: Ctx):
+    """WEDGESTORM's honest pin. The bug: draw_element_body's brushed-path
+    branch `return`ed between the per-element ctx.save() and the epilogue
+    ctx.restore(), leaking one save per brushed frame; every subsequent
+    repaint compounded the view transform on the leaked state, re-drawing
+    the whole scene smaller/offset each frame (JYH's receding-artboard
+    cascade, which followed mouse movement because mousemoves trigger
+    repaints). Heartbeats never died — earlier "livelock" verdicts were a
+    separate headless-CDP keydown artifact — so the ONLY honest observable
+    is the context's at-rest transform: it must be IDENTICAL before and
+    after a brushed render plus further repaints. Reads the real 2D
+    context's getTransform() (the same context the wasm draws through)."""
+    p = ctx.p
+    xform = ("(()=>{const c=document.getElementById('jas-canvas');"
+             "if(!c)return 'NOCANVAS';const t=c.getContext('2d').getTransform();"
+             "return JSON.stringify([t.a,t.b,t.c,t.d,t.e,t.f]);})()")
+
+    # Scene: a line with a brush applied (the exact leaking render), via the
+    # same steps brush_promotes_line uses.
+    tile = 'css:[id^="bp_tile_"]'
+    if not p.exists(tile):
+        _click_by_text(p, "css:.jas-menu-title", "Window")
+        time.sleep(0.3)
+        ctx.want(_click_by_text(p, "css:.jas-menu-item", "Brushes"),
+                 "Window ▸ Brushes toggles the Brushes panel open")
+        time.sleep(0.3)
+    p.click("btn_line")
+    p.drag([(LINE_X0, LINE_Y), (LINE_X1, LINE_Y), (LINE_X1, LINE_Y)])
+    p.click("btn_selection")
+    select_all(p)
+
+    before = p.cdp.evaluate(xform)
+    ctx.want(before != "NOCANVAS", "the canvas context is readable")
+
+    # The leaking render: apply a brush to the selected line...
+    p.click(tile)
+    time.sleep(0.4)
+    ctx.inject("leaked_ctx_save")
+    # ...then force several more repaints, the way mouse movement does live.
+    # Each repaint on a leaked stack compounds the transform.
+    cx0, cy0, cw, chh = p.canvas_rect()
+    for i in range(4):
+        p._mouse("mouseMoved", cx0 + 60 + 40 * i, cy0 + 80 + 10 * i)
+        time.sleep(0.15)
+    time.sleep(0.3)
+
+    after = p.cdp.evaluate(xform)
+    ctx.note(f"transform before={before} after={after}")
+    ctx.want(after == before,
+             "the canvas transform is balanced after a brushed render + "
+             "repaints (an unbalanced save/restore would compound here — "
+             "the receding-artboard cascade)")
+
+
 # ---------------------------------------------------------------------------
 
 def main() -> int:
