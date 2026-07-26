@@ -60,12 +60,12 @@ import Foundation
 /// so nothing downstream can rescue an unpublished null — the overlay is the
 /// only chance.
 ///
-/// The parity claim here is about the SCOPE and stops there. Rendering an
-/// explicit none is still divergent: Rust's `render_color_swatch` draws the
-/// red-diagonal no-paint indicator (deciding none-from-empty-slot by the bind's
-/// declaration, `null_color_means_none`), while ``YamlPanelBodyView`` renders it
-/// as a plain transparent square, the same as an empty recent-colour slot.
-/// Unfixed and banked by name in transcripts/COLOR_TESTS.md.
+/// RENDERING the explicit none agrees too, as of COLORTIERS:
+/// ``YamlPanelBodyView/renderColorSwatch`` draws the red-diagonal no-paint
+/// indicator and decides none-from-empty-slot by the bind's own declaration
+/// (``nullColorMeansNone``), key-for-key with Rust's `render_color_swatch` /
+/// `null_color_means_none`. It used to send every non-colour value to `.clear`,
+/// so an explicit None and an empty recent-colour slot were the same square.
 public func liveFillStrokeValues(model: Model?) -> (fill: Any?, stroke: Any?) {
     guard let model = model else { return (nil, nil) }
     let fill: Any? = {
@@ -89,6 +89,35 @@ public func liveFillStrokeValues(model: Model?) -> (fill: Any?, stroke: Any?) {
         }
     }()
     return (fill, stroke)
+}
+
+/// The fill / stroke fact typed for a NATIVE swatch to draw: a colour, or
+/// `nil` for "no paint" (the red-diagonal indicator).
+///
+/// Same three outcomes as ``liveFillStrokeValues`` — which it calls, so this is
+/// not a second opinion — with the third resolved the way every other reader
+/// resolves it: a MIXED selection publishes nothing, so the DECLARED
+/// `workspace/state.yaml` default stands, exactly as it stands in the map
+/// ``buildLiveStateMap`` composes for the panel scope.
+///
+/// ``FillStrokeWidget`` used to resolve `selection ?? model.defaultFill` on its
+/// own — no app tier — so a cold launch drew the NO-PAINT indicator on the
+/// toolbar while the Color panel showed white, and after the app tier moved
+/// above the canvases (COLORTIERS) a File > New would not have carried the
+/// user's colour into the widget at all.
+func liveSwatchPaint(model: Model?, isFill: Bool) -> Color? {
+    let key = isFill ? "fill_color" : "stroke_color"
+    let live = liveFillStrokeValues(model: model)
+    let value = isFill ? live.fill : live.stroke
+    if let hex = value as? String { return Color.fromHex(hex) }
+    if value is NSNull { return nil }
+    // MIXED (or no model at all): nothing is published, so the DECLARED
+    // default stands — the same composition `buildLiveStateMap` performs,
+    // resolved for one key so the toolbar's redraw path does not rebuild the
+    // whole defaults map twice per frame.
+    guard let hex = WorkspaceData.load()?.stateDefaults()[key] as? String
+    else { return nil }
+    return Color.fromHex(hex)
 }
 
 /// The LIVE app-level `state.*` keys, as an overlay to merge over the workspace
@@ -123,4 +152,20 @@ func buildLiveStateMap(ws: WorkspaceData, model: Model?) -> [String: Any] {
     var m = ws.stateDefaults()
     for (k, v) in liveAppStateOverrides(model: model) { m[k] = v }
     return m
+}
+
+/// The `state` scope a DIALOG opens against — ``buildLiveStateMap`` with the
+/// bundle loaded for the caller.
+///
+/// A dialog's `init:` expressions read `state.fill_color` (the colour picker
+/// seeds its channels from it; the Swatch Options dialog seeds a new swatch
+/// from it), so it wants the same live fact the panels render against. The two
+/// opening sites in ``ContentView`` used to hand-roll it from
+/// `model.defaultFill` alone — no selection tier, no app tier, and an absent
+/// default silently left the workspace's white standing — so double-clicking
+/// the toolbar fill swatch with a red rect selected seeded the picker RED in
+/// Rust (which seeds from `build_live_state_map`) and WHITE here (COLORTIERS).
+func dialogStateScope(model: Model?) -> [String: Any] {
+    guard let ws = WorkspaceData.load() else { return [:] }
+    return buildLiveStateMap(ws: ws, model: model)
 }

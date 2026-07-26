@@ -196,6 +196,139 @@ private let blackStroke = Stroke(color: Color(r: 0, g: 0, b: 0))
             "the stroke is untouched")
 }
 
+// MARK: - COLORTIERS: the app tier lives ABOVE the canvases
+//
+// JYH ruled 2026-07-26: fill/stroke defaults are WORKSPACE state, not document
+// state — they belong with brush size and the active tool. Set a red, hit
+// File > New, and you are mid-flow and expect red; nobody thinks of "current
+// fill" as a property of the file. Rust has always had that shape (one
+// `AppState.app_default_fill` above all tabs); this port kept the tier on
+// ``Model`` and there is one Model PER CANVAS, so File > New reseeded white.
+//
+// The tier now lives on ``WorkspaceState`` — this port's AppState-above-tabs —
+// and every canvas that enters the workspace adopts it. Mirrored by Rust's
+// `colortiers_app_default_survives_a_new_document`.
+
+/// File > New, verbatim: what `JasCommands`' `new_document` arm hands
+/// ``WorkspaceState/addCanvas``.
+private func fileNewModel() -> Model {
+    Model(document: Document.newEmptyDocument())
+}
+
+@Test func appDefaultsSurviveFileNew() {
+    let workspace = WorkspaceState()
+    let first = fileNewModel()
+    workspace.addCanvas(first)
+
+    // Nothing selected, so the colour lands on the DEFAULTS, not on a shape.
+    LayersPanel.dispatchYamlAction(
+        "set_active_color", model: first, params: ["color": "#ff0000"])
+    #expect(evaluate("state.fill_color", context: colorRenderCtx(first))
+                .toStringCoerce() == "#ff0000")
+
+    let second = fileNewModel()
+    workspace.addCanvas(second)
+    #expect(second.defaultFill == nil,
+            """
+            the fresh document's OWN tier starts empty — the answer below can \
+            only come from the tier above the canvases
+            """)
+    #expect(evaluate("state.fill_color", context: colorRenderCtx(second))
+                .toStringCoerce() == "#ff0000",
+            """
+            File > New must carry the colour forward: the defaults are \
+            workspace state, and the user is mid-flow
+            """)
+}
+
+// The tier is shared, not copied: a colour set on the SECOND canvas is the
+// colour the first one reports too. A per-canvas copy would pass the test
+// above (adoption at add time) and fail this one.
+@Test func appDefaultsAreOneTierNotACopyPerCanvas() {
+    let workspace = WorkspaceState()
+    let first = fileNewModel()
+    let second = fileNewModel()
+    workspace.addCanvas(first)
+    workspace.addCanvas(second)
+    LayersPanel.dispatchYamlAction(
+        "set_active_color", model: second, params: ["color": "#00ff00"])
+    #expect(evaluate("state.fill_color", context: colorRenderCtx(first))
+                .toStringCoerce() == "#00ff00",
+            "one tier above the canvases, as Rust's AppState has above its tabs")
+}
+
+// COLD LAUNCH is unchanged: white fill, black stroke. The ruling moved WHERE
+// the tier lives, not what it is seeded with.
+@Test func coldLaunchStillOpensBlackAndWhite() {
+    let workspace = WorkspaceState()
+    let model = fileNewModel()
+    workspace.addCanvas(model)
+    let ctx = colorRenderCtx(model)
+    #expect(evaluate("state.fill_color", context: ctx).toStringCoerce() == "#ffffff")
+    #expect(evaluate("state.stroke_color", context: ctx).toStringCoerce() == "#000000")
+}
+
+// MARK: - COLORTIERS: one fact, one reader
+//
+// Three more sites answered the fill/stroke question their own way. Each is the
+// same disease as the tier split above: the fact has a reader, and a caller
+// that re-derives it from `model.defaultFill` gets a different answer.
+
+// The two dialog-opening sites seeded `state.fill_color` from the per-document
+// default ALONE — so double-clicking the toolbar fill swatch with a red rect
+// selected opened the picker on RED in Rust (which seeds from
+// `build_live_state_map`) and on WHITE here.
+@Test func dialogSeedShowsTheSelectionsColour() {
+    let model = selectedRect(fill: Fill(color: Color(r: 1, g: 0, b: 0)), stroke: blackStroke)
+    #expect(dialogStateScope(model: model)["fill_color"] as? String == "#ff0000",
+            "a dialog opens on the paint the user can see, not the tab default")
+}
+
+@Test func dialogSeedSaysNoneForANoFillSelection() {
+    let model = selectedRect(fill: nil, stroke: blackStroke)
+    #expect(dialogStateScope(model: model)["fill_color"] is NSNull,
+            """
+            hand-rolled `if let fill = model.defaultFill` could not SAY none — \
+            it left the workspace's white standing
+            """)
+}
+
+// The toolbar's native fill/stroke squares resolved
+// `selection ?? model.defaultFill` on their own, skipping the app tier — so on
+// a cold launch the square drew the NO-PAINT indicator while the Color panel,
+// one reader away, showed white.
+@Test func toolbarSquaresReadTheAppTier() {
+    let model = Model()
+    #expect(model.defaultFill == nil, "the per-document tier starts empty")
+    #expect(liveSwatchPaint(model: model, isFill: true) == Color(r: 1, g: 1, b: 1),
+            "a cold launch's fill square is WHITE, as the Color panel says")
+    #expect(liveSwatchPaint(model: model, isFill: false) == Color(r: 0, g: 0, b: 0))
+}
+
+@Test func toolbarSquaresStillSayNoPaint() {
+    let model = selectedRect(fill: nil, stroke: blackStroke)
+    #expect(liveSwatchPaint(model: model, isFill: true) == nil,
+            "a no-fill selection still draws the red-diagonal indicator")
+}
+
+// A null colour has TWO meanings and the value alone cannot tell them apart:
+// `state.fill_color` null means "the user set this attribute to None" (draw the
+// red-diagonal indicator), while `panel.recent_colors.3` null means "that slot
+// is empty" (draw a hollow placeholder). `renderColorSwatch` used to send both
+// to `.clear`, so the two rendered identically. The decision is read off the
+// bind's own declaration — mirrors Rust's
+// `cptriage_null_means_none_only_for_nullable_state_colours`.
+@Test func nullMeansNoneOnlyForNullableStateColours() {
+    #expect(nullColorMeansNone("state.fill_color"))
+    #expect(nullColorMeansNone("state.stroke_color"))
+    #expect(!nullColorMeansNone("panel.recent_colors.3"),
+            "an empty recent slot is a placeholder, not a None indicator")
+    #expect(!nullColorMeansNone("swatch.color"))
+    #expect(!nullColorMeansNone("stroke_dash_2"), "nullable but not a colour")
+    #expect(!nullColorMeansNone("stroke_width"),
+            "a colour bind on a non-nullable field means nothing here")
+}
+
 // `set_active_color` branches on `state.fill_on_top`. The generic dispatcher
 // gave effects no `state` namespace at all, so the read fell through to an
 // unseeded store, came back null, and the ELSE branch recoloured the STROKE

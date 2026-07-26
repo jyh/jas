@@ -166,8 +166,23 @@ public struct CanvasEntry: Identifiable {
 // MARK: - Workspace state (shared with app delegate for quit-save prompt)
 
 public class WorkspaceState: ObservableObject {
-    @Published public var canvases: [CanvasEntry] = []
+    @Published public var canvases: [CanvasEntry] = [] {
+        didSet { adoptAppDefaults() }
+    }
     @Published public var selectedTab: UUID?
+    /// The app-global default fill / stroke, owned HERE — above the canvases —
+    /// because they are WORKSPACE state, not document state: set a red, hit
+    /// File > New, and you expect red (JYH ruling 2026-07-26, COLORTIERS).
+    /// This is the shape Rust has always had, one `AppState.app_default_fill`
+    /// above all tabs; the tier used to sit on ``Model``, of which there is one
+    /// per canvas, so File > New reseeded white here and carried the colour
+    /// forward there.
+    ///
+    /// Installed into every canvas the workspace adopts — see
+    /// ``adoptAppDefaults`` — so the models that read it
+    /// (``liveFillStrokeValues`` and the colour writers, which only ever
+    /// receive a `Model`) all see ONE tier.
+    public let appDefaults = AppDefaults()
     @Published public var workspaceLayout: WorkspaceLayout
     @Published public var appConfig: AppConfig
     @Published public var theme: Theme
@@ -251,6 +266,19 @@ public class WorkspaceState: ObservableObject {
         appConfig.registerLayout(name)
         appConfig.activeLayout = name
         appConfig.save()
+    }
+
+    /// Point every open canvas at the workspace's ONE app-default tier.
+    ///
+    /// Hung off the ``canvases`` `didSet` rather than written into each add
+    /// site, so it covers `addCanvas`, the session restore's whole-list
+    /// assignment, and whatever opens a canvas next: a site that forgets the
+    /// install would silently reintroduce the per-document tier this ruling
+    /// removed. Idempotent and O(open tabs), on a structural change only.
+    private func adoptAppDefaults() {
+        for entry in canvases where entry.model.appDefaults !== appDefaults {
+            entry.model.appDefaults = appDefaults
+        }
     }
 
     public var activeModel: Model? {
@@ -468,20 +496,12 @@ public struct ContentView: View {
     }
 
     /// Open the color picker for the toolbar's fill/stroke widget,
-    /// seeding the dialog with the active model's default fill / stroke.
+    /// seeding the dialog with the live fill / stroke fact.
     /// Extracted from the prior ToolbarPanel.onOpenColorPicker closure so
     /// the bundle-driven toolbar's native FillStrokeWidget keeps the same
     /// behavior.
     private func openToolbarColorPicker(forFill: Bool) {
-        var liveState: [String: Any] = WorkspaceData.load()?.stateDefaults() ?? [:]
-        if let model = workspace.activeModel {
-            if let fill = model.defaultFill {
-                liveState["fill_color"] = "#" + fill.color.toHex()
-            }
-            if let stroke = model.defaultStroke {
-                liveState["stroke_color"] = "#" + stroke.color.toHex()
-            }
-        }
+        let liveState = dialogStateScope(model: workspace.activeModel)
         yamlDialogState = openYamlDialog(
             dialogId: "color_picker",
             rawParams: ["target": forFill ? "fill" : "stroke"],
@@ -679,13 +699,7 @@ public struct ContentView: View {
     /// fields (PRINT.md §Phase 1B; matches the Rust dispatch path).
     private func openYamlDialogFromMenu(_ dialogId: String) {
         guard let model = workspace.activeModel else { return }
-        var liveState: [String: Any] = WorkspaceData.load()?.stateDefaults() ?? [:]
-        if let fill = model.defaultFill {
-            liveState["fill_color"] = "#" + fill.color.toHex()
-        }
-        if let stroke = model.defaultStroke {
-            liveState["stroke_color"] = "#" + stroke.color.toHex()
-        }
+        let liveState = dialogStateScope(model: model)
         let outer: [String: Any] = [
             "active_document": buildActiveDocumentView(model: model)
         ]
@@ -1140,26 +1154,14 @@ struct FillStrokeWidget: View {
 
     @ViewBuilder
     private func fillStrokeSquare(isFill: Bool) -> some View {
-        // Resolve from the selection first so the widget tracks the
-        // canvas — selecting a differently-coloured shape should
-        // surface its colors here, not the (potentially stale) tab
-        // defaults. Falls back to defaults when no selection.
-        let resolved: Color? = {
-            if isFill {
-                switch selectionFillSummary(model.document) {
-                case .uniform(let f?): return f.color
-                case .uniform(nil): return nil
-                default: return model.defaultFill?.color
-                }
-            } else {
-                switch selectionStrokeSummary(model.document) {
-                case .uniform(let s?): return s.color
-                case .uniform(nil): return nil
-                default: return model.defaultStroke?.color
-                }
-            }
-        }()
-        let color: SwiftUI.Color? = resolved.map(swiftColor)
+        // Resolved through the ONE reader — selection first (so the widget
+        // tracks the canvas), then the per-document default, then the app tier,
+        // and the declared workspace default for a Mixed selection. Reading
+        // `model.defaultFill` here on its own skipped the app tier, so a cold
+        // launch drew this square as NO PAINT while the Color panel showed
+        // white (COLORTIERS).
+        let color: SwiftUI.Color? = liveSwatchPaint(model: model, isFill: isFill)
+            .map(swiftColor)
 
         ZStack {
             if let c = color {

@@ -299,12 +299,25 @@ public class Model: ObservableObject {
     @Published public var filename: String
     @Published public var defaultFill: Fill? = nil
     @Published public var defaultStroke: Stroke? = Stroke(color: .black)
+    /// The app-level default-paint tier this model reads and writes. Owned by
+    /// ``WorkspaceState``, which installs its own instance into every canvas it
+    /// adopts, so the tier is ONE thing above all canvases (Rust's `AppState`
+    /// above its tabs) rather than one per document — COLORTIERS. A model
+    /// built outside the workspace keeps the fresh instance ``AppDefaults``
+    /// seeds white / black, which is also what a cold launch shows.
+    ///
+    /// Not `@Published`: it is a plumbing reference, swapped once at adoption
+    /// time. The VALUES it carries publish through ``appDefaultFill`` /
+    /// ``appDefaultStroke`` below.
+    public var appDefaults = AppDefaults()
     /// The APP-level default fill / stroke — the tier BELOW ``defaultFill`` /
     /// ``defaultStroke``, which are per-document (Rust's `Model.default_fill`,
     /// seeded `nil` / black, exactly as above). Mirrors Rust's
     /// `AppState.app_default_fill` / `app_default_stroke`, seeded WHITE / black
-    /// there and here; it lives on `Model` because this port has one long-lived
-    /// `Model` where Rust has an `AppState` above its tabs.
+    /// there and here. The storage lives in ``appDefaults`` (above the
+    /// canvases); these are the model-side window onto it, so every existing
+    /// reader and writer keeps working and a File > New carries the value
+    /// forward.
     ///
     /// Read in exactly ONE place — ``liveFillStrokeValues``'s no-selection arm,
     /// `tab tier ?? app tier`, mirroring Rust's `.or(st.app_default_fill)`. That
@@ -324,8 +337,17 @@ public class Model: ObservableObject {
     /// NATIVE widget paths (`set_active_to_none`, `reset_fill_stroke_defaults`,
     /// `swap_fill_stroke`) write only their tab tier, and so do this port's, so
     /// the two ports agree there as well.
-    @Published public var appDefaultFill: Fill? = Fill(color: .white)
-    @Published public var appDefaultStroke: Stroke? = Stroke(color: .black)
+    ///
+    /// The setters announce through ``objectWillChange`` so a write re-renders
+    /// the observing views exactly as the former `@Published` storage did.
+    public var appDefaultFill: Fill? {
+        get { appDefaults.fill }
+        set { objectWillChange.send(); appDefaults.fill = newValue }
+    }
+    public var appDefaultStroke: Stroke? {
+        get { appDefaults.stroke }
+        set { objectWillChange.send(); appDefaults.stroke = newValue }
+    }
     @Published public var fillOnTop: Bool = true
     /// Per-document list of recently committed colors (hex strings, no #), newest first. Max 10.
     @Published public var recentColors: [String] = []

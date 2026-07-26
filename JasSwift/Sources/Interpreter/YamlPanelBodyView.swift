@@ -12,6 +12,27 @@ private struct PickerEntry: Identifiable {
     let displayLabel: String
 }
 
+/// Does a NULL from this colour bind mean "explicitly no paint", or "no such
+/// entry"?
+///
+/// The value cannot tell them apart, and they must render differently:
+/// `state.fill_color` is null because the user set the attribute to None (draw
+/// the red-diagonal indicator), while `panel.recent_colors.3` is null because
+/// that slot has never been filled (draw a hollow placeholder). So decide from
+/// the bind's own DECLARATION instead: a global `state.<key>` read whose
+/// `workspace/state.yaml` schema entry is a NULLABLE COLOUR carries the "none"
+/// meaning; every other bind keeps the placeholder.
+///
+/// Mirrors Rust's `null_color_means_none` (jas_dioxus interpreter/renderer.rs)
+/// key-for-key, reading the same schema table.
+func nullColorMeansNone(_ bindExpr: String) -> Bool {
+    let key = bindExpr.hasPrefix("state.")
+        ? String(bindExpr.dropFirst("state.".count))
+        : bindExpr
+    guard let entry = getSchemaEntry(key) else { return false }
+    return entry.nullable && entry.fieldType == .color
+}
+
 /// Lower-right corner triangle marking a toolbar slot that carries
 /// long-press ``alternates`` (so the user knows a long-press reveals more
 /// tools). Mirrors jas_dioxus ``render_icon_button``'s 5x5 SVG
@@ -2081,27 +2102,63 @@ struct YamlElementView: View {
 
     // MARK: - Color Swatch
 
+    /// The red-diagonal "no paint" indicator, drawn corner-to-corner across a
+    /// swatch. Matches Rust's `NONE_DIAG_SVG` (bottom-left to top-right, red,
+    /// 8% of the swatch) and the native ``FillStrokeWidget`` squares.
+    /// `visible: false` renders nothing, so callers can overlay
+    /// unconditionally.
+    @ViewBuilder
+    private func noneDiagonal(size: CGFloat, visible: Bool) -> some View {
+        if visible {
+            SwiftUI.Path { path in
+                path.move(to: CGPoint(x: 0, y: size))
+                path.addLine(to: CGPoint(x: size, y: 0))
+            }
+            .stroke(SwiftUI.Color.red, lineWidth: max(1, size * 0.08))
+            .frame(width: size, height: size)
+            .allowsHitTesting(false)
+        }
+    }
+
     @ViewBuilder
     private func renderColorSwatch() -> some View {
         let size = (element["style"] as? [String: Any])?["size"] as? CGFloat ?? 16
         let hollow = element["hollow"] as? Bool ?? false
 
-        let color: NSColor = {
-            if let bind = element["bind"] as? [String: Any],
-               let colorExpr = bind["color"] as? String {
-                let result = evaluate(colorExpr, context: context)
-                switch result {
-                case .color(let c), .string(let c):
-                    let (r, g, b) = parseHex(c)
-                    return NSColor(
-                        red: CGFloat(r) / 255, green: CGFloat(g) / 255,
-                        blue: CGFloat(b) / 255, alpha: 1
-                    )
-                default:
-                    return .clear
-                }
+        // (colour, explicitNone). `explicitNone` marks "intentionally no paint"
+        // — the red-diagonal indicator — as distinct from "missing bind / unset
+        // slot", which also has no colour but is a hollow PLACEHOLDER. Two
+        // producers encode the intentional case, exactly as in Rust's
+        // `render_color_swatch`: an empty string (a dialog's hex field cleared)
+        // and a NULL from a bind that declares a nullable state colour
+        // (``nullColorMeansNone``). Sending both to `.clear` — which this did —
+        // made an explicit None and an empty recent-colour slot render
+        // identically, and drew a cleared hex field as BLACK (COLORTIERS).
+        let (color, explicitNone): (NSColor, Bool) = {
+            guard let bind = element["bind"] as? [String: Any],
+                  let colorExpr = bind["color"] as? String
+            else { return (.clear, false) }
+            // "#dialog.hex" means "#" + eval("dialog.hex"), mirroring Rust.
+            let isHashPrefixed = colorExpr.hasPrefix("#") && colorExpr.contains(".")
+            let inner = isHashPrefixed ? String(colorExpr.dropFirst()) : colorExpr
+            let result = evaluate(inner, context: context)
+            let swatchColor = { (c: String) -> NSColor in
+                let (r, g, b) = parseHex(c)
+                return NSColor(
+                    red: CGFloat(r) / 255, green: CGFloat(g) / 255,
+                    blue: CGFloat(b) / 255, alpha: 1
+                )
             }
-            return .clear
+            switch result {
+            case .color(let c):
+                return (swatchColor(c), false)
+            case .string(let c):
+                return c.isEmpty ? (.clear, true) : (swatchColor(c), false)
+            case .null:
+                return (.clear, nullColorMeansNone(inner))
+            default:
+                return (.clear, false)
+            }
         }()
 
         let selected = isSelectedInList()
@@ -2113,18 +2170,25 @@ struct YamlElementView: View {
         let behaviors = element["behavior"] as? [[String: Any]] ?? []
         let hasClick = behaviors.contains { ($0["event"] as? String) == "click" }
         let hasDouble = behaviors.contains { ($0["event"] as? String) == "double_click" }
+        // A no-paint swatch draws WHITE so the red diagonal reads against a
+        // clean background — the same substitution Rust makes (`none_bg` /
+        // `hollow_border`), and what the native ``FillStrokeWidget`` squares
+        // already did.
+        let face = SwiftUI.Color(nsColor: explicitNone ? .white : color)
         let swatch: AnyView = {
             if hollow {
                 return AnyView(
                     Rectangle()
-                        .stroke(SwiftUI.Color(nsColor: color), lineWidth: 3)
+                        .stroke(face, lineWidth: 3)
                         .frame(width: size, height: size)
+                        .overlay(noneDiagonal(size: size, visible: explicitNone))
                 )
             } else {
                 return AnyView(
                     Rectangle()
-                        .fill(SwiftUI.Color(nsColor: color))
+                        .fill(face)
                         .frame(width: size, height: size)
+                        .overlay(noneDiagonal(size: size, visible: explicitNone))
                         .border(
                             selected ? SwiftUI.Color.accentColor : SwiftUI.Color.gray,
                             width: selected ? 2 : 1
