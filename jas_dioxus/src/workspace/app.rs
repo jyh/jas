@@ -17,7 +17,7 @@ use crate::document::controller::{
 };
 use crate::geometry::element::{Color, Stroke};
 use super::app_state::{Act, AppState};
-use super::keyboard::{make_keydown_handler, make_keyup_handler};
+use super::keyboard::{make_keydown_handler, make_keyup_handler, APP_ROOT_ID};
 use super::theme::*;
 // ColorPickerDialogView removed — color picker now uses YAML dialog system
 use super::fill_stroke_widget::FillStrokeWidgetView;
@@ -1100,6 +1100,13 @@ pub fn App() -> Element {
             :root[data-input-modality="keyboard"] .jas-focusable:focus {{ outline: 2px solid var(--jas-accent, #4a90d9) !important; outline-offset: -2px !important; }}
         "#  }
         div {
+            // The app's own keyboard surface: this wrapper owns the key
+            // handlers, and focus lands here whenever the user clicks the
+            // canvas or any non-focusable chrome. The id is what lets
+            // `keyboard::focus_on_app_surface` tell "the app has focus" from
+            // "a widget inside the app has focus" — a <button> keeps its own
+            // native Enter activation, this surface has none to keep.
+            id: "{APP_ROOT_ID}",
             tabindex: "0",
             onkeydown: on_keydown,
             onkeyup: on_keyup,
