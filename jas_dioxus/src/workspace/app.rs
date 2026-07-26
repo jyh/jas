@@ -146,6 +146,59 @@ pub(crate) const INPUT_MODALITY_JS: &str = r##"
 })();
 "##;
 
+/// Self-hosted Bootstrap 5.3.3 (full file, verbatim; MIT banner retained).
+/// Embedded at compile time so the deployed demo makes no third-party
+/// requests. Installed by `install_vendor_stylesheet` below.
+const VENDOR_BOOTSTRAP_CSS: &str =
+    include_str!("../../assets/vendor/bootstrap-5.3.3.min.css");
+
+/// Put `VENDOR_BOOTSTRAP_CSS` into `<head>` exactly once per boot.
+///
+/// This used to be `document::Style { {include_str!(...)} }` in the App's
+/// rsx, which logged this warning:
+///
+///   Changing the props of `Style {}` is not supported
+///
+/// The warning was NOT about theme values (the theme has flowed through
+/// `:root` custom properties since the appearance work — this stylesheet is
+/// a compile-time constant and never changed). It came from
+/// `dioxus_document::use_update_warning`
+/// (dioxus-document-0.7.9 `src/elements/mod.rs:25`, called from
+/// `style.rs:78`), which compares the whole `StyleProps` against the props
+/// captured at mount and `tracing::warn!`s on every render they differ —
+/// it is not latched. `StyleProps` carries `children: Element`, and
+/// `VNode`'s `PartialEq` is `Rc::ptr_eq` (dioxus-core-0.7.9
+/// `src/nodes.rs:109`) — a fresh Rc every time the parent renders. So a
+/// `document::Style` with INLINE children can never compare equal on a
+/// re-render, and the warning fires once per App render for as long as the
+/// component is mounted — not once per boot — no matter what the CSS says.
+/// Head components are insert-once by contract; passing one a 200 KB child
+/// that is rebuilt (and re-allocated) on every App render was the wrong
+/// shape for the job.
+///
+/// So install it directly, in the same once-at-mount `use_hook` idiom the
+/// appearance/input-modality bootstraps use. Inserted as the FIRST child of
+/// `<head>`, which keeps the cascade order `document::Style` gave us: vendor
+/// CSS in the head, the app's own inline `style` block later in the body, so
+/// the app's rules still win ties. Idempotent via an id, so a re-mount can
+/// never double-install it.
+#[cfg(target_arch = "wasm32")]
+fn install_vendor_stylesheet() {
+    const ID: &str = "jas-vendor-css";
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else { return };
+    if doc.get_element_by_id(ID).is_some() {
+        return;
+    }
+    // query_selector rather than Document::head() so no extra web-sys
+    // feature is needed for one call.
+    let Ok(Some(head)) = doc.query_selector("head") else { return };
+    let Ok(el) = doc.create_element("style") else { return };
+    let _ = el.set_attribute("id", ID);
+    el.set_text_content(Some(VENDOR_BOOTSTRAP_CSS));
+    let first = head.first_child();
+    let _ = head.insert_before(&el, first.as_ref());
+}
+
 /// Translate a yaml-declared cursor name into a value the browser
 /// recognizes as a CSS `cursor` keyword. Tool yaml uses semantic
 /// names (`open_hand`, `arrow`, `eyedropper`) that match each
@@ -270,6 +323,15 @@ pub fn App() -> Element {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = js_sys::eval(INPUT_MODALITY_JS);
+        }
+    });
+
+    // Vendored Bootstrap into <head>, once, imperatively — see
+    // `install_vendor_stylesheet` for why this is not a `document::Style`.
+    use_hook(|| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            install_vendor_stylesheet();
         }
     });
 
@@ -1037,13 +1099,11 @@ pub fn App() -> Element {
             sizes: "32x32",
             href: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAsTAAALEwEAmpwYAAACi0lEQVR4nOXWXYhVVRQH8F85fqZQpiA65IOSBPkyDyIpipI4BKYvRpSgQZBmQYoQFCn6ICqCAwq+iCIU2FggKEhEkBYjgvQiGAgZDhIiqFNZieVc2bAObA5n7twZ594R+sPm7HP2Onv919rrY/M/wcTRVL4I93GiWQrmYXqd9VOo4T88N5KKx+M73EQfNlbIzMS/QSCN1Y+rdBbmxHx9EGjDi7iHCSX545nyNLoeR/ku3MZv+BKb4ylc+w8mZ/Kvoj8U/xHPi40qW4df0Yt38AL+wvNh5WWswTV8g6sl617CnVD6M7bE/E88NZjy9vh5ITpivjyez4TMD1iFKXgDS7EgjqgjvFQL0h2xXhxDMqYuFuOn7L0HK9Ad38/jUim3P4zN+8LKNH+A12J9Rkams5HovoaD4dbesHwMVuJ1PFv650Ap2Poy5cLt92PtXQ1gFnZjT4XL9sRGeyPQzuBhprwnsqKMX2L9Ew1kami2PQuctiy4yiPVg/fDU1X4caipuCPb/HjkfHG++UiWfZQF6EA4G/Kf1xN6M1x6JTuzqpFiZD9ewdMNGvRV/FvUjkp0VSjrD0JH8R7mGx6+iP1ODoXAQ3yPnZH3KZ2Gi+7Y8+t6Qttwq47ra1H1kjc2YPYQCBRdMREZFNOwJFx+CBei1lcRSvX9g1IfqMK3IX/EMDE2ynPK43NR6XIidyNzJg3w/+WQ22eEMAVvRzMqul4a17GsQr442o81AfOzICtuP1tL5b2olm9pIjpxIyNSWPty9i0dY1MxM7ploTC167XZe73744hhalxEatE7jsU8eadlmIu/S5lyWovxaYnAZ60mMBm/ZwTSbavlOJzdD8eNBoH26AObRkO5Jx6PAEOB3bAxAGnpAAAAAElFTkSuQmCC"
         }
-        // Self-hosted Bootstrap 5.3.3 (full file, verbatim; MIT banner
-        // retained). Embedded at compile time so the deployed demo makes
-        // no third-party requests. Must stay BEFORE the app's inline
-        // style block below so the cascade order is unchanged.
-        document::Style {
-            {include_str!("../../assets/vendor/bootstrap-5.3.3.min.css")}
-        }
+        // The vendored Bootstrap stylesheet is NOT declared here: it goes
+        // into <head> once at mount via `install_vendor_stylesheet`, which
+        // keeps it ahead of this block in the cascade without handing a
+        // 200 KB child to an insert-once head component on every render
+        // (see that function for the warning this avoids).
         style { r#"
             /* Anchor the base font-size at 12px so panel widgets inherit
                consistently. Bootstrap defaults body to 1rem (16px), which
