@@ -59,6 +59,16 @@ const CMD_SMOOTH_QUAD_TO: i64 = 5;
 const CMD_ARC_TO: i64 = 6;
 const CMD_CLOSE_PATH: i64 = 7;
 
+// Fill-rule tags. TAG_PATH slot 11 (see pack_element / unpack_element).
+// Trailing-append, like width_points (slot 10) before it: a blob written
+// before this slot existed simply has 11 slots and reads as NonZero, so
+// nothing on disk is orphaned and the header stays at v2 — a version bump
+// would make the frozen reference reader (which rejects version > 2)
+// unable to read anything we write. JasSwift pins the identical slot and
+// tag values so the two ports stay byte-identical.
+const FILL_RULE_NON_ZERO: i64 = 0;
+const FILL_RULE_EVEN_ODD: i64 = 1;
+
 // Color space tags.
 const SPACE_RGB: i64 = 0;
 const SPACE_HSB: i64 = 1;
@@ -416,9 +426,11 @@ fn pack_element(elem: &Element) -> Value {
         Element::Path(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let cmds: Vec<Value> = e.d.iter().map(pack_path_command).collect();
+            // fill_rule rides the trailing slot 11 (always written).
             Value::Array(vec![vint(TAG_PATH), locked, opacity, vis, xform, name, id,
                               Value::Array(cmds), pack_fill(&e.fill), pack_stroke(&e.stroke),
-                              pack_width_points(&e.width_points)])
+                              pack_width_points(&e.width_points),
+                              pack_fill_rule(e.fill_rule)])
         }
         Element::Text(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
@@ -581,6 +593,24 @@ fn as_array(v: &Value) -> Result<&Vec<Value>, String> {
 fn at(arr: &[Value], i: usize) -> Result<&Value, String> {
     arr.get(i)
         .ok_or_else(|| format!("index {} out of range (len {})", i, arr.len()))
+}
+
+/// Pack a fill rule as its wire tag.
+fn pack_fill_rule(r: FillRule) -> Value {
+    vint(match r {
+        FillRule::NonZero => FILL_RULE_NON_ZERO,
+        FillRule::EvenOdd => FILL_RULE_EVEN_ODD,
+    })
+}
+
+/// Read the fill rule from an optional trailing slot. `None` (the slot is
+/// absent in a pre-fill_rule blob) and any unrecognized tag both read as
+/// the app default, NonZero — the value those documents were written with.
+fn unpack_fill_rule(v: Option<&Value>) -> FillRule {
+    match v.and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u as i64))) {
+        Some(FILL_RULE_EVEN_ODD) => FillRule::EvenOdd,
+        _ => FillRule::NonZero,
+    }
 }
 
 fn unpack_color(v: &Value) -> Result<Color, String> {
@@ -836,7 +866,8 @@ fn unpack_element(v: &Value) -> Result<Element, String> {
                 stroke_gradient: None,
                 stroke_brush: None,
                 stroke_brush_overrides: None,
-                fill_rule: crate::geometry::element::FillRule::NonZero,
+                // Trailing slot 11; absent in pre-fill_rule blobs.
+                fill_rule: unpack_fill_rule(arr.get(11)),
             })
         }
         TAG_TEXT => {
@@ -1132,5 +1163,186 @@ mod tests {
             binary_to_document(&frame(&bad_tag)).is_err(),
             "unknown element tag should Err, not panic"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // fill_rule across the binary boundary (transcripts/BOOLEAN.md)
+    //
+    // Twin of JasSwift Tests/Geometry/BinaryFillRuleTests.swift. The two
+    // ports must produce BYTE-IDENTICAL blobs, so the encoding is pinned
+    // here as a positional index and a tag value, not just as a
+    // round-trip.
+    // ------------------------------------------------------------------
+
+    fn donut_commands() -> Vec<PathCommand> {
+        vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 100.0 },
+            PathCommand::ClosePath,
+            PathCommand::MoveTo { x: 25.0, y: 25.0 },
+            PathCommand::LineTo { x: 75.0, y: 25.0 },
+            PathCommand::LineTo { x: 75.0, y: 75.0 },
+            PathCommand::ClosePath,
+        ]
+    }
+
+    fn donut_doc(rule: FillRule) -> Document {
+        let path = Element::Path(PathElem {
+            d: donut_commands(),
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            width_points: vec![],
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+            fill_rule: rule,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(path)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Document { layers: vec![layer], selected_layer: 0, ..Document::default() }
+    }
+
+    fn first_path_rule(doc: &Document) -> FillRule {
+        match &*doc.layers[0].children().unwrap()[0] {
+            Element::Path(p) => p.fill_rule,
+            other => panic!("expected Path, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn binary_round_trips_even_odd_fill_rule() {
+        for rule in [FillRule::NonZero, FillRule::EvenOdd] {
+            let doc = donut_doc(rule);
+            let blob = document_to_binary(&doc, true);
+            let back = binary_to_document(&blob).expect("decode");
+            assert_eq!(first_path_rule(&back), rule,
+                       "binary dropped the declared fill rule {rule:?}");
+        }
+    }
+
+    /// The wire encoding, pinned exactly: TAG_PATH slot 11 is an integer
+    /// 0 = NonZero, 1 = EvenOdd, ALWAYS written. Swift's twin asserts the
+    /// same slot and the same tag values, which is what makes the two
+    /// ports byte-identical rather than merely both-correct.
+    #[test]
+    fn binary_fill_rule_is_path_slot_11() {
+        for (rule, want) in [(FillRule::NonZero, 0i64), (FillRule::EvenOdd, 1i64)] {
+            // Pack uncompressed so the payload is directly decodable.
+            let blob = document_to_binary(&donut_doc(rule), false);
+            let mut cursor = &blob[HEADER_SIZE..];
+            let payload = rmpv::decode::read_value(&mut cursor).expect("msgpack");
+            let Value::Array(top) = &payload else { panic!("payload not an array") };
+            let Value::Array(layers) = &top[0] else { panic!("layers not an array") };
+            let Value::Array(layer) = &layers[0] else { panic!("layer not an array") };
+            // Layer children ride slot 7 of TAG_LAYER.
+            let Value::Array(children) = &layer[7] else { panic!("children not an array") };
+            let Value::Array(path) = &children[0] else { panic!("path not an array") };
+            assert_eq!(path[0].as_i64(), Some(TAG_PATH));
+            assert_eq!(path.len(), 12, "TAG_PATH should carry 12 slots (fill_rule last)");
+            assert_eq!(path[11].as_i64(), Some(want),
+                       "fill_rule tag for {rule:?} should be {want}");
+        }
+    }
+
+    /// Documents written before fill_rule joined the codec have only 11
+    /// TAG_PATH slots. They MUST still load — the field is appended, not
+    /// versioned, exactly as width_points (slot 10) and Text's tspans
+    /// (slot 19) were before it. Nothing on disk is orphaned and the
+    /// header stays at v2, so the frozen Python writer's blobs and ours
+    /// remain mutually readable.
+    #[test]
+    fn binary_without_fill_rule_slot_still_loads_as_non_zero() {
+        let blob = document_to_binary(&donut_doc(FillRule::EvenOdd), false);
+        let mut cursor = &blob[HEADER_SIZE..];
+        let payload = rmpv::decode::read_value(&mut cursor).expect("msgpack");
+        // Truncate the path element back to its pre-fill_rule 11 slots.
+        let Value::Array(mut top) = payload else { panic!("payload not an array") };
+        let Value::Array(mut layers) = top[0].clone() else { panic!() };
+        let Value::Array(mut layer) = layers[0].clone() else { panic!() };
+        let Value::Array(mut children) = layer[7].clone() else { panic!() };
+        let Value::Array(mut path) = children[0].clone() else { panic!() };
+        assert_eq!(path.len(), 12);
+        path.truncate(11);
+        children[0] = Value::Array(path);
+        layer[7] = Value::Array(children);
+        layers[0] = Value::Array(layer);
+        top[0] = Value::Array(layers);
+        let old = binary_to_document(&frame(&Value::Array(top))).expect("old blob must load");
+        assert_eq!(first_path_rule(&old), FillRule::NonZero,
+                   "an absent fill_rule slot must read as the app default");
+    }
+
+    /// The header is NOT bumped by the fill_rule append: a version bump
+    /// would make the frozen reference port (VERSION = 2, rejects
+    /// version > VERSION) unable to read anything we write.
+    #[test]
+    fn binary_version_header_stays_at_two() {
+        assert_eq!(VERSION, 2);
+        assert_eq!(MIN_VERSION, 2);
+        let blob = document_to_binary(&donut_doc(FillRule::EvenOdd), false);
+        assert_eq!(u16::from_le_bytes([blob[4], blob[5]]), 2,
+                   "fill_rule must ride a trailing slot, not a new version");
+    }
+
+    /// The uncompressed blob for `donut_doc`, byte for byte. JasSwift's
+    /// twin asserts these SAME literals, which is what makes "the two
+    /// ports are byte-identical" a checked statement rather than a
+    /// claim. The two differ in exactly one byte — the fill-rule tag.
+    ///
+    /// To regenerate after an intentional codec change: print
+    /// `document_to_binary(&donut_doc(rule), false)` as hex and update
+    /// BOTH ports.
+    const DONUT_NON_ZERO_HEX: &str = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919c07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c000009090";
+    const DONUT_EVEN_ODD_HEX: &str = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919c07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c001009090";
+    /// The same document as written BEFORE fill_rule joined the codec:
+    /// the TAG_PATH array header is 0x9b (11 slots) instead of 0x9c (12)
+    /// and the trailing tag byte is gone. Kept as a literal so the
+    /// old-format read path is pinned against real bytes, not against a
+    /// value we reconstructed with the current writer.
+    const DONUT_PRE_FILL_RULE_HEX: &str = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919b07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c0009090";
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn unhex(s: &str) -> Vec<u8> {
+        (0..s.len() / 2)
+            .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn binary_bytes_are_pinned_for_both_fill_rules() {
+        assert_eq!(hex(&document_to_binary(&donut_doc(FillRule::NonZero), false)),
+                   DONUT_NON_ZERO_HEX);
+        assert_eq!(hex(&document_to_binary(&donut_doc(FillRule::EvenOdd), false)),
+                   DONUT_EVEN_ODD_HEX);
+        // Exactly one byte of difference: the appended tag.
+        let a = unhex(DONUT_NON_ZERO_HEX);
+        let b = unhex(DONUT_EVEN_ODD_HEX);
+        assert_eq!(a.len(), b.len());
+        let diffs: Vec<usize> = (0..a.len()).filter(|&i| a[i] != b[i]).collect();
+        assert_eq!(diffs.len(), 1, "the rule must cost exactly one byte");
+    }
+
+    #[test]
+    fn binary_reads_a_pre_fill_rule_blob() {
+        let doc = binary_to_document(&unhex(DONUT_PRE_FILL_RULE_HEX))
+            .expect("a pre-fill_rule blob must still load");
+        assert_eq!(first_path_rule(&doc), FillRule::NonZero);
+        // And it is otherwise the same document, so the read path is not
+        // just returning a default-shaped husk.
+        assert_eq!(doc.layers[0].children().unwrap().len(), 1);
+        match &*doc.layers[0].children().unwrap()[0] {
+            Element::Path(p) => assert_eq!(p.d.len(), 8),
+            other => panic!("expected Path, got {other:?}"),
+        }
     }
 }

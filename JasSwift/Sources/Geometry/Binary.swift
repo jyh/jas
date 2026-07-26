@@ -48,6 +48,16 @@ private let tagGroup: Int = 10
 // LiveElement kind, disambiguated by a kind string at index 7.
 private let tagLive: Int = 11
 
+// Fill-rule tags. TAG_PATH slot 11 (see packElement / unpackElement).
+// Trailing-append, like widthPoints (slot 10) before it: a blob written
+// before this slot existed simply has 11 slots and reads as .nonzero, so
+// nothing on disk is orphaned and the header stays at v2 — a version bump
+// would make the frozen reference reader (which rejects version > 2)
+// unable to read anything we write. jas_dioxus pins the identical slot
+// and tag values so the two ports stay byte-identical.
+private let fillRuleNonZero: Int = 0
+private let fillRuleEvenOdd: Int = 1
+
 // Path command tags.
 private let cmdMoveTo: Int = 0
 private let cmdLineTo: Int = 1
@@ -519,6 +529,20 @@ private func packStroke(_ stroke: Stroke?) -> MsgValue {
                    vbool(s.dashAlignAnchors)])
 }
 
+/// Pack a fill rule as its wire tag.
+private func packFillRule(_ r: FillRule) -> MsgValue {
+    vint(r == .evenodd ? fillRuleEvenOdd : fillRuleNonZero)
+}
+
+/// Read the fill rule from an optional trailing slot. `nil` (the slot is
+/// absent in a pre-fillRule blob) and any unrecognized tag both read as
+/// the app default, `.nonzero` — the value those documents were written
+/// with.
+private func unpackFillRule(_ v: MsgValue?) -> FillRule {
+    guard let v else { return .nonzero }
+    return asInt(v) == fillRuleEvenOdd ? .evenodd : .nonzero
+}
+
 private func packWidthPoints(_ pts: [StrokeWidthPoint]) -> MsgValue {
     if pts.isEmpty { return .nil }
     return .array(pts.map { .array([vf64($0.t), vf64($0.widthLeft), vf64($0.widthRight)]) })
@@ -620,9 +644,11 @@ private func packElement(_ elem: Element) -> MsgValue {
         let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
                                 transform: e.transform, name: e.name, id: e.id)
         let cmds: [MsgValue] = e.d.map { packPathCommand($0) }
+        // fillRule rides the trailing slot 11 (always written).
         return .array([vint(tagPath)] + common +
                       [.array(cmds), packFill(e.fill), packStroke(e.stroke),
-                       packWidthPoints(e.widthPoints)])
+                       packWidthPoints(e.widthPoints),
+                       packFillRule(e.fillRule)])
     case .text(let e):
         let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
                                 transform: e.transform, name: e.name, id: e.id)
@@ -886,10 +912,12 @@ private func unpackElement(_ v: MsgValue) -> Element {
     case tagPath:
         let cmds = asArray(arr[7]).map { unpackPathCommand($0) }
         let wp = arr.count > 10 ? unpackWidthPoints(arr[10]) : []
+        // Trailing slot 11; absent in pre-fillRule blobs.
+        let rule = unpackFillRule(arr.count > 11 ? arr[11] : nil)
         return .path(Path(d: cmds, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
                           widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
-                          name: name, id: id))
+                          name: name, id: id, fillRule: rule))
     case tagText:
         // Prefer the trailing tspans field when present; otherwise
         // fall back to the single-default-tspan seeded from content
