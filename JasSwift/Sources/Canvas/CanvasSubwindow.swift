@@ -344,6 +344,13 @@ func counterScaledElement(_ elem: Element, elementScale: Double) -> (element: El
     return (out, scale)
 }
 
+/// The CoreGraphics spelling of a declared `FillRule`. One helper so the
+/// mapping is stated once and every interior-painting call site can be
+/// grepped by name.
+func cgFillRule(_ rule: FillRule) -> CGPathFillRule {
+    rule == .evenodd ? .evenOdd : .winding
+}
+
 private func setFill(_ ctx: CGContext, _ fill: Fill?) {
     if let fill = fill {
         ctx.setFillColor(cgColor(fill.color))
@@ -403,7 +410,7 @@ private func fillCurrentPathWithGradient(_ ctx: CGContext, _ g: Gradient, _ bbox
                                          _ fillRule: FillRule) {
     guard let cgGradient = makeCGGradient(g) else { return }
     ctx.saveGState()
-    ctx.clip(using: fillRule == .evenodd ? .evenOdd : .winding)
+    ctx.clip(using: cgFillRule(fillRule))
     switch g.type {
     case .linear:
         let rad = g.angle * .pi / 180
@@ -697,7 +704,7 @@ private func fillAndStroke(_ ctx: CGContext, _ fill: Fill?, _ stroke: Stroke?,
     // (transcripts/BOOLEAN.md). Filling a multi-subpath path with the
     // winding rule when it declares even-odd FILLS ITS HOLES - which is
     // exactly the bug every multi-ring boolean result used to hit here.
-    let cgRule: CGPathFillRule = fillRule == .evenodd ? .evenOdd : .winding
+    let cgRule: CGPathFillRule = cgFillRule(fillRule)
     if hasFill && hasStroke {
         setFill(ctx, fill)
         let (_, align) = setStroke(ctx, stroke)
@@ -762,10 +769,21 @@ private func fillStrokeOrOutline(
 /// and fills that with the gradient (CGContext gradient APIs are
 /// fill-oriented).
 ///
-/// Every branch that paints an interior takes `fillRule`. Internal (not
-/// private) so Tests/Canvas/GradientFillRuleTests.swift can pixel-check
-/// that: CGContext state is the only place the winding rule is
-/// observable, so there is nothing to assert from outside.
+/// Each of THIS function's own interior-painting branches takes
+/// `fillRule` — the gradient fill (via the clip), the solid fill under a
+/// gradient stroke, and `fillAndStroke`. That is a claim about this
+/// function only: the `.path` arm of `drawElementBody` paints interiors in
+/// three further places that never reach here (brushed stroke, variable
+/// width, anchor-aligned dashes), and those pass `v.fillRule` to
+/// `cgFillRule` themselves. Grepping `cgFillRule` finds every fill that
+/// reads a Path element's declared rule. The other bare `fillPath()` calls
+/// in this file paint things that carry no rule: brush outline polygons,
+/// a Rect, live-element rings, and selection handles — each matching what
+/// jas_dioxus does at the same site.
+///
+/// Internal (not private) so Tests/Canvas/GradientFillRuleTests.swift can
+/// pixel-check the branches here: CGContext state is the only place the
+/// winding rule is observable, so there is nothing to assert from outside.
 func fillStrokeOrOutline(
     _ ctx: CGContext,
     _ fill: Fill?,
@@ -799,7 +817,7 @@ func fillStrokeOrOutline(
         let savedPath = ctx.path
         if let fill = fill {
             setFill(ctx, fill)
-            ctx.fillPath(using: fillRule == .evenodd ? .evenOdd : .winding)
+            ctx.fillPath(using: cgFillRule(fillRule))
             if let p = savedPath { ctx.addPath(p) }
         }
         fillStrokedPathWithGradient(ctx, stroke: stroke, gradient: sg, bbox: bbox)
@@ -1157,8 +1175,12 @@ private func drawElementWithMask(
 /// chain (1.0 at the top level); it is folded with this element's own transform
 /// scale inside the body and used to counter-scale strokes / threaded to
 /// children. See `counterScaledElement`.
-private func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview,
-                         elementScale: Double = 1.0) {
+/// Internal (not private) so Tests/Canvas/PathFillRuleRenderTests.swift can
+/// pixel-check the interior-painting branches of the `.path` arm: those fills
+/// live inside this function and CGContext state is the only place a winding
+/// rule is observable.
+func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview,
+                 elementScale: Double = 1.0) {
     // Opacity mask: when an element carries an active mask,
     // redirect rendering through the mask composite path. The plan
     // encodes which of the three supported composite strategies to
@@ -1344,7 +1366,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
             if v.fill != nil {
                 setFill(ctx, v.fill)
                 buildPath(ctx, v.d)
-                ctx.fillPath()
+                ctx.fillPath(using: cgFillRule(v.fillRule))
             }
         } else {
             // Arc-length-trim the path for arrowheads (see ArrowTrim). Mirrors
@@ -1370,7 +1392,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 if v.fill != nil {
                     setFill(ctx, v.fill)
                     buildPath(ctx, v.d)
-                    ctx.fillPath()
+                    ctx.fillPath(using: cgFillRule(v.fillRule))
                 }
                 // Variable-width stroke
                 renderVariableWidthPath(ctx, cmds: strokeCmds,
@@ -1391,7 +1413,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 if v.fill != nil {
                     setFill(ctx, v.fill)
                     buildPath(ctx, v.d)
-                    ctx.fillPath()
+                    ctx.fillPath(using: cgFillRule(v.fillRule))
                 }
                 let (_, align) = setStroke(ctx, s)
                 let expanded = DashRenderer.expandDashedStroke(
