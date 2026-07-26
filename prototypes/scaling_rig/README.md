@@ -58,8 +58,11 @@ not part of any workspace.
      `frame_ms` = fully serialized CPU+GPU time — a conservative floor, no
      pipelining.
 
-4. **Metrics** per sweep point: avg + p95 frame time (ms), CPU encode time
-   (the `Scene::append` cost) separated from total frame time, and fps. 2s warmup
+4. **Metrics** per sweep point: avg + p95 frame time (ms), and three nested spans
+   of the same frame — `encode` (the `Scene::append` cost), `cpu` (encode **plus**
+   `render_to_texture`, i.e. all CPU work before the hand-off), and total
+   `frame` — plus fps and `cpu_fraction` = cpu/frame. Use `cpu`, not `encode`, as
+   "the CPU cost": `encode` under-reports it by 6.8–11.4× (finding #3). 2s warmup
    discarded, 8s measured. Sweep: 10k, 50k, 100k, 250k, 500k, 800k.
 
 ---
@@ -156,33 +159,54 @@ Physical window **2400×1500**. Driven from the interactive desktop via a
 `LogonType Interactive` scheduled task — see "Windows invocation" below, since a
 plain ssh run cannot do this.
 
-| elements | frame avg (ms) | frame p95 (ms) | encode avg (ms) | fps | pipelining gain |
-|---------:|---------------:|---------------:|----------------:|----:|----------------:|
-| 10,000   | 1.76   | 1.89   | 0.14  | 567.4 | 1.65× |
-| 50,000   | 6.48   | 6.80   | 0.86  | 154.3 | 1.16× |
-| 100,000  | 11.74  | 12.20  | 1.69  | **85.2** | 1.22× |
-| 250,000  | 33.79  | 38.02  | 3.96  | 29.6  | 1.36× |
-| 500,000  | 74.99  | 76.29  | 7.86  | 13.3  | 1.17× |
-| 800,000  | 117.97 | 119.79 | 13.06 | 8.5   | 1.18× |
+| elements | frame avg (ms) | frame p95 (ms) | encode avg (ms) | cpu avg (ms) | fps | **cpu fraction** | pipelining gain |
+|---------:|---------------:|---------------:|----------------:|-------------:|----:|-----------------:|----------------:|
+| 10,000   | 1.91   | 2.14   | 0.14  | 1.67   | 523.3 | 0.87 | 1.53× |
+| 50,000   | 7.25   | 8.44   | 0.90  | 6.91   | 137.9 | 0.95 | 1.04× |
+| 100,000  | 11.97  | 12.62  | 1.71  | 11.53  | **83.5** | 0.96 | 1.19× |
+| 250,000  | 37.03  | 42.08  | 4.49  | 36.56  | 27.0  | 0.99 | 1.26× |
+| 500,000  | 77.49  | 79.14  | 8.45  | 76.98  | 12.9  | 0.99 | 1.14× |
+| 800,000  | 123.53 | 125.61 | 13.12 | 123.00 | 8.1   | 1.00 | 1.14× |
 
-File: `results/2026-07-26-rtx5060ti-dx12-windowed.json`.
+File: `results/2026-07-26-rtx5060ti-dx12-windowed.json`. `pipelining gain` is this
+table's frame time against the offscreen table's, both from the runs published here.
 
-Two things to read here.
+Three things to read here.
+
+**`cpu fraction` reaches 1.00. This is the finding at its sharpest.** In the
+pipelined present path the CPU work occupies essentially the *entire* frame period
+— 0.95 at 50k rising to 1.00 at 800k. The GPU is completely hidden behind CPU
+work; there is nothing left to overlap. So on this path **the renderer's
+throughput simply _is_ the throughput of one CPU thread encoding and resolving
+scenes.** Every frame-rate number in this document above 50k is a measurement of
+single-thread CPU speed wearing a graphics costume.
+
+That also closes the loop arithmetically. Offscreen runs at `cpu fraction` 0.80,
+i.e. frame = cpu + 20% GPU wait; windowed hides the wait entirely, so the
+predicted gain is `1/0.80` = **1.25×**. Measured 1.14–1.26× from 100k up. The
+prediction and the measurement were produced by different code paths on different
+runs and agree to within noise.
 
 **Windows measures the present path more cleanly than macOS does.** kenai's
 windowed curve is strictly monotone and its p95 tracks its average closely
-(1.76/1.89, 11.74/12.20). The Mac's windowed run is bimodal at the fast end —
+(1.91/2.14, 11.97/12.62). The Mac's windowed run is bimodal at the fast end —
 `frame_p95` pinned near 17 ms, the ~60 Hz compositor beat — and *non-monotone*
 (its 10k reads slower than its 50k), because macOS partially throttles even under
-`AutoNoVsync`. kenai's 567 fps at 10k shows no refresh cap whatsoever. So on
-Windows the windowed number is trustworthy at every point on the ladder, and on
-the Mac only above 100k.
+`AutoNoVsync`. kenai's 523 fps at 10k shows no refresh cap whatsoever. So *within*
+a run, the windowed shape is trustworthy at every point on the ladder on Windows
+and only above 100k on the Mac.
+
+**Windowed still varies run to run, though — more than offscreen does.** Two kenai
+windowed sweeps differed by up to 12% at a single point (50k: 6.48 vs 7.25 ms),
+against offscreen's 0.3%. That noise is what makes the 50k pipelining gain read
+1.04× here. Treat the gain column as approximate and the `cpu fraction` column —
+stable across both runs — as the load-bearing one.
 
 **The pipelining gain independently confirms finding #3.** Overlapping CPU and
 GPU can only hide the GPU portion of a frame, so the achievable speedup is
-`(cpu+gpu)/max(cpu,gpu)`. kenai gains just **1.16–1.36×** where the Mac gains up
-to 2×. Solving that back: kenai's frame is ~82% unhideable CPU — which is the
-*same 82%* the process-CPU measurement found independently (0.82 of 16 cores
+`(cpu+gpu)/max(cpu,gpu)`. kenai gains just **1.14–1.26×** where the Mac gains up
+to 2×. Solving that back: kenai's frame is ~80% unhideable CPU — which is the
+*same fraction* the process-CPU measurement found independently (0.82 of 16 cores
 busy). Two unrelated instruments agreeing on one number is the strongest evidence
 in this document that the workload is CPU bound. The Mac's larger gain is
 consistent too: its encode is ~2× faster and its window is 1.8× the pixels, so a
@@ -221,7 +245,7 @@ dual-channel DDR5), and it sets the shape of the whole high end.
 
 - **60fps @ 100k — PASS on Metal and on D3D12, in both modes.** Mac: 79 fps
   serialized offscreen, 115 fps windowed. kenai: **69.7 fps** serialized offscreen
-  at retina 3200×2000, and **85.2 fps** on the real windowed present path. All four
+  at retina 3200×2000, and **83.5 fps** on the real windowed present path. All four
   numbers clear the bar; the Mac clears it with more room. Both platforms are
   measured on real hardware (`device_type` = IntegratedGpu / DiscreteGpu), not a
   software rasterizer.
@@ -285,8 +309,8 @@ the performance lever, when we need one, is on the CPU side.
      element count, not pixels, so rasterization is not the limiter either.
    - **The pipelining gain agrees, from the opposite direction.** Overlapping CPU
      and GPU can only hide the GPU portion, so the ceiling is
-     `(cpu+gpu)/max(cpu,gpu)`. kenai's windowed mode gains only 1.16–1.36× over
-     serialized offscreen, which solves back to a frame that is ~82% unhideable
+     `(cpu+gpu)/max(cpu,gpu)`. kenai's windowed mode gains only 1.14–1.26× over
+     serialized offscreen, which solves back to a frame that is ~80% unhideable
      CPU — the *same 82%* the process-CPU measurement found by a completely
      different route. Two unrelated instruments landing on one number is the
      strongest single piece of evidence here.
