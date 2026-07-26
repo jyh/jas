@@ -1435,6 +1435,15 @@ fn connect_edges(events: &[SweepEvent], order: &[usize]) -> PolygonSet {
 /// Order is fixed — lobe before remainder, first repeat by `(j, i)` —
 /// so Rust and Swift emit the same rings in the same sequence, which is
 /// what the exact-comparison corpus requires.
+///
+/// **Cost.** [`first_repeated_vertex`] is O(n) expected, and each cut
+/// removes one duplicate vertex, so a ring with `p` pinches costs
+/// O(p * n) expected — O(n^2) in the pathological limit where a
+/// constant fraction of vertices is a pinch, O(n) for the overwhelmingly
+/// common `p = 0` (one scan, no split) and O(n) for the EXCLUDE-corner
+/// `p = 2`. Worth stating because this runs on EVERY boolean result,
+/// including curve-flattened ones with thousands of vertices; the same
+/// bound is documented on the normalizer's O(E^2) arrangement.
 fn split_pinched_rings(rings: &PolygonSet) -> PolygonSet {
     let mut out = PolygonSet::new();
     for ring in rings {
@@ -1460,16 +1469,55 @@ fn split_pinched_ring(ring: &Ring, out: &mut PolygonSet) {
     }
 }
 
+/// The hash key of a vertex, or `None` when the vertex can never equal
+/// anything (a NaN coordinate).
+///
+/// The key must reproduce `f64 ==` EXACTLY, and raw `to_bits` does not:
+///
+///  * `-0.0 == 0.0` is true while the bit patterns differ, so a raw key
+///    would MISS a pinch. `x + 0.0` maps -0.0 to +0.0 and is the
+///    identity on every other value (no rounding), which fixes it.
+///  * `NaN != NaN`, yet two NaNs of the same payload have equal bits, so
+///    a raw key would INVENT a pinch. Returning `None` for a NaN
+///    coordinate keeps such a vertex out of the map entirely, so it
+///    matches nothing — exactly what `==` does.
+///
+/// `first_repeated_vertex_matches_the_quadratic_scan` pins both cases
+/// against the scan this replaced.
+fn vertex_key(v: &(f64, f64)) -> Option<(u64, u64)> {
+    if v.0.is_nan() || v.1.is_nan() {
+        return None;
+    }
+    Some(((v.0 + 0.0).to_bits(), (v.1 + 0.0).to_bits()))
+}
+
 /// The first repeated vertex of `ring` as `(i, j)` with `i < j` and
 /// `ring[i] == ring[j]`, scanning `j` ascending then `i` ascending so
 /// the choice is total and port-independent. Exact equality is the
 /// right test: the sweep's vertices come from snap-rounded input and
 /// arrangement splits, so a revisited vertex is bit-identical.
+///
+/// **Cost.** O(n) expected, one hash lookup and at most one insert per
+/// vertex, replacing the O(n^2) pairwise scan this used to be. That
+/// matters because the post-pass runs on EVERY boolean result, and a
+/// curve-flattened one carries thousands of vertices.
+///
+/// The map holds the FIRST index at which each distinct vertex was seen
+/// (insert only when absent), and `j` still ascends, so the pair
+/// returned is the same `(smallest j that repeats, smallest i equal to
+/// it)` the pairwise scan chose. That identity is load-bearing:
+/// [`split_pinched_ring`] cuts at this pair, and the exact-comparison
+/// corpus pins the resulting ring order across both ports. JasSwift
+/// carries the identical reduction, key canonicalization included.
 fn first_repeated_vertex(ring: &Ring) -> Option<(usize, usize)> {
-    for j in 1..ring.len() {
-        for i in 0..j {
-            if ring[i] == ring[j] {
-                return Some((i, j));
+    let mut seen: std::collections::HashMap<(u64, u64), usize> =
+        std::collections::HashMap::with_capacity(ring.len());
+    for (j, v) in ring.iter().enumerate() {
+        let Some(key) = vertex_key(v) else { continue };
+        match seen.get(&key) {
+            Some(&i) => return Some((i, j)),
+            None => {
+                seen.insert(key, j);
             }
         }
     }
@@ -1490,6 +1538,90 @@ fn clone_nondegenerate(ps: &PolygonSet) -> PolygonSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ----------- first_repeated_vertex: the index-map reduction -----------
+
+    /// The O(n^2) scan `first_repeated_vertex` replaced, kept as the
+    /// test oracle. The reduction is only allowed to be faster — the
+    /// (j, i) choice it returns must be the SAME pair, because
+    /// `split_pinched_ring` cuts at that pair and the exact-comparison
+    /// corpus pins the resulting ring order across both ports.
+    fn first_repeated_vertex_quadratic(ring: &Ring) -> Option<(usize, usize)> {
+        for j in 1..ring.len() {
+            for i in 0..j {
+                if ring[i] == ring[j] {
+                    return Some((i, j));
+                }
+            }
+        }
+        None
+    }
+
+    fn lcg(seed: &mut u64) -> f64 {
+        // Numerical Recipes constants.
+        *seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+        let v = (*seed >> 11) as f64 / (1u64 << 53) as f64; // [0,1)
+        2.0 * v - 1.0
+    }
+
+    /// Adversarial rings: the two cases where a bit-keyed hash map and
+    /// `f64 ==` disagree, plus the ordinary ones.
+    ///
+    ///  * `-0.0 == 0.0` is TRUE but the bit patterns differ, so a naive
+    ///    `to_bits` key would MISS a pinch the scan finds.
+    ///  * `NaN != NaN` is FALSE-y for equality but two NaNs have equal
+    ///    bits, so a naive key would INVENT a pinch that is not there.
+    fn adversarial_rings() -> Vec<Ring> {
+        vec![
+            // No repeat at all.
+            vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
+            // A plain pinch.
+            vec![(0.0, 0.0), (5.0, 5.0), (10.0, 0.0), (5.0, 5.0), (0.0, 10.0)],
+            // Signed zero on x: equal under ==, different bits.
+            vec![(0.0, 1.0), (5.0, 5.0), (-0.0, 1.0), (9.0, 9.0)],
+            // Signed zero on y.
+            vec![(1.0, -0.0), (5.0, 5.0), (1.0, 0.0), (9.0, 9.0)],
+            // Signed zero in BOTH coordinates.
+            vec![(-0.0, -0.0), (5.0, 5.0), (0.0, 0.0), (9.0, 9.0)],
+            // Two NaNs: equal bits, NOT equal values.
+            vec![(f64::NAN, 1.0), (5.0, 5.0), (f64::NAN, 1.0), (9.0, 9.0)],
+            // A NaN and a real repeat after it — the repeat must win.
+            vec![(f64::NAN, 0.0), (3.0, 3.0), (f64::NAN, 0.0), (3.0, 3.0)],
+            // Three occurrences: the FIRST pair (smallest j, then
+            // smallest i) is the answer.
+            vec![(1.0, 1.0), (2.0, 2.0), (1.0, 1.0), (1.0, 1.0)],
+            // Degenerate lengths.
+            vec![],
+            vec![(1.0, 1.0)],
+            vec![(1.0, 1.0), (1.0, 1.0)],
+        ]
+    }
+
+    #[test]
+    fn first_repeated_vertex_matches_the_quadratic_scan() {
+        for (n, ring) in adversarial_rings().iter().enumerate() {
+            assert_eq!(first_repeated_vertex(ring), first_repeated_vertex_quadratic(ring),
+                       "adversarial ring {n} disagrees: {ring:?}");
+        }
+        // Random rings drawn from a small coordinate alphabet so
+        // repeats are common, including signed zeros.
+        let alphabet = [0.0f64, -0.0, 1.0, 2.0, -1.0, 0.5];
+        let mut seed = 0x5eed_1234u64;
+        for _ in 0..4000 {
+            let len = ((lcg(&mut seed).abs() * 12.0) as usize) + 1;
+            let ring: Ring = (0..len)
+                .map(|_| {
+                    let xi = (lcg(&mut seed).abs() * alphabet.len() as f64) as usize
+                        % alphabet.len();
+                    let yi = (lcg(&mut seed).abs() * alphabet.len() as f64) as usize
+                        % alphabet.len();
+                    (alphabet[xi], alphabet[yi])
+                })
+                .collect();
+            assert_eq!(first_repeated_vertex(&ring), first_repeated_vertex_quadratic(&ring),
+                       "random ring disagrees: {ring:?}");
+        }
+    }
 
     // ----------- The carried-rule law, clauses 1 and 4 -----------
 

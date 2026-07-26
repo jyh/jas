@@ -864,6 +864,15 @@ func connectEdges(_ events: [BoolSweepEvent], _ order: [Int]) -> BoolPolygonSet 
 /// Order is fixed - lobe before remainder, first repeat by (j, i) - so
 /// Rust and Swift emit the same rings in the same sequence, which the
 /// exact-comparison corpus requires.
+///
+/// COST. firstRepeatedVertex is O(n) expected, and each cut removes one
+/// duplicate vertex, so a ring with p pinches costs O(p * n) expected -
+/// O(n^2) in the pathological limit where a constant fraction of
+/// vertices is a pinch, O(n) for the overwhelmingly common p = 0 (one
+/// scan, no split) and O(n) for the EXCLUDE-corner p = 2. Worth stating
+/// because this runs on EVERY boolean result, including curve-flattened
+/// ones with thousands of vertices; the same bound is documented on the
+/// normalizer's O(E^2) arrangement.
 func splitPinchedRings(_ rings: BoolPolygonSet) -> BoolPolygonSet {
     var out: BoolPolygonSet = []
     for ring in rings {
@@ -886,17 +895,60 @@ private func splitPinchedRing(_ ring: BoolRing, _ out: inout BoolPolygonSet) {
     splitPinchedRing(rest, &out)
 }
 
+/// The hash key of a vertex. Nil-able at the call site: a NaN
+/// coordinate has no key, because it can never equal anything.
+///
+/// The key must reproduce Double == EXACTLY, and a raw bitPattern does
+/// not:
+///
+///  * -0.0 == 0.0 is true while the bit patterns differ, so a raw key
+///    would MISS a pinch. `x + 0.0` maps -0.0 to +0.0 and is the
+///    identity on every other value (no rounding), which fixes it.
+///  * NaN != NaN, yet two NaNs of the same payload have equal bits, so
+///    a raw key would INVENT a pinch. Keeping a NaN-bearing vertex out
+///    of the map entirely makes it match nothing - exactly what == does.
+///
+/// firstRepeatedVertexMatchesTheQuadraticScan pins both cases against
+/// the scan this replaced.
+struct BoolVertexKey: Hashable {
+    let x: UInt64
+    let y: UInt64
+
+    init?(_ v: (Double, Double)) {
+        if v.0.isNaN || v.1.isNaN { return nil }
+        x = (v.0 + 0.0).bitPattern
+        y = (v.1 + 0.0).bitPattern
+    }
+}
+
 /// The first repeated vertex of `ring` as (i, j) with i < j and
 /// ring[i] == ring[j], scanning j ascending then i ascending so the
 /// choice is total and port-independent. Exact equality is the right
 /// test: the sweep's vertices come from snap-rounded input and
 /// arrangement splits, so a revisited vertex is bit-identical.
-private func firstRepeatedVertex(_ ring: BoolRing) -> (Int, Int)? {
-    guard ring.count > 1 else { return nil }
-    for j in 1..<ring.count {
-        for i in 0..<j {
-            if ring[i] == ring[j] { return (i, j) }
-        }
+///
+/// COST. O(n) expected, one lookup and at most one insert per vertex,
+/// replacing the O(n^2) pairwise scan this used to be. That matters
+/// because the post-pass runs on EVERY boolean result, and a
+/// curve-flattened one carries thousands of vertices.
+///
+/// The map holds the FIRST index at which each distinct vertex was seen
+/// (insert only when absent), and j still ascends, so the pair returned
+/// is the same (smallest j that repeats, smallest i equal to it) the
+/// pairwise scan chose. That identity is load-bearing: splitPinchedRing
+/// cuts at this pair, and the exact-comparison corpus pins the
+/// resulting ring order across both ports. jas_dioxus carries the
+/// identical reduction, key canonicalization included.
+///
+/// Internal (not private) only so the differential test can compare it
+/// against the retired scan.
+func firstRepeatedVertex(_ ring: BoolRing) -> (Int, Int)? {
+    var seen: [BoolVertexKey: Int] = [:]
+    seen.reserveCapacity(ring.count)
+    for (j, v) in ring.enumerated() {
+        guard let key = BoolVertexKey(v) else { continue }
+        if let i = seen[key] { return (i, j) }
+        seen[key] = j
     }
     return nil
 }
