@@ -4666,4 +4666,159 @@ mod tests {
         assert!(!selection_has_mask(model.document()),
                 "mixed selection counts as no-mask");
     }
+
+    // ------------------------------------------------------------------
+    // fill_rule preservation across the id-stamping / duplicate family
+    //
+    // The PRIME DIRECTIVE twin of JasSwift's
+    // Tests/Geometry/FillRulePreservationTests.swift. Rust reaches these
+    // paths by MUTATING `common` in place (`clear_ids`, `common_mut().id
+    // = ...`), so no field can be dropped by construction — unlike
+    // Swift, whose value-type copies must re-list every field. These
+    // tests exist so that the two ports assert the same invariant and a
+    // future refactor to a rebuild-style copy in Rust cannot regress it
+    // silently.
+    // ------------------------------------------------------------------
+
+    /// A two-ring even-odd path: outer 100x100 square, concentric inner
+    /// square. Under EvenOdd the inner ring is a HOLE; under NonZero
+    /// (both rings wound alike) it fills solid, so the rule is
+    /// observable in the artwork, not just a tag.
+    fn even_odd_donut(id: Option<&str>) -> Element {
+        use crate::geometry::element::PathCommand as C;
+        Element::Path(PathElem {
+            d: vec![
+                C::MoveTo { x: 0.0, y: 0.0 }, C::LineTo { x: 100.0, y: 0.0 },
+                C::LineTo { x: 100.0, y: 100.0 }, C::LineTo { x: 0.0, y: 100.0 },
+                C::ClosePath,
+                C::MoveTo { x: 25.0, y: 25.0 }, C::LineTo { x: 75.0, y: 25.0 },
+                C::LineTo { x: 75.0, y: 75.0 }, C::LineTo { x: 25.0, y: 75.0 },
+                C::ClosePath,
+            ],
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            width_points: vec![],
+            common: CommonProps {
+                id: id.map(|s| s.to_string()),
+                name: Some("donut".to_string()),
+                ..CommonProps::default()
+            },
+            fill_gradient: None,
+            stroke_gradient: None,
+            fill_rule: FillRule::EvenOdd,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+        })
+    }
+
+    /// The fill rule of `elem`, or None when it is not a Path.
+    fn rule_of(elem: &Element) -> Option<FillRule> {
+        match elem {
+            Element::Path(p) => Some(p.fill_rule),
+            _ => None,
+        }
+    }
+
+    fn model_with_donut(id: Option<&str>, select_first: bool) -> Model {
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(even_odd_donut(id))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let selection: Selection = if select_first {
+            vec![ElementSelection::all(vec![0, 0])]
+        } else {
+            vec![]
+        };
+        Model::new(
+            Document { layers: vec![layer], selected_layer: 0, selection, ..Document::default() },
+            None,
+        )
+    }
+
+    fn top_child(model: &Model, i: usize) -> Element {
+        (*model.document().layers[0].children().unwrap()[i]).clone()
+    }
+
+    #[test]
+    fn fill_rule_survives_clear_ids() {
+        let mut e = even_odd_donut(Some("src"));
+        crate::geometry::element::clear_ids(&mut e);
+        assert!(e.common().id.is_none());
+        assert_eq!(rule_of(&e), Some(FillRule::EvenOdd), "clear_ids refilled the hole");
+    }
+
+    #[test]
+    fn fill_rule_survives_assign_id() {
+        let mut model = model_with_donut(None, false);
+        Controller::assign_id(&mut model, &vec![0, 0], "e1");
+        let out = top_child(&model, 0);
+        assert_eq!(out.common().id.as_deref(), Some("e1"));
+        assert_eq!(rule_of(&out), Some(FillRule::EvenOdd), "assign_id refilled the hole");
+    }
+
+    #[test]
+    fn fill_rule_survives_create_reference_stamp() {
+        let mut model = model_with_donut(None, false);
+        Controller::create_reference(&mut model, &vec![0, 0], "t1", "r1");
+        let target = top_child(&model, 0);
+        assert_eq!(target.common().id.as_deref(), Some("t1"));
+        assert_eq!(rule_of(&target), Some(FillRule::EvenOdd),
+                   "create_reference refilled the hole");
+    }
+
+    #[test]
+    fn fill_rule_survives_make_symbol_master() {
+        let mut model = model_with_donut(None, false);
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "r1");
+        assert_eq!(model.document().symbols.len(), 1);
+        let master = model.document().symbols[0].clone();
+        assert_eq!(master.common().id.as_deref(), Some("m1"));
+        assert_eq!(rule_of(&master), Some(FillRule::EvenOdd),
+                   "make_symbol refilled the master's hole");
+    }
+
+    #[test]
+    fn fill_rule_survives_detach() {
+        let mut model = model_with_donut(None, false);
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "r1");
+        Controller::detach(&mut model, &vec![0, 0]);
+        let out = top_child(&model, 0);
+        assert_eq!(rule_of(&out), Some(FillRule::EvenOdd), "detach refilled the hole");
+    }
+
+    #[test]
+    fn fill_rule_survives_duplicate() {
+        let mut model = model_with_donut(Some("src"), true);
+        Controller::copy_selection(&mut model, 10.0, 0.0);
+        let children = model.document().layers[0].children().unwrap().len();
+        assert_eq!(children, 2);
+        for i in 0..2 {
+            assert_eq!(rule_of(&top_child(&model, i)), Some(FillRule::EvenOdd),
+                       "duplicate refilled the hole at index {i}");
+        }
+    }
+
+    #[test]
+    fn fill_rule_survives_id_dedupe() {
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(even_odd_donut(Some("dup"))),
+                           Rc::new(even_odd_donut(Some("dup")))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document { layers: vec![layer], selected_layer: 0, ..Document::default() };
+        let out = crate::geometry::normalize::dedupe_element_ids(&doc);
+        let children = out.layers[0].children().unwrap();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].common().id.as_deref(), Some("dup"));
+        assert!(children[1].common().id.is_none(),
+                "dedupe should have cleared the second id");
+        for (i, c) in children.iter().enumerate() {
+            assert_eq!(rule_of(c), Some(FillRule::EvenOdd),
+                       "id-dedupe refilled the hole at index {i}");
+        }
+    }
 }

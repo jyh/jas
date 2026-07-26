@@ -3811,7 +3811,7 @@ extension Path {
              locked: locked, visibility: visibility, blendMode: blendMode,
              mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
              strokeBrush: strokeBrush, strokeBrushOverrides: strokeBrushOverrides,
-             toolOrigin: toolOrigin, name: name, id: id)
+             toolOrigin: toolOrigin, name: name, id: id, fillRule: fillRule)
     }
 }
 
