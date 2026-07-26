@@ -54,7 +54,11 @@ func applyPrintPrefField(_ p: PrintPreferences, field: String, val: Value) -> Pr
         return _withPref(p, printerName: s.isEmpty ? .some(nil) : .some(.some(s)))
     case "copies":
         guard let n = num() else { return nil }
-        return _withPref(p, copies: max(0, Int(n)))
+        // Rust stores `copies` as u32 via `(n as i64).max(0) as u32`. The old
+        // `max(0, Int(n))` here had the right outer clamp over a trapping inner
+        // cast, and no u32 ceiling — so a huge finite value also stored a
+        // different NUMBER than Rust did. Risk R9.
+        return _withPref(p, copies: saturatingUInt32AsInt(n))
     case "collate":
         guard let b = bool() else { return nil }
         return _withPref(p, collate: b)

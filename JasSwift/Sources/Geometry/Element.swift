@@ -124,9 +124,11 @@ public enum Color: Equatable, Hashable {
     /// The color is first converted to RGB; alpha is ignored.
     public func toHex() -> String {
         let (r, g, b, _) = toRgba()
-        let ri = max(0, min(255, Int(round(r * 255))))
-        let gi = max(0, min(255, Int(round(g * 255))))
-        let bi = max(0, min(255, Int(round(b * 255))))
+        // quantise8, not `max(0, min(255, Int(round(x * 255))))`: that outer
+        // clamp was correct and agreed with Rust for every FINITE component,
+        // but the INNER cast was a precondition failure on NaN / ±infinity
+        // where Rust's `as u8` saturates. Risk R9.
+        let ri = quantise8(r), gi = quantise8(g), bi = quantise8(b)
         return String(format: "%02x%02x%02x", ri, gi, bi)
     }
 
@@ -148,8 +150,17 @@ public enum Color: Equatable, Hashable {
 
 func hsbToRgbComponents(h: Double, s: Double, v: Double) -> (Double, Double, Double) {
     if s == 0 { return (v, v, v) }
-    let h = ((h.truncatingRemainder(dividingBy: 360.0)) + 360.0)
-        .truncatingRemainder(dividingBy: 360.0)
+    // A non-finite hue is sanitised to 0 in BOTH ports before the sector
+    // index is taken. `Int(floor(h / 60.0))` here is a precondition failure on
+    // NaN, where Rust's `as u32` yields 0 and then carries NaN into two of the
+    // three components — neither is a colour, so the ports agree on 0 instead.
+    // Infinity reaches the same place: the wrap below is NaN for it. Risk R9,
+    // transcripts/CORPUS_CENSUS.md §7. Rust twin: geometry/element.rs
+    // hsb_to_rgb_components.
+    let h = h.isFinite
+        ? ((h.truncatingRemainder(dividingBy: 360.0)) + 360.0)
+            .truncatingRemainder(dividingBy: 360.0)
+        : 0.0
     let hi = Int(floor(h / 60.0)) % 6
     let f = h / 60.0 - Double(hi)
     let p = v * (1.0 - s)

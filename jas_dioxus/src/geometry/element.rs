@@ -207,7 +207,17 @@ fn hsb_to_rgb_components(h: f64, s: f64, v: f64) -> (f64, f64, f64) {
     if s == 0.0 {
         return (v, v, v);
     }
-    let h = ((h % 360.0) + 360.0) % 360.0; // normalize hue
+    // A non-finite hue is sanitised to 0 in BOTH ports before the sector index
+    // is taken. Here `as u32` would give 0 and then carry NaN into two of the
+    // three components; in Swift `Int(floor(h / 60.0))` is a precondition
+    // failure. Neither is a colour, so the ports agree on 0 instead. Risk R9,
+    // transcripts/CORPUS_CENSUS.md §7. Swift twin: Geometry/Element.swift
+    // hsbToRgbComponents.
+    let h = if h.is_finite() {
+        ((h % 360.0) + 360.0) % 360.0 // normalize hue
+    } else {
+        0.0
+    };
     let hi = (h / 60.0).floor() as u32 % 6;
     let f = h / 60.0 - hi as f64;
     let p = v * (1.0 - s);
@@ -3047,6 +3057,26 @@ pub fn with_width_points(elem: &Element, width_points: Vec<StrokeWidthPoint>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Risk R9 (transcripts/CORPUS_CENSUS.md §7): a non-finite hue must be
+    /// sanitised to 0 here, not carried into the components. Unsanitised, `as
+    /// u32` gives sector 0 and then `f` is NaN, so two of the three returned
+    /// components are NaN; JasSwift's `Int(floor(h / 60.0))` is a precondition
+    /// failure on the same input. Twin: JasSwift's
+    /// `R9ColourChainTests.nonFiniteHueIsTreatedAsZero`.
+    #[test]
+    fn non_finite_hue_is_treated_as_zero() {
+        let (r, g, b, a) = Color::hsb(f64::NAN, 1.0, 0.8).to_rgba();
+        assert_eq!((r, g, b, a), (0.8, 0.0, 0.0, 1.0));
+        let (r, g, b, _) = Color::hsb(f64::INFINITY, 1.0, 0.8).to_rgba();
+        assert_eq!((r, g, b), (0.8, 0.0, 0.0));
+        assert_eq!(Color::hsb(f64::NAN, 1.0, 0.8).to_hex(), "cc0000");
+        // A finite out-of-range hue still WRAPS — the guard must not eat it.
+        assert_eq!(
+            Color::hsb(480.0, 1.0, 1.0).to_rgba(),
+            Color::hsb(120.0, 1.0, 1.0).to_rgba()
+        );
+    }
 
     #[test]
     fn gradient_json_roundtrip_linear() {

@@ -142,7 +142,10 @@ enum Value: Equatable {
         case .null: return nil
         case .bool(let b): return b
         case .number(let n):
-            if n == Double(Int(n)) { return Int(n) }
+            // intIfIntegral, not `if n == Double(Int(n))`: that guard evaluated the
+            // trapping cast inside its own predicate (risk R9). Rust's
+            // value_to_json performs no integer conversion at all.
+            if let i = intIfIntegral(n) { return i }
             return n
         case .string(let s): return s
         case .color(let c): return c

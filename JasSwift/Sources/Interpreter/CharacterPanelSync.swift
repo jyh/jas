@@ -851,8 +851,14 @@ private func parseEmAsThousandths(_ s: String) -> Double? {
 
 /// Trim trailing zeros from a decimal render — integers have no
 /// decimal point. Mirrors Rust's `fmt_num`.
-private func fmtNum(_ n: Double) -> String {
-    if n == n.rounded(.towardZero) { return String(Int(n)) }
+/// Internal rather than private so `R9GuardedCastTests` can hold it to that
+/// mirror.
+func fmtNum(_ n: Double) -> String {
+    // saturatingInt mirrors Rust's `n as i64`. The `n == n.rounded(.towardZero)`
+    // predicate is TRUE for +/-infinity and for every integral value at or
+    // above 2^63, so it admitted exactly what a plain `Int(n)` cannot take
+    // (risk R9); Rust prints the saturated i64 there.
+    if n == n.rounded(.towardZero) { return String(saturatingInt(n)) }
     var s = String(format: "%.4f", n)
     while s.hasSuffix("0") { s.removeLast() }
     if s.hasSuffix(".") { s.removeLast() }

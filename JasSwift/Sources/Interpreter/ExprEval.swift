@@ -641,7 +641,10 @@ private class Parser {
                 case .number(let n):
                     // Integer index after dot (e.g. list.0)
                     pos += 1
-                    let seg = "\(Int(n))"
+                    // saturatingInt mirrors Rust's `format!("{}", n as i64)`, so a
+                    // huge or non-finite literal after a dot yields the same
+                    // segment name in both ports instead of trapping (risk R9).
+                    let seg = "\(saturatingInt(n))"
                     node = extendOrDot(node, seg)
                 default:
                     break  // unexpected token after dot
@@ -1230,8 +1233,13 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         var indices: [Int] = []
         for a in args {
             let v = evalNode(a, ctx)
+            // The `n >= 0` guard rejects NaN in both ports but ADMITS
+            // +infinity, where Rust pushes `n as usize` = usize::MAX and this
+            // port trapped (risk R9). The saturated sentinels differ in
+            // magnitude because the index types do, but both exceed any
+            // container length.
             guard case .number(let n) = v, n >= 0 else { return .null }
-            indices.append(Int(n))
+            indices.append(saturatingInt(n))
         }
         return .path(indices)
 
@@ -1239,10 +1247,11 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         guard args.count == 2 else { return .null }
         let p = evalNode(args[0], ctx)
         let i = evalNode(args[1], ctx)
+        // Same guard, same leak as `path` above (risk R9).
         guard case .path(var indices) = p, case .number(let n) = i, n >= 0 else {
             return .null
         }
-        indices.append(Int(n))
+        indices.append(saturatingInt(n))
         return .path(indices)
 
     case "path_from_id":

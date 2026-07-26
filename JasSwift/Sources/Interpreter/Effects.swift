@@ -337,7 +337,9 @@ private func valueToAny(_ v: Value) -> Any? {
     case .null: return nil
     case .bool(let b): return b
     case .number(let n):
-        if n == Double(Int(n)) { return Int(n) }
+        // See intIfIntegral: the old `n == Double(Int(n))` guard evaluated the
+        // trapping cast inside its own predicate (risk R9).
+        if let i = intIfIntegral(n) { return i }
         return n
     case .string(let s): return s
     case .color(let c): return c
@@ -2244,9 +2246,12 @@ public func notifyPanelStateChanged(
 /// Format a number for CSS length / value output: integers have no
 /// decimal, fractions drop trailing zeros. Matches the Rust
 /// `fmt_num` helper.
-private func _fmtNum(_ n: Double) -> String {
+/// Internal rather than private so `R9GuardedCastTests` can hold it to that
+/// mirror. (A verbatim second copy of CharacterPanelSync's `fmtNum`.)
+func _fmtNum(_ n: Double) -> String {
+    // saturatingInt mirrors Rust's `n as i64` — see fmtNum (risk R9).
     if n == n.rounded(.towardZero) {
-        return String(Int(n))
+        return String(saturatingInt(n))
     }
     var s = String(format: "%.4f", n)
     while s.hasSuffix("0") { s.removeLast() }

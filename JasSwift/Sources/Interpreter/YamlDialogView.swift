@@ -200,7 +200,9 @@ private func valueToAnyDlg(_ v: Value) -> Any? {
     case .null: return nil
     case .bool(let b): return b
     case .number(let n):
-        if n == Double(Int(n)) { return Int(n) }
+        // See intIfIntegral: the old `n == Double(Int(n))` guard evaluated the
+        // trapping cast inside its own predicate (risk R9).
+        if let i = intIfIntegral(n) { return i }
         return n
     case .string(let s): return s
     case .color(let c): return c

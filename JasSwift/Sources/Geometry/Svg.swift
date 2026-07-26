@@ -24,9 +24,14 @@ private func fmt(_ v: Double) -> String {
 
 private func colorStr(_ c: Color) -> String {
     let (cr, cg, cb, ca) = c.toRgba()
-    let r = Int(round(cr * 255))
-    let g = Int(round(cg * 255))
-    let b = Int(round(cb * 255))
+    // quantise8, so the emitted number is always in 0...255 — Rust's
+    // `(rv * 255.0).round() as u8` saturates, and this port's bare `Int(...)`
+    // is 64-bit, so an out-of-range component was written out VERBATIM as
+    // `rgb(510,0,0)`, which is not valid CSS colour syntax. NaN / ±infinity
+    // additionally trapped. Risk R9. Rust twin: geometry/svg.rs color_str.
+    let r = quantise8(cr)
+    let g = quantise8(cg)
+    let b = quantise8(cb)
     if ca < 1.0 { return "rgba(\(r),\(g),\(b),\(fmt(ca)))" }
     return "rgb(\(r),\(g),\(b))"
 }

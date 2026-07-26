@@ -101,7 +101,13 @@ struct ColorBarView: View {
         let stripCount = max(1, Int(size.width / stripWidth))
         for i in 0..<stripCount {
             let x = CGFloat(i) * stripWidth
-            let hue = 360.0 * Double(x) / Double(size.width)
+            // `max(width, 1)` for the same reason `colorAt` above has it: at
+            // zero width `stripCount` is still 1, so this divide is 0.0/0.0 and
+            // hands a NaN hue on to the colour conversion. `hsbToRgbComponents`
+            // no longer traps on that (risk R9), but a NaN hue is not a colour
+            // either, and Rust rasterises this bar at a fixed 120px width where
+            // the divisor cannot be zero at all.
+            let hue = 360.0 * Double(x) / Double(max(size.width, 1))
             // Three sample colors per strip (top, middle, bottom),
             // s/b in [0, 1].
             let top = Color.hsb(h: hue, s: 0, b: 1.0, a: 1.0)
