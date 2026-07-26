@@ -24,7 +24,10 @@ import Foundation
 // non-zero; two overlapping same-orientation rings are a symmetric
 // difference under even-odd but a union under non-zero. This module
 // follows the ratified even-odd contract for the between-rings question
-// and does not touch it.
+// and does not touch it. The contradiction, the measured evidence for
+// this choice, and the schema alternative are written up as an open
+// ruling in transcripts/BOOLEAN.md, under Fill rule: an open ruling.
+// That section is the record; do not re-litigate it here.
 //
 // TWO PATHS.
 //

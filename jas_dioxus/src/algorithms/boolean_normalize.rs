@@ -41,6 +41,13 @@
 //! `PolygonSet` carry the document's `fill-rule` instead of a fixed
 //! one, that is a schema decision, not a normalizer decision.
 //!
+//! That question is now recorded as an open ruling in
+//! `transcripts/BOOLEAN.md`, under "Fill rule: an open ruling", with
+//! the measured evidence for the current reading (a set-wide non-zero
+//! reading deletes the inner ring of every donut and turns 7 unit
+//! tests red). The spec section is the record; this comment only
+//! points at it.
+//!
 //! The output rings of a rebuilt ring are simple and pairwise
 //! non-overlapping, oriented so the filled side is on the left: outer
 //! boundaries counter-clockwise (positive signed area) and hole
