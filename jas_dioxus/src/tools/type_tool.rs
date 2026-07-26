@@ -20,6 +20,7 @@
 
 use web_sys::CanvasRenderingContext2d;
 
+use crate::canvas::ctx_guard::CtxSaveGuard;
 use crate::document::controller::Controller;
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
@@ -760,7 +761,15 @@ impl CanvasTool for TypeTool {
         // the same view transform `repaint` uses for the document
         // pass. Saved + restored at exit so other overlays nesting
         // on top see the original transform.
-        ctx.save();
+        //
+        // The save is RAII (canvas::ctx_guard::CtxSaveGuard): this body has
+        // TWO early returns between the save and the function-end restore
+        // (no edit session; no layout), which is the exact WEDGESTORM shape
+        // — one missed restore there leaks a save per repaint and the view
+        // transform compounds on it. The guard pops on every path, so the
+        // balance is the type system's job, not the reader's. Bound to a
+        // NAMED variable: a bare `_` would drop it on the spot.
+        let _ctx_guard = CtxSaveGuard::new(ctx);
         ctx.translate(model.view_offset_x, model.view_offset_y).ok();
         ctx.scale(model.zoom_level, model.zoom_level).ok();
         // Stroke / line widths are zoom-invariant: divide by the
@@ -793,11 +802,9 @@ impl CanvasTool for TypeTool {
 
         // Editing overlay: selection highlights and caret.
         let Some(session) = &self.session else {
-            ctx.restore();
             return;
         };
         let Some((t, lay)) = self.build_layout(model) else {
-            ctx.restore();
             return;
         };
 
@@ -856,7 +863,8 @@ impl CanvasTool for TypeTool {
             ctx.line_to(t.x + cx, t.y + cy + ch * 0.2);
             ctx.stroke();
         }
-        ctx.restore();
+        // The view transform pops here via `_ctx_guard`'s Drop — the same
+        // point the manual restore() stood (end of the function body).
     }
 }
 

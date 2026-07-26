@@ -1692,7 +1692,10 @@ impl AppState {
         // restoring the identity transform because their tool-state
         // coordinates (press_x, cursor_x, etc.) are already in
         // viewport-local pixel space.
-        ctx.save();
+        // RAII-balanced (canvas::ctx_guard::CtxSaveGuard); dropped explicitly
+        // below where the manual restore() stood, because the tool-overlay
+        // pass that follows must run in the POPPED (screen-space) state.
+        let ctx_guard = crate::canvas::ctx_guard::CtxSaveGuard::new(&ctx);
         ctx.translate(tab.model.view_offset_x, tab.model.view_offset_y).ok();
         ctx.scale(tab.model.zoom_level, tab.model.zoom_level).ok();
         let layers_isolation = self.layers_isolation_stack.last().map(|p| p.as_slice());
@@ -1713,7 +1716,7 @@ impl AppState {
             // Model's generation (cleared on any edit / undo / redo).
             tab.model.generation(),
         );
-        ctx.restore();
+        drop(ctx_guard);
 
         // Draw tool overlay (in screen-space, post-transform).
         if let Some(tool) = tab.tools.get(&self.active_tool) {
