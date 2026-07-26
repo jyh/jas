@@ -599,14 +599,6 @@ func isRingSimple(_ ring: BoolRing) -> Bool {
     return true
 }
 
-func properCrossing(_ ax1: Double, _ ay1: Double, _ ax2: Double, _ ay2: Double,
-                    _ bx1: Double, _ by1: Double, _ bx2: Double, _ by2: Double) -> Bool {
-    let d1 = crossProduct(bx2 - bx1, by2 - by1, ax1 - bx1, ay1 - by1)
-    let d2 = crossProduct(bx2 - bx1, by2 - by1, ax2 - bx1, ay2 - by1)
-    let d3 = crossProduct(ax2 - ax1, ay2 - ay1, bx1 - ax1, by1 - ay1)
-    let d4 = crossProduct(ax2 - ax1, ay2 - ay1, bx2 - ax1, by2 - ay1)
-    return d1 * d2 < 0 && d3 * d4 < 0
-}
 
 func crossProduct(_ ux: Double, _ uy: Double, _ vx: Double, _ vy: Double) -> Double {
     ux * vy - uy * vx

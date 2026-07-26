@@ -218,7 +218,15 @@ extension PlanarGraph {
         var edgeSet: Set<UInt64> = []
         var edges: [(Int, Int)] = []
         for si in 0..<segParams.count {
-            segParams[si].sort { $0.0 < $1.0 }
+            // Tie-break on the vertex index. Rust's `sort_by` is STABLE, so equal
+                // params keep insertion order there; Swift's `sort` is not, and a tie
+                // here is genuinely reachable — snap_param forces params to exactly
+                // 0.0/1.0, so exact equality is routine, and two ties carrying
+                // DIFFERENT vertex indices occur once |segment|*PARAM_EPS exceeds
+                // VERT_EPS. Different chain order yields different atomic spans and
+                // differently-built rings, so the order is pinned rather than left to
+                // the sort's discretion (mirrors the outgoing-span tie-break below).
+                segParams[si].sort { $0.0 == $1.0 ? $0.1 < $1.1 : $0.0 < $1.0 }
             // Drop consecutive duplicates that snapped to the same vertex.
             var chain: [Int] = []
             var prev: Int? = nil

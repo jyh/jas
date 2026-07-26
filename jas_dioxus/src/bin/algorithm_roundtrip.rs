@@ -904,30 +904,6 @@ fn is_ring_simple(ring: &Ring) -> bool {
     true
 }
 
-fn proper_crossing(
-    ax1: f64,
-    ay1: f64,
-    ax2: f64,
-    ay2: f64,
-    bx1: f64,
-    by1: f64,
-    bx2: f64,
-    by2: f64,
-) -> bool {
-    let d1 = cross(bx2 - bx1, by2 - by1, ax1 - bx1, ay1 - by1);
-    let d2 = cross(bx2 - bx1, by2 - by1, ax2 - bx1, ay2 - by1);
-    let d3 = cross(ax2 - ax1, ay2 - ay1, bx1 - ax1, by1 - ay1);
-    let d4 = cross(ax2 - ax1, ay2 - ay1, bx2 - ax1, by2 - ay1);
-    if d1 * d2 < 0.0 && d3 * d4 < 0.0 {
-        return true;
-    }
-    false
-}
-
-fn cross(ux: f64, uy: f64, vx: f64, vy: f64) -> f64 {
-    ux * vy - uy * vx
-}
-
 fn all_rings_simple(ps: &PolygonSet) -> bool {
     ps.iter().all(|ring| is_ring_simple(ring))
 }
