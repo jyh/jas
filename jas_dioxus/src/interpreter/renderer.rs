@@ -7512,6 +7512,130 @@ fn null_color_means_none(bind_expr: &str) -> bool {
     })
 }
 
+/// The colour a swatch's `bind.color` resolves to, and whether "no colour"
+/// means an EXPLICIT none.
+///
+/// Returns `(colour, explicit_none)`. `explicit_none = true` is the
+/// "intentionally no paint" case — the red-diagonal indicator — as distinct
+/// from "missing bind / unset slot", which also has no colour but renders as a
+/// hollow PLACEHOLDER. Two producers encode the intentional case: an empty
+/// string (a dialog's hex field cleared), and a NULL from a bind that declares
+/// a nullable state colour (`null_color_means_none`).
+///
+/// Bare hex strings without a leading '#' (recent_colors stores them that way)
+/// get one prepended. `"#dialog.hex"` means `"#" + eval("dialog.hex")`.
+///
+/// Pulled out of `render_color_swatch` so the decision is reachable without a
+/// DOM: `color_panel_content` is Path-B-excluded, so no widget_tree golden sees
+/// this widget, and the render half of the COLORTIERS work was pinned by
+/// NOTHING — reverting the whole `explicit_none` plumbing left every test, every
+/// golden and every gui_drive check green. Mirrored in JasSwift by
+/// `swatchColorBind`.
+pub(crate) fn swatch_color_bind(
+    el: &serde_json::Value,
+    ctx: &serde_json::Value,
+) -> (String, bool) {
+    let Some(bind_color) = el.get("bind").and_then(|b| b.get("color")).and_then(|v| v.as_str())
+    else { return (String::new(), false) };
+    // Handle "#expr" pattern: "#dialog.hex" means "#" + eval("dialog.hex")
+    let hash_prefixed = bind_color.starts_with('#') && bind_color.contains('.');
+    let inner = if hash_prefixed { &bind_color[1..] } else { bind_color };
+    match expr::eval(inner, ctx) {
+        Value::Color(c) => (c, false),
+        Value::Str(s) if s.starts_with('#') && !hash_prefixed => (s, false),
+        Value::Str(s) if !s.is_empty() => (format!("#{s}"), false),
+        Value::Str(_) => (String::new(), true),
+        Value::Null => (String::new(), null_color_means_none(inner)),
+        _ => (String::new(), false),
+    }
+}
+
+/// The colour a swatch PAINTS, given `swatch_color_bind`'s answer.
+///
+/// An explicit none paints WHITE so the red diagonal reads against a clean
+/// background (the same substitution the native JasSwift squares make); an
+/// unresolved bind paints nothing; anything else paints its colour. The hollow
+/// ("stroke") swatch runs its RING through this same function, which is why a
+/// no-stroke ring is a white ring with a diagonal rather than an invisible one.
+pub(crate) fn swatch_face_color<'a>(color: &'a str, explicit_none: bool) -> &'a str {
+    if explicit_none {
+        "#fff"
+    } else if color.is_empty() {
+        "transparent"
+    } else {
+        color
+    }
+}
+
+/// Which of the three borders a swatch draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SwatchBorder {
+    /// In `bind.selected_in`'s list: a 2px accent outline.
+    Selected,
+    /// No colour and no explicit none — an EMPTY SLOT (an unfilled
+    /// recent-colours tile). Dashed, the standard placeholder affordance.
+    Placeholder,
+    /// A real swatch: a colour, or an explicit none (which is a real answer
+    /// about the paint, drawn as a white face with a red diagonal — not an
+    /// empty slot). JasSwift drew the solid border here while this port drew
+    /// the PLACEHOLDER's dashed one, because it decided from `color.is_empty()`
+    /// alone and an explicit none has no colour string (COLORTIERS repair).
+    Solid,
+}
+
+/// The red-diagonal "no paint" indicator: bottom-left to top-right, red, 8% of
+/// the box (`stroke-width: 8` in a `0 0 100 100` viewBox). JasSwift's
+/// `noneDiagonal` draws the same line at `max(1, size * 0.08)` — pinned on both
+/// sides so the indicator cannot drift apart.
+pub(crate) const NONE_DIAG_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none' style='position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;'><line x1='0' y1='100' x2='100' y2='0' stroke='red' stroke-width='8'/></svg>";
+
+/// The inline style a swatch tile carries, from the decisions above.
+///
+/// Hoisted out of the rsx so the WIRING is testable, not just the decisions: it
+/// is what turns "explicit none" into a white face and a solid border, and what
+/// turns "empty slot" into a transparent face and a dashed one. A hollow
+/// ("stroke") swatch spends its colour on a 6px RING around a transparent
+/// centre instead, which is why a no-stroke ring is a white ring with the
+/// diagonal across it rather than an invisible one.
+pub(crate) fn swatch_style(
+    size: u64, face: &str, border: SwatchBorder, hollow: bool,
+    z_style: &str, extra_style: &str,
+) -> String {
+    if hollow {
+        format!("width:{size}px;height:{size}px;background:transparent;\
+                 border:6px solid {face};cursor:pointer;box-sizing:border-box;\
+                 position:relative;{z_style}{extra_style}")
+    } else {
+        let border = border.css();
+        format!("width:{size}px;height:{size}px;background:{face};\
+                 border:{border};cursor:pointer;box-sizing:border-box;\
+                 position:relative;{z_style}{extra_style}")
+    }
+}
+
+pub(crate) fn swatch_border(color: &str, explicit_none: bool, selected: bool) -> SwatchBorder {
+    if selected {
+        SwatchBorder::Selected
+    } else if color.is_empty() && !explicit_none {
+        SwatchBorder::Placeholder
+    } else {
+        SwatchBorder::Solid
+    }
+}
+
+impl SwatchBorder {
+    pub(crate) fn css(self) -> &'static str {
+        match self {
+            // 2px macOS-system-blue (#007aff), matching JasSwift's
+            // `SwiftUI.Color.accentColor` (#007aff on macOS in both light and
+            // dark mode), so the selection reads the same in both ports.
+            SwatchBorder::Selected => "2px solid #007aff",
+            SwatchBorder::Placeholder => "1px dashed var(--jas-border,#555)",
+            SwatchBorder::Solid => "1px solid var(--jas-border,#666)",
+        }
+    }
+}
+
 fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     // Size resolution: top-level `size: "<small|medium|large>"` (used by
@@ -7539,45 +7663,10 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
             .unwrap_or(16)
     };
 
-    // Returns (color_string, explicit_none). explicit_none=true marks
-    // the "intentionally no fill / no stroke" case, distinct from
-    // "missing bind / unset slot" which also has no colour but renders as
-    // a hollow placeholder rather than the red-diagonal "no fill"
-    // indicator. Two producers encode the intentional case: an empty
-    // string (a dialog's hex field cleared), or NULL from a bind that
-    // declares a nullable state colour (`null_color_means_none` — the
-    // Color panel's fill / stroke swatches once the user clicks None).
-    // Bare hex strings without a leading '#' (recent_colors stores them
-    // that way) are also valid colors and need a '#' prepended.
-    let (color, explicit_none) = if let Some(bind_color) = el.get("bind").and_then(|b| b.get("color")).and_then(|v| v.as_str()) {
-        // Handle "#expr" pattern: "#dialog.hex" means "#" + eval("dialog.hex")
-        if bind_color.starts_with('#') && bind_color.contains('.') {
-            let inner = &bind_color[1..];
-            let result = expr::eval(inner, ctx);
-            match result {
-                Value::Str(s) if !s.is_empty() => (format!("#{s}"), false),
-                Value::Color(c) => (c, false),
-                Value::Str(_) => (String::new(), true),
-                Value::Null => (String::new(), null_color_means_none(inner)),
-                _ => (String::new(), false),
-            }
-        } else {
-            let result = expr::eval(bind_color, ctx);
-            match result {
-                Value::Color(c) => (c, false),
-                Value::Str(s) if s.starts_with('#') => (s, false),
-                Value::Str(s) if !s.is_empty() => (format!("#{s}"), false),
-                Value::Str(_) => (String::new(), true),
-                Value::Null => (String::new(), null_color_means_none(bind_color)),
-                _ => (String::new(), false),
-            }
-        }
-    } else {
-        (String::new(), false)
-    };
-
-    let bg = if color.is_empty() { "transparent".to_string() } else { color.clone() };
-    let border = if color.is_empty() { "1px dashed var(--jas-border,#555)" } else { "1px solid var(--jas-border,#666)" };
+    // The colour and the "is this an explicit none" answer, decided by
+    // `swatch_color_bind` — pulled out so it is testable without a DOM (this
+    // widget's panel is Path-B-excluded, so no widget_tree golden sees it).
+    let (color, explicit_none) = swatch_color_bind(el, ctx);
     // hollow may be a static attribute OR a bind expression. The Color
     // panel's stroke swatch uses bind.hollow = "not state.fill_on_top"
     // so the active swatch renders as a solid filled square (visually
@@ -7613,47 +7702,29 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     // Shared with the brush-tile container via `eval_selected_in`.
     let selected = eval_selected_in(el, ctx);
 
-    // Selected: 2px macOS-system-blue (#007aff) outline replacing
-    // the 1px border. Matches JasSwift's renderColorSwatch which
-    // uses SwiftUI.Color.accentColor (defaults to #007aff on macOS
-    // across light/dark mode). Cross-port parity: the same selection
-    // color appears in both ports regardless of theme appearance.
-    let final_border = if selected {
-        "2px solid #007aff"
-    } else {
-        border
-    };
-    let selected_halo = "";
+    // The three border kinds — selected / empty-slot placeholder / real swatch
+    // — decided by `swatch_border`. An EXPLICIT none is a real swatch (a white
+    // face with a red diagonal), not an empty slot, so it takes the solid
+    // border; this used to key off `color.is_empty()` alone, which is true for
+    // an explicit none too, so a no-paint swatch wore the placeholder's dashed
+    // border here and a solid one in JasSwift (COLORTIERS repair).
+    let border = swatch_border(&color, explicit_none, selected);
 
-    // Diagonal "no fill" indicator only when the bind explicitly
-    // resolved to an empty color (FillSummary::Uniform(None) etc.).
-    // Empty / unbound recent slots stay as plain hollow placeholders.
+    // Diagonal "no fill" indicator only when the bind explicitly resolved to
+    // "no paint". Empty / unbound recent slots stay as plain placeholders.
     let is_none = explicit_none;
-    // Make "no fill / no stroke" swatches white so the red diagonal
-    // reads against a clean background (matches Illustrator /
-    // Photoshop / OCaml + Python ports). Without this the swatch was
-    // a transparent rectangle that just inherited the toolbar bg.
-    let none_bg = if is_none { "#fff" } else { bg.as_str() };
-    let style = if hollow {
-        // Hollow ("stroke") swatch: a thick colored border around a
-        // transparent center. When stroke is None, render the border
-        // as white (instead of transparent + invisible) so the user
-        // sees a hollow ring with the red diagonal across it —
-        // matches Illustrator's no-stroke indicator.
-        let hollow_border = if is_none { "#fff" } else { bg.as_str() };
-        format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {hollow_border};cursor:pointer;box-sizing:border-box;position:relative;{z_style}{extra_style}")
-    } else {
-        format!("width:{size}px;height:{size}px;background:{none_bg};border:{final_border};{selected_halo}cursor:pointer;box-sizing:border-box;position:relative;{z_style}{extra_style}")
-    };
+    // A no-paint swatch's FACE is white so the red diagonal reads against a
+    // clean background (the same substitution JasSwift's native FillStroke
+    // squares and the reference ports make). Without it the swatch was a
+    // transparent rectangle that just inherited the toolbar bg.
+    let face = swatch_face_color(&color, explicit_none);
+    let style = swatch_style(size, face, border, hollow, &z_style, &extra_style);
 
     let on_click = build_click_handler(el, ctx, rctx);
     let on_dblclick = build_dblclick_handler(el, ctx, rctx);
 
-    // Diagonal "no fill" indicator — drawn via dangerous_inner_html
-    // since Dioxus rsx! emits SVG tags into the HTML namespace by
-    // default and the browser would ignore them.
-    const NONE_DIAG_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none' style='position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;'><line x1='0' y1='100' x2='100' y2='0' stroke='red' stroke-width='8'/></svg>";
-
+    // The diagonal goes in via dangerous_inner_html: Dioxus rsx! emits SVG tags
+    // into the HTML namespace by default and the browser would ignore them.
     rsx! {
         div {
             id: "{id}",
@@ -14557,6 +14628,162 @@ mod tests {
     // None" (draw the red-diagonal indicator), while
     // `panel.recent_colors.3` null means "that slot is empty" (draw a
     // hollow placeholder). The decision is read off the bind's declaration.
+    // ── COLORTIERS: the RENDER half gets vectors of its own ───────────
+    //
+    // Only the PREDICATE (`null_color_means_none`) had a test. The white face,
+    // the red diagonal and the empty-string arm had none, in either port —
+    // `color_panel_content` is Path-B-excluded so no widget_tree golden sees
+    // this widget, and the harness has no none-indicator check. Reverting the
+    // whole `explicit_none` plumbing left every unit test, every golden and
+    // every gui_drive check GREEN. These are the vectors that red instead.
+    //
+    // Mirrored in JasSwift by ColorSwatchFaceTests.swift, function for function.
+
+    /// A `color_swatch` element with the given `bind.color`, as color.yaml
+    /// declares it.
+    fn swatch_el(bind_color: &str) -> serde_json::Value {
+        serde_json::json!({ "type": "color_swatch", "bind": { "color": bind_color } })
+    }
+
+    /// The Color panel's own render scope, reduced to what a swatch reads: the
+    /// fill is NONE, the stroke is black, and recent slot 3 has never been
+    /// filled.
+    fn swatch_ctx() -> serde_json::Value {
+        serde_json::json!({
+            "state": { "fill_color": serde_json::Value::Null, "stroke_color": "#000000" },
+            "panel": { "recent_colors": ["ff0000", serde_json::Value::Null] },
+            "dialog": { "hex": "" },
+        })
+    }
+
+    #[test]
+    fn colortiers_explicit_none_swatch_paints_white_with_a_diagonal() {
+        let ctx = swatch_ctx();
+        let (color, explicit_none) = super::swatch_color_bind(&swatch_el("state.fill_color"), &ctx);
+        assert!(color.is_empty(), "a None fill resolves to no colour");
+        assert!(explicit_none,
+                "…and the null MEANS none, so the swatch draws the indicator");
+        assert_eq!(super::swatch_face_color(&color, explicit_none), "#fff",
+                   "the face is WHITE so the red diagonal reads against it — a \
+                    transparent face just shows the panel background through");
+        assert_eq!(super::swatch_border(&color, explicit_none, false),
+                   super::SwatchBorder::Solid,
+                   "an explicit none is a real swatch, not an empty slot");
+    }
+
+    #[test]
+    fn colortiers_empty_recent_slot_stays_a_placeholder() {
+        let ctx = swatch_ctx();
+        let (color, explicit_none) =
+            super::swatch_color_bind(&swatch_el("panel.recent_colors.1"), &ctx);
+        assert!(color.is_empty());
+        assert!(!explicit_none,
+                "an unfilled recent slot is a PLACEHOLDER — no diagonal");
+        assert_eq!(super::swatch_face_color(&color, explicit_none), "transparent",
+                   "and no white face either: the slot is empty, not no-paint");
+        assert_eq!(super::swatch_border(&color, explicit_none, false),
+                   super::SwatchBorder::Placeholder);
+    }
+
+    #[test]
+    fn colortiers_cleared_hex_field_is_an_explicit_none() {
+        // The second producer of the intentional case: a dialog's hex field
+        // cleared to "". `#dialog.hex` means "#" + eval("dialog.hex").
+        let ctx = swatch_ctx();
+        let (color, explicit_none) = super::swatch_color_bind(&swatch_el("#dialog.hex"), &ctx);
+        assert!(color.is_empty());
+        assert!(explicit_none, "an empty hex field is no paint, not black");
+        assert_eq!(super::swatch_face_color(&color, explicit_none), "#fff");
+    }
+
+    #[test]
+    fn colortiers_a_real_colour_swatch_is_unaffected() {
+        let ctx = swatch_ctx();
+        let (color, explicit_none) =
+            super::swatch_color_bind(&swatch_el("state.stroke_color"), &ctx);
+        assert_eq!(color, "#000000");
+        assert!(!explicit_none);
+        assert_eq!(super::swatch_face_color(&color, explicit_none), "#000000");
+        assert_eq!(super::swatch_border(&color, explicit_none, false),
+                   super::SwatchBorder::Solid);
+        // A bare hex (how recent_colors stores them) gets its '#'.
+        let (bare, _) = super::swatch_color_bind(&swatch_el("panel.recent_colors.0"), &ctx);
+        assert_eq!(bare, "#ff0000");
+    }
+
+    #[test]
+    fn colortiers_selection_outline_wins_over_both_borders() {
+        let ctx = swatch_ctx();
+        let (color, explicit_none) = super::swatch_color_bind(&swatch_el("state.fill_color"), &ctx);
+        assert_eq!(super::swatch_border(&color, explicit_none, true),
+                   super::SwatchBorder::Selected);
+        assert_eq!(super::swatch_border("", false, true), super::SwatchBorder::Selected);
+    }
+
+    /// An unbound swatch (no `bind.color` at all) is the third no-colour case
+    /// and it is a placeholder: nothing declared it as paint.
+    #[test]
+    fn colortiers_unbound_swatch_is_a_placeholder() {
+        let el = serde_json::json!({ "type": "color_swatch" });
+        let (color, explicit_none) = super::swatch_color_bind(&el, &swatch_ctx());
+        assert!(color.is_empty());
+        assert!(!explicit_none);
+        assert_eq!(super::swatch_border(&color, explicit_none, false),
+                   super::SwatchBorder::Placeholder);
+    }
+
+    // The decisions above are only half the render half: something has to turn
+    // them into markup. These pin THAT — the style string a tile carries, and
+    // the diagonal's own geometry.
+
+    #[test]
+    fn colortiers_explicit_none_style_paints_a_white_face() {
+        let style = super::swatch_style(
+            16, super::swatch_face_color("", true),
+            super::swatch_border("", true, false), false, "", "");
+        assert!(style.contains("background:#fff;"), "white face, got: {style}");
+        assert!(style.contains("border:1px solid var(--jas-border,#666);"),
+                "a real swatch's solid border, got: {style}");
+        assert!(style.contains("width:16px;height:16px;"), "got: {style}");
+    }
+
+    #[test]
+    fn colortiers_placeholder_style_is_transparent_and_dashed() {
+        let style = super::swatch_style(
+            16, super::swatch_face_color("", false),
+            super::swatch_border("", false, false), false, "", "");
+        assert!(style.contains("background:transparent;"), "got: {style}");
+        assert!(style.contains("border:1px dashed var(--jas-border,#555);"),
+                "an empty slot keeps the dashed placeholder border, got: {style}");
+    }
+
+    #[test]
+    fn colortiers_hollow_none_ring_is_white() {
+        // The Color panel's stroke swatch is hollow: the RING carries the
+        // colour, so a no-stroke ring must be white-with-a-diagonal, not
+        // invisible.
+        let style = super::swatch_style(
+            16, super::swatch_face_color("", true),
+            super::swatch_border("", true, false), true, "", "");
+        assert!(style.contains("border:6px solid #fff;"), "got: {style}");
+        assert!(style.contains("background:transparent;"),
+                "the hollow centre stays empty, got: {style}");
+    }
+
+    #[test]
+    fn colortiers_none_diagonal_is_a_red_corner_to_corner_line() {
+        let svg = super::NONE_DIAG_SVG;
+        assert!(svg.contains("viewBox='0 0 100 100'"), "got: {svg}");
+        assert!(svg.contains("x1='0' y1='100' x2='100' y2='0'"),
+                "bottom-left to top-right, got: {svg}");
+        assert!(svg.contains("stroke='red'"), "got: {svg}");
+        // 8 in a 100-unit box is 8%, which is what JasSwift's `noneDiagonal`
+        // draws (`max(1, size * 0.08)`). Pinned on both sides.
+        assert!(svg.contains("stroke-width='8'"), "8% of the box, got: {svg}");
+        assert!(svg.contains("pointer-events:none"),
+                "the indicator must not eat the swatch's own clicks, got: {svg}");
+    }
+
     #[test]
     fn cptriage_null_means_none_only_for_nullable_state_colours() {
         assert!(null_color_means_none("state.fill_color"));

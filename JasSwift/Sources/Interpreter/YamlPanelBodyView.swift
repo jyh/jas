@@ -2080,13 +2080,30 @@ struct YamlElementView: View {
     @ViewBuilder
     private func noneDiagonal(size: CGFloat, visible: Bool) -> some View {
         if visible {
-            SwiftUI.Path { path in
-                path.move(to: CGPoint(x: 0, y: size))
-                path.addLine(to: CGPoint(x: size, y: 0))
-            }
-            .stroke(SwiftUI.Color.red, lineWidth: max(1, size * 0.08))
-            .frame(width: size, height: size)
-            .allowsHitTesting(false)
+            swatchNoneDiagonalPath(size: size)
+                .stroke(SwiftUI.Color.red,
+                        lineWidth: swatchNoneDiagonalLineWidth(size: size))
+                .frame(width: size, height: size)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// The border for a swatch, drawn as an inset stroke so a dashed pattern is
+    /// possible (SwiftUI's `.border` cannot dash). Rust's equivalents:
+    /// `2px solid #007aff` (accentColor is #007aff on macOS in both
+    /// appearances), `1px dashed var(--jas-border,#555)`, and
+    /// `1px solid var(--jas-border,#666)`.
+    @ViewBuilder
+    private func swatchBorderOverlay(_ kind: SwatchBorder) -> some View {
+        switch kind {
+        case .selected:
+            Rectangle().strokeBorder(SwiftUI.Color.accentColor, lineWidth: 2)
+        case .placeholder:
+            Rectangle().strokeBorder(
+                SwiftUI.Color.gray,
+                style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+        case .solid:
+            Rectangle().strokeBorder(SwiftUI.Color.gray, lineWidth: 1)
         }
     }
 
@@ -2095,41 +2112,14 @@ struct YamlElementView: View {
         let size = (element["style"] as? [String: Any])?["size"] as? CGFloat ?? 16
         let hollow = element["hollow"] as? Bool ?? false
 
-        // (colour, explicitNone). `explicitNone` marks "intentionally no paint"
-        // — the red-diagonal indicator — as distinct from "missing bind / unset
-        // slot", which also has no colour but is a hollow PLACEHOLDER. Two
-        // producers encode the intentional case, exactly as in Rust's
-        // `render_color_swatch`: an empty string (a dialog's hex field cleared)
-        // and a NULL from a bind that declares a nullable state colour
-        // (``nullColorMeansNone``). Sending both to `.clear` — which this did —
-        // made an explicit None and an empty recent-colour slot render
-        // identically, and drew a cleared hex field as BLACK (COLORTIERS).
-        let (color, explicitNone): (NSColor, Bool) = {
-            guard let bind = element["bind"] as? [String: Any],
-                  let colorExpr = bind["color"] as? String
-            else { return (.clear, false) }
-            // "#dialog.hex" means "#" + eval("dialog.hex"), mirroring Rust.
-            let isHashPrefixed = colorExpr.hasPrefix("#") && colorExpr.contains(".")
-            let inner = isHashPrefixed ? String(colorExpr.dropFirst()) : colorExpr
-            let result = evaluate(inner, context: context)
-            let swatchColor = { (c: String) -> NSColor in
-                let (r, g, b) = parseHex(c)
-                return NSColor(
-                    red: CGFloat(r) / 255, green: CGFloat(g) / 255,
-                    blue: CGFloat(b) / 255, alpha: 1
-                )
-            }
-            switch result {
-            case .color(let c):
-                return (swatchColor(c), false)
-            case .string(let c):
-                return c.isEmpty ? (.clear, true) : (swatchColor(c), false)
-            case .null:
-                return (.clear, nullColorMeansNone(inner))
-            default:
-                return (.clear, false)
-            }
-        }()
+        // The colour and the "is this an explicit none" answer, decided by
+        // ``swatchColorBind`` — a free function so it is testable without a
+        // view, and so it can be read side by side with Rust's
+        // `swatch_color_bind` (this panel is Path-B-excluded, so no widget_tree
+        // golden covers this widget).
+        let (color, explicitNone) = swatchColorBind(
+            (element["bind"] as? [String: Any])?["color"] as? String,
+            context: context)
 
         let selected = isSelectedInList()
         // Honor click / double_click behavior blocks (Color panel's
@@ -2141,10 +2131,18 @@ struct YamlElementView: View {
         let hasClick = behaviors.contains { ($0["event"] as? String) == "click" }
         let hasDouble = behaviors.contains { ($0["event"] as? String) == "double_click" }
         // A no-paint swatch draws WHITE so the red diagonal reads against a
-        // clean background — the same substitution Rust makes (`none_bg` /
-        // `hollow_border`), and what the native ``FillStrokeWidget`` squares
-        // already did.
-        let face = SwiftUI.Color(nsColor: explicitNone ? .white : color)
+        // clean background — ``swatchFaceColor``, Rust's `swatch_face_color`.
+        // `nil` means paint nothing (an empty slot's transparent face).
+        let face = SwiftUI.Color(nsColor: swatchFaceColor(color, explicitNone: explicitNone)
+                                    ?? .clear)
+        // Three border kinds, decided by ``swatchBorder``. An EXPLICIT none is a
+        // real swatch and takes the solid border, not the empty slot's dashed
+        // one: Rust keyed that off `color.is_empty()` alone (true for an
+        // explicit none too) and so wore the dashed placeholder border where
+        // this port wore a solid one. Converged both ways in the COLORTIERS
+        // repair — Rust's explicit none went solid, and the dashed PLACEHOLDER,
+        // which this port did not draw at all, is drawn here.
+        let borderKind = swatchBorder(color, explicitNone: explicitNone, selected: selected)
         let swatch: AnyView = {
             if hollow {
                 return AnyView(
@@ -2159,10 +2157,7 @@ struct YamlElementView: View {
                         .fill(face)
                         .frame(width: size, height: size)
                         .overlay(noneDiagonal(size: size, visible: explicitNone))
-                        .border(
-                            selected ? SwiftUI.Color.accentColor : SwiftUI.Color.gray,
-                            width: selected ? 2 : 1
-                        )
+                        .overlay(swatchBorderOverlay(borderKind))
                 )
             }
         }()

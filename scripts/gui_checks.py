@@ -32,6 +32,9 @@ EACH CHECK IS A DEFECT CLASS, NOT A WIDGET
   button_enter_activates   a focused native button must still activate on
                            Enter — the app may not claim a key's default
                            action out from under the element that owns it
+  none_indicator_visible   a no-paint swatch must LOOK like no paint — the
+                           white face and the red diagonal, not a colour
+                           (the unrendered-fact class)
 
 FAULT INJECTION (`--regress MODE`)
 ----------------------------------
@@ -78,6 +81,11 @@ is a usage error (exit 2), never a fake red.
                                                 transform onto the live canvas
                                                 context, the class the brushed
                                                 early `return` used to leak
+  none_indicator_flat  none_indicator_visible   strip the red diagonal from the
+                                                fill swatch and keep stripping
+                                                it, the way reverting the
+                                                `explicit_none` plumbing renders
+                                                a null colour
   enter_default_stolen button_enter_activates   prevent Enter's default from a
                                                 capturing document listener,
                                                 regardless of what has focus —
@@ -192,6 +200,28 @@ def _strip_dioxus_id(p: GuiProbe, ids: list[str]):
         "const e=document.getElementById(id);"
         "if(e){e.removeAttribute('data-dioxus-id');"
         "e.style.pointerEvents='auto';}}return true;})()")
+
+
+def _fault_none_indicator_flat(p: GuiProbe):
+    """Strip the red-diagonal no-paint indicator, and keep stripping it.
+
+    The shape of the escape this check exists for: `explicit_none` is what tells
+    `render_color_swatch` that a NULL colour means "no paint" rather than "empty
+    slot", and with that plumbing reverted every no-colour swatch renders as a
+    plain placeholder — no white face, no diagonal. Reverting it in the source
+    left all 2386 Swift tests, the widget_tree goldens and 8/8 gui_drive checks
+    green, which is why this check is here.
+
+    A one-shot DOM edit would not survive the click's re-render, so the removal
+    is re-applied by a MutationObserver: the indicator can never appear.
+    """
+    p.cdp.evaluate(
+        "(()=>{const strip=()=>{const e=document.getElementById('cp_fill_swatch');"
+        "if(!e)return;for(const c of [...e.children]){"
+        "if(c.querySelector&&c.querySelector('svg'))c.remove();}};"
+        "strip();const mo=new MutationObserver(strip);"
+        "mo.observe(document.body,{childList:true,subtree:true});"
+        "window.__jasNoneFlat=mo;return true;})()")
 
 
 def _fault_invisible_highlight(p: GuiProbe):
@@ -330,6 +360,13 @@ FAULTS = {
     "enter_default_stolen": Fault(lambda p: _fault_enter_default_stolen(p),
                                   "button_enter_activates",
                                   "ACTIVATED on Enter"),
+    # COLORTIERS: owns none_indicator_visible. Removes the red diagonal and
+    # keeps removing it, which is what reverting the `explicit_none` plumbing
+    # produces on screen — a no-paint swatch indistinguishable from a painted
+    # one.
+    "none_indicator_flat": Fault(_fault_none_indicator_flat,
+                                 "none_indicator_visible",
+                                 "carries the red DIAGONAL"),
 }
 
 
@@ -558,6 +595,73 @@ def chain_visible(ctx: Ctx):
              f"(>=10 required; 0 would mean the highlight is invisible)")
     ctx.want(on_px["digest"] != off_px["digest"],
              f"crop digests differ ({off_px['digest']} -> {on_px['digest']})")
+
+
+def _none_diagonal(p: GuiProbe, target: str) -> dict | None:
+    """The no-paint indicator inside `target`, as {stroke, x1, y1, x2, y2} —
+    None when the swatch carries no indicator at all."""
+    return p.cdp.evaluate(
+        "(()=>{const e=document.getElementById(%s);if(!e)return null;"
+        "const l=e.querySelector('svg line');if(!l)return null;"
+        "return {stroke:l.getAttribute('stroke'),x1:l.getAttribute('x1'),"
+        "y1:l.getAttribute('y1'),x2:l.getAttribute('x2'),"
+        "y2:l.getAttribute('y2')};})()" % json.dumps(target))
+
+
+@check("none_indicator_visible",
+       "a no-paint swatch must LOOK like no paint, not like a colour")
+def none_indicator_visible(ctx: Ctx):
+    """The unrendered-fact class: a state the app KNOWS and never draws.
+
+    `state.fill_color == null` has to become a white face with a red diagonal
+    across it. Nothing else on the gate could see that: `color_panel_content` is
+    Path-B-excluded so no widget_tree golden covers this widget, and until this
+    check existed reverting the whole `explicit_none` plumbing left every unit
+    test, every golden and 8/8 gui_drive checks GREEN (COLORTIERS).
+
+    The fill is painted BLACK first, deliberately: the launch default is already
+    white, so "no paint" and "unchanged" would otherwise look identical, and a
+    check that cannot fail on a no-op is not a check.
+    """
+    p = ctx.p
+    swatch = "cp_fill_swatch"
+    ctx.want(p.exists(swatch), f"{swatch} is present in the live DOM")
+
+    # Paint it black, so the no-paint face has somewhere to move FROM.
+    p.click("cp_black_swatch")
+    painted = p.attr(swatch, "style")
+    ctx.note(f"painted style: ...{painted[-70:]}")
+    ctx.want("rgb(0, 0, 0)" in painted or "#000000" in painted,
+             "the swatch starts on a real colour (black)")
+    ctx.want(_none_diagonal(p, swatch) is None,
+             "a PAINTED swatch carries no indicator")
+    painted_px = p.region_stats(swatch)
+    ctx.shot("none_indicator_painted", swatch)
+
+    ctx.inject("none_indicator_flat")
+
+    p.click("cp_none_swatch")
+    none_style = p.attr(swatch, "style")
+    diag = _none_diagonal(p, swatch)
+    none_px = p.region_stats(swatch)
+    ctx.note(f"no-paint style: ...{none_style[-70:]}")
+    ctx.note(f"indicator: {diag}")
+    ctx.shot("none_indicator_none", swatch)
+
+    ctx.want(diag is not None and diag.get("stroke") == "red",
+             "the no-paint swatch carries the red DIAGONAL indicator; without "
+             "it a None fill is indistinguishable from a painted one")
+    ctx.want((diag["x1"], diag["y1"], diag["x2"], diag["y2"])
+             == ("0", "100", "100", "0"),
+             f"the diagonal runs corner to corner, bottom-left to top-right "
+             f"(got {diag['x1']},{diag['y1']} -> {diag['x2']},{diag['y2']})")
+    ctx.want("#fff" in none_style or "rgb(255, 255, 255)" in none_style,
+             f"the no-paint FACE is white so the diagonal reads against it "
+             f"(style tail: ...{none_style[-40:]})")
+    dist = p.stats_distance(painted_px, none_px)
+    ctx.want(dist >= 10.0,
+             f"and the pixels actually moved: mean distance {dist} from the "
+             f"painted state (>=10 required)")
 
 
 @check("tile_click_responds",
