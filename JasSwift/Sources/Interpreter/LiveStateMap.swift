@@ -113,8 +113,16 @@ func liveSwatchPaint(model: Model?, isFill: Bool) -> Color? {
     if value is NSNull { return nil }
     // MIXED (or no model at all): nothing is published, so the DECLARED
     // default stands — the same composition `buildLiveStateMap` performs,
-    // resolved for one key so the toolbar's redraw path does not rebuild the
-    // whole defaults map twice per frame.
+    // resolved for one key rather than as a whole map.
+    //
+    // This runs inside a SwiftUI body (the toolbar squares), twice per redraw
+    // while a mixed selection is live, and it does build the whole defaults map
+    // to take one key out of it. That is affordable for exactly one reason: the
+    // BUNDLE PARSE behind `WorkspaceData.load()` is cached (see
+    // ``WorkspaceData/load()``), so what remains is a walk of the `state`
+    // section. Rust's counterpart, `action_fill_stroke_values`, is the same
+    // shape over the same `OnceLock`-cached parse. Before the cache this line
+    // re-read and re-parsed 1.4 MB of JSON per call.
     guard let hex = WorkspaceData.load()?.stateDefaults()[key] as? String
     else { return nil }
     return Color.fromHex(hex)

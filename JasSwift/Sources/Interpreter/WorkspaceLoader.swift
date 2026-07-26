@@ -11,12 +11,37 @@ class WorkspaceData {
         self.data = data
     }
 
+    /// The workspace bundle, read and parsed ONCE.
+    ///
+    /// Mirrors Rust's `Workspace::load`, which hands out a reference to a
+    /// `OnceLock`-cached parse (jas_dioxus/src/interpreter/workspace.rs). A
+    /// `static let` is Swift's equivalent: lazily initialised, exactly once,
+    /// thread-safely.
+    ///
+    /// This has to be cached, not "should be": the bundle is 1.4 MB of JSON,
+    /// this call has ~40 sites, and some of them are inside SwiftUI bodies —
+    /// ``liveSwatchPaint`` reaches it for ONE key while a mixed selection is
+    /// live, which is twice per toolbar redraw. Uncached, each of those was a
+    /// full re-read and re-parse (~100 ms measured in
+    /// `workspaceBundleIsParsedOnceNotPerCall`).
+    ///
+    /// Sharing one instance is safe because ``WorkspaceData`` is immutable: its
+    /// `data` is a `let` and nothing mutates the parsed tree. There is no
+    /// reload path — the bundle is a build product, regenerated from
+    /// `workspace/*.yaml` before a run, never during one.
+    private static let cached: WorkspaceData? = parse()
+
     /// Load the workspace from a JSON file or embedded fallback.
     ///
     /// Tries to read from the development file path first
     /// (../../workspace/workspace.json relative to JasSwift),
     /// then falls back to an embedded empty workspace.
     static func load() -> WorkspaceData? {
+        cached
+    }
+
+    /// The uncached read + parse behind ``cached``. Runs at most once.
+    private static func parse() -> WorkspaceData? {
         // Try file-based loading for development
         let filePaths = [
             // Relative to JasSwift directory
