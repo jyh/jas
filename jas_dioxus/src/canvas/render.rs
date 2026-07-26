@@ -160,6 +160,28 @@ fn lookup_brush(slug: &str) -> Option<serde_json::Value> {
     })
 }
 
+/// The Canvas2D drawing-state stack, as the one pair of calls
+/// `CtxSaveGuard` balances. Production always uses the web-sys context;
+/// the trait exists so the guard's contract is testable on the host —
+/// a real `CanvasRenderingContext2d` cannot be constructed under
+/// `cargo test` (wasm-bindgen imports are not callable off-wasm), so the
+/// unit tests drive the guard through a counting double instead.
+pub(super) trait CtxStateStack {
+    /// Push the current drawing state (`ctx.save()`).
+    fn push_ctx_state(&self);
+    /// Pop the top drawing state (`ctx.restore()`).
+    fn pop_ctx_state(&self);
+}
+
+impl CtxStateStack for CanvasRenderingContext2d {
+    fn push_ctx_state(&self) {
+        self.save();
+    }
+    fn pop_ctx_state(&self) {
+        self.restore();
+    }
+}
+
 /// Balanced `ctx.save()`: the paired `restore()` runs when this guard
 /// drops — on ANY scope exit, including early `return`s. Rust's RAII is
 /// the `with`-block equivalent: the type system enforces the balance a
@@ -167,21 +189,31 @@ fn lookup_brush(slug: &str) -> Option<serde_json::Value> {
 /// brushed-path branch `return`ed between a manual save() and the
 /// function-end restore(), leaking one save per brushed frame; every
 /// later repaint then compounded the view transform on the leaked state
-/// (the receding-artboard cascade). Bind to a NAMED variable
-/// (`let _ctx_guard = ...`); binding to bare `_` drops IMMEDIATELY and
-/// restores on the spot.
-struct CtxSaveGuard<'a>(&'a CanvasRenderingContext2d);
+/// (the receding-artboard cascade).
+///
+/// Two usage laws, both pinned by unit tests below:
+///
+/// 1. Bind to a NAMED variable (`let _ctx_guard = ...`). Binding to bare
+///    `_` is NOT a binding — the temporary drops at the end of that very
+///    statement, restoring on the spot and leaving the "guarded" body
+///    running unbalanced. This is the one footgun of the pattern.
+/// 2. The guarded span is the binding's SCOPE. When the save must cover
+///    less than the enclosing scope (code after the old `restore()` that
+///    relies on the popped state), wrap it in an explicit `{ ... }`
+///    block — or, for a conditional save, hold an `Option<CtxSaveGuard>`
+///    and `drop()` it exactly where the manual `restore()` stood.
+pub(super) struct CtxSaveGuard<'a, C: CtxStateStack>(&'a C);
 
-impl<'a> CtxSaveGuard<'a> {
-    fn new(ctx: &'a CanvasRenderingContext2d) -> Self {
-        ctx.save();
+impl<'a, C: CtxStateStack> CtxSaveGuard<'a, C> {
+    pub(super) fn new(ctx: &'a C) -> Self {
+        ctx.push_ctx_state();
         Self(ctx)
     }
 }
 
-impl Drop for CtxSaveGuard<'_> {
+impl<C: CtxStateStack> Drop for CtxSaveGuard<'_, C> {
     fn drop(&mut self) {
-        self.0.restore();
+        self.0.pop_ctx_state();
     }
 }
 
@@ -696,16 +728,18 @@ fn stroke_aligned(ctx: &CanvasRenderingContext2d, align: StrokeAlign) {
         StrokeAlign::Inside => {
             // The current path is still on the context. Clip to it,
             // then stroke — only the inner half of the 2x-width stroke is visible.
-            ctx.save();
+            // The clip is scoped to this arm by the guard (see CtxSaveGuard).
+            let _ctx_guard = CtxSaveGuard::new(ctx);
             ctx.clip();
             ctx.stroke();
-            ctx.restore();
         }
         StrokeAlign::Outside => {
             // The current path is still on the context. Add a huge rect
             // to the existing path (rect() doesn't clear it), then clip
             // with evenodd — this clips to everything OUTSIDE the shape.
-            ctx.save();
+            // Guarded: the reflection call below can panic on an exotic
+            // context, and Drop still pops the clip on that path.
+            let _ctx_guard = CtxSaveGuard::new(ctx);
             ctx.rect(-1e6, -1e6, 2e6, 2e6);
             // Call clip("evenodd") via js_sys since web-sys may not expose the overload
             let _ = js_sys::Reflect::apply(
@@ -716,7 +750,6 @@ fn stroke_aligned(ctx: &CanvasRenderingContext2d, align: StrokeAlign) {
                 &js_sys::Array::of1(&wasm_bindgen::JsValue::from_str("evenodd")),
             );
             ctx.stroke();
-            ctx.restore();
         }
     }
 }
@@ -1038,11 +1071,15 @@ fn apply_clip_in_luminance(
     if promote_mask_to_luminance(&luma_ctx, 0, 0, w, h).is_none() {
         return false;
     }
-    off_ctx.save();
-    off_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
-    off_ctx.set_global_composite_operation("destination-in").ok();
-    let _ = off_ctx.draw_image_with_html_canvas_element(&luma_canvas, 0.0, 0.0);
-    off_ctx.restore();
+    // Guarded so the identity transform + destination-in are popped on
+    // every exit; the block ends the span before the `true` tail, exactly
+    // where the manual restore() stood (see CtxSaveGuard).
+    {
+        let _ctx_guard = CtxSaveGuard::new(off_ctx);
+        off_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+        off_ctx.set_global_composite_operation("destination-in").ok();
+        let _ = off_ctx.draw_image_with_html_canvas_element(&luma_canvas, 0.0, 0.0);
+    }
     true
 }
 
@@ -1105,74 +1142,79 @@ fn draw_element_with_mask(
 
     // Pass 2: apply the mask's effective transform (per
     // ``effective_mask_transform``), then composite the mask
-    // subtree against the element body.
-    off_ctx.save();
-    if let Some(t) = effective_mask_transform(mask, elem) {
-        off_ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f).ok();
-    }
-    match plan {
-        MaskPlan::ClipIn => {
-            // Luminance-based soft-mask composite. The mask subtree
-            // is rendered to a separate scratch, its alpha is
-            // replaced by the per-pixel luminance (so a black
-            // opaque mask reads as fully transparent and a white
-            // opaque mask reads as fully opaque), and then the
-            // result is drawn onto the element buffer with
-            // ``destination-in``. Matches PDF §11's soft-mask
-            // convention. OPACITY.md §Rendering.
-            //
-            // If any step of the luminance path fails (ImageData
-            // unavailable, zero-size canvas, …) we fall back to
-            // the alpha-based composite so the user still sees
-            // *something*.
-            let fell_back = !apply_clip_in_luminance(
-                &off_ctx, w, h, mask, ancestor_vis, precision,
-            );
-            if fell_back {
-                off_ctx.set_global_composite_operation("destination-in").ok();
+    // subtree against the element body. The explicit block ends the
+    // guarded span exactly where the manual restore() stood — the blit
+    // below must run in the popped state.
+    {
+        let _ctx_guard = CtxSaveGuard::new(&off_ctx);
+        if let Some(t) = effective_mask_transform(mask, elem) {
+            off_ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f).ok();
+        }
+        match plan {
+            MaskPlan::ClipIn => {
+                // Luminance-based soft-mask composite. The mask subtree
+                // is rendered to a separate scratch, its alpha is
+                // replaced by the per-pixel luminance (so a black
+                // opaque mask reads as fully transparent and a white
+                // opaque mask reads as fully opaque), and then the
+                // result is drawn onto the element buffer with
+                // ``destination-in``. Matches PDF §11's soft-mask
+                // convention. OPACITY.md §Rendering.
+                //
+                // If any step of the luminance path fails (ImageData
+                // unavailable, zero-size canvas, …) we fall back to
+                // the alpha-based composite so the user still sees
+                // *something*.
+                let fell_back = !apply_clip_in_luminance(
+                    &off_ctx, w, h, mask, ancestor_vis, precision,
+                );
+                if fell_back {
+                    off_ctx.set_global_composite_operation("destination-in").ok();
+                    draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+                }
+            }
+            MaskPlan::ClipOut => {
+                // `destination-out` over the whole canvas — the mask
+                // shape erases the element.
+                off_ctx.set_global_composite_operation("destination-out").ok();
                 draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
             }
-        }
-        MaskPlan::ClipOut => {
-            // `destination-out` over the whole canvas — the mask
-            // shape erases the element.
-            off_ctx.set_global_composite_operation("destination-out").ok();
-            draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
-        }
-        MaskPlan::RevealOutsideBbox => {
-            // `clip: false, invert: false`: the element keeps full
-            // alpha outside the mask subtree's bounding box, and is
-            // clipped to the mask shape only inside it. Implement
-            // by clipping the Canvas2D state to the bbox rectangle
-            // before applying `destination-in`; outside the clip,
-            // the element remains untouched.
-            let (bx, by, bw, bh) = mask.subtree.bounds();
-            if bw > 0.0 && bh > 0.0 {
-                off_ctx.save();
-                off_ctx.begin_path();
-                off_ctx.rect(bx, by, bw, bh);
-                off_ctx.clip();
-                off_ctx.set_global_composite_operation("destination-in").ok();
-                draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
-                off_ctx.set_global_composite_operation("source-over").ok();
-                off_ctx.restore();
+            MaskPlan::RevealOutsideBbox => {
+                // `clip: false, invert: false`: the element keeps full
+                // alpha outside the mask subtree's bounding box, and is
+                // clipped to the mask shape only inside it. Implement
+                // by clipping the Canvas2D state to the bbox rectangle
+                // before applying `destination-in`; outside the clip,
+                // the element remains untouched.
+                let (bx, by, bw, bh) = mask.subtree.bounds();
+                if bw > 0.0 && bh > 0.0 {
+                    // Guarded: the bbox clip + destination-in pop at the
+                    // end of this branch (see CtxSaveGuard).
+                    let _ctx_guard = CtxSaveGuard::new(&off_ctx);
+                    off_ctx.begin_path();
+                    off_ctx.rect(bx, by, bw, bh);
+                    off_ctx.clip();
+                    off_ctx.set_global_composite_operation("destination-in").ok();
+                    draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+                    off_ctx.set_global_composite_operation("source-over").ok();
+                }
+                // Empty-bbox mask: no clip region; the element
+                // body passes through unmodified (mask has nothing to
+                // composite against).
             }
-            // Empty-bbox mask: no clip region; the element
-            // body passes through unmodified (mask has nothing to
-            // composite against).
         }
     }
-    off_ctx.restore();
 
     // Copy the composited offscreen pixels onto the main ctx at
     // device coordinates (0, 0). The main ctx's alpha / blend_mode
     // will apply to the final blit, matching the non-mask path.
-    ctx.save();
+    // Guarded: the identity transform + blend state pop when this
+    // function returns, on every path (see CtxSaveGuard).
+    let _ctx_guard = CtxSaveGuard::new(ctx);
     ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
     ctx.set_global_alpha(elem.opacity());
     ctx.set_global_composite_operation(blend_mode_css(elem.mode())).ok();
     ctx.draw_image_with_html_canvas_element(&off_canvas, 0.0, 0.0).ok();
-    ctx.restore();
 }
 
 // ---------------------------------------------------------------------------
@@ -1199,11 +1241,11 @@ fn draw_element_body(
     }
     let outline = effective == Visibility::Outline;
 
-    // Capture the inherited alpha BEFORE save(); save+set replaces
+    // Capture the inherited alpha BEFORE the save; save+set replaces
     // it, but we want this element's effective alpha to MULTIPLY into
     // any outer alpha (parent group opacity, isolation dim) rather
-    // than replace it. ctx.save() saves the current alpha; ctx.restore()
-    // pops it back when this element finishes.
+    // than replace it. The guard's save takes the current alpha; its
+    // Drop pops it back when this element finishes.
     let parent_alpha = ctx.global_alpha();
     // RAII-balanced save: restores on every exit path (see CtxSaveGuard).
     let _ctx_guard = CtxSaveGuard::new(ctx);
@@ -1617,13 +1659,15 @@ fn draw_element_body(
             // the native stroke / arrowhead pipeline below. See
             // BRUSHES.md §Stroke styling interaction.
             //
-            // MUST NOT `return` here: the per-element prologue did
-            // ctx.save() and the epilogue restore() is the last line of
-            // this function — an early return leaks the save, and every
-            // later repaint then compounds the view transform on the
-            // leaked state (the whole scene re-draws smaller/offset each
-            // frame — the "receding artboard cascade"). Gate the native
-            // stroke + arrowhead sections on this flag instead.
+            // Gate the native stroke + arrowhead sections on this flag
+            // rather than `return`ing from here: this branch is the
+            // WEDGESTORM site, where the early return skipped the
+            // epilogue restore() and leaked one save per brushed frame
+            // (every later repaint then compounded the view transform on
+            // the leaked state — the "receding artboard cascade"). The
+            // prologue's CtxSaveGuard now makes such a return harmless,
+            // but the flag is also what the surrounding sections mean:
+            // the brush renderer owns the whole stroke appearance.
             let stroke_brushed = if !outline && e.stroke_brush.is_some() {
                 ctx.set_global_alpha(base_alpha * stroke_op);
                 // False when the slug didn't resolve or the brush type
@@ -1765,7 +1809,7 @@ fn draw_element_body(
             }
             // V/H scale wraps the whole text draw. Character rotation
             // is *per-glyph* (matches SVG's <text rotate="N"> spec and
-            // Illustrator's Character Rotation field): each glyph
+            // the Character panel's Rotation field): each glyph
             // rotates around its own baseline position, leaving the
             // overall layout on a horizontal baseline.
             let h_scale = if e.horizontal_scale.is_empty() { 1.0 }
@@ -1776,12 +1820,19 @@ fn draw_element_body(
                 else { e.rotate.parse::<f64>().unwrap_or(0.0) };
             let rotate_rad = rotate_deg.to_radians();
             let needs_scale = h_scale != 1.0 || v_scale != 1.0;
-            if needs_scale {
-                ctx.save();
+            // Conditional guarded save: `Some` only when the v/h-scale frame
+            // is actually pushed. Drop pops it at the end of this branch —
+            // where the paired `if needs_scale { ctx.restore(); }` stood
+            // (see CtxSaveGuard).
+            let _scale_guard = if needs_scale {
+                let guard = CtxSaveGuard::new(ctx);
                 ctx.translate(e.x, e.y).ok();
                 ctx.scale(h_scale, v_scale).ok();
                 ctx.translate(-e.x, -e.y).ok();
-            }
+                Some(guard)
+            } else {
+                None
+            };
             let measure = crate::tools::text_measure::make_measurer(&font, effective_fs);
             let max_w = if e.is_area_text() { e.width } else { 0.0 };
             // text-transform / font-variant: small-caps is rendered as
@@ -1926,11 +1977,16 @@ fn draw_element_body(
                     let mut cx = line_x;
                     for ch in s.chars() {
                         let ch_str = ch.to_string();
-                        ctx.save();
-                        ctx.translate(cx, baseline).ok();
-                        ctx.rotate(rotate_rad).ok();
-                        ctx.fill_text(&ch_str, 0.0, 0.0).ok();
-                        ctx.restore();
+                        // The glyph's own frame: the block ends the guarded
+                        // span exactly where the manual restore() stood, so
+                        // the advance below is measured in the parent frame
+                        // (see CtxSaveGuard).
+                        {
+                            let _ctx_guard = CtxSaveGuard::new(ctx);
+                            ctx.translate(cx, baseline).ok();
+                            ctx.rotate(rotate_rad).ok();
+                            ctx.fill_text(&ch_str, 0.0, 0.0).ok();
+                        }
                         cx += measure(&ch_str) + ls_px;
                     }
                 }
@@ -2023,9 +2079,7 @@ fn draw_element_body(
                     &js_sys::JsString::from("0px"),
                 );
             }
-            if needs_scale {
-                ctx.restore();
-            }
+            // The v/h-scale frame pops here, via `_scale_guard`'s Drop.
             } // end else (is_flat)
         }
         Element::TextPath(e) => {
@@ -2070,11 +2124,12 @@ fn draw_element_body(
                             let (px2, py2) = path_point_at_offset(&e.d, t2);
                             let angle = (py2 - py).atan2(px2 - px);
 
-                            ctx.save();
+                            // The glyph's frame on the path; popped at the
+                            // end of this branch (see CtxSaveGuard).
+                            let _ctx_guard = CtxSaveGuard::new(ctx);
                             ctx.translate(px, py).ok();
                             ctx.rotate(angle).ok();
                             ctx.fill_text(&ch_str, -ch_width / 2.0, e.font_size * 0.35).ok();
-                            ctx.restore();
                         }
                         offset += ch_width;
                     }
@@ -2236,8 +2291,11 @@ fn draw_segmented_text(
         let has_transform = t.transform.is_some();
         let has_rotate = rotate_rad != 0.0;
 
-        if has_rotate || has_transform {
-            ctx.save();
+        // Conditional guarded save: `Some` only when this tspan needs its own
+        // frame. Dropped explicitly below, at the site of the paired manual
+        // restore() (see CtxSaveGuard).
+        let tspan_guard = if has_rotate || has_transform {
+            let guard = CtxSaveGuard::new(ctx);
             ctx.translate(cx, tspan_baseline).ok();
             if let Some(tr) = &t.transform {
                 ctx.transform(tr.a, tr.b, tr.c, tr.d, tr.e, tr.f).ok();
@@ -2246,9 +2304,11 @@ fn draw_segmented_text(
                 ctx.rotate(rotate_rad).ok();
             }
             ctx.fill_text(&t.content, 0.0, 0.0).ok();
+            Some(guard)
         } else {
             ctx.fill_text(&t.content, cx, tspan_baseline).ok();
-        }
+            None
+        };
 
         // Effective decoration: Some([..]) overrides parent (empty
         // list = explicit no-decoration); None inherits parent tokens.
@@ -2279,9 +2339,9 @@ fn draw_segmented_text(
                 );
             }
         }
-        if has_rotate || has_transform {
-            ctx.restore();
-        }
+        // Pop the tspan frame here rather than at the loop-body end, so the
+        // guarded span is exactly the former save/restore span.
+        drop(tspan_guard);
         cx += w;
     }
 }
@@ -2621,65 +2681,69 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
 
         // Apply the element's transform (translation from align ops,
         // future rotate/scale, etc.) so the overlay tracks the
-        // rendered element. Save/restore so the overlay for the next
-        // selected element starts from the world transform.
-        ctx.save();
-        apply_transform(ctx, elem.transform());
+        // rendered element. The guarded block scopes that transform to the
+        // outline trace: the handle pass below MUST run in the popped state
+        // (view transform only), so the block ends exactly where the manual
+        // restore() stood (see CtxSaveGuard).
+        {
+            let _ctx_guard = CtxSaveGuard::new(ctx);
+            apply_transform(ctx, elem.transform());
 
-        // Counter-scale the fixed outline pen width by the element transform's
-        // scale (selection_outline_scale) so the outline trace — drawn UNDER
-        // that transform — renders at a constant width regardless of the
-        // element's scale (it stays zoom-scaled, like the handle squares).
-        let outline_scale = selection_outline_scale(doc, &es.path);
-        let inv = if outline_scale > 1e-6 { 1.0 / outline_scale } else { 1.0 };
-        ctx.set_line_width(inv);
+            // Counter-scale the fixed outline pen width by the element
+            // transform's scale (selection_outline_scale) so the outline trace
+            // — drawn UNDER that transform — renders at a constant width
+            // regardless of the element's scale (it stays zoom-scaled, like
+            // the handle squares).
+            let outline_scale = selection_outline_scale(doc, &es.path);
+            let inv = if outline_scale > 1e-6 { 1.0 / outline_scale } else { 1.0 };
+            ctx.set_line_width(inv);
 
-        // Text and TextPath get a bounding-box highlight instead of
-        // a path trace. For area text the bbox aligns with the area
-        // (that's what `bounds()` returns); for point text it wraps
-        // the drawn glyphs; for TextPath it wraps the path the text
-        // follows.
-        let is_text_like = matches!(elem, Element::Text(_) | Element::TextPath(_));
-        // Containers (Group / Layer) are picked as whole elements by
-        // the Selection tool's hit_test (which stops at direct layer
-        // children). Per Illustrator convention, a selected Group is
-        // shown as a single bbox around its contents — not as
-        // individual descendant outlines — so we render the
-        // children-union bounds here.
-        let is_container = matches!(elem, Element::Group(_) | Element::Layer(_));
+            // Text and TextPath get a bounding-box highlight instead of
+            // a path trace. For area text the bbox aligns with the area
+            // (that's what `bounds()` returns); for point text it wraps
+            // the drawn glyphs; for TextPath it wraps the path the text
+            // follows.
+            let is_text_like = matches!(elem, Element::Text(_) | Element::TextPath(_));
+            // Containers (Group / Layer) are picked as whole elements by
+            // the Selection tool's hit_test (which stops at direct layer
+            // children). Per the vector-illustration convention, a selected
+            // Group is shown as a single bbox around its contents — not as
+            // individual descendant outlines — so we render the
+            // children-union bounds here.
+            let is_container = matches!(elem, Element::Group(_) | Element::Layer(_));
 
-        if is_container {
-            let (bx, by, bw, bh) = elem.bounds();
-            if bw > 0.0 && bh > 0.0 {
-                ctx.stroke_rect(bx, by, bw, bh);
-            }
-        } else {
-            // Text and TextPath show a bbox + corner handles so the
-            // user can grab and resize/move the text frame; other
-            // elements stroke their own path. ``control_points``
-            // returns the 4 bbox corners for text elements (default
-            // fallback) so the same handle-drawing loop below works
-            // unchanged.
-            if is_text_like {
+            if is_container {
                 let (bx, by, bw, bh) = elem.bounds();
                 if bw > 0.0 && bh > 0.0 {
                     ctx.stroke_rect(bx, by, bw, bh);
                 }
             } else {
-                ctx.begin_path();
-                trace_element_path(ctx, elem);
-                ctx.stroke();
-            }
+                // Text and TextPath show a bbox + corner handles so the
+                // user can grab and resize/move the text frame; other
+                // elements stroke their own path. ``control_points``
+                // returns the 4 bbox corners for text elements (default
+                // fallback) so the same handle-drawing loop below works
+                // unchanged.
+                if is_text_like {
+                    let (bx, by, bw, bh) = elem.bounds();
+                    if bw > 0.0 && bh > 0.0 {
+                        ctx.stroke_rect(bx, by, bw, bh);
+                    }
+                } else {
+                    ctx.begin_path();
+                    trace_element_path(ctx, elem);
+                    ctx.stroke();
+                }
 
-            // NOTE: the control-point handle SQUARES are intentionally NOT
-            // drawn here. They are drawn below via `selection_handle_rects`
-            // at a FIXED screen size under the view (pan/zoom) transform only
-            // — the element transform was restored — so an element's
-            // transform moves them but never scales the glyphs. The outline
-            // trace above stays under the element transform (it traces the
-            // geometry).
+                // NOTE: the control-point handle SQUARES are intentionally NOT
+                // drawn here. They are drawn below via `selection_handle_rects`
+                // at a FIXED screen size under the view (pan/zoom) transform
+                // only — the element transform was restored — so an element's
+                // transform moves them but never scales the glyphs. The
+                // outline trace above stays under the element transform (it
+                // traces the geometry).
+            }
         }
-        ctx.restore();
 
         // Control-point handles: FIXED size at element-transformed positions,
         // drawn under the VIEW (pan/zoom) transform only — the element
@@ -2789,7 +2853,7 @@ fn draw_fade_overlay(
     if doc.artboards.is_empty() {
         return;
     }
-    ctx.save();
+    let _ctx_guard = CtxSaveGuard::new(ctx);
     // Fill the full canvas with 50% theme-gray.
     ctx.set_fill_style_str("rgba(160,160,160,0.5)");
     ctx.fill_rect(0.0, 0.0, width, height);
@@ -2799,7 +2863,7 @@ fn draw_fade_overlay(
     for ab in &doc.artboards {
         ctx.fill_rect(ab.x, ab.y, ab.width, ab.height);
     }
-    ctx.restore();
+    // The composite state pops via `_ctx_guard`'s Drop.
 }
 
 fn draw_artboard_borders(ctx: &CanvasRenderingContext2d, doc: &Document) {
@@ -2845,7 +2909,9 @@ fn draw_bleed_guides(ctx: &CanvasRenderingContext2d, doc: &Document) {
     {
         return;
     }
-    ctx.save();
+    // Guarded: the dash pattern + pen state pop when this function returns,
+    // on every path (see CtxSaveGuard).
+    let _ctx_guard = CtxSaveGuard::new(ctx);
     ctx.set_stroke_style_str(BLEED_GUIDE_COLOR);
     ctx.set_line_width(1.0);
     let dash = js_sys::Array::new();
@@ -2858,7 +2924,6 @@ fn draw_bleed_guides(ctx: &CanvasRenderingContext2d, doc: &Document) {
         }
     }
     ctx.set_line_dash(&js_sys::Array::new()).ok();
-    ctx.restore();
 }
 
 fn draw_artboard_accent(
@@ -3027,12 +3092,16 @@ pub fn render(
         //     multiplies through draw_element_body).
         //   - Isolated subtree paints over them at full alpha.
         // Artboard fills (already painted above) stay full strength.
-        ctx.save();
-        ctx.set_global_alpha(0.15);
-        for layer in &doc.layers {
-            draw_element(ctx, layer, Visibility::Preview, precision);
+        // The dim pass is guarded in its own block: the isolated subtree
+        // below must paint at FULL alpha, so the span ends exactly where the
+        // manual restore() stood (see CtxSaveGuard).
+        {
+            let _ctx_guard = CtxSaveGuard::new(ctx);
+            ctx.set_global_alpha(0.15);
+            for layer in &doc.layers {
+                draw_element(ctx, layer, Visibility::Preview, precision);
+            }
         }
-        ctx.restore();
         if let Some(iso_elem) = doc.get_element(&iso_path.to_vec()) {
             draw_element(ctx, iso_elem, Visibility::Preview, precision);
         }
@@ -3069,6 +3138,136 @@ pub fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // -- CtxSaveGuard: the WEDGESTORM class kill -----------------------------
+    //
+    // A real CanvasRenderingContext2d cannot be built under `cargo test`
+    // (its methods are wasm-bindgen imports and are not callable off-wasm),
+    // so these drive the guard through `CtxStateStack` with a counting
+    // double. What they pin is the guard's OWN contract — one push on
+    // construction, one pop on every scope exit — which is exactly the
+    // invariant the leaked save() violated. The live-context end of the
+    // contract is pinned separately by the `canvas_transform_balance` GUI
+    // check, which reads getTransform() across a brushed render + repaints.
+
+    #[derive(Default)]
+    struct CountingCtx {
+        depth: std::cell::Cell<i32>,
+        pushes: std::cell::Cell<u32>,
+        pops: std::cell::Cell<u32>,
+    }
+
+    impl CtxStateStack for CountingCtx {
+        fn push_ctx_state(&self) {
+            self.depth.set(self.depth.get() + 1);
+            self.pushes.set(self.pushes.get() + 1);
+        }
+        fn pop_ctx_state(&self) {
+            self.depth.set(self.depth.get() - 1);
+            self.pops.set(self.pops.get() + 1);
+        }
+    }
+
+    #[test]
+    fn ctx_save_guard_restores_at_scope_end() {
+        let c = CountingCtx::default();
+        {
+            let _ctx_guard = CtxSaveGuard::new(&c);
+            assert_eq!(c.depth.get(), 1, "save taken on construction");
+        }
+        assert_eq!(c.depth.get(), 0, "restored when the scope ended");
+        assert_eq!((c.pushes.get(), c.pops.get()), (1, 1));
+    }
+
+    #[test]
+    fn ctx_save_guard_restores_on_early_return() {
+        // The WEDGESTORM shape verbatim: a branch returns from the middle of
+        // the guarded span. With a manual save()/end-of-function restore()
+        // that path leaked one save per call, and every later repaint
+        // compounded the view transform on the leaked state. Drop runs on
+        // the early-return path too, so the balance holds.
+        fn guarded(c: &CountingCtx, bail: bool) -> &'static str {
+            let _ctx_guard = CtxSaveGuard::new(c);
+            if bail {
+                return "early";
+            }
+            "end"
+        }
+        let c = CountingCtx::default();
+        assert_eq!(guarded(&c, true), "early");
+        assert_eq!(c.depth.get(), 0, "early return still restored");
+        assert_eq!(guarded(&c, false), "end");
+        assert_eq!(c.depth.get(), 0, "fall-through still restored");
+        // Repeat the leak-capable path: a leak of one save per call is what
+        // made the cascade advance one copy per frame.
+        for _ in 0..16 {
+            guarded(&c, true);
+        }
+        assert_eq!(c.depth.get(), 0, "no drift across repeated frames");
+        assert_eq!(c.pushes.get(), c.pops.get());
+    }
+
+    #[test]
+    fn ctx_save_guard_block_scopes_a_narrow_span() {
+        // Usage law 2: an explicit block makes the guarded span exactly the
+        // former save/restore span, so code that must run in the POPPED
+        // state (selection handles, the mask blit) still does.
+        let c = CountingCtx::default();
+        {
+            let _ctx_guard = CtxSaveGuard::new(&c);
+            assert_eq!(c.depth.get(), 1);
+        }
+        assert_eq!(c.depth.get(), 0, "popped before the trailing code runs");
+        assert_eq!(c.pops.get(), 1);
+    }
+
+    #[test]
+    fn ctx_save_guard_optional_guard_drops_where_restore_stood() {
+        // The conditional-save shape (Text v/h-scale, per-tspan frames):
+        // `Option<CtxSaveGuard>` — Some only when the save was taken — and
+        // an explicit drop() at the old restore() site.
+        fn run(c: &CountingCtx, needs_scale: bool) {
+            let guard = if needs_scale {
+                Some(CtxSaveGuard::new(c))
+            } else {
+                None
+            };
+            assert_eq!(c.depth.get(), if needs_scale { 1 } else { 0 });
+            drop(guard);
+            assert_eq!(c.depth.get(), 0, "back to the parent frame");
+        }
+        let c = CountingCtx::default();
+        run(&c, true);
+        run(&c, false);
+        assert_eq!((c.pushes.get(), c.pops.get()), (1, 1), "no save when unneeded");
+    }
+
+    #[test]
+    fn ctx_save_guard_nests() {
+        let c = CountingCtx::default();
+        let _outer = CtxSaveGuard::new(&c);
+        {
+            let _inner = CtxSaveGuard::new(&c);
+            assert_eq!(c.depth.get(), 2, "nested save");
+        }
+        assert_eq!(c.depth.get(), 1, "inner popped, outer still held");
+        drop(_outer);
+        assert_eq!(c.depth.get(), 0);
+    }
+
+    #[test]
+    fn ctx_save_guard_bare_underscore_drops_immediately() {
+        // Usage law 1, the footgun, pinned executably: `let _ = ...` is not
+        // a binding. The guard is a temporary that drops at the end of the
+        // statement, so the restore lands on the spot and everything after
+        // it runs in the parent state — the exact bug the guard exists to
+        // prevent, reintroduced by one character.
+        let c = CountingCtx::default();
+        let _ = CtxSaveGuard::new(&c);
+        assert_eq!(c.depth.get(), 0, "bare `_` restored on the spot");
+        let _ctx_guard = CtxSaveGuard::new(&c);
+        assert_eq!(c.depth.get(), 1, "a NAMED binding holds the save open");
+    }
 
     #[test]
     fn render_resolver_resolves_concepts_from_registry() {
