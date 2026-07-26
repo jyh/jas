@@ -9719,4 +9719,69 @@ mod tests {
         };
         assert_eq!(brush, None, "an unknown attr leaves the brush unset");
     }
+
+    // BRUSHAPPLY (2026-07-24): the headless repro from the stone. Clicking a
+    // Brushes-panel tile dispatches `apply_brush_to_selection` with the tile's
+    // library/brush_slug params; the element's stroke_brush must become the
+    // COMPOSED id "default_brushes/flat_10". This exercises the REAL bundled
+    // action (reading workspace.json), so it guards the actions.yaml value-form
+    // law: the value is a pure expression composed by concatenation
+    // (`param.library + "/" + param.brush_slug`). A literal-{{}} template
+    // (the pre-fix bug) would leave the un-expanded string on the element.
+    #[test]
+    fn brush_tile_click_applies_composed_brush_id_via_action() {
+        use crate::document::document::Document;
+        use crate::workspace::app_state::{AppState, TabState};
+
+        // A fresh single-tab app with a clean one-layer document.
+        let mut st = AppState::new();
+        st.tabs.clear();
+        st.tabs.push(TabState::new());
+        st.active_tab = 0;
+        st.tabs[st.active_tab]
+            .model
+            .set_document_for_test(Document::default());
+
+        // Draw one stroked path; add_element selects it at [0,0].
+        let elem = Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 10.0, y: 10.0 },
+                PathCommand::LineTo { x: 100.0, y: 60.0 },
+            ],
+            fill: None,
+            stroke: Some(Stroke::new(Color::BLACK, 2.0)),
+            width_points: Vec::new(),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
+        });
+        Controller::add_element(&mut st.tabs[st.active_tab].model, elem);
+        assert!(
+            !st.tabs[st.active_tab].model.document().selection.is_empty(),
+            "add_element selects the new path"
+        );
+
+        // Click the tile: dispatch the real action reading the compiled bundle.
+        let mut params = serde_json::Map::new();
+        params.insert("library".to_string(), serde_json::json!("default_brushes"));
+        params.insert("brush_slug".to_string(), serde_json::json!("flat_10"));
+        crate::interpreter::renderer::dispatch_action(
+            "apply_brush_to_selection",
+            &params,
+            &mut st,
+        );
+
+        let brush = match st.tabs[st.active_tab].model.document().get_element(&vec![0, 0]) {
+            Some(Element::Path(p)) => p.stroke_brush.clone(),
+            other => panic!("expected a Path at [0,0], got {other:?}"),
+        };
+        assert_eq!(
+            brush,
+            Some("default_brushes/flat_10".to_string()),
+            "the brush id is composed from the params, not the literal {{}} template"
+        );
+    }
 }

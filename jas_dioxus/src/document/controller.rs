@@ -892,25 +892,77 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
-    /// Live, NON-undoable fill set for per-tick color-slider drag
-    /// (`set_active_color_live`). Undo is captured once on pointer-up by
-    /// `set_active_color`, so the drag must not push checkpoints.
-    pub fn set_selection_fill_live(model: &mut Model, fill: Option<Fill>) {
-        let new_doc = Self::fill_applied(model.document(), fill);
-        model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
-    }
-
     /// Set the stroke of all selected elements (undoable, self-bracketing).
     pub fn set_selection_stroke(model: &mut Model, stroke: Option<Stroke>) {
         let new_doc = Self::stroke_applied(model.document(), stroke);
         model.edit_document(new_doc);
     }
 
-    /// Live, NON-undoable stroke set for per-tick color drag (see
-    /// `set_selection_fill_live`).
-    pub fn set_selection_stroke_live(model: &mut Model, stroke: Option<Stroke>) {
-        let new_doc = Self::stroke_applied(model.document(), stroke);
+    /// Rewrite each selected element's stroke through `f`, which receives
+    /// that element's OWN current stroke (`None` when it has none).
+    ///
+    /// Unlike [`Self::set_selection_stroke`] — which stamps one identical
+    /// Stroke across the whole selection — this preserves the per-element
+    /// fields `f` leaves alone, so a Stroke-panel edit to one attribute
+    /// cannot carry the first element's width / colour onto its siblings.
+    /// Used by `apply_stroke_panel_to_selection`.
+    pub fn map_selection_stroke(
+        model: &mut Model, f: impl Fn(Option<Stroke>) -> Option<Stroke>,
+    ) {
+        let new_doc = Self::stroke_mapped(model.document(), f);
+        model.edit_document(new_doc);
+    }
+
+    /// Live, NON-undoable [`Self::map_selection_stroke`] for per-tick
+    /// colour-slider drag: undo is captured once on pointer-up by
+    /// `set_active_color`, so the drag must not push checkpoints.
+    pub fn map_selection_stroke_live(
+        model: &mut Model, f: impl Fn(Option<Stroke>) -> Option<Stroke>,
+    ) {
+        let new_doc = Self::stroke_mapped(model.document(), f);
         model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
+    }
+
+    fn stroke_mapped(
+        doc: &Document, f: impl Fn(Option<Stroke>) -> Option<Stroke>,
+    ) -> Document {
+        let doc = doc.clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                let next = f(elem.stroke().cloned());
+                new_doc = new_doc.replace_element(&es.path, with_stroke(elem, next));
+            }
+        }
+        new_doc
+    }
+
+    /// Rewrite each selected element's fill through `f`, which receives
+    /// that element's OWN current fill (`None` when it has none). The
+    /// per-element counterpart of [`Self::set_selection_fill`]: preserves
+    /// the fields `f` leaves alone (e.g. a colour pick must not reset each
+    /// element's fill opacity).
+    pub fn map_selection_fill(model: &mut Model, f: impl Fn(Option<Fill>) -> Option<Fill>) {
+        let new_doc = Self::fill_mapped(model.document(), f);
+        model.edit_document(new_doc);
+    }
+
+    /// Live, NON-undoable [`Self::map_selection_fill`] for per-tick drag.
+    pub fn map_selection_fill_live(model: &mut Model, f: impl Fn(Option<Fill>) -> Option<Fill>) {
+        let new_doc = Self::fill_mapped(model.document(), f);
+        model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
+    }
+
+    fn fill_mapped(doc: &Document, f: impl Fn(Option<Fill>) -> Option<Fill>) -> Document {
+        let doc = doc.clone();
+        let mut new_doc = doc.clone();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                let next = f(elem.fill().cloned());
+                new_doc = new_doc.replace_element(&es.path, with_fill(elem, next));
+            }
+        }
+        new_doc
     }
 
     /// Set the `fill_gradient` field of every selected element to the
@@ -2541,6 +2593,43 @@ mod tests {
         let original_count = model.document().layers[0].children().unwrap().len();
         Controller::add_element(&mut model, make_rect(50.0, 50.0, 5.0, 5.0));
         assert_eq!(model.document().layers[0].children().unwrap().len(), original_count + 1);
+    }
+
+    /// LINEPROMOTE: applying a brush to a SELECTED Line promotes it to a Path
+    /// in place (same tree path), and a single undo restores the Line — the
+    /// "upgrade naturally" convention with a one-step journal (JYH 2026-07-25).
+    #[test]
+    fn brush_apply_promotes_selected_line_and_undo_restores_it() {
+        let line = make_line(0.0, 0.0, 5.0, 5.0);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(line)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        assert!(matches!(model.document().get_element(&vec![0, 0]), Some(Element::Line(_))));
+
+        Controller::set_selection_stroke_brush(&mut model, Some("charcoal".to_string()));
+        match model.document().get_element(&vec![0, 0]) {
+            Some(Element::Path(p)) => {
+                assert_eq!(p.stroke_brush, Some("charcoal".to_string()));
+                assert_eq!(p.d, vec![
+                    crate::geometry::element::PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    crate::geometry::element::PathCommand::LineTo { x: 5.0, y: 5.0 },
+                ]);
+            }
+            other => panic!("brush apply must promote the Line to a Path, got {other:?}"),
+        }
+
+        model.undo();
+        assert!(matches!(model.document().get_element(&vec![0, 0]), Some(Element::Line(_))),
+            "a single undo restores the Line");
     }
 
     // ── Mask editor routing (OPACITY.md §Preview interactions) ──

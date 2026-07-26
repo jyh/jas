@@ -66,6 +66,7 @@ fn main() {
         "measure" => run_measure(&vectors),
         "element_bounds" => run_element_bounds(&vectors),
         "flatten" => run_flatten(&vectors),
+        "arrow_trim" => run_arrow_trim(&vectors),
         "length" => run_length(&vectors),
         "hit_test" => run_hit_test(&vectors),
         "boolean" => run_boolean(&vectors),
@@ -144,6 +145,54 @@ fn run_flatten(vectors: &[Value]) -> Vec<Value> {
             };
             let pts = flatten_path_commands(&d);
             let result: Vec<Value> = pts.iter().map(|(x, y)| json!([x, y])).collect();
+            json!({"name": name, "result": result})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// arrow_trim (arc-length trim of an arrowheaded stroke path)
+// ---------------------------------------------------------------
+
+fn cmd_to_json(cmd: &PathCommand) -> Value {
+    match *cmd {
+        PathCommand::MoveTo { x, y } => json!({"cmd": "M", "x": x, "y": y}),
+        PathCommand::LineTo { x, y } => json!({"cmd": "L", "x": x, "y": y}),
+        PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+            json!({"cmd": "C", "x1": x1, "y1": y1, "x2": x2, "y2": y2, "x": x, "y": y})
+        }
+        PathCommand::QuadTo { x1, y1, x, y } => {
+            json!({"cmd": "Q", "x1": x1, "y1": y1, "x": x, "y": y})
+        }
+        PathCommand::ClosePath => json!({"cmd": "Z"}),
+        _ => json!({"cmd": "?"}),
+    }
+}
+
+fn run_arrow_trim(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::arrow_trim::{head_angles, trim_path};
+    const EPS: f64 = 1e-9;
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem = parse_element(&tc["element"]);
+            let d = match &elem {
+                Element::Path(e) => e.d.clone(),
+                _ => Vec::new(),
+            };
+            let start_sb = tc["start_setback"].as_f64().unwrap_or(0.0);
+            let end_sb = tc["end_setback"].as_f64().unwrap_or(0.0);
+            // Orientation vectors pin the trim-chord head angles (ARROWFIX2
+            // item 1); a head reports its angle only when armed (setback > 0).
+            if tc["orient"].as_bool().unwrap_or(false) {
+                let (start_angle, end_angle) = head_angles(&d, start_sb, end_sb);
+                let start = if start_sb > EPS { json!(start_angle) } else { Value::Null };
+                let end = if end_sb > EPS { json!(end_angle) } else { Value::Null };
+                return json!({"name": name, "result": {"start": start, "end": end}});
+            }
+            let trimmed = trim_path(&d, start_sb, end_sb);
+            let result: Vec<Value> = trimmed.iter().map(cmd_to_json).collect();
             json!({"name": name, "result": result})
         })
         .collect()

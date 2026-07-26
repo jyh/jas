@@ -43,25 +43,19 @@ import Testing
 }
 
 // MARK: - Swap fill/stroke (X shortcut logic)
+//
+// These drive `Controller.swapFillStrokeColors` — the ONE statement of the
+// law (workspace/actions.yaml `swap_fill_stroke`, mirroring Rust's
+// app_state.rs), which both Shift+X and the fill/stroke widget arrow call.
+// They used to re-implement the swap inline, so they could not have caught a
+// regression in the code that ships.
 
 @Test func swapFillStrokeColors() {
     let model = Model()
     model.defaultFill = Fill(color: Color(r: 1.0, g: 0.0, b: 0.0))
     model.defaultStroke = Stroke(color: Color(r: 0.0, g: 0.0, b: 1.0))
 
-    // Swap
-    let oldFill = model.defaultFill
-    let oldStroke = model.defaultStroke
-    if let s = oldStroke {
-        model.defaultFill = Fill(color: s.color)
-    } else {
-        model.defaultFill = nil
-    }
-    if let f = oldFill {
-        model.defaultStroke = Stroke(color: f.color)
-    } else {
-        model.defaultStroke = nil
-    }
+    Controller(model: model).swapFillStrokeColors()
 
     #expect(model.defaultFill?.color == Color(r: 0.0, g: 0.0, b: 1.0))
     #expect(model.defaultStroke?.color == Color(r: 1.0, g: 0.0, b: 0.0))
@@ -72,21 +66,10 @@ import Testing
     model.defaultFill = nil
     model.defaultStroke = Stroke(color: Color(r: 0.0, g: 1.0, b: 0.0))
 
-    let oldFill = model.defaultFill
-    let oldStroke = model.defaultStroke
-    if let s = oldStroke {
-        model.defaultFill = Fill(color: s.color)
-    } else {
-        model.defaultFill = nil
-    }
-    if let f = oldFill {
-        model.defaultStroke = Stroke(color: f.color)
-    } else {
-        model.defaultStroke = nil
-    }
+    Controller(model: model).swapFillStrokeColors()
 
     #expect(model.defaultFill?.color == Color(r: 0.0, g: 1.0, b: 0.0))
-    #expect(model.defaultStroke == nil)
+    #expect(model.defaultStroke == nil, "no fill swaps in as no stroke")
 }
 
 @Test func swapFillStrokeWithNilStroke() {
@@ -94,20 +77,9 @@ import Testing
     model.defaultFill = Fill(color: Color(r: 1.0, g: 0.5, b: 0.0))
     model.defaultStroke = nil
 
-    let oldFill = model.defaultFill
-    let oldStroke = model.defaultStroke
-    if let s = oldStroke {
-        model.defaultFill = Fill(color: s.color)
-    } else {
-        model.defaultFill = nil
-    }
-    if let f = oldFill {
-        model.defaultStroke = Stroke(color: f.color)
-    } else {
-        model.defaultStroke = nil
-    }
+    Controller(model: model).swapFillStrokeColors()
 
-    #expect(model.defaultFill == nil)
+    #expect(model.defaultFill == nil, "no stroke swaps in as no fill")
     #expect(model.defaultStroke?.color == Color(r: 1.0, g: 0.5, b: 0.0))
 }
 
@@ -116,18 +88,7 @@ import Testing
     model.defaultFill = nil
     model.defaultStroke = nil
 
-    let oldFill = model.defaultFill
-    let oldStroke = model.defaultStroke
-    if let s = oldStroke {
-        model.defaultFill = Fill(color: s.color)
-    } else {
-        model.defaultFill = nil
-    }
-    if let f = oldFill {
-        model.defaultStroke = Stroke(color: f.color)
-    } else {
-        model.defaultStroke = nil
-    }
+    Controller(model: model).swapFillStrokeColors()
 
     #expect(model.defaultFill == nil)
     #expect(model.defaultStroke == nil)

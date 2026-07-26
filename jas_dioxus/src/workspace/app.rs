@@ -104,6 +104,48 @@ const APPEARANCE_BOOTSTRAP_JS: &str = r##"
 })();
 "##;
 
+/// JS installed at App mount to track the user's input MODALITY — mouse vs
+/// keyboard — as a `data-input-modality` attribute on the document root. The
+/// focus ring (`.jas-focusable:focus`, App style block) is gated on
+/// `:root[data-input-modality="keyboard"]`, so it shows ONLY during keyboard
+/// navigation and never on a plain mouse click (CHAINPOLISH). Before this,
+/// plain `:focus` painted the accent ring on every mouse click too, so a
+/// click read as the CHECKED state.
+///
+/// Why capture-phase document listeners (rather than CSS `:focus-visible` or
+/// a Dioxus signal on the root div): the ring must be correct SYNCHRONOUSLY,
+/// the instant `:focus` lands. A capture-phase listener runs top-down BEFORE
+/// the target element receives focus, so the modality attribute is already
+/// right when `:focus` matches — no one-frame flash. `:focus-visible` was
+/// tried and rejected (several panels nest the button inside containers that
+/// strip focus before the browser's heuristic registers keyboard modality);
+/// a signal-driven attribute on the root div updates a render LATER than the
+/// synchronous focus move, which would flash the ring on mouse clicks (the
+/// reported bug).
+///
+/// Rule: a `pointerdown` (mouse / pen / touch) sets "mouse"; a `keydown` of
+/// any NON-modifier key sets "keyboard" — a bare Shift/Ctrl/Alt/Meta held for
+/// a mouse-driven shortcut must NOT flip the modality to keyboard, or the ring
+/// would reappear mid-drag. Idempotent: a window flag guards a re-mount from
+/// double-installing the listeners.
+pub(crate) const INPUT_MODALITY_JS: &str = r##"
+(function() {
+    if (window.__jasInputModalityInstalled) return;
+    window.__jasInputModalityInstalled = true;
+    var root = document.documentElement;
+    var MODIFIERS = { Control:1, Shift:1, Alt:1, Meta:1, CapsLock:1,
+                      NumLock:1, ScrollLock:1, Fn:1, Hyper:1, Super:1 };
+    document.addEventListener('pointerdown', function() {
+        root.setAttribute('data-input-modality', 'mouse');
+    }, true);
+    document.addEventListener('keydown', function(e) {
+        if (!MODIFIERS[e.key]) {
+            root.setAttribute('data-input-modality', 'keyboard');
+        }
+    }, true);
+})();
+"##;
+
 /// Translate a yaml-declared cursor name into a value the browser
 /// recognizes as a CSS `cursor` keyword. Tool yaml uses semantic
 /// names (`open_hand`, `arrow`, `eyedropper`) that match each
@@ -216,6 +258,18 @@ pub fn App() -> Element {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = js_sys::eval(APPEARANCE_BOOTSTRAP_JS);
+        }
+    });
+
+    // Input-modality tracking (CHAINPOLISH): stamp `data-input-modality` on
+    // the document root so the `.jas-focusable:focus` ring shows for keyboard
+    // navigation only, never on a plain mouse click. Capture-phase document
+    // listeners; see INPUT_MODALITY_JS. Runs once at mount, alongside the
+    // appearance bootstrap above.
+    use_hook(|| {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = js_sys::eval(INPUT_MODALITY_JS);
         }
     });
 
@@ -1009,20 +1063,41 @@ pub fn App() -> Element {
             .jas-border-handle:hover {{ background: rgba(74,144,217,0.3); }}
             .jas-border-handle:active {{ background: rgba(74,144,217,0.5); }}
             .jas-icon-toggle:hover {{ background: var(--jas-button-hover, #606060); }}
+            /* icon_button checked highlight. Driving it from a stylesheet
+               rule keyed on the data-checked attribute (with the resolved
+               color carried in the --jas-check-bg custom property) keeps the
+               highlight reactive WITHOUT baking a background into the widget's
+               multi-segment inline style — so a toggle flips one attribute on
+               a stable node and Dioxus never has to remount to land it
+               (CHAINGLOW). Unchecked → the rule un-matches → no highlight.
+               The background lift alone (button_checked sits only ~20/channel
+               off pane_bg in every appearance) reads far too subtly, so the
+               checked state ALSO paints a 2px INSET ring in the theme ACCENT
+               — the app's own strongest signal color, well clear of pane_bg in
+               Dark/Medium/Light — making "checked" unmistakable (CHAINPOLISH).
+               Inset box-shadow (not outline) so it never collides with the
+               :focus outline and survives parents with overflow:hidden. */
+            .jas-icon-button[data-checked="true"] {{ background: var(--jas-check-bg, #505050); box-shadow: inset 0 0 0 2px var(--jas-accent, #4a90d9); }}
             /* Swatches / brushes tile hover — subtle accent ring;
                selection outline is set inline by render_color_swatch
                and wins via the inline style precedence. */
             .jas-swatch-tile:hover {{ outline: 1px solid var(--jas-accent, #4a90d9); outline-offset: -1px; }}
             /* Keyboard focus ring for icon-buttons, plain buttons,
-               number-inputs, and any other widget that opts in with
-               class="jas-focusable". focus-visible would suppress the
-               ring on mouse focus, but several panels nest the button
-               inside containers that strip focus before the heuristic
-               sees the keyboard modality — so use plain :focus.
-               outline-offset is negative so the ring renders INSIDE
-               the button's box, surviving parents with overflow:hidden
-               and not colliding with adjacent buttons in tight rows. */
-            .jas-focusable:focus {{ outline: 2px solid var(--jas-accent, #4a90d9) !important; outline-offset: -2px !important; }}
+               number-inputs, and any widget that opts in with
+               class="jas-focusable" — shown for KEYBOARD navigation ONLY.
+               Gated on the document root's data-input-modality attribute
+               (set by INPUT_MODALITY_JS: "keyboard" on a keydown, "mouse"
+               on a pointerdown). Plain `:focus` also fired this ring on
+               mouse clicks, so a click read as the CHECKED state — an entire
+               debugging round was lost to focus masquerading as state
+               (CHAINPOLISH). `:focus-visible` was tried and rejected: several
+               panels nest the button inside containers that strip focus
+               before the browser's heuristic registers keyboard modality —
+               hence the explicit modality attribute instead. outline-offset
+               is negative so the ring renders INSIDE the button's box,
+               surviving parents with overflow:hidden and not colliding with
+               adjacent buttons in tight rows. */
+            :root[data-input-modality="keyboard"] .jas-focusable:focus {{ outline: 2px solid var(--jas-accent, #4a90d9) !important; outline-offset: -2px !important; }}
         "#  }
         div {
             tabindex: "0",
@@ -1588,5 +1663,90 @@ mod tests {
         assert_eq!(yaml_cursor_to_css("grabbing"),  "grabbing");
         assert_eq!(yaml_cursor_to_css("default"),   "default");
         assert_eq!(yaml_cursor_to_css("move"),      "move");
+    }
+
+    /// Parse a `#rrggbb` hex color into (r, g, b). Test-only helper.
+    fn hex_rgb(s: &str) -> (i32, i32, i32) {
+        let s = s.trim_start_matches('#');
+        let r = i32::from_str_radix(&s[0..2], 16).unwrap();
+        let g = i32::from_str_radix(&s[2..4], 16).unwrap();
+        let b = i32::from_str_radix(&s[4..6], 16).unwrap();
+        (r, g, b)
+    }
+
+    /// Largest per-channel absolute difference between two `#rrggbb` colors.
+    fn max_channel_dist(a: &str, b: &str) -> i32 {
+        let (ar, ag, ab) = hex_rgb(a);
+        let (br, bg, bb) = hex_rgb(b);
+        (ar - br).abs().max((ag - bg).abs()).max((ab - bb).abs())
+    }
+
+    // ── CHAINPOLISH: the checked accent ring must be visible in EVERY
+    //    bundled appearance ───────────────────────────────────────────────
+    //
+    // The checked icon_button paints a background lift (button_checked) PLUS a
+    // 2px inset ring in the theme ACCENT (App style block). JYH found the lift
+    // alone imperceptible: in every appearance button_checked sits within
+    // ~30/channel of pane_bg. The remedy leans on the accent, which is far
+    // from pane_bg in all three. This pins BOTH halves of that decision —
+    // lift-too-subtle, accent-clearly-visible — against the appearance tables
+    // the running app actually loads (APPEARANCE_BOOTSTRAP_JS), so the pin can
+    // never silently drift from what the app paints.
+    #[test]
+    fn checked_accent_ring_is_visible_in_every_appearance() {
+        // (name, pane_bg, button_checked, accent) — mirrors theme.yaml base
+        // (dark_gray) + workspace/appearances/{medium,light}_gray.json.
+        let appearances = [
+            ("dark_gray",   "#3c3c3c", "#505050", "#4a90d9"),
+            ("medium_gray", "#565656", "#686868", "#5a9ee6"),
+            ("light_gray",  "#f0f0f0", "#d4d4d8", "#007aff"),
+        ];
+        for (name, pane_bg, button_checked, accent) in appearances {
+            // Tie the pin to the runtime source of truth.
+            assert!(APPEARANCE_BOOTSTRAP_JS.contains(pane_bg),
+                "{name}: pane_bg {pane_bg} present in the appearance bootstrap");
+            assert!(APPEARANCE_BOOTSTRAP_JS.contains(accent),
+                "{name}: accent {accent} present in the appearance bootstrap");
+            // The background lift is genuinely subtle — this is WHY the ring
+            // is needed, not decoration.
+            assert!(max_channel_dist(button_checked, pane_bg) <= 40,
+                "{name}: button_checked ({button_checked}) is close to pane_bg \
+                 ({pane_bg}) — the lift alone can't carry the checked state");
+            // The accent ring is unmistakable against the panel in all three.
+            assert!(max_channel_dist(accent, pane_bg) >= 100,
+                "{name}: accent ({accent}) stands well clear of pane_bg \
+                 ({pane_bg}) — the checked ring reads across the room");
+        }
+    }
+
+    // ── CHAINPOLISH: input-modality logic drives the focus ring ──────────
+    //
+    // INPUT_MODALITY_JS installs capture-phase document listeners that stamp
+    // data-input-modality on the root: "mouse" on a pointerdown, "keyboard"
+    // on a keydown of any NON-modifier key. The focus ring is gated on
+    // :root[data-input-modality="keyboard"], so this contract is what keeps
+    // the ring off mouse clicks while preserving it for Tab-nav. Capture phase
+    // is load-bearing (runs before :focus lands, no one-frame flash) — pinned
+    // here so a refactor to bubble phase or :focus-visible trips the test.
+    #[test]
+    fn input_modality_js_gates_the_focus_ring_by_modality() {
+        let js = INPUT_MODALITY_JS;
+        assert!(js.contains("'pointerdown'") && js.contains("'mouse'"),
+            "a pointerdown sets mouse modality");
+        assert!(js.contains("'keydown'") && js.contains("'keyboard'"),
+            "a keydown sets keyboard modality");
+        assert!(js.contains("data-input-modality"),
+            "modality is written to the data-input-modality attribute");
+        assert!(js.contains("documentElement"),
+            "the attribute lands on the document root the :root selector reads");
+        // Capture phase (third arg true) is what makes the ring correct the
+        // instant :focus lands — must not regress to bubble phase.
+        assert!(js.matches(", true)").count() >= 2,
+            "both listeners are registered in the CAPTURE phase");
+        // A bare modifier held for a mouse-driven shortcut must NOT flip
+        // modality to keyboard (that would flash the ring back on mid-drag).
+        for m in ["Control", "Shift", "Alt", "Meta"] {
+            assert!(js.contains(m), "{m} is in the modifier-exclusion set");
+        }
     }
 }

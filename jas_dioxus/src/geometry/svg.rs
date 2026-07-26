@@ -79,6 +79,25 @@ fn stroke_attrs(stroke: &Option<Stroke>) -> String {
             if s.dash_align_anchors {
                 parts.push(" data-jas-dash-align-anchors=\"true\"".to_string());
             }
+            // Arrowheads — workspace-private, in the `jas:` namespace declared on
+            // the root <svg> (see JAS_NS). Each attr is identity-omitted at its
+            // default so a plain stroke stays byte-clean; parsed back by
+            // parse_stroke, ignored on import from non-jas SVG.
+            if s.start_arrow != Arrowhead::None {
+                parts.push(format!(" jas:start-arrow=\"{}\"", s.start_arrow.as_str()));
+            }
+            if s.end_arrow != Arrowhead::None {
+                parts.push(format!(" jas:end-arrow=\"{}\"", s.end_arrow.as_str()));
+            }
+            if s.start_arrow_scale != 100.0 {
+                parts.push(format!(" jas:start-arrow-scale=\"{}\"", fmt(s.start_arrow_scale)));
+            }
+            if s.end_arrow_scale != 100.0 {
+                parts.push(format!(" jas:end-arrow-scale=\"{}\"", fmt(s.end_arrow_scale)));
+            }
+            if s.arrow_align == ArrowAlign::CenterAtEnd {
+                parts.push(" jas:arrow-align=\"center_at_end\"".to_string());
+            }
             parts.join("")
         }
     }
@@ -1167,7 +1186,17 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
         get_s(node, "data-jas-dash-align-anchors", "").trim(),
         "true" | "1"
     );
-    Some(Stroke { color, width, linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, dash_align_anchors, start_arrow: Arrowhead::None, end_arrow: Arrowhead::None, start_arrow_scale: 100.0, end_arrow_scale: 100.0, arrow_align: ArrowAlign::TipAtEnd, opacity })
+    // Arrowheads — round-tripped from the `jas:` namespace (see stroke_attr).
+    // Each defaults to its identity value when the attr is absent (plain SVG).
+    let start_arrow = Arrowhead::from_str(get_s(node, "jas:start-arrow", "none"));
+    let end_arrow = Arrowhead::from_str(get_s(node, "jas:end-arrow", "none"));
+    let start_arrow_scale = get_f(node, "jas:start-arrow-scale", 100.0);
+    let end_arrow_scale = get_f(node, "jas:end-arrow-scale", 100.0);
+    let arrow_align = match get_s(node, "jas:arrow-align", "tip_at_end") {
+        "center_at_end" => ArrowAlign::CenterAtEnd,
+        _ => ArrowAlign::TipAtEnd,
+    };
+    Some(Stroke { color, width, linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, dash_align_anchors, start_arrow, end_arrow, start_arrow_scale, end_arrow_scale, arrow_align, opacity })
 }
 
 fn parse_transform(node: &XmlNode) -> Option<Transform> {
@@ -3180,6 +3209,118 @@ mod tests {
             assert_eq!(r.stroke.unwrap().dash_align_anchors, false);
         } else {
             panic!("expected Rect");
+        }
+    }
+
+    #[test]
+    fn arrowheads_roundtrip_on_line() {
+        // ARROWFIX2 item 2 — all five arrow fields survive save->load on a line.
+        let mut stroke = Stroke::new(Color::rgb(0.0, 0.0, 0.0), 2.0);
+        stroke.start_arrow = Arrowhead::SimpleArrow;
+        stroke.end_arrow = Arrowhead::Diamond;
+        stroke.start_arrow_scale = 150.0;
+        stroke.end_arrow_scale = 200.0;
+        stroke.arrow_align = ArrowAlign::CenterAtEnd;
+        let doc = make_doc(vec![Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
+            stroke: Some(stroke),
+            width_points: vec![],
+            common: CommonProps::default(),
+            stroke_gradient: None,
+        })]);
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("jas:start-arrow=\"simple_arrow\""), "{svg}");
+        assert!(svg.contains("jas:end-arrow=\"diamond\""), "{svg}");
+        assert!(svg.contains("jas:start-arrow-scale=\"150\""), "{svg}");
+        assert!(svg.contains("jas:end-arrow-scale=\"200\""), "{svg}");
+        assert!(svg.contains("jas:arrow-align=\"center_at_end\""), "{svg}");
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        if let Element::Line(l) = &*children[0] {
+            let s = l.stroke.unwrap();
+            assert_eq!(s.start_arrow, Arrowhead::SimpleArrow);
+            assert_eq!(s.end_arrow, Arrowhead::Diamond);
+            assert_eq!(s.start_arrow_scale, 150.0);
+            assert_eq!(s.end_arrow_scale, 200.0);
+            assert_eq!(s.arrow_align, ArrowAlign::CenterAtEnd);
+        } else {
+            panic!("expected Line");
+        }
+    }
+
+    #[test]
+    fn arrowheads_roundtrip_on_path() {
+        // A one-armed arrowed path: end arrow only, default scale + align, so
+        // only jas:end-arrow is emitted.
+        let mut stroke = Stroke::new(Color::rgb(0.0, 0.0, 0.0), 6.6667);
+        stroke.end_arrow = Arrowhead::StealthArrow;
+        let doc = make_doc(vec![Element::Path(PathElem {
+            d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::CurveTo { x1: 0.0, y1: 40.0, x2: 40.0, y2: 40.0, x: 40.0, y: 0.0 }],
+            fill: None,
+            stroke: Some(stroke),
+            width_points: vec![],
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+            fill_rule: FillRule::default(),
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+        })]);
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("jas:end-arrow=\"stealth_arrow\""), "{svg}");
+        // Default scale/align stay omitted even on an armed stroke.
+        assert!(!svg.contains("jas:start-arrow"), "{svg}");
+        assert!(!svg.contains("jas:start-arrow-scale"), "{svg}");
+        assert!(!svg.contains("jas:end-arrow-scale"), "{svg}");
+        assert!(!svg.contains("jas:arrow-align"), "{svg}");
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        if let Element::Path(p) = &*children[0] {
+            let s = p.stroke.unwrap();
+            assert_eq!(s.start_arrow, Arrowhead::None);
+            assert_eq!(s.end_arrow, Arrowhead::StealthArrow);
+            assert_eq!(s.start_arrow_scale, 100.0);
+            assert_eq!(s.end_arrow_scale, 100.0);
+            assert_eq!(s.arrow_align, ArrowAlign::TipAtEnd);
+        } else {
+            panic!("expected Path");
+        }
+    }
+
+    #[test]
+    fn plain_stroke_emits_no_jas_arrow_attrs() {
+        // Byte-cleanliness: a stroke with no arrowheads emits none of the
+        // jas:arrow attributes (clean SVG for ordinary strokes).
+        let stroke = Stroke::new(Color::rgb(0.0, 0.0, 0.0), 1.0);
+        let doc = make_doc(vec![Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 50.0, y2: 50.0,
+            stroke: Some(stroke),
+            width_points: vec![],
+            common: CommonProps::default(),
+            stroke_gradient: None,
+        })]);
+        let svg = document_to_svg(&doc);
+        assert!(!svg.contains("jas:start-arrow"), "{svg}");
+        assert!(!svg.contains("jas:end-arrow"), "{svg}");
+        assert!(!svg.contains("jas:arrow-align"), "{svg}");
+    }
+
+    #[test]
+    fn plain_svg_import_defaults_arrows_to_none() {
+        // Cross-tool: plain SVG (no jas attrs) parses to no arrows.
+        let svg = r#"<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><line x1="0" y1="0" x2="100" y2="0" stroke="black" stroke-width="2"/></svg>"#;
+        let doc = svg_to_document(svg);
+        let children = doc.layers[0].children().unwrap();
+        if let Element::Line(l) = &*children[0] {
+            let s = l.stroke.unwrap();
+            assert_eq!(s.start_arrow, Arrowhead::None);
+            assert_eq!(s.end_arrow, Arrowhead::None);
+            assert_eq!(s.start_arrow_scale, 100.0);
+            assert_eq!(s.end_arrow_scale, 100.0);
+            assert_eq!(s.arrow_align, ArrowAlign::TipAtEnd);
+        } else {
+            panic!("expected Line");
         }
     }
 

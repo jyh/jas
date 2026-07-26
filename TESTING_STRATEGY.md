@@ -193,6 +193,35 @@ cursor / theming output. `MANUAL_TESTING.md` should add an explicit "injection f
 section and a ritual: once a behavior is byte-gated by a shared corpus, retire its manual
 cross-app parity test.
 
+### 5.1 GUI_EYES — automating part of the manual floor
+
+`GUI_EYES.md` + `scripts/gui_drive.sh` drive a **live app** and assert facts read back
+out of the running DOM and canvas. This reclaims the part of the manual floor that is
+*mechanically checkable* — real hit-testing against rendered geometry, and visual /
+overlay / theming **output** — for the Rust/Dioxus lane.
+
+It exists because three defect classes are invisible to every gate above **by
+construction**, none of which observes a renderer: (1) a widget that declares a click
+behavior and is never wired — `widget_tree.rs` records `bind`/`style` key sets but not
+`behavior`, and is a projection of the compiled bundle; (2) a state that flips correctly
+but paints nothing; (3) a rendered property that silently resets on an unrelated panel
+edit. The generic gate for (1) is a **declared-behavior liveness sweep** derived from
+`workspace/workspace.json` (198 `event: click` handlers), so it grows with the YAML.
+
+It asserts **measurable properties** — stroke thickness along a canvas scanline, exact
+RGBA at a probe point, crop mean-colour distance, declared `data-checked` paired against
+computed style — never whole-image equality. Every check — the liveness sweep included —
+**owns a `--regress` fault mode that must make it go red**, and the scorer requires the
+red to carry the fault's own marker: a caught fault exits 0, a gate blind to its fault
+exits 1, and a broken host (no Chrome, dev server down, CDP timeout) exits 3 rather than
+masquerading as a caught fault.
+
+**It does not raise the floor's ceiling on FEEL.** Taste, motion, cursor glyphs, native
+chrome, retina fidelity and cross-app parity remain JYH's manual floor and are listed
+explicitly in `GUI_EYES.md` §Limits. Swift has the pixel half only; its blocker (no
+read-back — the app cannot be asked "is this widget checked?") and the one-line unblock
+are recorded there.
+
 ---
 
 ## 6. Flask re-charter

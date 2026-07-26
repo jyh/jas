@@ -390,7 +390,11 @@ struct YamlElementView: View {
                                  value: value)
         }
         model.panelStateVersion &+= 1
-        notifyPanelStateChanged(pid, store: model.stateStore, model: model)
+        // Name the committed field: the Stroke panel's apply is
+        // field-scoped (it writes only that field's group and preserves
+        // the rest from the element). See applyStrokePanelToSelection.
+        notifyPanelStateChanged(pid, store: model.stateStore, model: model,
+                                edited: key)
     }
 
     /// Dispatch a widget edit to the right state container based on the
@@ -568,6 +572,25 @@ struct YamlElementView: View {
 
     // MARK: - Container
 
+    /// True when this element declares a behavior for `target`. When `target`
+    /// is `double_click` it additionally matches `click_and_wait` (its alias —
+    /// mirrors jas_dioxus build_mouse_event_handler, where click_and_wait
+    /// routes through the double-click handler). Used by renderContainer /
+    /// renderText to decide which pointer gestures to attach.
+    private func behaviorHasEvent(_ target: String) -> Bool {
+        guard let behaviors = element["behavior"] as? [[String: Any]] else { return false }
+        return behaviors.contains { behaviorEntryMatches($0, target) }
+    }
+
+    /// Whether a single behavior `entry` fires for `eventName`.
+    /// `click_and_wait` is an alias for `double_click` (mirrors jas_dioxus
+    /// build_mouse_event_handler), so a double-tap dispatches it too.
+    private func behaviorEntryMatches(_ entry: [String: Any], _ eventName: String) -> Bool {
+        let ev = (entry["event"] as? String) ?? "click"
+        if ev == eventName { return true }
+        return eventName == "double_click" && ev == "click_and_wait"
+    }
+
     @ViewBuilder
     private func renderContainer() -> some View {
         // A container with `style.border` is a group box (the Scale / Shear
@@ -584,7 +607,69 @@ struct YamlElementView: View {
         let style = element["style"] as? [String: Any] ?? [:]
         let w = containerNumericDim(style["width"])
         let h = containerNumericDim(style["height"])
-        if style["border"] != nil {
+
+        // A container may carry its own `behavior` list — the Brushes-panel
+        // brush tile is a `type: container` with click (select + set
+        // stroke_brush + apply) and double_click (open options). Wire those
+        // the same way icon_button / color_swatch do; without this the tile
+        // rendered as an inert box and clicks did nothing at all (the
+        // BRUSHDEAD bug). Gate on widgetHasPointerBehavior (plus any
+        // mouse_down/up press behaviors) so plain layout containers — the
+        // vast majority — keep the no-listener fast path. Mirrors jas_dioxus
+        // render_container.
+        let hasClick = behaviorHasEvent("click")
+        let hasDouble = behaviorHasEvent("double_click")
+        let hasMouseDown = behaviorHasEvent("mouse_down")
+        let hasMouseUp = behaviorHasEvent("mouse_up")
+        let hasPress = hasMouseDown || hasMouseUp
+        let interactive = widgetHasPointerBehavior(element) || hasPress
+        // bind.selected_in: draw the 2px accent outline when this tile's
+        // identity is a member of the bound list (shared with color_swatch
+        // via widgetSelectedIn). Overrides the base 1px group-box border,
+        // matching render_container where selected_border is appended last.
+        let selected = widgetSelectedIn(element, context: context)
+
+        let styled = containerStyledBody(
+            width: w, height: h, style: style, selected: selected)
+        if interactive {
+            styled
+                .contentShape(Rectangle())
+                .modifier(PointerBehaviorModifier(
+                    hasClick: hasClick, hasDouble: hasDouble, hasPress: hasPress,
+                    onSingle: { handleWidgetClick() },
+                    onDouble: { handleBehaviorClick(eventName: "double_click") },
+                    onPress: { loc in
+                        handleBehaviorClick(eventName: "mouse_down", pressLocation: loc)
+                    },
+                    onRelease: { handleBehaviorClick(eventName: "mouse_up") }
+                ))
+        } else {
+            styled
+        }
+    }
+
+    /// Apply a container's frame + border. `bind.selected_in` membership
+    /// (`selected`) draws a 2px accent outline that replaces the base 1px
+    /// group-box border (the brush-tile highlight), matching
+    /// renderColorSwatch's selected cue and jas_dioxus render_container's
+    /// selected_border. Non-selected styled boxes keep the group-box border;
+    /// borderless layout containers render unchanged.
+    @ViewBuilder
+    private func containerStyledBody(width w: CGFloat?, height h: CGFloat?,
+                                     style: [String: Any], selected: Bool) -> some View {
+        let hasBorder = style["border"] != nil
+        if selected {
+            if hasBorder {
+                containerBody()
+                    .frame(width: w, height: h)
+                    .padding(containerPadding(style))
+                    .border(SwiftUI.Color.accentColor, width: 2)
+            } else {
+                containerBody()
+                    .frame(width: w, height: h)
+                    .border(SwiftUI.Color.accentColor, width: 2)
+            }
+        } else if hasBorder {
             containerBody()
                 .frame(width: w, height: h)
                 .padding(containerPadding(style))
@@ -739,7 +824,38 @@ struct YamlElementView: View {
             if let t = theme { return SwiftUI.Color(nsColor: t.text) }
             return nil
         }()
-        if let c = resolvedColor {
+        // A `text` widget can carry its own `behavior` list — the
+        // Artboards / Symbols / Concepts list rows put their
+        // `*_panel_select` click (and ap_name's `click_and_wait` rename) on
+        // the label itself. Wire click / double_click the same way
+        // color_swatch does; without this the label rendered as an inert
+        // span and the row-select click was silently dropped (the
+        // BRUSHDEAD disease). Gate on widgetHasPointerBehavior so the vast
+        // majority (static labels) stay listener-free. Mirrors jas_dioxus
+        // render_text, which gates its span's onclick/ondoubleclick the
+        // same way.
+        let hasClick = behaviorHasEvent("click")
+        let hasDouble = behaviorHasEvent("double_click")
+        if hasClick || hasDouble {
+            styledText(text, fontSize: fontSize, color: resolvedColor)
+                .contentShape(Rectangle())
+                .modifier(PointerBehaviorModifier(
+                    hasClick: hasClick, hasDouble: hasDouble, hasPress: false,
+                    onSingle: { handleWidgetClick() },
+                    onDouble: { handleBehaviorClick(eventName: "double_click") },
+                    onPress: { _ in }, onRelease: {}
+                ))
+        } else {
+            styledText(text, fontSize: fontSize, color: resolvedColor)
+        }
+    }
+
+    /// The styled label body (theme color when resolved, else the SwiftUI
+    /// default) shared by renderText's inert and interactive branches.
+    @ViewBuilder
+    private func styledText(_ text: String, fontSize: CGFloat,
+                            color: SwiftUI.Color?) -> some View {
+        if let c = color {
             SwiftUI.Text(text)
                 .font(.system(size: fontSize))
                 .foregroundColor(c)
@@ -2083,7 +2199,7 @@ struct YamlElementView: View {
         let bridge = onStoreDialogOpened
         let anchor = pressLocation
         let beforeDlg = model.stateStore.getDialogId()
-        for entry in behavior where (entry["event"] as? String) == eventName {
+        for entry in behavior where behaviorEntryMatches(entry, eventName) {
             let effects = (entry["effects"] as? [Any]) ?? []
             if !effects.isEmpty {
                 runEffects(effects, ctx: ctxWithEvent, store: model.stateStore,
@@ -2191,53 +2307,12 @@ struct YamlElementView: View {
         }
     }
 
-    /// Evaluate `bind.selected_in` against the per-item identity read
-    /// from the click behavior's first `select.target` (so authors don't
-    /// repeat themselves) and return whether this item is currently
-    /// selected. Mirrors the Rust implementation in renderer.rs.
+    /// Evaluate `bind.selected_in` for this element. Thin wrapper over the
+    /// shared free function `widgetSelectedIn`, which both color_swatch and
+    /// the brush-tile container use so the accent-outline selection cue is
+    /// computed identically. Mirrors the Rust implementation in renderer.rs.
     private func isSelectedInList() -> Bool {
-        guard let bind = element["bind"] as? [String: Any],
-              let listExpr = bind["selected_in"] as? String
-        else { return false }
-        let listVal = evaluate(listExpr, context: context)
-        guard case .list(let items) = listVal else { return false }
-
-        guard let behaviors = element["behavior"] as? [[String: Any]] else { return false }
-        var idExpr: String? = nil
-        outer: for b in behaviors {
-            guard let effects = b["effects"] as? [[String: Any]] else { continue }
-            for e in effects {
-                if let sel = e["select"] as? [String: Any],
-                   let target = sel["target"] as? String {
-                    idExpr = target
-                    break outer
-                }
-            }
-        }
-        guard let expr = idExpr else { return false }
-        let idVal = evaluate(expr, context: context)
-        let idAny: Any? = idVal.toAny()
-        return items.contains { item in
-            selectedInIdEquals(item.value, idAny)
-        }
-    }
-
-    /// Loose typed equality used by `selected_in` lookup. Compares
-    /// numeric / string / bool values from list members (which are
-    /// stored as `Any`) against an evaluated identity value.
-    private func selectedInIdEquals(_ a: Any?, _ b: Any?) -> Bool {
-        switch (a, b) {
-        case (nil, nil): return true
-        case (is NSNull, is NSNull): return true
-        case (let x as String, let y as String): return x == y
-        case (let x as Bool, let y as Bool): return x == y
-        case (let x as Int, let y as Int): return x == y
-        case (let x as Double, let y as Double): return x == y
-        case (let x as Int, let y as Double): return Double(x) == y
-        case (let x as Double, let y as Int): return x == Double(y)
-        case (let x as NSNumber, let y as NSNumber): return x == y
-        default: return false
-        }
+        widgetSelectedIn(element, context: context)
     }
 
     // MARK: - Gradient primitives
@@ -3190,6 +3265,125 @@ struct YamlElementView: View {
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .topLeading)
+        }
+    }
+}
+
+// MARK: - Shared pointer-behavior helpers
+
+/// True when `element` declares any click-family pointer behavior
+/// (`click` / `double_click` / `click_and_wait`) — the events that
+/// renderContainer / renderText turn into live tap gestures. Those render
+/// arms host arbitrary widgets and gate their interactive branch on this so a
+/// declared behavior is never silently dropped (the BRUSHDEAD brush-tile bug,
+/// where a click-bearing container rendered as an inert box). Mirrors
+/// jas_dioxus renderer.rs `has_pointer_behavior`.
+func widgetHasPointerBehavior(_ element: [String: Any]) -> Bool {
+    guard let behaviors = element["behavior"] as? [[String: Any]] else { return false }
+    return behaviors.contains { b in
+        let ev = (b["event"] as? String) ?? "click"
+        return ev == "click" || ev == "double_click" || ev == "click_and_wait"
+    }
+}
+
+/// Evaluate a tile widget's `bind.selected_in` membership: true when the
+/// element's per-item identity (read from its click behavior's first
+/// `select.target`, so authors don't repeat it) is a member of the bound list
+/// expression. Shared by tile-shaped widgets (`color_swatch` and the
+/// Brushes-panel brush-tile `container`) so the accent-outline selection cue
+/// is drawn identically wherever a `selected_in` bind appears. Mirrors
+/// jas_dioxus renderer.rs `eval_selected_in`.
+func widgetSelectedIn(_ element: [String: Any], context: [String: Any]) -> Bool {
+    guard let bind = element["bind"] as? [String: Any],
+          let listExpr = bind["selected_in"] as? String
+    else { return false }
+    let listVal = evaluate(listExpr, context: context)
+    guard case .list(let items) = listVal else { return false }
+
+    guard let behaviors = element["behavior"] as? [[String: Any]] else { return false }
+    var idExpr: String? = nil
+    outer: for b in behaviors {
+        guard let effects = b["effects"] as? [[String: Any]] else { continue }
+        for e in effects {
+            if let sel = e["select"] as? [String: Any],
+               let target = sel["target"] as? String {
+                idExpr = target
+                break outer
+            }
+        }
+    }
+    guard let expr = idExpr else { return false }
+    let idVal = evaluate(expr, context: context)
+    let idAny: Any? = idVal.toAny()
+    return items.contains { item in
+        widgetSelectedInIdEquals(item.value, idAny)
+    }
+}
+
+/// Loose typed equality used by `selected_in` lookup. Compares numeric /
+/// string / bool values from list members (stored as `Any`) against an
+/// evaluated identity value. Mirrors the Rust `list_contains_value` compare.
+func widgetSelectedInIdEquals(_ a: Any?, _ b: Any?) -> Bool {
+    switch (a, b) {
+    case (nil, nil): return true
+    case (is NSNull, is NSNull): return true
+    case (let x as String, let y as String): return x == y
+    case (let x as Bool, let y as Bool): return x == y
+    case (let x as Int, let y as Int): return x == y
+    case (let x as Double, let y as Double): return x == y
+    case (let x as Int, let y as Double): return Double(x) == y
+    case (let x as Double, let y as Int): return x == Double(y)
+    case (let x as NSNumber, let y as NSNumber): return x == y
+    default: return false
+    }
+}
+
+/// Wire a click-bearing widget's declared pointer behaviors. Applies the same
+/// gesture patterns color_swatch (ClickDisambiguator / tap) and icon_button
+/// (PressDispatchModifier) use, so a declared behavior on a container or text
+/// label is never silently dropped (the BRUSHDEAD bug). Mirrors jas_dioxus
+/// render_container's onclick / ondoubleclick / onmousedown / onmouseup
+/// wiring. Only attached on the interactive branch, so plain layout
+/// containers and static labels never pay for a gesture.
+private struct PointerBehaviorModifier: ViewModifier {
+    let hasClick: Bool
+    let hasDouble: Bool
+    let hasPress: Bool
+    let onSingle: () -> Void
+    let onDouble: () -> Void
+    let onPress: (CGPoint) -> Void
+    let onRelease: () -> Void
+
+    func body(content: Content) -> some View {
+        // The press (mouse_down/up) gesture is only layered on when the
+        // widget actually declares those behaviors, so a tap-only tile
+        // (the brush tile) doesn't carry a spurious drag recognizer.
+        if hasPress {
+            tapWired(content)
+                .modifier(PressDispatchModifier(
+                    onPress: { loc in onPress(loc) },
+                    onRelease: { onRelease() }
+                ))
+        } else {
+            tapWired(content)
+        }
+    }
+
+    @ViewBuilder
+    private func tapWired(_ content: Content) -> some View {
+        if hasClick && hasDouble {
+            // A tile carrying both: disambiguate single vs double the same
+            // way renderColorSwatch does. The single-click work re-renders
+            // the panel, so ClickDisambiguator defers it via a
+            // DispatchWorkItem that survives the re-render and the
+            // double-tap cancels the pending single.
+            content.modifier(ClickDisambiguator(onSingle: onSingle, onDouble: onDouble))
+        } else if hasDouble {
+            content.onTapGesture(count: 2) { onDouble() }
+        } else if hasClick {
+            content.onTapGesture { onSingle() }
+        } else {
+            content
         }
     }
 }

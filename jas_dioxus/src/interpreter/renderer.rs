@@ -1346,7 +1346,8 @@ fn set_app_state_field(
     val: &serde_json::Value,
     st: &mut crate::workspace::app_state::AppState,
 ) {
-    use crate::geometry::element::{Color, Fill, Stroke};
+    use crate::geometry::element::Color;
+    use crate::workspace::app_state::{recolor_fill, recolor_stroke};
 
     match key {
         "fill_on_top" => {
@@ -1371,24 +1372,39 @@ fn set_app_state_field(
                 }
             }
         }
+        // The YAML colour route (swatch / hex / colour-bar click through
+        // set_active_color). Colour-ONLY, exactly like
+        // AppState::set_active_color: a null clears the paint, a hex
+        // recolours it and preserves every other attribute — the element's
+        // fill opacity, or its stroke width / cap / join / dash /
+        // arrowheads (STROKEWIDTH, 2026-07-24).
         "fill_color" => {
-            let new_fill = if val.is_null() {
-                None
-            } else {
-                val.as_str().and_then(Color::from_hex).map(Fill::new)
-            };
-            st.app_default_fill = new_fill;
-            if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                tab.model.default_fill = new_fill;
-                // Propagate to canvas selection so a swatch / hex /
-                // color-bar click via the YAML set_active_color
-                // action updates the selected element's fill — same
-                // path AppState::set_active_color uses for the
-                // Color-panel slider commits.
-                if !tab.model.document().selection.is_empty() {
-                    tab.model.with_txn(|m| {
-                        crate::document::controller::Controller::set_selection_fill(m, new_fill);
-                    });
+            let color = if val.is_null() { None } else { val.as_str().and_then(Color::from_hex) };
+            match color {
+                None if val.is_null() => {
+                    st.app_default_fill = None;
+                    if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                        tab.model.default_fill = None;
+                        if !tab.model.document().selection.is_empty() {
+                            tab.model.with_txn(|m| {
+                                crate::document::controller::Controller::set_selection_fill(m, None);
+                            });
+                        }
+                    }
+                }
+                // Unparseable hex: leave everything alone.
+                None => {}
+                Some(color) => {
+                    st.app_default_fill = Some(recolor_fill(st.app_default_fill, color));
+                    if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+                        tab.model.default_fill = Some(recolor_fill(tab.model.default_fill, color));
+                        if !tab.model.document().selection.is_empty() {
+                            tab.model.with_txn(|m| {
+                                crate::document::controller::Controller::map_selection_fill(
+                                    m, |f| Some(recolor_fill(f, color)));
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -1404,16 +1420,13 @@ fn set_app_state_field(
                     }
                 }
             } else if let Some(color) = val.as_str().and_then(Color::from_hex) {
-                let width = st.app_default_stroke.map(|s| s.width).unwrap_or(1.0);
-                let new_stroke = Some(Stroke::new(color, width));
-                st.app_default_stroke = new_stroke;
+                st.app_default_stroke = Some(recolor_stroke(st.app_default_stroke, color));
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                    let tab_width = tab.model.default_stroke.map(|s| s.width).unwrap_or(width);
-                    let tab_stroke = Some(Stroke::new(color, tab_width));
-                    tab.model.default_stroke = tab_stroke;
+                    tab.model.default_stroke = Some(recolor_stroke(tab.model.default_stroke, color));
                     if !tab.model.document().selection.is_empty() {
                         tab.model.with_txn(|m| {
-                            crate::document::controller::Controller::set_selection_stroke(m, tab_stroke);
+                            crate::document::controller::Controller::map_selection_stroke(
+                                m, |s| Some(recolor_stroke(s, color)));
                         });
                     }
                 }
@@ -1421,6 +1434,14 @@ fn set_app_state_field(
         }
         "stroke_width" => {
             if let Some(w) = val.as_f64() {
+                // The weight input's panel field, same as every other
+                // `stroke_*` key below writes its own — the flat global and
+                // the panel field are ONE slot in this port, and the apply
+                // reads the width from `stroke_panel.weight`. Without this
+                // an out-of-panel `set: { stroke_width }` (actions.yaml
+                // `reset_fill_stroke`) moved the defaults but left the
+                // panel's committed weight stale.
+                st.stroke_panel.weight = w;
                 if let Some(ref mut s) = st.app_default_stroke {
                     s.width = w;
                 }
@@ -2048,7 +2069,7 @@ fn apply_set_panel_state_with_ctx(
             "cap": sp.cap, "join": sp.join, "miter_limit": sp.miter_limit,
             "align_stroke": sp.align, "dashed": sp.dashed,
             "dash_1": sp.dash_1, "gap_1": sp.gap_1,
-            "weight": st.app_default_stroke.as_ref().map(|s| s.width).unwrap_or(1.0),
+            "weight": sp.weight,
             "start_arrowhead": sp.start_arrowhead, "end_arrowhead": sp.end_arrowhead,
             "start_arrowhead_scale": sp.start_arrowhead_scale,
             "end_arrowhead_scale": sp.end_arrowhead_scale,
@@ -2064,28 +2085,13 @@ fn apply_set_panel_state_with_ctx(
         val.clone()
     };
     set_stroke_field(&mut st.stroke_panel, key, &resolved);
-    // Also sync stroke_width when weight changes
-    if key == "weight" {
-        if let Some(w) = resolved.as_f64() {
-            if let Some(ref mut stroke) = st.app_default_stroke {
-                stroke.width = w;
-            }
-            if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                if let Some(ref mut stroke) = tab.model.default_stroke {
-                    stroke.width = w;
-                }
-            }
-        }
-    }
-    // Propagate rendering-affecting changes to selected elements
-    if matches!(key, "cap" | "join" | "weight" | "miter_limit" |
-                "dashed" | "dash_1" | "gap_1" | "dash_2" | "gap_2" | "dash_3" | "gap_3" |
-                "dash_align_anchors" |
-                "align_stroke" | "start_arrowhead" | "end_arrowhead" |
-                "start_arrowhead_scale" | "end_arrowhead_scale" | "arrow_align" |
-                "profile" | "profile_flipped") {
-        st.apply_stroke_panel_to_selection();
-    }
+    // No default-stroke pre-sync: the weight now lands on the panel state
+    // like every other field, and the apply propagates it to both defaults
+    // through the width group.
+    // Propagate the edited field to the selected elements. The apply is
+    // field-scoped (it writes only this key's group), and keys that own
+    // no element attribute are a no-op inside it.
+    st.apply_stroke_panel_to_selection(key);
 }
 
 /// Get a stroke panel field as a JSON value.
@@ -2112,6 +2118,7 @@ fn get_stroke_field(sp: &crate::workspace::app_state::StrokePanelState, key: &st
         "profile" => J::String(sp.profile.clone()),
         "profile_flipped" => J::Bool(sp.profile_flipped),
         "dash_align_anchors" => J::Bool(sp.dash_align_anchors),
+        "weight" => serde_json::json!(sp.weight),
         _ => J::Null,
     }
 }
@@ -2183,9 +2190,9 @@ fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key:
         "arrow_align" => { if let Some(s) = val.as_str() { sp.arrow_align = s.into(); } }
         "profile" => { if let Some(s) = val.as_str() { sp.profile = s.into(); } }
         "profile_flipped" => { if let Some(b) = val.as_bool() { sp.profile_flipped = b; } }
-        "weight" => {
-            // weight is not on StrokePanelState — handled by caller via Stroke.width
-        }
+        // The committed weight lives on the panel state like every other
+        // field; `apply_stroke_panel_to_selection` reads it from there.
+        "weight" => { if let Some(n) = val.as_f64() { sp.weight = n; } }
         _ => {}
     }
 }
@@ -4327,6 +4334,26 @@ fn get_app_state_field(key: &str, st: &crate::workspace::app_state::AppState) ->
 
 /// Build an onclick handler from an element's behavior declarations.
 /// Returns None if the element has no click behaviors.
+/// True when `el` declares any click-family pointer behavior
+/// (`click` / `double_click` / `click_and_wait`) — i.e. the events that
+/// `build_click_handler` / `build_dblclick_handler` turn into live
+/// handlers. Render arms that host arbitrary widgets (notably
+/// `render_container`) gate their interactive branch on this so a
+/// declared behavior is never silently dropped (the BRUSHDEAD brush-tile
+/// bug, where a click-bearing container rendered as an inert `<div>`).
+fn has_pointer_behavior(el: &serde_json::Value) -> bool {
+    el.get("behavior")
+        .and_then(|b| b.as_array())
+        .map_or(false, |behaviors| {
+            behaviors.iter().any(|b| {
+                matches!(
+                    b.get("event").and_then(|e| e.as_str()).unwrap_or("click"),
+                    "click" | "double_click" | "click_and_wait"
+                )
+            })
+        })
+}
+
 fn build_click_handler(
     el: &serde_json::Value,
     ctx: &serde_json::Value,
@@ -4851,21 +4878,66 @@ fn render_container(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     } else {
         format!("display:flex;flex-direction:{dir};")
     };
-    let style = if visible {
-        format!("{flex_dir}{pos_style}{color_default}{gutter_reset}{base_style};{bind_bg}")
+    // A container may carry its own `behavior` list — the brush tile is a
+    // `type: container` with click (select + set stroke_brush + apply) and
+    // double_click (open options). Wire those the same way icon_button /
+    // color_swatch do; without this the tile rendered as an inert <div>
+    // and clicks did nothing at all (the BRUSHDEAD bug). Only interactive
+    // containers pay for the listeners — the vast majority (plain layout
+    // wrappers) take the no-listener branch below.
+    let on_click = build_click_handler(el, ctx, rctx);
+    let on_dblclick = build_dblclick_handler(el, ctx, rctx);
+    let on_mousedown = build_mousedown_handler(el, ctx, rctx);
+    let on_mouseup = build_mouseup_handler(el, ctx, rctx);
+    // `has_pointer_behavior` is the same predicate the BRUSHDEAD pin
+    // asserts for the brush tile — gate the interactive branch on it (plus
+    // any mouse_down/up timer behaviors) so the tested contract and the
+    // live wiring decision are one and the same.
+    let interactive =
+        has_pointer_behavior(el) || on_mousedown.is_some() || on_mouseup.is_some();
+    let cursor = if interactive { "cursor:pointer;" } else { "" };
+
+    // bind.selected_in: draw the 2px accent outline when this tile's
+    // identity is a member of the bound list (shared with color_swatch via
+    // eval_selected_in). Appended last so it overrides the base border.
+    let selected_border = if eval_selected_in(el, ctx) {
+        "border:2px solid #007aff;"
     } else {
-        format!("display:none;{pos_style}{color_default}{gutter_reset}{base_style};{bind_bg}")
+        ""
+    };
+
+    let style = if visible {
+        format!("{flex_dir}{pos_style}{color_default}{gutter_reset}{base_style};{bind_bg}{cursor}{selected_border}")
+    } else {
+        format!("display:none;{pos_style}{color_default}{gutter_reset}{base_style};{bind_bg}{cursor}{selected_border}")
     };
     let css_class = format!("{row_class} {col_class}").trim().to_string();
     let children = render_children(el, ctx, rctx);
 
-    rsx! {
-        div {
-            id: "{id}",
-            class: "{css_class}",
-            style: "{style}",
-            for child in children {
-                {child}
+    if interactive {
+        rsx! {
+            div {
+                id: "{id}",
+                class: "{css_class}",
+                style: "{style}",
+                onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
+                ondoubleclick: move |evt| { if let Some(ref h) = on_dblclick { h.call(evt); } },
+                onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
+                onmouseup: move |evt| { if let Some(ref h) = on_mouseup { h.call(evt); } },
+                for child in children {
+                    {child}
+                }
+            }
+        }
+    } else {
+        rsx! {
+            div {
+                id: "{id}",
+                class: "{css_class}",
+                style: "{style}",
+                for child in children {
+                    {child}
+                }
             }
         }
     }
@@ -5189,27 +5261,46 @@ fn is_toolbar_tool_slot(el: &serde_json::Value) -> bool {
         .unwrap_or(false)
 }
 
-fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
-    let id = get_id(el);
-    let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
-    let style = build_style(el, ctx);
-    let panel_kind = rctx.panel_kind;
+/// Resolve an icon_button's checked state and the color its highlight uses
+/// WHEN checked, from `bind.checked` + `style.checked_bg` against the render
+/// ctx. Returns `(checked, checked_bg_color)`.
+///
+/// The highlight is NOT baked into the root div's `style` string. The div
+/// carries a dedicated `data-checked` attribute (this bool) plus a
+/// `--jas-check-bg` custom property (this color), and the app stylesheet's
+/// `.jas-icon-button[data-checked="true"] { background: var(--jas-check-bg) }`
+/// rule paints it (app.rs). Driving on/off from that ONE dedicated attribute
+/// — rather than a `background:` fragment buried in a multi-segment formatted
+/// `style` value — means a toggle flips a single attribute on a node whose
+/// identity is STABLE (`key: "{id}"`): Dioxus flushes that value reliably (the
+/// same way the glyph's `dangerous_inner_html` child always re-rendered), and
+/// nothing remounts.
+///
+/// This replaces the prior CHAINGLOW remedy, which keyed the div on
+/// `{id}-{checked}-{disabled}`. That key DID land the fresh highlight — but
+/// only by remounting the whole node on every checked/disabled flip, which
+/// destroyed the focused element on keyboard activation (breaking Tab-nav
+/// continuity — keyboard.rs relies on the focused widget, and there is no
+/// focus restoration for `.jas-focusable` divs) and split a toolbar slot's
+/// double-click across two DOM nodes (click1 selects the tool, flipping
+/// `checked` and remounting before click2, suppressing the dblclick).
+/// `checked_bg_color` is constant across a toggle, so it never needs to
+/// re-flush mid-interaction — only `data-checked` moves.
+///
+/// Extracted so the checked decision has a headless test target
+/// (render_icon_button returns an Element that needs component context).
+fn icon_button_check_state(el: &serde_json::Value, ctx: &serde_json::Value) -> (bool, String) {
+    let checked = el
+        .get("bind")
+        .and_then(|b| b.get("checked"))
+        .and_then(|v| v.as_str())
+        .map(|expr_str| expr::eval(expr_str, ctx).to_bool())
+        .unwrap_or(false);
 
-    // Evaluate bind.checked for active/highlighted state
-    let checked = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("checked")).and_then(|v| v.as_str()) {
-        expr::eval(expr_str, ctx).to_bool()
-    } else {
-        false
-    };
-    // Evaluate bind.disabled to grey the button out. Used by
-    // op_link_indicator to disable while the selection has no mask.
-    let disabled = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
-        expr::eval(expr_str, ctx).to_bool()
-    } else {
-        false
-    };
-
-    // Get checked_bg from style spec, resolve template expressions
+    // Resolve checked_bg from the style spec, substituting {{...}} templates.
+    // Every shipped icon_button uses `{{theme.colors.button_checked}}`, and
+    // the unset default is that same #505050; a literal color in
+    // `style.checked_bg` is honored too (it rides the --jas-check-bg property).
     let checked_bg = if let Some(raw) = el.get("style").and_then(|s| s.get("checked_bg")).and_then(|v| v.as_str()) {
         let resolved = if raw.contains("{{") { expr::eval_text(raw, ctx) } else { raw.to_string() };
         if resolved.is_empty() || resolved.contains("{{") {
@@ -5220,15 +5311,26 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     } else {
         "#505050".to_string()
     };
-    // Always emit `background:` explicitly so a checked→unchecked
-    // transition actually clears the highlight in the DOM. With an
-    // empty fallback Dioxus's style diff left the previous
-    // background-color on the element (so e.g. all three Align-To
-    // toggles looked checked once any had ever been checked).
-    let bg_style = if checked {
-        format!("background:{checked_bg};")
+    (checked, checked_bg)
+}
+
+fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
+    let id = get_id(el);
+    let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
+    let style = build_style(el, ctx);
+    let panel_kind = rctx.panel_kind;
+
+    // Evaluate bind.checked + resolve the highlight color. The highlight is
+    // applied by CSS via the `data-checked` attribute + `--jas-check-bg`
+    // property set on the root div below — NOT by a background fragment in
+    // the style string — so the toggle flips one attribute on a stable node.
+    let (checked, checked_bg) = icon_button_check_state(el, ctx);
+    // Evaluate bind.disabled to grey the button out. Used by
+    // op_link_indicator to disable while the selection has no mask.
+    let disabled = if let Some(expr_str) = el.get("bind").and_then(|b| b.get("disabled")).and_then(|v| v.as_str()) {
+        expr::eval(expr_str, ctx).to_bool()
     } else {
-        "background:transparent;".to_string()
+        false
     };
 
     // Resolve the icon name. Resolution order:
@@ -5504,10 +5606,29 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let id_for_keydown = id.clone();
     rsx! {
         div {
+            // STABLE identity: key on the widget id ALONE so a state change
+            // never remounts the node. The checked highlight is driven by the
+            // `data-checked` attribute + the app stylesheet rule
+            // `.jas-icon-button[data-checked="true"]`, so toggling flips one
+            // dedicated attribute on THIS same persistent node — Dioxus
+            // flushes that reliably (as it always did the glyph's
+            // `dangerous_inner_html` tint) with no remount. That preserves
+            // keyboard focus across Enter/Space activation (keyboard.rs
+            // Tab-nav continuity) and keeps a toolbar slot's double-click on
+            // ONE DOM node even though click1 flips active_tool/checked.
+            // (CHAINGLOW had keyed this on `{{id}}-{{checked}}-{{disabled}}`;
+            // that remounted on every flip, destroying the focused node and
+            // splitting the dblclick target between click1 and click2.)
+            key: "{id}",
             id: "{id}",
-            class: "jas-focusable",
+            class: "jas-focusable jas-icon-button",
+            "data-checked": "{checked}",
             tabindex: "{tabindex_val}",
-            style: "{position_style}{layout_style}cursor:pointer;{disabled_style}{bg_style}{style}",
+            // `--jas-check-bg` is the highlight color the stylesheet paints
+            // when data-checked is "true"; it is constant across a toggle
+            // (only data-checked moves), so it never needs to re-flush
+            // mid-interaction. The `background:` itself is NOT in this string.
+            style: "{position_style}{layout_style}cursor:pointer;--jas-check-bg:{checked_bg};{disabled_style}{style}",
             title: "{summary}",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
             onmousedown: move |evt| { if let Some(ref h) = on_mousedown { h.call(evt); } },
@@ -5977,18 +6098,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                         }
                         Some(PanelKind::Stroke) | None => {
                             set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                            if f == "weight" {
-                                if let Some(ref mut stroke) = st.app_default_stroke {
-                                    stroke.width = new_val;
-                                }
-                                let idx = st.active_tab;
-                                if let Some(tab) = st.tabs.get_mut(idx) {
-                                    if let Some(ref mut stroke) = tab.model.default_stroke {
-                                        stroke.width = new_val;
-                                    }
-                                }
-                            }
-                            st.apply_stroke_panel_to_selection();
+                            st.apply_stroke_panel_to_selection(&f);
                         }
                         Some(PanelKind::Opacity) => {
                             set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(new_val));
@@ -6187,7 +6297,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                             }
                             Some(PanelKind::Stroke) | None => {
                                 set_stroke_field(&mut st.stroke_panel, &f, &serde_json::Value::Null);
-                                st.apply_stroke_panel_to_selection();
+                                st.apply_stroke_panel_to_selection(&f);
                             }
                             _ => {}
                         }
@@ -6222,25 +6332,11 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                             st.apply_paragraph_panel_to_selection();
                         }
                         Some(PanelKind::Stroke) | None => {
-                            // Weight is the canonical "stroke width"
-                            // path — mirror the number_input branch's
-                            // app_default_stroke / per-tab.default_stroke
-                            // sync so newly-drawn strokes inherit the
-                            // edited weight.
-                            if f == "weight" {
-                                if let Some(ref mut stroke) = st.app_default_stroke {
-                                    stroke.width = new_val;
-                                }
-                                let idx = st.active_tab;
-                                if let Some(tab) = st.tabs.get_mut(idx) {
-                                    if let Some(ref mut stroke) = tab.model.default_stroke {
-                                        stroke.width = new_val;
-                                    }
-                                }
-                            } else {
-                                set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                            }
-                            st.apply_stroke_panel_to_selection();
+                            // Weight goes through set_stroke_field like
+                            // every other field; the apply propagates it
+                            // to both new-element defaults.
+                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
+                            st.apply_stroke_panel_to_selection(&f);
                         }
                         Some(PanelKind::Opacity) => {
                             set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(new_val));
@@ -6585,7 +6681,7 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                                 }
                                 Some(PanelKind::Stroke) | None => {
                                     set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
-                                    st.apply_stroke_panel_to_selection();
+                                    st.apply_stroke_panel_to_selection(&f);
                                 }
                                 Some(PanelKind::Opacity) => {
                                     set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(v));
@@ -6753,7 +6849,7 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                                     }
                                     Some(PanelKind::Stroke) | None => {
                                         set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
-                                        st.apply_stroke_panel_to_selection();
+                                        st.apply_stroke_panel_to_selection(&f);
                                     }
                                     _ => {}
                                 }
@@ -6890,7 +6986,7 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         }
                                         Some(PanelKind::Stroke) | None => {
                                             set_stroke_field(&mut st.stroke_panel, &f, &json_val);
-                                            st.apply_stroke_panel_to_selection();
+                                            st.apply_stroke_panel_to_selection(&f);
                                         }
                                         // Other panels: no-op until their
                                         // per-panel state structs land.
@@ -7475,28 +7571,8 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     // from the click behavior's first `select.target` so authors don't
     // have to repeat it). If the identity is in the list, draw a 2px
     // accent outline. Falls back to the regular border otherwise.
-    let selected = el.get("bind")
-        .and_then(|b| b.get("selected_in"))
-        .and_then(|v| v.as_str())
-        .map(|list_expr| {
-            let list_val = expr::eval(list_expr, ctx);
-            let id_expr = el.get("behavior")
-                .and_then(|b| b.as_array())
-                .and_then(|behaviors| {
-                    behaviors.iter().find_map(|b| {
-                        let effects = b.get("effects").and_then(|v| v.as_array())?;
-                        effects.iter().find_map(|e| {
-                            e.get("select")
-                                .and_then(|s| s.get("target"))
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string())
-                        })
-                    })
-                });
-            let id_val = id_expr.map(|expr| expr::eval(&expr, ctx));
-            list_contains_value(&list_val, id_val.as_ref())
-        })
-        .unwrap_or(false);
+    // Shared with the brush-tile container via `eval_selected_in`.
+    let selected = eval_selected_in(el, ctx);
 
     // Selected: 2px macOS-system-blue (#007aff) outline replacing
     // the 1px border. Matches JasSwift's renderColorSwatch which
@@ -7554,6 +7630,38 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
             }
         }
     }
+}
+
+/// Evaluate a tile widget's `bind.selected_in` membership: true when the
+/// element's per-item identity (read from its click behavior's first
+/// `select.target`, so authors don't repeat it) is a member of the bound
+/// list expression. Shared by tile-shaped widgets (`color_swatch` and the
+/// brush-tile `container`) so the accent-outline selection cue is drawn
+/// identically wherever a `selected_in` bind appears.
+fn eval_selected_in(el: &serde_json::Value, ctx: &serde_json::Value) -> bool {
+    el.get("bind")
+        .and_then(|b| b.get("selected_in"))
+        .and_then(|v| v.as_str())
+        .map(|list_expr| {
+            let list_val = expr::eval(list_expr, ctx);
+            let id_expr = el
+                .get("behavior")
+                .and_then(|b| b.as_array())
+                .and_then(|behaviors| {
+                    behaviors.iter().find_map(|b| {
+                        let effects = b.get("effects").and_then(|v| v.as_array())?;
+                        effects.iter().find_map(|e| {
+                            e.get("select")
+                                .and_then(|s| s.get("target"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                        })
+                    })
+                });
+            let id_val = id_expr.map(|expr| expr::eval(&expr, ctx));
+            list_contains_value(&list_val, id_val.as_ref())
+        })
+        .unwrap_or(false)
 }
 
 /// Test whether `id` is a member of the list `list`. Used by the
@@ -10608,11 +10716,122 @@ mod tests {
         );
     }
 
+    // ── STROKEWIDTH: the YAML colour route is COLOUR-only ─────────
+    //
+    // A swatch / hex click writes state.stroke_color (or fill_color)
+    // through set_app_state_field. It used to stamp
+    // `Stroke::new(color, default_width)` over the selection, so a swatch
+    // click reset a 5pt dashed line to a plain 1pt stroke — the same
+    // clobber as the Stroke panel's, on the colour route.
+    fn state_with_selected_stroked_line(stroke: Stroke) -> AppState {
+        use crate::geometry::element::{CommonProps, Element, LayerElem, LineElem};
+        use crate::document::document::{Document, ElementSelection};
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let line = Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0,
+            stroke: Some(stroke),
+            width_points: Vec::new(),
+            common: CommonProps::default(),
+            stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(line)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        st.tabs[st.active_tab].model.set_document_for_test(Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        });
+        st
+    }
+
+    #[test]
+    fn yaml_stroke_color_write_keeps_every_other_attribute() {
+        use crate::geometry::element::{Arrowhead, LineCap};
+        let mut base = Stroke::new(Color::from_hex("ff0000").unwrap(), 5.0);
+        base.linecap = LineCap::Round;
+        base.dash_pattern = [7.0, 3.0, 0.0, 0.0, 0.0, 0.0];
+        base.dash_len = 2;
+        base.end_arrow = Arrowhead::Diamond;
+        base.opacity = 0.5;
+        let mut st = state_with_selected_stroked_line(base);
+        st.app_default_stroke = Some(Stroke::new(Color::BLACK, 1.0));
+        st.tabs[st.active_tab].model.default_stroke = Some(Stroke::new(Color::BLACK, 1.0));
+        set_app_state_field("stroke_color", &serde_json::json!("#0000ff"), &mut st);
+        let s = st.tab().unwrap().model.document()
+            .get_element(&vec![0usize, 0]).unwrap()
+            .stroke().cloned().unwrap();
+        assert_eq!(s.color, Color::from_hex("0000ff").unwrap());
+        assert_eq!(s.width, 5.0, "5pt line must STAY 5pt");
+        assert_eq!(s.linecap, LineCap::Round);
+        assert_eq!(s.dash_array(), &[7.0, 3.0]);
+        assert_eq!(s.end_arrow, Arrowhead::Diamond);
+        assert_eq!(s.opacity, 0.5);
+    }
+
+    #[test]
+    fn yaml_fill_color_write_keeps_fill_opacity() {
+        use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
+        use crate::document::document::{Document, ElementSelection};
+        let mut st = AppState::new();
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let mut fill = Fill::new(Color::from_hex("ff0000").unwrap());
+        fill.opacity = 0.25;
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(fill), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        st.tabs[st.active_tab].model.set_document_for_test(Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        });
+        set_app_state_field("fill_color", &serde_json::json!("#0000ff"), &mut st);
+        let f = st.tab().unwrap().model.document()
+            .get_element(&vec![0usize, 0]).unwrap()
+            .fill().cloned().unwrap();
+        assert_eq!(f.color, Color::from_hex("0000ff").unwrap());
+        assert_eq!(f.opacity, 0.25, "fill opacity must survive a colour write");
+    }
+
     #[test]
     fn get_app_state_field_null_fill() {
         let mut st = AppState::new();
         st.app_default_fill = None;
         assert_eq!(get_app_state_field("fill_color", &st), serde_json::Value::Null);
+    }
+
+    // The flat global `stroke_width` and the panel's `weight` field are ONE
+    // slot in this port, so a global write must land on the panel field the
+    // apply reads — like every other `stroke_*` key. It used to move only
+    // the default strokes, leaving the committed weight stale.
+    #[test]
+    fn global_stroke_width_write_lands_on_the_panel_weight() {
+        let mut st = make_state_with_colors("ffffff", "000000");
+        set_app_state_field("stroke_width", &serde_json::json!(7.5), &mut st);
+        assert_eq!(st.stroke_panel.weight, 7.5,
+                   "the global weight write must reach the panel field");
+        assert_eq!(st.app_default_stroke.unwrap().width, 7.5);
     }
 
     #[test]
@@ -10764,7 +10983,7 @@ mod tests {
         // Simulate a scale field edit + its apply.
         set_stroke_field(&mut st.stroke_panel, "start_arrowhead_scale",
                          &serde_json::json!(200.0));
-        st.apply_stroke_panel_to_selection();
+        st.apply_stroke_panel_to_selection("start_arrowhead_scale");
         let overrides = build_live_panel_overrides(&st);
         assert_eq!(overrides.get("link_arrowhead_scale"),
                    Some(&serde_json::Value::Bool(true)),
@@ -10843,7 +11062,7 @@ mod tests {
         //    render-time ctx snapshot (ctx1), as render_combo_box does. ──
         set_stroke_field(&mut st.stroke_panel, "start_arrowhead_scale",
             &serde_json::json!(200.0));
-        st.apply_stroke_panel_to_selection();
+        st.apply_stroke_panel_to_selection("start_arrowhead_scale");
         run_input_commit_behavior(&start_scale_combo(), "start_arrowhead_scale",
             &serde_json::json!(200.0), &ctx1, &mut st);
 
@@ -10859,6 +11078,67 @@ mod tests {
             "end combo (mirrored sibling) displays 200 — NOT the stale 100, got {end_disp:?}");
         assert!(chain_disp,
             "chain highlight SURVIVES the scale edit (checked binds true)");
+    }
+
+    // ── CHAINGLOW: the icon_button highlight must track on→off ────────
+    //
+    // The Stroke chain toggle (stroke.yaml stk_link_arrowhead_scale,
+    // icon_button, `bind.checked: panel.link_arrowhead_scale`) must light its
+    // highlight while checked and CLEAR it when unchecked. The highlight is
+    // now the `data-checked` attribute + the app stylesheet rule
+    // `.jas-icon-button[data-checked="true"]` (see icon_button_check_state),
+    // so the decision the button DISPLAYS is exactly the `checked` bool CSS
+    // keys on, plus the `--jas-check-bg` color it paints. This pin rebuilds
+    // the dock ctx exactly as build_dock_groups does and evaluates that real
+    // decision across a full on→OFF cycle: `checked` must flip true then back
+    // to false (data-checked "true"→"false" → CSS un-matches → highlight
+    // clears, does NOT stick ON), while the resolved color stays constant.
+    // The stable `key: "{id}"` means the flip never remounts the node.
+    fn chain_toggle_el() -> serde_json::Value {
+        // The shipped stroke.yaml element (bind.checked only; no checked_bg
+        // → the #505050 default). Pinned in the reference bundle test.
+        serde_json::json!({
+            "id": "stk_link_arrowhead_scale",
+            "type": "icon_button",
+            "icon": "chain",
+            "bind": { "checked": "panel.link_arrowhead_scale" },
+        })
+    }
+
+    #[test]
+    fn chainglow_icon_button_highlight_tracks_on_off() {
+        let el = chain_toggle_el();
+        let chain_effects = [
+            serde_json::json!({"set_panel_state": {"key": "link_arrowhead_scale",
+                "value": "not panel.link_arrowhead_scale"}}),
+            serde_json::json!({"set": {"stroke_link_arrowhead_scale":
+                "not state.stroke_link_arrowhead_scale"}}),
+        ];
+        let mut st = make_state_with_colors("ffffff", "000000");
+
+        // ── ctx #0: initial render — chain OFF → data-checked=false, the
+        //    stylesheet rule does not match, so no highlight is painted. ──
+        let ctx0 = build_stroke_render_ctx(&st);
+        let (checked0, bg0) = icon_button_check_state(&el, &ctx0);
+        assert!(!checked0, "chain starts unchecked → data-checked=false, no highlight");
+        assert_eq!(bg0, "#505050", "checked_bg resolves to the default highlight color");
+
+        // ── Click 1 (enable): data-checked flips true → CSS paints it. ──
+        run_yaml_effects(&chain_effects, &ctx0, &mut st);
+        let ctx1 = build_stroke_render_ctx(&st);
+        let (checked1, bg1) = icon_button_check_state(&el, &ctx1);
+        assert!(checked1, "checked true after first enable → data-checked=true, highlight ON");
+        assert_eq!(bg1, "#505050", "highlight color unchanged across the toggle");
+
+        // ── Click 2 (disable): data-checked flips back to false — the
+        //    highlight CLEARS (the rule un-matches), NOT sticks ON (the
+        //    reported bug). No remount: the stable {id} key keeps the same
+        //    node; only the attribute value moves. ──
+        run_yaml_effects(&chain_effects, &ctx1, &mut st);
+        let ctx2 = build_stroke_render_ctx(&st);
+        let (checked2, bg2) = icon_button_check_state(&el, &ctx2);
+        assert!(!checked2, "checked back to false → data-checked=false, highlight CLEARS");
+        assert_eq!(bg2, "#505050", "highlight color still resolvable (just not painted)");
     }
 
     // ── radio widget: on_check partitioning ───────────────────
@@ -13769,6 +14049,197 @@ mod tests {
         // No behavior at all.
         let bare = serde_json::json!({ "type": "icon_button" });
         assert!(!super::is_toolbar_tool_slot(&bare));
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // BRUSHDEAD — declared pointer behaviors must not be silently dropped
+    // ─────────────────────────────────────────────────────────────
+    //
+    // The live bug: clicking a Brushes-panel brush tile did NOTHING —
+    // no apply, no state change, not even the tile's own selected-outline
+    // cue. The tile is a `type: container` carrying `behavior: [click,
+    // double_click]`, but `render_container` built a plain `<div>` with no
+    // onclick/ondoubleclick, so the declared behavior never reached the
+    // dispatcher. That is finding-#26 disease: a widget-type render arm
+    // that silently drops declared behaviors.
+    //
+    // AUTHORITATIVE CONTRACT. `wires_pointer_click` lists every widget
+    // `type` whose render arm attaches a pointer (onclick / ondoubleclick)
+    // handler built from the element's declared `behavior` list. Grep
+    // contract: each type here has an `onclick:` (and, where it also takes
+    // double_click, an `ondoubleclick:`) in its `render_*` arm above,
+    // sourced from `build_click_handler` / `build_dblclick_handler` (or,
+    // for the native tree widget, its own pointer wiring). If you give a
+    // NEW widget type a click behavior in the YAML, you MUST both add its
+    // `onclick` in the render arm and register it here — otherwise
+    // `every_click_bearing_widget_type_is_pointer_wired` fails.
+    //
+    // Scope: this pin guards the demonstrated defect class —
+    // click-family pointer behaviors (`click` / `double_click` /
+    // `click_and_wait`). change/commit/input behaviors are wired through
+    // each input arm's own native onchange/oninput closures, and
+    // drag/toggle through the drag subsystem; those are out of scope here.
+    fn wires_pointer_click(widget_type: &str) -> bool {
+        matches!(
+            widget_type,
+            "container" | "row" | "col"   // render_container
+                | "icon_button"           // render_icon_button
+                | "color_swatch"          // render_color_swatch
+                | "gradient_tile"         // render_gradient_tile
+                | "gradient_slider"       // render_gradient_slider
+                | "text"                  // render_text
+                | "button"                // render_button
+                | "toggle" | "checkbox"   // render_toggle
+                | "tree_view"             // render_tree_view (native)
+        )
+    }
+
+    /// Collect `(widget_type, event)` for every node in `node` whose
+    /// `behavior[]` declares a click-family pointer event.
+    fn collect_click_bearing(node: &serde_json::Value, out: &mut Vec<(String, String)>) {
+        match node {
+            serde_json::Value::Object(map) => {
+                if let (Some(t), Some(behaviors)) = (
+                    map.get("type").and_then(|t| t.as_str()),
+                    map.get("behavior").and_then(|b| b.as_array()),
+                ) {
+                    for b in behaviors {
+                        let ev = b.get("event").and_then(|e| e.as_str()).unwrap_or("click");
+                        if matches!(ev, "click" | "double_click" | "click_and_wait") {
+                            out.push((t.to_string(), ev.to_string()));
+                        }
+                    }
+                }
+                for v in map.values() {
+                    collect_click_bearing(v, out);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for v in items {
+                    collect_click_bearing(v, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // COMPLETENESS PIN. Walk the COMPILED bundle (workspace.json) and
+    // assert that every widget type carrying a click-family behavior maps
+    // to a render arm that wires a pointer handler. This is the guard
+    // against the whole class: if a render arm silently drops declared
+    // pointer behaviors (as render_container did), any bundle widget of
+    // that type is dead — and this test names it.
+    #[test]
+    fn every_click_bearing_widget_type_is_pointer_wired() {
+        let ws = super::super::workspace::Workspace::load().expect("bundle loads");
+        let mut found = Vec::new();
+        collect_click_bearing(ws.data(), &mut found);
+
+        // Sanity: the bundle actually carries click behaviors (guards
+        // against a walker that silently finds nothing).
+        assert!(
+            !found.is_empty(),
+            "bundle should declare click-family behaviors on widgets"
+        );
+
+        let mut unwired: Vec<(String, String)> = found
+            .iter()
+            .filter(|(t, _)| !wires_pointer_click(t))
+            .cloned()
+            .collect();
+        unwired.sort();
+        unwired.dedup();
+        assert!(
+            unwired.is_empty(),
+            "widget types carry a click/double_click behavior in the bundle \
+             but their render arm attaches no pointer handler (silently dead \
+             clicks — the BRUSHDEAD disease): {unwired:?}"
+        );
+
+        // The container fix specifically must be represented: the bundle
+        // DOES ship a click-bearing container (the brush tile), so this
+        // must be a live case, not a hypothetical.
+        assert!(
+            found.iter().any(|(t, _)| t == "container"),
+            "expected a click-bearing container in the bundle (the brush tile)"
+        );
+    }
+
+    /// Walk the bundle for the first node with `id == want` (ids may carry
+    /// `{{...}}` templating, so match on the literal template form).
+    fn find_by_id<'a>(node: &'a serde_json::Value, want: &str) -> Option<&'a serde_json::Value> {
+        match node {
+            serde_json::Value::Object(map) => {
+                if map.get("id").and_then(|v| v.as_str()) == Some(want) {
+                    return Some(node);
+                }
+                map.values().find_map(|v| find_by_id(v, want))
+            }
+            serde_json::Value::Array(items) => items.iter().find_map(|v| find_by_id(v, want)),
+            _ => None,
+        }
+    }
+
+    // BRUSHES-SPECIFIC PIN. The brush tile must be a container that
+    // declares BOTH a click behavior (select + set stroke_brush + apply)
+    // and a double_click behavior (open options), and `render_container`
+    // must treat that shape as interactive. `has_pointer_behavior` is the
+    // exact predicate render_container gates its interactive branch on, so
+    // asserting it here locks the wiring decision for the tile.
+    #[test]
+    fn brush_tile_container_is_interactive() {
+        let ws = super::super::workspace::Workspace::load().expect("bundle loads");
+        let tile = find_by_id(ws.data(), "bp_tile_{{lib.id}}_{{brush.slug}}")
+            .expect("brush tile present in compiled bundle");
+
+        assert_eq!(
+            tile.get("type").and_then(|t| t.as_str()),
+            Some("container"),
+            "brush tile is a container"
+        );
+
+        let events: Vec<&str> = tile
+            .get("behavior")
+            .and_then(|b| b.as_array())
+            .expect("tile declares behaviors")
+            .iter()
+            .filter_map(|b| b.get("event").and_then(|e| e.as_str()))
+            .collect();
+        assert!(events.contains(&"click"), "tile declares a click behavior");
+        assert!(
+            events.contains(&"double_click"),
+            "tile declares a double_click behavior"
+        );
+
+        // The render arm's own interactivity gate must fire for this node.
+        assert!(
+            super::has_pointer_behavior(tile),
+            "render_container must classify the brush tile as interactive"
+        );
+        // And the tile's type must be pointer-wired per the contract.
+        assert!(wires_pointer_click("container"));
+    }
+
+    // The tile also carries a `selected_in` bind for its highlight; the
+    // shared `eval_selected_in` must report membership so the accent
+    // outline shows once the brush is in `panel.selected_brushes`.
+    #[test]
+    fn eval_selected_in_matches_bundle_tile_shape() {
+        // Mirror the tile: identity is read from the click behavior's
+        // first `select.target` (here a literal), tested against the bound
+        // list.
+        let el = serde_json::json!({
+            "type": "container",
+            "bind": { "selected_in": "panel.selected_brushes" },
+            "behavior": [{
+                "event": "click",
+                "effects": [{ "select": { "target": "\"acme/round\"", "list": "selected_brushes" } }]
+            }]
+        });
+        let ctx_in = serde_json::json!({ "panel": { "selected_brushes": ["acme/round"] } });
+        let ctx_out = serde_json::json!({ "panel": { "selected_brushes": ["acme/flat"] } });
+        assert!(super::eval_selected_in(&el, &ctx_in), "tile is selected when its id is in the list");
+        assert!(!super::eval_selected_in(&el, &ctx_out), "tile is not selected otherwise");
     }
 }
 

@@ -1212,39 +1212,17 @@ struct FillStrokeWidget: View {
     }
 
     private func swapColors() {
-        // Pull current colors from the SELECTION first (matching what
-        // the widget displays — see fillStrokeSquare). Fall back to
-        // tab defaults when no selection / non-uniform. Swapping based
-        // on defaults alone produced "random" colors when the
-        // defaults had drifted from the selection's actual fill /
-        // stroke (e.g. the user changed colors via Color panel
-        // slider edits that wrote to the selection).
-        let curFill: Fill? = {
-            switch selectionFillSummary(model.document) {
-            case .uniform(let f?): return f
-            case .uniform(nil): return nil
-            default: return model.defaultFill
-            }
-        }()
-        let curStroke: Stroke? = {
-            switch selectionStrokeSummary(model.document) {
-            case .uniform(let s?): return s
-            case .uniform(nil): return nil
-            default: return model.defaultStroke
-            }
-        }()
-        let newFill: Fill? = curStroke.map { Fill(color: $0.color) }
-        let newStroke: Stroke? = curFill.map { Stroke(color: $0.color) }
-        model.defaultFill = newFill
-        model.defaultStroke = newStroke
-        if !model.document.selection.isEmpty {
-            let ctrl = Controller(model: model)
-            // Fill + stroke swap as ONE undo step (withTxn; each editDocument joins).
-            model.withTxn {
-                ctrl.setSelectionFill(newFill)
-                ctrl.setSelectionStroke(newStroke)
-            }
-        }
+        // The law lives in ONE place — Controller.swapFillStrokeColors, the
+        // Swift statement of the Rust `AppState::swap_fill_stroke` — and
+        // both this widget arrow and the Shift+X key route there. It used to
+        // be a second copy that additionally sourced the two colours from
+        // the SELECTION (defaults as fallback) while Shift+X and Rust
+        // sourced the DEFAULTS, so the same action swapped different colours
+        // depending on how it was invoked. Default-sourced is the right
+        // semantic: the defaults are also what decides `nil`, and per-element
+        // sourcing would swap a Line's stroke away to nothing, since a Line
+        // holds no fill.
+        Controller(model: model).swapFillStrokeColors()
     }
 
     private func resetDefaults() {

@@ -29,6 +29,24 @@
     "expected_json": "set_attr_on_selection_clear_expected.json"
   },
   {
+    "name": "set_attr_on_selection_line_promotes_to_path",
+    "setup_svg": "line_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "set_attr_on_selection", "attr": "stroke_brush", "value": "charcoal"}
+    ],
+    "expected_json": "set_attr_on_selection_line_promotes_to_path_expected.json"
+  },
+  {
+    "name": "set_attr_on_selection_polyline_promotes_to_path",
+    "setup_svg": "polyline_with_id.svg",
+    "ops": [
+      {"op": "select_rect", "x": 0, "y": 0, "width": 96, "height": 96, "extend": false},
+      {"op": "set_attr_on_selection", "attr": "stroke_brush", "value": "charcoal"}
+    ],
+    "expected_json": "set_attr_on_selection_polyline_promotes_to_path_expected.json"
+  },
+  {
     "name": "set_attr_on_selection_unknown_attr_skips",
     "setup_svg": "path_with_id.svg",
     "ops": [

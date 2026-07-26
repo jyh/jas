@@ -64,6 +64,14 @@ private func strokeAttrs(_ stroke: Stroke?) -> String {
     // Identity-omitted when false; round-trips through jas-authored
     // files; ignored on import from non-jas SVG.
     if stroke.dashAlignAnchors { s += " data-jas-dash-align-anchors=\"true\"" }
+    // Arrowheads — workspace-private, in the `jas:` namespace declared on the
+    // root <svg>. Each attr is identity-omitted at its default so a plain stroke
+    // stays byte-clean; parsed back by parseStroke, ignored on non-jas import.
+    if stroke.startArrow != .none { s += " jas:start-arrow=\"\(stroke.startArrow.name)\"" }
+    if stroke.endArrow != .none { s += " jas:end-arrow=\"\(stroke.endArrow.name)\"" }
+    if stroke.startArrowScale != 100.0 { s += " jas:start-arrow-scale=\"\(fmt(stroke.startArrowScale))\"" }
+    if stroke.endArrowScale != 100.0 { s += " jas:end-arrow-scale=\"\(fmt(stroke.endArrowScale))\"" }
+    if stroke.arrowAlign == .centerAtEnd { s += " jas:arrow-align=\"center_at_end\"" }
     return s
 }
 
@@ -473,8 +481,42 @@ public func documentToSvg(_ doc: Document) -> String {
     let vb = "\(fmt(px(b.x))) \(fmt(px(b.y))) \(fmt(px(b.width))) \(fmt(px(b.height)))"
     let setupDefault = doc.documentSetup == DocumentSetup.default
     let prefsDefault = doc.printPreferences == PrintPreferences.default
-    let needsJasNs = !setupDefault || !prefsDefault
-    let needsSodipodi = needsJasNs
+    let needsNamedview = !setupDefault || !prefsDefault
+
+    // Build the body (symbols + layers) first so we can decide whether the root
+    // <svg> must declare xmlns:jas: an arrowed stroke emits jas:*-namespaced
+    // attributes (ARROWFIX2 item 2), and Foundation's strict XML parser rejects
+    // an undeclared prefix on import. Detecting from the emitted body keeps the
+    // namespace off plain documents (byte-clean, fixtures unchanged).
+    var bodyLines: [String] = []
+    // Symbols (master store, SYMBOLS.md §5 / Fork S3): masters serialize
+    // inside a single <defs> block (each as its normal element SVG, carrying
+    // its id), placed before the layer content so the standard SVG
+    // non-rendered-definition mechanism applies. Emitted only when the store
+    // is non-empty (so existing fixtures stay byte-identical), sorted by id
+    // (the §2 deterministic-order rule). Instances ride the existing
+    // <use href="#id"> path in the layer tree. On import, <defs> children
+    // become doc.symbols (see svgToDocument).
+    if !doc.symbols.isEmpty {
+        let sortedMasters = doc.symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
+        bodyLines.append("  <defs>")
+        for master in sortedMasters {
+            bodyLines.append(elementSvg(master, indent: "    "))
+        }
+        bodyLines.append("  </defs>")
+    }
+    for layer in doc.layers {
+        bodyLines.append(elementSvg(.layer(layer), indent: "  "))
+    }
+    // ` jas:start-arrow` is a prefix of `-scale`, likewise ` jas:end-arrow`, so
+    // these three substrings cover all five arrowhead attributes.
+    let hasArrowNs = bodyLines.contains {
+        $0.contains(" jas:start-arrow") || $0.contains(" jas:end-arrow")
+            || $0.contains(" jas:arrow-align")
+    }
+    let needsJasNs = needsNamedview || hasArrowNs
+    let needsSodipodi = needsNamedview
+
     var nsAttrs = " xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\""
     if needsSodipodi {
         nsAttrs += " xmlns:sodipodi=\"http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd\""
@@ -492,7 +534,7 @@ public func documentToSvg(_ doc: Document) -> String {
     // marks-and-bleed state. Conservative writer: emit nothing when
     // both are default. Artboards aren't yet persisted in this
     // port's SVG (separate cross-port follow-up).
-    if needsJasNs {
+    if needsNamedview {
         lines.append("  <sodipodi:namedview id=\"namedview1\">")
         if !setupDefault {
             lines.append(documentSetupToSvg(doc.documentSetup, indent: "    "))
@@ -502,25 +544,7 @@ public func documentToSvg(_ doc: Document) -> String {
         }
         lines.append("  </sodipodi:namedview>")
     }
-    // Symbols (master store, SYMBOLS.md §5 / Fork S3): masters serialize
-    // inside a single <defs> block (each as its normal element SVG, carrying
-    // its id), placed before the layer content so the standard SVG
-    // non-rendered-definition mechanism applies. Emitted only when the store
-    // is non-empty (so existing fixtures stay byte-identical), sorted by id
-    // (the §2 deterministic-order rule). Instances ride the existing
-    // <use href="#id"> path in the layer tree. On import, <defs> children
-    // become doc.symbols (see svgToDocument).
-    if !doc.symbols.isEmpty {
-        let sortedMasters = doc.symbols.sorted { ($0.id ?? "") < ($1.id ?? "") }
-        lines.append("  <defs>")
-        for master in sortedMasters {
-            lines.append(elementSvg(master, indent: "    "))
-        }
-        lines.append("  </defs>")
-    }
-    for layer in doc.layers {
-        lines.append(elementSvg(.layer(layer), indent: "  "))
-    }
+    lines += bodyLines
     lines.append("</svg>")
     return lines.joined(separator: "\n")
 }
@@ -1022,8 +1046,19 @@ private func parseStroke(_ node: XMLElement) -> Stroke? {
     let dashAlign = (node.attribute(forName: "data-jas-dash-align-anchors")?.stringValue ?? "")
         .trimmingCharacters(in: .whitespaces)
     let dashAlignAnchors = (dashAlign == "true" || dashAlign == "1")
+    // Arrowheads — round-tripped from the `jas:` namespace (see strokeAttrs).
+    // Each defaults to its identity value when the attr is absent (plain SVG).
+    let startArrow = Arrowhead(rawValue: node.attribute(forName: "jas:start-arrow")?.stringValue ?? "none") ?? .none
+    let endArrow = Arrowhead(rawValue: node.attribute(forName: "jas:end-arrow")?.stringValue ?? "none") ?? .none
+    let startArrowScale = Double(node.attribute(forName: "jas:start-arrow-scale")?.stringValue ?? "100") ?? 100.0
+    let endArrowScale = Double(node.attribute(forName: "jas:end-arrow-scale")?.stringValue ?? "100") ?? 100.0
+    let arrowAlign: ArrowAlign =
+        (node.attribute(forName: "jas:arrow-align")?.stringValue == "center_at_end") ? .centerAtEnd : .tipAtEnd
     return Stroke(color: c, width: width, linecap: lc, linejoin: lj,
-                  dashAlignAnchors: dashAlignAnchors, opacity: opacity)
+                  dashAlignAnchors: dashAlignAnchors,
+                  startArrow: startArrow, endArrow: endArrow,
+                  startArrowScale: startArrowScale, endArrowScale: endArrowScale,
+                  arrowAlign: arrowAlign, opacity: opacity)
 }
 
 private func parseTransform(_ node: XMLElement) -> Transform? {

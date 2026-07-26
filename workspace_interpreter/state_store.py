@@ -835,6 +835,49 @@ class StateStore:
         elem[keys[-1]] = value
         return True
 
+    def promote_element_for_brush(self, path: tuple[int, ...]) -> bool:
+        """Promote a Line (or open Polyline) at ``path`` to a geometry-identical
+        Path IN PLACE, so it can carry Path-only attributes such as
+        ``stroke_brush``.
+
+        The "upgrade naturally" convention (JYH 2026-07-25), mirroring the
+        Rect→Polygon corner-drag promotion: applying a brush to a Line upgrades
+        it to a Path rather than silently no-op'ing. Identity is preserved (the
+        SAME dict object stays at ``path`` in its parent's children), and the
+        stroke / common / gradient / width-profile fields carry across
+        untouched. A Line has no fill, so no fill is synthesised; a Polyline's
+        fill carries whole. A degenerate Polyline (< 2 points) is left as-is.
+
+        Returns True when a promotion happened, False otherwise (already a Path,
+        or not promotable). See BRUSHES.md §Stroke styling interaction.
+        """
+        elem = self.get_element(path)
+        if not isinstance(elem, dict):
+            return False
+        kind = elem.get("kind")
+        if kind == "Line":
+            x1 = elem.pop("x1", 0.0)
+            y1 = elem.pop("y1", 0.0)
+            x2 = elem.pop("x2", 0.0)
+            y2 = elem.pop("y2", 0.0)
+            elem["kind"] = "Path"
+            elem["d"] = [
+                {"MoveTo": {"x": x1, "y": y1}},
+                {"LineTo": {"x": x2, "y": y2}},
+            ]
+            return True
+        if kind == "Polyline":
+            pts = elem.get("points")
+            if isinstance(pts, list) and len(pts) >= 2:
+                d = [{"MoveTo": {"x": pts[0][0], "y": pts[0][1]}}]
+                for p in pts[1:]:
+                    d.append({"LineTo": {"x": p[0], "y": p[1]}})
+                elem.pop("points", None)
+                elem["kind"] = "Path"
+                elem["d"] = d
+                return True
+        return False
+
     # ── Context for expression evaluation ────────────────────
 
     def eval_context(self, extra: dict | None = None) -> dict:
@@ -1053,3 +1096,10 @@ class StateStore:
                     if isinstance(p, (list, tuple)):
                         out.append(tuple(p))
         return out
+
+    def selection_paths(self) -> list[tuple[int, ...]]:
+        """Public accessor: the canvas selection as normalized path tuples.
+        Delegates to the document's ``selection`` list. Used by
+        selection-wide document effects (e.g. ``doc.set_attr_on_selection``)
+        that must mutate every selected element."""
+        return self._canvas_selection_paths()

@@ -53,8 +53,18 @@ private func applyStrokePanel(
     } else {
         model.stateStore.initPanel("stroke_panel_content", defaults: [:])
     }
-    applyStrokePanelToSelection(store: model.stateStore,
-                               controller: Controller(model: model))
+    // The apply is field-scoped: it writes only the group of the field the
+    // user just committed (STROKEWIDTH — a panel edit must not rewrite
+    // attributes the user did not touch). Each case here seeds exactly the
+    // keys it exercises, so replay one apply per seeded key, which is what
+    // the runtime does (one commit -> one apply).
+    var edits = Array(globals.keys)
+    if weight != nil { edits.append("weight") }
+    for key in edits {
+        applyStrokePanelToSelection(store: model.stateStore,
+                                    controller: Controller(model: model),
+                                    edited: key)
+    }
     guard let s = model.document.getElement([0, 0]).stroke else {
         fatalError("expected a Stroke at [0,0] after apply")
     }
@@ -233,7 +243,8 @@ private func applyStrokePanel(
     model.stateStore.set("stroke_cap", "round")
     model.stateStore.initPanel("stroke_panel_content", defaults: ["weight": 9.0])
     applyStrokePanelToSelection(store: model.stateStore,
-                               controller: Controller(model: model))
+                               controller: Controller(model: model),
+                               edited: "cap")
     let s = model.document.getElement([0, 0]).stroke
     #expect(s?.linecap == .butt)   // unchanged
     #expect(s?.width == 1.0)       // unchanged
@@ -266,7 +277,10 @@ private func syncModel(_ stroke: Stroke) -> Model {
                              linecap: .round, linejoin: .bevel))
     syncStrokePanelFromSelection(store: m.stateStore,
                                  controller: Controller(model: m))
-    #expect((m.stateStore.get("stroke_weight") as? Double) == 3.5)
+    // The weight's global spelling is `stroke_width` — the key
+    // `strokePanelField` reads back and a `set:` effect writes. It was
+    // `stroke_weight`, which nothing read.
+    #expect((m.stateStore.get("stroke_width") as? Double) == 3.5)
     #expect((m.stateStore.get("stroke_cap") as? String) == "round")
     #expect((m.stateStore.get("stroke_join") as? String) == "bevel")
 }
@@ -279,6 +293,25 @@ private func syncModel(_ stroke: Stroke) -> Model {
     #expect((o["weight"] as? Double) == 3.5)
     #expect((o["cap"] as? String) == "square")
     #expect((o["join"] as? String) == "round")
+}
+
+// ARROWSCALE (JYH 2026-07-25): the arrowhead shape, scale and align the
+// panel DISPLAYS are the selected element's, exactly like weight/cap/join.
+// JYH's repro at the true layer: the head renders the element's scale, so the
+// Scale field MUST show that same scale or the head is a size the panel never
+// displayed and committing the shown value jumps it.
+@Test func strokeSyncArrowheads_overrides() {
+    let m = syncModel(Stroke(color: Color(r: 0, g: 0, b: 0), width: 5.0,
+                             startArrow: .simpleArrow, endArrow: .circle,
+                             startArrowScale: 50.0, endArrowScale: 175.0,
+                             arrowAlign: .centerAtEnd))
+    let o = strokePanelLiveOverrides(model: m)
+    #expect((o["start_arrowhead"] as? String) == "simple_arrow")
+    #expect((o["end_arrowhead"] as? String) == "circle")
+    // The heart of the repro: DISPLAYED scale IS the element's scale.
+    #expect((o["start_arrowhead_scale"] as? Double) == 50.0)
+    #expect((o["end_arrowhead_scale"] as? Double) == 175.0)
+    #expect((o["arrow_align"] as? String) == "center_at_end")
 }
 
 // MARK: - Dashed-Line checkbox toggles both ways (DASHFIX)
@@ -534,7 +567,8 @@ private func numeric(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
 
     // Native combo commit of start=150 (panel bind + gap-closure global).
     commitStrokeScale(store, "start_arrowhead_scale", 150)
-    applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+    applyStrokePanelToSelection(store: store, controller: Controller(model: model),
+                                edited: "start_arrowhead_scale")
 
     #expect(model.document.getElement([0, 0]).stroke?.startArrowScale == 150)
 }
@@ -543,14 +577,22 @@ private func numeric(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
 // start=200 through the REAL runInputCommitBehavior path against a Model
 // with a SELECTED stroked element. The mirror's set / set_panel_state
 // effects must drive applyStrokePanelToSelection for the SIBLING scale —
-// exactly as Rust's apply_set_panel_state_with_ctx unconditionally
-// re-applies for the arrowhead-scale keys (renderer.rs ~2042-2048). The
-// SIBLING must reach the element through the commit-behavior effects, NOT
-// a direct applyStrokePanelToSelection call. Before the fix the
-// commit-behavior platformEffects map (alignPlatformEffects) registered no
-// notify_panel_state_changed hook, so the mirror updated the panel/global
-// scopes but the element stayed {startArrowScale:200, endArrowScale:100}
-// (start applied by the edited-field commit, end stale). Rust: {200,200}.
+// exactly as Rust's apply_set_panel_state_with_ctx re-applies with its own
+// key (renderer.rs). The SIBLING must reach the element through the
+// commit-behavior effects, NOT a direct applyStrokePanelToSelection call.
+// Before the fix the commit-behavior platformEffects map
+// (alignPlatformEffects) registered no notify_panel_state_changed hook, so
+// the mirror updated the panel/global scopes but the element stayed
+// {startArrowScale:200, endArrowScale:100} (start applied by the
+// edited-field commit, end stale). Rust: {200,200}.
+//
+// STROKEWIDTH: the MECHANISM changed, the law did not. Each arrowhead
+// scale is now its own edit group, so the sibling no longer rides along on
+// the edited field's apply — it reaches the element because the notify
+// payload NAMES the key each mirror write touched, and that key's own
+// group is what gets written. Same {200,200} outcome, now for the right
+// reason: an UNLINKED start-scale edit leaves the end scale alone (see
+// StrokeFieldScopeTests / the stroke_apply corpus).
 @Test func linkedStartScaleCommitReAppliesSiblingToSelection() {
     let model = strokeModelWithSelectedRect()
     let store = model.stateStore
@@ -565,7 +607,8 @@ private func numeric(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
     // what commitPanelWrite does BEFORE runInputCommitBehavior. Element
     // reaches {200,100}: start applied, sibling still stale.
     commitStrokeScale(store, "start_arrowhead_scale", 200)
-    applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+    applyStrokePanelToSelection(store: store, controller: Controller(model: model),
+                                edited: "start_arrowhead_scale")
     #expect(model.document.getElement([0, 0]).stroke?.startArrowScale == 200)
     #expect(model.document.getElement([0, 0]).stroke?.endArrowScale == 100)
 
@@ -597,7 +640,8 @@ private func numeric(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
     store.set("stroke_end_arrowhead_scale", 100.0)
 
     commitStrokeScale(store, "start_arrowhead_scale", 200)
-    applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+    applyStrokePanelToSelection(store: store, controller: Controller(model: model),
+                                edited: "start_arrowhead_scale")
     runInputCommitBehavior(element: startScaleCombo(),
                            field: "start_arrowhead_scale", committed: 200.0,
                            context: staleScaleCtx(linked: false),

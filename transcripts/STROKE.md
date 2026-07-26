@@ -347,6 +347,113 @@ mirrors are re-initialised from `state.*`. This means Stroke panel
 writes propagate through each app's `apply_stroke_panel_to_selection`
 pipeline (same shape as Character's `apply_character_panel_to_selection`).
 
+### The field-scoped apply law
+
+**A Stroke-panel edit names the field the user just committed, and
+writes only what that field owns.** Every other stroke attribute is
+preserved from the element being edited, per element. An edit to a
+field that owns no element attribute writes nothing at all — not even
+an undo step.
+
+This is the law because the panel is not a picture of the selection.
+Most of its controls display panel state that never syncs from the
+selected element, so an apply that rebuilt the whole stroke would
+impose values the user never chose and, in most cases, cannot see. The
+weight field is the sharp case: it shows the selection's real width,
+but the panel's other fields sit at their defaults, so rebuilding on
+any edit reset a selected 5pt dashed arrowheaded line to a plain 1pt
+line. Picking an arrowhead changed the weight. (JYH, 2026-07-24.)
+
+**The display side has its own rule, and it is the mirror image of the
+apply rule: a control that shows a RENDERED geometry of the selection
+must show the SELECTION's value, not a panel default.** Weight and
+cap / join do this, and the **arrowhead group** — start / end shape,
+start / end scale, and arrow alignment — joins them. It has to: the head
+size is `4 × weight × scale%` on the canvas, so a Scale field frozen at
+its 100 % default while the selected element carries another value shows
+a number the head never had. The head then renders at (say) half, and
+committing the field's own displayed 100 % — which the field-scoped
+apply writes straight onto the element — *jumps* the head to full, a
+change the panel never showed. Draw a line whose new-element default
+scale was 50 %, move the default back to 100 %, reselect: the old
+display read 100 while the head was 50 (JYH, 2026-07-25, ARROWSCALE).
+The fix is display-only and does not touch the apply: the panel now
+mirrors the selection's arrowhead group, and because the field shows the
+element's true scale, committing it is a no-op instead of a silent jump.
+Syncing the display is safe precisely because the apply stays
+field-scoped — a truthful display of one attribute cannot leak the
+others onto the element. The link-scale chain button stays panel-state
+(it is a UI-only flag, not an element attribute). The read seams are the
+per-port live overrides: Rust `build_live_panel_overrides`
+(`workspace/dock_panel.rs`), Swift `strokePanelLiveOverrides`
+(`Sources/Interpreter/StrokePanelSync.swift`), reference
+`sync_stroke_panel_from_selection` (`workspace_interpreter/effects.py`),
+each gated by an element→panel test.
+
+The attribute **groups** — a group is the set of attributes one field
+owns, and is a single attribute except where that is impossible:
+
+| Panel field | Writes |
+| --- | --- |
+| `weight` | the stroke width, taken from the weight input's committed value. This is the ONLY field that reads a panel-committed width, which is what makes it impossible for any other edit to disturb the element's weight. |
+| `cap` | the line cap |
+| `join` | the line join |
+| `miter_limit` | the miter limit |
+| `align_stroke` | the stroke alignment |
+| `dashed`, `dash_1`, `gap_1`, `dash_2`, `gap_2`, `dash_3`, `gap_3`, `dash_align_anchors` | the whole dash pattern **and** the anchor-alignment flag. Necessarily wide: a dash array cannot be written a slot at a time, so any dash-family edit re-derives the pattern from the panel's dash fields (empty when the `dashed` toggle is off). |
+| `start_arrowhead` | the start arrowhead shape |
+| `end_arrowhead` | the end arrowhead shape |
+| `start_arrowhead_scale` | the start arrowhead scale, and **only** the start scale |
+| `end_arrowhead_scale` | the end arrowhead scale, and **only** the end scale |
+| `arrow_align` | the arrowhead alignment |
+| `profile`, `profile_flipped` | the element's width points **only**; the stroke itself is untouched. The width points are also re-derived on a `weight` edit, because the profile scales with the weight. |
+| `link_arrowhead_scale` | nothing. The chain is a UI-only flag; toggling it must not push an undo step that changes nothing. |
+
+The two arrowhead scales are deliberately **separate** groups. Grouping
+them looks tempting because the link-scales chain moves them together,
+but the chain does that by *committing the sibling field*, which applies
+through that field's own group. Sharing one group bought nothing and cost
+an unlinked scale edit stamping the panel's sibling scale over the
+element's own.
+
+Because the apply is field-scoped, every write into a stroke key must be
+attributed to the key it actually wrote — including writes made by
+another field's commit behaviour, like the chain mirror. A write blamed
+on the wrong field applies the wrong group.
+
+"Preserved" means **bit-for-bit**, and the colour is the attribute where
+that bites. A stroke colour carries its colour *space* (RGB / HSB / CMYK)
+and its own alpha, so a colour that makes a round trip through 6-char hex
+comes back demoted to RGB, opaque, and quantised to 8 bits. A panel edit
+owns no part of the colour, so it must hand the element's colour object
+straight back — never re-derive it. The reference bridge did exactly that
+round trip on every apply, which made the reference the one
+implementation that broke its own preserve-the-rest clause; the corpus
+now carries a CMYK vector and an alpha-bearing vector so no
+implementation can silently demote a colour again.
+
+**Colour is not part of this.** A colour pick changes the colour and
+nothing else, through the same preserve-the-rest rule (`recolor_stroke` /
+`recolorStroke`), and so does the fill/stroke swap (Shift+X, the widget
+arrow, the Color-panel button) — it swaps the two **colours**, and it
+sources them from the **new-element defaults**, never per element. The
+defaults are what decides `nil` (no fill / no stroke swaps too), and
+per-element sourcing breaks on the commonest case: a Line holds no fill,
+so its "own" fill colour is nothing and the swap would take its stroke
+away instead of recolouring it. Each port states this once — Rust
+`AppState::swap_fill_stroke`, Swift `Controller.swapFillStrokeColors` —
+and every call site routes there, so the keyboard path and the widget
+path cannot drift apart (they had: Swift's widget arrow sourced the
+selection while Shift+X sourced the defaults). Resetting
+to defaults (`reset_fill_stroke`) is the one action that legitimately
+replaces the whole set of stroke attributes, and `workspace/actions.yaml`
+enumerates what it resets.
+
+The law is stated executably in the reference interpreter
+(`workspace_interpreter/stroke_law.py`, which holds the field → group
+table the ports mirror) and pinned across all three live implementations
+by `test_fixtures/stroke_apply/panel_edit.json`.
+
 Per-app entry points (see the corresponding files for details —
 the names and locations mirror the Character panel wiring):
 
@@ -357,10 +464,15 @@ the names and locations mirror the Character panel wiring):
 - **Swift** (`JasSwift`): `applyStrokePanelToSelection` in
   `Sources/Interpreter/Effects.swift`, subscribed through the
   notify-panel-state-changed dispatcher.
+- **Reference** (`workspace_interpreter`): `stroke_law.py` states the
+  law; `apply_stroke_panel_to_selection` in `effects.py` applies it, with
+  `subscribe_stroke_panel` threading the changed key as the edited field.
 - **OCaml** (`jas_ocaml`): `subscribe_stroke_panel` in
-  `lib/interpreter/effects.ml`.
-- **Python** (`jas`): the stroke-panel subscription in
-  `jas/panels/`.
+  `lib/interpreter/effects.ml`. FROZEN at `five-port-parity` — it still
+  holds the whole-rebuild law and is not being updated to match.
+- **Python Qt app** (`jas`): the stroke-panel subscription in
+  `jas/panels/`. FROZEN at `five-port-parity`; it reaches the law only
+  through the shared reference helper it calls.
 
 Open follow-ups:
 
@@ -373,3 +485,57 @@ Open follow-ups:
 - The 15 arrowhead shapes exist as marker references; the full
   per-shape SVG marker set needs to land before every shape renders
   on every canvas.
+
+Banked by the STROKEWIDTH council (2026-07-24) — decided, deferred, and
+written down here so the decision does not live only in a commit message:
+
+- **Per-element swap-colour sourcing.** The fill/stroke swap sources both
+  colours from the new-element defaults, in every port. Sourcing them per
+  element (so a mixed selection swaps each element's own two colours) is a
+  plausible future feature, but it needs an answer for elements that hold
+  only one of the two — a Line has no fill, and swapping its stroke away
+  to nothing is not what the arrow promises. Revisit with the
+  multi-selection story, not before.
+- **`reset_fill_stroke_defaults` still replaces whole attributes.** Reset
+  is the one action that legitimately does; `workspace/actions.yaml`
+  enumerates exactly what it resets. Left as intended semantics, not an
+  oversight — if it ever grows a "reset colours only" mode, that is a new
+  action, not a change to this one.
+- **Display-vs-apply sync.** The panel shows the selection's real weight /
+  cap / join through a per-render PULL (Rust `build_live_panel_overrides`,
+  Swift `strokePanelLiveOverrides`) — but a push-style
+  `sync_stroke_panel_from_selection` also survives in the reference
+  (writing panel state) and in Swift (writing the flat globals, with no
+  production caller). Rust deleted its copy, which additionally mutated
+  the new-element default — a display path must never do that. Two shapes
+  for one job: unifying on the pull is the intended direction and wants
+  its own pass.
+- **The profile stamp on a multi-selection.** A `profile` / `weight` edit
+  re-derives width points for the whole selection from ONE profile width:
+  the committed weight for a weight edit, else the FIRST selected
+  element's width. With mixed widths selected, the later elements get the
+  first element's profile scale. Correct fix is per-element re-derivation;
+  needs a decision on what the panel's profile picker means across a
+  mixed selection.
+- **The Character-panel clobber.** `applyCharacterPanelToSelection` /
+  `apply_character_panel_to_selection` take no `edited` field at all: they
+  read the whole panel scope and write it over the selected range on any
+  edit — the shape the Stroke panel just left behind. Nothing has been
+  reported yet, but the class of bug is identical (a panel field that does
+  not track the selection re-imposing itself on an unrelated edit) and the
+  fix is the same field-scoped move. Next panel in line.
+- **Swift's `icon_button` effects: not every write notifies.** A YAML
+  button's `effects:` reach the apply only through the effects that fire
+  the `notify_panel_state_changed` hook — `set:` (per written key) and
+  `set_panel_state:` (per key). The others that touch panel state,
+  `select:` chief among them, write straight through `store.setPanel` and
+  only bump the render version, so a panel-state write made that way
+  lands without applying. No Stroke-panel control uses one today (its
+  buttons all commit keyed values), which is why nothing is broken; the
+  gap is in the generic widget layer and closing it means every
+  panel-state-writing effect naming the field it wrote.
+- **Rust `set_app_state_field` has no `stroke_dash_align_anchors` arm.** A
+  YAML `set: { stroke_dash_align_anchors: ... }` reaches neither the panel
+  field nor any apply in the Rust port, while Swift's `strokeRenderKeys`
+  fires it. Same decision surface as the global-`set:` apply question in
+  this list; fix the two together.

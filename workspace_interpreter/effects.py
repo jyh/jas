@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from workspace_interpreter.expr import evaluate
 from workspace_interpreter.state_store import StateStore
+from workspace_interpreter.stroke_law import DASH_DEFAULT
 
 
 def _set_by_scoped_target(store: StateStore, raw_target: str, value) -> None:
@@ -669,6 +670,52 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.set_element_field(path_val.value, dotted_field, value)
         return None
 
+    # doc.set_attr_on_selection: { attr, value } — BRUSHES.md §Apply /
+    # the BRUSHAPPLY value-form law. Writes ONE attribute to EVERY
+    # canvas-selected element. The `value` is a PURE EXPRESSION in the
+    # purpose-built language — evaluated with `evaluate`, exactly like
+    # every sibling doc.* value, and NOT {{}}-text-interpolated (the
+    # moustache form is reserved for display text and constructed toggle
+    # keys). A brush id is therefore composed by string concatenation,
+    # e.g. `param.library + "/" + param.brush_slug`. A non-empty string
+    # result SETS the attribute; an empty string / null / non-string
+    # result CLEARS it (writes None) — mirroring the active ports'
+    # empty-string => clear rule. Phase 1 supports the two brush
+    # attributes only (stroke_brush, stroke_brush_overrides); an unknown
+    # attr, or a missing `value` key, is a hard skip (records nothing).
+    # Mutates the live tree in place like doc.set; the accompanying
+    # doc.snapshot effect (first in the action) provides the single undo
+    # step.
+    if "doc.set_attr_on_selection" in effect:
+        from workspace_interpreter.expr_types import ValueType
+        spec = effect["doc.set_attr_on_selection"]
+        if not isinstance(spec, dict):
+            return None
+        attr = spec.get("attr")
+        if attr not in ("stroke_brush", "stroke_brush_overrides"):
+            return None
+        if "value" not in spec:
+            return None
+        value_expr = spec.get("value")
+        eval_ctx = store.eval_context(ctx)
+        result = evaluate(str(value_expr) if value_expr is not None else "", eval_ctx)
+        resolved = (
+            result.value
+            if result.type == ValueType.STRING and result.value
+            else None
+        )
+        for path in store.selection_paths():
+            # Applying a brush (a non-empty resolved value) to a Line or open
+            # Polyline PROMOTES it to a geometry-identical Path first — the
+            # "upgrade naturally" convention (JYH 2026-07-25), mirroring the
+            # Rect→Polygon corner-drag promotion. Clearing (None) never
+            # promotes. A Path (or a non-promotable element) is untouched by
+            # the promotion and simply receives the attribute.
+            if resolved is not None:
+                store.promote_element_for_brush(path)
+            store.set_element_field(path, attr, resolved)
+        return None
+
     # foreach: { source, as } do: [...] — PHASE3 §5.3
     # Evaluates source once; each iteration runs do: in a fresh scope
     # with `as:` bound to the item. Bindings inside do: do not leak
@@ -1017,93 +1064,224 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 return
 
 
-def apply_stroke_panel_to_selection(store: StateStore, controller) -> None:
-    """Read stroke state keys from the store and apply to selected elements.
+def _stroke_to_attrs(stroke) -> dict:
+    """A geometry ``Stroke`` as the law's flat attribute map
+    (:mod:`workspace_interpreter.stroke_law`).
 
-    This is a platform-level helper that bridges the YAML panel state
-    (stroke_width, stroke_color, etc.) to the document controller.
+    The ``color`` entry is 6-char hex, which is LOSSY three ways at once:
+    the colour space is flattened to RGB, the alpha is dropped, and the
+    components are quantised to 8 bits. The law never reads or writes the
+    colour on a panel edit, so a caller whose edit does not CHANGE the
+    colour must carry the original ``Color`` object across and hand it back
+    through ``_stroke_from_attrs(..., color=...)`` — never let it make the
+    hex round trip.
+    """
+    return {
+        "color": stroke.color.to_hex(),
+        "width": float(stroke.width),
+        "linecap": getattr(stroke.linecap, "value", "butt"),
+        "linejoin": getattr(stroke.linejoin, "value", "miter"),
+        "miter_limit": float(stroke.miter_limit),
+        "align": getattr(stroke.align, "value", "center"),
+        "dash": tuple(float(x) for x in (stroke.dash_pattern or ())),
+        "dash_align_anchors": bool(stroke.dash_align_anchors),
+        "start_arrow": getattr(stroke.start_arrow, "value", "none"),
+        "end_arrow": getattr(stroke.end_arrow, "value", "none"),
+        "start_arrow_scale": float(stroke.start_arrow_scale),
+        "end_arrow_scale": float(stroke.end_arrow_scale),
+        "arrow_align": getattr(stroke.arrow_align, "value", "tip_at_end"),
+        "opacity": float(stroke.opacity),
+    }
+
+
+def _stroke_from_attrs(attrs: dict, color=None):
+    """The law's flat attribute map back as a geometry ``Stroke``.
+
+    ``color`` is the colour OBJECT to install, bypassing ``attrs["color"]``
+    entirely. Every caller whose edit leaves the colour alone passes the
+    stroke's own colour here, so the space / alpha / full precision survive
+    (see :func:`_stroke_to_attrs`). Only the colour ROUTE — where the new
+    colour genuinely arrives as the hex a ``set: { stroke_color }`` effect
+    wrote — leaves it unset.
     """
     from geometry.element import (
-        Stroke, Color, RgbColor, LineCap, LineJoin,
-        StrokeAlign, Arrowhead, ArrowAlign,
-        StrokeWidthPoint, profile_to_width_points,
+        Stroke, Color, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign,
     )
-
-    # Read stroke properties from store
-    width = store.get("stroke_width")
-    if width is None:
-        width = 1.0
-    width = float(width)
-
-    color_hex = store.get("stroke_color")
-    if color_hex and isinstance(color_hex, str):
-        c = Color.from_hex(color_hex)
-        color = c if c is not None else Color.BLACK
-    else:
-        color = Color.BLACK
-
-    opacity = store.get("stroke_opacity")
-    opacity = float(opacity) if opacity is not None else 1.0
-
-    cap_str = store.get("stroke_linecap") or "butt"
-    cap_map = {"butt": LineCap.BUTT, "round": LineCap.ROUND, "square": LineCap.SQUARE}
-    linecap = cap_map.get(cap_str, LineCap.BUTT)
-
-    join_str = store.get("stroke_linejoin") or "miter"
-    join_map = {"miter": LineJoin.MITER, "round": LineJoin.ROUND, "bevel": LineJoin.BEVEL}
-    linejoin = join_map.get(join_str, LineJoin.MITER)
-
-    miter_limit = store.get("stroke_miter_limit")
-    miter_limit = float(miter_limit) if miter_limit is not None else 10.0
-
-    align_str = store.get("stroke_align") or "center"
+    if color is None:
+        color = Color.from_hex(attrs["color"]) or Color.BLACK
+    cap_map = {"butt": LineCap.BUTT, "round": LineCap.ROUND,
+               "square": LineCap.SQUARE}
+    join_map = {"miter": LineJoin.MITER, "round": LineJoin.ROUND,
+                "bevel": LineJoin.BEVEL}
     align_map = {"center": StrokeAlign.CENTER, "inside": StrokeAlign.INSIDE,
                  "outside": StrokeAlign.OUTSIDE}
-    align = align_map.get(align_str, StrokeAlign.CENTER)
-
-    dash_str = store.get("stroke_dash_pattern") or ""
-    dash_pattern: tuple[float, ...] = ()
-    if dash_str and isinstance(dash_str, str):
-        try:
-            dash_pattern = tuple(float(x) for x in dash_str.split(",") if x.strip())
-        except ValueError:
-            pass
-    elif isinstance(dash_str, (list, tuple)):
-        dash_pattern = tuple(float(x) for x in dash_str)
-
-    start_arrow_str = store.get("stroke_start_arrow") or "none"
-    start_arrow = Arrowhead.from_string(start_arrow_str)
-    end_arrow_str = store.get("stroke_end_arrow") or "none"
-    end_arrow = Arrowhead.from_string(end_arrow_str)
-
-    start_arrow_scale = store.get("stroke_start_arrow_scale")
-    start_arrow_scale = float(start_arrow_scale) if start_arrow_scale is not None else 100.0
-    end_arrow_scale = store.get("stroke_end_arrow_scale")
-    end_arrow_scale = float(end_arrow_scale) if end_arrow_scale is not None else 100.0
-
-    arrow_align_str = store.get("stroke_arrow_align") or "tip_at_end"
-    arrow_align_map = {"tip_at_end": ArrowAlign.TIP_AT_END,
-                       "center_at_end": ArrowAlign.CENTER_AT_END}
-    arrow_align = arrow_align_map.get(arrow_align_str, ArrowAlign.TIP_AT_END)
-
-    dash_align_anchors = bool(store.get("stroke_dash_align_anchors"))
-
-    stroke = Stroke(
-        color=color, width=width, linecap=linecap, linejoin=linejoin,
-        opacity=opacity, miter_limit=miter_limit, align=align,
-        dash_pattern=dash_pattern,
-        dash_align_anchors=dash_align_anchors,
-        start_arrow=start_arrow,
-        end_arrow=end_arrow, start_arrow_scale=start_arrow_scale,
-        end_arrow_scale=end_arrow_scale, arrow_align=arrow_align,
+    return Stroke(
+        color=color,
+        width=attrs["width"],
+        linecap=cap_map.get(attrs["linecap"], LineCap.BUTT),
+        linejoin=join_map.get(attrs["linejoin"], LineJoin.MITER),
+        miter_limit=attrs["miter_limit"],
+        align=align_map.get(attrs["align"], StrokeAlign.CENTER),
+        dash_pattern=tuple(attrs["dash"]),
+        dash_align_anchors=attrs["dash_align_anchors"],
+        start_arrow=Arrowhead.from_string(attrs["start_arrow"]),
+        end_arrow=Arrowhead.from_string(attrs["end_arrow"]),
+        start_arrow_scale=attrs["start_arrow_scale"],
+        end_arrow_scale=attrs["end_arrow_scale"],
+        arrow_align=(ArrowAlign.CENTER_AT_END
+                     if attrs["arrow_align"] == "center_at_end"
+                     else ArrowAlign.TIP_AT_END),
+        opacity=attrs["opacity"],
     )
-    controller.set_selection_stroke(stroke)
 
-    # Apply width profile if set
-    profile = store.get("stroke_width_profile") or "uniform"
-    flipped = bool(store.get("stroke_width_profile_flipped"))
-    wp = profile_to_width_points(profile, width, flipped)
-    controller.set_selection_width_profile(wp)
+
+#: Every Stroke-panel field the law can read, with the value it takes when
+#: neither the panel scope nor the global scope holds one. Each fallback is
+#: the field's declared workspace default (``workspace/panels/stroke.yaml``
+#: ``state:`` block) — ``weight`` alone is a None sentinel, meaning "no
+#: committed weight", which sends the width group to the default stroke.
+#: The dash / gap pair reads 12.0 there, not 0.0, and both ports agreed with
+#: the workspace while this table did not.
+_STROKE_PANEL_FIELDS: dict = {
+    "weight": None, "cap": "butt", "join": "miter", "miter_limit": 10.0,
+    "align_stroke": "center", "dashed": False,
+    "dash_1": DASH_DEFAULT, "gap_1": DASH_DEFAULT,
+    "dash_2": None, "gap_2": None, "dash_3": None, "gap_3": None,
+    "dash_align_anchors": False, "start_arrowhead": "none",
+    "end_arrowhead": "none", "start_arrowhead_scale": 100.0,
+    "end_arrowhead_scale": 100.0, "arrow_align": "tip_at_end",
+    "profile": "uniform", "profile_flipped": False,
+}
+
+
+def stroke_panel_state(store: StateStore) -> dict:
+    """The Stroke panel's fields as the law's panel map.
+
+    PANEL scope first, the flat global ``stroke_<field>`` as fallback:
+    panel-first because that is where every in-panel widget write-back
+    lands, with the globals kept as the fallback for out-of-panel writers.
+    The weight input is the asymmetric pair — its global is
+    ``stroke_width`` while its panel field is ``weight``. ``align_stroke``
+    is written to the global as ``stroke_align`` by the panel's ``init:``
+    block but as ``stroke_align_stroke`` by its widgets, so both are
+    accepted. Mirrors the Swift ``strokePanelField``.
+    """
+    out = {}
+    for field, fallback in _STROKE_PANEL_FIELDS.items():
+        val = store.get_panel("stroke_panel_content", field)
+        if val is None:
+            val = store.get("stroke_width" if field == "weight"
+                            else f"stroke_{field}")
+        if val is None and field == "align_stroke":
+            val = store.get("stroke_align")
+        out[field] = fallback if val is None else val
+    return out
+
+
+def apply_stroke_panel_to_selection(
+    store: StateStore, controller, edited: str,
+) -> None:
+    """Apply ONE Stroke-panel edit to the selected element(s).
+
+    ``edited`` is the panel field key the user just committed (``"cap"``,
+    ``"end_arrowhead"``, ``"weight"``, ...); the flat global form
+    (``"stroke_cap"``) is accepted too, since that is what a YAML ``set:``
+    effect writes. Only that field's attribute group is taken from panel
+    state; every other stroke attribute is preserved FROM THE ELEMENT
+    BEING EDITED, per element. See
+    :mod:`workspace_interpreter.stroke_law` for the group table and
+    ``transcripts/STROKE.md`` for the English law.
+
+    This used to rebuild the WHOLE Stroke from panel state on every write
+    to a render-affecting key, so touching any one control reset a
+    selected 5pt dashed arrowheaded line to the panel's 1pt defaults
+    (JYH, 2026-07-24). Unknown keys write nothing: the panel carries
+    fields that own no element attribute.
+    """
+    from geometry.element import (
+        element_stroke, with_stroke, profile_to_width_points,
+    )
+    from workspace_interpreter.stroke_law import (
+        PROFILE_REDERIVING_GROUPS, WIDTH, stroke_edit_group,
+        stroke_with_group,
+    )
+
+    group = stroke_edit_group(edited)
+    if group is None:
+        return
+    panel = stroke_panel_state(store)
+    model = controller.model
+    doc = model.document
+
+    default_stroke = getattr(model, "default_stroke", None)
+    sel_stroke = None
+    if doc.selection:
+        try:
+            first = doc.get_element(next(iter(doc.selection)).path)
+        except Exception:
+            first = None
+        if first is not None:
+            sel_stroke = element_stroke(first)
+    # Nothing to build on: no selected stroke and no default.
+    fallback = sel_stroke or default_stroke
+    if fallback is None:
+        return
+    fallback_attrs = _stroke_to_attrs(fallback)
+
+    # The weight input's committed value. Read ONLY by the width group —
+    # that is what stops an unrelated edit from resetting the element's
+    # weight. Panel-committed value first, then the new-element default,
+    # then the stroke we are building on.
+    committed_width = panel.get("weight")
+    if committed_width is None:
+        committed_width = (default_stroke.width if default_stroke is not None
+                           else fallback_attrs["width"])
+    committed_width = float(committed_width)
+
+    if doc.selection:
+        new_doc = doc
+        for es in doc.selection:
+            try:
+                elem = new_doc.get_element(es.path)
+            except Exception:
+                continue
+            base = element_stroke(elem)
+            base_attrs = (_stroke_to_attrs(base) if base is not None
+                          else fallback_attrs)
+            new_attrs = stroke_with_group(
+                base_attrs, panel, group, committed_width)
+            # The edit owns ONE attribute group and the colour is never in
+            # it, so the element's own colour object goes straight back —
+            # the hex in base_attrs would demote its space, drop its alpha
+            # and quantise it to 8 bits.
+            new_elem = with_stroke(elem, _stroke_from_attrs(
+                new_attrs, color=(base or fallback).color))
+            if new_elem is not elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        if new_doc is not doc:
+            model.edit_document(new_doc)
+        # Width profiles are re-derived only when the edit can change
+        # them: the profile shape / flip, or the weight they scale with.
+        if group in PROFILE_REDERIVING_GROUPS:
+            profile_width = (
+                committed_width if group == WIDTH
+                else (sel_stroke.width if sel_stroke is not None
+                      else committed_width))
+            controller.set_selection_width_profile(profile_to_width_points(
+                panel["profile"], profile_width,
+                bool(panel["profile_flipped"])))
+
+    # The new-element defaults take the SAME field-scoped edit, built on
+    # the default stroke — never on the selected element, whose width /
+    # colour must not leak into what the next element gets.
+    # Its own colour object rides across untouched, same as the elements'.
+    default_base = default_stroke if default_stroke is not None else fallback
+    model.default_stroke = _stroke_from_attrs(
+        stroke_with_group(
+            _stroke_to_attrs(default_stroke) if default_stroke is not None
+            else fallback_attrs,
+            panel, group, committed_width),
+        color=default_base.color)
 
 
 # Rendering-affecting stroke state keys. Mirrors OCaml's
@@ -1128,12 +1306,16 @@ def subscribe_stroke_panel(store: StateStore, controller_getter) -> None:
     Controller (the app rotates models across tabs, so we can't
     capture a fixed reference). Mirrors OCaml's
     ``Effects.subscribe_stroke_panel``.
+
+    The changed KEY is threaded through as the edit's field, which is what
+    makes the apply field-scoped: the subscription already knows exactly
+    which control the user touched, so no caller has to say.
     """
     keys_set = set(STROKE_RENDER_KEYS)
 
     def _on_change(key, _value):
         if key in keys_set:
-            apply_stroke_panel_to_selection(store, controller_getter())
+            apply_stroke_panel_to_selection(store, controller_getter(), key)
 
     store.subscribe(STROKE_RENDER_KEYS, _on_change)
 
@@ -1181,6 +1363,35 @@ def sync_stroke_panel_from_selection(store: StateStore, model) -> None:
         if join is not None:
             store.set_panel("stroke_panel_content", "join",
                             getattr(join, "value", "miter"))
+        # Arrowheads reflect the selection too (ARROWSCALE; JYH 2026-07-25):
+        # the shape, the scale and the alignment are rendered geometry the
+        # user reads off the canvas, exactly like weight/cap/join. Without
+        # this the Scale field showed its own default (100) while the element
+        # carried another value, so the head rendered a size the panel never
+        # displayed and committing the shown value silently jumped it. The
+        # field-scoped apply (STROKE_EDIT_GROUPS) is unchanged. Guarded per
+        # attribute so a duck-typed stroke (tests) without them is a no-op,
+        # matching the cap/join style above.
+        start_arrow = getattr(stroke, "start_arrow", None)
+        end_arrow = getattr(stroke, "end_arrow", None)
+        start_scale = getattr(stroke, "start_arrow_scale", None)
+        end_scale = getattr(stroke, "end_arrow_scale", None)
+        align = getattr(stroke, "arrow_align", None)
+        if start_arrow is not None:
+            store.set_panel("stroke_panel_content", "start_arrowhead",
+                            getattr(start_arrow, "value", "none"))
+        if end_arrow is not None:
+            store.set_panel("stroke_panel_content", "end_arrowhead",
+                            getattr(end_arrow, "value", "none"))
+        if start_scale is not None:
+            store.set_panel("stroke_panel_content", "start_arrowhead_scale",
+                            float(start_scale))
+        if end_scale is not None:
+            store.set_panel("stroke_panel_content", "end_arrowhead_scale",
+                            float(end_scale))
+        if align is not None:
+            store.set_panel("stroke_panel_content", "arrow_align",
+                            getattr(align, "value", "tip_at_end"))
 
 
 def _element_evaluated_bbox(doc, path):
@@ -1611,8 +1822,47 @@ def subscribe_active_color(store: StateStore, controller_getter) -> None:
     set_active_color action) needs this subscription so the
     selection follows the active-color change. Mirrors OCaml's
     ``Effects.subscribe_active_color``.
+
+    A colour pick changes the COLOUR and nothing else. Both sides map the
+    selection per element, preserving every other attribute: this used to
+    build a bare ``Stroke(color, width)`` / ``Fill(color)`` and stamp it
+    over the selection, which dropped the element's cap / join / dash /
+    arrowheads / align / miter / opacity on a recolour (the same clobber
+    STROKEWIDTH fixed in the panel apply). See
+    :func:`workspace_interpreter.stroke_law.recolor_stroke`.
     """
-    from geometry.element import Color, Fill, Stroke
+    from geometry.element import (
+        Color, Fill, element_fill, element_stroke, with_fill, with_stroke,
+    )
+    from workspace_interpreter.stroke_law import recolor_fill, recolor_stroke
+
+    def _recolor_selection(ctrl, hex_color: str, *, stroke_side: bool) -> None:
+        """Map the selection, replacing only the colour on each element."""
+        doc = ctrl.model.document
+        new_doc = doc
+        for es in doc.selection:
+            try:
+                elem = new_doc.get_element(es.path)
+            except Exception:
+                continue
+            if stroke_side:
+                base = element_stroke(elem)
+                attrs = recolor_stroke(
+                    _stroke_to_attrs(base) if base is not None else None,
+                    hex_color)
+                new_elem = with_stroke(elem, _stroke_from_attrs(attrs))
+            else:
+                base = element_fill(elem)
+                attrs = recolor_fill(
+                    {"opacity": base.opacity} if base is not None else None,
+                    hex_color)
+                new_elem = with_fill(elem, Fill(
+                    color=Color.from_hex(attrs["color"]) or Color.BLACK,
+                    opacity=attrs["opacity"]))
+            if new_elem is not elem:
+                new_doc = new_doc.replace_element(es.path, new_elem)
+        if new_doc is not doc:
+            ctrl.model.edit_document(new_doc)
 
     def _on_change(key, _value):
         if key not in ("fill_color", "stroke_color"):
@@ -1632,30 +1882,38 @@ def subscribe_active_color(store: StateStore, controller_getter) -> None:
                 color = Color.from_hex(raw)
                 if color is None:
                     return
-                fill = Fill(color=color)
+                fill = Fill(color=color,
+                            opacity=(model.default_fill.opacity
+                                     if model.default_fill else 1.0))
             elif raw is None:
                 fill = None
             else:
                 return
             model.default_fill = fill
             if model.document.selection:
-                # The Controller mutator self-brackets via edit_document.
-                ctrl.set_selection_fill(fill)
+                if fill is None:
+                    # Clearing the fill outright is not a recolour.
+                    ctrl.set_selection_fill(None)
+                else:
+                    _recolor_selection(ctrl, raw, stroke_side=False)
         elif key == "stroke_color":
             raw = store.get("stroke_color")
-            existing_width = model.default_stroke.width if model.default_stroke else 1.0
             if isinstance(raw, str):
-                color = Color.from_hex(raw)
-                if color is None:
+                if Color.from_hex(raw) is None:
                     return
-                stroke = Stroke(color=color, width=existing_width)
+                base = (_stroke_to_attrs(model.default_stroke)
+                        if model.default_stroke is not None else None)
+                stroke = _stroke_from_attrs(recolor_stroke(base, raw))
             elif raw is None:
                 stroke = None
             else:
                 return
             model.default_stroke = stroke
             if model.document.selection:
-                # The Controller mutator self-brackets via edit_document.
-                ctrl.set_selection_stroke(stroke)
+                if stroke is None:
+                    # Clearing the stroke outright is not a recolour.
+                    ctrl.set_selection_stroke(None)
+                else:
+                    _recolor_selection(ctrl, raw, stroke_side=True)
 
     store.subscribe(["fill_color", "stroke_color"], _on_change)

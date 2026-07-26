@@ -46,6 +46,7 @@ switch algo {
 case "measure":           results = runMeasure(activeVectors)
 case "element_bounds":    results = runElementBounds(activeVectors)
 case "flatten":           results = runFlatten(activeVectors)
+case "arrow_trim":        results = runArrowTrim(activeVectors)
 case "length":            results = runLength(activeVectors)
 case "hit_test":          results = runHitTest(activeVectors)
 case "boolean":           results = runBoolean(activeVectors)
@@ -88,6 +89,47 @@ func runFlatten(_ vectors: [[String: Any]]) -> [[String: Any]] {
         if case .path(let p) = elem { d = p.d }
         let pts = flattenPathCommands(d)
         let result = pts.map { [$0.0, $0.1] }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Arrow Trim (arc-length trim of an arrowheaded stroke path)
+
+func cmdToJSON(_ cmd: PathCommand) -> [String: Any] {
+    switch cmd {
+    case .moveTo(let x, let y): return ["cmd": "M", "x": x, "y": y]
+    case .lineTo(let x, let y): return ["cmd": "L", "x": x, "y": y]
+    case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+        return ["cmd": "C", "x1": x1, "y1": y1, "x2": x2, "y2": y2, "x": x, "y": y]
+    case .quadTo(let x1, let y1, let x, let y):
+        return ["cmd": "Q", "x1": x1, "y1": y1, "x": x, "y": y]
+    case .closePath: return ["cmd": "Z"]
+    default: return ["cmd": "?"]
+    }
+}
+
+func runArrowTrim(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        var d: [PathCommand] = []
+        if case .path(let p) = elem { d = p.d }
+        let startSb = (tc["start_setback"] as? NSNumber)?.doubleValue ?? 0.0
+        let endSb = (tc["end_setback"] as? NSNumber)?.doubleValue ?? 0.0
+        // Orientation vectors pin the trim-chord head angles (ARROWFIX2 item 1);
+        // a head reports its angle only when armed (its setback > 0).
+        if (tc["orient"] as? NSNumber)?.boolValue ?? false {
+            let eps = 1e-9
+            let (startAngle, endAngle) = ArrowTrim.headAngles(
+                d, startSetback: startSb, endSetback: endSb)
+            let result: [String: Any] = [
+                "start": startSb > eps ? (startAngle as Any) : NSNull(),
+                "end": endSb > eps ? (endAngle as Any) : NSNull(),
+            ]
+            return ["name": name, "result": result]
+        }
+        let trimmed = ArrowTrim.trimPath(d, startSetback: startSb, endSetback: endSb)
+        let result = trimmed.map { cmdToJSON($0) }
         return ["name": name, "result": result]
     }
 }

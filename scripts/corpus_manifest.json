@@ -157,6 +157,17 @@
       },
       "notes": "The production run_effects capture pins (OP_LOG.md section 9, 3b-B). Journal/document/re-derivation goldens are claimed transitively via the root-relative expected_*_json fields."
     },
+    "test_fixtures/stroke_apply": {
+      "kind": "fixtures",
+      "required_consumers": ["rust", "swift", "reference"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literal (read_fixture in src/cross_language_test.rs stroke_apply_panel_edit_corpus)",
+        "swift": "path literal (Tests/Panels/StrokeApplyCorpusTests.swift strokeApplyCorpus)",
+        "reference": "os.path.join segments (workspace_interpreter/tests/test_stroke_apply.py)"
+      },
+      "notes": "STROKEWIDTH: the FIELD-SCOPED Stroke-panel apply law (transcripts/STROKE.md 'The field-scoped apply law'). Gates all THREE live implementations off one corpus: a panel edit names its field and only that field's attribute group is written, everything else preserved per element; plus the colour-only recolour route. The reference states the field -> group table (workspace_interpreter/stroke_law.py) and the ports mirror it. The reference arm additionally asserts the corpus REJECTS the whole-rebuild law it replaced, so the gate cannot pass vacuously. No scripts consumer: the law is a pure function pinned in-port, not an algorithm_roundtrip binary."
+    },
     "test_fixtures/svg": {
       "kind": "source",
       "required_consumers": ["rust", "swift", "scripts"],

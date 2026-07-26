@@ -1318,16 +1318,25 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 ctx.fillPath()
             }
         } else {
-            // Shorten path for arrowheads
+            // Arc-length-trim the path for arrowheads (see ArrowTrim). Mirrors
+            // jas_dioxus render.rs: replaces the old anchor-displacement shorten
+            // that deformed curved ends and folded them past the head at large
+            // setbacks. `strokeForDraw` butts the trimmed cut so round/projecting
+            // caps can't poke into the head base (single cap per stroke -> also
+            // butts a one-armed path's free end, an accepted simplification). An
+            // empty result is heads-only: the draw calls no-op, arrowheads still
+            // draw off v.d.
             var strokeCmds = v.d
+            var strokeForDraw = v.stroke
             if let s = v.stroke {
                 let startSb = arrowSetback(s.startArrow.name, strokeWidth: s.width, scalePct: s.startArrowScale)
                 let endSb = arrowSetback(s.endArrow.name, strokeWidth: s.width, scalePct: s.endArrowScale)
                 if startSb > 0 || endSb > 0 {
-                    strokeCmds = shortenPath(v.d, startSetback: startSb, endSetback: endSb)
+                    strokeCmds = ArrowTrim.trimPath(v.d, startSetback: startSb, endSetback: endSb)
+                    strokeForDraw = s.withLinecap(.butt)
                 }
             }
-            if !v.widthPoints.isEmpty, let s = v.stroke {
+            if !v.widthPoints.isEmpty, let s = strokeForDraw {
                 // Fill first if present
                 if v.fill != nil {
                     setFill(ctx, v.fill)
@@ -1338,7 +1347,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 renderVariableWidthPath(ctx, cmds: strokeCmds,
                                        widthPoints: v.widthPoints,
                                        strokeColor: cgColor(s.color), linecap: s.linecap)
-            } else if let s = v.stroke,
+            } else if let s = strokeForDraw,
                       s.dashAlignAnchors,
                       !s.dashPattern.isEmpty,
                       v.fillGradient == nil,
@@ -1368,19 +1377,24 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 let b = elem.bounds
                 let pbbox = CGRect(x: b.x, y: b.y, width: b.width, height: b.height)
                 fillStrokeOrOutline(
-                    ctx, v.fill, v.stroke,
+                    ctx, v.fill, strokeForDraw,
                     fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
                     bbox: pbbox, outline: false
                 )
             }
-            // Arrowheads
+            // Arrowheads — anchored at the ORIGINAL v.d endpoints, never the
+            // trimmed strokeCmds. The ANGLE is the trim-chord over each head's
+            // footprint (see Arrowheads orientation contract).
             if let s = v.stroke {
                 let center = s.arrowAlign == .centerAtEnd
+                let startSb = arrowSetback(s.startArrow.name, strokeWidth: s.width, scalePct: s.startArrowScale)
+                let endSb = arrowSetback(s.endArrow.name, strokeWidth: s.width, scalePct: s.endArrowScale)
                 drawArrowheads(ctx, cmds: v.d,
                               startName: s.startArrow.name, endName: s.endArrow.name,
                               startScale: s.startArrowScale, endScale: s.endArrowScale,
                               strokeWidth: s.width, strokeColor: cgColor(s.color),
-                              centerAtEnd: center)
+                              centerAtEnd: center,
+                              startSetback: startSb, endSetback: endSb)
             }
         }
 
@@ -3269,31 +3283,12 @@ class CanvasNSView: NSView {
                     super.keyDown(with: event)
                 }
             case "X":
-                // Swap fill and stroke colors (shift+x, no Cmd)
+                // Swap fill and stroke colors (shift+x, no Cmd). The law is
+                // stated once, in Controller.swapFillStrokeColors (the Swift
+                // statement of Rust's app_state.rs `swap_fill_stroke`); the
+                // fill/stroke widget arrow routes to the same call.
                 if !hasCmd {
-                    if let model = controller?.model {
-                        let oldFill = model.defaultFill
-                        let oldStroke = model.defaultStroke
-                        // Swap: fill color becomes stroke color and vice versa
-                        if let sf = oldStroke {
-                            model.defaultFill = Fill(color: sf.color)
-                        } else {
-                            model.defaultFill = nil
-                        }
-                        if let ff = oldFill {
-                            model.defaultStroke = Stroke(color: ff.color)
-                        } else {
-                            model.defaultStroke = nil
-                        }
-                        if !model.document.selection.isEmpty {
-                            // Fill + stroke swap as ONE undo step (withTxn; each
-                            // setSelection* editDocument joins it).
-                            model.withTxn {
-                                controller?.setSelectionFill(model.defaultFill)
-                                controller?.setSelectionStroke(model.defaultStroke)
-                            }
-                        }
-                    }
+                    controller?.swapFillStrokeColors()
                 } else {
                     super.keyDown(with: event)
                 }

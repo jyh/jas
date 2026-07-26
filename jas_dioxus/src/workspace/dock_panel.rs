@@ -196,11 +196,34 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
             crate::geometry::element::LineJoin::Round => "round",
             crate::geometry::element::LineJoin::Bevel => "bevel",
         }.into()));
+        // Arrowheads reflect the selection too — the shape, the scale and the
+        // alignment are rendered geometry the user reads off the canvas,
+        // exactly like weight/cap/join. Without this the Scale field showed
+        // its own default (100) while the element carried another value, so
+        // the head rendered a size the panel never displayed and committing
+        // the shown value silently JUMPED it (ARROWSCALE; JYH 2026-07-25). The
+        // field-scoped APPLY is unchanged: an edit still writes only its own
+        // group, so a truthful display cannot leak the other arrow attrs.
+        m.insert("start_arrowhead".into(), J::String(s.start_arrow.as_str().into()));
+        m.insert("end_arrowhead".into(), J::String(s.end_arrow.as_str().into()));
+        m.insert("start_arrowhead_scale".into(), serde_json::json!(s.start_arrow_scale));
+        m.insert("end_arrowhead_scale".into(), serde_json::json!(s.end_arrow_scale));
+        m.insert("arrow_align".into(), J::String(match s.arrow_align {
+            crate::geometry::element::ArrowAlign::CenterAtEnd => "center_at_end",
+            crate::geometry::element::ArrowAlign::TipAtEnd => "tip_at_end",
+        }.into()));
     } else {
         m.insert("weight".into(), serde_json::json!(
             st.app_default_stroke.map(|s| s.width).unwrap_or(1.0)));
         m.insert("cap".into(), J::String(sp.cap.clone()));
         m.insert("join".into(), J::String(sp.join.clone()));
+        // Nothing selected: the panel shows its own arrowhead defaults (the
+        // new-element settings), the same fallback weight/cap/join use.
+        m.insert("start_arrowhead".into(), J::String(sp.start_arrowhead.clone()));
+        m.insert("end_arrowhead".into(), J::String(sp.end_arrowhead.clone()));
+        m.insert("start_arrowhead_scale".into(), serde_json::json!(sp.start_arrowhead_scale));
+        m.insert("end_arrowhead_scale".into(), serde_json::json!(sp.end_arrowhead_scale));
+        m.insert("arrow_align".into(), J::String(sp.arrow_align.clone()));
     }
     m.insert("miter_limit".into(), serde_json::json!(sp.miter_limit));
     m.insert("align_stroke".into(), J::String(sp.align.clone()));
@@ -211,12 +234,9 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
     m.insert("gap_2".into(), sp.gap_2.map_or(J::Null, |v| serde_json::json!(v)));
     m.insert("dash_3".into(), sp.dash_3.map_or(J::Null, |v| serde_json::json!(v)));
     m.insert("gap_3".into(), sp.gap_3.map_or(J::Null, |v| serde_json::json!(v)));
-    m.insert("start_arrowhead".into(), J::String(sp.start_arrowhead.clone()));
-    m.insert("end_arrowhead".into(), J::String(sp.end_arrowhead.clone()));
-    m.insert("start_arrowhead_scale".into(), serde_json::json!(sp.start_arrowhead_scale));
-    m.insert("end_arrowhead_scale".into(), serde_json::json!(sp.end_arrowhead_scale));
+    // link_arrowhead_scale is a UI-only flag (not an element attribute), so it
+    // stays panel-state even under a selection.
     m.insert("link_arrowhead_scale".into(), J::Bool(sp.link_arrowhead_scale));
-    m.insert("arrow_align".into(), J::String(sp.arrow_align.clone()));
     m.insert("profile".into(), J::String(sp.profile.clone()));
     m.insert("profile_flipped".into(), J::Bool(sp.profile_flipped));
     m.insert("dash_align_anchors".into(), J::Bool(sp.dash_align_anchors));
@@ -1788,6 +1808,44 @@ mod stroke_panel_override_tests {
         // Selection empty -> fall back to the app default stroke width.
         let m = build_live_panel_overrides(&st);
         assert_eq!(m.get("weight").and_then(|v| v.as_f64()), Some(1.0));
+    }
+
+    // ARROWSCALE (JYH 2026-07-25): the arrowhead shape, scale and align the
+    // panel DISPLAYS are the selected element's, exactly like weight/cap/join.
+    // This is JYH's repro at the true layer: the head renders the element's
+    // scale, so the Scale field MUST show that same scale or the head is a
+    // size the panel never displayed and committing the shown value jumps it.
+    #[test]
+    fn arrowheads_from_selected_element() {
+        use crate::geometry::element::{Arrowhead, ArrowAlign};
+        let mut st = AppState::new();
+        let mut s = Stroke::new(Color::BLACK, 5.0);
+        s.start_arrow = Arrowhead::SimpleArrow;
+        s.end_arrow = Arrowhead::Circle;
+        s.start_arrow_scale = 50.0;
+        s.end_arrow_scale = 175.0;
+        s.arrow_align = ArrowAlign::CenterAtEnd;
+        select_rect_with_stroke(&mut st, Some(s));
+        let m = build_live_panel_overrides(&st);
+        assert_eq!(m.get("start_arrowhead").and_then(|v| v.as_str()), Some("simple_arrow"));
+        assert_eq!(m.get("end_arrowhead").and_then(|v| v.as_str()), Some("circle"));
+        // The heart of the repro: DISPLAYED scale IS the element's scale.
+        assert_eq!(m.get("start_arrowhead_scale").and_then(|v| v.as_f64()), Some(50.0));
+        assert_eq!(m.get("end_arrowhead_scale").and_then(|v| v.as_f64()), Some(175.0));
+        assert_eq!(m.get("arrow_align").and_then(|v| v.as_str()), Some("center_at_end"));
+    }
+
+    // With nothing selected the arrowhead fields fall back to panel state (the
+    // new-element defaults) — same rule weight/cap/join follow.
+    #[test]
+    fn arrowhead_scale_no_selection_uses_panel_state() {
+        let mut st = AppState::new();
+        if st.tabs.is_empty() { st.tabs.push(TabState::new()); st.active_tab = 0; }
+        st.stroke_panel.start_arrowhead_scale = 250.0;
+        st.stroke_panel.end_arrowhead_scale = 300.0;
+        let m = build_live_panel_overrides(&st);
+        assert_eq!(m.get("start_arrowhead_scale").and_then(|v| v.as_f64()), Some(250.0));
+        assert_eq!(m.get("end_arrowhead_scale").and_then(|v| v.as_f64()), Some(300.0));
     }
 
     #[test]

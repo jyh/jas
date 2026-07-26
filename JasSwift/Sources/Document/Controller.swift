@@ -1301,9 +1301,8 @@ public class Controller {
     }
 
     /// Build the document with `fill` applied to every selected element,
-    /// WITHOUT committing it. Shared by the undoable ``setSelectionFill(_:)``
-    /// and the non-undoable live-drag ``setSelectionFillLive(_:)``. Mirrors the
-    /// Rust `Controller::fill_applied`.
+    /// WITHOUT committing it. Used by the undoable ``setSelectionFill(_:)``.
+    /// Mirrors the Rust `Controller::fill_applied`.
     private func fillApplied(_ fill: Fill?) -> Document {
         var doc = model.document
         if doc.selection.isEmpty { return doc }
@@ -1320,15 +1319,6 @@ public class Controller {
     public func setSelectionFill(_ fill: Fill?) {
         if model.document.selection.isEmpty { return }
         model.editDocument(fillApplied(fill))
-    }
-
-    /// Live, NON-undoable fill set for per-tick color-slider drag
-    /// (`setActiveColorLive`). Undo is captured once on pointer-up by
-    /// ``setSelectionFill(_:)`` / `setActiveColor`, so the drag must not push
-    /// checkpoints. Mirrors the Rust `Controller::set_selection_fill_live`.
-    public func setSelectionFillLive(_ fill: Fill?) {
-        if model.document.selection.isEmpty { return }
-        model.setDocumentUnbracketed(fillApplied(fill), intent: .liveDrag)
     }
 
     /// Build the document with `stroke` applied to every selected element,
@@ -1351,12 +1341,99 @@ public class Controller {
         model.editDocument(strokeApplied(stroke))
     }
 
-    /// Live, NON-undoable stroke set for per-tick color drag (see
-    /// ``setSelectionFillLive(_:)``). Mirrors the Rust
-    /// `Controller::set_selection_stroke_live`.
-    public func setSelectionStrokeLive(_ stroke: Stroke?) {
-        if model.document.selection.isEmpty { return }
-        model.setDocumentUnbracketed(strokeApplied(stroke), intent: .liveDrag)
+    /// Rewrite each selected element's stroke through `f`, which receives
+    /// that element's OWN current stroke (`nil` when it has none).
+    ///
+    /// Unlike ``setSelectionStroke(_:)`` — which stamps one identical
+    /// Stroke across the whole selection — this preserves the per-element
+    /// fields `f` leaves alone, so a Stroke-panel edit to one attribute
+    /// cannot carry the first element's width / colour onto its siblings.
+    /// Used by `applyStrokePanelToSelection`. Mirrors the Rust
+    /// `Controller::map_selection_stroke`.
+    public func mapSelectionStroke(_ f: (Stroke?) -> Stroke?) {
+        guard let doc = strokeMapped(f) else { return }
+        model.editDocument(doc)
+    }
+
+    /// Live, NON-undoable ``mapSelectionStroke(_:)`` for per-tick
+    /// colour-slider drag: undo is captured once on pointer-up by
+    /// `setActiveColor`, so the drag must not push checkpoints.
+    public func mapSelectionStrokeLive(_ f: (Stroke?) -> Stroke?) {
+        guard let doc = strokeMapped(f) else { return }
+        model.setDocumentUnbracketed(doc, intent: .liveDrag)
+    }
+
+    private func strokeMapped(_ f: (Stroke?) -> Stroke?) -> Document? {
+        var doc = model.document
+        if doc.selection.isEmpty { return nil }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withStroke(elem, stroke: f(elem.stroke))
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        return doc
+    }
+
+    /// Rewrite each selected element's fill through `f`, which receives
+    /// that element's OWN current fill (`nil` when it has none). The
+    /// per-element counterpart of ``setSelectionFill(_:)``: preserves the
+    /// fields `f` leaves alone (e.g. a colour pick must not reset each
+    /// element's fill opacity). Mirrors Rust `map_selection_fill`.
+    public func mapSelectionFill(_ f: (Fill?) -> Fill?) {
+        guard let doc = fillMapped(f) else { return }
+        model.editDocument(doc)
+    }
+
+    /// Live, NON-undoable ``mapSelectionFill(_:)`` for per-tick drag.
+    public func mapSelectionFillLive(_ f: (Fill?) -> Fill?) {
+        guard let doc = fillMapped(f) else { return }
+        model.setDocumentUnbracketed(doc, intent: .liveDrag)
+    }
+
+    private func fillMapped(_ f: (Fill?) -> Fill?) -> Document? {
+        var doc = model.document
+        if doc.selection.isEmpty { return nil }
+        for es in doc.selection {
+            let elem = doc.getElement(es.path)
+            let newElem = withFill(elem, fill: f(elem.fill))
+            doc = doc.replaceElement(es.path, with: newElem)
+        }
+        return doc
+    }
+
+    /// Swap the fill and stroke COLOURS — `workspace/actions.yaml`
+    /// `swap_fill_stroke` (Shift+X, the fill/stroke widget arrow, the
+    /// Color-panel button).
+    ///
+    /// Colour-only: each side keeps every one of its own non-colour
+    /// attributes (width / cap / join / dash / arrowheads / align / miter,
+    /// and each opacity) and takes only the other's colour. It used to build
+    /// a bare `Stroke(color:)` / `Fill(color:)` and stamp it over the
+    /// selection, so the arrow reset a 5pt dashed arrowheaded line.
+    ///
+    /// The two colours are sourced from the tab DEFAULTS, which is also what
+    /// decides `nil` (no fill / no stroke swaps too). Sourcing them from the
+    /// selection instead — which one of the two Swift call sites did — is
+    /// wrong per element: a Line holds no fill, so a per-element swap would
+    /// hand its stroke a nil colour and swap the stroke away to nothing.
+    /// Mirrors the Rust `AppState::swap_fill_stroke` (app_state.rs), which
+    /// this is the single Swift statement of: both view call sites route
+    /// here rather than each holding a copy of the law.
+    public func swapFillStrokeColors() {
+        let oldFill = model.defaultFill
+        let oldStroke = model.defaultStroke
+        let fillColor = oldFill?.color
+        let strokeColor = oldStroke?.color
+        model.defaultFill = strokeColor.map { ColorPanel.recolorFill(oldFill, $0) }
+        model.defaultStroke = fillColor.map { ColorPanel.recolorStroke(oldStroke, $0) }
+        guard !model.document.selection.isEmpty else { return }
+        // Fill + stroke swap as ONE undo step: withTxn opens the bracket,
+        // each mapSelection* (editDocument) joins it. Each mapper hands the
+        // element its OWN fill / stroke, so recolouring preserves the rest.
+        model.withTxn {
+            self.mapSelectionFill { f in strokeColor.map { ColorPanel.recolorFill(f, $0) } }
+            self.mapSelectionStroke { s in fillColor.map { ColorPanel.recolorStroke(s, $0) } }
+        }
     }
 
     /// Set strokeBrush on every selected element (paths only). Used

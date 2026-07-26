@@ -274,7 +274,10 @@ content:
                         scope: selected_library
                         scope_value: "lib.id"
                         mode: auto
-                    - set: { stroke_brush: '"{{lib.id}}/{{brush.slug}}"' }
+                    # Value-form law (see actions.yaml apply_brush_to_selection):
+                    # a set: value is a PURE EXPRESSION, not a {{}} template, so
+                    # the primed brush id is composed by concatenation.
+                    - set: { stroke_brush: 'lib.id + "/" + brush.slug' }
                     - set: { stroke_brush_overrides: null }
                   action: apply_brush_to_selection
                   params:

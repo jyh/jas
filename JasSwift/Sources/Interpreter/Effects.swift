@@ -246,8 +246,14 @@ func runInputCommitBehavior(
     // re-applies, not a scale-combo special case.
     var platformEffects = alignPlatformEffects(model: model)
     platformEffects["notify_panel_state_changed"] = { arg, _, store in
-        if let panelId = arg as? String {
-            notifyPanelStateChanged(panelId, store: store, model: model)
+        if let (panelId, wroteField) = parseNotifyPayload(arg) {
+            // Scope the apply to the field the write NAMES, falling back to
+            // the field being committed. The linked-scale mirror writes the
+            // SIBLING scale, which applies through that field's OWN group
+            // (each scale is its own group); attributing it to the committed
+            // field applied the wrong group and left the sibling stale.
+            notifyPanelStateChanged(panelId, store: store, model: model,
+                                    edited: wroteField ?? field)
         }
         return nil
     }
@@ -394,11 +400,17 @@ private func runOne(
         // The schema-driven writer resolves `panel.X` against the
         // active panel; non-schema writes don't touch panel scope.
         // Silent no-op when the host hasn't registered the effect.
-        let wrotePanel = pairs.keys.contains { $0.hasPrefix("panel.") }
-        if wrotePanel,
+        let panelKeys = pairs.keys.filter { $0.hasPrefix("panel.") }
+        if !panelKeys.isEmpty,
            let panelId = store.getActivePanelId(),
            let hook = platformEffects["notify_panel_state_changed"] {
-            _ = hook(panelId, ctx, store)
+            // One notify per written field, each naming its own key so a
+            // field-scoped apply writes the right group.
+            for k in panelKeys.sorted() {
+                _ = hook(notifyPayload(panelId,
+                                       field: String(k.dropFirst("panel.".count))),
+                         ctx, store)
+            }
         }
         // Phase 5 follow-up: gradient_* writes trigger the apply
         // pipeline. Host provides "apply_gradient_panel" in its
@@ -434,10 +446,16 @@ private func runOne(
         // applyStrokePanelToSelection (mirrors OCaml's
         // subscribe_stroke_panel which fires on every stroke_* global
         // write).
-        let wroteStroke = pairs.keys.contains { isStrokeRenderKey($0) }
-        if wroteStroke,
+        let strokeKeys = pairs.keys.filter { isStrokeRenderKey($0) }
+        if !strokeKeys.isEmpty,
            let hook = platformEffects["notify_panel_state_changed"] {
-            _ = hook("stroke_panel_content", ctx, store)
+            // One notify per written stroke key, each naming itself: the
+            // apply is field-scoped, so the key that changed is the key
+            // whose group gets written.
+            for k in strokeKeys.sorted() {
+                _ = hook(notifyPayload("stroke_panel_content", field: k),
+                         ctx, store)
+            }
         }
         return
     }
@@ -585,7 +603,7 @@ private func runOne(
         // attributes onto the selected element). Silent no-op if
         // the host hasn't registered the effect.
         if let name = writtenPanel, let hook = platformEffects["notify_panel_state_changed"] {
-            _ = hook(name, ctx, store)
+            _ = hook(notifyPayload(name, field: key), ctx, store)
         }
         return
     }
@@ -801,114 +819,104 @@ private func runOne(
 
 // MARK: - Stroke panel state binding
 
-/// Rendering-affecting stroke state keys.
+/// Rendering-affecting stroke state keys — the flat GLOBAL spellings, which
+/// are what a `set:` effect writes. Mirrors the reference
+/// `STROKE_RENDER_KEYS` (effects.py) key for key.
+///
+/// Two of them used to be spellings nothing in workspace/ ever writes:
+/// `stroke_weight` (the weight global is `stroke_width`) and
+/// `stroke_align_stroke` (the align global is `stroke_align`). Both are
+/// written by `reset_fill_stroke` and by the panel's own align buttons, so
+/// the apply simply never fired for them.
 private let strokeRenderKeys: Set<String> = [
-    "stroke_cap", "stroke_join", "stroke_weight", "stroke_miter_limit",
+    "stroke_cap", "stroke_join", "stroke_width", "stroke_miter_limit",
     "stroke_dashed", "stroke_dash_1", "stroke_gap_1",
     "stroke_dash_2", "stroke_gap_2", "stroke_dash_3", "stroke_gap_3",
     "stroke_dash_align_anchors",
-    "stroke_align_stroke", "stroke_start_arrowhead", "stroke_end_arrowhead",
+    "stroke_align", "stroke_start_arrowhead", "stroke_end_arrowhead",
     "stroke_start_arrowhead_scale", "stroke_end_arrowhead_scale",
     "stroke_arrow_align", "stroke_profile", "stroke_profile_flipped",
 ]
 
-/// Build a Stroke from the state store's stroke_* keys and apply to selection.
-func applyStrokePanelToSelection(store: StateStore, controller: Controller) {
-    let s = store.getAll()
-    let cap: LineCap
-    switch s["stroke_cap"] as? String {
-    case "round": cap = .round
-    case "square": cap = .square
-    default: cap = .butt
-    }
-    let join: LineJoin
-    switch s["stroke_join"] as? String {
-    case "round": join = .round
-    case "bevel": join = .bevel
-    default: join = .miter
-    }
-    let miterLimit = (s["stroke_miter_limit"] as? NSNumber)?.doubleValue ?? 10.0
-    let align: StrokeAlign
-    switch s["stroke_align_stroke"] as? String {
-    case "inside": align = .inside
-    case "outside": align = .outside
-    default: align = .center
-    }
-    let dashed = s["stroke_dashed"] as? Bool ?? false
-    var dashPattern: [Double] = []
-    if dashed {
-        let d1 = (s["stroke_dash_1"] as? NSNumber)?.doubleValue ?? 12.0
-        let g1 = (s["stroke_gap_1"] as? NSNumber)?.doubleValue ?? 12.0
-        dashPattern = [d1, g1]
-        if let d2 = s["stroke_dash_2"] as? NSNumber, let g2 = s["stroke_gap_2"] as? NSNumber {
-            dashPattern.append(contentsOf: [d2.doubleValue, g2.doubleValue])
-        }
-        if let d3 = s["stroke_dash_3"] as? NSNumber, let g3 = s["stroke_gap_3"] as? NSNumber {
-            dashPattern.append(contentsOf: [d3.doubleValue, g3.doubleValue])
-        }
-    }
-    let dashAlignAnchors = s["stroke_dash_align_anchors"] as? Bool ?? false
-    let startArrow = Arrowhead(fromString: s["stroke_start_arrowhead"] as? String ?? "none")
-    let endArrow = Arrowhead(fromString: s["stroke_end_arrowhead"] as? String ?? "none")
-    let startArrowScale = (s["stroke_start_arrowhead_scale"] as? NSNumber)?.doubleValue ?? 100.0
-    let endArrowScale = (s["stroke_end_arrowhead_scale"] as? NSNumber)?.doubleValue ?? 100.0
-    let arrowAlign: ArrowAlign
-    switch s["stroke_arrow_align"] as? String {
-    case "center_at_end": arrowAlign = .centerAtEnd
-    default: arrowAlign = .tipAtEnd
-    }
-
-    // Get base stroke from selection or default
+/// Apply ONE Stroke-panel edit to the selected element(s).
+///
+/// `edited` is the panel field key the user just committed (`"cap"`,
+/// `"end_arrowhead"`, `"weight"`, … — or the flat `"stroke_cap"` global
+/// form). Only that field's ``StrokeEditGroup`` is taken from panel state;
+/// every other stroke attribute is preserved from the element being
+/// edited, per element. It is REQUIRED: a caller that cannot name the
+/// field it committed has nothing to apply, and defaulting it to nil made
+/// a forgotten argument a silent no-op (Rust's is required too).
+///
+/// Why field-scoped: this used to rebuild the whole Stroke from panel
+/// state on every edit and take `width` from the panel `weight` key
+/// (stale until the weight input is committed), so picking an arrowhead on
+/// a selected 5pt line snapped it back to 1pt (JYH, 2026-07-24). Cap /
+/// join were the same shape — the panel DISPLAYS them from the selected
+/// element via `strokePanelLiveOverrides`, so re-imposing panel state on
+/// an unrelated edit contradicted what the user saw — and the dash /
+/// arrowhead / profile groups were re-stamped from stale panel state on
+/// every edit. Gating the width write to the weight edit removes the
+/// ordering problem entirely: nothing else reads the committed weight, so
+/// nothing else can clobber the element's own width. Mirrors the Rust
+/// reference `apply_stroke_panel_to_selection` (app_state.rs).
+func applyStrokePanelToSelection(
+    store: StateStore, controller: Controller, edited: String
+) {
+    guard let group = StrokeEditGroup.fromField(edited) else { return }
     let doc = controller.model.document
-    let baseStroke: Stroke?
-    if let first = doc.selection.first, let el = doc.tryGetElement(first.path) {
-        baseStroke = el.stroke
-    } else {
-        baseStroke = controller.model.defaultStroke
-    }
-    guard let base = baseStroke ?? controller.model.defaultStroke else { return }
-
-    // Stroke weight: read from panel state (where the length_input
-    // commits via commitPanelWrite), not from defaultStroke.width.
-    // The legacy fallback to model.defaultStroke / base meant typed
-    // values silently bounced back to whatever width the existing
-    // stroke had — exactly the symptom of "stroke weight does
-    // nothing." Numeric values arrive as Int / Double / NSNumber
-    // depending on commit path; cover all three.
-    let pid = "stroke_panel_content"
-    let panelWeight: Double? = {
-        let raw = controller.model.stateStore.getPanel(pid, "weight")
-        if let n = raw as? NSNumber { return n.doubleValue }
-        if let d = raw as? Double { return d }
-        if let i = raw as? Int { return Double(i) }
-        return nil
-    }()
-    let width = panelWeight
-        ?? controller.model.defaultStroke?.width
-        ?? base.width
-    let newStroke = Stroke(color: base.color, width: width, linecap: cap, linejoin: join,
-                           miterLimit: miterLimit, align: align, dashPattern: dashPattern,
-                           dashAlignAnchors: dashAlignAnchors,
-                           startArrow: startArrow, endArrow: endArrow,
-                           startArrowScale: startArrowScale, endArrowScale: endArrowScale,
-                           arrowAlign: arrowAlign, opacity: base.opacity)
-
-    controller.model.defaultStroke = newStroke
+    let selStroke = doc.selection.first
+        .flatMap { doc.tryGetElement($0.path) }
+        .flatMap { $0.stroke }
+    let defaultStroke = controller.model.defaultStroke
+    // Nothing to build on: no selected stroke and no default.
+    guard let fallback = selStroke ?? defaultStroke else { return }
+    // The weight input's committed value lives in the panel scope (the
+    // length_input commits it there via commitPanelWrite). Read ONLY for a
+    // weight edit; numeric values arrive as Int / Double / NSNumber
+    // depending on the commit path, which strokePanelNumber covers.
+    // Rust reads the same panel-committed value from `StrokePanelState.weight`
+    // (STROKEWIDTH repair 3 gave it a real field; it used to read the tab /
+    // app default stroke width, which made a weight edit a silent no-op when
+    // there was no default while this port applied it).
+    let committedWidth = strokePanelNumber(store, "weight")
+        ?? defaultStroke?.width
+        ?? fallback.width
     if !doc.selection.isEmpty {
-        // Stroke + width-profile as ONE undo step: withTxn opens the bracket,
-        // each Controller mutator's editDocument joins it. Mirrors Rust
-        // apply_stroke_panel_to_selection's with_txn.
-        let profile = s["stroke_profile"] as? String ?? "uniform"
-        let flipped = s["stroke_profile_flipped"] as? Bool ?? false
-        let widthPts = profileToWidthPoints(profile: profile, width: width, flipped: flipped)
+        // Width profiles are re-derived only when the edit can change
+        // them: the profile shape / flip, or the weight they scale with.
+        let profileEdit = group == .width || group == .profile
+        let profileWidth = group == .width
+            ? committedWidth
+            : (selStroke?.width ?? committedWidth)
+        // Stroke + width-profile as ONE undo step: withTxn opens the
+        // bracket, each Controller mutator's editDocument joins it.
         controller.model.withTxn {
-            controller.setSelectionStroke(newStroke)
-            controller.setSelectionWidthProfile(widthPts)
+            controller.mapSelectionStroke { elStroke in
+                strokeWithGroup(elStroke ?? fallback, store: store, group: group,
+                                committedWidth: committedWidth)
+            }
+            if profileEdit {
+                let profile = strokePanelField(store, "profile") as? String ?? "uniform"
+                let flipped = strokePanelField(store, "profile_flipped") as? Bool ?? false
+                controller.setSelectionWidthProfile(profileToWidthPoints(
+                    profile: profile, width: profileWidth, flipped: flipped))
+            }
         }
     }
+    // The new-element default takes the SAME field-scoped edit, built on
+    // the default stroke — never on the selected element, whose width /
+    // colour must not leak into what the next element gets.
+    controller.model.defaultStroke = strokeWithGroup(
+        defaultStroke ?? fallback, store: store, group: group,
+        committedWidth: committedWidth)
 }
 
 /// Sync stroke panel state from the first selected element's stroke.
+///
+/// Writes the flat GLOBAL spellings (`stroke_width`, `stroke_align`), the
+/// same ones `strokePanelField` reads back and `set:` effects write. It used
+/// to write `stroke_weight` / `stroke_align_stroke`, which nothing read.
 func syncStrokePanelFromSelection(store: StateStore, controller: Controller) {
     let doc = controller.model.document
     guard let first = doc.selection.first else { return }
@@ -916,11 +924,11 @@ func syncStrokePanelFromSelection(store: StateStore, controller: Controller) {
 
     store.set("stroke_cap", s.linecap == .butt ? "butt" : s.linecap == .round ? "round" : "square")
     store.set("stroke_join", s.linejoin == .miter ? "miter" : s.linejoin == .round ? "round" : "bevel")
-    store.set("stroke_weight", s.width)
+    store.set("stroke_width", s.width)
     store.set("stroke_miter_limit", s.miterLimit)
     let alignStr: String
     switch s.align { case .center: alignStr = "center"; case .inside: alignStr = "inside"; case .outside: alignStr = "outside" }
-    store.set("stroke_align_stroke", alignStr)
+    store.set("stroke_align", alignStr)
     store.set("stroke_dashed", !s.dashPattern.isEmpty)
     if s.dashPattern.count >= 2 {
         store.set("stroke_dash_1", s.dashPattern[0])
@@ -2135,18 +2143,55 @@ private func withJustificationAttrs(
         xmlLang: t.xmlLang)
 }
 
+/// The payload the `notify_panel_state_changed` platform effect carries.
+///
+/// Either a bare panel id (the caller does not know which field changed) or
+/// `["panel": id, "field": key]` when it does. The FIELD matters: the Stroke
+/// panel's apply is field-scoped, so a write must be attributed to the key
+/// it actually wrote — the linked arrowhead-scale mirror writes the SIBLING
+/// scale, and blaming the committed field instead applied the wrong group.
+/// Mirrors Rust's `apply_set_panel_state_with_ctx`, which re-applies with
+/// its own `key`.
+public func notifyPayload(_ panelId: String, field: String?) -> Any {
+    guard let field else { return panelId }
+    return ["panel": panelId, "field": field]
+}
+
+/// Unpack a `notify_panel_state_changed` payload into (panel id, field).
+public func parseNotifyPayload(_ arg: Any?) -> (panel: String, field: String?)? {
+    if let s = arg as? String { return (s, nil) }
+    if let d = arg as? [String: Any], let p = d["panel"] as? String {
+        return (p, d["field"] as? String)
+    }
+    return nil
+}
+
 /// Dispatch a panel-state change to the matching apply-to-selection
 /// pipeline. Called after any widget write-back or `set: panel.X`
 /// batch so the downstream surface (selected element, other views)
 /// re-syncs. Silent no-op for panels without a subscriber.
-public func notifyPanelStateChanged(_ panelId: String, store: StateStore, model: Model) {
+///
+/// `edited` names the panel field that just changed. The Stroke panel's
+/// apply is field-scoped — it writes only that field's group and preserves
+/// the rest from the element — so callers that know the key must pass it;
+/// see `applyStrokePanelToSelection`.
+public func notifyPanelStateChanged(
+    _ panelId: String, store: StateStore, model: Model, edited: String? = nil
+) {
     switch panelId {
     case "character_panel_content":
         applyCharacterPanelToSelection(store: store, controller: Controller(model: model))
     case "paragraph_panel_content":
         applyParagraphPanelToSelection(store: store, controller: Controller(model: model))
     case "stroke_panel_content":
-        applyStrokePanelToSelection(store: store, controller: Controller(model: model))
+        // Without a named field there is nothing to apply: the Stroke
+        // apply is field-scoped, and guessing which control changed is
+        // exactly what clobbered the element's width.
+        if let edited {
+            applyStrokePanelToSelection(store: store,
+                                        controller: Controller(model: model),
+                                        edited: edited)
+        }
     case "color_panel_content":
         // Hex / sliders / mode all write to the same panel state;
         // re-derive the color from the updated state and apply it
@@ -2272,9 +2317,11 @@ public func applyActiveColorFromStore(store: StateStore, model: Model) {
     if fillOnTop {
         let raw = store.get("fill_color")
         if let hex = raw as? String, let color = Color.fromHex(hex) {
-            model.defaultFill = Fill(color: color)
+            // Colour-ONLY, exactly like ColorPanel.setActiveColor: the
+            // element's fill opacity is preserved (STROKEWIDTH).
+            model.defaultFill = ColorPanel.recolorFill(model.defaultFill, color)
             if !model.document.selection.isEmpty {
-                ctrl.setSelectionFill(Fill(color: color))
+                ctrl.mapSelectionFill { ColorPanel.recolorFill($0, color) }
             }
         } else if raw == nil || raw is NSNull {
             model.defaultFill = nil
@@ -2285,10 +2332,11 @@ public func applyActiveColorFromStore(store: StateStore, model: Model) {
     } else {
         let raw = store.get("stroke_color")
         if let hex = raw as? String, let color = Color.fromHex(hex) {
-            let width = model.defaultStroke?.width ?? 1.0
-            model.defaultStroke = Stroke(color: color, width: width)
+            // Colour-ONLY: width / cap / join / dash / arrowheads and the
+            // stroke opacity all stay as they are, per element.
+            model.defaultStroke = ColorPanel.recolorStroke(model.defaultStroke, color)
             if !model.document.selection.isEmpty {
-                ctrl.setSelectionStroke(Stroke(color: color, width: width))
+                ctrl.mapSelectionStroke { ColorPanel.recolorStroke($0, color) }
             }
         } else if raw == nil || raw is NSNull {
             model.defaultStroke = nil

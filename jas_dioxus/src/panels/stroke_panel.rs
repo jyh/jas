@@ -21,12 +21,12 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     if let Some(cap) = cmd.strip_prefix("set_stroke_cap:") {
         state.stroke_panel.cap = cap.to_string();
-        state.apply_stroke_panel_to_selection();
+        state.apply_stroke_panel_to_selection("cap");
         return;
     }
     if let Some(join) = cmd.strip_prefix("set_stroke_join:") {
         state.stroke_panel.join = join.to_string();
-        state.apply_stroke_panel_to_selection();
+        state.apply_stroke_panel_to_selection("join");
         return;
     }
     match cmd {

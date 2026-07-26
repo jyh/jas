@@ -296,6 +296,59 @@ class TestStrokeSyncDoesNotClobberLinkFlag:
             "stroke_panel_content", "link_arrowhead_scale") is True
 
 
+class TestStrokeSyncReflectsArrowheads:
+    """ARROWSCALE (JYH 2026-07-25): the selection -> panel refresh mirrors the
+    arrowhead SHAPE / SCALE / ALIGN into the panel, exactly like weight / cap /
+    join. JYH's repro at the true layer: the head renders the element's scale,
+    so the Scale field must show that same scale or the head is a size the
+    panel never displayed and committing the shown value silently jumps it."""
+
+    def test_sync_reflects_arrowhead_scale_shape_align(self):
+        from workspace_interpreter.effects import sync_stroke_panel_from_selection
+
+        class _Enum:
+            def __init__(self, value):
+                self.value = value
+
+        class _Stroke:
+            width = 5.0
+            linecap = None
+            linejoin = None
+            start_arrow = _Enum("simple_arrow")
+            end_arrow = _Enum("circle")
+            start_arrow_scale = 50.0
+            end_arrow_scale = 175.0
+            arrow_align = _Enum("center_at_end")
+
+        class _El:
+            stroke = _Stroke()
+
+        class _Sel:
+            path = [0, 0]
+
+        class _Doc:
+            selection = [_Sel()]
+
+            def get_element(self, path):
+                return _El()
+
+        class _Model:
+            document = _Doc()
+            default_stroke = None
+
+        store = StateStore()
+        store.init_panel("stroke_panel_content", {})
+        store.set_active_panel("stroke_panel_content")
+        sync_stroke_panel_from_selection(store, _Model())
+        gp = lambda k: store.get_panel("stroke_panel_content", k)
+        assert gp("start_arrowhead") == "simple_arrow"
+        assert gp("end_arrowhead") == "circle"
+        # The heart of the repro: DISPLAYED scale IS the element's scale.
+        assert gp("start_arrowhead_scale") == 50.0
+        assert gp("end_arrowhead_scale") == 175.0
+        assert gp("arrow_align") == "center_at_end"
+
+
 class TestIncrementDecrement:
     def test_increment(self):
         store = StateStore({"count": 5})

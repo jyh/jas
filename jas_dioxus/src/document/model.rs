@@ -71,7 +71,7 @@ pub(crate) fn advance_next_untitled_past(existing: &[String]) {
 ///   artboard move/resize live-drag (`artboard_translate_from_preview` /
 ///   `artboard_resize_apply`, idempotent restore+re-apply per mousemove) and
 ///   the per-tick color apply during a picker drag
-///   (`set_selection_fill_live` / `set_selection_stroke_live`); undo is
+///   (`map_selection_fill_live` / `map_selection_stroke_live`); undo is
 ///   captured once at the gesture boundary.
 /// - `TestOnly` — test-fixture seeding (46 Rust / 64 Swift test-file sites at
 ///   freeze, routed via the `#[cfg(test)]` [`Model::set_document_for_test`]

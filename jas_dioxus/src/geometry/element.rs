@@ -2878,21 +2878,91 @@ pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
     }
 }
 
+/// Promote a Line (or open Polyline) to a geometry-identical Path so it
+/// can carry Path-only attributes such as `stroke_brush`. This mirrors
+/// the Rect→Polygon corner-drag promotion (see `move_control_points`,
+/// the "upgrade naturally" convention ratified by JYH 2026-07-25):
+/// identity is preserved (the caller replaces the element in place at its
+/// tree path), the common props (name, id, opacity, transform,
+/// visibility, lock, mask, blend mode, tool_origin) are carried WHOLE via
+/// `common`, and the stroke + width profile carry whole too. A Line has
+/// no fill, so the Path's fill is None; a Polyline's fill and gradients
+/// carry across. Non-promotable elements (including a degenerate Polyline
+/// with fewer than two points) return unchanged. See BRUSHES.md §Stroke
+/// styling interaction.
+pub fn promote_to_path_for_brush(elem: &Element) -> Element {
+    match elem {
+        Element::Line(e) => Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: e.x1, y: e.y1 },
+                PathCommand::LineTo { x: e.x2, y: e.y2 },
+            ],
+            fill: None,
+            stroke: e.stroke,
+            width_points: e.width_points.clone(),
+            common: e.common.clone(),
+            fill_gradient: None,
+            stroke_gradient: e.stroke_gradient.clone(),
+            fill_rule: FillRule::default(),
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+        }),
+        Element::Polyline(e) if e.points.len() >= 2 => {
+            let mut d = Vec::with_capacity(e.points.len());
+            d.push(PathCommand::MoveTo { x: e.points[0].0, y: e.points[0].1 });
+            for p in &e.points[1..] {
+                d.push(PathCommand::LineTo { x: p.0, y: p.1 });
+            }
+            Element::Path(PathElem {
+                d,
+                fill: e.fill,
+                stroke: e.stroke,
+                width_points: Vec::new(),
+                common: e.common.clone(),
+                fill_gradient: e.fill_gradient.clone(),
+                stroke_gradient: e.stroke_gradient.clone(),
+                fill_rule: FillRule::default(),
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+            })
+        }
+        _ => elem.clone(),
+    }
+}
+
 /// Return a copy of the element with its stroke_brush replaced.
-/// Only Path supports brushes today; other elements are returned
+/// A Path carries the brush directly. Applying a brush (a `Some` slug) to
+/// a Line or open Polyline PROMOTES it to a geometry-identical Path that
+/// then carries the brush — the "upgrade naturally" convention (JYH
+/// 2026-07-25); see `promote_to_path_for_brush`. Clearing (`None`) is not
+/// a brush application, so it never promotes. Other elements are returned
 /// unchanged. See BRUSHES.md §Stroke styling interaction.
 pub fn with_stroke_brush(elem: &Element, stroke_brush: Option<String>) -> Element {
     match elem {
         Element::Path(e) => Element::Path(PathElem { stroke_brush, ..e.clone() }),
+        Element::Line(_) | Element::Polyline(_) if stroke_brush.is_some() => {
+            match promote_to_path_for_brush(elem) {
+                Element::Path(p) => Element::Path(PathElem { stroke_brush, ..p }),
+                other => other,
+            }
+        }
         _ => elem.clone(),
     }
 }
 
 /// Return a copy of the element with its stroke_brush_overrides
-/// replaced. Path-only, like with_stroke_brush.
+/// replaced. A Path carries it directly; a Line / open Polyline is
+/// promoted to a Path first when the value is `Some` (mirrors
+/// `with_stroke_brush`). Clearing (`None`) never promotes.
 pub fn with_stroke_brush_overrides(elem: &Element, overrides: Option<String>) -> Element {
     match elem {
         Element::Path(e) => Element::Path(PathElem { stroke_brush_overrides: overrides, ..e.clone() }),
+        Element::Line(_) | Element::Polyline(_) if overrides.is_some() => {
+            match promote_to_path_for_brush(elem) {
+                Element::Path(p) => Element::Path(PathElem { stroke_brush_overrides: overrides, ..p }),
+                other => other,
+            }
+        }
         _ => elem.clone(),
     }
 }
@@ -4371,5 +4441,136 @@ mod tests {
             (0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0), (0.0, 0.0),
             (20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0), (20.0, 0.0),
         ]);
+    }
+
+    // --- Line/Polyline → Path promotion on brush apply (LINEPROMOTE) -------
+    //
+    // The "upgrade naturally" convention (JYH 2026-07-25), mirroring the
+    // Rect→Polygon corner-drag promotion: applying a brush to a Line promotes
+    // it to a geometry-identical Path that then carries the brush.
+
+    /// A Line carrying non-default common props (id, name, opacity, transform,
+    /// lock, visibility, blend mode) + a stroke and a width profile — so the
+    /// promotion's "carry common + stroke whole" claim is testable.
+    fn decorated_line() -> Element {
+        let common = CommonProps {
+            opacity: 0.5,
+            mode: BlendMode::Multiply,
+            transform: Some(Transform::default().translated(3.0, 4.0)),
+            locked: true,
+            visibility: Visibility::Outline,
+            mask: None,
+            tool_origin: None,
+            name: Some("my line".to_string()),
+            id: Some("line-7".to_string()),
+        };
+        Element::Line(LineElem {
+            x1: 1.0, y1: 2.0, x2: 30.0, y2: 40.0,
+            stroke: Some(Stroke::new(Color::rgb(0.1, 0.2, 0.3), 5.0)),
+            width_points: vec![StrokeWidthPoint { t: 0.5, width_left: 2.0, width_right: 2.0 }],
+            common,
+            stroke_gradient: None,
+        })
+    }
+
+    #[test]
+    fn brush_apply_promotes_line_to_path_geometry_identical() {
+        let promoted = with_stroke_brush(&decorated_line(), Some("charcoal".to_string()));
+        let Element::Path(p) = promoted else {
+            panic!("a brush on a Line must promote it to a Path, got {promoted:?}");
+        };
+        // Geometry: MoveTo(x1,y1) + LineTo(x2,y2).
+        assert_eq!(p.d, vec![
+            PathCommand::MoveTo { x: 1.0, y: 2.0 },
+            PathCommand::LineTo { x: 30.0, y: 40.0 },
+        ]);
+        // The brush landed; a Line has no fill so the Path fill is None.
+        assert_eq!(p.stroke_brush, Some("charcoal".to_string()));
+        assert_eq!(p.fill, None);
+        // Stroke + width profile carried whole.
+        assert_eq!(p.stroke, Some(Stroke::new(Color::rgb(0.1, 0.2, 0.3), 5.0)));
+        assert_eq!(p.width_points,
+            vec![StrokeWidthPoint { t: 0.5, width_left: 2.0, width_right: 2.0 }]);
+        // Common props carried WHOLE (identity + presentation preserved).
+        assert_eq!(p.common.id.as_deref(), Some("line-7"));
+        assert_eq!(p.common.name.as_deref(), Some("my line"));
+        assert_eq!(p.common.opacity, 0.5);
+        assert_eq!(p.common.mode, BlendMode::Multiply);
+        assert!(p.common.locked);
+        assert_eq!(p.common.visibility, Visibility::Outline);
+        assert_eq!(p.common.transform, Some(Transform::default().translated(3.0, 4.0)));
+    }
+
+    #[test]
+    fn brush_clear_does_not_promote_a_line() {
+        // Clearing (None) is not a brush application — a Line stays a Line.
+        let unchanged = with_stroke_brush(&decorated_line(), None);
+        assert!(matches!(unchanged, Element::Line(_)),
+            "clearing a brush must not promote a Line");
+        // Same for overrides.
+        let unchanged = with_stroke_brush_overrides(&decorated_line(), None);
+        assert!(matches!(unchanged, Element::Line(_)));
+    }
+
+    #[test]
+    fn brush_apply_promotes_polyline_carrying_fill() {
+        let poly = Element::Polyline(PolylineElem {
+            points: vec![(0.0, 0.0), (10.0, 5.0), (20.0, 0.0)],
+            fill: Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))),
+            stroke: Some(Stroke::new(Color::BLACK, 3.0)),
+            common: CommonProps { id: Some("poly-1".to_string()), ..CommonProps::default() },
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let Element::Path(p) = with_stroke_brush(&poly, Some("charcoal".to_string())) else {
+            panic!("a brush on a Polyline must promote it to a Path");
+        };
+        assert_eq!(p.d, vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 5.0 },
+            PathCommand::LineTo { x: 20.0, y: 0.0 },
+        ]);
+        assert_eq!(p.stroke_brush, Some("charcoal".to_string()));
+        // A Polyline's fill carries across (unlike a Line, which has none).
+        assert_eq!(p.fill, Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))));
+        assert_eq!(p.common.id.as_deref(), Some("poly-1"));
+    }
+
+    #[test]
+    fn brush_overrides_on_a_line_also_promotes() {
+        let Element::Path(p) =
+            with_stroke_brush_overrides(&decorated_line(), Some("{\"angle\":9}".to_string()))
+        else {
+            panic!("overrides on a Line must promote it to a Path");
+        };
+        assert_eq!(p.stroke_brush_overrides, Some("{\"angle\":9}".to_string()));
+        assert_eq!(p.d, vec![
+            PathCommand::MoveTo { x: 1.0, y: 2.0 },
+            PathCommand::LineTo { x: 30.0, y: 40.0 },
+        ]);
+    }
+
+    #[test]
+    fn brush_apply_on_a_path_is_unchanged_geometry() {
+        // A Path already carries the brush directly — no promotion, geometry
+        // and every other field untouched but stroke_brush set.
+        let path = Element::Path(PathElem {
+            d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 5.0, y: 5.0 }],
+            fill: None,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+            fill_rule: FillRule::default(),
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+        });
+        let Element::Path(p) = with_stroke_brush(&path, Some("charcoal".to_string())) else {
+            panic!("a Path stays a Path");
+        };
+        assert_eq!(p.stroke_brush, Some("charcoal".to_string()));
+        assert_eq!(p.d.len(), 2);
     }
 }
