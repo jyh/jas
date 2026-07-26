@@ -25,6 +25,10 @@ EACH CHECK IS A DEFECT CLASS, NOT A WIDGET
                            widget live in the DOM must move something
   arrowhead_reflects_scale a head's rendered size must match the panel's
                            Scale field                (JYH's half-size head)
+  brush_promotes_line      applying a brush to a Line must thicken its ink
+                                                    (Line→Path promotion)
+  canvas_transform_balance a brushed repaint must leave the canvas transform
+                           where it found it       (the receding artboard)
 
 FAULT INJECTION (`--regress MODE`)
 ----------------------------------
@@ -48,17 +52,27 @@ is a usage error (exit 2), never a fake red.
                                                 the SAME pristine probe that
                                                 clicks it, so the sweep must
                                                 report that widget DEAD
-  width_reset          stroke_width_invariance  a second Stroke-panel weight
-                                                commit while selected — on this
-                                                build a livelock (see
-                                                GUI_EYES.md §Findings)
+  dead_brush_tile      brush_promotes_line      strip `data-dioxus-id` from
+                                                every brush tile, so the click
+                                                applies no brush and the Line
+                                                is never promoted
+  width_reset          stroke_width_invariance  drive the rendered width to 1pt
+                                                across the unrelated edit — the
+                                                escape itself, caught by the
+                                                INVARIANCE assertion
   thin_stroke          stroke_width_invariance  draw the probe stroke at 1pt
-                                                when the check asked for 5pt
+                                                when the check asked for 5pt —
+                                                the same check's ABSOLUTE
+                                                assertion
   arrow_scale_lie      arrowhead_reflects_scale overwrite the end-scale field's
                                                 DOM value to 200 while the head
                                                 stays at its true 100% — the
                                                 panel then claims a scale the
                                                 canvas never rendered
+  leaked_ctx_save      canvas_transform_balance push one un-restored save() +
+                                                transform onto the live canvas
+                                                context, the class the brushed
+                                                early `return` used to leak
 
 SCORING (`--regress`). The verdict is INVERTED, but not blindly — a red for
 the wrong reason proves nothing:
@@ -111,8 +125,11 @@ class Ctx:
         # A factory for ADDITIONAL pristine app instances. The liveness sweep
         # needs one per widget: clicking widgets serially in a single instance
         # accumulates document/panel state, and that accumulation — not any one
-        # widget — is what produced a 200-record mutation storm and then a
-        # wedge during development. Isolation makes every verdict attributable.
+        # widget — is what produced a 200-record mutation storm during
+        # development (an unresponsive instance followed; that part was never
+        # root-caused, and this driver has since been caught manufacturing
+        # unresponsiveness of its own — see gui_probe.KEY_TEXT). The mutation
+        # storm alone earns the isolation: it makes every verdict attributable.
         self.new_probe = new_probe
         self.opts = opts or {}
         self.notes: list[str] = []
@@ -212,12 +229,23 @@ def _fault_dead_sweep(p: GuiProbe):
 def _fault_width_reset(p: GuiProbe):
     """Reproduce the 5pt → 1pt reset as a side effect of an unrelated edit.
 
-    NOTE (finding, 2026-07-24): on this build the injected user action — a
-    SECOND Stroke-panel weight commit made while an object is selected — does
-    not merely change the width, it WEDGES the app (see
-    GUI_EYES.md §Findings). The check still goes red, via `heartbeat`, whose
-    message ("the main thread is wedged") is the mode's marker. Use
-    `thin_stroke` for a wedge-free teeth demonstration of the same measurement.
+    We cannot make a healthy build reset the width by itself, so we inject the
+    OBSERVABLE the escape produced — the rendered stroke is 1pt after an edit
+    that had nothing to do with the weight — by committing 1pt through the
+    panel's own production path at that exact moment. The check must then go
+    red at its INVARIANCE assertion, the one that names the defect class.
+
+    This is the mode that gives that assertion teeth: `thin_stroke` trips the
+    check's ABSOLUTE assertion (a 5pt stroke measures thick) before the
+    unrelated edit is ever made, so the two are complementary, not redundant.
+
+    HISTORY (2026-07-25): this fault used to carry the marker "the main thread
+    is wedged", because the injected commit really did stop the app answering.
+    That wedge was the DRIVER's: `set_field`'s Enter was dispatched without its
+    control-character text, and Chrome then re-queued it into thousands of
+    trusted keydowns (gui_probe.KEY_TEXT — reproduced on a blank page with no
+    app loaded). With that fixed the app rides the injection with a flat
+    heartbeat, and the fault reds where it always should have.
     """
     p.set_field("stk_weight", "1")
 
@@ -225,8 +253,9 @@ def _fault_width_reset(p: GuiProbe):
 def _fault_thin_stroke(p: GuiProbe):
     """No browser-side mutation: `draw_probe_line` draws the stroke at 1pt when
     this mode is armed, so the 5pt-thickness assertion fails at 2.0px vs the
-    4.0px floor — the wedge-free proof the canvas measurement tells fat from
-    thin, exactly the observation JYH made by eye."""
+    4.0px floor — the proof the canvas measurement tells fat from thin, exactly
+    the observation JYH made by eye. Trips the check's ABSOLUTE assertion;
+    `width_reset` trips its INVARIANCE assertion."""
 
 
 def _fault_arrow_scale_lie(p: GuiProbe):
@@ -271,7 +300,7 @@ FAULTS = {
     "dead_sweep": Fault(_fault_dead_sweep, "behavior_liveness",
                         DEAD_SWEEP_TARGET),
     "width_reset": Fault(_fault_width_reset, "stroke_width_invariance",
-                         "the main thread is wedged"),
+                         "stroke thickness is INVARIANT"),
     "thin_stroke": Fault(_fault_thin_stroke, "stroke_width_invariance",
                          "5pt stroke renders thick"),
     "arrow_scale_lie": Fault(_fault_arrow_scale_lie, "arrowhead_reflects_scale",

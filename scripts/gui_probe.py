@@ -75,6 +75,24 @@ ALT, CTRL, META, SHIFT = 1, 2, 4, 8
 # as editing commands inside a focused <input>.
 VK = {"Enter": 13, "Backspace": 8, "Tab": 9, "Escape": 27, "Delete": 46}
 
+# THE KEYS THAT STORM. Enter and Escape carry a legacy control character as
+# their text ("\r", "\x1b"). Dispatched through `Input.dispatchKeyEvent` with a
+# virtual key code but WITHOUT that text, Chrome (150.0.7871) never completes
+# the key and re-queues it forever: ONE dispatched Enter became 8757 further
+# trusted `key="Unidentified"` keydowns, and one Escape 10589 — enough to
+# saturate the renderer and make a perfectly healthy app miss its heartbeat.
+#
+# It is the DRIVER's artifact, not the app's: measured at 11543 keydowns on a
+# blank `data:text/html,<input>` page with no app loaded at all (and with the
+# text supplied, exactly 1 keydown + 1 keypress, app or no app). Backspace,
+# Tab and Delete do not storm — only these two.
+#
+# That storm is what two WEDGESTORM diagnosis attempts mistook for an app
+# livelock. Supplying the text is the whole fix: the key arrives once, and its
+# keypress reaches the browser's default action, which is what makes Enter
+# COMMIT a focused field (an input's `change` event).
+KEY_TEXT = {"Enter": "\r", "Escape": "\x1b"}
+
 
 class ProbeFailure(AssertionError):
     """A visual/DOM fact did not hold. Carries the numbers that disproved it."""
@@ -310,6 +328,11 @@ class GuiProbe:
         risky step turns "mystery hang" into a named result, and returns the
         round-trip latency so a check can also assert the app is not merely
         *crawling*.
+
+        It says the main thread stopped, and NOT whose fault that is: an input
+        this driver dispatched can saturate the renderer all by itself (see
+        `KEY_TEXT`, which cost two diagnosis waves). Treat a red here as "the
+        page stopped answering", and pin the cause before naming the app.
         """
         start = time.time()
         try:
@@ -443,8 +466,15 @@ class GuiProbe:
 
     def key(self, key: str, code: str | None = None, *, mods: int = 0,
             text: str | None = None):
+        """Press and release one key, the way a keyboard delivers it.
+
+        Enter and Escape default to their control-character `text` (see
+        `KEY_TEXT`): without it Chrome re-queues them forever, and that storm —
+        not the app — is what made the driver see wedges.
+        """
         code = code or (f"Key{key.upper()}" if key.isalpha() and len(key) == 1
                         else key)
+        text = text if text is not None else KEY_TEXT.get(key)
         p = dict(key=key, code=code, modifiers=mods)
         if text:
             p.update(text=text, unmodifiedText=text.lower())
@@ -469,6 +499,13 @@ class GuiProbe:
         Backspace: the app claims both as Select-All / Delete at the document
         level, so those never reach the field (verified — they append instead
         of replacing, yielding values like "1 pt5").
+
+        The Enter really does commit (it did not before `KEY_TEXT`: a textless
+        Enter produced no keypress, so no `change` event, and the value sat raw
+        in the DOM until some later click blurred the field). The returned
+        value is therefore the app's — a length input reads back normalized,
+        `"5 pt"` for an entered `"5"`, which is only possible if the write went
+        through app state and re-rendered.
         """
         self.click(target, clicks=3)
         self.type_text(text)
