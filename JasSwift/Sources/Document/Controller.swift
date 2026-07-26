@@ -597,10 +597,28 @@ public class Controller {
         let elem = doc.getElement(path)
         if case .path(let v) = elem {
             let newD = JasLib.movePathHandle(v.d, anchorIdx: anchorIdx, handleType: handleType, dx: dx, dy: dy)
+            // Rust's twin is `PathElem { d: new_cmds, ..elem.clone() }`
+            // (geometry/element.rs, move_path_handle) and so preserves
+            // every field structurally. Swift has no `..clone()`, so this
+            // rebuild must restate all 17 non-`d` fields by hand; the
+            // earlier version forwarded only eight and silently promoted
+            // outline/invisible paths to `.preview` and erased name/id.
+            // Pinned by Tests/Document/MovePathHandleFieldsTests.swift,
+            // whose Mirror walk covers fields added to Path later.
             let newElem = Element.path(Path(d: newD, fill: v.fill, stroke: v.stroke,
                                                widthPoints: v.widthPoints,
                                                opacity: v.opacity, transform: v.transform,
                                                locked: v.locked,
+                                               visibility: v.visibility,
+                                               blendMode: v.blendMode,
+                                               mask: v.mask,
+                                               fillGradient: v.fillGradient,
+                                               strokeGradient: v.strokeGradient,
+                                               strokeBrush: v.strokeBrush,
+                                               strokeBrushOverrides: v.strokeBrushOverrides,
+                                               toolOrigin: v.toolOrigin,
+                                               name: v.name,
+                                               id: v.id,
                                                fillRule: v.fillRule))
             doc = doc.replaceElement(path, with: newElem)
             model.editDocument(doc)
