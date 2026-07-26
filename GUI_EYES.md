@@ -95,6 +95,7 @@ Baselines are supported (`--shot-dir`, element-clipped PNGs are ~1 KB) but are
 | `arrowhead_reflects_scale` | a head's rendered size must match the scale the panel field shows |
 | `brush_promotes_line` | applying a brush to a Line must thicken its ink (the Line→Path promotion) |
 | `canvas_transform_balance` | a brushed repaint must leave the canvas transform exactly where it found it |
+| `button_enter_activates` | a focused native `<button>` must still activate on Enter — the app may claim a key's default action only where the focused element has none of its own |
 
 ### The generic sweep is the one that scales
 
@@ -155,6 +156,7 @@ and a bare `--regress dead_tile` exited nonzero on a perfectly healthy app.)
 | `width_reset` | `stroke_width_invariance` | drives the rendered width to 1pt across the unrelated edit — trips the check's *invariance* assertion, the one that names the escape |
 | `arrow_scale_lie` | `arrowhead_reflects_scale` | overwrites the end-scale field's DOM value to 200 while the head stays at its true 100%, so the panel claims a scale the canvas never rendered |
 | `leaked_ctx_save` | `canvas_transform_balance` | pushes one un-restored `save()` + transform onto the live canvas context — the class the brushed-path early `return` used to leak |
+| `enter_default_stolen` | `button_enter_activates` | prevents Enter's default from a **capturing document listener, regardless of what holds focus** — the over-broad suppression that killed native button activation (Dioxus delegates the app's keydown from the document root, so this is the same claim at the same layer) |
 
 **Scoring is not a blind inversion** — a red for the wrong reason proves
 nothing. Each mode declares a *marker* (a fragment of its owning check's own
@@ -240,6 +242,15 @@ def dash_gap_renders(ctx: Ctx):
   driver "committed" quietly did not commit until something later blurred it.
   `gui_probe.KEY_TEXT` supplies the text; see §Findings 1 for what believing the
   storm cost.
+* **A key's default action belongs to whatever element has focus.** A root
+  handler that calls `preventDefault` on Enter because "no text field is
+  focused" also kills the NATIVE Enter activation of every `<button>` in its
+  subtree — measured on this app: File ▸ Document Setup with OK focused reported
+  `defaultPrevented=true`, fired no click, and the dialog would not close from
+  the keyboard, while Space on the same button still worked. Suppress a default
+  only where the focused element has no default of its own (`keyboard.rs` gates
+  on an allowlist of the app's own surfaces); `button_enter_activates` is the
+  gate, `--regress enter_default_stolen` its teeth.
 * **Use `hit_target()`** to confirm the widget is really the topmost element at
   its own centre before believing a click did nothing.
 * **Never let mutation noise evict mutation signal.** The liveness observer

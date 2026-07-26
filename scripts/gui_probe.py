@@ -284,7 +284,14 @@ class GuiProbe:
                         if (t.get("type") == "page"
                                 and t.get("url", "").startswith(self.serve_url)):
                             return Cdp(t["webSocketDebuggerUrl"])
-            except OSError:
+            # A Chrome that is still coming up answers /json with an empty or
+            # truncated body as readily as it refuses the connection, and
+            # `json.load` raises ValueError for that, not OSError. Both are the
+            # same "not ready yet" and both must be RETRIED: the liveness sweep
+            # launches one instance per widget, and an unretried decode error
+            # there surfaced as a bare `JSONDecodeError` scored as a check
+            # FAILURE — a launch race wearing a defect's clothes.
+            except (OSError, ValueError):
                 pass
             time.sleep(0.4)
         raise ProbeFailure(f"could not attach to {self.serve_url} over CDP "
@@ -341,8 +348,11 @@ class GuiProbe:
         except Exception as e:
             raise ProbeFailure(
                 f"{what} stopped answering within {timeout}s "
-                f"({type(e).__name__}) — the main thread is wedged (livelock or "
-                f"panic), not merely slow") from None
+                f"({type(e).__name__}): the page stopped answering. This does "
+                f"NOT name a cause — an input THIS DRIVER dispatched can "
+                f"saturate the renderer by itself (see KEY_TEXT, which cost "
+                f"two diagnosis waves), so rule the driver out before calling "
+                f"it an app livelock or panic") from None
         finally:
             try:
                 self.cdp.set_timeout(30.0)
@@ -514,8 +524,16 @@ class GuiProbe:
         return self.value(target)
 
     def focus_app(self):
-        """Give the root keyboard div focus so keys reach its onkeydown."""
-        self.cdp.evaluate("document.querySelector('div[tabindex]').focus()")
+        """Give the root keyboard div focus so keys reach its onkeydown.
+
+        Prefers the wrapper's own id (`keyboard::APP_ROOT_ID`) over "the first
+        div with a tabindex", which was only ever true by layout accident; the
+        selector remains as a fallback so the probe still drives a build that
+        predates the id.
+        """
+        self.cdp.evaluate(
+            "(document.getElementById('jas-app-root')"
+            "||document.querySelector('div[tabindex]')).focus()")
 
     # --- canvas -----------------------------------------------------------
 
