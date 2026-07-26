@@ -37,5 +37,27 @@
       "fill_color": "#112233",
       "stroke_color": "#000000"
     }
+  },
+  {
+    "name": "nothing_selected_publishes_the_seeded_app_default",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [],
+    "expected_json": "fill_stroke_none_noselection_expected.json",
+    "expected_panel_state": {
+      "fill_color": "#ffffff",
+      "stroke_color": "#000000"
+    }
+  },
+  {
+    "name": "nothing_selected_and_fill_none_still_publishes_null",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {"action": "set_fill_none", "params": {}}
+    ],
+    "expected_json": "fill_stroke_none_noselection_expected.json",
+    "expected_panel_state": {
+      "fill_color": null,
+      "stroke_color": "#000000"
+    }
   }
 ]

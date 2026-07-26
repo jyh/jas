@@ -2786,6 +2786,20 @@ private func assertActionPanelState(_ tc: [String: Any], _ model: Model) {
     }
     let live = buildLiveStateMap(ws: ws, model: model)
     for (key, want) in expected {
+        // ABSENT is not NULL, and the docstring above says so: the reader must
+        // PUBLISH the key. Asserting presence separately is what lets a `null`
+        // expectation catch the regression it was written for — a port that
+        // stops seeding / overlaying and omits the key instead. Coalescing the
+        // two would read that omission as a published null.
+        #expect(
+            live.index(forKey: key) != nil,
+            """
+            Action test '\(name)': the panel-render state map has no key \
+            '\(key)' at all. The corpus pins its VALUE, so the key must be \
+            published — an absent key leaves whatever the caller had (here the \
+            workspace default) standing.
+            """
+        )
         let got = live[key] ?? NSNull()
         // Compare through the shared canonical serializer so null / string /
         // number all read the same way the Rust arm reads them.

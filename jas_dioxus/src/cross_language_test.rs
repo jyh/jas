@@ -1167,7 +1167,20 @@ mod tests {
         let name = tc["name"].as_str().unwrap();
         let live = crate::workspace::dock_panel::build_live_state_map(st);
         for (key, want) in expected {
-            let got = live.get(key).unwrap_or(&serde_json::Value::Null);
+            // ABSENT is not NULL, and the docstring above says so: the reader
+            // must PUBLISH the key. Asserting presence separately is what lets
+            // a `null` expectation catch the regression it was written for — a
+            // port that stops seeding / overlaying and omits the key instead.
+            // Coalescing the two would read that omission as a published null.
+            assert!(
+                live.contains_key(key),
+                "Action test '{}': the panel-render state map has no key {:?} \
+                 at all. The corpus pins its VALUE, so the key must be \
+                 published — an absent key leaves whatever the caller had \
+                 (here the workspace default) standing.",
+                name, key,
+            );
+            let got = &live[key];
             assert_eq!(
                 got, want,
                 "Action test '{}': panel-render state.{} is {} but the corpus \
