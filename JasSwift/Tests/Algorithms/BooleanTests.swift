@@ -529,24 +529,24 @@ private func totalArea(_ ps: BoolPolygonSet) -> Double {
 
 @Test func normSimpleSquarePassesThrough() {
     let input: BoolPolygonSet = [[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]]
-    let out = normalize(input)
+    let out = normalize(input, .nonzero)
     #expect(out.count == 1)
     #expect(approxEqT(totalArea(out), 100.0))
 }
 
 @Test func normSimpleTrianglePassesThrough() {
     let input: BoolPolygonSet = [[(0.0, 0.0), (10.0, 0.0), (5.0, 10.0)]]
-    let out = normalize(input)
+    let out = normalize(input, .nonzero)
     #expect(out.count == 1)
     #expect(approxEqT(totalArea(out), 50.0))
 }
 
 @Test func normEmptyInputYieldsEmpty() {
-    #expect(normalize([]).isEmpty)
+    #expect(normalize([], .nonzero).isEmpty)
 }
 
 @Test func normRingFewerThanThreeDropped() {
-    #expect(normalize([[(0.0, 0.0), (10.0, 0.0)]]).isEmpty)
+    #expect(normalize([[(0.0, 0.0), (10.0, 0.0)]], .nonzero).isEmpty)
 }
 
 @Test func normConsecutiveDuplicatesDeduped() {
@@ -554,7 +554,7 @@ private func totalArea(_ ps: BoolPolygonSet) -> Double {
         (0.0, 0.0), (0.0, 0.0), (10.0, 0.0), (10.0, 10.0),
         (10.0, 10.0), (0.0, 10.0)
     ]]
-    let out = normalize(input)
+    let out = normalize(input, .nonzero)
     #expect(out.count == 1)
     #expect(out[0].count == 4)
     #expect(approxEqT(totalArea(out), 100.0))
@@ -562,8 +562,54 @@ private func totalArea(_ ps: BoolPolygonSet) -> Double {
 
 @Test func normFigureEightBecomesTwoTriangles() {
     let input: BoolPolygonSet = [[(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]]
-    let out = normalize(input)
+    let out = normalize(input, .nonzero)
     #expect(out.count == 2)
     #expect(approxEqT(totalArea(out), 50.0))
     for r in out { #expect(r.count == 3) }
+}
+
+// MARK: - The carried-rule law, clauses 1 and 4
+//
+// Twins of `a_bare_polygon_set_reads_as_even_odd` and
+// `generated_results_declare_even_odd` in
+// jas_dioxus/src/algorithms/boolean.rs.
+
+@Test func boolBarePolygonSetReadsAsEvenOdd() {
+    // Clause 1's standing convention, pinned so the four bare entry
+    // points cannot quietly change which rule they assume.
+    #expect(BoolRuledPolygonSet([]).rule == .evenodd)
+
+    // The bare booleanSubtract must therefore agree with the ruled call
+    // that spells even-odd out. Operand a is a donut drawn the natural
+    // way (two CCW rings); under even-odd its middle is a hole, so
+    // subtracting a strip below the hole leaves 20*17 - 100 = 240 over
+    // two rings.
+    let a: BoolPolygonSet = [
+        [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)],
+        [(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)],
+    ]
+    let b: BoolPolygonSet = [
+        [(0.0, 0.0), (20.0, 0.0), (20.0, 3.0), (0.0, 3.0)]
+    ]
+    let bare = booleanSubtract(a, b)
+    let ruled = booleanSubtractRuled(.evenOdd(a), .evenOdd(b))
+    #expect(bare.count == ruled.count)
+    #expect(approxEqT(totalArea(bare), totalArea(ruled)))
+    #expect(bare.count == 2)
+    // totalArea sums ABSOLUTE ring areas, so the donut-with-strip-cut
+    // reads 340 (outer) + 100 (hole) = 440; the net filled region is
+    // 340 - 100 = 240.
+    #expect(approxEqT(totalArea(bare), 440.0))
+
+    // And the non-zero reading of the SAME rings is genuinely
+    // different — otherwise carrying the rule would be theatre.
+    let nz = booleanSubtractRuled(.nonZero(a), .evenOdd(b))
+    #expect(nz.count == 1)
+    #expect(approxEqT(totalArea(nz), 340.0))
+}
+
+@Test func boolGeneratedResultsDeclareEvenOdd() {
+    // Clause 4: what applyDestructiveBoolean stamps on a multi-ring
+    // result, named in one place rather than left as a literal.
+    #expect(boolResultFillRule == .evenodd)
 }

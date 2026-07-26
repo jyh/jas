@@ -9,24 +9,62 @@
 //!
 //! # Data model
 //!
-//! All inputs and outputs are [`PolygonSet`] values. A `PolygonSet`
-//! is a flat list of *rings*; a ring is a closed polygon expressed
-//! as a list of `(x, y)` vertices (without an explicit closing
-//! vertex — the last vertex is implicitly connected back to the
-//! first).
+//! A [`PolygonSet`] is a flat list of *rings*; a ring is a closed
+//! polygon expressed as a list of `(x, y)` vertices (without an
+//! explicit closing vertex — the last vertex is implicitly connected
+//! back to the first).
 //!
-//! Multiple rings represent a region using the **even-odd fill
-//! rule**: a point is *inside* the region iff a ray from the point
-//! crosses an odd number of ring edges. This means a polygon with
-//! a hole is two rings (the outer boundary and the hole), and the
+//! # THE CARRIED-RULE LAW (JYH-ratified 2026-07-26)
+//!
+//! **A polygon set does not have a fill rule of its own — it carries
+//! the one its source declared.** Rings alone are geometry, not a
+//! region: it takes a fill rule to say which points they enclose, and
+//! the two rules disagree on exactly the inter-ring cases (nested
+//! same-orientation rings are a hole under even-odd and a solid under
+//! non-zero; two overlapping same-orientation rings are a symmetric
+//! difference under even-odd and a union under non-zero). Neither rule
+//! is universally "more natural" for an artist — even-odd matches
+//! deliberate holes, non-zero matches self-crossing freehand drawing —
+//! which is why SVG and PDF put `fill-rule` **on the path**. jas
+//! imports and exports SVG and `PathElem` already carries `fill_rule`,
+//! so a rule fixed in this layer would make the boundary *lie*: a
+//! document declaring `fill-rule="nonzero"` would be silently
+//! reinterpreted by a boolean op. Hence [`RuledPolygonSet`], which
+//! pairs rings with the rule that reads them, and
+//! [`canonicalize`], which resolves that pair into rings the rest of
+//! this module can read without asking.
+//!
+//! Two corollaries, both load-bearing:
+//!
+//! 1. **Canonical form.** [`canonicalize`] returns simple rings that
+//!    denote the same region *read under even-odd*, whatever rule the
+//!    input carried — so the rule has been fully consumed and nothing
+//!    downstream needs it. (From a non-zero input they are also
+//!    pairwise non-overlapping, which makes the two readings coincide;
+//!    see the normalizer's output contract for the exact shades.) The
+//!    sweep below takes canonical rings and emits canonical rings.
+//! 2. **Results declare EVEN-ODD.** Every `PolygonSet` this module
+//!    *emits* is declared even-odd — see [`PolyFillRule::EvenOdd`]
+//!    being the `Default`, and `Controller::apply_destructive_boolean`
+//!    stamping `FillRule::EvenOdd` on multi-ring results. This is a
+//!    deliberate choice for machine-made compound shapes: even-odd
+//!    does not depend on the sweep emitting consistent winding, so a
+//!    result stays correct even if a future connection step hands back
+//!    a hole wound the "wrong" way. A bare `PolygonSet` crossing a
+//!    function boundary inside this module therefore means "even-odd,
+//!    already canonical".
+//!
+//! Under either rule a polygon with a hole is two rings, and the
 //! result of a boolean operation may legitimately produce many
 //! disjoint pieces and/or holes — all collected in the same flat
 //! `PolygonSet`.
 //!
-//! Ring orientation is **not** part of the contract. The
+//! Ring orientation is **not** part of the *output* contract. The
 //! implementation is free to emit clockwise or counter-clockwise
 //! rings; the test suite asserts on the *region* (area, sample
-//! points, bounding box), never on raw vertex sequences.
+//! points, bounding box), never on raw vertex sequences. Orientation
+//! is of course meaningful in a non-zero-ruled *input*, which is
+//! precisely what [`canonicalize`] consumes it for.
 //!
 //! # Out of scope here
 //!
@@ -35,10 +73,11 @@
 //!   that wires these functions to `Element::Path` /
 //!   `Element::Circle` / etc. lives elsewhere; this module is
 //!   pure geometry.
-//! - Self-intersecting input rings. The behaviour on a
-//!   self-intersecting input is left intentionally undefined; if
-//!   we need to handle them, we'll add a normalisation pass and
-//!   tests for it explicitly.
+//! - Self-intersecting input rings. The sweep itself assumes simple
+//!   rings; [`crate::algorithms::boolean_normalize`] is the pre-pass
+//!   that makes them simple, and it is where the carried rule is
+//!   consumed. Call [`canonicalize`] (or one of the `*_ruled`
+//!   entry points) rather than feeding raw artwork to the sweep.
 //! - Open polylines. Boolean operations are defined on regions,
 //!   not curves; lines and polylines have no interior.
 
@@ -51,13 +90,107 @@
 /// include a duplicate closing vertex.
 pub type Ring = Vec<(f64, f64)>;
 
-/// A region in the plane, represented as a flat list of rings under
-/// the even-odd fill rule. Multiple rings can encode disjoint pieces
+/// A flat list of rings. Multiple rings can encode disjoint pieces
 /// and/or holes.
+///
+/// **Rings alone are geometry, not a region.** Which points they
+/// enclose is decided by a [`PolyFillRule`], which a `PolygonSet`
+/// deliberately does not fix — see the module docs' carried-rule law
+/// and [`RuledPolygonSet`]. A bare `PolygonSet` is only well-defined
+/// once a rule is attached to it; the one standing convention is that
+/// a set this module *emits* is canonical and declared even-odd.
 pub type PolygonSet = Vec<Ring>;
+
+/// Which fill rule reads a [`PolygonSet`]'s rings — the thing the
+/// algorithm layer must carry rather than assume. Mirrors SVG/PDF
+/// `fill-rule` and `crate::geometry::element::FillRule`, which is the
+/// document-side spelling of the same choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PolyFillRule {
+    /// SVG `fill-rule="nonzero"`. A point is inside iff the signed
+    /// winding number of **all** rings taken together is non-zero.
+    /// What a self-crossing freehand stroke means, and the SVG
+    /// document default — so it is the rule most imported artwork
+    /// carries.
+    NonZero,
+    /// SVG `fill-rule="evenodd"`. A point is inside iff a ray from it
+    /// crosses the rings an odd number of times.
+    ///
+    /// The **default here**, because this module's own emissions are
+    /// even-odd: see corollary 2 of the carried-rule law. That is a
+    /// statement about machine-made results, not about what artwork
+    /// means — never let it leak back into reading an operand.
+    #[default]
+    EvenOdd,
+}
+
+/// The fill rule a boolean RESULT declares. Clause 4 of the
+/// carried-rule law, named rather than left incidental: every emitter
+/// of a multi-ring boolean result stamps *this* constant, so the choice
+/// is stated in one place and can be re-read (or, one day, re-ruled)
+/// without hunting literals.
+///
+/// Why even-odd for machine-made compound shapes: it does not depend on
+/// the sweep emitting consistent winding. A hole stays a hole even if a
+/// future connection step hands its ring back wound the other way,
+/// whereas a non-zero declaration would silently fill it. Artwork the
+/// artist drew keeps whatever rule the artist declared — this constant
+/// governs only what jas itself generates.
+pub const RESULT_FILL_RULE: PolyFillRule = PolyFillRule::EvenOdd;
+
+/// A polygon set that carries the fill rule reading it: the operand
+/// type the carried-rule law calls for. Construct it at the boundary
+/// where the rule is still known (an element's `fill_rule`, an SVG
+/// attribute, a corpus vector's `fill_rule` field) and resolve it with
+/// [`canonicalize`] before handing rings to anything that does not
+/// take a rule.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RuledPolygonSet {
+    pub rings: PolygonSet,
+    pub rule: PolyFillRule,
+}
+
+impl RuledPolygonSet {
+    pub fn new(rings: PolygonSet, rule: PolyFillRule) -> Self {
+        Self { rings, rule }
+    }
+
+    /// Rings read under the even-odd rule.
+    pub fn even_odd(rings: PolygonSet) -> Self {
+        Self::new(rings, PolyFillRule::EvenOdd)
+    }
+
+    /// Rings read under the non-zero winding rule.
+    pub fn non_zero(rings: PolygonSet) -> Self {
+        Self::new(rings, PolyFillRule::NonZero)
+    }
+
+    /// This set's [`canonicalize`]d rings.
+    pub fn canonical(&self) -> PolygonSet {
+        canonicalize(self)
+    }
+}
+
+/// Consume the carried rule: return the simple, pairwise
+/// non-overlapping rings that bound exactly the region `set` denotes.
+///
+/// The even-odd and non-zero readings of the returned rings agree, so
+/// the rule has been fully spent and the result is safe to hand to the
+/// sweep, to a renderer as an even-odd path, or to any other consumer
+/// that takes bare rings. This is the *one* place a declared rule is
+/// interpreted; every other function in this module takes canonical
+/// rings.
+pub fn canonicalize(set: &RuledPolygonSet) -> PolygonSet {
+    crate::algorithms::boolean_normalize::normalize(&set.rings, set.rule)
+}
 
 // ---------------------------------------------------------------------------
 // Public API — algorithm-agnostic
+//
+// The four bare-`PolygonSet` entry points below read both operands as
+// EVEN-ODD, per the standing convention for a bare set. Use the
+// `*_ruled` twins whenever the operands came from a document, where
+// the declared rule is known and must be honoured.
 // ---------------------------------------------------------------------------
 
 /// `a ∪ b` — the region covered by either operand.
@@ -79,6 +212,26 @@ pub fn boolean_subtract(a: &PolygonSet, b: &PolygonSet) -> PolygonSet {
 /// one of the operands. Equivalent to `(a ∪ b) − (a ∩ b)`.
 pub fn boolean_exclude(a: &PolygonSet, b: &PolygonSet) -> PolygonSet {
     run_boolean(a, b, Operation::Xor)
+}
+
+/// `a ∪ b`, honouring each operand's declared fill rule.
+pub fn boolean_union_ruled(a: &RuledPolygonSet, b: &RuledPolygonSet) -> PolygonSet {
+    run_boolean_ruled(a, b, Operation::Union)
+}
+
+/// `a ∩ b`, honouring each operand's declared fill rule.
+pub fn boolean_intersect_ruled(a: &RuledPolygonSet, b: &RuledPolygonSet) -> PolygonSet {
+    run_boolean_ruled(a, b, Operation::Intersection)
+}
+
+/// `a − b`, honouring each operand's declared fill rule.
+pub fn boolean_subtract_ruled(a: &RuledPolygonSet, b: &RuledPolygonSet) -> PolygonSet {
+    run_boolean_ruled(a, b, Operation::Difference)
+}
+
+/// `a ⊕ b`, honouring each operand's declared fill rule.
+pub fn boolean_exclude_ruled(a: &RuledPolygonSet, b: &RuledPolygonSet) -> PolygonSet {
+    run_boolean_ruled(a, b, Operation::Xor)
 }
 
 // ---------------------------------------------------------------------------
@@ -465,19 +618,37 @@ fn snap_round(ps: &PolygonSet, grid: f64) -> PolygonSet {
 }
 
 fn run_boolean(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
+    run_boolean_ruled(
+        &RuledPolygonSet::even_odd(a.clone()),
+        &RuledPolygonSet::even_odd(b.clone()),
+        op,
+    )
+}
+
+fn run_boolean_ruled(
+    a: &RuledPolygonSet,
+    b: &RuledPolygonSet,
+    op: Operation,
+) -> PolygonSet {
     // Snap-round inputs onto a grid sized as a fixed fraction of the
     // combined bounding-box diagonal. See `SNAP_RATIO`.
-    let (a_snap, b_snap) = match snap_grid(a, b) {
-        Some(grid) => (snap_round(a, grid), snap_round(b, grid)),
-        None => (clone_nondegenerate(a), clone_nondegenerate(b)),
+    let (a_snap, b_snap) = match snap_grid(&a.rings, &b.rings) {
+        Some(grid) => (snap_round(&a.rings, grid), snap_round(&b.rings, grid)),
+        None => (
+            clone_nondegenerate(&a.rings),
+            clone_nondegenerate(&b.rings),
+        ),
     };
 
-    // Resolve any self-intersections under the non-zero winding fill
-    // rule, so the sweep below can keep assuming simple input rings.
-    // The normalizer is a no-op for inputs that are already simple,
-    // which is the common case.
-    let a_norm = crate::algorithms::boolean_normalize::normalize(&a_snap);
-    let b_norm = crate::algorithms::boolean_normalize::normalize(&b_snap);
+    // Consume each operand's DECLARED fill rule (the carried-rule law):
+    // resolve self-intersections and inter-ring relations into canonical
+    // rings, so the sweep below can keep assuming simple input rings
+    // read under one rule. The normalizer is a no-op for inputs that
+    // are already canonical, which is the common case.
+    let a_norm =
+        crate::algorithms::boolean_normalize::normalize(&a_snap, a.rule);
+    let b_norm =
+        crate::algorithms::boolean_normalize::normalize(&b_snap, b.rule);
 
     // The normalizer can introduce new vertices at intersection
     // points that don't land on the snap grid. Re-snap so downstream
@@ -1245,6 +1416,66 @@ fn clone_nondegenerate(ps: &PolygonSet) -> PolygonSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ----------- The carried-rule law, clauses 1 and 4 -----------
+
+    #[test]
+    fn a_bare_polygon_set_reads_as_even_odd() {
+        // Clause 1's standing convention, pinned so the four bare
+        // entry points cannot quietly change which rule they assume.
+        // A bare `PolygonSet` is even-odd, which is also what
+        // `PolyFillRule::default()` says.
+        assert_eq!(PolyFillRule::default(), PolyFillRule::EvenOdd);
+        assert_eq!(RuledPolygonSet::default().rule, PolyFillRule::EvenOdd);
+
+        // The bare `boolean_subtract` must therefore agree with the
+        // ruled call that spells even-odd out. Operand `a` is a donut
+        // drawn the natural way (two CCW rings); under even-odd its
+        // middle is a hole, so subtracting a strip below the hole
+        // leaves 20*17 - 100 = 240 over two rings.
+        let a: PolygonSet = vec![
+            vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)],
+            vec![(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)],
+        ];
+        let b: PolygonSet = vec![vec![
+            (0.0, 0.0),
+            (20.0, 0.0),
+            (20.0, 3.0),
+            (0.0, 3.0),
+        ]];
+        let bare = boolean_subtract(&a, &b);
+        let ruled = boolean_subtract_ruled(
+            &RuledPolygonSet::even_odd(a.clone()),
+            &RuledPolygonSet::even_odd(b.clone()),
+        );
+        assert_eq!(bare, ruled);
+        assert_eq!(bare.len(), 2, "even-odd keeps the hole: {:?}", bare);
+
+        // And the non-zero reading of the SAME rings is genuinely
+        // different — otherwise carrying the rule would be theatre.
+        let nz = boolean_subtract_ruled(
+            &RuledPolygonSet::non_zero(a),
+            &RuledPolygonSet::even_odd(b),
+        );
+        assert_eq!(nz.len(), 1, "non-zero fills the middle: {:?}", nz);
+    }
+
+    #[test]
+    fn generated_results_declare_even_odd() {
+        // Clause 4. The constant is what `apply_destructive_boolean`
+        // stamps on a multi-ring result, and the bridge to the
+        // document-side enum must be lossless in both directions.
+        use crate::geometry::element::FillRule;
+        assert_eq!(RESULT_FILL_RULE, PolyFillRule::EvenOdd);
+        assert_eq!(FillRule::from(RESULT_FILL_RULE), FillRule::EvenOdd);
+        for (doc, algo) in [
+            (FillRule::NonZero, PolyFillRule::NonZero),
+            (FillRule::EvenOdd, PolyFillRule::EvenOdd),
+        ] {
+            assert_eq!(PolyFillRule::from(doc), algo);
+            assert_eq!(FillRule::from(algo), doc);
+        }
+    }
 
     // -------------------------------------------------------------------
     // Region helpers

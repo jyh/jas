@@ -713,11 +713,16 @@ pub enum PathCommand {
 }
 
 /// SVG-style fill rule. Determines how a multi-subpath shape is filled.
-/// Defaults to NonZero (SVG default). Boolean operations that produce
-/// holes (e.g. XOR of overlapping rects) emit Paths with EvenOdd so the
-/// even-odd crossing count correctly cuts inner rings out of outer
-/// ones; PolygonSet's documented contract is that its rings are read
-/// under the even-odd rule.
+/// Defaults to NonZero (the SVG default).
+///
+/// This is the **document-side** half of the carried-rule law
+/// (transcripts/BOOLEAN.md, "Fill rule: the polygon set carries it"):
+/// what the artist or the imported file declared. The algorithm-side
+/// half is [`crate::algorithms::boolean::PolyFillRule`], and the `From`
+/// impls below are the only bridge between them — a boolean operand
+/// must carry this value across, never assume one. Boolean *results*
+/// are stamped with [`crate::algorithms::boolean::RESULT_FILL_RULE`],
+/// which is `EvenOdd`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum FillRule {
     #[default]
@@ -725,6 +730,26 @@ pub enum FillRule {
     NonZero,
     #[serde(rename = "evenodd")]
     EvenOdd,
+}
+
+impl From<FillRule> for crate::algorithms::boolean::PolyFillRule {
+    fn from(r: FillRule) -> Self {
+        use crate::algorithms::boolean::PolyFillRule as P;
+        match r {
+            FillRule::NonZero => P::NonZero,
+            FillRule::EvenOdd => P::EvenOdd,
+        }
+    }
+}
+
+impl From<crate::algorithms::boolean::PolyFillRule> for FillRule {
+    fn from(r: crate::algorithms::boolean::PolyFillRule) -> Self {
+        use crate::algorithms::boolean::PolyFillRule as P;
+        match r {
+            P::NonZero => FillRule::NonZero,
+            P::EvenOdd => FillRule::EvenOdd,
+        }
+    }
 }
 
 fn fill_rule_is_default(r: &FillRule) -> bool { matches!(r, FillRule::NonZero) }

@@ -160,6 +160,46 @@
           {"point": [1.0, 1.0], "inside": false}
         ]
       }
+    },
+    {
+      "name": "subtract_from_evenodd_declared_donut",
+      "a_fill_rule": "evenodd",
+      "_derivation": "THE CARRIED-RULE HONESTY PAIR, half one. Operand A is two nested CCW rings, [0,20]^2 and [5,15]^2, DECLARED even-odd \u2014 so it is a donut of area 400 - 100 = 300 and the middle is NOT part of it. B is the bottom strip [0,20]x[0,3] of area 60, which lies wholly inside the outer ring and wholly BELOW the hole (the hole starts at y=5), so it never touches it. A - B is therefore the rectangle [0,20]x[3,20] (area 20*17 = 340) minus the still-detached hole [5,15]^2 (area 100) = 240, as two rings. The sample at (10,10) sits in the hole and must be OUTSIDE. Paired with subtract_from_nonzero_declared_solid: identical geometry, opposite declared rule, different answer \u2014 which is the whole point of carrying the rule instead of fixing it.",
+      "function": "subtract",
+      "a": [
+        [[0,0],[20,0],[20,20],[0,20]],
+        [[5,5],[15,5],[15,15],[5,15]]
+      ],
+      "b": [[[0,0],[20,0],[20,3],[0,3]]],
+      "expected": {
+        "area": 240.0,
+        "ring_count": 2,
+        "sample_points": [
+          {"point": [10.0, 10.0], "inside": false},
+          {"point": [2.0, 10.0], "inside": true},
+          {"point": [10.0, 1.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "subtract_from_nonzero_declared_solid",
+      "a_fill_rule": "nonzero",
+      "_derivation": "THE CARRIED-RULE HONESTY PAIR, half two, and the correctness argument that decided the ruling. The SAME operand A rings, DECLARED nonzero \u2014 the SVG default, so this is what an imported fill-rule=nonzero path means. Inside the inner ring the winding is +1+1 = 2, so A is a SOLID square of area 400 with no hole at all. Subtracting the same strip leaves the rectangle [0,20]x[3,20]: area 20*17 = 340, ONE ring. The sample at (10,10) is now INSIDE. Before the carried-rule ruling the algorithm layer fixed even-odd, so this document's declared rule was silently discarded and the boolean op cut a hole the artist never asked for; this vector is the gate that keeps that from coming back.",
+      "function": "subtract",
+      "a": [
+        [[0,0],[20,0],[20,20],[0,20]],
+        [[5,5],[15,5],[15,15],[5,15]]
+      ],
+      "b": [[[0,0],[20,0],[20,3],[0,3]]],
+      "expected": {
+        "area": 340.0,
+        "ring_count": 1,
+        "sample_points": [
+          {"point": [10.0, 10.0], "inside": true},
+          {"point": [2.0, 10.0], "inside": true},
+          {"point": [10.0, 1.0], "inside": false}
+        ]
+      }
     }
   ]
 }

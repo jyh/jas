@@ -1720,15 +1720,17 @@ impl Controller {
 
         // Flatten (PolygonSet, paint) outputs into elements.
         //
-        // Per algorithms/boolean.rs's PolygonSet doc: rings are read
-        // under the even-odd fill rule. A result like XOR of two
-        // overlapping rects is one outer ring plus an inner ring that
-        // cuts out the overlap — emitting each ring as a separate
-        // PolygonElem (which fills its own area independently) leaves
-        // the overlap doubly-filled. Single-ring results stay as
-        // PolygonElems; multi-ring results emit one PathElem with all
-        // rings as subpaths and fill_rule=EvenOdd so the renderer
-        // honours the boolean semantics.
+        // The sweep emits CANONICAL rings, which are read under the
+        // even-odd rule (see algorithms/boolean.rs's carried-rule law).
+        // A result like XOR of two overlapping rects is one outer ring
+        // plus an inner ring that cuts out the overlap — emitting each
+        // ring as a separate PolygonElem (which fills its own area
+        // independently) leaves the overlap doubly-filled. Single-ring
+        // results stay as PolygonElems; multi-ring results emit one
+        // PathElem with all rings as subpaths, declaring
+        // boolean::RESULT_FILL_RULE so the renderer honours the boolean
+        // semantics. JasSwift's applyDestructiveBoolean does the same,
+        // element for element.
         //
         // Curve recovery (Schneider refit) is NOT done here; it's a
         // post-op step driven by boolean_panel.apply_simplify_after_op
@@ -1788,7 +1790,12 @@ impl Controller {
                         stroke_gradient: None,
                         stroke_brush: None,
                         stroke_brush_overrides: None,
-                        fill_rule: FillRule::EvenOdd,
+                        // Clause 4 of the carried-rule law: a generated
+                        // result DECLARES even-odd, from the one named
+                        // constant rather than a literal here.
+                        fill_rule: FillRule::from(
+                            crate::algorithms::boolean::RESULT_FILL_RULE,
+                        ),
                     })));
                 }
             }

@@ -1,44 +1,68 @@
 import Foundation
 
-// Ring normalizer: turn an arbitrary (possibly self-intersecting) ring
-// into an equivalent set of SIMPLE rings under the non-zero winding fill
-// rule. Port of jas_dioxus/src/algorithms/boolean_normalize.rs — keep the
-// two in lockstep; the cross-language corpus pins them to the same rings.
+// Ring normalizer: turn an arbitrary (possibly self-intersecting)
+// polygon set into the CANONICAL set of simple rings bounding the same
+// region, reading the input under the fill rule it CARRIES. Port of
+// jas_dioxus/src/algorithms/boolean_normalize.rs — keep the two in
+// lockstep; the cross-language corpus pins them to the same rings.
 //
-// SCOPE: ONE RING AT A TIME. Each ring of the input is replaced by the
-// simple rings bounding the same filled region CONSIDERED ALONE, under
-// the non-zero winding rule — which is what a single self-intersecting
-// subpath means (SVG fill-rule="nonzero"). How the resulting rings then
-// combine is not this module's business: Boolean.swift defines a
-// BoolPolygonSet as a flat list of rings under the EVEN-ODD rule, with
-// orientation explicitly outside the contract, and its sweep resolves
-// nesting and overlap. A ring-with-hole therefore passes through as two
-// rings whatever their orientations, and two overlapping rings pass
-// through as two rings; anything else would silently re-interpret the
-// operand.
+// INPUT CONTRACT: THE CARRIED RULE (JYH-ratified 2026-07-26).
+// normalize takes rings AND the BoolFillRule that reads them. It does
+// not assume one, and there is no rule-less entry point, because the
+// two rules denote genuinely different regions and only the caller —
+// who knows whether these rings came from a fill-rule="nonzero" path, a
+// fill-rule="evenodd" path or a machine-made boolean result — can say
+// which was meant. Boolean.swift's header states the full law; this
+// file implements the half that consumes it.
 //
-// SPEC NOTE for the council: the two rules meeting here — non-zero within
-// a ring, even-odd between rings — disagree on exactly the cases one
-// would call "inter-ring winding cancellation". Two nested
-// same-orientation rings are a hole under even-odd but a solid under
-// non-zero; two overlapping same-orientation rings are a symmetric
-// difference under even-odd but a union under non-zero. This module
-// follows the ratified even-odd contract for the between-rings question
-// and does not touch it. The contradiction, the measured evidence for
-// this choice, and the schema alternative are written up as an open
-// ruling in transcripts/BOOLEAN.md, under Fill rule: an open ruling.
-// That section is the record; do not re-litigate it here.
+// The rule applies to the WHOLE SET AT ONCE, exactly as SVG and PDF
+// define it: insideness comes from the crossings/windings of every ring
+// together, not ring by ring. Concretely:
+//
+//   nonzero — filled iff the winding summed over all rings is non-zero.
+//     Two nested same-orientation rings are a SOLID; two overlapping
+//     same-orientation rings are their UNION; a counter-wound inner
+//     ring is a hole. This is inter-ring winding cancellation, now
+//     implemented rather than deferred: with the rule carried it is no
+//     longer us choosing a semantics, it is doing what the artist's
+//     path says.
+//   evenodd — filled iff a ray crosses the rings an odd number of
+//     times. Two nested rings are a HOLE whatever their orientations;
+//     two overlapping rings are their SYMMETRIC DIFFERENCE. Because
+//     even-odd parity is additive across rings (the parity of the whole
+//     is the XOR of the parts), resolving each ring alone and
+//     concatenating IS the set-wide answer — which is why the even-odd
+//     path here is still a per-ring loop, and why simple rings pass
+//     through untouched however they nest.
+//
+// OUTPUT CONTRACT: canonical means EVEN-ODD-CORRECT. The returned rings
+// are simple and denote the input's region read under EVEN-ODD,
+// whatever rule came in. That is what lets the sweep, the renderer and
+// the corpus all read the output as even-odd without lying about the
+// input, and what Controller.applyDestructiveBoolean relies on when it
+// stamps .evenodd on a multi-ring result. Two shades: from a nonzero
+// input the whole set is rebuilt, so the output is additionally
+// pairwise non-overlapping and its two readings coincide; from an
+// evenodd input, rings that are already even-odd-correct are returned
+// as given, so two of them may still overlap (their even-odd reading,
+// the symmetric difference, is the point) — do not re-read such an
+// output as non-zero.
 //
 // TWO PATHS.
 //
-// Fast path: if the ring is already simple — no two of its edges meet
-// except where consecutive edges share their one vertex — and it
-// encloses a non-zero area, it is returned unchanged, orientation
-// included. Keeping this a literal pass-through is what lets
-// Boolean.swift call the normalizer on every operand without perturbing
-// non-degenerate results.
+// Fast path: if the input is already canonical UNDER ITS CARRIED RULE —
+// no two edges meet except where consecutive edges of one ring share
+// their vertex, and every ring really bounds a filled/unfilled
+// transition when read under that rule — it is returned unchanged,
+// orientation included. Keeping this a literal pass-through is what
+// lets Boolean.swift call the normalizer on every operand without
+// perturbing non-degenerate results. The rule enters even here: two
+// nested same-orientation rings are canonical under evenodd (a hole)
+// and are NOT canonical under nonzero (a solid), and
+// isAlreadyNormalized separates the cases by asking whether removing a
+// ring's own contribution changes filled-ness.
 //
-// Arrangement path: otherwise the ring's region boundary is rebuilt.
+// Arrangement path: otherwise the region's boundary is rebuilt.
 //   1. Split every edge at every meeting with every other edge — proper
 //      crossings, T-junctions and collinear-overlap ends — via
 //      arrangementSplitPoints. The result is a CONFORMING arrangement.
@@ -75,27 +99,57 @@ import Foundation
 // because the probe is sized relative to the local feature size rather
 // than to a fixed absolute epsilon.
 
-/// Normalize a polygon set: replace each ring by the simple rings that
-/// bound the same region considered alone, under the non-zero winding
-/// rule. Ring-to-ring relations are left to Boolean.swift's even-odd
-/// sweep.
-public func normalize(_ input: BoolPolygonSet) -> BoolPolygonSet {
-    var out: BoolPolygonSet = []
-    for ring in input {
-        out.append(contentsOf: normalizeRing(ring))
+/// Is a point with winding number `w` inside the region, under `rule`?
+/// The whole difference between the two rules, in one function.
+func boolFilled(_ w: Int, _ rule: BoolFillRule) -> Bool {
+    switch rule {
+    case .nonzero: return w != 0
+    case .evenodd: return w % 2 != 0
     }
-    return out
+}
+
+/// Normalize a polygon set read under `rule`: the canonical simple
+/// rings bounding the same region.
+///
+/// `rule` is mandatory by design — see the carried-rule contract in
+/// this file's header. Callers holding a document element pass its
+/// `fillRule`; callers holding a set this package produced pass
+/// `.evenodd`.
+public func normalize(_ input: BoolPolygonSet, _ rule: BoolFillRule) -> BoolPolygonSet {
+    switch rule {
+    // Even-odd parity is additive across rings — the parity of the
+    // whole set is the XOR of the per-ring parities — so resolving each
+    // ring alone and concatenating IS the set-wide answer, at a
+    // fraction of the cost (the arrangement is O(E^2) in the edges
+    // handed to it, so n small sets beat one big one).
+    case .evenodd:
+        var out: BoolPolygonSet = []
+        for ring in input {
+            out.append(contentsOf: normalizeRing(ring, rule))
+        }
+        return out
+    // Non-zero winding does NOT decompose: the winding at a point is
+    // the sum over every ring, so nesting and overlap between rings
+    // change the answer and the whole set must be resolved together.
+    // This is inter-ring winding cancellation.
+    case .nonzero:
+        let cleaned: BoolPolygonSet =
+            input.map { dedupConsecutive($0) }.filter { $0.count >= 3 }
+        if cleaned.isEmpty { return [] }
+        if isAlreadyNormalized(cleaned, rule) { return cleaned }
+        return rebuildFromArrangement(cleaned, rule)
+    }
 }
 
 /// Normalize a single ring. Returns 0, 1, or more simple rings.
-func normalizeRing(_ ring: BoolRing) -> [BoolRing] {
+func normalizeRing(_ ring: BoolRing, _ rule: BoolFillRule) -> [BoolRing] {
     let cleaned = dedupConsecutive(ring)
     if cleaned.count < 3 { return [] }
     // The two workers take a whole set so their geometry reads
     // naturally; here the set is always this one ring.
     let one: BoolPolygonSet = [cleaned]
-    if isAlreadyNormalized(one) { return one }
-    return rebuildFromArrangement(one)
+    if isAlreadyNormalized(one, rule) { return one }
+    return rebuildFromArrangement(one, rule)
 }
 
 // MARK: - Vertex cleanup
@@ -149,11 +203,20 @@ private func taggedEdges(_ rings: BoolPolygonSet) -> [TaggedEdge] {
 ///      same ring share their one common vertex. Any other reported
 ///      meeting is a crossing, a T-junction, a pinch or a collinear
 ///      overlap — all of which need the arrangement.
-///   2. The boundary really is a boundary: immediately inside the ring
-///      and immediately outside it, the winding must differ in
-///      filled-ness. True for any simple ring of either orientation;
-///      false for a degenerate zero-area ring.
-func isAlreadyNormalized(_ rings: BoolPolygonSet) -> Bool {
+///   2. Every ring really is a boundary UNDER `rule`: at a point just
+///      inside the ring, the filled-ness of the whole set must differ
+///      from what it would be with this ring's own winding removed.
+///      False for a degenerate zero-area ring.
+///
+///      This is the check that carries the rule between rings. Two
+///      nested counter-wound rings (the SVG way to draw a donut) pass
+///      under BOTH rules. Two nested same-orientation rings pass under
+///      .evenodd — inside the inner ring the total winding is 2 (even,
+///      unfilled) against 1 (odd, filled) without it, so the hole is
+///      genuine — and FAIL under .nonzero, where 2 and 1 are both
+///      non-zero so the inner ring bounds nothing and the arrangement
+///      must dissolve it.
+func isAlreadyNormalized(_ rings: BoolPolygonSet, _ rule: BoolFillRule) -> Bool {
     let edges = taggedEdges(rings)
     for e in edges {
         // A degenerate edge survived dedup only if two vertices differ by
@@ -187,16 +250,17 @@ func isAlreadyNormalized(_ rings: BoolPolygonSet) -> Bool {
         let wAll = windingOfSet(rings, inside)
         let wSelf = windingNumber(ring, inside)
         let wWithout = wAll - wSelf
-        if (wAll != 0) == (wWithout != 0) { return false }
+        if boolFilled(wAll, rule) == boolFilled(wWithout, rule) { return false }
     }
     return true
 }
 
 // MARK: - Arrangement path
 
-/// Rebuild the boundary of the non-zero-winding region of `rings` from a
-/// conforming arrangement of their edges. Called with a one-ring set.
-func rebuildFromArrangement(_ rings: BoolPolygonSet) -> BoolPolygonSet {
+/// Rebuild the boundary of the region `rings` denotes UNDER `rule` from
+/// a conforming arrangement of their edges. Called with a one-ring set
+/// on the even-odd path and with the whole set on the non-zero path.
+func rebuildFromArrangement(_ rings: BoolPolygonSet, _ rule: BoolFillRule) -> BoolPolygonSet {
     // ----- 1. Conforming arrangement -----
     var segments: [((Double, Double), (Double, Double))] = []
     for ring in rings {
@@ -301,8 +365,8 @@ func rebuildFromArrangement(_ rings: BoolPolygonSet) -> BoolPolygonSet {
             rings, (mx + nx * offset, my + ny * offset))
         let wRight = windingOfSet(
             rings, (mx - nx * offset, my - ny * offset))
-        let leftFilled = wLeft != 0
-        let rightFilled = wRight != 0
+        let leftFilled = boolFilled(wLeft, rule)
+        let rightFilled = boolFilled(wRight, rule)
         if leftFilled == rightFilled { continue }
         kept.append(leftFilled ? (u, v) : (v, u))
     }

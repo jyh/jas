@@ -6,21 +6,120 @@ import Foundation
 //
 // Data model: a `BoolPolygonSet` is a flat list of rings; a ring is a
 // closed polygon expressed as a list of (x, y) vertices without the
-// implicit closing vertex. Multiple rings represent a region under the
-// even-odd fill rule.
+// implicit closing vertex.
 //
-// Inputs may be self-intersecting; they are normalized as a pre-pass
-// under the non-zero winding fill rule. See BooleanNormalize.swift.
+// THE CARRIED-RULE LAW (JYH-ratified 2026-07-26). A polygon set does
+// NOT have a fill rule of its own — it carries the one its source
+// declared. Rings alone are geometry, not a region: it takes a fill
+// rule to say which points they enclose, and the two rules disagree on
+// exactly the inter-ring cases (nested same-orientation rings are a
+// hole under even-odd and a solid under non-zero; two overlapping
+// same-orientation rings are a symmetric difference under even-odd and
+// a union under non-zero). Neither rule is universally more natural for
+// an artist — even-odd matches deliberate holes, non-zero matches
+// self-crossing freehand drawing — which is why SVG and PDF put
+// fill-rule ON THE PATH. jas imports and exports SVG and Path carries
+// fillRule, so a rule fixed in this layer would make the boundary LIE:
+// a document declaring fill-rule="nonzero" would be silently
+// reinterpreted by a boolean op. Hence BoolRuledPolygonSet, which pairs
+// rings with the rule that reads them, and boolCanonicalize, which
+// resolves that pair into rings the rest of this file can read without
+// asking. See transcripts/BOOLEAN.md, "Fill rule: the polygon set
+// carries it", and the Rust twin's module docs for the full reasoning.
+//
+// Two corollaries, both load-bearing:
+//   1. CANONICAL FORM. boolCanonicalize returns simple rings denoting
+//      the same region READ UNDER EVEN-ODD, whatever rule came in — so
+//      the rule is fully consumed and nothing downstream needs it. The
+//      sweep takes canonical rings and emits canonical rings.
+//   2. RESULTS DECLARE EVEN-ODD. Every set this file emits is declared
+//      even-odd (BoolFillRule's default, and the .evenodd Path stamped
+//      by Controller.applyDestructiveBoolean on multi-ring results).
+//      That is deliberate for machine-made compound shapes: even-odd
+//      does not depend on the sweep emitting consistent winding. A bare
+//      BoolPolygonSet crossing a function boundary here therefore means
+//      "even-odd, already canonical".
+//
+// Inputs may be self-intersecting; they are resolved as a pre-pass by
+// BooleanNormalize.swift, which is where the carried rule is consumed.
 
 // MARK: - Public types
 
 /// A single closed ring as an array of (x, y) vertices.
 public typealias BoolRing = [(Double, Double)]
 
-/// A flat list of rings under the even-odd fill rule.
+/// A flat list of rings. Rings alone are geometry, not a region: which
+/// points they enclose is decided by a `BoolFillRule`, which this type
+/// deliberately does not fix. See the carried-rule law above.
 public typealias BoolPolygonSet = [BoolRing]
 
+/// Which fill rule reads a `BoolPolygonSet`'s rings — the thing the
+/// algorithm layer must carry rather than assume. Mirrors SVG/PDF
+/// `fill-rule` and the document-side `FillRule`.
+public enum BoolFillRule: Equatable {
+    /// SVG `fill-rule="nonzero"`. Inside iff the winding summed over
+    /// ALL rings is non-zero. What a self-crossing freehand stroke
+    /// means, and the SVG document default.
+    case nonzero
+    /// SVG `fill-rule="evenodd"`. Inside iff a ray crosses the rings an
+    /// odd number of times. The DEFAULT here, because this file's own
+    /// emissions are even-odd (corollary 2). That is a statement about
+    /// machine-made results, never about what artwork means.
+    case evenodd
+}
+
+/// The fill rule a boolean RESULT declares. Clause 4 of the
+/// carried-rule law, named rather than left incidental: every emitter
+/// of a multi-ring boolean result stamps THIS constant, so the choice
+/// is stated in one place.
+///
+/// Why even-odd for machine-made compound shapes: it does not depend on
+/// the sweep emitting consistent winding. A hole stays a hole even if a
+/// future connection step hands its ring back wound the other way,
+/// whereas a non-zero declaration would silently fill it. Artwork the
+/// artist drew keeps whatever rule the artist declared — this governs
+/// only what jas itself generates. Twin of Rust's RESULT_FILL_RULE.
+public let boolResultFillRule: BoolFillRule = .evenodd
+
+/// A polygon set that carries the fill rule reading it: the operand
+/// type the carried-rule law calls for. Build it where the rule is
+/// still known (an element's `fillRule`, an SVG attribute, a corpus
+/// vector's `fill_rule`) and resolve it with `boolCanonicalize` before
+/// handing rings to anything that does not take a rule.
+public struct BoolRuledPolygonSet {
+    public var rings: BoolPolygonSet
+    public var rule: BoolFillRule
+
+    public init(_ rings: BoolPolygonSet, rule: BoolFillRule = .evenodd) {
+        self.rings = rings
+        self.rule = rule
+    }
+
+    public static func evenOdd(_ rings: BoolPolygonSet) -> BoolRuledPolygonSet {
+        BoolRuledPolygonSet(rings, rule: .evenodd)
+    }
+
+    public static func nonZero(_ rings: BoolPolygonSet) -> BoolRuledPolygonSet {
+        BoolRuledPolygonSet(rings, rule: .nonzero)
+    }
+
+    /// This set's `boolCanonicalize`d rings.
+    public var canonical: BoolPolygonSet { boolCanonicalize(self) }
+}
+
+/// Consume the carried rule: the simple rings bounding exactly the
+/// region `set` denotes, read under even-odd. The ONE place a declared
+/// rule is interpreted; every other function here takes canonical rings.
+public func boolCanonicalize(_ set: BoolRuledPolygonSet) -> BoolPolygonSet {
+    normalize(set.rings, set.rule)
+}
+
 // MARK: - Public API
+//
+// The four bare-BoolPolygonSet entry points read BOTH operands as
+// EVEN-ODD, per the standing convention for a bare ring list. Use the
+// Ruled twins whenever the operands came from a document, where the
+// declared rule is known and must be honoured.
 
 public func booleanUnion(_ a: BoolPolygonSet, _ b: BoolPolygonSet) -> BoolPolygonSet {
     runBoolean(a, b, .union)
@@ -36,6 +135,30 @@ public func booleanSubtract(_ a: BoolPolygonSet, _ b: BoolPolygonSet) -> BoolPol
 
 public func booleanExclude(_ a: BoolPolygonSet, _ b: BoolPolygonSet) -> BoolPolygonSet {
     runBoolean(a, b, .xor)
+}
+
+/// `a union b`, honouring each operand's declared fill rule.
+public func booleanUnionRuled(_ a: BoolRuledPolygonSet,
+                              _ b: BoolRuledPolygonSet) -> BoolPolygonSet {
+    runBooleanRuled(a, b, .union)
+}
+
+/// `a intersect b`, honouring each operand's declared fill rule.
+public func booleanIntersectRuled(_ a: BoolRuledPolygonSet,
+                                  _ b: BoolRuledPolygonSet) -> BoolPolygonSet {
+    runBooleanRuled(a, b, .intersection)
+}
+
+/// `a minus b`, honouring each operand's declared fill rule.
+public func booleanSubtractRuled(_ a: BoolRuledPolygonSet,
+                                 _ b: BoolRuledPolygonSet) -> BoolPolygonSet {
+    runBooleanRuled(a, b, .difference)
+}
+
+/// `a xor b`, honouring each operand's declared fill rule.
+public func booleanExcludeRuled(_ a: BoolRuledPolygonSet,
+                                _ b: BoolRuledPolygonSet) -> BoolPolygonSet {
+    runBooleanRuled(a, b, .xor)
 }
 
 // MARK: - Internal types
@@ -265,22 +388,30 @@ struct BoolSweep {
 // MARK: - Top-level dispatch
 
 func runBoolean(_ a: BoolPolygonSet, _ b: BoolPolygonSet, _ op: BoolOperation) -> BoolPolygonSet {
+    runBooleanRuled(.evenOdd(a), .evenOdd(b), op)
+}
+
+func runBooleanRuled(_ a: BoolRuledPolygonSet,
+                     _ b: BoolRuledPolygonSet,
+                     _ op: BoolOperation) -> BoolPolygonSet {
     // Snap-round inputs onto a grid sized as a fixed fraction of the
     // combined bounding-box diagonal.
     let aSnap: BoolPolygonSet
     let bSnap: BoolPolygonSet
-    if let grid = snapGrid(a, b) {
-        aSnap = snapRound(a, grid: grid)
-        bSnap = snapRound(b, grid: grid)
+    if let grid = snapGrid(a.rings, b.rings) {
+        aSnap = snapRound(a.rings, grid: grid)
+        bSnap = snapRound(b.rings, grid: grid)
     } else {
-        aSnap = cloneNondegenerate(a)
-        bSnap = cloneNondegenerate(b)
+        aSnap = cloneNondegenerate(a.rings)
+        bSnap = cloneNondegenerate(b.rings)
     }
 
-    // Resolve self-intersections under non-zero winding so the sweep
-    // can keep assuming simple input rings. No-op for already-simple input.
-    let aNorm = normalize(aSnap)
-    let bNorm = normalize(bSnap)
+    // Consume each operand's DECLARED fill rule (the carried-rule law):
+    // resolve self-intersections and inter-ring relations into canonical
+    // rings, so the sweep can keep assuming simple input rings read
+    // under one rule. No-op for input that is already canonical.
+    let aNorm = normalize(aSnap, a.rule)
+    let bNorm = normalize(bSnap, b.rule)
 
     // Re-snap: normalize() may introduce off-grid intersection points.
     let aFinal: BoolPolygonSet

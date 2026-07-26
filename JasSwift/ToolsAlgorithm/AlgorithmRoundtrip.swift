@@ -212,18 +212,38 @@ func runHitTest(_ vectors: [[String: Any]]) -> [[String: Any]] {
 
 // MARK: - Boolean
 
+/// Read a corpus vector's declared fill rule. Absent means EVEN-ODD —
+/// the algorithm layer's default for a bare ring list. Mirrors
+/// `parse_fill_rule` in the Rust runner. See transcripts/BOOLEAN.md
+/// "Fill rule: the polygon set carries it".
+func parseFillRule(_ v: Any?) -> BoolFillRule {
+    switch v as? String {
+    case "nonzero": return .nonzero
+    case "evenodd", nil: return .evenodd
+    case let other?:
+        fputs("Unknown fill_rule: \(other)\n", stderr)
+        exit(1)
+    }
+}
+
 func runBoolean(_ vectors: [[String: Any]]) -> [[String: Any]] {
     vectors.map { tc in
         let name = tc["name"] as! String
         let fn = tc["function"] as! String
-        let a = parsePolygonSet(tc["a"]!)
-        let b = parsePolygonSet(tc["b"]!)
+        // Each operand DECLARES its fill rule (the carried-rule law,
+        // transcripts/BOOLEAN.md). Absent, it is even-odd: the standing
+        // convention for a bare ring list, and what booleanUnion and
+        // friends read.
+        let a = BoolRuledPolygonSet(parsePolygonSet(tc["a"]!),
+                                    rule: parseFillRule(tc["a_fill_rule"]))
+        let b = BoolRuledPolygonSet(parsePolygonSet(tc["b"]!),
+                                    rule: parseFillRule(tc["b_fill_rule"]))
         let res: BoolPolygonSet
         switch fn {
-        case "union":     res = booleanUnion(a, b)
-        case "intersect": res = booleanIntersect(a, b)
-        case "subtract":  res = booleanSubtract(a, b)
-        case "exclude":   res = booleanExclude(a, b)
+        case "union":     res = booleanUnionRuled(a, b)
+        case "intersect": res = booleanIntersectRuled(a, b)
+        case "subtract":  res = booleanSubtractRuled(a, b)
+        case "exclude":   res = booleanExcludeRuled(a, b)
         default:
             fputs("Unknown boolean function: \(fn)\n", stderr)
             exit(1)
@@ -251,7 +271,7 @@ func runBooleanNormalize(_ vectors: [[String: Any]]) -> [[String: Any]] {
     vectors.map { tc in
         let name = tc["name"] as! String
         let input = parsePolygonSet(tc["input"]!)
-        let res = normalize(input)
+        let res = normalize(input, parseFillRule(tc["fill_rule"]))
         let rings: [[[Double]]] = res.map { ring in ring.map { [$0.0, $0.1] } }
         return ["name": name, "result": [
             "area": polygonSetAreaHelper(res),

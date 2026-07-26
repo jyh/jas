@@ -9,7 +9,8 @@
 use jas_dioxus::geometry::measure::{Measure, parse_unit};
 use jas_dioxus::geometry::test_json::parse_element;
 use jas_dioxus::algorithms::boolean::{
-    boolean_exclude, boolean_intersect, boolean_subtract, boolean_union, PolygonSet, Ring,
+    boolean_exclude_ruled, boolean_intersect_ruled, boolean_subtract_ruled,
+    boolean_union_ruled, PolyFillRule, PolygonSet, Ring, RuledPolygonSet,
 };
 use jas_dioxus::algorithms::boolean_normalize::normalize;
 use jas_dioxus::algorithms::fit_curve::fit_curve;
@@ -292,14 +293,24 @@ fn run_boolean(vectors: &[Value]) -> Vec<Value> {
         .map(|tc| {
             let name = tc["name"].as_str().unwrap();
             let func = tc["function"].as_str().unwrap();
-            let a = parse_polygon_set(&tc["a"]);
-            let b = parse_polygon_set(&tc["b"]);
+            // Each operand DECLARES its fill rule (the carried-rule
+            // law, transcripts/BOOLEAN.md). Absent, it is even-odd:
+            // the standing convention for a bare ring list, and what
+            // `boolean_union` and friends read.
+            let a = RuledPolygonSet::new(
+                parse_polygon_set(&tc["a"]),
+                parse_fill_rule(&tc["a_fill_rule"]),
+            );
+            let b = RuledPolygonSet::new(
+                parse_polygon_set(&tc["b"]),
+                parse_fill_rule(&tc["b_fill_rule"]),
+            );
 
             let result = match func {
-                "union" => boolean_union(&a, &b),
-                "intersect" => boolean_intersect(&a, &b),
-                "subtract" => boolean_subtract(&a, &b),
-                "exclude" => boolean_exclude(&a, &b),
+                "union" => boolean_union_ruled(&a, &b),
+                "intersect" => boolean_intersect_ruled(&a, &b),
+                "subtract" => boolean_subtract_ruled(&a, &b),
+                "exclude" => boolean_exclude_ruled(&a, &b),
                 _ => {
                     eprintln!("Unknown boolean function: {}", func);
                     std::process::exit(1);
@@ -349,7 +360,7 @@ fn run_boolean_normalize(vectors: &[Value]) -> Vec<Value> {
         .map(|tc| {
             let name = tc["name"].as_str().unwrap();
             let input = parse_polygon_set(&tc["input"]);
-            let result = normalize(&input);
+            let result = normalize(&input, parse_fill_rule(&tc["fill_rule"]));
 
             let rings: Vec<Value> = result
                 .iter()
@@ -741,6 +752,21 @@ fn parse_points(v: &Value) -> Vec<(f64, f64)> {
 
 fn parse_polygon(v: &Value) -> Vec<(f64, f64)> {
     parse_points(v)
+}
+
+/// Read a corpus vector's declared fill rule. Absent means EVEN-ODD —
+/// the algorithm layer's default for a bare ring list, matching
+/// `PolyFillRule::default()`. See transcripts/BOOLEAN.md
+/// "Fill rule: the polygon set carries it".
+fn parse_fill_rule(v: &Value) -> PolyFillRule {
+    match v.as_str() {
+        Some("nonzero") => PolyFillRule::NonZero,
+        Some("evenodd") | None => PolyFillRule::EvenOdd,
+        Some(other) => {
+            eprintln!("Unknown fill_rule: {}", other);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn parse_polygon_set(v: &Value) -> PolygonSet {
