@@ -29,6 +29,10 @@ ALGORITHMS = {
     "flatten":           ("tolerance", 1e-9),
     "arrow_trim":        ("tolerance", 1e-4),
     "length":            ("tolerance", 1e-9),
+    # Colour conversion is integer-valued in every channel (the panel's units),
+    # so the comparison is EXACT: a one-unit miss is exactly the bug this
+    # family exists to catch, and any tolerance would swallow it.
+    "color_convert":     ("exact", None),
     "hit_test":          ("exact", None),
     "boolean":           ("exact_boolean", None),
     "boolean_normalize": ("exact_boolean", None),

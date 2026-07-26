@@ -69,6 +69,7 @@ fn main() {
         "flatten" => run_flatten(&vectors),
         "arrow_trim" => run_arrow_trim(&vectors),
         "length" => run_length(&vectors),
+        "color_convert" => run_color_convert(&vectors),
         "hit_test" => run_hit_test(&vectors),
         "boolean" => run_boolean(&vectors),
         "boolean_normalize" => run_boolean_normalize(&vectors),
@@ -220,6 +221,58 @@ fn run_length(vectors: &[Value]) -> Vec<Value> {
                 let unit = tc["unit"].as_str().unwrap_or("");
                 let precision = tc["precision"].as_u64().unwrap_or(2) as usize;
                 json!(length::format(pt, unit, precision))
+            };
+            json!({"name": name, "result": result})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// color_convert (the Color panel's four conversion primitives)
+// ---------------------------------------------------------------
+
+fn run_color_convert(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::interpreter::color_util as cu;
+    let ints = |v: &Value| -> Vec<i64> {
+        v.as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).collect()
+    };
+    let floats = |v: &Value| -> Vec<f64> {
+        v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect()
+    };
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let result: Value = match tc["function"].as_str().unwrap_or("") {
+                "rgb_to_hsb" => {
+                    let a = ints(&tc["rgb"]);
+                    let (h, s, b) = cu::rgb_to_hsb(a[0] as u8, a[1] as u8, a[2] as u8);
+                    json!([h, s, b])
+                }
+                "hsb_to_rgb" => {
+                    let a = floats(&tc["hsb"]);
+                    let (r, g, b) = cu::hsb_to_rgb(a[0], a[1], a[2]);
+                    json!([r as i64, g as i64, b as i64])
+                }
+                "rgb_to_cmyk" => {
+                    let a = ints(&tc["rgb"]);
+                    let (c, m, y, k) = cu::rgb_to_cmyk(a[0] as u8, a[1] as u8, a[2] as u8);
+                    json!([c, m, y, k])
+                }
+                "panel_channels" => {
+                    let a = floats(&tc["float_rgb"]);
+                    let ch = cu::panel_channels(a[0], a[1], a[2]);
+                    json!({
+                        "r": ch.r, "g": ch.g, "bl": ch.bl,
+                        "h": ch.h, "s": ch.s, "b": ch.b,
+                        "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
+                        "hex": ch.hex,
+                    })
+                }
+                other => {
+                    eprintln!("Unknown color_convert function: {}", other);
+                    std::process::exit(1);
+                }
             };
             json!({"name": name, "result": result})
         })

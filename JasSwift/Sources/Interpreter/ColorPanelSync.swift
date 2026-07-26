@@ -63,34 +63,27 @@ public func resolveActivePaintColor(model: Model) -> Color? {
     return fromDocument ?? fromAppTier
 }
 
+/// The Color panel's channel values for the resolved active paint, or `nil` when
+/// no tier resolves.
+///
+/// The eleven numbers come from ``panelChannels(for:)`` — the same function the
+/// shared corpus (`test_fixtures/algorithms/color_convert.json`) holds to the
+/// same order as Rust's `color_util::panel_channels`. This function used to do
+/// the arithmetic itself, and in a DIFFERENT order from Rust's: it asked the
+/// float colour for its own h / s / b rather than the quantised 8-bit triple,
+/// and hand-rolled CMYK from floats instead of calling the conforming
+/// `rgbToCmyk`. Read as display that was off by a unit; read as a WRITE — which
+/// is what this overlay became when the panel's write path started recomputing
+/// the unedited channels from it — it committed a different COLOUR (COLORTIERS,
+/// 2026-07-26).
 public func colorPanelLiveOverrides(model: Model) -> [String: Any]? {
     guard let color = resolveActivePaintColor(model: model) else { return nil }
-
-    let (rf, gf, bf, _) = color.toRgba()
-    let r = Int((rf * 255.0).rounded())
-    let g = Int((gf * 255.0).rounded())
-    let b = Int((bf * 255.0).rounded())
-    let (h, s, br, _) = color.toHsba()
-
-    // CMYK from RGB (same convention as ColorPanel.seedSliders).
-    let rN = rf, gN = gf, bN = bf
-    let kN = 1.0 - max(rN, max(gN, bN))
-    let cN = (kN < 1.0) ? (1.0 - rN - kN) / (1.0 - kN) : 0
-    let mN = (kN < 1.0) ? (1.0 - gN - kN) / (1.0 - kN) : 0
-    let yN = (kN < 1.0) ? (1.0 - bN - kN) / (1.0 - kN) : 0
-
+    let ch = panelChannels(for: color)
     return [
-        "r": r,
-        "g": g,
-        "bl": b,
-        "h": Int(h.rounded()),
-        "s": Int((s * 100.0).rounded()),
-        "b": Int((br * 100.0).rounded()),
-        "c": Int((cN * 100.0).rounded()),
-        "m": Int((mN * 100.0).rounded()),
-        "y": Int((yN * 100.0).rounded()),
-        "k": Int((kN * 100.0).rounded()),
-        "hex": String(format: "%02x%02x%02x", r, g, b),
+        "r": ch.r, "g": ch.g, "bl": ch.bl,
+        "h": ch.h, "s": ch.s, "b": ch.b,
+        "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
+        "hex": ch.hex,
     ]
 }
 

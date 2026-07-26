@@ -461,6 +461,76 @@ mod tests {
         }
     }
 
+    /// The colour-conversion corpus: the four primitives every port's Color
+    /// panel is built out of, goldens derived from the spec formulas rather than
+    /// captured from a port.
+    ///
+    /// The `panel_channels` family is the one that matters most. It pins the
+    /// ORDER the panel's channel derivation applies the conversions in —
+    /// quantise the float colour to three 8-bit values FIRST, then convert
+    /// those — which is the contract Swift's overlay broke by asking the float
+    /// colour for its own h/s/b instead (COLORTIERS, 2026-07-26). Mirrored by
+    /// Swift's `algorithmColorConvertVectors`, and run port-against-port by
+    /// `scripts/cross_language_algorithms.py --algo color_convert`.
+    #[test]
+    fn algorithm_color_convert_vectors() {
+        use crate::interpreter::color_util as cu;
+        let json_str = read_fixture("algorithms/color_convert.json");
+        let doc: serde_json::Value = serde_json::from_str(&json_str)
+            .expect("Failed to parse color_convert.json");
+        let vectors = doc["vectors"].as_array().expect("color_convert.json has no vectors");
+        assert!(!vectors.is_empty(), "color_convert.json is empty");
+
+        let ints = |v: &serde_json::Value| -> Vec<i64> {
+            v.as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).collect()
+        };
+        let floats = |v: &serde_json::Value| -> Vec<f64> {
+            v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect()
+        };
+
+        for tc in vectors {
+            let name = tc["name"].as_str().unwrap();
+            match tc["function"].as_str().unwrap() {
+                "rgb_to_hsb" => {
+                    let a = ints(&tc["rgb"]);
+                    let (h, s, b) = cu::rgb_to_hsb(a[0] as u8, a[1] as u8, a[2] as u8);
+                    assert_eq!(vec![h as i64, s as i64, b as i64], ints(&tc["expected"]),
+                        "color_convert '{}': rgb_to_hsb", name);
+                }
+                "hsb_to_rgb" => {
+                    let a = floats(&tc["hsb"]);
+                    let (r, g, b) = cu::hsb_to_rgb(a[0], a[1], a[2]);
+                    assert_eq!(vec![r as i64, g as i64, b as i64], ints(&tc["expected"]),
+                        "color_convert '{}': hsb_to_rgb", name);
+                }
+                "rgb_to_cmyk" => {
+                    let a = ints(&tc["rgb"]);
+                    let (c, m, y, k) = cu::rgb_to_cmyk(a[0] as u8, a[1] as u8, a[2] as u8);
+                    assert_eq!(vec![c as i64, m as i64, y as i64, k as i64],
+                        ints(&tc["expected"]), "color_convert '{}': rgb_to_cmyk", name);
+                }
+                "panel_channels" => {
+                    let a = floats(&tc["float_rgb"]);
+                    let got = cu::panel_channels(a[0], a[1], a[2]);
+                    let want = tc["expected"].as_object().unwrap();
+                    let pairs: [(&str, i64); 10] = [
+                        ("r", got.r as i64), ("g", got.g as i64), ("bl", got.bl as i64),
+                        ("h", got.h as i64), ("s", got.s as i64), ("b", got.b as i64),
+                        ("c", got.c as i64), ("m", got.m as i64), ("y", got.y as i64),
+                        ("k", got.k as i64),
+                    ];
+                    for (key, value) in pairs {
+                        assert_eq!(value, want[key].as_i64().unwrap(),
+                            "color_convert '{}': panel_channels.{}", name, key);
+                    }
+                    assert_eq!(got.hex, want["hex"].as_str().unwrap(),
+                        "color_convert '{}': panel_channels.hex", name);
+                }
+                other => panic!("Unknown color_convert function: {}", other),
+            }
+        }
+    }
+
     // ---------------------------------------------------------------
     // Operation equivalence tests
     // ---------------------------------------------------------------

@@ -48,6 +48,7 @@ case "element_bounds":    results = runElementBounds(activeVectors)
 case "flatten":           results = runFlatten(activeVectors)
 case "arrow_trim":        results = runArrowTrim(activeVectors)
 case "length":            results = runLength(activeVectors)
+case "color_convert":     results = runColorConvert(activeVectors)
 case "hit_test":          results = runHitTest(activeVectors)
 case "boolean":           results = runBoolean(activeVectors)
 case "boolean_normalize": results = runBooleanNormalize(activeVectors)
@@ -149,6 +150,48 @@ func runLength(_ vectors: [[String: Any]]) -> [[String: Any]] {
             let unit = tc["unit"] as? String ?? ""
             let precision = (tc["precision"] as? NSNumber)?.intValue ?? 2
             result = Length.format(pt, unit: unit, precision: precision)
+        }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Color conversion (the Color panel's four primitives)
+
+func runColorConvert(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let ints: ([String: Any], String) -> [Int] = { tc, key in
+            (tc[key] as? [NSNumber])?.map { $0.intValue } ?? []
+        }
+        let floats: ([String: Any], String) -> [Double] = { tc, key in
+            (tc[key] as? [NSNumber])?.map { $0.doubleValue } ?? []
+        }
+        let result: Any
+        switch tc["function"] as? String ?? "" {
+        case "rgb_to_hsb":
+            let a = ints(tc, "rgb")
+            let (h, s, b) = rgbToHsb(UInt8(a[0]), UInt8(a[1]), UInt8(a[2]))
+            result = [h, s, b]
+        case "hsb_to_rgb":
+            let a = floats(tc, "hsb")
+            let (r, g, b) = hsbToRgb(a[0], a[1], a[2])
+            result = [Int(r), Int(g), Int(b)]
+        case "rgb_to_cmyk":
+            let a = ints(tc, "rgb")
+            let (c, m, y, k) = rgbToCmyk(UInt8(a[0]), UInt8(a[1]), UInt8(a[2]))
+            result = [c, m, y, k]
+        case "panel_channels":
+            let a = floats(tc, "float_rgb")
+            let ch = panelChannels(rf: a[0], gf: a[1], bf: a[2])
+            result = [
+                "r": ch.r, "g": ch.g, "bl": ch.bl,
+                "h": ch.h, "s": ch.s, "b": ch.b,
+                "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
+                "hex": ch.hex,
+            ] as [String: Any]
+        default:
+            fputs("Unknown color_convert function: \(tc["function"] ?? "")\n", stderr)
+            exit(1)
         }
         return ["name": name, "result": result]
     }

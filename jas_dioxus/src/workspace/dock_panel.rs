@@ -100,7 +100,7 @@ fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_js
 }
 
 pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
-    use crate::interpreter::color_util::{rgb_to_hsb, rgb_to_cmyk};
+    use crate::interpreter::color_util::panel_channels;
     use serde_json::Value as J;
 
     let mode_str = match st.color_panel_mode {
@@ -146,33 +146,27 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
         })
     };
 
-    // Compute slider values from the resolved active color
+    // Compute slider values from the resolved active color. The derivation —
+    // quantise the float colour to three 8-bit values, THEN convert those to
+    // hue / saturation / brightness / CMYK / hex — lives in `panel_channels` so
+    // that the other port and the shared corpus
+    // (test_fixtures/algorithms/color_convert.json) can hold the same function
+    // to the same order rather than each rewriting the arithmetic.
     if let Some(color) = panel_color {
         let (rf, gf, bf, _) = color.to_rgba();
-        let r = (rf * 255.0).round() as u8;
-        let g = (gf * 255.0).round() as u8;
-        let b = (bf * 255.0).round() as u8;
-
-        // RGB
-        m.insert("r".into(), J::Number(serde_json::Number::from(r as i64)));
-        m.insert("g".into(), J::Number(serde_json::Number::from(g as i64)));
-        m.insert("bl".into(), J::Number(serde_json::Number::from(b as i64)));
-
-        // HSB
-        let (h, s, br) = rgb_to_hsb(r, g, b);
-        m.insert("h".into(), J::Number(serde_json::Number::from(h as i64)));
-        m.insert("s".into(), J::Number(serde_json::Number::from(s as i64)));
-        m.insert("b".into(), J::Number(serde_json::Number::from(br as i64)));
-
-        // CMYK
-        let (c, mk, y, k) = rgb_to_cmyk(r, g, b);
-        m.insert("c".into(), J::Number(serde_json::Number::from(c as i64)));
-        m.insert("m".into(), J::Number(serde_json::Number::from(mk as i64)));
-        m.insert("y".into(), J::Number(serde_json::Number::from(y as i64)));
-        m.insert("k".into(), J::Number(serde_json::Number::from(k as i64)));
-
-        // Hex
-        m.insert("hex".into(), J::String(format!("{:02x}{:02x}{:02x}", r, g, b)));
+        let ch = panel_channels(rf, gf, bf);
+        let num = |v: i64| J::Number(serde_json::Number::from(v));
+        m.insert("r".into(), num(ch.r as i64));
+        m.insert("g".into(), num(ch.g as i64));
+        m.insert("bl".into(), num(ch.bl as i64));
+        m.insert("h".into(), num(ch.h as i64));
+        m.insert("s".into(), num(ch.s as i64));
+        m.insert("b".into(), num(ch.b as i64));
+        m.insert("c".into(), num(ch.c as i64));
+        m.insert("m".into(), num(ch.m as i64));
+        m.insert("y".into(), num(ch.y as i64));
+        m.insert("k".into(), num(ch.k as i64));
+        m.insert("hex".into(), J::String(ch.hex));
     }
 
     // ── Stroke panel overrides ──────────────────────────────

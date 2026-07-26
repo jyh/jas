@@ -36,7 +36,7 @@
         "swift": "path literals (AlignFixtureTests full paths; TspanPrimitivesTests loadFixture)",
         "scripts": "ALGORITHMS dict in cross_language_algorithms.py (name -> algorithms/<name>.json)"
       },
-      "notes": "Port symmetry is deliberately NOT machine-checked per registration list here: the 14-algorithm matrix is gated across both active ports by scripts/cross_language_algorithms.py (each port's roundtrip binary runs every fixture), while the in-port unit registrations legitimately differ (Rust natively gates the pane/panel/menu vectors; Swift natively gates align + the tspan primitives)."
+      "notes": "Port symmetry is deliberately NOT machine-checked per registration list here: every algorithm in cross_language_algorithms.py's ALGORITHMS dict is gated across both active ports by that script (each port's roundtrip binary runs every fixture), while the in-port unit registrations legitimately differ (Rust natively gates the pane/panel/menu vectors; Swift natively gates align + the tspan primitives). The count is not restated here on purpose -- it was stale at '14' while the dict held 15."
     },
     "test_fixtures/artboards": {
       "kind": "fixtures",

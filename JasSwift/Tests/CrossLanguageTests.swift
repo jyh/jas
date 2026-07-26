@@ -1865,6 +1865,102 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Colour conversion algorithm vectors
+
+/// The colour-conversion corpus: the four primitives every port's Color panel is
+/// built out of, goldens derived from the spec formulas rather than captured
+/// from a port.
+///
+/// The `panel_channels` family is the one that matters most. It pins the ORDER
+/// the panel's channel derivation applies the conversions in — quantise the
+/// float colour to three 8-bit values FIRST, then convert those — which is the
+/// contract this port's overlay broke by asking the float colour for its own
+/// h/s/b instead (COLORTIERS, 2026-07-26). Mirror of Rust's
+/// `algorithm_color_convert_vectors`; run port-against-port by
+/// `scripts/cross_language_algorithms.py --algo color_convert`.
+@Test func algorithmColorConvertVectors() throws {
+    let json = readFixture("algorithms/color_convert.json")
+    let doc = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    let vectors = doc["vectors"] as! [[String: Any]]
+    #expect(!vectors.isEmpty, "color_convert.json is empty")
+
+    for tc in vectors {
+        let name = tc["name"] as! String
+        switch tc["function"] as! String {
+        case "rgb_to_hsb":
+            let a = (tc["rgb"] as! [NSNumber]).map { $0.intValue }
+            let (h, s, b) = rgbToHsb(UInt8(a[0]), UInt8(a[1]), UInt8(a[2]))
+            #expect([h, s, b] == (tc["expected"] as! [NSNumber]).map { $0.intValue },
+                    "color_convert '\(name)': rgb_to_hsb gave \([h, s, b])")
+        case "hsb_to_rgb":
+            let a = (tc["hsb"] as! [NSNumber]).map { $0.doubleValue }
+            let (r, g, b) = hsbToRgb(a[0], a[1], a[2])
+            #expect([Int(r), Int(g), Int(b)]
+                        == (tc["expected"] as! [NSNumber]).map { $0.intValue },
+                    "color_convert '\(name)': hsb_to_rgb gave \([r, g, b])")
+        case "rgb_to_cmyk":
+            let a = (tc["rgb"] as! [NSNumber]).map { $0.intValue }
+            let (c, m, y, k) = rgbToCmyk(UInt8(a[0]), UInt8(a[1]), UInt8(a[2]))
+            #expect([c, m, y, k] == (tc["expected"] as! [NSNumber]).map { $0.intValue },
+                    "color_convert '\(name)': rgb_to_cmyk gave \([c, m, y, k])")
+        case "panel_channels":
+            let a = (tc["float_rgb"] as! [NSNumber]).map { $0.doubleValue }
+            let ch = panelChannels(rf: a[0], gf: a[1], bf: a[2])
+            let want = tc["expected"] as! [String: Any]
+            let got: [String: Int] = [
+                "r": ch.r, "g": ch.g, "bl": ch.bl, "h": ch.h, "s": ch.s, "b": ch.b,
+                "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
+            ]
+            for (key, value) in got {
+                let pinned = (want[key] as! NSNumber).intValue
+                #expect(value == pinned,
+                        "color_convert '\(name)': panel_channels.\(key) is \(value), corpus pins \(pinned)")
+            }
+            #expect(ch.hex == want["hex"] as! String,
+                    "color_convert '\(name)': panel_channels.hex is \(ch.hex)")
+        default:
+            Issue.record("Unknown color_convert function: \(tc["function"]!)")
+        }
+    }
+}
+
+/// The `.hsb`-represented colour is the case the shared corpus CANNOT reach: a
+/// fixture vector is a float RGB triple, while `Color.toHsba()` on a `.hsb`
+/// short-circuits and hands back the h/s/b it was constructed with, never
+/// touching RGB at all. That short-circuit is exactly what the overlay used to
+/// read, so it needs its own pin here.
+///
+/// The two colours are the two reachable `.hsb` producers: a colour-bar click
+/// (`ColorBarView.colorAt`, before it was converged onto `hsbToRgb`) and
+/// Complement (`ColorPanel.dispatch`, `.hsb` in BOTH ports). The expected values
+/// are `rgbToHsb` of the quantised triple, which is what Rust's
+/// `build_live_panel_overrides` answers for the same colour.
+@Test func panelChannelsQuantisesBeforeConvertingAnHsbColor() {
+    // A colour-bar pixel (x=1, y=1 of a 200x64 bar): hue 1.8°, s 3.125%,
+    // b 99.375% as the bar's own parameterisation produces it. The stored
+    // triple reads hue 2; the 8-bit grid the panel displays on reads 7.
+    let barPixel = Color.hsb(h: 1.8, s: 0.03125, b: 0.99375, a: 1.0)
+    let bar = panelChannels(for: barPixel)
+    #expect((bar.r, bar.g, bar.bl) == (253, 246, 245))
+    #expect((bar.h, bar.s, bar.b) == (7, 3, 99))
+    #expect(bar.hex == "fdf6f5")
+
+    // Complement of #0477cc: hue rotated 180°, kept as `.hsb` by BOTH ports, so
+    // this one diverged on the derivation alone. The stored triple reads hue 26;
+    // the quantised triple (204, 89, 4) reads 25.
+    let complement = Color.hsb(h: 25.5, s: 0.9803921568627452, b: 0.8, a: 1.0)
+    let comp = panelChannels(for: complement)
+    #expect((comp.r, comp.g, comp.bl) == (204, 89, 4))
+    #expect((comp.h, comp.s, comp.b) == (25, 98, 80))
+    #expect(comp.hex == "cc5904")
+
+    // And the derivation is the corpus's derivation, not a second copy of it:
+    // the `Color` entry point must agree with the float-triple entry point on
+    // every channel, for a `.hsb` colour too.
+    let (rf, gf, bf, _) = barPixel.toRgba()
+    #expect(bar == panelChannels(rf: rf, gf: gf, bf: bf))
+}
+
 // MARK: - Expression-language conformance (shared corpus)
 
 /// Loads the compiled corpus from test_fixtures/expressions/conformance.json
