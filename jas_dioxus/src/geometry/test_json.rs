@@ -924,9 +924,42 @@ fn parse_transform_opt(v: &serde_json::Value) -> Option<Transform> {
     })
 }
 
+/// A Test-JSON tspan `id`: the number's value when that value is an id in the
+/// declared domain, else 0.
+///
+/// `CROSS_LANGUAGE_TESTING.md`'s Tspan notes declare `id` a monotonic `u32`.
+/// Nothing in that file gives a meaning to a value outside the domain, so each
+/// one reads as 0 — the answer both ports already gave for a negative, missing
+/// or non-numeric id. Deliberately NOT the older `as_u64().unwrap_or(0) as u32`:
+///
+///   - `as_u64()` is `None` for ANY serde_json float, whole-valued or not, so
+///     `3.0` read as 0 here and as 3 in JasSwift. The rule that would make a
+///     decimal point meaningful ("Floats … always written with the decimal
+///     point") is one of that file's Normalization rules, which are stated for
+///     `document_to_test_json` — they bind the WRITER, not this reader.
+///   - `as u32` on an in-`u64` value TRUNCATES to the low 32 bits, so
+///     `4294967297` read as 1 — an id the writer could equally have emitted for
+///     a real tspan, which TSPAN.md's Invariants require to be unique within one
+///     `Text`. That truncation is an artifact of `as`, not an authored rule.
+///
+/// Gated in both ports by `test_fixtures/algorithms/tspan_id_from_json.json`.
+fn parse_tspan_id(v: &serde_json::Value) -> u32 {
+    let d = match v.as_f64() {
+        Some(d) => d,
+        None => return 0,
+    };
+    if !(d >= 0.0 && d <= 4_294_967_295.0) {
+        return 0;
+    }
+    if d != d.trunc() {
+        return 0;
+    }
+    d as u32
+}
+
 fn parse_tspan(v: &serde_json::Value) -> crate::geometry::tspan::Tspan {
     crate::geometry::tspan::Tspan {
-        id: v["id"].as_u64().unwrap_or(0) as u32,
+        id: parse_tspan_id(&v["id"]),
         content: v["content"].as_str().unwrap_or("").to_string(),
         baseline_shift: v["baseline_shift"].as_f64(),
         dx: v["dx"].as_f64(),
@@ -2132,5 +2165,39 @@ mod tests {
         let json = document_to_test_json(&d);
         let d2 = test_json_to_document(&json);
         assert_eq!(d2.print_preferences, d.print_preferences);
+    }
+
+    /// The shared `id`-domain corpus, driven through the real element
+    /// decoder. JasSwift runs the same file in
+    /// `R9CallSitePinTests.tspanIdDomainCorpusMatchesAcrossPorts`.
+    #[test]
+    fn tspan_id_domain_corpus() {
+        let full = format!(
+            "{}/../test_fixtures/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            "algorithms/tspan_id_from_json.json"
+        );
+        let raw = std::fs::read_to_string(&full)
+            .unwrap_or_else(|e| panic!("read {}: {}", full, e));
+        let file: serde_json::Value = serde_json::from_str(&raw).expect("parse fixture");
+        let vectors = file["vectors"].as_array().expect("vectors array");
+        assert!(!vectors.is_empty());
+        for v in vectors {
+            let name = v["name"].as_str().unwrap_or("?");
+            let tspans = match parse_element(&v["input"]) {
+                Element::Text(t) => t.tspans,
+                other => panic!("vector {}: expected a text element, got {:?}", name, other),
+            };
+            let expected = v["expected"].as_u64().expect("expected is a number") as u32;
+            assert_eq!(tspans[0].id, expected, "vector {}", name);
+            if let Some(last) = v.get("expected_last").and_then(|n| n.as_u64()) {
+                assert_eq!(
+                    tspans[tspans.len() - 1].id,
+                    last as u32,
+                    "vector {} (last tspan)",
+                    name
+                );
+            }
+        }
     }
 }

@@ -169,9 +169,13 @@ struct R9SaturatingConversionTests {
         #expect(saturatingUInt32AsInt(3.0) == 3)
     }
 
-    /// Rust reads a Test-JSON tspan id with `as_u64().unwrap_or(0) as u32`,
-    /// which yields 0 for a negative OR fractional number.
-    @Test func tspanIdFromJsonMatchesRustAsU64() {
+    /// A Test-JSON tspan `id` outside the declared `u32` domain reads as 0 in
+    /// both ports. The domain rule and the evidence for it are in
+    /// `tspanIdFromJson` / jas_dioxus's `parse_tspan_id`; the shared gate is
+    /// `test_fixtures/algorithms/tspan_id_from_json.json`, driven here by
+    /// `R9CallSitePinTests.tspanIdDomainCorpusMatchesAcrossPorts`. This case
+    /// stays because it reaches the helper directly, including the `nil` slot.
+    @Test func tspanIdFromJsonRejectsOutOfDomainValues() {
         #expect(tspanIdFromJson(NSNumber(value: 7)) == 7)
         #expect(tspanIdFromJson(NSNumber(value: -1)) == 0)
         #expect(tspanIdFromJson(NSNumber(value: 3.7)) == 0)

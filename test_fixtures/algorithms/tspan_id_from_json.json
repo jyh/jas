@@ -1,0 +1,76 @@
+{
+  "algorithm": "tspan_id_from_json",
+  "comparison": "exact",
+  "description": "The `id` slot of a Test-JSON tspan object, read through each port's element decoder (Rust parse_element / Swift parseElement). CROSS_LANGUAGE_TESTING.md's Tspan notes declare `id` a monotonic u32; a number outside that domain is not an id, and reads as 0 -- the answer both ports already gave for a negative, missing or non-numeric id. Only the WRITER is bound by that file's Normalization rules (they are stated for document_to_test_json), so a decimal point in the token does not make 3.0 something other than the id 3. Every out-of-domain vector below is a hand-mutated or foreign fixture: the emitter writes a u32.",
+  "vectors": [
+    {
+      "name": "zero",
+      "input": {"type": "text", "tspans": [{"id": 0, "content": "A"}]},
+      "expected": 0
+    },
+    {
+      "name": "integer_in_domain",
+      "input": {"type": "text", "tspans": [{"id": 7, "content": "A"}]},
+      "expected": 7
+    },
+    {
+      "name": "u32_max",
+      "input": {"type": "text", "tspans": [{"id": 4294967295, "content": "A"}]},
+      "expected": 4294967295
+    },
+    {
+      "name": "whole_valued_float_token",
+      "input": {"type": "text", "tspans": [{"id": 3.0, "content": "A"}]},
+      "expected": 3
+    },
+    {
+      "name": "fractional",
+      "input": {"type": "text", "tspans": [{"id": 3.7, "content": "A"}]},
+      "expected": 0
+    },
+    {
+      "name": "negative",
+      "input": {"type": "text", "tspans": [{"id": -1, "content": "A"}]},
+      "expected": 0
+    },
+    {
+      "name": "one_above_u32_max",
+      "input": {"type": "text", "tspans": [{"id": 4294967296, "content": "A"}]},
+      "expected": 0
+    },
+    {
+      "name": "above_u32_max_within_u64",
+      "input": {"type": "text", "tspans": [{"id": 4294967297, "content": "A"}]},
+      "expected": 0
+    },
+    {
+      "name": "far_above_u64_max",
+      "input": {"type": "text", "tspans": [{"id": 100000000000000000000, "content": "A"}]},
+      "expected": 0
+    },
+    {
+      "name": "missing_id",
+      "input": {"type": "text", "tspans": [{"content": "A"}]},
+      "expected": 0
+    },
+    {
+      "name": "null_id",
+      "input": {"type": "text", "tspans": [{"id": null, "content": "A"}]},
+      "expected": 0
+    },
+    {
+      "name": "string_id",
+      "input": {"type": "text", "tspans": [{"id": "3", "content": "A"}]},
+      "expected": 0
+    },
+    {
+      "name": "each_tspan_reads_its_own_id",
+      "input": {
+        "type": "text",
+        "tspans": [{"id": 3.7, "content": "A"}, {"id": 9, "content": "B"}]
+      },
+      "expected": 0,
+      "expected_last": 9
+    }
+  ]
+}

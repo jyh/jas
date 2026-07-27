@@ -839,14 +839,21 @@ private func parsePoints(_ v: Any?) -> [(Double, Double)] {
     }
 }
 
-/// Parse the canonical-JSON `tspans` array, or fall back to the
-/// legacy `content: String` shape and wrap it in a single default
-/// tspan. Keeps older fixtures readable during the migration.
-/// A Test-JSON tspan id, by Rust's rule: `as_u64().unwrap_or(0) as u32`.
+/// A Test-JSON tspan `id`: the number's value when that value is an id in the
+/// declared domain, else 0.
 ///
-/// serde_json's `as_u64` returns None for a NEGATIVE or FRACTIONAL number, so
-/// Rust yields 0 for both; this port's `NSNumber.intValue` truncated a fraction
-/// and then `UInt32(_:)` of a negative was a precondition failure (risk R9).
+/// CROSS_LANGUAGE_TESTING.md's Tspan notes declare `id` a monotonic `u32`.
+/// Nothing in that file gives a meaning to a value outside the domain, so each
+/// one reads as 0 — the answer both ports already gave for a negative, missing
+/// or non-numeric id. Before risk R9 this port's `NSNumber.intValue` truncated a
+/// fraction to 3 and `UInt32(_:)` of a negative was a precondition failure.
+///
+/// jas_dioxus read this slot with `as_u64().unwrap_or(0) as u32` until the same
+/// corpus was written; that form parted the ports twice (`3.0` → 0 there and 3
+/// here, `4294967297` → 1 there and 0 here) and now spells the rule below. See
+/// `parse_tspan_id` in jas_dioxus/src/geometry/test_json.rs for why neither of
+/// those two answers survived, and
+/// `test_fixtures/algorithms/tspan_id_from_json.json` for the shared gate.
 func tspanIdFromJson(_ any: Any?) -> UInt32 {
     guard let n = any as? NSNumber else { return 0 }
     let d = n.doubleValue
@@ -854,6 +861,9 @@ func tspanIdFromJson(_ any: Any?) -> UInt32 {
     return UInt32(d)
 }
 
+/// Parse the canonical-JSON `tspans` array, or fall back to the
+/// legacy `content: String` shape and wrap it in a single default
+/// tspan. Keeps older fixtures readable during the migration.
 private func parseTspansOrLegacy(_ d: [String: Any]) -> [Tspan] {
     if let arr = d["tspans"] as? [[String: Any]] {
         return arr.map { parseTspan($0) }
@@ -871,10 +881,9 @@ private func parseTspan(_ d: [String: Any]) -> Tspan {
         decor = nil
     }
     return Tspan(
-        // Rust reads this slot with `as_u64().unwrap_or(0) as u32`, which
-        // yields 0 for a negative OR fractional number; `UInt32(_:)` of a
-        // negative Int is a precondition failure here (risk R9). tspanIdFromJson
-        // spells out Rust's rule so a mutated fixture cannot part the ports.
+        // tspanIdFromJson, not a bare cast: `UInt32(_:)` of a negative Int is a
+        // precondition failure here and the domain rule is shared with
+        // jas_dioxus's parse_tspan_id (risk R9).
         id: tspanIdFromJson(d["id"]),
         content: d["content"] as? String ?? "",
         baselineShift: (d["baseline_shift"] as? NSNumber)?.doubleValue,
