@@ -2121,6 +2121,62 @@ pub fn flatten_path_commands(d: &[PathCommand]) -> Vec<(f64, f64)> {
 
 use crate::document::document::SelectionKind;
 
+/// The rounded rect's outline, split into ONE POINT RUN PER CORNER, in the
+/// same order as a Rect's four control points: 0 = top-left, 1 = top-right,
+/// 2 = bottom-right, 3 = bottom-left. Concatenating the four runs in that
+/// order yields the closed outline.
+///
+/// A SQUARE rect (`rx <= 0 && ry <= 0`, or a clamp that lands there) gives
+/// four single-point runs — exactly the four corners, so the concatenation is
+/// byte-identical to what the Rect -> Polygon promotion has always emitted.
+/// A ROUNDED rect gives four equal-length arc runs: each corner's quadratic
+/// is sampled at `t = 0 ..= FLATTEN_STEPS`, matching `rounded_rect_path`'s
+/// control points and clamping (`rx.min(w/2)`, `ry.min(h/2)`) so the emitted
+/// points trace the outline the renderer draws.
+///
+/// This is the machine-readable answer to "which emitted points belong to
+/// corner i" — needed both by the promotion (which corner's points a drag
+/// translates) and by `Controller::move_selection` (which polygon indices a
+/// mid-drag corner selection remaps onto).
+pub fn rounded_rect_corner_runs(
+    x: f64, y: f64, w: f64, h: f64, rx_in: f64, ry_in: f64,
+) -> [Vec<(f64, f64)>; 4] {
+    // Clamp exactly as `rounded_rect_path` does, so promotion and render
+    // agree on the shape (WYSIWYG at promotion).
+    let (rx, ry) = if rx_in <= 0.0 && ry_in <= 0.0 {
+        (0.0, 0.0)
+    } else {
+        (rx_in.max(0.0).min(w / 2.0), ry_in.max(0.0).min(h / 2.0))
+    };
+    if rx <= 0.0 && ry <= 0.0 {
+        return [
+            vec![(x, y)],
+            vec![(x + w, y)],
+            vec![(x + w, y + h)],
+            vec![(x, y + h)],
+        ];
+    }
+    // (start, control, end) of each corner's quadratic, walked clockwise.
+    let corners = [
+        ((x, y + ry), (x, y), (x + rx, y)),
+        ((x + w - rx, y), (x + w, y), (x + w, y + ry)),
+        ((x + w, y + h - ry), (x + w, y + h), (x + w - rx, y + h)),
+        ((x + rx, y + h), (x, y + h), (x, y + h - ry)),
+    ];
+    corners.map(|(p0, p1, p2)| {
+        (0..=FLATTEN_STEPS)
+            .map(|i| {
+                let t = i as f64 / FLATTEN_STEPS as f64;
+                let mt = 1.0 - t;
+                (
+                    mt * mt * p0.0 + 2.0 * mt * t * p1.0 + t * t * p2.0,
+                    mt * mt * p0.1 + 2.0 * mt * t * p1.1 + t * t * p2.1,
+                )
+            })
+            .collect()
+    })
+}
+
 /// Return a new element with the specified control points moved by (dx, dy).
 ///
 /// `kind == SelectionKind::All` translates the whole element in-place
@@ -4726,5 +4782,228 @@ mod tests {
         };
         assert_eq!(p.stroke_brush, Some("charcoal".to_string()));
         assert_eq!(p.d.len(), 2);
+    }
+}
+
+/// THE PRESERVATION LAW at the Rect -> Polygon corner-drag promotion.
+/// transcripts/EDIT_SEMANTICS_FREEZE.md (ratified 2026-07-27): §3.1 (the
+/// Theseus clause under T1's REPRESENTATION term — a 1 -> 1 kind change
+/// preserves every field with a counterpart) and RATIFIED ANSWER (3):
+/// `rx`/`ry` FLATTEN into the emitted points (WYSIWYG at promotion).
+#[cfg(test)]
+mod rect_promotion_preservation_tests {
+    use super::*;
+    use crate::document::document::{SelectionKind, SortedCps};
+
+    /// A one-corner partial selection, the shape a corner drag arrives in.
+    fn cp(i: usize) -> SelectionKind {
+        SelectionKind::Partial(SortedCps::from_iter([i]))
+    }
+
+    fn a_gradient(angle: f64) -> Gradient {
+        Gradient {
+            angle,
+            stops: vec![
+                GradientStop { color: Color::BLACK, opacity: 100.0,
+                               location: 0.0, midpoint_to_next: 50.0 },
+                GradientStop { color: Color::WHITE, opacity: 100.0,
+                               location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            ..Gradient::default()
+        }
+    }
+
+    /// A rounded, gradient-painted, named, identified rect. ANTI-VACUITY is
+    /// asserted by `assert_rect_fixture_is_rich` before every use.
+    fn rich_rect(rx: f64, ry: f64) -> RectElem {
+        RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 60.0, rx, ry,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: Some(Stroke::new(Color::BLACK, 2.0)),
+            common: CommonProps {
+                opacity: 0.5,
+                mode: BlendMode::Multiply,
+                transform: Some(Transform::default().translated(3.0, 4.0)),
+                locked: false,
+                visibility: Visibility::Outline,
+                mask: None,
+                tool_origin: Some("blob_brush".to_string()),
+                name: Some("hull".to_string()),
+                id: Some("rect-id".to_string()),
+            },
+            fill_gradient: Some(Box::new(a_gradient(30.0))),
+            stroke_gradient: Some(Box::new(a_gradient(60.0))),
+        }
+    }
+
+    fn assert_rect_fixture_is_rich(e: &RectElem) {
+        let d = CommonProps::default();
+        assert!(e.fill_gradient.is_some(), "fixture lost its fill gradient");
+        assert!(e.stroke_gradient.is_some(), "fixture lost its stroke gradient");
+        assert_ne!(e.common.opacity, d.opacity);
+        assert_ne!(e.common.mode, d.mode);
+        assert_ne!(e.common.visibility, d.visibility);
+        assert_ne!(e.common.transform, d.transform);
+        assert!(e.common.id.is_some());
+        assert!(e.common.name.is_some());
+        assert!(e.common.tool_origin.is_some());
+    }
+
+    /// §3.1 under T1's representation term. Rust hard-coded
+    /// `fill_gradient: None, stroke_gradient: None` at this cross-kind copy
+    /// site — the compiler demanded the field and a human answered None —
+    /// so a gradient-filled rounded rect, corner-dragged, silently lost BOTH
+    /// gradients. Polygon has a counterpart for each, so each is preserved.
+    #[test]
+    fn rect_corner_drag_preserves_both_gradients() {
+        let r = rich_rect(0.0, 0.0);
+        assert_rect_fixture_is_rich(&r);
+        let moved = move_control_points(
+            &Element::Rect(r.clone()), &cp(1), 5.0, 7.0);
+        let Element::Polygon(p) = moved else {
+            panic!("a partial corner drag promotes Rect to Polygon");
+        };
+        // MANDATORY GEOMETRY PAIRING: corner 1 (top-right) really moved.
+        assert_eq!(p.points[1], (105.0, 7.0));
+        assert_eq!(p.points[0], (0.0, 0.0));
+        assert_eq!(p.fill_gradient, r.fill_gradient,
+                   "the fill gradient has a Polygon counterpart — it must ride");
+        assert_eq!(p.stroke_gradient, r.stroke_gradient,
+                   "the stroke gradient has a Polygon counterpart");
+    }
+
+    /// The rest of the Theseus list at the same site, so a future edit
+    /// cannot quietly drop a field the `..` spread was never given.
+    #[test]
+    fn rect_corner_drag_preserves_identity_and_appearance() {
+        let r = rich_rect(0.0, 0.0);
+        assert_rect_fixture_is_rich(&r);
+        let moved = move_control_points(
+            &Element::Rect(r.clone()), &cp(2), 1.0, 1.0);
+        let Element::Polygon(p) = moved else { panic!("expected Polygon") };
+        assert_eq!(p.points[2], (101.0, 61.0), "corner 2 moved");
+        assert_eq!(p.common.id.as_deref(), Some("rect-id"),
+                   "a 1->1 kind change preserves identity");
+        assert_eq!(p.common.name.as_deref(), Some("hull"));
+        assert_eq!(p.common.opacity, 0.5);
+        assert_eq!(p.common.mode, BlendMode::Multiply);
+        assert_eq!(p.common.visibility, Visibility::Outline);
+        assert_eq!(p.common.tool_origin.as_deref(), Some("blob_brush"));
+        assert_eq!(p.common.transform, r.common.transform);
+        assert_eq!(p.fill, r.fill);
+        assert_eq!(p.stroke, r.stroke);
+    }
+
+    /// A square-cornered rect must promote to EXACTLY the four corners it
+    /// always did — the flatten below is additive, not a re-shaping of the
+    /// commonest case.
+    #[test]
+    fn square_rect_corner_drag_still_emits_exactly_four_points() {
+        let r = rich_rect(0.0, 0.0);
+        let moved = move_control_points(
+            &Element::Rect(r), &cp(0), 2.0, 3.0);
+        let Element::Polygon(p) = moved else { panic!("expected Polygon") };
+        assert_eq!(p.points, vec![
+            (2.0, 3.0), (100.0, 0.0), (100.0, 60.0), (0.0, 60.0),
+        ]);
+    }
+
+    /// RATIFIED ANSWER (3): FLATTEN the rounding into the emitted points.
+    /// `rx`/`ry` have no counterpart on Polygon (T2 shape 4), and the ruling
+    /// is WYSIWYG at promotion — the corner arcs become real points instead
+    /// of the rounding silently vanishing.
+    #[test]
+    fn rounded_rect_corner_drag_flattens_the_rounding_into_points() {
+        let r = rich_rect(20.0, 10.0);
+        assert_rect_fixture_is_rich(&r);
+        let moved = move_control_points(
+            &Element::Rect(r), &cp(1), 0.0, 0.0);
+        let Element::Polygon(p) = moved else { panic!("expected Polygon") };
+        assert!(p.points.len() > 4,
+                "the rounding must survive as points, not evaporate; got {} \
+                 points", p.points.len());
+        // No emitted point may sit in a corner square the rounding cut away.
+        // Top-left corner box is [0,20]x[0,10]; the arc runs strictly inside
+        // its quarter-ellipse, so (1.0, 1.0) — deep in the cut corner — must
+        // be outside the emitted outline's point cloud by a wide margin.
+        let in_tl_notch = p.points.iter().any(|&(x, y)| {
+            x < 20.0 && y < 10.0 && {
+                let nx = (x - 20.0) / 20.0;
+                let ny = (y - 10.0) / 10.0;
+                nx * nx + ny * ny > 1.02
+            }
+        });
+        assert!(!in_tl_notch,
+                "an emitted point fell OUTSIDE the rounded corner's arc — the \
+                 promotion is drawing a square corner the artist did not see");
+        // The flattened outline still spans the full rect.
+        let min_x = p.points.iter().map(|q| q.0).fold(f64::MAX, f64::min);
+        let max_x = p.points.iter().map(|q| q.0).fold(f64::MIN, f64::max);
+        assert!((min_x - 0.0).abs() < 1e-9 && (max_x - 100.0).abs() < 1e-9,
+                "flattened outline spans [0..100], got [{min_x}..{max_x}]");
+    }
+
+    /// The flatten must still MOVE the dragged corner: every point of that
+    /// corner's arc translates by the delta, and no other corner's does.
+    #[test]
+    fn rounded_rect_corner_drag_moves_the_whole_dragged_corner_arc() {
+        let r = rich_rect(20.0, 10.0);
+        let rest = move_control_points(
+            &Element::Rect(r.clone()), &cp(1), 0.0, 0.0);
+        let moved = move_control_points(
+            &Element::Rect(r), &cp(1), 30.0, -40.0);
+        let (Element::Polygon(a), Element::Polygon(b)) = (rest, moved) else {
+            panic!("expected Polygons")
+        };
+        assert_eq!(a.points.len(), b.points.len());
+        let n = a.points.len() / 4;
+        assert!(n > 1, "each corner should contribute an arc run");
+        for i in 0..a.points.len() {
+            let corner = i / n;
+            let (dx, dy) = (b.points[i].0 - a.points[i].0,
+                            b.points[i].1 - a.points[i].1);
+            if corner == 1 {
+                assert!((dx - 30.0).abs() < 1e-9 && (dy + 40.0).abs() < 1e-9,
+                        "point {i} of the dragged corner did not move");
+            } else {
+                assert!(dx.abs() < 1e-9 && dy.abs() < 1e-9,
+                        "point {i} of an undragged corner moved");
+            }
+        }
+    }
+
+    /// A whole-element (`All`) move on a rounded rect must STAY a Rect and
+    /// keep `rx`/`ry` — the flatten belongs to the promotion only.
+    #[test]
+    fn rounded_rect_whole_move_stays_a_rect_with_its_rounding() {
+        let r = rich_rect(20.0, 10.0);
+        let moved = move_control_points(&Element::Rect(r), &SelectionKind::All, 5.0, 5.0);
+        let Element::Rect(out) = moved else { panic!("expected Rect") };
+        assert_eq!((out.x, out.y), (5.0, 5.0));
+        assert_eq!((out.rx, out.ry), (20.0, 10.0));
+    }
+
+    /// The corner runs are the machine-readable answer to "which emitted
+    /// points belong to corner i" — the mapping `Controller::move_selection`
+    /// needs to keep a multi-sample drag on the corner it started on.
+    #[test]
+    fn corner_runs_are_four_equal_runs_in_cp_order() {
+        let square = rounded_rect_corner_runs(0.0, 0.0, 100.0, 60.0, 0.0, 0.0);
+        assert_eq!(square.iter().map(Vec::len).collect::<Vec<_>>(), vec![1, 1, 1, 1]);
+        assert_eq!(square[0][0], (0.0, 0.0));
+        assert_eq!(square[1][0], (100.0, 0.0));
+        assert_eq!(square[2][0], (100.0, 60.0));
+        assert_eq!(square[3][0], (0.0, 60.0));
+
+        let round = rounded_rect_corner_runs(0.0, 0.0, 100.0, 60.0, 20.0, 10.0);
+        let lens: Vec<usize> = round.iter().map(Vec::len).collect();
+        assert!(lens.iter().all(|&l| l == lens[0] && l > 1),
+                "every corner arc must sample the same number of points, got \
+                 {lens:?}");
+        // Each run starts and ends on the rect's edges, at the arc's feet.
+        assert_eq!(round[0].first().copied(), Some((0.0, 10.0)));
+        assert_eq!(round[0].last().copied(), Some((20.0, 0.0)));
+        assert_eq!(round[2].first().copied(), Some((100.0, 50.0)));
+        assert_eq!(round[2].last().copied(), Some((80.0, 60.0)));
     }
 }

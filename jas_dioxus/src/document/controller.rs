@@ -4973,3 +4973,427 @@ mod tests {
         }
     }
 }
+
+/// THE PRESERVATION LAW at the two container/merge sites this file owns:
+/// `apply_destructive_boolean`'s N -> 1 arm and `make_compound_shape_with_op`.
+/// transcripts/EDIT_SEMANTICS_FREEZE.md, ratified 2026-07-27 — §3.3 (merges),
+/// §3.4 (WRAP), §3.6 (the per-op table), T3 ("must not guess") and the
+/// cardinality law's identity projection.
+///
+/// Every battery below carries the §3.1 ANTI-VACUITY guard (the fixture is
+/// asserted to differ from `CommonProps::default()` in every field the law
+/// legislates, so a fixture that decayed to defaults could not pass on
+/// nothing) and the MANDATORY GEOMETRY PAIRING (at least one assertion on
+/// where the result's geometry actually landed).
+#[cfg(test)]
+mod preservation_law_tests {
+    use super::*;
+    use crate::geometry::element::{
+        BlendMode, Color, CommonProps, Fill, LayerElem, Mask, RectElem, Stroke,
+        Visibility,
+    };
+    use crate::geometry::live::{CompoundShape, LiveVariant};
+    use std::rc::Rc;
+
+    fn a_mask() -> Mask {
+        Mask {
+            subtree: Box::new(Element::Rect(RectElem {
+                x: 0.0, y: 0.0, width: 4.0, height: 4.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::BLACK)), stroke: None,
+                common: CommonProps::default(),
+                fill_gradient: None, stroke_gradient: None,
+            })),
+            clip: false,
+            invert: false,
+            disabled: false,
+            linked: true,
+            unlink_transform: None,
+        }
+    }
+
+    /// A rect whose `common` differs from the default in EVERY field the
+    /// preservation law legislates. `tag` distinguishes the sources so a
+    /// disagreement fixture really disagrees.
+    fn rich_rect(
+        x: f64, w: f64, id: &str, name: Option<&str>, opacity: f64,
+    ) -> Element {
+        Element::Rect(RectElem {
+            x, y: 0.0, width: w, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: Some(Stroke::new(Color::BLACK, 2.0)),
+            common: CommonProps {
+                opacity,
+                mode: BlendMode::Multiply,
+                transform: None,
+                locked: false,
+                visibility: Visibility::Outline,
+                mask: Some(Box::new(a_mask())),
+                tool_origin: Some("blob_brush".to_string()),
+                name: name.map(|s| s.to_string()),
+                id: Some(id.to_string()),
+            },
+            fill_gradient: None,
+            stroke_gradient: None,
+        })
+    }
+
+    /// ANTI-VACUITY (§3.1, mandatory): the fixture must differ from the
+    /// fresh-element default in every legislated field, or the batteries
+    /// below assert nothing.
+    fn assert_fixture_is_rich(e: &Element) {
+        let d = CommonProps::default();
+        let c = e.common();
+        assert_ne!(c.opacity, d.opacity, "fixture opacity decayed to default");
+        assert_ne!(c.mode, d.mode, "fixture blend mode decayed to default");
+        assert_ne!(c.visibility, d.visibility, "fixture visibility decayed");
+        assert_ne!(c.mask, d.mask, "fixture mask decayed to default");
+        assert_ne!(c.tool_origin, d.tool_origin, "fixture tool_origin decayed");
+        assert!(c.id.is_some(), "fixture must carry an id");
+    }
+
+    /// Two overlapping rich rects, back-to-front, selected.
+    /// back = [0..10]x[0..10] id "id-back"; front = [5..15]x[0..10] id
+    /// "id-front". Union bbox is therefore [0..15]x[0..10].
+    fn rich_pair(back_name: Option<&str>, front_name: Option<&str>,
+                 back_opacity: f64, front_opacity: f64) -> Model {
+        let back = rich_rect(0.0, 10.0, "id-back", back_name, back_opacity);
+        let front = rich_rect(5.0, 10.0, "id-front", front_name, front_opacity);
+        assert_fixture_is_rich(&back);
+        assert_fixture_is_rich(&front);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(back), Rc::new(front)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L0".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+            ],
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    /// The bbox of a Polygon's POINTS — the geometry the op produced,
+    /// unaffected by the stroke width `Element::bounds` inflates by.
+    fn polygon_point_bbox(e: &Element) -> (f64, f64, f64, f64) {
+        let Element::Polygon(p) = e else { panic!("expected a Polygon") };
+        let min_x = p.points.iter().map(|q| q.0).fold(f64::MAX, f64::min);
+        let max_x = p.points.iter().map(|q| q.0).fold(f64::MIN, f64::max);
+        let min_y = p.points.iter().map(|q| q.1).fold(f64::MAX, f64::min);
+        let max_y = p.points.iter().map(|q| q.1).fold(f64::MIN, f64::max);
+        (min_x, min_y, max_x - min_x, max_y - min_y)
+    }
+
+    fn only_child(model: &Model) -> Rc<Element> {
+        let children = model.document().layers[0].children().unwrap();
+        assert_eq!(children.len(), 1, "expected exactly one output element");
+        children[0].clone()
+    }
+
+    // ── §3.3 / cardinality law: the N -> 1 boolean arm ────────────────────
+
+    /// THE REJECTED RULE IN DISGUISE. `front.common().clone()` carries the
+    /// FRONTMOST operand's id through an N -> 1 merge — "the frontmost source
+    /// keeps the id", elected by z-order. Identity is preservable exactly
+    /// when the edit is 1 -> 1 (the cardinality law), so the union product
+    /// must wear an id that belonged to NEITHER operand.
+    #[test]
+    fn boolean_union_mints_an_id_that_was_no_operand_s() {
+        let mut model = rich_pair(None, None, 0.5, 0.5);
+        Controller::apply_destructive_boolean(
+            &mut model, "union", &BooleanOptions::default());
+        let out = only_child(&model);
+        // MANDATORY GEOMETRY PAIRING: the union really is the [0..15] bar.
+        let (bx, by, bw, bh) = polygon_point_bbox(&out);
+        assert!((bx - 0.0).abs() < 1e-9 && (by - 0.0).abs() < 1e-9
+                && (bw - 15.0).abs() < 1e-9 && (bh - 10.0).abs() < 1e-9,
+                "union bbox should be [0..15]x[0..10], got {bx},{by},{bw},{bh}");
+        let id = out.common().id.clone();
+        assert!(id.is_some(), "an N->1 merge mints a fresh id, it does not \
+                               leave the product identity-less");
+        assert_ne!(id.as_deref(), Some("id-front"),
+                   "the frontmost operand's id survived an N->1 merge — the \
+                    rule JYH rejected twice, wearing ..clone() as a hat");
+        assert_ne!(id.as_deref(), Some("id-back"),
+                   "the backmost operand's id survived an N->1 merge");
+    }
+
+    /// Uniqueness (REFERENCE_GRAPH.md §2.5): whatever the merge mints must
+    /// not collide with an id still live in the document.
+    #[test]
+    fn boolean_union_minted_id_avoids_live_ids() {
+        let mut model = rich_pair(None, None, 0.5, 0.5);
+        Controller::apply_destructive_boolean(
+            &mut model, "union", &BooleanOptions::default());
+        let ids = model.document().element_ids();
+        let out = only_child(&model);
+        let id = out.common().id.clone().unwrap();
+        // The only element left is the product, so its id is the only one.
+        assert!(ids.contains(&id));
+        assert_eq!(ids.len(), 1, "no stale operand id may linger");
+    }
+
+    /// §3.3: a field the op does not speak to follows UNANIMITY. `mask`,
+    /// `visibility` and `tool_origin` agree across both operands here, so
+    /// they carry — no winner is elected, the value is simply well-defined.
+    #[test]
+    fn boolean_union_carries_unanimous_non_paint_fields() {
+        let mut model = rich_pair(None, None, 0.5, 0.5);
+        Controller::apply_destructive_boolean(
+            &mut model, "union", &BooleanOptions::default());
+        let out = only_child(&model);
+        let c = out.common();
+        assert_eq!(c.mask, Some(Box::new(a_mask())),
+                   "a unanimous mask is preservation, not a guess");
+        assert_eq!(c.visibility, Visibility::Outline,
+                   "a unanimous visibility carries");
+        assert_eq!(c.tool_origin.as_deref(), Some("blob_brush"),
+                   "a unanimous capability marker carries (T6)");
+    }
+
+    /// §3.3: sources DISAGREE on `visibility`, so the fresh element's
+    /// documented default stands. Nothing geometric elects a winner.
+    #[test]
+    fn boolean_union_disagreeing_field_falls_to_the_default() {
+        let mut model = rich_pair(None, None, 0.5, 0.5);
+        // Make the back operand disagree on visibility only.
+        {
+            let doc = model.document().clone();
+            let mut back = (*doc.get_element(&vec![0, 0]).unwrap()).clone();
+            back.common_mut().visibility = Visibility::Invisible;
+            let new_doc = doc.replace_element(&vec![0, 0], back);
+            model.edit_document(new_doc);
+        }
+        Controller::apply_destructive_boolean(
+            &mut model, "union", &BooleanOptions::default());
+        let out = only_child(&model);
+        assert_eq!(out.common().visibility, CommonProps::default().visibility,
+                   "disagreeing sources must fall to the default, never elect \
+                    the frontmost");
+    }
+
+    /// RATIFIED ANSWER (1), ASSERTING-SOURCES: a source that asserts a name
+    /// carries it; a silent source does not veto. "hull" + unnamed -> "hull".
+    #[test]
+    fn boolean_union_name_carries_from_the_only_asserting_source() {
+        let mut model = rich_pair(Some("hull"), None, 0.5, 0.5);
+        Controller::apply_destructive_boolean(
+            &mut model, "union", &BooleanOptions::default());
+        assert_eq!(only_child(&model).common().name.as_deref(), Some("hull"),
+                   "the only name asserted must survive the merge");
+    }
+
+    /// ASSERTING-SOURCES, the other direction: two sources both assert and
+    /// they disagree, so the name dies. No winner by z-order.
+    #[test]
+    fn boolean_union_name_dies_when_asserting_sources_disagree() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.5, 0.5);
+        Controller::apply_destructive_boolean(
+            &mut model, "union", &BooleanOptions::default());
+        assert_eq!(only_child(&model).common().name, None,
+                   "two asserted names disagree -> the default, not the \
+                    frontmost's word");
+    }
+
+    /// The ratified BOOLEAN.md paint rule is FOUR properties — fill, stroke,
+    /// opacity, blend mode — from the frontmost operand. That rule is what
+    /// the op SPEAKS TO (T1), so it is preserved by the fix, not swept away
+    /// with the id. Disagreeing opacities here prove it is the frontmost's
+    /// value and not a unanimity accident.
+    #[test]
+    fn boolean_union_still_takes_the_frontmost_s_four_paint_properties() {
+        let mut model = rich_pair(None, None, 0.25, 0.75);
+        Controller::apply_destructive_boolean(
+            &mut model, "union", &BooleanOptions::default());
+        let out = only_child(&model);
+        assert_eq!(out.common().opacity, 0.75,
+                   "opacity is paint: the frontmost operand's, per BOOLEAN.md");
+        assert_eq!(out.common().mode, BlendMode::Multiply);
+        assert!(out.fill().is_some());
+        assert!(out.stroke().is_some());
+    }
+
+    /// §3.6: a SUBTRACT_FRONT survivor is 1 -> 1, so its identity LIVES.
+    /// The fix to the N->1 arm must not leak into the survivor arms.
+    #[test]
+    fn boolean_subtract_front_survivor_keeps_its_own_identity() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        Controller::apply_destructive_boolean(
+            &mut model, "subtract_front", &BooleanOptions::default());
+        let out = only_child(&model);
+        let (bx, _, bw, _) = polygon_point_bbox(&out);
+        assert!((bx - 0.0).abs() < 1e-9 && (bw - 5.0).abs() < 1e-9,
+                "subtract_front leaves [0..5], got x={bx} w={bw}");
+        assert_eq!(out.common().id.as_deref(), Some("id-back"),
+                   "a 1->1 survivor keeps its id");
+        assert_eq!(out.common().name.as_deref(), Some("hull"),
+                   "a 1->1 survivor keeps its name");
+        assert_eq!(out.common().opacity, 0.25, "and its own paint");
+    }
+
+    // ── §3.4 WRAP: Make Compound Shape ────────────────────────────────────
+
+    /// A DUPLICATE ID, worse than a loud break. The wrapper wore the
+    /// frontmost operand's whole `common` — id included — while that operand
+    /// REMAINED a child, so two live elements shared one id and a reference
+    /// to it would silently rebind to whichever the index walk reached first.
+    /// WRAP is 0 -> 1 for the container: never a member's identity.
+    #[test]
+    fn compound_shape_make_never_wears_an_operand_s_id() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        Controller::make_compound_shape_with_op(
+            &mut model, crate::geometry::live::CompoundOperation::Union);
+        let out = only_child(&model);
+        // MANDATORY GEOMETRY PAIRING: the compound really evaluates to the bar.
+        let (bx, by, bw, bh) = out.bounds();
+        assert!((bx - 0.0).abs() < 1e-9 && (by - 0.0).abs() < 1e-9
+                && (bw - 15.0).abs() < 1e-9 && (bh - 10.0).abs() < 1e-9,
+                "compound bbox should be [0..15]x[0..10], got {bx},{by},{bw},{bh}");
+        assert_ne!(out.common().id.as_deref(), Some("id-front"),
+                   "the wrapper wore the frontmost's id while the frontmost \
+                    stayed a child — two live elements, one id");
+        assert_ne!(out.common().id.as_deref(), Some("id-back"));
+    }
+
+    /// The uniqueness invariant, stated document-wide: after MAKE, walking
+    /// every element (wrapper and operands) must yield no repeated id.
+    #[test]
+    fn compound_shape_make_leaves_no_duplicate_id_in_the_document() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        Controller::make_compound_shape_with_op(
+            &mut model, crate::geometry::live::CompoundOperation::Union);
+        let mut seen: Vec<String> = Vec::new();
+        fn walk(e: &Element, seen: &mut Vec<String>) {
+            if let Some(id) = e.common().id.as_ref() {
+                seen.push(id.clone());
+            }
+            if let Element::Live(LiveVariant::CompoundShape(cs)) = e {
+                for o in &cs.operands {
+                    walk(o, seen);
+                }
+            }
+            if let Some(children) = e.children() {
+                for c in children {
+                    walk(c, seen);
+                }
+            }
+        }
+        for layer in &model.document().layers {
+            walk(layer, &mut seen);
+        }
+        let mut sorted = seen.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), seen.len(),
+                   "duplicate id after Make Compound Shape: {seen:?}");
+    }
+
+    /// §3.4: children of a WRAP are 1 -> 1 — untouched, ids and all.
+    #[test]
+    fn compound_shape_make_leaves_its_operands_untouched() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        Controller::make_compound_shape_with_op(
+            &mut model, crate::geometry::live::CompoundOperation::Union);
+        let out = only_child(&model);
+        let Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operands, ..
+        })) = &*out else {
+            panic!("expected a compound shape");
+        };
+        assert_eq!(operands.len(), 2);
+        assert_eq!(operands[0].common().id.as_deref(), Some("id-back"));
+        assert_eq!(operands[1].common().id.as_deref(), Some("id-front"));
+        assert_eq!(operands[0].common().name.as_deref(), Some("hull"));
+        assert_eq!(operands[1].common().name.as_deref(), Some("keel"));
+    }
+
+    /// §3.6 MAKE row: "frontmost's, per spec — paint only, never `common`".
+    /// Paint (fill / stroke / opacity / blend mode) rides; the identity and
+    /// container-structural fields do not.
+    #[test]
+    fn compound_shape_make_takes_paint_but_not_identity_or_mask() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        Controller::make_compound_shape_with_op(
+            &mut model, crate::geometry::live::CompoundOperation::Union);
+        let out = only_child(&model);
+        assert_eq!(out.common().opacity, 0.75,
+                   "opacity is paint: the frontmost's");
+        assert_eq!(out.common().mode, BlendMode::Multiply,
+                   "blend mode is paint: the frontmost's");
+        assert!(out.fill().is_some());
+        assert!(out.stroke().is_some());
+        assert_eq!(out.common().name, None,
+                   "the wrapper is a fresh container, not the frontmost");
+        assert_eq!(out.common().mask, None,
+                   "a mask on an operand must not silently re-apply to the \
+                    wrapper as well (it would composite twice)");
+        assert_eq!(out.common().tool_origin, None,
+                   "a capability marker belongs to the element that earned it");
+    }
+
+    // ── The corner drag is a MULTI-SAMPLE gesture ─────────────────────────
+
+    /// `doc.translate_selection` feeds `move_selection` an INCREMENTAL delta
+    /// per mousemove against the LIVE document (workspace/tools/
+    /// partial_selection.yaml), so the promotion happens on sample 1 and
+    /// every later sample lands on the Polygon. With four emitted points the
+    /// corner index happened to survive; once the rounding flattens into arc
+    /// runs it does not, so the promotion must remap the selection onto the
+    /// whole run it came from — or the second sample would spike one arc
+    /// point and shred the corner.
+    #[test]
+    fn rounded_rect_corner_drag_survives_a_second_sample() {
+        use crate::document::document::{SelectionKind, SortedCps};
+        use crate::geometry::element::RectElem;
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 60.0, rx: 20.0, ry: 10.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection {
+                path: vec![0, 0],
+                kind: SelectionKind::Partial(SortedCps::from_iter([1usize])),
+            }],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        // Sample 1: promotes and moves corner 1 by (10, 0).
+        Controller::move_selection(&mut model, 10.0, 0.0);
+        // Sample 2: another (10, 0) on the SAME gesture.
+        Controller::move_selection(&mut model, 10.0, 0.0);
+        let out = only_child(&model);
+        let Element::Polygon(p) = &*out else { panic!("expected Polygon") };
+        let n = p.points.len() / 4;
+        assert!(n > 1, "the rounding should have flattened into arc runs");
+        // Corner 1's whole run has moved by (20, 0); corner 0's has not.
+        let reference = crate::geometry::element::rounded_rect_corner_runs(
+            0.0, 0.0, 100.0, 60.0, 20.0, 10.0);
+        for (i, want) in reference[1].iter().enumerate() {
+            let got = p.points[n + i];
+            assert!((got.0 - want.0 - 20.0).abs() < 1e-9
+                    && (got.1 - want.1).abs() < 1e-9,
+                    "corner-1 point {i}: want {:?} + (20,0), got {got:?}",
+                    want);
+        }
+        for (i, want) in reference[0].iter().enumerate() {
+            let got = p.points[i];
+            assert!((got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9,
+                    "corner-0 point {i} moved: want {:?}, got {got:?}", want);
+        }
+    }
+}
