@@ -365,3 +365,41 @@ when a document is reopened from disk.
   collectively form the View > Zoom group. The tool is the
   canvas-side input pathway; the menu is the keyboard pathway. Both
   call into the same `doc.zoom.*` effects.
+
+---
+
+## RULED 2026-07-27 (JYH): `zoom_to_actual_size` RECENTRES — the four "pan
+## unchanged" statements above are SUPERSEDED
+
+**Ctrl+1 recomputes `view_offset` around the viewport centre**, so whatever the
+artist was looking at stays approximately under it. Rust's `doc.zoom.set` already
+does this (commit ff4d46d); **Swift changes to match**, and the four statements
+saying "pan unchanged" — §Double-click toolbar icon, the `Ctrl+1` row of the
+shortcut table, the `zoom_to_actual_size` prose, and `workspace/actions.yaml`'s
+description — are superseded by this ruling and must be rewritten.
+
+**Why the written record disagreed with itself, recorded so it is not re-derived:**
+`ZOOM_TOOL_TESTS.md` ZOOM-134 says *"pan unchanged (so whatever was under the
+viewport center stays approximately under it)"* — presenting the parenthetical as a
+CONSEQUENCE of pan-unchanged. **It is the opposite.** `view_offset` is the doc
+origin's screen position, so holding it fixed while zoom goes 4x -> 1x quadruples
+the visible region around that point: at offset (-300,-200) the view moves from doc
+[75..275]x[50..200] to [300..1100]x[200..800] — the artwork leaves the screen.
+Someone ran ZOOM-134, saw that pan-unchanged did not keep the centre, and changed
+Rust to match the **gloss** rather than the requirement. The gloss was a mistaken
+inference; the intuition behind it was right.
+
+**The three reasons the ruling goes Rust's way:**
+1. **Consistency inside the zoom family.** `zoom_in`/`zoom_out` anchor at the
+   viewport centre by default, and a fit "lands at the viewport center" (§109). If
+   Ctrl+1 alone abandoned the centre, Ctrl+= would keep your view and Ctrl+1 would
+   throw it away.
+2. **"Pan unchanged" is written at the wrong level** — it describes a field not
+   changing. What the artist experiences is "my view stays put." Specs belong at the
+   second level.
+3. **It was hit in practice**, not in theory: ff4d46d's note names the symptom,
+   "walked off the visible area."
+
+**ZOOM-134's parenthetical must be rewritten to state the requirement** rather than
+a false consequence of a different one — left as-is, the next reader re-derives the
+same error.
