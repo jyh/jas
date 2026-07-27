@@ -116,4 +116,129 @@ struct CanonicalJsonStringTests {
         // The canonical form is a fixed point, which every golden relies on.
         #expect(documentToTestJson(back) == json)
     }
+
+    // MARK: - Per-call-site pins for `jsonEscapeString`
+    //
+    // `canonicalJsonStringCorpus` above drives the escaper through three entry
+    // points: the function itself, `JsonObj.str` (via a tspan's content), and
+    // `canonicalRecordedValue`'s String arm. The escaper has EIGHT call sites
+    // across TestJson.swift and LiveElement.swift, and each of the other six
+    // was reverted individually to its pre-2026-07-27 form with the whole
+    // 2649-test suite green — routed by 2358fda4, gated by nothing. One test
+    // per site follows, each named for its site.
+    //
+    // Every test uses ONE probe whose canonical spelling separates both
+    // pre-lift Swift forms at once, and the Rust `{:?}` form too so the two
+    // ports can share the probe:
+    //   probe            a " b \ c U+0008 d
+    //   canonical        "a\"b\\c\bd"     (json.dumps, ensure_ascii=False)
+    //   naive "\"\(s)\"" "a"b\c<BS>d"     — invalid JSON, three ways wrong
+    //   two-replacement  "a\"b\\c<BS>d"   — raw control char, still invalid
+    // The probe deliberately contains no whitespace: both text-decoration
+    // writers tokenize on it.
+    private static let escapeProbe = "a\"b\\c\u{08}d"
+    /// The probe's canonical spelling, produced by
+    /// `json.dumps('a"b\\c\bd', ensure_ascii=False)` — the rule's adjudicator —
+    /// and NOT by running this port's escaper.
+    private static let escapeProbeJson = #""a\"b\\c\bd""#
+
+    /// Assert the emitted element JSON is JSON at all, which is the property
+    /// the escaper exists for.
+    private static func expectParses(_ json: String, _ label: String) {
+        let ok = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) != nil
+        #expect(ok, "\(label): emitted invalid JSON: \(json)")
+    }
+
+    /// SITE: `textDecorationJson` — the element-wide `text_decoration` list.
+    ///
+    /// The tspan's list is left absent so it emits `null`, which keeps this
+    /// test blind to `tspanJson`'s list writer and pins this site alone.
+    @Test func elementTextDecorationMembersAreJsonEscaped() {
+        let elem = parseElement([
+            "type": "text",
+            "x": 0.0, "y": 0.0, "font_size": 12.0,
+            "text_decoration": [Self.escapeProbe],
+            "tspans": [["id": 1, "content": "t"]],
+        ] as [String: Any])
+        let json = elementJson(elem)
+        #expect(json.contains("\"text_decoration\":[\(Self.escapeProbeJson)]"),
+                "element text_decoration member not escaped in: \(json)")
+        #expect(json.contains("\"text_decoration\":null"),
+                "tspan list not null in: \(json)")
+        Self.expectParses(json, "element text_decoration")
+    }
+
+    /// SITE: `tspanJson`'s `text_decoration` member list.
+    ///
+    /// The element-wide list is held at `"none"` so it emits `[]`, which keeps
+    /// this test blind to `textDecorationJson` and pins this site alone.
+    @Test func tspanTextDecorationMembersAreJsonEscaped() {
+        let elem = parseElement([
+            "type": "text",
+            "x": 0.0, "y": 0.0, "font_size": 12.0,
+            "text_decoration": "none",
+            "tspans": [["id": 1, "content": "t",
+                        "text_decoration": [Self.escapeProbe]]],
+        ] as [String: Any])
+        let json = elementJson(elem)
+        #expect(json.contains("\"text_decoration\":[\(Self.escapeProbeJson)]"),
+                "tspan text_decoration member not escaped in: \(json)")
+        #expect(json.contains("\"text_decoration\":[]"),
+                "element list not empty in: \(json)")
+        Self.expectParses(json, "tspan text_decoration")
+    }
+
+    /// SITE: `elementJson`'s recorded arm, the `inputs` id list.
+    @Test func recordedInputIdsAreJsonEscaped() {
+        let elem = Element.live(.recorded(RecordedElem(
+            ops: [], inputs: [ElementRef(Self.escapeProbe)])))
+        let json = elementJson(elem)
+        #expect(json.contains("\"inputs\":[\(Self.escapeProbeJson)]"),
+                "recorded input id not escaped in: \(json)")
+        Self.expectParses(json, "recorded inputs")
+    }
+
+    /// SITE: `canonicalRecordedValue`'s object-KEY arm — a recipe param's own
+    /// key, the one key these files emit that is data rather than a literal.
+    /// The corpus test pins the String VALUE arm six lines above it; reverting
+    /// the key arm alone left the suite green.
+    @Test func recipeParamObjectKeysAreJsonEscaped() {
+        // Directly, with a `true` value so no float formatting is involved.
+        #expect(canonicalRecordedValue([Self.escapeProbe: true] as [String: Any])
+                    == "{\(Self.escapeProbeJson):true}")
+        // And through the shipping serializer: a recorded op's params, with the
+        // op name and targets held ordinary so only the key arm can matter.
+        let elem = Element.live(.recorded(RecordedElem(
+            ops: [PrimitiveOp(op: "translate",
+                              params: [Self.escapeProbe: true],
+                              targets: [])],
+            inputs: [])))
+        let json = elementJson(elem)
+        #expect(json.contains("\"params\":{\(Self.escapeProbeJson):true}"),
+                "recipe param key not escaped in: \(json)")
+        Self.expectParses(json, "recipe param key")
+    }
+
+    /// SITE: `canonicalRecordedOp`'s `targets` list.
+    @Test func recordedOpTargetsAreJsonEscaped() {
+        let elem = Element.live(.recorded(RecordedElem(
+            ops: [PrimitiveOp(op: "translate", params: [:],
+                              targets: [Self.escapeProbe])],
+            inputs: [])))
+        let json = elementJson(elem)
+        #expect(json.contains("\"targets\":[\(Self.escapeProbeJson)]"),
+                "recorded op target not escaped in: \(json)")
+        Self.expectParses(json, "recorded op targets")
+    }
+
+    /// SITE: `canonicalRecordedOp`'s op NAME.
+    @Test func recordedOpNameIsJsonEscaped() {
+        let elem = Element.live(.recorded(RecordedElem(
+            ops: [PrimitiveOp(op: Self.escapeProbe, params: [:], targets: [])],
+            inputs: [])))
+        let json = elementJson(elem)
+        #expect(json.contains("\"op\":\(Self.escapeProbeJson)"),
+                "recorded op name not escaped in: \(json)")
+        Self.expectParses(json, "recorded op name")
+    }
 }
