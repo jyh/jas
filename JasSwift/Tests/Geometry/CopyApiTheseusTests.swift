@@ -245,6 +245,51 @@ private func expectOnlySubjectChanged(_ before: Any, _ after: Any,
     }
 }
 
+// MARK: - withVisibility / withLocked
+//
+// The same clause and the same method, on the two Element-level helpers whose
+// subject is a single non-paint flag. `withVisibility` is the layers-panel eye
+// and `hide_selection`; `withLocked` is Object > Lock and `lockSelection`. Both
+// were open-coded rebuilds in the same omission class — hiding a named group
+// destroyed its id and name — and the corpus fixture
+// `operations/bystander_containers.json` catches the `withVisibility` half
+// across both ports. These are its per-port inner loop, and the ONLY thing
+// watching `withLocked`.
+
+@Test func withVisibilityIsIdentityWhenUnchanged() {
+    for (kind, e) in populated() {
+        #expect(e.withVisibility(e.visibility) == e,
+                "withVisibility dropped a field on \(kind)")
+    }
+}
+
+@Test func withVisibilityChangesOnlyTheVisibility() {
+    for (kind, e) in populated() {
+        let after = e.withVisibility(.invisible)
+        #expect(after.visibility == .invisible,
+                "withVisibility did not set the visibility on \(kind)")
+        expectOnlySubjectChanged(payload(e), payload(after),
+                                 subject: "visibility", "withVisibility on \(kind)")
+    }
+}
+
+@Test func withLockedIsIdentityWhenUnchanged() {
+    for (kind, e) in populated() {
+        #expect(e.withLocked(e.isLocked) == e,
+                "withLocked dropped a field on \(kind)")
+    }
+}
+
+@Test func withLockedChangesOnlyTheLockedFlag() {
+    for (kind, e) in populated() {
+        let after = e.withLocked(false)   // every fixture is locked: true
+        #expect(after.isLocked == false,
+                "withLocked did not clear the locked flag on \(kind)")
+        expectOnlySubjectChanged(payload(e), payload(after),
+                                 subject: "locked", "withLocked on \(kind)")
+    }
+}
+
 @Test func withWidthPointsChangesOnlyTheWidthPoints() {
     let fresh = [StrokeWidthPoint(t: 0, widthLeft: 9, widthRight: 9),
                  StrokeWidthPoint(t: 0.5, widthLeft: 1, widthRight: 1),
