@@ -140,7 +140,14 @@ def _expand_preserve(
 ) -> list[tuple[tuple, ...]]:
     """Walk one subpath end-to-end with a uniform dash period."""
     anchors = _anchor_points(subpath)
-    if _is_closed(subpath):
+    # `and anchors`: a subpath that is nothing but Z is closed but has no
+    # anchor, because a ClosePath before any point is established is a
+    # no-op (S-4, ruled by JYH at the fleet council 2026-07-27). Without
+    # this the cyclic wrap raised IndexError; the len < 2 check below is
+    # then what turns the empty walk into "no dash". Both active ports
+    # guard the same expression -- Rust on `!anchors.is_empty()`, Swift on
+    # `anchors.first`. `_expand_align` carries the identical guard.
+    if _is_closed(subpath) and anchors:
         anchors_walk = anchors + [anchors[0]]
     else:
         anchors_walk = anchors
@@ -172,7 +179,9 @@ def _expand_align(
     natural linejoin behavior (DASH_ALIGN.md Option 2)."""
     anchors = _anchor_points(subpath)
     closed = _is_closed(subpath)
-    if closed:
+    # `and anchors`: see _expand_preserve. Here the empty walk is turned
+    # into "no dash" by the n_segs < 1 check below, which -1 satisfies.
+    if closed and anchors:
         anchors_walk = anchors + [anchors[0]]
     else:
         anchors_walk = anchors
