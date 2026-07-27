@@ -901,6 +901,12 @@ mod tests {
     /// polygon / star).
     const GESTURE_FIXTURES: &[&str] = &[
         "draw_rect.json",
+        // VIEWSEED: the same Rect drag at a NON-identity view (zoom 2, offset
+        // (-100, -50)). Every other gesture vector runs at the identity view,
+        // where the screen→doc conversion in pointer_event_payload is
+        // algebraically the identity and a tool that skipped it would still
+        // pass. See CORPUS_CENSUS.md §5.7.
+        "draw_rect_zoomed.json",
         "draw_line.json",
         "draw_ellipse.json",
         "draw_rounded_rect.json",

@@ -2798,6 +2798,12 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 /// same press(10,20)->drag(110,70)->release(110,70) gesture as draw_rect.
 private let gestureFixtures = [
     "draw_rect.json",
+    // VIEWSEED: the same Rect drag at a NON-identity view (zoom 2, offset
+    // (-100, -50)). Every other gesture vector runs at the identity view, where
+    // the screen->doc conversion in pointerEventPayload is algebraically the
+    // identity and a tool that skipped it would still pass. See
+    // CORPUS_CENSUS.md §5.7.
+    "draw_rect_zoomed.json",
     "draw_line.json",
     "draw_ellipse.json",
     "draw_rounded_rect.json",
@@ -2952,6 +2958,10 @@ private func runGestureModel(_ tc: [String: Any]) -> Model {
     guard let tool = loadYamlTool(toolId, in: ws) else {
         fatalError("workspace declares no tool '\(toolId)' (or it failed to parse)")
     }
+
+    // Optional non-identity view seed (VIEWSEED) — before `activate`, since a
+    // tool's on_enter may snapshot the view.
+    seedCaseView(model, tc)
 
     let ctx = gestureToolContext(model)
     tool.activate(ctx)
