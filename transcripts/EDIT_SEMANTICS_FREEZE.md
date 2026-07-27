@@ -1164,3 +1164,39 @@ refuter-gated: four adversarial passes; four fatal findings, all answered
 by new defined terms rather than by defending the indefensible;
 twenty-three repairs folded (two narrowed in form, none rejected);
 twenty-one attacks withstood and recorded. It changes no code.*
+
+
+---
+
+## RULED 2026-07-27 (JYH): THE BINARY CODEC'S SEVEN DROPPED FIELDS
+
+The binary (msgpack) codec drops `common.mode`, `common.mask`, `common.tool_origin`,
+`fill_gradient`, `stroke_gradient`, `stroke_brush` and `stroke_brush_overrides` — in
+**both ports**. Save as binary, reload, and they are gone. Under this law that is
+unambiguous: **a round trip speaks to nothing, so it must preserve everything.**
+
+**RULED — the format shape:** **per-tag trailing append, tolerant reads, NO VERSION
+BUMP.**
+- `unpack_common` reads FIXED indices and every variant's payload starts at index 7,
+  so the common block cannot be extended once — it must be extended **per element
+  tag**, with a per-tag arity table mirrored in both ports.
+- **`VERSION` stays at 2.** `MIN_VERSION` is also 2 and readers reject
+  `version > VERSION`, so bumping to 3 would make the FROZEN ports unable to read
+  anything the active ports write. They are tag-pinned canaries and orphaning them
+  costs a real signal. This is the same reasoning that settled the `fill_rule`
+  slot-11 decision, verified then to work across all four ports because neither
+  frozen reader validates array length.
+- **Tolerant reads** (`arr.get(n)` -> documented default when absent): an old blob
+  loads correctly, and a new blob loses only the new fields in an old reader —
+  honest degradation. The format has grown trailing slots twice before (document
+  index 3 for `symbols`, `TAG_LIVE` slot 9 for the instance transform), so the
+  mechanism is established, not novel.
+
+**RULED with it — the byte-level gate lands at the same time.** Measured by an
+earlier wave: **every codec gate compares canonical test-JSON strings, and the fields
+the binary codec drops are a strict SUBSET of the fields that string oracle also
+drops.** So no fixture can red-light a binary drop today, and a one-port slot
+mismatch in `pack_element` would land SILENTLY. The repair therefore needs a
+**byte-level binary comparison**, not the string oracle — otherwise we would be
+extending a format whose divergences we cannot see. Coverage gap
+`codec-string-oracle-cannot-see-a-dropped-field` is the record of that.
