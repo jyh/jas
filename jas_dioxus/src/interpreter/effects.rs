@@ -4360,6 +4360,16 @@ fn path_move_latched_handle(
 }
 
 /// Implementation of doc.path.erase_at_rect.
+///
+/// MINTS IDS. A severing erase replaces one identified element with several,
+/// so each fragment needs a fresh id — and the fragment count is not knowable
+/// until the geometry is split, so the initiator cannot carry the ids in an
+/// operation payload the way creation verbs do. The mint happens here, where
+/// the document is in hand for the collision check, through the shared
+/// `mint_unique_ids` loop; determinism across ports comes from seeding both
+/// ports' id source identically (`set_test_id_rng`), exactly as the creation
+/// verbs are already gated. See OP_LOG.md §9 for what the 33-verb unification
+/// owes this verb.
 fn path_erase_at_rect(
     model: &mut Model,
     last_x: f64, last_y: f64,
@@ -4367,6 +4377,7 @@ fn path_erase_at_rect(
     eraser_size: f64,
 ) {
     use std::rc::Rc;
+    use crate::document::artboard::{generate_element_id, mint_unique_ids};
     use crate::geometry::element::{flatten_path_commands, PathCommand, PathElem};
     use crate::geometry::path_ops::{find_eraser_hit, split_path_at_eraser};
 
@@ -4378,37 +4389,54 @@ fn path_erase_at_rect(
     let max_x = last_x.max(x) + half;
     let max_y = last_y.max(y) + half;
 
+    // The avoid-set for the fragment ids minted below. Built ONCE from the
+    // pre-edit document and carried across the whole call, so fragments of
+    // different paths cannot collide with each other either. It still holds
+    // the ids of the sources being replaced — those are about to vanish, so
+    // avoiding them is merely conservative, never wrong.
+    let mut existing_ids = doc.element_ids();
+
     let mut changed = false;
     for (li, layer) in doc.layers.iter().enumerate() {
         let children = match layer.children() {
             Some(c) => c,
             None => continue,
         };
-        for ci in (0..children.len()).rev() {
-            let child = &children[ci];
+        // Rebuild the child list FRONT-TO-BACK rather than editing it in
+        // place back-to-front. Both orders produce the same document, but the
+        // mint order is observable in the ids, and Swift's pathEraseAtRect
+        // rebuilds forward — so document order is the only order the two
+        // ports can agree on. Fragment ids are handed out in document order.
+        let mut new_children: Vec<Rc<Element>> = Vec::with_capacity(children.len());
+        let mut layer_changed = false;
+        for child in children.iter() {
             let path_elem = match child.as_ref() {
                 Element::Path(pe) => pe,
-                _ => continue,
+                _ => {
+                    new_children.push(child.clone());
+                    continue;
+                }
             };
             if child.locked() {
+                new_children.push(child.clone());
                 continue;
             }
             let flat = flatten_path_commands(&path_elem.d);
             if flat.len() < 2 {
+                new_children.push(child.clone());
                 continue;
             }
             let hit = match find_eraser_hit(&flat, min_x, min_y, max_x, max_y) {
                 Some(h) => h,
-                None => continue,
+                None => {
+                    new_children.push(child.clone());
+                    continue;
+                }
             };
             let bounds = child.bounds();
             if bounds.2 <= eraser_size * 2.0 && bounds.3 <= eraser_size * 2.0 {
-                if let Some(layer_children) =
-                    new_doc.layers[li].children_mut()
-                {
-                    layer_children.remove(ci);
-                    changed = true;
-                }
+                // bbox fits inside the eraser — drop entirely.
+                layer_changed = true;
                 continue;
             }
             let is_closed = path_elem
@@ -4428,36 +4456,47 @@ fn path_erase_at_rect(
             // ERASE DOES NOT REMOVE IDENTITY — "it is still the same object".
             // Branch on the surviving-fragment count; Swift's pathEraseAtRect
             // branches identically so the two ports agree in both arms.
+            //
+            // One fragment -> the one-element case: everything but `d`
+            // survives, `id` included. Several fragments -> each gets a FRESH
+            // id, minted HERE (the effect is where the document is in hand for
+            // the collision check; the initiator cannot mint, because the
+            // fragment count falls out of the geometry and is unknown until
+            // now). Copying the source's id instead would leave N live
+            // elements sharing one id and break the unique-id invariant of
+            // REFERENCE_GRAPH.md §2.5. A failed mint aborts the whole erase —
+            // never a half-identified split.
+            //
+            // STILL OWED for the severing case: a linear-gradient stop remap
+            // (a gradient carries no position — linear resolves angle + stops
+            // against the element's OWN bbox centre and half-diagonal — so
+            // each fragment re-fits the whole ramp instead of showing its
+            // slice; the fix is an affine remap of stop locations with
+            // clipping and interpolated endpoint colours). Radial cannot be
+            // preserved without a model change; the recentre is accepted.
             let severed = results.len() > 1;
+            let fragment_ids: Vec<Option<String>> = if severed {
+                let Some(ids) = mint_unique_ids(
+                    results.len(),
+                    &mut existing_ids,
+                    &mut || generate_element_id(None),
+                ) else {
+                    return;
+                };
+                ids.into_iter().map(Some).collect()
+            } else {
+                vec![path_elem.common.id.clone()]
+            };
+            for (cmds, id) in results.into_iter().zip(fragment_ids) {
+                let mut frag = PathElem { d: cmds, ..path_elem.clone() };
+                frag.common.id = id;
+                new_children.push(Rc::new(Element::Path(frag)));
+            }
+            layer_changed = true;
+        }
+        if layer_changed {
             if let Some(layer_children) = new_doc.layers[li].children_mut() {
-                layer_children.remove(ci);
-                for cmds in results.into_iter().rev() {
-                    // One fragment -> the one-element case: everything but `d`
-                    // survives, `id` included. Several fragments -> phase 1
-                    // keeps appearance, transform and `name` but WITHHOLDS
-                    // `id`: nothing on this path can mint one (Controller
-                    // never mints — the initiator carries the id in the
-                    // operation payload — and dedupe_element_ids only CLEARS
-                    // duplicates, and only in document readers), so copying it
-                    // would leave N live elements sharing an id and break the
-                    // unique-id invariant of REFERENCE_GRAPH.md §2.5.
-                    //
-                    // PHASE 2 OWES, for the severing case: fresh deterministic
-                    // cross-port ids per fragment, and a linear-gradient stop
-                    // remap (a gradient carries no position — linear resolves
-                    // angle + stops against the element's OWN bbox centre and
-                    // half-diagonal — so each fragment currently re-fits the
-                    // whole ramp instead of showing its slice; the fix is an
-                    // affine remap of stop locations with clipping and
-                    // interpolated endpoint colours). Radial cannot be
-                    // preserved without a model change; the recentre is
-                    // accepted. The severing case is NOT finished.
-                    let mut frag = PathElem { d: cmds, ..path_elem.clone() };
-                    if severed {
-                        frag.common.id = None;
-                    }
-                    layer_children.insert(ci, Rc::new(Element::Path(frag)));
-                }
+                *layer_children = new_children;
                 changed = true;
             }
         }
@@ -4870,6 +4909,15 @@ fn blob_brush_fill_matches(a: &Option<Fill>, b: &Option<Fill>) -> bool {
 
 /// Implementation of doc.blob_brush.commit_painting.
 /// See BLOB_BRUSH_TOOL.md §Commit pipeline + §Multi-element merge.
+///
+/// MINTS AN ID in the N -> 1 merge arm (N >= 2 matches). A merge consumes
+/// identified elements and produces one, so the result needs a fresh id — and
+/// the initiator cannot carry it in an operation payload, because whether a
+/// merge happens at all falls out of the geometry (the overlap test below).
+/// The mint happens here, where the document is in hand for the collision
+/// check; determinism across ports comes from seeding both ports' id source
+/// identically (`set_test_id_rng`). See OP_LOG.md §9 for what the 33-verb
+/// unification owes this verb.
 fn blob_brush_commit_painting(
     model: &mut Model, store: &StateStore, ctx: &serde_json::Value,
     buffer_name: &str,
@@ -4878,6 +4926,7 @@ fn blob_brush_commit_painting(
     _keep_selected: bool, // Selection update deferred; future follow-up
 ) {
     use crate::algorithms::boolean::boolean_union;
+    use crate::document::artboard::{generate_element_id, mint_unique_ids};
     use crate::geometry::element::{Element, PathElem, CommonProps};
     use crate::geometry::path_ops::{path_to_polygon_set, polygon_set_to_path};
 
@@ -4983,18 +5032,33 @@ fn blob_brush_commit_painting(
         };
         Element::Path(PathElem { d: new_d, ..src })
     } else {
-        // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both mint
+        // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both build
         // a fresh element carrying the tool's own attributes. For the merge
-        // that is the law's verdict on identity: no source's id may travel,
-        // and nothing here can mint a replacement (Controller::assign_id never
-        // mints — the initiator carries the id in the op payload — and
-        // dedupe_element_ids only CLEARS duplicates, and only in document
-        // readers), so `CommonProps::default()` leaving `id` at None is the
-        // outcome, not an accident. Whether attributes the sources AGREE on
-        // should carry is UNRULED: do not invent a rule here. "The largest
-        // source keeps the id" was explicitly rejected in both directions.
+        // that is the law's verdict on identity: no source's id may travel
+        // ("the largest source keeps the id" was explicitly rejected in both
+        // directions), so the result wears a FRESH id, minted HERE through the
+        // shared `mint_unique_ids` loop — the effect is where the document is
+        // in hand for the collision check, and the initiator cannot know that
+        // a merge is happening at all until the match loop above has run.
+        //
+        // The 0 -> 1 arm deliberately does NOT mint: a brand-new blob is a
+        // creation, and no creation tool in this app mints an element id (a
+        // drawn rect, ellipse or pen path all commit id-less). Giving one to
+        // the blob brush alone would single it out; when creation-time ids
+        // land, they land for every tool at once.
         let mut common = CommonProps::default();
         common.tool_origin = Some("blob_brush".to_string());
+        // This arm is `matches.len() != 1`, so a non-empty `matches` here is
+        // exactly the N >= 2 merge.
+        if matches.len() >= 2 {
+            let mut existing_ids = doc.element_ids();
+            let Some(ids) = mint_unique_ids(1, &mut existing_ids, &mut || {
+                generate_element_id(None)
+            }) else {
+                return;
+            };
+            common.id = Some(ids[0].clone());
+        }
         Element::Path(PathElem {
             d: new_d,
             fill: new_fill,
@@ -9961,6 +10025,24 @@ mod tests {
         }
     }
 
+    /// Run `body` with the per-char id counter both corpus runners install
+    /// (0,1,2,… so each 8-char draw walks the base-36 alphabet in order:
+    /// "01234567", "89abcdef", "ghijklmn", "opqrstuv"), then clear it. The
+    /// Swift twin `withCorpusIdCounter` installs the identical source, which
+    /// is what lets the two ports pin the SAME literal ids.
+    fn with_corpus_id_counter<T>(body: impl FnOnce() -> T) -> T {
+        use crate::document::artboard::set_test_id_rng;
+        let mut counter: u32 = 0;
+        set_test_id_rng(Some(Box::new(move || {
+            let v = counter;
+            counter = counter.wrapping_add(1);
+            v
+        })));
+        let out = body();
+        set_test_id_rng(None);
+        out
+    }
+
     #[test]
     fn theseus_delete_anchor_preserves_everything_but_d() {
         let (mut model, src) = model_with_theseus(vec![
@@ -10049,28 +10131,110 @@ mod tests {
     /// mint ids (the initiator carries them in the op payload) and
     /// dedupe_element_ids runs only in document readers, so duplicated ids
     /// would persist live and break the unique-id invariant of
-    /// REFERENCE_GRAPH.md §2.5. Fresh per-fragment ids are phase 2.
+    /// REFERENCE_GRAPH.md §2.5. Each fragment therefore gets a FRESH id,
+    /// minted inside the effect.
     #[test]
-    fn theseus_erase_split_preserves_appearance_and_name_but_not_id() {
+    fn theseus_erase_split_preserves_appearance_and_name_with_fresh_ids() {
         let (mut model, src) = model_with_theseus(vec![
             PathCommand::MoveTo { x: 0.0, y: 0.0 },
             PathCommand::LineTo { x: 100.0, y: 0.0 },
         ]);
-        path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0);
+        with_corpus_id_counter(|| {
+            path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0)
+        });
         let n = model.document().layers[0].children().map_or(0, |c| c.len());
         assert_eq!(n, 2, "a severing erase of an open path yields two fragments");
+        let mut seen: Vec<String> = Vec::new();
         for i in 0..n {
             let frag = path_at(&model, &[0, i]);
             let label = format!("erase fragment {i}");
-            // Appearance + name + transform survive; only `id` is withheld.
+            // Appearance + name + transform survive; only `id` differs.
             let grafted = PathElem {
                 d: src.d.clone(),
                 common: CommonProps { id: src.common.id.clone(), ..frag.common.clone() },
                 ..frag.clone()
             };
             assert_eq!(&grafted, &src, "{label}: a non-`d`, non-`id` field changed");
-            assert_eq!(frag.common.id, None, "{label}: split fragments must not share an id");
+            let id = frag.common.id.clone().unwrap_or_else(|| {
+                panic!("{label}: a split fragment must carry a fresh id")
+            });
+            assert_ne!(Some(&id), src.common.id.as_ref(),
+                "{label}: no fragment may wear the severed source's id");
+            assert!(!seen.contains(&id), "{label}: fragments must not share an id");
+            seen.push(id);
         }
+    }
+
+    /// The minted ids themselves, pinned as literals under the SAME per-char
+    /// counter Swift's twin installs, so the two ports cannot drift on how
+    /// many ids a severing erase draws or in what order it hands them out.
+    /// Document order is mint order: fragment [0,0] takes the first id.
+    ///
+    /// Separation from the pre-fix behaviour: the old code left BOTH fragments
+    /// at `id: None`, which is neither literal here.
+    #[test]
+    fn erase_split_mints_ids_in_document_order() {
+        let (mut model, _src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+        ]);
+        with_corpus_id_counter(|| {
+            path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0)
+        });
+        assert_eq!(path_at(&model, &[0, 0]).common.id.as_deref(), Some("01234567"));
+        assert_eq!(path_at(&model, &[0, 1]).common.id.as_deref(), Some("89abcdef"));
+    }
+
+    /// TWO paths severed by ONE erase call. The mint order is DOCUMENT order
+    /// (the earlier child's fragments draw first), which is the only order
+    /// both ports can agree on — Swift rebuilds the child list front-to-back.
+    /// Four fragments, four ids, in sequence.
+    #[test]
+    fn erase_split_of_two_paths_mints_in_document_order() {
+        use crate::geometry::element::FillRule;
+        use std::rc::Rc;
+        let bar = |y: f64, id: &str| {
+            Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: 0.0, y },
+                    PathCommand::LineTo { x: 100.0, y },
+                ],
+                fill: None,
+                stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+                width_points: Vec::new(),
+                common: CommonProps {
+                    id: Some(id.to_string()),
+                    ..CommonProps::default()
+                },
+                fill_gradient: None,
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })
+        };
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(bar(0.0, "top")));
+            children.push(Rc::new(bar(10.0, "bottom")));
+        }
+        let mut model = Model::new(doc, None);
+        // A tall eraser rect at x = 50 crosses BOTH bars in one call.
+        with_corpus_id_counter(|| {
+            path_erase_at_rect(&mut model, 50.0, 5.0, 50.0, 5.0, 8.0)
+        });
+        let ids: Vec<Option<String>> = (0..4)
+            .map(|i| path_at(&model, &[0, i]).common.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                Some("01234567".to_string()),
+                Some("89abcdef".to_string()),
+                Some("ghijklmn".to_string()),
+                Some("opqrstuv".to_string()),
+            ]
+        );
     }
 
     // ── The cardinality law at the blob-brush merge ──
@@ -10148,14 +10312,15 @@ mod tests {
     }
 
     /// TWO matches change cardinality, so identity DIES: the merged element
-    /// carries NO id. Nothing here can mint one (`assign_id` never mints — the
-    /// initiator carries the id in the op payload — and `dedupe_element_ids`
-    /// only CLEARS duplicates, and only in document readers), so carrying a
-    /// source's id would leave the merged element wearing a dead ship's name.
-    /// Whether attributes the sources AGREE on should carry is UNRULED, and
-    /// this test deliberately pins none of them.
+    /// carries NEITHER source's id, and wears a FRESH one minted inside the
+    /// effect (carrying a source's id would leave the merge wearing a dead
+    /// ship's name). Pinned as a literal under the per-char counter Swift's
+    /// twin also installs.
+    ///
+    /// Separation from the pre-fix behaviour: the old code left the merged
+    /// element at `id: None`, which is neither "01234567" nor either source's.
     #[test]
-    fn blob_brush_merge_of_two_sources_carries_no_id() {
+    fn blob_brush_merge_of_two_sources_mints_a_fresh_id() {
         use crate::geometry::element::FillRule;
         use std::rc::Rc;
         let red = Fill::new(Color::from_hex("#ff0000").unwrap());
@@ -10196,9 +10361,9 @@ mod tests {
         store.set("blob_brush_roundness", serde_json::json!(100.0));
         let buffer = "theseus_blob_merge_two";
         seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
-        run_effects(
+        with_corpus_id_counter(|| run_effects(
             &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
-            &mut store, Some(&mut model), None, None, None);
+            &mut store, Some(&mut model), None, None, None));
         super::super::point_buffers::clear(buffer);
         // Both sources plus the sweep collapsed into ONE child: had only one
         // matched, the other would still be sitting there.
@@ -10207,8 +10372,8 @@ mod tests {
             "the sweep bridged both blobs, so both were merged away"
         );
         let out = path_at(&model, &[0, 0]);
-        assert_eq!(out.common.id, None,
-            "a merge of two sources must not wear either source's id");
+        assert_eq!(out.common.id.as_deref(), Some("01234567"),
+            "a merge of two sources wears a FRESH id, not either source's");
         assert_eq!(out.common.tool_origin.as_deref(), Some("blob_brush"),
             "the merged blob stays a blob-brush element");
     }

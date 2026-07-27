@@ -1597,10 +1597,11 @@ private enum PathEditIdentity {
     /// The edit yielded ONE element: it is the same object, so `id` travels
     /// with everything else.
     case sameElement
-    /// The edit SEVERED the source into several elements. Phase 1 carries
-    /// appearance, transform and `name` but withholds `id` — see
-    /// `pathWithCommands`.
-    case splitFragment
+    /// The edit SEVERED the source into several elements. Each fragment
+    /// carries appearance, transform and `name` from the source but is a NEW
+    /// element, so it wears the FRESH id the caller minted for it — never the
+    /// source's. See `pathWithCommands`.
+    case splitFragment(id: String)
 }
 
 /// Reconstruct a Path element with a replaced command list.
@@ -1618,21 +1619,23 @@ private enum PathEditIdentity {
 /// battery that compares every reflected property except `d` — a property
 /// added to `Path` later is checked without editing the test.
 ///
-/// `identity: .splitFragment` withholds `id` only. Nothing on the erase path
-/// can mint a fresh one (`Controller.assignId` never mints — the initiator
-/// carries the id in the operation payload — and `dedupeElementIds` only
-/// CLEARS duplicates, and only in document readers), so copying it would
+/// `identity: .splitFragment(id:)` swaps in the caller's freshly minted id and
+/// carries everything else: copying the source's id onto every fragment would
 /// leave N live elements sharing one id and break the unique-id invariant of
-/// REFERENCE_GRAPH.md §2.5. PHASE 2 OWES the severing case fresh
-/// deterministic cross-port ids per fragment and a linear-gradient stop remap
-/// (a gradient carries no position — linear resolves angle + stops against
-/// the element's OWN bbox centre and half-diagonal — so each fragment
-/// currently re-fits the whole ramp instead of showing its slice; the fix is
-/// an affine remap of stop locations with clipping and interpolated endpoint
-/// colours). Radial cannot be preserved without a model change; the recentre
-/// is accepted. The severing case is NOT finished.
+/// REFERENCE_GRAPH.md §2.5. STILL OWED for the severing case: a
+/// linear-gradient stop remap (a gradient carries no position — linear
+/// resolves angle + stops against the element's OWN bbox centre and
+/// half-diagonal — so each fragment re-fits the whole ramp instead of showing
+/// its slice; the fix is an affine remap of stop locations with clipping and
+/// interpolated endpoint colours). Radial cannot be preserved without a model
+/// change; the recentre is accepted.
 private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand],
                               identity: PathEditIdentity) -> Path {
+    let newId: String?
+    switch identity {
+    case .sameElement: newId = pe.id
+    case .splitFragment(let id): newId = id
+    }
     return Path(d: cmds, fill: pe.fill, stroke: pe.stroke,
                 widthPoints: pe.widthPoints,
                 opacity: pe.opacity, transform: pe.transform,
@@ -1646,7 +1649,7 @@ private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand],
                 strokeBrushOverrides: pe.strokeBrushOverrides,
                 toolOrigin: pe.toolOrigin,
                 name: pe.name,
-                id: identity == .sameElement ? pe.id : nil,
+                id: newId,
                 fillRule: pe.fillRule)
 }
 
@@ -1740,6 +1743,16 @@ private func projectionDistance(
 }
 
 /// Implementation of doc.path.erase_at_rect.
+///
+/// MINTS IDS. A severing erase replaces one identified element with several,
+/// so each fragment needs a fresh id — and the fragment count is not knowable
+/// until the geometry is split, so the initiator cannot carry the ids in an
+/// operation payload the way creation verbs do. The mint happens here, where
+/// the document is in hand for the collision check, through the shared
+/// `mintUniqueIds` loop; determinism across ports comes from seeding both
+/// ports' id source identically (`setTestIdRng`), exactly as the creation
+/// verbs are already gated. See OP_LOG.md §9 for what the 33-verb unification
+/// owes this verb. Mirrors Rust `path_erase_at_rect`.
 private func pathEraseAtRect(
     model: Model, lastX: Double, lastY: Double,
     x: Double, y: Double, eraserSize: Double
@@ -1748,6 +1761,13 @@ private func pathEraseAtRect(
     let minY = min(lastY, y) - eraserSize
     let maxX = max(lastX, x) + eraserSize
     let maxY = max(lastY, y) + eraserSize
+
+    // The avoid-set for the fragment ids minted below. Built ONCE from the
+    // pre-edit document and carried across the whole call, so fragments of
+    // different paths cannot collide with each other either. It still holds
+    // the ids of the sources being replaced — those are about to vanish, so
+    // avoiding them is merely conservative, never wrong.
+    var existingIds = model.document.elementIds
 
     var newLayers = model.document.layers
     var changed = false
@@ -1784,10 +1804,20 @@ private func pathEraseAtRect(
             // Branch on the surviving-fragment count; Rust's path_erase_at_rect
             // branches identically so the two ports agree in BOTH arms. One
             // fragment is the one-element case and keeps everything including
-            // `id`; a severing erase withholds `id` (see pathWithCommands).
-            let identity: PathEditIdentity =
-                results.count > 1 ? .splitFragment : .sameElement
-            for cmds in results {
+            // `id`; a severing erase gives each fragment a FRESH id (see
+            // pathWithCommands). A failed mint aborts the whole erase — never
+            // a half-identified split. The child list is rebuilt FRONT-TO-BACK
+            // and Rust rebuilds it the same way, so fragment ids are handed
+            // out in document order in both ports.
+            var identities: [PathEditIdentity] = [.sameElement]
+            if results.count > 1 {
+                guard let minted = mintUniqueIds(
+                    results.count, existing: &existingIds,
+                    mint: { generateElementId() })
+                else { return }
+                identities = minted.map { .splitFragment(id: $0) }
+            }
+            for (cmds, identity) in zip(results, identities) {
                 let open = cmds.filter { if case .closePath = $0 { return false }; return true }
                 newChildren.append(.path(
                     pathWithCommands(pe, open, identity: identity)))
@@ -2502,6 +2532,15 @@ private func blobBrushFillMatches(_ a: Fill?, _ b: Fill?) -> Bool {
 
 /// Implementation of doc.blob_brush.commit_painting.
 /// See BLOB_BRUSH_TOOL.md §Commit pipeline + §Multi-element merge.
+///
+/// MINTS AN ID in the N -> 1 merge arm (N >= 2 matches). A merge consumes
+/// identified elements and produces one, so the result needs a fresh id — and
+/// the initiator cannot carry it in an operation payload, because whether a
+/// merge happens at all falls out of the geometry (the overlap test below).
+/// The mint happens here, where the document is in hand for the collision
+/// check; determinism across ports comes from seeding both ports' id source
+/// identically (`setTestIdRng`). See OP_LOG.md §9 for what the 33-verb
+/// unification owes this verb.
 private func blobBrushCommitPainting(
     model: Model, store: StateStore, ctx: [String: Any],
     buffer: String,
@@ -2600,21 +2639,37 @@ private func blobBrushCommitPainting(
         // overwriting it with the tool's.
         newElem = pathWithCommands(src, newD, identity: .sameElement)
     } else {
-        // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both mint
+        // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both build
         // a fresh element carrying the tool's own attributes. For the merge
-        // that is the law's verdict on identity: no source's id may travel, and
-        // nothing here can mint a replacement (Controller.assignId never mints
-        // — the initiator carries the id in the operation payload — and
-        // dedupeElementIds only CLEARS duplicates, and only in document
-        // readers), so the initializer's `id: nil` is the outcome, not an
-        // accident. Whether attributes the sources AGREE on should carry is
-        // UNRULED: do not invent a rule here. "The largest source keeps the id"
-        // was explicitly rejected in both directions.
+        // that is the law's verdict on identity: no source's id may travel
+        // ("the largest source keeps the id" was explicitly rejected in both
+        // directions), so the result wears a FRESH id, minted HERE through the
+        // shared `mintUniqueIds` loop — the effect is where the document is in
+        // hand for the collision check, and the initiator cannot know that a
+        // merge is happening at all until the match loop above has run.
+        //
+        // The 0 -> 1 arm deliberately does NOT mint: a brand-new blob is a
+        // creation, and no creation tool in this app mints an element id (a
+        // drawn rect, ellipse or pen path all commit id-less). Giving one to
+        // the blob brush alone would single it out; when creation-time ids
+        // land, they land for every tool at once.
+        //
+        // This branch is `matches.count != 1`, so a non-empty `matches` here
+        // is exactly the N >= 2 merge.
+        var freshId: String? = nil
+        if matches.count >= 2 {
+            var existingIds = doc.elementIds
+            guard let minted = mintUniqueIds(1, existing: &existingIds,
+                                             mint: { generateElementId() })
+            else { return }
+            freshId = minted[0]
+        }
         newElem = Path(
             d: newD,
             fill: newFill, stroke: nil,
             widthPoints: [],
             toolOrigin: "blob_brush",
+            id: freshId,
             // Rust's blob_brush_commit_painting stamps NonZero on the
             // unified region; parity, not preference.
             fillRule: .nonzero

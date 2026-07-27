@@ -271,31 +271,90 @@ private func pathAt(_ model: Model, _ p: ElementPath) -> Path? {
                        "doc.path.erase_at_rect (one fragment)")
 }
 
-/// A SEVERING erase yields several fragments. Phase 1 keeps their appearance,
-/// transform and `name` but must NOT propagate `id`: nothing on this path can
-/// mint one (`Controller.assignId` never mints — the initiator carries the id
-/// in the operation payload — and `dedupeElementIds` only CLEARS duplicates,
-/// and only in document readers), so copying it would leave N live elements
-/// sharing an id and break the unique-id invariant of REFERENCE_GRAPH.md §2.5.
-/// Fresh per-fragment ids are phase 2, along with the linear-gradient stop
-/// remap. The severing case is NOT finished.
-@Test func theseusEraseSplitKeepsAppearanceAndNameButNotId() throws {
-    let (model, src) = modelWithTheseus([.moveTo(0, 0), .lineTo(100, 0)])
+/// Run `body` with the per-char id counter both corpus runners install
+/// (0,1,2,… so each 8-char draw walks the base-36 alphabet in order:
+/// "01234567", "89abcdef", "ghijklmn", "opqrstuv"), then clear it. Rust's twin
+/// `with_corpus_id_counter` installs the identical source, which is what lets
+/// the two ports pin the SAME literal ids.
+private func withCorpusIdCounter<T>(_ body: () -> T) -> T {
+    var ctr = 0
+    setTestIdRng({ defer { ctr += 1 }; return ctr })
+    defer { setTestIdRng(nil) }
+    return body()
+}
+
+private func eraseAtRect(_ model: Model, lastX: Double, lastY: Double,
+                         x: Double, y: Double, eraserSize: Double) {
     runEffects([["doc.path.erase_at_rect":
-                    ["last_x": 50, "last_y": 0, "x": 50, "y": 0,
-                     "eraser_size": 2]]],
+                    ["last_x": lastX, "last_y": lastY, "x": x, "y": y,
+                     "eraser_size": eraserSize]]],
                ctx: [:], store: StateStore(),
                platformEffects: buildYamlToolEffects(model: model))
+}
+
+/// A SEVERING erase yields several fragments. They keep their appearance,
+/// transform and `name`, but must NOT propagate `id`: copying it would leave N
+/// live elements sharing an id and break the unique-id invariant of
+/// REFERENCE_GRAPH.md §2.5. Each fragment gets a FRESH id, minted inside the
+/// effect. (The linear-gradient stop remap is still owed.)
+@Test func theseusEraseSplitKeepsAppearanceAndNameWithFreshIds() throws {
+    let (model, src) = modelWithTheseus([.moveTo(0, 0), .lineTo(100, 0)])
+    withCorpusIdCounter {
+        eraseAtRect(model, lastX: 50, lastY: 0, x: 50, y: 0, eraserSize: 2)
+    }
     let n = model.document.layers[0].children.count
     #expect(n == 2, "a severing erase of an open path yields two fragments")
+    var seen: [String] = []
     for i in 0..<n {
         let frag = try #require(pathAt(model, [0, i]))
         expectOnlyDChanged(src, frag, "erase fragment \(i)", alsoExempt: ["id"])
-        #expect(frag.id == nil,
-                "erase fragment \(i): split fragments must not share an id")
+        let id = try #require(frag.id,
+                              "erase fragment \(i): a split fragment must carry a fresh id")
+        #expect(id != src.id,
+                "erase fragment \(i): no fragment may wear the severed source's id")
+        #expect(!seen.contains(id),
+                "erase fragment \(i): fragments must not share an id")
+        seen.append(id)
         #expect(frag.name == "theseus",
                 "erase fragment \(i): the name must survive the split")
     }
+}
+
+/// The minted ids themselves, pinned as literals under the SAME per-char
+/// counter Rust's twin installs, so the two ports cannot drift on how many ids
+/// a severing erase draws or in what order it hands them out. Document order
+/// is mint order: fragment [0,0] takes the first id.
+///
+/// Separation from the pre-fix behaviour: the old code left BOTH fragments at
+/// `id: nil`, which is neither literal here.
+@Test func eraseSplitMintsIdsInDocumentOrder() throws {
+    let (model, _) = modelWithTheseus([.moveTo(0, 0), .lineTo(100, 0)])
+    withCorpusIdCounter {
+        eraseAtRect(model, lastX: 50, lastY: 0, x: 50, y: 0, eraserSize: 2)
+    }
+    #expect(try #require(pathAt(model, [0, 0])).id == "01234567")
+    #expect(try #require(pathAt(model, [0, 1])).id == "89abcdef")
+}
+
+/// TWO paths severed by ONE erase call. The mint order is DOCUMENT order (the
+/// earlier child's fragments draw first), which is the only order both ports
+/// can agree on — Rust rebuilds the child list front-to-back for exactly this
+/// reason. Four fragments, four ids, in sequence.
+@Test func eraseSplitOfTwoPathsMintsInDocumentOrder() throws {
+    func bar(_ y: Double, _ id: String) -> Element {
+        .path(Path(d: [.moveTo(0, y), .lineTo(100, y)],
+                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1),
+                   id: id, fillRule: .nonzero))
+    }
+    let model = Model(document: Document(
+        layers: [Layer(children: [bar(0, "top"), bar(10, "bottom")])],
+        selectedLayer: 0, selection: []))
+    // A tall eraser rect at x = 50 crosses BOTH bars in one call.
+    withCorpusIdCounter {
+        eraseAtRect(model, lastX: 50, lastY: 5, x: 50, y: 5, eraserSize: 8)
+    }
+    let ids = model.document.layers[0].children.map { $0.id }
+    #expect(ids == ["01234567", "89abcdef", "ghijklmn", "opqrstuv"])
 }
 
 // MARK: - The cardinality law at the blob-brush merge
@@ -367,13 +426,13 @@ private let theseusSquare: [PathCommand] = [
 }
 
 /// TWO matches change cardinality, so identity DIES: the merged element
-/// carries NO id. Nothing here can mint one (`Controller.assignId` never mints
-/// — the initiator carries the id in the operation payload — and
-/// `dedupeElementIds` only CLEARS duplicates, and only in document readers),
-/// so carrying a source's id would leave the merged element wearing a dead
-/// ship's name. Whether attributes the sources AGREE on should carry is
-/// UNRULED, and this test deliberately pins none of them.
-@Test func blobBrushMergeOfTwoSourcesCarriesNoId() throws {
+/// carries NEITHER source's id, and wears a FRESH one minted inside the effect
+/// (carrying a source's id would leave the merge wearing a dead ship's name).
+/// Pinned as a literal under the per-char counter Rust's twin also installs.
+///
+/// Separation from the pre-fix behaviour: the old code left the merged element
+/// at `id: nil`, which is neither "01234567" nor either source's.
+@Test func blobBrushMergeOfTwoSourcesMintsAFreshId() throws {
     let red = Fill(color: Color.fromHex("#ff0000")!)
     func blob(_ id: String, _ x0: Double, _ x1: Double) -> Element {
         .path(Path(d: [.moveTo(x0, 40), .lineTo(x1, 40),
@@ -391,14 +450,16 @@ private let theseusSquare: [PathCommand] = [
     store.set("blob_brush_roundness", 100.0)
     let buffer = "theseus_blob_merge_two_swift"
     seedBlobBrushSweepIn(buffer, 10, 90, 50)
-    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    withCorpusIdCounter {
+        runBlobBrushCommitPainting(model, store, buffer: buffer)
+    }
     // Both sources plus the sweep collapsed into ONE child: had only one
     // matched, the other would still be sitting there.
     #expect(model.document.layers[0].children.count == 1,
             "the sweep bridged both blobs, so both were merged away")
     let out = try #require(pathAt(model, [0, 0]))
-    #expect(out.id == nil,
-            "a merge of two sources must not wear either source's id")
+    #expect(out.id == "01234567",
+            "a merge of two sources wears a FRESH id, not either source's")
     #expect(out.toolOrigin == "blob_brush",
             "the merged blob stays a blob-brush element")
 }
