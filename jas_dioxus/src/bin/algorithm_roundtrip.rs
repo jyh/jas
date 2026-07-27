@@ -345,6 +345,21 @@ fn run_hit_test(vectors: &[Value]) -> Vec<Value> {
                     let poly = parse_polygon(&tc["polygon"]);
                     hit_test::point_in_polygon(args[0], args[1], &poly)
                 }
+                // Element-level marquee / lasso. `element` is a test-JSON
+                // element (parse_element handles every type, including
+                // live compound shapes); `args` is the marquee rect
+                // x, y, w, h; `polygon` is the lasso outline.
+                "element_intersects_rect" => {
+                    let elem = parse_element(&tc["element"]);
+                    hit_test::element_intersects_rect(
+                        &elem, args[0], args[1], args[2], args[3],
+                    )
+                }
+                "element_intersects_polygon" => {
+                    let elem = parse_element(&tc["element"]);
+                    let poly = parse_polygon(&tc["polygon"]);
+                    hit_test::element_intersects_polygon(&elem, &poly)
+                }
                 _ => {
                     eprintln!("Unknown hit_test function: {}", func);
                     std::process::exit(1);

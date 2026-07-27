@@ -259,6 +259,17 @@ func runHitTest(_ vectors: [[String: Any]]) -> [[String: Any]] {
         case "point_in_polygon":
             let poly = parsePolygon(tc["polygon"]!)
             result = pointInPolygon(a[0], a[1], poly)
+        // Element-level marquee / lasso. `element` is a test-JSON element
+        // (parseElement handles every type, including live compound
+        // shapes); `args` is the marquee rect x, y, w, h; `polygon` is the
+        // lasso outline.
+        case "element_intersects_rect":
+            let elem = parseElement(tc["element"]!)
+            result = elementIntersectsRect(elem, a[0], a[1], a[2], a[3])
+        case "element_intersects_polygon":
+            let elem = parseElement(tc["element"]!)
+            let poly = parsePolygon(tc["polygon"]!)
+            result = elementIntersectsPolygon(elem, poly)
         default:
             fputs("Unknown hit_test function: \(fn)\n", stderr)
             exit(1)
