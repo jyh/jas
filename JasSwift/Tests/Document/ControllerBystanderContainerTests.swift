@@ -16,9 +16,13 @@ import Testing
 /// through `op_apply`) is structurally blind to all of them and this per-port
 /// battery is the only thing that can see them.
 ///
-/// Rust's twins conform for free: `Controller::add_element` and friends reach
-/// the layer with `layers[i].children_mut()`, so the parent's `common` is never
-/// reconstructed, and `Document` is mutated field-wise rather than rebuilt.
+/// Rust's twins conform for free, stated only as far as it was read:
+/// `Controller::add_element` and `add_element_to_mask` reach their container
+/// with `children_mut()` and mutate a cloned `Document` field-wise, so the
+/// parent's `common` is never reconstructed. `add_layer` has NO Rust twin at
+/// all (Rust's layer-append lives in `op_apply`, as `new_doc.layers.push`), and
+/// Swift's `addLayer` has no production caller either — only tests reach it, so
+/// its repair below removes a loaded trap rather than a user-visible bug.
 ///
 /// EXHAUSTIVENESS METHOD (the same method as `BystanderContainerTests` and
 /// `MovePathHandleFieldsTests`): the comparisons carry no hand-written field

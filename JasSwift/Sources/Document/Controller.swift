@@ -121,10 +121,15 @@ public class Controller {
 
     /// Append a layer. T4: this speaks to `layers` and nothing else, so it goes
     /// through `Document.replacing`. The inline `Document(...)` it replaced
-    /// passed five of eight fields, and the designated init defaults the rest —
-    /// so adding a layer erased the off-canvas symbol masters (SYMBOLS.md §6),
-    /// the Document Setup record and the Print preferences. Exactly the failure
-    /// mode `addElement`'s comment below describes, in the method above it.
+    /// passed five of eight fields, and the designated init defaults the rest,
+    /// so a call to THIS METHOD erased the off-canvas symbol masters
+    /// (SYMBOLS.md §6), the Document Setup record and the Print preferences —
+    /// the same failure mode `addElement` below carries a comment about.
+    /// Scoped exactly: no production caller reaches this method today (its only
+    /// callers are tests; the interactive add-layer path is `op_apply`'s
+    /// `wrap_in_layer` / layer-insert arms, and Rust has no `add_layer` on
+    /// Controller at all), so this repair removes a loaded trap rather than a
+    /// user-visible bug.
     public func addLayer(_ layer: Layer) {
         let old = model.document
         model.editDocument(old.replacing(layers: old.layers + [layer]))
@@ -164,8 +169,12 @@ public class Controller {
         // `Layer(name:children:opacity:transform:)` this replaced kept four of
         // eleven, silently erasing the target layer's `id`, `locked`,
         // `visibility`, `blendMode`, `isolatedBlending`, `knockoutGroup` and
-        // `mask` on EVERY element the artist drew. Rust never had the hole:
-        // `layers[i].children_mut()` mutates in place.
+        // `mask`. Scoped exactly: this is the commit path behind the
+        // `doc.add_element` YAML effect (so every YAML drawing tool), plus
+        // TypeTool, TypeOnPathTool and two path-committing arms in
+        // YamlToolEffects — i.e. it fired on the artist's every shape. Rust
+        // never had the hole: `add_element` appends through
+        // `layers[idx].children_mut()`, so the layer is mutated, not rebuilt.
         let newLayer = target.withChildren(target.children + [element])
         var layers = doc.layers
         layers[idx] = newLayer
