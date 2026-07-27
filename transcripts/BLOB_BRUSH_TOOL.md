@@ -137,8 +137,12 @@ with the YAML tool-runtime convention used by Paintbrush.
 
 ## Fill and stroke
 
-Behavior at commit time for a new Path (§ Erase gesture has its
-own rules for modifying existing elements):
+Behavior at commit time for a new Path — a sweep that matched
+nothing, or one that merged two or more elements. A sweep that
+merged with EXACTLY ONE element rewrites that element instead of
+making a new one, and keeps its attributes (§ Multi-element merge
+step 6); § Erase gesture likewise has its own rules for modifying
+existing elements.
 
 - **`fill`** — `state.fill_color`. Null / gradient states commit
   an invisible or gradient-filled Path respectively; the merge
@@ -219,12 +223,32 @@ set):
    candidate).
 4. Remove every element in `matches` from the document.
 5. Insert the unified Path at the **lowest z-index** among
-   `matches`. The unified element inherits opacity, mask, blend
-   mode, and `jas:tool-origin` from the lowest-z match; fill is
-   already guaranteed equal.
-6. Selection state follows `blob_brush_keep_selected`.
+   `matches`.
+6. Give the unified Path its attributes by the **cardinality
+   law** (JYH, ratified 2026-07-26): *identity survives a
+   one-to-one edit; it does not survive a change in
+   cardinality.* The arm is chosen by `n`, the match count:
+   - **`n == 1`** — one element in, one out with a rewritten `d`.
+     It is the SAME element, so it keeps **everything except
+     `d`**. Stated as a law and implemented as a whole-struct
+     copy, never as an enumeration: an earlier enumeration of
+     this law omitted `transform`, and dropping `transform`
+     relocates the artwork. Fill needs no rule of its own —
+     § Merge condition already gated on fill equality.
+   - **`n >= 2`** — cardinality changed, so identity dies. The
+     unified Path is a fresh element carrying the tool's own
+     attributes, and it carries **no id**: no source's identity
+     survives, and neither active port can mint a replacement
+     (the id-uniqueness invariant is `REFERENCE_GRAPH.md` §2.5).
+     "The largest — or the lowest-z — source keeps the id" is
+     explicitly **rejected**, in both directions.
+     **UNRULED:** whether attributes the `n` sources AGREE on
+     (equal opacity, equal transform, …) should carry to the
+     merged element. Today none of them do. This awaits a
+     ruling; do not guess it in code.
+7. Selection state follows `blob_brush_keep_selected`.
 
-All of (4)–(5) happens within the single undo step opened by
+All of (4)–(6) happens within the single undo step opened by
 `doc.snapshot` at mousedown.
 
 ### Z-order invariant

@@ -89,6 +89,17 @@ one element and so preserves everything but `d`. (Delete-anchor
 has one non-edit outcome: on a path with too few anchors left it
 removes the element entirely rather than rewriting it.)
 
+The two cases above generalize to the **cardinality law** (JYH,
+same ratification): identity survives a one-to-one edit; it does
+not survive a change in cardinality. So it also governs the
+Blob Brush merge, where the count runs the other way: a sweep
+that merges with exactly ONE element rewrites that element and
+keeps everything but `d`, while a sweep that merges two or more
+mints a fresh element with no id — the same withholding as a
+severing erase, for the same reason. See `BLOB_BRUSH_TOOL.md`
+§ Multi-element merge step 6, which also records what is still
+unruled there.
+
 ## eraser_size parameter
 
 `eraser_size` is the half-extent of the eraser rectangle
