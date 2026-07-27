@@ -324,6 +324,24 @@ fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: 
         Element::Ellipse(e) => {
             ellipse_intersects_rect(e.cx, e.cy, e.rx, e.ry, rx, ry, rw, rh, e.fill.is_some())
         }
+        // A filled polyline paints as though its last point were joined back
+        // to its first, so its painted area is not the open run the segments
+        // describe: [[0,0],[0,100],[100,100],[100,0]] strokes as a U but fills
+        // as the whole 100x100 square. The bounding box is the arm the
+        // reference (jas/algorithms/hit_test.py, `case Polyline()`) and
+        // JasSwift's `.polyline` case both use; without this Rust fell into
+        // the segments-based catch-all and missed a marquee lying wholly
+        // inside the fill. Unfilled polylines keep the segments test.
+        Element::Polyline(e) => {
+            if e.fill.is_some() {
+                let b = elem.bounds();
+                rects_intersect(b.0, b.1, b.2, b.3, rx, ry, rw, rh)
+            } else {
+                segments_of_element(elem)
+                    .iter()
+                    .any(|&(x1, y1, x2, y2)| segment_intersects_rect(x1, y1, x2, y2, rx, ry, rw, rh))
+            }
+        }
         Element::Text(_) | Element::TextPath(_) => {
             let b = elem.bounds();
             rects_intersect(b.0, b.1, b.2, b.3, rx, ry, rw, rh)
