@@ -849,6 +849,7 @@ mod tests {
                          "operations/structural_delete_selection.json",
                          "operations/structural_insert_after.json",
                          "operations/structural_insert_at.json",
+                         "operations/bystander_containers.json",
                          "operations/wrap_in_group.json",
                          "operations/wrap_in_layer.json",
                          "operations/unpack_group_at.json",
@@ -3276,6 +3277,22 @@ mod tests {
     #[test]
     fn operation_structural_insert_at() {
         run_operation_fixture("operations/structural_insert_at.json");
+    }
+
+    /// EDIT_SEMANTICS_FREEZE.md T4 (the BYSTANDER CLAUSE) as a cross-port byte
+    /// gate: *an edit preserves, unchanged, every element it does not name —
+    /// including the containers it rebuilds to reach its target.* The three
+    /// structural mutators (replace / delete / insert-after) each reach a
+    /// grandchild through a Layer and a Group that both carry an `id`, a `name`
+    /// and — for the replace vector — a non-default `visibility`. Everything the
+    /// shared test-JSON encoding can see about those two containers must survive
+    /// the edit byte-identically. Rust conformed on the day this landed; the
+    /// fixture exists because the Swift twin did not (its private `withChildren`
+    /// rebuilt Layer/Group from four fields), and a per-port unit test cannot
+    /// discharge the ratification condition on its own.
+    #[test]
+    fn operation_bystander_containers() {
+        run_operation_fixture("operations/bystander_containers.json");
     }
 
     /// OP_LOG.md §9 Phase P4 — Fork-4 targets: an inserting verb whose carried
