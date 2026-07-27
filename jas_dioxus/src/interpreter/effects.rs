@@ -4962,20 +4962,52 @@ fn blob_brush_commit_painting(
     if new_d.is_empty() {
         return;
     }
-    let mut common = CommonProps::default();
-    common.tool_origin = Some("blob_brush".to_string());
-    let new_elem = Element::Path(PathElem {
-        d: new_d,
-        fill: new_fill,
-        stroke: None,
-        width_points: Vec::new(),
-        common,
-        fill_gradient: None,
-        stroke_gradient: None,
-        stroke_brush: None,
-        stroke_brush_overrides: None,
-        fill_rule: crate::geometry::element::FillRule::NonZero,
-    });
+    // THE CARDINALITY LAW (JYH, ratified 2026-07-26): "Identity survives a
+    // one-to-one edit. It does not survive a change in cardinality." The arm
+    // is chosen by the MATCH COUNT, and Swift's blobBrushCommitPainting
+    // branches on the same predicate so the two cannot drift.
+    let new_elem = if matches.len() == 1 {
+        // 1 -> 1: one existing path in, one out with a rewritten `d`. It is
+        // the same object, so everything but `d` travels — a struct update,
+        // never a field list (an earlier enumeration of this law omitted
+        // `transform`, which RELOCATES the artwork).
+        //
+        // `fill` deliberately keeps the SOURCE's value rather than `new_fill`:
+        // the match loop above ran blob_brush_fill_matches, so the source's
+        // fill already equals the stroke's under that comparison (lowercased
+        // hex plus opacity within 1e-9). No paint rule is needed here.
+        let src = match doc.get_element(&matches[0]) {
+            Some(Element::Path(pe)) => pe.clone(),
+            // Unreachable: the path was collected from this same `doc` above.
+            _ => return,
+        };
+        Element::Path(PathElem { d: new_d, ..src })
+    } else {
+        // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both mint
+        // a fresh element carrying the tool's own attributes. For the merge
+        // that is the law's verdict on identity: no source's id may travel,
+        // and nothing here can mint a replacement (Controller::assign_id never
+        // mints — the initiator carries the id in the op payload — and
+        // dedupe_element_ids only CLEARS duplicates, and only in document
+        // readers), so `CommonProps::default()` leaving `id` at None is the
+        // outcome, not an accident. Whether attributes the sources AGREE on
+        // should carry is UNRULED: do not invent a rule here. "The largest
+        // source keeps the id" was explicitly rejected in both directions.
+        let mut common = CommonProps::default();
+        common.tool_origin = Some("blob_brush".to_string());
+        Element::Path(PathElem {
+            d: new_d,
+            fill: new_fill,
+            stroke: None,
+            width_points: Vec::new(),
+            common,
+            fill_gradient: None,
+            stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
+        })
+    };
 
     // Build a new document: remove matches (in reverse order so
     // earlier indices stay valid), then insert the unified element.
@@ -10039,5 +10071,181 @@ mod tests {
             assert_eq!(&grafted, &src, "{label}: a non-`d`, non-`id` field changed");
             assert_eq!(frag.common.id, None, "{label}: split fragments must not share an id");
         }
+    }
+
+    // ── The cardinality law at the blob-brush merge ──
+    //
+    // JYH, ratified 2026-07-26: "Identity survives a one-to-one edit. It does
+    // not survive a change in cardinality." So at
+    // doc.blob_brush.commit_painting the arm is chosen by the MATCH COUNT:
+    //   0 matches -> a brand-new blob with the tool's own attributes;
+    //   1 match   -> the 1 -> 1 case, so the Theseus law applies in full;
+    //   N >= 2    -> a merge, so identity dies and the result carries no id.
+    // "The largest source keeps the id" was explicitly REJECTED in both
+    // directions, so no arm tie-breaks among sources.
+
+    /// The state `doc.blob_brush.commit_painting` reads. `fill_color` is taken
+    /// FROM the source so `blob_brush_fill_matches` accepts it — that helper
+    /// compares lowercased hex plus opacity, and `Color::to_hex` round-trips.
+    fn seed_blob_brush_merge_state(store: &mut StateStore, src: &PathElem) {
+        let fill = src.fill.expect("the fixture carries a solid fill");
+        store.set("fill_color", serde_json::json!(fill.color.to_hex()));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+    }
+
+    /// A 6-point horizontal sweep along `y` from `x0` to `x1`, in a
+    /// test-private buffer (the point buffers are process-global, and tests
+    /// run in parallel).
+    fn seed_blob_brush_sweep_in(buffer: &str, x0: f64, x1: f64, y: f64) {
+        super::super::point_buffers::clear(buffer);
+        for i in 0..=5 {
+            let t = i as f64 / 5.0;
+            super::super::point_buffers::push(buffer, x0 + (x1 - x0) * t, y);
+        }
+    }
+
+    fn blob_brush_commit_painting_effects(buffer: &str) -> Vec<serde_json::Value> {
+        vec![serde_json::json!({
+            "doc.blob_brush.commit_painting": {
+                "buffer": buffer,
+                "fidelity_epsilon": "5.0",
+                "merge_only_with_selection": "false",
+                "keep_selected": "false"
+            }
+        })]
+    }
+
+    /// EXACTLY ONE match is the 1 -> 1 case: one PathElem in, one out with a
+    /// rewritten `d`. The law applies in full, `id` included. `fill` is not
+    /// re-derived from `state.fill_color` — the match loop already gated on
+    /// fill equality, so the source's fill matches the stroke's.
+    #[test]
+    fn theseus_blob_brush_merge_one_match_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 100.0 },
+            PathCommand::LineTo { x: 0.0, y: 100.0 },
+            PathCommand::ClosePath,
+        ]);
+        let mut store = StateStore::new();
+        seed_blob_brush_merge_state(&mut store, &src);
+        let buffer = "theseus_blob_merge_one";
+        seed_blob_brush_sweep_in(buffer, 50.0, 150.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the sweep overlapped the one existing blob, so it merged"
+        );
+        assert_only_d_changed(
+            &src, &path_at(&model, &[0, 0]),
+            "blob_brush.commit_painting (exactly one match)");
+    }
+
+    /// TWO matches change cardinality, so identity DIES: the merged element
+    /// carries NO id. Nothing here can mint one (`assign_id` never mints — the
+    /// initiator carries the id in the op payload — and `dedupe_element_ids`
+    /// only CLEARS duplicates, and only in document readers), so carrying a
+    /// source's id would leave the merged element wearing a dead ship's name.
+    /// Whether attributes the sources AGREE on should carry is UNRULED, and
+    /// this test deliberately pins none of them.
+    #[test]
+    fn blob_brush_merge_of_two_sources_carries_no_id() {
+        use crate::geometry::element::FillRule;
+        use std::rc::Rc;
+        let red = Fill::new(Color::from_hex("#ff0000").unwrap());
+        let blob = |id: &str, x0: f64, x1: f64| {
+            Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: x0, y: 40.0 },
+                    PathCommand::LineTo { x: x1, y: 40.0 },
+                    PathCommand::LineTo { x: x1, y: 60.0 },
+                    PathCommand::LineTo { x: x0, y: 60.0 },
+                    PathCommand::ClosePath,
+                ],
+                fill: Some(red),
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps {
+                    tool_origin: Some("blob_brush".to_string()),
+                    id: Some(id.to_string()),
+                    ..CommonProps::default()
+                },
+                fill_gradient: None,
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })
+        };
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(blob("left", 0.0, 40.0)));
+            children.push(Rc::new(blob("right", 60.0, 100.0)));
+        }
+        let mut model = Model::new(doc, None);
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!(red.color.to_hex()));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+        let buffer = "theseus_blob_merge_two";
+        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        // Both sources plus the sweep collapsed into ONE child: had only one
+        // matched, the other would still be sitting there.
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the sweep bridged both blobs, so both were merged away"
+        );
+        let out = path_at(&model, &[0, 0]);
+        assert_eq!(out.common.id, None,
+            "a merge of two sources must not wear either source's id");
+        assert_eq!(out.common.tool_origin.as_deref(), Some("blob_brush"),
+            "the merged blob stays a blob-brush element");
+    }
+
+    /// The erase arm PRESERVES `tool_origin` where `CommonProps::default()`
+    /// used to clear it, so an erased fragment is now a blob-merge candidate
+    /// it previously was not. A closed path erased once yields ONE fragment
+    /// (the 1 -> 1 arm), and a sweep over that fragment is again 1 -> 1, so
+    /// the whole chain must preserve everything but `d`. If erase dropped
+    /// `tool_origin`, the sweep would append a SECOND element instead.
+    #[test]
+    fn theseus_erase_then_blob_merge_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 100.0 },
+            PathCommand::LineTo { x: 0.0, y: 100.0 },
+            PathCommand::ClosePath,
+        ]);
+        path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0);
+        let fragment = path_at(&model, &[0, 0]);
+        assert_eq!(fragment.common.tool_origin.as_deref(), Some("blob_brush"),
+            "the erased fragment keeps tool_origin — that is what makes it a \
+             merge candidate");
+        let mut store = StateStore::new();
+        seed_blob_brush_merge_state(&mut store, &src);
+        let buffer = "theseus_blob_merge_after_erase";
+        seed_blob_brush_sweep_in(buffer, 50.0, 150.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the erased fragment was merged into, not left beside a new blob"
+        );
+        assert_only_d_changed(
+            &src, &path_at(&model, &[0, 0]), "erase then blob_brush merge");
     }
 }
