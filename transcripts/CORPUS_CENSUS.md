@@ -87,7 +87,7 @@ document* > *committed selection/state* > *view* > *crash* (loud) > *latent*.
 | **2** | `collapse_collinear_points` — same algebra, cancellation-prone Swift form | `document/controller.rs:70` (diff-of-differences) | `Geometry/LiveElement.swift:103` (5 raw-coord products) | NONE | R1 R4 | every Swift boolean output ring today | **[V-BASE]** expanded by hand; decides KEEP/DROP of a vertex at tol 0.0283 |
 | **3** | Boolean output rebuild drops `CommonProps` | `controller.rs:1766` `common: common.clone()` | `Document/Controller.swift:1288` field-by-field | PARTIAL | R8 R6 | set any operand's opacity <100%, then union | **[V-BASE]** opacity forced 1.0, `locked` forced false, blend/mask/name/id/`tool_origin` dropped |
 | **4** | Eyedropper appearance cache: **float enum vs hex string** | `interpreter/effects.rs:5177` serde over `Color` | `Algorithms/Eyedropper.swift:459` `colorToString → c.toHex()` | NONE | R1 R6 R8 | Eyedropper click → Alt+click | **[V-HEAD]** `colorToString` still `c.toHex()` at `:459-460`; loses **alpha + colour-space variant**, and `state.eyedropper_cache.fill.color` is an **object** in Rust, a **string** in Swift |
-| **5** | `segmentsOfElement` has **no `.live` case**; filled polyline goes bbox-only | `algorithms/hit_test.rs:232` (Live arm at `:268`, evaluates rings) | `Algorithms/HitTest.swift:88`, `default:` at **`:115`** | NOT_IN_ROUNDTRIP | R6 R3 | marquee / lasso — everyday | **[V-HEAD]** dispatch arms at HEAD are `.line .rect .polyline .polygon .path default` — no `.live`. Lasso across a donut hole: **selects in Swift, not in Rust** |
+| **5** | `segmentsOfElement` has **no `.live` case**; filled polyline goes bbox-only | `algorithms/hit_test.rs:232` (Live arm at `:268`, evaluates rings) | `Algorithms/HitTest.swift:88`, `default:` at **`:115`** | NOT_IN_ROUNDTRIP | R6 R3 | marquee / lasso — everyday | **[V-HEAD]** dispatch arms at HEAD are `.line .rect .polyline .polygon .path default` — no `.live`. Lasso across a donut hole: **selects in Swift, not in Rust**. **CLOSED — both legs; see §9.1(b)** |
 | **6** | `doc.zoom.apply` — the `anchor = -1` "viewport centre" default | `interpreter/effects.rs:1752` (uses `viewport_w/2`) | `Tools/YamlToolEffects.swift:764` `anchorXRaw < 0 ? px : anchorXRaw` | NONE | R6 | any zoom action with default anchors | **[V-HEAD]** line 764 read at HEAD — **no viewport-centre branch**; Swift carries `viewportW` and does not use it |
 | **7** | `doc.zoom.set` — Rust recomputes pan, Swift does not | `effects.rs:1786` | `YamlToolEffects.swift:777` ("pan unchanged") | NONE | R6 R8 | Cmd-1 from 4× | **[V-BASE]** Rust has the fix; Swift is the pre-fix version; **`workspace/actions.yaml:343` still documents the OLD behaviour**, so the reference cannot arbitrate |
 | **8** | Six view actions **bypass the YAML pipeline** in Swift (native `Model` methods, hardcoded constants) | `workspace/keyboard.rs:500`, `menu_bar.rs:422` → actions | `Canvas/ContentView.swift:540`, `Menu/JasCommands.swift:352` → `Model.swift:530-583` | NONE | R6 R8 | View menu, Cmd-+/−/0/1 | **[V-BASE]** `pad = 20.0`, clamp `0.1…64.0` hardcoded; `preferences.viewport.*` moves Rust only; `fitActiveArtboard` uses `artboards.first` vs Rust's `current_artboard`; **the correct Swift effects are dead on the user path** |
@@ -217,6 +217,12 @@ Live CompoundShape; a marquee in the empty corner of a V-shaped filled polyline'
 each of the same two; and one control case (marquee fully enclosing a rect) proving the arm is wired.
 `hit_test.json` already has 34 vectors and the `exact` strategy — **no new comparison strategy, no
 new golden format.** Cheapest high-value move in this document.
+
+> **ROW CLOSED** — `.live` leg in batch 1, filled-polyline leg in batch 2. But note that the
+> paragraph above gets the polyline direction backwards: it reads Swift's bbox arm as the
+> defect and "Rust tests real segments" as correct. A filled polyline closes implicitly, so
+> the bbox arm is the one that matches the reference, and **Rust** was the port that needed
+> the fix. §9.1(b) has the corrected account and the two follow-on findings.
 
 ### #6–#8 — View state: three live divergences over a subsystem with literally zero coverage.
 
@@ -783,6 +789,11 @@ Scratch notes and the sweeps' throwaway verification programs are in the session
 
 ## 9. RESIDUALS FROM THE OVERNIGHT QUEUE (2026-07-26, batch 1)
 
+> **BOTH RESIDUALS CLOSED, batch 2 (2026-07-26).** Read §9.1 before acting on
+> anything below: (b)'s stated conclusion — "Rust is right" — was **WRONG**, and
+> the fix went the other way. The two subsections below are preserved as the
+> evidence the lens actually drove, not as standing verdicts.
+
 Batch 1 closed four census rows. Three landed clean; **row 5 and the hypot row are
 NOT fully closed**, recorded here so closing the batch does not lose them.
 
@@ -807,5 +818,71 @@ at :533 and t=0.4800060146 at :547.
 concave opening gives **Rust `false`, Swift `true`** — Swift's filled-polyline arm
 returns `rectsIntersect(bounds...)` while Rust falls into the segments-based
 catch-all. Unfilled agrees, and the lasso variant agrees, so it is specifically
-**filled + marquee** — everyday marquee-select behaviour. Rust is right: the concave
-opening of a filled U is outside the fill.
+**filled + marquee** — everyday marquee-select behaviour. ~~Rust is right: the concave
+opening of a filled U is outside the fill.~~ **STRUCK — see §9.1(b).**
+
+### 9.1 How the two residuals actually closed (batch 2, 2026-07-26)
+
+**(a) The hypot row is closed by a new corpus family, not by a production change.**
+The production code was correct in both active ports all along; the TEST was blind.
+`test_fixtures/algorithms/path_project.json` (7 vectors, registered in
+`cross_language_algorithms.py`'s `ALGORITHMS` as `path_project`, tolerance 1e-9)
+pins `closest_on_line` and `closest_on_cubic` across Rust and Swift, with a
+fast-suite twin of the discriminating vector in each port. Distances are reported
+divided by a per-vector `scale`, because an absolute tolerance against a raw 1e200
+distance is meaningless — one ulp there is ~1.6e184.
+
+Goldens derive from `jas/geometry/path_ops.py`, read-only. That file belongs to the
+frozen Python port, but it is the ONLY reference implementation of these helpers —
+`workspace_interpreter/` carries no geometry module — and its body is
+line-for-line the same algorithm over `math.hypot`.
+
+All twelve sites (six per port) were mutated to the naive squares-first form ONE AT
+A TIME and individually caught. The two the old test missed are the coarse-scan `d`
+and the trisection `d2`, and they are caught **only** by
+`cubic_overflow_point_above_middle` — confirming §9(a)'s diagnosis exactly, down to
+the predicted t values (0.0199969927 and 0.4800060146).
+
+**(b) Row 5's filled-polyline leg is closed by fixing RUST, not Swift — the lens's
+geometric premise was wrong.** A `<polyline>` carrying a fill paints as though its
+last point were joined back to its first (a canvas fill closes every subpath), so
+`[[0,0],[0,100],[100,100],[100,0]]` **strokes** as a U but **fills** as the full
+100x100 square. There is no "concave opening" in the fill; the marquee at
+(40,20,20,20) is inside it. Checked against the reference: it answers `true`, i.e.
+it agrees with **Swift**. Rust had no `Element::Polyline` arm at all and fell into
+the segments catch-all — an omission, not a decision. Rust now carries the arm.
+
+Recorded so the semantics are a ruling and not a drift: this arm is the element's
+**bounding box**, not a point-in-fill test. Vector
+`polyline_filled_marquee_in_bbox_outside_closed_fill` pins that deliberately — an
+open triangle's empty bbox corner answers `true` in the reference and in both ports.
+
+**Two findings from the sweep this row asked for, REPORTED not fixed:**
+
+1. **No other element kind splits bbox-vs-segments between the ports.** Both
+   `Element` enums carry the same twelve variants (line, rect, circle, ellipse,
+   polyline, polygon, path, text, textPath, group, layer, live). Walking
+   `element_intersects_rect_local` against `elementIntersectsRectLocal` arm by arm
+   after this fix: line / rect / circle / ellipse / polyline / text agree; polygon
+   and path agree (Rust reaches them through its catch-all, whose endpoints-in-rect
+   clause is the same point set as Swift's vertices-in-rect for a polygon);
+   textPath, group and layer are bbox in both (Rust names them, Swift's `default:`
+   reaches them); `.live` agrees since batch 1. Polyline was the last one.
+
+2. **The marquee and the lasso disagree with each other for filled
+   Polygon/Path/Live — in BOTH ports and in the reference.** The lasso catch-all
+   has an "any lasso vertex inside `elem.bounds()`" clause; the marquee catch-all
+   has no matching "marquee corner inside bounds" clause. Measured, all three
+   agreeing, on a filled 100x100 square:
+
+   | shape | marquee (40,20,20,20) | lasso with the identical outline |
+   |---|---|---|
+   | filled Polygon | `false` | `true` |
+   | filled Path    | `false` | `true` |
+
+   So dragging a small marquee inside a filled square does not select it, while
+   drawing the same square with the lasso does. This is shared, pre-existing, and
+   NOT a port divergence — which is why it was left alone. Deciding it is a spec
+   question (which is the intended marquee rule: Rect/Circle/Ellipse/Polyline's
+   area semantics, or Polygon/Path's outline semantics), and the reference is
+   internally inconsistent about it, so it wants a ruling rather than a patch.

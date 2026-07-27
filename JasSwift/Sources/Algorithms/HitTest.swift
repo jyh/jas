@@ -169,6 +169,13 @@ private func elementIntersectsRectLocal(_ elem: Element,
         return circleIntersectsRect(v.cx, v.cy, v.r, rx, ry, rw, rh, filled: v.fill != nil)
     case .ellipse(let v):
         return ellipseIntersectsRect(v.cx, v.cy, v.rx, v.ry, rx, ry, rw, rh, filled: v.fill != nil)
+    // A filled polyline paints as though its last point were joined back to
+    // its first, so its painted area is not the open run the segments
+    // describe: [[0,0],[0,100],[100,100],[100,0]] strokes as a U but fills as
+    // the whole 100x100 square. The bounding box is the arm the reference
+    // (jas/algorithms/hit_test.py, `case Polyline()`) uses; Rust's
+    // `Element::Polyline` arm now matches. It is a BOX, not a point-in-fill
+    // test — an open triangle's empty bbox corner answers true.
     case .polyline(let v):
         if v.fill != nil {
             let b = elem.bounds
