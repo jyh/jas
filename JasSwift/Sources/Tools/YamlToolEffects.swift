@@ -4053,12 +4053,8 @@ private func artboardTranslateElement(
         return .group(g.withChildren(
             g.children.map { artboardTranslateElement($0, dx: dx, dy: dy) }))
     case .layer(let l):
-        return .layer(Layer(
-            name: l.name,
-            children: l.children.map {
-                artboardTranslateElement($0, dx: dx, dy: dy)
-            },
-            opacity: l.opacity, transform: l.transform, locked: l.locked))
+        return .layer(l.withChildren(
+            l.children.map { artboardTranslateElement($0, dx: dx, dy: dy) }))
     default:
         return elem.moveControlPoints(.all, dx: dx, dy: dy)
     }
@@ -4156,10 +4152,7 @@ private func artboardTranslateFromPreview(
                         }
                         return child
                     }
-                rebuilt.append(Layer(
-                    name: layer.name, children: newChildren,
-                    opacity: layer.opacity, transform: layer.transform,
-                    locked: layer.locked))
+                rebuilt.append(layer.withChildren(newChildren))
             }
             newLayers = rebuilt
         }
@@ -4373,10 +4366,8 @@ private func artboardResizeApply(
     }
     // PREVIEW (live-drag) resize off the restored snapshot: non-undoable.
     // Mirrors Rust artboard_resize_apply's set_document_unbracketed.
-    model.setDocumentUnbracketed(Document(
-        layers: doc.layers, selectedLayer: doc.selectedLayer,
-        selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions), intent: .liveDrag)
+    model.setDocumentUnbracketed(
+        doc.replacing(artboards: newAbs), intent: .liveDrag)
 }
 
 /// doc.artboard.resize_commit — integer-pt rounded final bounds.
@@ -4410,10 +4401,7 @@ private func artboardResizeCommit(model: Model, store: StateStore) {
     // COMMIT: undoable. editDocument self-brackets one undo step (joins the
     // runEffects owner txn if open). Mirrors Rust artboard_resize_commit's
     // edit_document.
-    model.editDocument(Document(
-        layers: doc.layers, selectedLayer: doc.selectedLayer,
-        selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions))
+    model.editDocument(doc.replacing(artboards: newAbs))
 }
 
 /// doc.artboard.duplicate_init implementation per
@@ -4458,10 +4446,7 @@ private func artboardDuplicateInit(model: Model, store: StateStore) {
         }
         // T4: the layer is a bystander of the duplicate — it gains a child and
         // keeps everything else, `id` included.
-        newLayers.append(Layer(
-            name: layer.name, children: newChildren,
-            opacity: layer.opacity, transform: layer.transform,
-            locked: layer.locked))
+        newLayers.append(layer.withChildren(newChildren))
     }
 
     // Mint the duplicate artboard's id through THE ONE MINT LOOP.
@@ -4484,10 +4469,7 @@ private func artboardDuplicateInit(model: Model, store: StateStore) {
 
     // Undoable: editDocument self-brackets (joins the owner txn if open).
     // Mirrors Rust artboard_duplicate_init's edit_document.
-    model.editDocument(Document(
-        layers: newLayers, selectedLayer: doc.selectedLayer,
-        selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions))
+    model.editDocument(doc.replacing(layers: newLayers, artboards: newAbs))
 
     // Retarget tool state.
     store.setTool("artboard", "hit_artboard_id", newId)
@@ -4507,10 +4489,7 @@ private func artboardDeletePanelSelected(model: Model, store: StateStore) {
     model.beginTxn()
     let doc = model.document
     let newAbs = doc.artboards.filter { !targetIds.contains($0.id) }
-    model.setDocument(Document(
-        layers: doc.layers, selectedLayer: doc.selectedLayer,
-        selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions))
+    model.setDocument(doc.replacing(artboards: newAbs))
 }
 
 /// doc.artboard.move_commit — re-applies translate with integer-pt
