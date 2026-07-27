@@ -65,8 +65,10 @@ invariant and state both its site (`row`) and why (`note`) — enforced by
 
 ## 4. Anti-vacuity
 
-Two families in this repo were once registered, green, and gating nothing.
-Guards, split between the data gate and the runtime gates:
+The campaign's standing finding is that a family can be registered, green, and
+gating nothing (`scripts/corpus_manifest.json`'s own `_coverage_gaps_doc` makes
+the same point about `known_gaps` sitting at `[]` while eight real gaps went
+unrecorded). Guards, split between the data gate and the runtime gates:
 
 - **V1** every id a vector names exists in the setup SVG (data)
 - **V2** at least one **container** bystander exists, or T4 is unwatchable (data)
@@ -94,8 +96,18 @@ Two findings this gate produced that no golden in the corpus could:
    All five vectors fail `id_survival` on `lyr_main`; nested ones also lose
    `grp_inner`. The identical Rust gate is green on all five.
 2. **A live cross-port divergence on the same N→1 union**: Rust carries the
-   frontmost operand's id, Swift carries none. The operations goldens run on
-   setups whose elements have no ids at all, so both ports "agree" there.
+   frontmost operand's id, Swift carries none. Both boolean fixtures in the
+   operations corpus (`boolean_ops.json` → `overlapping_rects.svg`,
+   `boolean_collapse_default.json` → `boolean_collinear_union.svg`) run on
+   setups whose elements carry no `id` at all, so the two ports produce
+   byte-identical goldens and "agree" there. (Counted on this commit: 9 of the
+   18 setup SVGs the operations corpus uses DO carry element ids — the gap is
+   specific to the boolean fixtures, not general.)
+
+Why the containers had to be new: of the 47 SVGs in `test_fixtures/svg/`,
+exactly one other carries a `<g>` with an `id` (`live_compound_id.svg`, a
+compound-shape live element). No pre-existing setup gave a Layer or Group an
+identity, which is why the `withChildren` class had never been seen.
 
 The Swift boolean's two causes were separated by *isolating mutation*, not by
 reading: with `withChildren` temporarily made field-preserving, four of the

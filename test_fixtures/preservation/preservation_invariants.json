@@ -129,7 +129,7 @@
         {
           "invariant": "fresh_ids",
           "row": "§3.6 UNION row ('id: fresh mint') — JasSwift/Sources/Document/Controller.swift applyDestructiveBoolean",
-          "note": "MEASURED: 0 fresh ids where the law requires 1. The Swift rebuild passes no id at all to the Polygon/Path initializer (its own source comment banks name/id/toolOrigin/mask for a ruling), so the merge mints nothing. This is the SAME clause Rust fails, by the OPPOSITE route: Rust carries the frontmost's id, Swift carries none — a live cross-port divergence that the golden-based corpus cannot see, because the operations goldens run on setups whose elements have no ids at all."
+          "note": "MEASURED: 0 fresh ids where the law requires 1. The Swift rebuild passes no id at all to the Polygon/Path initializer (its own source comment banks name/id/toolOrigin/mask for a ruling), so the merge mints nothing. This is the SAME clause Rust fails, by the OPPOSITE route: Rust carries the frontmost's id, Swift carries none — a live cross-port divergence that the golden-based corpus cannot see: BOTH boolean fixtures in the operations corpus (boolean_ops.json -> overlapping_rects.svg, boolean_collapse_default.json -> boolean_collinear_union.svg) run on setups whose elements carry no id, so the two ports emit byte-identical goldens. COUNTED on this commit: 9 of the 18 setup SVGs the operations corpus uses DO carry element ids — the blind spot is specific to the boolean fixtures, not general."
         }
       ]
     }
