@@ -3780,3 +3780,35 @@ private func survivalRow(_ before: Path, _ after: Path?) -> [(String, String)] {
         }
     }
 }
+
+/// A `jas:`-prefixed attribute obliges the root `<svg>` to declare the
+/// namespace: Foundation's strict XML parser rejects an undeclared prefix, and
+/// it rejects the WHOLE DOCUMENT, not the attribute. `jas:tool-origin` is the
+/// case the saturated survival fixture cannot see, because a saturated path
+/// also carries arrowheads and the arrowheads pull the namespace in.
+///
+/// The element here is what Blob Brush actually commits: a tool-origin tag and
+/// no arrowheads. Mirrors `svg_tool_origin_survives_without_arrowheads` in
+/// jas_dioxus/src/cross_language_test.rs.
+@Test func svgToolOriginSurvivesWithoutArrowheads() {
+    let p = Path(d: [.moveTo(0, 0), .lineTo(10, 10)],
+                 stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 2),
+                 toolOrigin: "blob_brush",
+                 fillRule: .nonzero)
+    let doc = Document(rawLayers: [Layer(name: "L", children: [.path(p)])],
+                       rawSelectedLayer: 0, rawSelection: [], rawArtboards: [],
+                       rawArtboardOptions: .default)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("jas:tool-origin=\"blob_brush\""),
+            "the writer must emit jas:tool-origin")
+    #expect(svg.contains("xmlns:jas="),
+            "a jas:-prefixed attribute obliges the root <svg> to declare xmlns:jas; emitted SVG was:\n\(svg)")
+
+    let back = svgToDocument(svg)
+    let kids = back.layers.first?.children ?? []
+    #expect(kids.count == 1,
+            "the round-tripped document lost its content entirely (\(kids.count) children) -- an undeclared namespace prefix makes the strict parser reject the whole file")
+    if case .path(let q)? = kids.first {
+        #expect(q.toolOrigin == "blob_brush", "tool origin did not survive the SVG round trip")
+    }
+}

@@ -518,13 +518,18 @@ public func documentToSvg(_ doc: Document) -> String {
     for layer in doc.layers {
         bodyLines.append(elementSvg(.layer(layer), indent: "  "))
     }
-    // ` jas:start-arrow` is a prefix of `-scale`, likewise ` jas:end-arrow`, so
-    // these three substrings cover all five arrowhead attributes.
-    let hasArrowNs = bodyLines.contains {
-        $0.contains(" jas:start-arrow") || $0.contains(" jas:end-arrow")
-            || $0.contains(" jas:arrow-align")
-    }
-    let needsJasNs = needsNamedview || hasArrowNs
+    // ANY jas:-prefixed attribute in the body obliges the declaration, not just
+    // the five arrowhead ones this test used to enumerate. The enumeration was
+    // an undercount: `jas:tool-origin` is written by the <path> arm below and
+    // was not in the list, so a Blob Brush stroke with no arrowhead produced a
+    // file whose prefix is undeclared — and Foundation's strict parser rejects
+    // the WHOLE DOCUMENT on that, not the attribute, so the artwork came back
+    // empty. Matching the prefix itself is what keeps the next jas: attribute
+    // from re-opening the same hole. The leading space anchors it to an
+    // attribute position, so an element or text content mentioning "jas:"
+    // cannot trigger it.
+    let hasJasAttr = bodyLines.contains { $0.contains(" jas:") }
+    let needsJasNs = needsNamedview || hasJasAttr
     let needsSodipodi = needsNamedview
 
     var nsAttrs = " xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\""

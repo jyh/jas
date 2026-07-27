@@ -5565,6 +5565,72 @@ mod tests {
         }
     }
 
+
+    /// A `jas:`-prefixed attribute obliges the root `<svg>` to declare the
+    /// namespace: a strict XML parser rejects an undeclared prefix, and it
+    /// rejects the WHOLE DOCUMENT, not the attribute. `jas:tool-origin` is the
+    /// case the saturated `codec_field_survival` fixture cannot see, because a
+    /// saturated path also carries arrowheads and the arrowheads pull the
+    /// namespace in by themselves.
+    ///
+    /// The element here is what Blob Brush actually commits: a tool-origin tag
+    /// and no arrowheads. Mirrors `svgToolOriginSurvivesWithoutArrowheads` in
+    /// JasSwift/Tests/CrossLanguageTests.swift.
+    #[test]
+    fn svg_tool_origin_survives_without_arrowheads() {
+        use crate::geometry::element::*;
+        let mut common = CommonProps::default();
+        common.tool_origin = Some("blob_brush".to_string());
+        let path = Element::Path(PathElem {
+            d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 10.0, y: 10.0 }],
+            fill: None,
+            stroke: Some(Stroke::new(Color::Rgb { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, 2.0)),
+            width_points: vec![],
+            common,
+            fill_gradient: None,
+            stroke_gradient: None,
+            fill_rule: FillRule::NonZero,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+        });
+        let mut lc = CommonProps::default();
+        lc.name = Some("L".to_string());
+        let mut doc = crate::document::document::Document::default();
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(path)],
+            common: lc,
+            isolated_blending: false,
+            knockout_group: false,
+        })];
+
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("jas:tool-origin=\"blob_brush\""),
+                "the writer must emit jas:tool-origin; got:\n{}", svg);
+        assert!(svg.contains("xmlns:jas="),
+                "a jas:-prefixed attribute obliges the root <svg> to declare \
+                 xmlns:jas; got:\n{}", svg);
+
+        let back = svg_to_document(&svg);
+        let kids = match back.layers.first() {
+            Some(Element::Layer(l)) => l.children.len(),
+            _ => 0,
+        };
+        assert_eq!(kids, 1,
+            "the round-tripped document lost its content entirely -- an \
+             undeclared namespace prefix makes a strict parser reject the \
+             whole file");
+        match back.layers.first() {
+            Some(Element::Layer(l)) => match l.children.first().map(|c| c.as_ref()) {
+                Some(Element::Path(p)) => assert_eq!(
+                    p.common.tool_origin.as_deref(), Some("blob_brush"),
+                    "tool origin did not survive the SVG round trip"),
+                other => panic!("expected a Path, got {:?}", other),
+            },
+            other => panic!("expected a Layer, got {:?}", other),
+        }
+    }
+
     #[cfg(feature = "web")]
     #[test]
     fn state_defaults() {
