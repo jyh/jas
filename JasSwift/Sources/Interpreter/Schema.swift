@@ -127,13 +127,6 @@ private func isHexColor(_ s: String) -> Bool {
     return hexColorRegex.firstMatch(in: s, range: range) != nil
 }
 
-private let numberStringRegex = try! NSRegularExpression(pattern: "^-?\\d+(\\.\\d+)?$")
-
-private func isNumberString(_ s: String) -> Bool {
-    let range = NSRange(s.startIndex..., in: s)
-    return numberStringRegex.firstMatch(in: s, range: range) != nil
-}
-
 /// Coerce a value from the state bag to match the schema entry's declared type.
 ///
 /// Returns the coerced value (Any?) and an optional error reason string.
@@ -161,7 +154,11 @@ func coerceValue(_ value: Any?, entry: SchemaEntry) -> (Any?, String?) {
         if let n = value as? NSNumber {
             if !(value is Bool) { return (n.doubleValue, nil) }
         }
-        if let s = value as? String, isNumberString(s), let n = Double(s) {
+        // The regex-then-Double pair this line used to spell out inline now
+        // lives in WidgetCommit.swift as `numericStringValue`, so the
+        // `number_input` widget commits through the same grammar. Same strings
+        // accepted, same values.
+        if let s = value as? String, let n = numericStringValue(s) {
             return (n, nil)
         }
         return (nil, "type_mismatch")

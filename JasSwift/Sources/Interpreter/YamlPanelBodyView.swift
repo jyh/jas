@@ -1461,17 +1461,18 @@ struct YamlElementView: View {
 
     @ViewBuilder
     private func renderNumberInput() -> some View {
-        let minVal = element["min"] as? Int ?? 0
-        // YAML may declare max numerically; clamp commits to it. Without
-        // this, typing 500 into an R-channel field (max=255) committed
-        // 500 verbatim — the resulting color went past 0xff and produced
-        // a 7-character hex like "1f4ff3b" instead of clamping to 255.
-        // saturatingInt: every `max:` on a number_input in the current bundle
-        // is a plain integer (I walked all 121 of them in workspace.json), but
-        // Rust reads it as an f64 and never converts, so a non-finite one
-        // trapped only here (risk R9).
-        let maxVal: Int? = (element["max"] as? Int)
-            ?? (element["max"] as? Double).map { saturatingInt($0) }
+        // Declared bounds drive clamp-on-commit. Without the clamp, typing 500
+        // into an R-channel field (max=255) committed 500 verbatim — the
+        // resulting color went past 0xff and produced a 7-character hex like
+        // "1f4ff3b" instead of clamping to 255. UNDECLARED means no clamp: an
+        // `as? Int ?? 0` min substituted 0 for an absent bound, so a typed -50
+        // committed -50 in jas_dioxus (`min_clamp` stays None there) and 0 here.
+        // Read as Double — YAML gives an integer literal as Int and a
+        // fractional one as Double, and jas_dioxus reads both as f64.
+        let minClamp = (element["min"] as? Double)
+            ?? (element["min"] as? Int).map(Double.init)
+        let maxClamp = (element["max"] as? Double)
+            ?? (element["max"] as? Int).map(Double.init)
         // Bind may be a bare string ("dialog.h") or an object form
         // ({value: "panel.x"}). Color picker fields use the bare-string
         // form via the radio_field_row template; without the fallback
@@ -1479,16 +1480,17 @@ struct YamlElementView: View {
         // no-op (the field accepts typing but Enter resets to 0).
         let valueExpr: String? = (element["bind"] as? String)
             ?? (element["bind"] as? [String: Any])?["value"] as? String
-        let currentValue: Int = {
+        // Kept as a Double, like jas_dioxus's `value: f64`: this used to be
+        // `saturatingInt(n)`, so a bound 12.5 DISPLAYED as 12 here and as 12.5
+        // there (transcripts/CORPUS_CENSUS.md §7.1 item 2). The fallback for a
+        // non-number binding is the declared min, or 0 when none is declared —
+        // jas_dioxus's `min` with its `unwrap_or(0.0)`.
+        let currentValue: Double = {
             if let e = valueExpr {
                 let result = evaluate(e, context: context)
-                // saturatingInt mirrors Rust's `as i64` (risk R9). Rust keeps
-                // this bound value an f64 and DISPLAYS a fraction, where this
-                // port shows the truncated integer — a separate divergence,
-                // banked in transcripts/CORPUS_CENSUS.md §7.1.
-                if case .number(let n) = result { return saturatingInt(n) }
+                if case .number(let n) = result { return n }
             }
-            return minVal
+            return minClamp ?? 0
         }()
         let writeTarget = writeBackTarget(valueExpr)
 
@@ -1507,18 +1509,25 @@ struct YamlElementView: View {
         // user input (Enter / blur after typing).
         BufferedTextField(
             placeholder: "",
-            externalValue: String(currentValue),
+            // Same number → string rule the expression language uses (and so
+            // the same string jas_dioxus's `value: "{value}"` renders from an
+            // f64): 12 shows as "12", 12.5 as "12.5".
+            externalValue: numberToCanonicalString(currentValue),
             commit: { newVal in
-                guard let parsed = Int(newVal) else { return }
-                var clamped = max(parsed, minVal)
-                if let m = maxVal { clamped = min(clamped, m) }
+                // `Int(newVal)` here dropped EVERY non-integer entry silently —
+                // "12.5" wrote nothing at all, where jas_dioxus committed 12.5.
+                // The shared rule accepts what the reference accepts for a
+                // number-typed field, clamps to the declared bounds, and writes
+                // nothing for anything else.
+                guard let clamped = numberInputCommit(
+                    text: newVal, min: minClamp, max: maxClamp) else { return }
                 if let t = writeTarget { commitWidgetWrite(target: t, value: clamped) }
                 // Fields bound to a non-writable expression (e.g. a foreach
                 // `p.value` in the Concepts param editor) drive their effect via
                 // a `behavior: [{event: change, …}]` block instead of a
                 // write-back target. Dispatch it with the committed value as
                 // `event.value`, mirroring the Dioxus widget framework.
-                handleChangeBehavior(value: Double(clamped))
+                handleChangeBehavior(value: clamped)
             }
         )
             .frame(maxWidth: fillsParent ? .infinity : 45)

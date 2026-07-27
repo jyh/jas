@@ -70,6 +70,7 @@ fn main() {
         "arrow_trim" => run_arrow_trim(&vectors),
         "length" => run_length(&vectors),
         "color_convert" => run_color_convert(&vectors),
+        "number_commit" => run_number_commit(&vectors),
         "hit_test" => run_hit_test(&vectors),
         "boolean" => run_boolean(&vectors),
         "boolean_normalize" => run_boolean_normalize(&vectors),
@@ -90,6 +91,24 @@ fn main() {
         "{}",
         serde_json::to_string(&results).expect("Failed to serialize results")
     );
+}
+
+// ---------------------------------------------------------------
+// number_commit (the number_input widget's commit rule)
+// ---------------------------------------------------------------
+
+fn run_number_commit(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::interpreter::widget_commit::number_input_commit;
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let text = tc["text"].as_str().unwrap_or("");
+            let min = tc.get("min").and_then(|v| v.as_f64());
+            let max = tc.get("max").and_then(|v| v.as_f64());
+            json!({"name": name, "result": number_input_commit(text, min, max)})
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------

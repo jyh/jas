@@ -49,6 +49,7 @@ case "flatten":           results = runFlatten(activeVectors)
 case "arrow_trim":        results = runArrowTrim(activeVectors)
 case "length":            results = runLength(activeVectors)
 case "color_convert":     results = runColorConvert(activeVectors)
+case "number_commit":     results = runNumberCommit(activeVectors)
 case "hit_test":          results = runHitTest(activeVectors)
 case "boolean":           results = runBoolean(activeVectors)
 case "boolean_normalize": results = runBooleanNormalize(activeVectors)
@@ -152,6 +153,19 @@ func runLength(_ vectors: [[String: Any]]) -> [[String: Any]] {
             result = Length.format(pt, unit: unit, precision: precision)
         }
         return ["name": name, "result": result]
+    }
+}
+
+// MARK: - number_input commit rule
+
+func runNumberCommit(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let text = tc["text"] as? String ?? ""
+        let minVal = (tc["min"] as? NSNumber)?.doubleValue
+        let maxVal = (tc["max"] as? NSNumber)?.doubleValue
+        let committed = numberInputCommit(text: text, min: minVal, max: maxVal)
+        return ["name": name, "result": committed ?? NSNull()]
     }
 }
 

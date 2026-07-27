@@ -1865,6 +1865,32 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - number_input commit vectors
+
+/// The `number_input` COMMIT corpus: typed text → the value written to state,
+/// or nothing at all. Acceptance goldens are derived from the live reference's
+/// numeric-string coercion (see the fixture's `_doc`); the clamp goldens are the
+/// widget's declared-bounds rule. Mirror of Rust's
+/// `algorithm_number_commit_vectors`; run port-against-port by
+/// `scripts/cross_language_algorithms.py --algo number_commit`.
+@Test func algorithmNumberCommitVectors() throws {
+    let json = readFixture("algorithms/number_commit.json")
+    let doc = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    let vectors = doc["vectors"] as! [[String: Any]]
+    #expect(!vectors.isEmpty, "number_commit.json is empty")
+
+    for tc in vectors {
+        let name = tc["name"] as! String
+        let text = tc["text"] as! String
+        let minVal = (tc["min"] as? NSNumber)?.doubleValue
+        let maxVal = (tc["max"] as? NSNumber)?.doubleValue
+        let expected = (tc["expected"] as? NSNumber)?.doubleValue
+        let got = numberInputCommit(text: text, min: minVal, max: maxVal)
+        #expect(got == expected,
+                "number_commit '\(name)': text \(text.debugDescription) with min \(String(describing: minVal)) max \(String(describing: maxVal)) gave \(String(describing: got)), corpus pins \(String(describing: expected))")
+    }
+}
+
 // MARK: - Colour conversion algorithm vectors
 
 /// The colour-conversion corpus: the four primitives every port's Color panel is

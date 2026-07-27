@@ -461,6 +461,36 @@ mod tests {
         }
     }
 
+    /// The `number_input` COMMIT corpus: typed text → the value written to
+    /// state, or nothing at all. Acceptance goldens are derived from the live
+    /// reference's numeric-string coercion (see the fixture's `_doc`); the
+    /// clamp goldens are the widget's declared-bounds rule. Mirrored by Swift's
+    /// `algorithmNumberCommitVectors`, and run port-against-port by
+    /// `scripts/cross_language_algorithms.py --algo number_commit`.
+    #[test]
+    fn algorithm_number_commit_vectors() {
+        use crate::interpreter::widget_commit::number_input_commit;
+        let json_str = read_fixture("algorithms/number_commit.json");
+        let doc: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Failed to parse number_commit.json");
+        let vectors = doc["vectors"].as_array().expect("number_commit.json has no vectors");
+        assert!(!vectors.is_empty(), "number_commit.json is empty");
+
+        for tc in vectors {
+            let name = tc["name"].as_str().unwrap();
+            let text = tc["text"].as_str().unwrap();
+            let min = tc.get("min").and_then(|v| v.as_f64());
+            let max = tc.get("max").and_then(|v| v.as_f64());
+            let expected = tc["expected"].as_f64();
+            assert_eq!(
+                number_input_commit(text, min, max),
+                expected,
+                "number_commit '{}': text {:?} with min {:?} max {:?}",
+                name, text, min, max,
+            );
+        }
+    }
+
     /// The colour-conversion corpus: the four primitives every port's Color
     /// panel is built out of, goldens derived from the spec formulas rather than
     /// captured from a port.

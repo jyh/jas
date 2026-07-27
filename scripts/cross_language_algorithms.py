@@ -34,6 +34,10 @@ ALGORITHMS = {
     # family exists to catch, and any tolerance would swallow it.
     "color_convert":     ("exact", None),
     "hit_test":          ("exact", None),
+    # The number_input commit rule. EXACT: the whole point is which strings are
+    # accepted at all (a null result vs a value) and the clamp landing exactly on
+    # the declared bound, so any tolerance would swallow the divergence.
+    "number_commit":     ("exact", None),
     "boolean":           ("exact_boolean", None),
     "boolean_normalize": ("exact_boolean", None),
     "fit_curve":         ("tolerance", 0.5),

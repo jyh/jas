@@ -6030,29 +6030,11 @@ fn compute_color_from_panel(field: &str, new_val: f64, panel: &serde_json::Value
     Some(color)
 }
 
-/// Clamp a widget commit to the bounds its YAML DECLARES, leaving an
-/// undeclared bound alone (Tracking is signed and declares neither).
-///
-/// One function rather than an inline pair of `if`s at each call site because
-/// the two call sites disagreed: the panel branch of `render_number_input`
-/// clamped and the dialog branch did not, so typing 150 into the Color Picker's
-/// `c` field (declared `max: 100`) committed 100 in JasSwift — whose
-/// `renderNumberInput` clamps on commit — and 150 here, and that 150 then
-/// reached `cmyk()`. Risk R9's widget half, transcripts/CORPUS_CENSUS.md §7.
-fn clamp_to_declared(v: f64, min: Option<f64>, max: Option<f64>) -> f64 {
-    let mut v = v;
-    if let Some(lo) = min {
-        if v < lo {
-            v = lo;
-        }
-    }
-    if let Some(hi) = max {
-        if v > hi {
-            v = hi;
-        }
-    }
-    v
-}
+// The widget commit rules themselves live in `super::widget_commit`, outside
+// this `feature = "web"` module, so the corpus can run them natively:
+// `clamp_to_declared` (the declared-bounds clamp) and `number_input_commit`
+// (that clamp on top of the reference's numeric-string grammar).
+use super::widget_commit::{clamp_to_declared, number_input_commit};
 
 fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
@@ -6102,8 +6084,11 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         let mut revision = revision;
         let panel_ctx = panel_for_color.clone();
         Some(EventHandler::new(move |evt: Event<FormData>| {
-            let new_val: f64 =
-                clamp_to_declared(evt.value().parse().unwrap_or(0.0), min_clamp, max_clamp);
+            // Text the reference would refuse for a number-typed field writes
+            // NOTHING, rather than the 0.0 an `unwrap_or` used to commit.
+            let Some(new_val) = number_input_commit(&evt.value(), min_clamp, max_clamp) else {
+                return;
+            };
             let f = f.clone();
             let app = app.clone();
             let mut revision = revision;
@@ -6217,10 +6202,14 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 value: "{value}",
                 style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
                 oninput: move |evt: Event<FormData>| {
-                    // Clamped to the declared bounds, same as the panel branch
-                    // above and same as JasSwift's commit (risk R9).
-                    let new_val: f64 = clamp_to_declared(
-                        evt.value().parse().unwrap_or(0.0), min_clamp, max_clamp);
+                    // Same commit rule as the panel branch above and as
+                    // JasSwift's `renderNumberInput`: accepted by the
+                    // reference's numeric-string grammar, then clamped to the
+                    // declared bounds; anything else writes nothing (risk R9).
+                    let Some(new_val) = number_input_commit(&evt.value(), min_clamp, max_clamp)
+                    else {
+                        return;
+                    };
                     if let BindTarget::Dialog(ref field) = bind_target {
                         if let Some(mut ds) = dialog_signal() {
                             ds.set_value(field, serde_json::json!(new_val));
