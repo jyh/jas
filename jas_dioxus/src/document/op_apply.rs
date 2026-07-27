@@ -540,9 +540,15 @@ fn apply_artboard_field_in_place(
 // element JSON. On replay these helpers deserialize the element from the op JSON
 // via `serde_json::from_value::<Element>` (Element derives Deserialize, so this
 // layer is self-contained — no interpreter import) and insert it BYTE-IDENTICALLY:
-// the clone keeps whatever id it had (value-in-op ⇒ replay inserts the same id),
-// which the checkpoint_equivalence gate (OP_LOG.md §6) proves via
-// document_to_test_json. Hardened reads: a malformed/absent element or path SKIPS
+// whatever id the op's element JSON carries is the id replay inserts
+// (value-in-op ⇒ production and replay agree byte for byte), which the
+// checkpoint_equivalence gate (OP_LOG.md §6) proves via document_to_test_json.
+// This layer takes NO position on WHICH id that is: `clone_at` now clears the
+// clone's ids before binding it (a copy is born id-less — see
+// `element::clear_ids` and transcripts/EDIT_SEMANTICS_FREEZE.md §3.7), so in
+// practice a duplicate's element JSON carries none. The sentence this replaced
+// read "the clone keeps whatever id it had", which invited the opposite
+// reading: that the insert layer is where a duplicated id is meant to survive. Hardened reads: a malformed/absent element or path SKIPS
 // rather than panicking; an effective-change check (delete a present path / a
 // non-empty selection) means a no-op edit journals nothing. Elements live in the
 // `document.layers` tree (paths, not ids), so `targets` carries the affected

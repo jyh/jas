@@ -3618,9 +3618,10 @@ fn run_yaml_effect(
 
     // doc.insert_after: { path, element } — PHASE3 §5.5 / OP_LOG.md §9 Phase P4.
     // VALUE-IN-OP: the resolved element is serialized to JSON and carried WHOLE
-    // in the op (replay deserializes and inserts it byte-identically, keeping
-    // whatever id it had). The element comes from a preceding NON-JOURNALED
-    // binder (`doc.clone_at` binds a clone as ctx JSON); only this insert
+    // in the op (replay deserializes and inserts it byte-identically, with
+    // whatever id the JSON carries — which for a duplicate is NONE, because
+    // `clone_at` clears the clone's ids before binding it). The element comes
+    // from a preceding NON-JOURNALED binder (`doc.clone_at`); only this insert
     // journals, so the composite `duplicate_layer_selection` journals as ONE
     // `insert_after` op per duplicate. Routes through the SHARED `op_apply`
     // dispatcher (which calls `apply_insert_element_after`); targets carry the
