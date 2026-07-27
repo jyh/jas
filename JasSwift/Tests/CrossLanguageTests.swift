@@ -1791,6 +1791,102 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Panel bind-VALUE (resolved snapshot) algorithm vectors
+
+@Test func testAlgorithmBindValues() throws {
+    let json = readFixture("algorithms/panel_bind_values.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    // Source of truth is the compiled bundle (workspace/workspace.json), which
+    // sits beside test_fixtures at the repo root. Mirror the widget-tree gate.
+    let bundlePath = (fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json")
+    let standardized = (bundlePath as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: standardized) else {
+        Issue.record("Failed to read workspace bundle: \(standardized)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let panels = bundle["panels"] as! [String: Any]
+
+    for tc in tests {
+        let name = tc["name"] as! String
+        let function = tc["function"] as! String
+        #expect(function == "bind_values", "Unknown function: \(function)")
+        let args = tc["args"] as! [String: Any]
+        let panelId = args["panel"] as! String
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
+        let expected = tc["expected"] as! [[String: Any]]
+
+        let panel = panels[panelId] as! [String: Any]
+        let actual = BindValues.bindValues(panel, ctx: ctx)
+
+        // Compare STRUCTURALLY: canonicalize both sides via JSONSerialization
+        // with sorted keys and compare bytes. Every field is a string or an
+        // int array, so there is no float formatting in the comparison.
+        let actualBytes = try JSONSerialization.data(
+            withJSONObject: actual, options: [.sortedKeys])
+        let expectedBytes = try JSONSerialization.data(
+            withJSONObject: expected, options: [.sortedKeys])
+        let expStr = String(data: expectedBytes, encoding: .utf8)!
+        let actStr = String(data: actualBytes, encoding: .utf8)!
+        #expect(actualBytes == expectedBytes,
+            "Bind values '\(name)' mismatch:\nexpected: \(expStr)\nactual:   \(actStr)")
+    }
+}
+
+/// The census 5.8 claim, in this port: two data scopes differing only in
+/// `panel.hex` — "664040" vs "664141", the colour divergence's byte pattern —
+/// are INDISTINGUISHABLE to `widgetTree` (key names only) and to `layoutPanel`
+/// (scalar count times a constant), and differ in exactly one `bindValues` row.
+/// That difference is the reason this family exists, so it is asserted here
+/// rather than only in the shared corpus.
+@Test func bindValuesSeparatesEqualLengthHexWhereTheOlderGatesCannot() throws {
+    let bundlePath = (fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json")
+    let standardized = (bundlePath as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: standardized) else {
+        Issue.record("Failed to read workspace bundle: \(standardized)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let panels = bundle["panels"] as! [String: Any]
+    let panel = panels["color_panel_content"] as! [String: Any]
+
+    func ctxOf(_ hex: String) -> [String: Any] {
+        ["state": ["fill_color": "#664040", "fill_on_top": true],
+         "panel": ["mode": "hsb", "hex": hex]]
+    }
+    func bytes(_ o: Any) throws -> Data {
+        try JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])
+    }
+    let a = ctxOf("664040")
+    let b = ctxOf("664141")
+
+    #expect(try bytes(WidgetTree.widgetTree(panel, ctx: a))
+            == bytes(WidgetTree.widgetTree(panel, ctx: b)),
+            "widgetTree is expected to be blind to bind VALUES")
+    #expect(try bytes(PanelLayout.layoutPanel(panel, availW: 228, availH: 600, ctx: a))
+            == bytes(PanelLayout.layoutPanel(panel, availW: 228, availH: 600, ctx: b)),
+            "layoutPanel is expected to be blind to equal-length text")
+
+    let rowsA = BindValues.bindValues(panel, ctx: a)
+    let rowsB = BindValues.bindValues(panel, ctx: b)
+    #expect(rowsA.count == rowsB.count)
+    var diff: [([String: Any], [String: Any])] = []
+    for (x, y) in zip(rowsA, rowsB) {
+        if try bytes(x) != bytes(y) { diff.append((x, y)) }
+    }
+    #expect(diff.count == 1, "expected exactly one differing row, got \(diff.count)")
+    if let (x, y) = diff.first {
+        #expect(x["id"] as? String == "cp_hex")
+        #expect(x["key"] as? String == "bind.value")
+        #expect(x["value"] as? String == "664040")
+        #expect(y["value"] as? String == "664141")
+    }
+}
+
 // MARK: - Menu enabled/checked state (chrome seam) algorithm vectors
 
 @Test func testAlgorithmMenuState() throws {
