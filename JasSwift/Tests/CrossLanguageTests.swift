@@ -2641,8 +2641,8 @@ private let gestureFixtures = [
     // `pathToPolygonSet(pe.d)` on the RAW `d` (0..72), which DOES overlap the
     // sweep, so the two merged into ONE child whose `d` was the doc-space
     // union pushed back through no matrix at all — one child, and the new ink
-    // drawn 300 units from where the artist put it. See
-    // transcripts/BLOB_BRUSH_TOOL.md §Transform.
+    // drawn offset by the matrix's (300, 300) from where the artist put it.
+    // See transcripts/BLOB_BRUSH_TOOL.md §Transform.
     "blob_transform_no_merge.json",
     // The POSITIVE half of the pair above, and the only gate in the corpus
     // that can see `jas:tool-origin` survive an SVG IMPORT. The setup is the
@@ -2657,8 +2657,10 @@ private let gestureFixtures = [
     // WITHOUT `toolOrigin`, so every path opened from a file reached the tool
     // untagged and Swift never merged where Rust did.
     "blob_import_merge.json",
-    // The n == 1 arm WITH a matrix — the only gate that reads the value of a
-    // merged `d` rather than just its presence. Same setup as
+    // The n == 1 arm WITH a matrix — the only gate whose merged `d` is written
+    // THROUGH a matrix, so the only one the inverse write-back can be seen
+    // through (mutation-proved: dropping the inverse fails gestureCorpus on
+    // this vector and nothing else). Same setup as
     // blob_transform_no_merge (local square 0..72, translate(300,300), so
     // drawn at doc 300..372); this sweep runs at doc y=336 from x=320 to
     // x=420, which DOES cross it. One child results, keeping the source's id
@@ -2667,9 +2669,10 @@ private let gestureFixtures = [
     // x 0..125, y 0..72.
     //
     // Without the inverse the union is written in document coordinates and the
-    // whole element jumps 300 units down-right on the next render, while every
-    // field-list test still passes — they graft the source's `d` onto the
-    // output and never look at it.
+    // whole element is then drawn through translate(300,300) on top of that —
+    // offset by (300, 300) from where it belongs — while every field-list test
+    // still passes: they graft the source's `d` onto the output and never look
+    // at it.
     "blob_transform_merge.json",
 ]
 

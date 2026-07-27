@@ -962,24 +962,31 @@ mod tests {
         // `path_to_polygon_set(&pe.d)` on the RAW `d` (0..72), which DOES
         // overlap the sweep, so the two merged into ONE child whose `d` was
         // the doc-space union pushed back through no matrix at all — one
-        // child, and the new ink drawn 300 units from where the artist put
-        // it. See transcripts/BLOB_BRUSH_TOOL.md §Transform.
+        // child, and the new ink drawn offset by the matrix's (300, 300) from
+        // where the artist put it. See transcripts/BLOB_BRUSH_TOOL.md
+        // §Transform.
         "blob_transform_no_merge.json",
-        // The POSITIVE half of the pair above, and the only gate in the corpus
-        // that can see `jas:tool-origin` survive an SVG IMPORT. The setup is
-        // the same square 0..72 with the transform removed, so it sits exactly
-        // under the sweep and the merge is CORRECT: one child, the union, at
-        // doc x 0..155.
+        // The POSITIVE half of the pair above. The setup is the same square
+        // 0..72 with the transform removed, so it sits exactly under the sweep
+        // and the merge is CORRECT: one child, the union, at doc x 0..155.
         //
+        // Also a gate on `jas:tool-origin` surviving an SVG IMPORT.
         // `tool_origin` is not a key of the canonical test JSON, so no
-        // serialization gate can observe it directly; the merge is the only
-        // behaviour that depends on it, which makes this fixture the sole
-        // reader. It is also the identity-transform guard on the transform
-        // work: a matrix-aware merge must leave a transform-less element's
-        // result byte-identical to what it was before.
+        // serialization gate observes it directly; only a merge depends on it.
+        // Counted mechanically: `grep -rl "jas:tool-origin" test_fixtures/svg`
+        // returns three files, all added with these fixtures, and the two that
+        // MERGE (this one and blob_transform_merge) are the ones whose goldens
+        // change if the tag is dropped — blob_transform_no_merge yields two
+        // children either way. This is the fixture that caught it.
+        //
+        // It is also the identity-transform guard on the transform work: a
+        // matrix-aware merge must leave a transform-less element's result
+        // byte-identical to what it was before.
         "blob_import_merge.json",
-        // The n == 1 arm WITH a matrix — the only gate that reads the value of
-        // a merged `d` rather than just its presence. Same setup as
+        // The n == 1 arm WITH a matrix — the only gate whose merged `d` is
+        // written THROUGH a matrix, so the only one the inverse write-back can
+        // be seen through (mutation-proved: dropping the inverse fails
+        // gesture_corpus on this vector and nothing else). Same setup as
         // blob_transform_no_merge (local square 0..72, translate(300,300), so
         // drawn at doc 300..372); this sweep runs at doc y=336 from x=320 to
         // x=420, which DOES cross it. One child results, keeping the source's
@@ -988,9 +995,10 @@ mod tests {
         // spanning local x 0..125, y 0..72.
         //
         // Without the inverse the union is written in document coordinates and
-        // the whole element jumps 300 units down-right on the next render,
-        // while every field-list test (`assert_only_d_changed`) still passes —
-        // they graft the source's `d` onto the output and never look at it.
+        // the whole element is then drawn through translate(300,300) on top of
+        // that — offset by (300, 300) from where it belongs — while every
+        // field-list test (`assert_only_d_changed`) still passes: they graft
+        // the source's `d` onto the output and never look at it.
         "blob_transform_merge.json",
     ];
 

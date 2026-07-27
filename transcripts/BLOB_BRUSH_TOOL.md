@@ -363,16 +363,23 @@ Three gesture fixtures, all reading the same square:
 | `blob_transform_merge` | `translate(300,300)` | doc y=336, across the artwork | one child, `d` in local space |
 | `blob_import_merge` | none | across the artwork | one child |
 
-`blob_transform_merge` is the only one that reads the **value** of a
-merged `d`. The `assert_only_d_changed` family cannot: it grafts the
-source's `d` onto the output before comparing, so it is exact about
-attributes and structurally blind to geometry.
+`blob_transform_merge` is the only one whose merged `d` is written
+**through a matrix**, so it is the only one the inverse write-back can
+be seen through: reverting that step alone fails this vector and
+nothing else in either port. The `assert_only_d_changed` family cannot
+see it at all — it grafts the source's `d` onto the output before
+comparing, so it is exact about attributes and structurally blind to
+geometry.
 
-`blob_import_merge` is also the only gate anywhere that sees
-`jas:tool-origin` survive an SVG import — the field is not a key of
-the canonical test JSON, and the merge is its only reader. It caught
-Swift's `normalizeElement` rebuilding an imported Path without it,
-which left every path opened from a file untagged and unmergeable.
+The two MERGING fixtures also gate `jas:tool-origin` surviving an SVG
+import: the field is not a key of the canonical test JSON, so nothing
+serializes it, and only a merge depends on it. Counted mechanically,
+`grep -rl "jas:tool-origin" test_fixtures/svg` returns three files,
+all added with these fixtures; `blob_transform_no_merge` is the one
+that does NOT depend on the tag, since it yields two children either
+way. `blob_import_merge` is the fixture that caught Swift's
+`normalizeElement` rebuilding an imported Path without it, which left
+every path opened from a file untagged and unmergeable.
 
 ## Erase gesture
 
