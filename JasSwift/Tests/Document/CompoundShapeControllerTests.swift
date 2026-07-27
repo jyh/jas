@@ -288,3 +288,62 @@ private func firstChildCompoundOp(_ m: Model) -> CompoundOperation? {
     Controller(model: m).applyRepeatBooleanOperation("")
     #expect(topChildrenCount(m) == 2)
 }
+
+// MARK: - BOOLEAN.md "Operand and paint rules": opacity and blend mode
+//
+// The rule names FOUR properties as the paint the result carries: "fill,
+// stroke, opacity, blend mode". Swift's output rebuild passed fill and
+// stroke but wrote `opacity: 1.0` and left `blendMode` at its `.normal`
+// default, so a half-transparent multiply operand came out opaque and
+// normal. Rust carries all four (its rebuild clones the operand's
+// CommonProps). The shared operations corpus pins `opacity` (it is in
+// documentToTestJson); `blendMode` is NOT serialized there, which is why
+// these live as per-port unit tests with Rust twins in controller.rs.
+
+/// Two overlapping rects with DIFFERENT opacity and blend mode, front
+/// (index 1, the last child = topmost) distinguishable from back.
+private func twoOverlappingPainted() -> Model {
+    let back = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                 opacity: 0.25, blendMode: .screen))
+    let front = Element.rect(Rect(x: 5, y: 0, width: 10, height: 10,
+                                  opacity: 0.5, blendMode: .multiply))
+    return modelWithRects([back, front], selected: [[0, 0], [0, 1]])
+}
+
+@Test func unionCarriesFrontmostOpacityAndBlendMode() {
+    let m = twoOverlappingPainted()
+    Controller(model: m).applyDestructiveBoolean("union")
+    guard case .polygon(let p) = m.document.layers[0].children[0] else {
+        Issue.record("expected a polygon, got \(m.document.layers[0].children[0])")
+        return
+    }
+    #expect(p.opacity == 0.5)
+    #expect(p.blendMode == .multiply)
+}
+
+@Test func excludePathArmCarriesFrontmostOpacityAndBlendMode() {
+    // The multi-ring arm builds a Path, a SECOND construction site that
+    // has to carry the same four properties as the single-ring Polygon.
+    let m = twoOverlappingPainted()
+    Controller(model: m).applyDestructiveBoolean("exclude")
+    guard case .path(let p) = m.document.layers[0].children[0] else {
+        Issue.record("expected a path, got \(m.document.layers[0].children[0])")
+        return
+    }
+    #expect(p.opacity == 0.5)
+    #expect(p.blendMode == .multiply)
+}
+
+@Test func subtractFrontSurvivorKeepsItsOwnOpacityAndBlendMode() {
+    // "Each remaining element has the frontmost subtracted from it and
+    // keeps its own paint" — so the survivor is the BACK rect and the
+    // result must carry 0.25 / .screen, not the consumed cutter's.
+    let m = twoOverlappingPainted()
+    Controller(model: m).applyDestructiveBoolean("subtract_front")
+    guard case .polygon(let p) = m.document.layers[0].children[0] else {
+        Issue.record("expected a polygon, got \(m.document.layers[0].children[0])")
+        return
+    }
+    #expect(p.opacity == 0.25)
+    #expect(p.blendMode == .screen)
+}

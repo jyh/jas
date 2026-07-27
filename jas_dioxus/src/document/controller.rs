@@ -3281,6 +3281,91 @@ mod tests {
         assert_eq!(top_children_count(&model), before);
     }
 
+    // BOOLEAN.md "Operand and paint rules" names FOUR properties as the
+    // paint a boolean result carries: "fill, stroke, opacity, blend
+    // mode". This port carried all four already (the rebuild clones the
+    // paint source's CommonProps) but nothing asserted it: rewriting the
+    // rebuild to `CommonProps::default()` was green before these tests.
+    // Swift wrote `opacity: 1.0` and left blend at Normal; these are the
+    // twins of the Swift tests in CompoundShapeControllerTests.swift.
+    // `opacity` is also pinned cross-language by
+    // test_fixtures/operations/boolean_collapse_default.json; blend mode
+    // is not in the corpus JSON, hence the per-port pair.
+
+    /// Two overlapping rects with DIFFERENT opacity and blend mode, so
+    /// front (index 1, the topmost) is distinguishable from back.
+    fn two_overlapping_painted_rects() -> Model {
+        let paint = |x: f64, opacity: f64, mode: crate::geometry::element::BlendMode| {
+            let mut e = make_rect(x, 0.0, 10.0, 10.0);
+            let c = match &mut e {
+                Element::Rect(r) => &mut r.common,
+                _ => unreachable!("make_rect builds a Rect"),
+            };
+            c.opacity = opacity;
+            c.mode = mode;
+            e
+        };
+        use crate::geometry::element::BlendMode;
+        let back = paint(0.0, 0.25, BlendMode::Screen);
+        let front = paint(5.0, 0.5, BlendMode::Multiply);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(back), Rc::new(front)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+            ],
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    #[test]
+    fn union_carries_frontmost_opacity_and_blend_mode() {
+        use crate::geometry::element::BlendMode;
+        let mut model = two_overlapping_painted_rects();
+        Controller::apply_destructive_boolean(&mut model, "union", &BooleanOptions::default());
+        let child = model.document().layers[0].children().unwrap()[0].clone();
+        let common = child.common();
+        assert_eq!(common.opacity, 0.5, "frontmost operand's opacity");
+        assert_eq!(common.mode, BlendMode::Multiply, "frontmost operand's blend mode");
+    }
+
+    #[test]
+    fn exclude_path_arm_carries_frontmost_opacity_and_blend_mode() {
+        // The multi-ring arm builds a Path — a SECOND construction site
+        // that has to carry the same four properties as the Polygon arm.
+        use crate::geometry::element::BlendMode;
+        let mut model = two_overlapping_painted_rects();
+        Controller::apply_destructive_boolean(&mut model, "exclude", &BooleanOptions::default());
+        let child = model.document().layers[0].children().unwrap()[0].clone();
+        assert!(matches!(&*child, Element::Path(_)), "exclude emits one multi-ring Path");
+        let common = child.common();
+        assert_eq!(common.opacity, 0.5);
+        assert_eq!(common.mode, BlendMode::Multiply);
+    }
+
+    #[test]
+    fn subtract_front_survivor_keeps_its_own_opacity_and_blend_mode() {
+        // "Each remaining element has the frontmost subtracted from it
+        // and keeps its own paint" — the survivor is the BACK rect, so
+        // the result carries 0.25 / Screen, not the cutter's.
+        use crate::geometry::element::BlendMode;
+        let mut model = two_overlapping_painted_rects();
+        Controller::apply_destructive_boolean(
+            &mut model, "subtract_front", &BooleanOptions::default());
+        let child = model.document().layers[0].children().unwrap()[0].clone();
+        let common = child.common();
+        assert_eq!(common.opacity, 0.25);
+        assert_eq!(common.mode, BlendMode::Screen);
+    }
+
     #[test]
     fn expand_compound_shape_replaces_with_polygons() {
         // Build a fresh doc with two overlapping rects so the boolean

@@ -1272,6 +1272,26 @@ public class Controller {
         // multi-ring results emit ONE Path with all rings as subpaths,
         // declaring boolResultFillRule, matching Rust's
         // apply_destructive_boolean ring for ring.
+        //
+        // PAINT. BOOLEAN.md §Operand and paint rules names four
+        // properties as the paint the result carries — "fill, stroke,
+        // opacity, blend mode" — from whichever operand that op's rule
+        // designates (`paintSrc`). All four are passed below. `opacity`
+        // used to be written as a literal 1.0 and `blendMode` was left
+        // at its `.normal` default, so a half-transparent multiply
+        // operand came out opaque and normal; Rust never had that gap
+        // (its rebuild clones the paint source's CommonProps).
+        //
+        // NOT paint, and still divergent from Rust: `locked` (written
+        // false here, cloned there) and the identity trio
+        // `name`/`id`/`toolOrigin` plus `mask` (dropped here, cloned
+        // there). BOOLEAN.md's paint rule does not reach them and the
+        // cardinality law (PATH_ERASER_TOOL.md §cardinality law) cuts
+        // both ways across these ops — UNION is N->1 and DIVIDE is
+        // 1->N, where identity dies, while a SUBTRACT_FRONT survivor is
+        // 1->1, where it lives. Banked for a ruling; do not guess it
+        // here. `fillGradient`/`strokeGradient` are dropped by BOTH
+        // ports.
         var newElements: [Element] = []
         for (ps, paintSrc) in outputs {
             if opName == "divide" && options.divideRemoveUnpainted
@@ -1289,10 +1309,11 @@ public class Controller {
                     points: kept[0],
                     fill: paintSrc.fill,
                     stroke: paintSrc.stroke,
-                    opacity: 1.0,
+                    opacity: paintSrc.opacity,
                     transform: paintSrc.transform,
                     locked: false,
-                    visibility: paintSrc.visibility
+                    visibility: paintSrc.visibility,
+                    blendMode: paintSrc.blendMode
                 )))
             } else {
                 var d: [PathCommand] = []
@@ -1305,10 +1326,11 @@ public class Controller {
                     d: d,
                     fill: paintSrc.fill,
                     stroke: paintSrc.stroke,
-                    opacity: 1.0,
+                    opacity: paintSrc.opacity,
                     transform: paintSrc.transform,
                     locked: false,
                     visibility: paintSrc.visibility,
+                    blendMode: paintSrc.blendMode,
                     fillRule: FillRule(boolResultFillRule)
                 )))
             }
