@@ -859,7 +859,10 @@ private func parseTspan(_ d: [String: Any]) -> Tspan {
         decor = nil
     }
     return Tspan(
-        id: UInt32((d["id"] as? NSNumber)?.intValue ?? 0),
+        // Rust reads this slot with `as_u64().unwrap_or(0) as u32`, so a
+        // negative or fractional id becomes 0 there; UInt32(_:) of a negative
+        // Int is a precondition failure here (risk R9).
+        id: UInt32(truncatingIfNeeded: max(0, (d["id"] as? NSNumber)?.intValue ?? 0)),
         content: d["content"] as? String ?? "",
         baselineShift: (d["baseline_shift"] as? NSNumber)?.doubleValue,
         dx: (d["dx"] as? NSNumber)?.doubleValue,

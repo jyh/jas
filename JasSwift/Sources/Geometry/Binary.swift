@@ -423,7 +423,10 @@ private func packTspan(_ t: Tspan) -> MsgValue {
 private func unpackTspan(_ v: MsgValue) -> Tspan {
     let arr = asArray(v)
     func get(_ i: Int) -> MsgValue { i < arr.count ? arr[i] : .nil }
-    let id = arr.count > 0 ? UInt32(asInt(arr[0])) : 0
+    // truncatingIfNeeded mirrors Rust's `as u32`, which WRAPS an out-of-range
+    // integer where UInt32(_:) is a precondition failure -- a crafted blob with
+    // a negative tspan id crashed only here (risk R9).
+    let id = arr.count > 0 ? UInt32(truncatingIfNeeded: asInt(arr[0])) : 0
     let content = arr.count > 1 ? asStr(arr[1]) : ""
     let decor: [String]?
     if case .array(let xs) = get(17) {
@@ -467,7 +470,10 @@ private func unpackTspan(_ v: MsgValue) -> Tspan {
 
 private func asInt(_ v: MsgValue) -> Int {
     guard case .int(let n) = v else {
-        if case .float64(let f) = v { return Int(f) }
+        // saturatingInt so a corrupted blob cannot take the process down
+        // (risk R9). Rust's as_i64 REJECTS a float outright and returns Err,
+        // which is a wider contract gap banked in §7.1.
+        if case .float64(let f) = v { return saturatingInt(f) }
         fatalError("expected int, got \(v)")
     }
     return n

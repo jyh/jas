@@ -456,14 +456,18 @@ struct YamlDialogOverlay: View {
         // dialog.color, so subsequent reads of h/s/b/r/g/bl/c/m/y/k/hex
         // see the snapped value.
         if key == "web_only", let on = value as? Bool, on {
+            // Rust clamps BEFORE its cast here (`v.clamp(0.0, 255.0) as i64`,
+            // renderer.rs) and this port clamped after; the inputs are the
+            // 0...255 r/g/bl getters so the two agree today, but the shape is
+            // risk R9's and saturatingInt removes it either way.
             func snap(_ v: Int) -> Int {
                 let n = (Double(v) / 51.0).rounded() * 51.0
-                return min(max(Int(n), 0), 255)
+                return min(max(saturatingInt(n), 0), 255)
             }
             func ival(_ k: String) -> Int {
                 if let any = store.getDialog(k) {
                     if let i = any as? Int { return i }
-                    if let d = any as? Double { return Int(d.rounded()) }
+                    if let d = any as? Double { return saturatingInt(d.rounded()) }
                 }
                 return 0
             }

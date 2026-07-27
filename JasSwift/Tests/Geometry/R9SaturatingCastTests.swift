@@ -139,6 +139,24 @@ struct R9SaturatingConversionTests {
         #expect(saturatingInt(0.0) == 0)
     }
 
+    /// The substitution property that justifies every mechanical swap of
+    /// `Int(x)` for `saturatingInt(x)` in this repair: wherever `Int(x)` was
+    /// DEFINED, the two agree, so no reachable behaviour changes — only the
+    /// inputs that used to take the process down.
+    @Test func saturatingIntAgreesWithIntWhereIntIsDefined() {
+        var probes: [Double] = [0, 1, -1, 0.5, -0.5, 5.9, -5.9, 255, 256, -256,
+                                1e6, -1e6, 1e15, -1e15]
+        // A spread across the exponent range, still inside Int.
+        for e in 0...60 {
+            probes.append(pow(2.0, Double(e)))
+            probes.append(-pow(2.0, Double(e)))
+            probes.append(pow(2.0, Double(e)) + 0.5)
+        }
+        for v in probes {
+            #expect(saturatingInt(v) == Int(v), "disagreed at \(v)")
+        }
+    }
+
     @Test func saturatingUInt32MatchesRustCopiesCast() {
         // Rust: `(n as i64).max(0) as u32`.
         #expect(saturatingUInt32AsInt(.nan) == 0)             // Rust: 0

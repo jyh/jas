@@ -98,7 +98,11 @@ struct ColorBarView: View {
     /// sample points to keep it cheap.
     private static func draw(in ctx: inout GraphicsContext, size: CGSize) {
         let stripWidth: CGFloat = 2
-        let stripCount = max(1, Int(size.width / stripWidth))
+        // saturatingInt: `stripWidth` is the literal 2 above so the divisor
+        // cannot be zero, but a NaN layout width would still trap the bare
+        // conversion, and Rust has no counterpart at all here — it rasterises
+        // this bar at a fixed 120x32 (risk R9).
+        let stripCount = max(1, saturatingInt(size.width / stripWidth))
         for i in 0..<stripCount {
             let x = CGFloat(i) * stripWidth
             // `max(width, 1)` for the same reason `colorAt` above has it: at

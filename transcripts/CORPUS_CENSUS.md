@@ -555,10 +555,45 @@ mechanism existing at all, and for extending it rather than relying on port-vs-p
 
 ---
 
-## 7. AN R9 THE TAXONOMY IS MISSING
+## 7. R9 — SATURATING CAST vs TRAPPING INITIALISER (PROMOTED, and largely repaired)
 
-The brief's taxonomy has no code for the most mechanically greppable divergence class in this
-codebase, and it appeared in **three** of the six domains:
+**Status 2026-07-26: promoted into the taxonomy and repaired across the sites five read-only sweeps
+enumerated.** JYH ratified the repair the same day ("do it now, nothing is gained by waiting"). Read
+this section as the taxonomy entry plus the repair's record; §7.1 below lists what is banked.
+
+The repair's own commits are the reference for what the rule now is:
+
+- `R9: clamp colour-channel INPUTS in cmyk / grayscale / hsb, all three ports`
+- `R9: the Swift-side trap sites the sweep found reachable, with Rust's saturation`
+- `R9: the sites where a guard does not reject NaN, and one guard asymmetry`
+- `R9: clamp a dialog number_input's commit to its declared bounds`
+
+**The two rules the repair established.** Where a value has a DOCUMENTED range, clamp the INPUT before
+any arithmetic (`color_util::clamp_channel` in Rust, `clampChannel` in Swift, `clamp_channel` in the
+Python reference). Where a conversion merely mirrors a Rust `as` cast with no range to appeal to, route
+it through a function that spells that cast out (`Sources/SaturatingCast.swift`: `saturatingInt`,
+`saturatingUInt32AsInt`, `intIfIntegral`; plus `saturatingUInt8` and the pre-existing `quantise8` in
+`Interpreter/ColorUtil.swift`).
+
+Input-clamping is not interchangeable with output-saturation, and the colour primitives are the proof.
+The formulas are monotonic per channel, so for ONE out-of-range channel the two agree. They diverge
+when two channels overflow with signs that multiply back positive: unclamped, `cmyk(150, 0, 0, 150)`
+is `(1-1.5)*(1-1.5)*255 = +63.75`, i.e. `#400000` — a bogus mid-grey that looks like a real colour —
+and `cmyk(200, 0, 0, 200)` is a fully saturated `#ff0000`. Clamping the inputs gives black. It is also
+the only form in which no saturating-cast asymmetry survives to disagree about. Both are now
+corpus-pinned (`workspace/tests/expressions.yaml`, 13 new cases, run by Rust, Swift and the Python
+reference).
+
+The class also had **three members that are not crashes**, which is the reason a fix pass must not
+simply re-spell every cast: `colorStr` wrote `rgb(510,0,0)` into a saved SVG (not valid CSS colour
+syntax) where Rust wrote `rgb(255,0,0)`; `Svg.swift`'s inline-size line count was
+`Int(x) + 1` against Rust's `ceil(x)`, an extra line of height at every exact integer; and
+`segments_for_arc`'s guards were not mirror images, so a NaN radius gave 32 ring segments in Swift and
+8 in Rust with no crash on either side.
+
+The original proposal, kept verbatim:
+
+> **R9 — SATURATING CAST vs TRAPPING INITIALISER.** Rust's `as u8` / `as i64` casts **saturate**
 
 > **R9 — SATURATING CAST vs TRAPPING INITIALISER.** Rust's `as u8` / `as i64` casts **saturate**
 > (guaranteed since 1.45) and map NaN to 0. Swift's `UInt8(Double)` / `Int(Double)` initialisers
@@ -573,9 +608,86 @@ Confirmed sites: `grayscale()` and `cmyk()` (`ExprEval.swift:1148` — **no clam
 through. Rust's paired `.max(0.01)` / clamping habits mean **Rust reaches these functions with values
 Swift cannot survive.**
 
-It will recur in every numeric domain, and it is a one-line grep: any `UInt8(` or `Int(` over a
-`Double` in `JasSwift` whose Rust twin uses `as u8` / `as i32`. Worth adding to the taxonomy before
-the next sweep.
+Every site in that list is repaired. The class was enumerated by five read-only sweeps over
+`JasSwift/Sources/{Interpreter,Geometry,Algorithms,Canvas,Panels,Tools,Document,Workspace}`, each
+judging its rows against the `jas_dioxus` twin.
+
+### 7.1 What is BANKED — the rows deliberately not repaired
+
+These survived the pass. Each is listed with its file:line and the reason, so a later pass does not
+have to re-derive it.
+
+1. **`JasSwift/Sources/Document/Document.swift:37, :42, :61** — `SortedCps` narrows a control-point
+   index with `UInt16(i)`, which TRAPS at 65536, where Rust's `i as u16` **wraps** and silently
+   selects control point 0 instead (`document.rs:61, :67, :70, :84`). This is int→int, not
+   float→int, and neither port is CORRECT: mirroring the wrap would trade a crash for a silently
+   wrong selection, which is a product decision and not a cast fix. Needs ≥65536 control points on
+   one path (a machine-traced SVG, not hand drawing).
+2. **`YamlPanelBodyView.swift:1481` (`renderNumberInput`) and `:3041` (`renderComboBox`)** — the TRAP
+   is fixed (both route through `saturatingInt`), but a DIFFERENT_VALUE remains: Rust keeps the bound
+   value an `f64` and renders `12.5`, where this port renders the truncated `12`. Closing it means
+   changing what the widgets DISPLAY, which the panel widget-tree goldens cover and no unit test
+   reaches, so it wants its own pass with a golden refresh.
+3. **`Geometry/Binary.swift:468-481` (`asInt` / `asF64`)** — the trap is fixed, but the decoder's
+   CONTRACT still differs: Rust's `as_i64` REJECTS a float outright and returns `Err` so a corrupted
+   blob cannot abort the module (its comment at `binary.rs:551-559` says why, and
+   `malformed_but_decodable_blob_errors_not_panics` pins it), while this port truncates a float and
+   uses `fatalError` for every other type mismatch. That is a decode-recoverability gap, wider than
+   R9, and it touches 12 call sites plus error propagation.
+4. **`Tools/YamlToolEffects.swift:151` (`data.list_remove`)** — a NEGATIVE index no-ops here and
+   removes element 0 in Rust (`effects.rs:816`, `as usize` maps -1 to 0). Which behaviour is right is
+   a semantics call, not a cast fix; the effect has zero YAML callers repo-wide.
+5. **`Workspace/LayoutApply.swift:213`, `Tools/YamlToolEffects.swift:3077`,
+   `Interpreter/ExprTypes.swift:80`** — three places where this port ACCEPTS a value Rust rejects (a
+   fractional or negative JSON number where Rust's `as_u64()` returns `None` and falls back to 0 or
+   to a string). All three are latent: on Darwin the `NSNumber` branch wins for every `Double`, and
+   the markers are only ever produced by the ports' own serialisation.
+6. **`Algorithms/CalligraphicOutline.swift:113`, `PatternAlongPath.swift:52`,
+   `Tools/YamlToolEffects.swift:2237/:2246`, `Geometry/LiveElement.swift:1040`** — the traps are
+   fixed and the ports now agree, but for an INFINITE input both ports agree on a saturated segment /
+   tile / sides count and then attempt an astronomically large allocation. A shared OOM is not a
+   divergence, so it is out of this class; capping either port alone would create one.
+7. **`fmtNum` / `_fmtNum` NaN spelling** — `String(format: "%.4f", .nan)` gives `nan` here where
+   Rust's `format!("{:.4}", f64::NAN)` gives `NaN`. Not a cast; a formatting difference, and the same
+   one `Geometry/TestJson.swift` has for a NaN coordinate.
+8. **Rust's own saturating casts that make RUST the diverging port** —
+   `jas_dioxus/src/algorithms/dash_renderer.rs:259` round-trips a dash multiple through `i64` where
+   JasSwift stays in `f64`. Needs a value above roughly 1.8e19 × the base period; no gesture found.
+
+### 7.2 The mechanical closure check
+
+Two greps over `JasSwift/Sources`, with labelled initialisers (`clamping:`, `exactly:`,
+`truncatingIfNeeded:`, `bitPattern:`, `radix:`, `utf16Offset:`) and comment-only lines filtered out.
+
+**(a) Lines carrying an integer initialiser AND float-producing syntax** — the pattern is
+`\b(UInt8|Int|UInt32|Int32|UInt|Int64|UInt16|Int16)\(` piped through
+`\.rounded\(|floor\(|ceil\(|round\(|Double\(|CGFloat|\.nan|\* 255|/ ` (two stages, because a
+single regex cannot span the nested parens these expressions use). **19 hits, and every one is
+accounted for.** 7 are the colour primitives whose INPUTS are now clamped, so their products are in
+range by construction (`ExprEval.swift:1151-1153, :1160`; `ColorUtil.swift:119-121`). 6 take a `UInt8`
+or an already-guarded value (`ColorUtil.swift:51-52, :199-202` — `rgb_to_cmyk`'s `r==g==b==0` early
+return is exactly the case that would otherwise make its divisor zero). 1 is `Int.init?(String)`
+(`Svg.swift:778`). 2 are `Element.swift:164`, now behind the non-finite-hue sanitise, and
+`Boolean.swift:321`, whose `if target <= 0.0 || !target.isFinite { return nil }` two lines above is
+the exemplary form. The last 3 the sweeps re-verified as provably bounded and this pass left alone:
+`WorkspaceIcon.swift:817` (|deltaTheta| <= 3pi, so `ceil` <= 5), `TextEditSession.swift:14`
+(wall-clock ms / 530), `CanvasSubwindow.swift:545` (|dtheta| <= 3pi, proved by running the body).
+
+**(b) An integer initialiser applied to a BARE identifier**, where grep cannot see the argument's
+type: `\b(UInt8|Int|...)\([a-z_][A-Za-z0-9_]*\)`. **32 code lines, every one accounted for**: 3 are
+inside `saturatingInt` / `saturatingUInt32AsInt` / `saturatingUInt8` themselves, immediately after
+their own bounds tests; 12 are `Int.init?(String)` (failable, cannot trap); 14 are integer→integer
+conversions whose argument is a loop index, a `UInt8` channel, or a value an adjacent explicit range
+test has already bounded (the `Binary.swift` encoder's six are each preceded by their own
+`n >= X && n <= Y`); and **3 are the banked `Document.swift` `UInt16` narrowings** of item 1 above.
+
+**What that grep cannot see:** a conversion performed inside a generic helper or a protocol witness
+(`BinaryInteger.init(_: some BinaryFloatingPoint)` reached indirectly — no `numericCast` exists in
+the tree, but absence of that spelling is not proof); an `Int`-typed parameter whose float argument is
+computed several frames up the call stack; integer OVERFLOW on `+` / `*` / `<<`, which traps in Swift
+and wraps in Rust release builds and is a DIFFERENT class; and the SwiftUI / CoreGraphics entry points
+called with a NaN from our code. The repair is also **not GUI-verified**: the trap semantics and the
+call chains are proven by tests and by reading, but no site was reproduced in a running app.
 
 ---
 

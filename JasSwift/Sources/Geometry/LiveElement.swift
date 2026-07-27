@@ -1037,7 +1037,9 @@ func segmentsForArc(radius: Double, precision: Double) -> Int {
         return 32
     }
     let n = Double.pi * (radius / (2.0 * precision)).squareRoot()
-    return max(8, Int(n.rounded(.up)))
+    // saturatingInt: the guard above admits a finite radius over a tiny
+    // precision, whose quotient can still overflow to infinity (risk R9).
+    return max(8, saturatingInt(n.rounded(.up)))
 }
 
 private func circleToRing(cx: Double, cy: Double, r: Double, precision: Double) -> BoolRing {

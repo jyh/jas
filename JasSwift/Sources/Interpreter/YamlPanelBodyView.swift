@@ -1466,8 +1466,11 @@ struct YamlElementView: View {
         // this, typing 500 into an R-channel field (max=255) committed
         // 500 verbatim — the resulting color went past 0xff and produced
         // a 7-character hex like "1f4ff3b" instead of clamping to 255.
+        // saturatingInt: a YAML `max:` is a plain integer everywhere in the
+        // current bundle, but Rust reads it as an f64 and never converts, so a
+        // non-finite one trapped only here (risk R9).
         let maxVal: Int? = (element["max"] as? Int)
-            ?? (element["max"] as? Double).map { Int($0) }
+            ?? (element["max"] as? Double).map { saturatingInt($0) }
         // Bind may be a bare string ("dialog.h") or an object form
         // ({value: "panel.x"}). Color picker fields use the bare-string
         // form via the radio_field_row template; without the fallback
@@ -1478,7 +1481,11 @@ struct YamlElementView: View {
         let currentValue: Int = {
             if let e = valueExpr {
                 let result = evaluate(e, context: context)
-                if case .number(let n) = result { return Int(n) }
+                // saturatingInt mirrors Rust's `as i64` (risk R9). Rust keeps
+                // this bound value an f64 and DISPLAYS a fraction, where this
+                // port shows the truncated integer — a separate divergence,
+                // banked in transcripts/CORPUS_CENSUS.md §7.1.
+                if case .number(let n) = result { return saturatingInt(n) }
             }
             return minVal
         }()
@@ -2372,11 +2379,14 @@ struct YamlElementView: View {
 
         let stopsRaw: [[String: Any]] = (stopsExpr.flatMap { evaluateBindObject($0) } as? [[String: Any]]) ?? []
 
+        // saturatingInt mirrors Rust's `n as i64` (risk R9).
         let selStop: Int = selStopExpr.map {
-            if case .number(let n) = evaluate($0, context: context) { return Int(n) } else { return -1 }
+            if case .number(let n) = evaluate($0, context: context) { return saturatingInt(n) }
+            else { return -1 }
         } ?? -1
         let selMid: Int = selMidExpr.map {
-            if case .number(let n) = evaluate($0, context: context) { return Int(n) } else { return -1 }
+            if case .number(let n) = evaluate($0, context: context) { return saturatingInt(n) }
+            else { return -1 }
         } ?? -1
 
         let stops = extractStops(stopsRaw)
@@ -3038,7 +3048,10 @@ struct YamlElementView: View {
                 let result = evaluate(e, context: context)
                 switch result {
                 case .string(let s): return s
-                case .number(let n): return String(Int(n))
+                // saturatingInt mirrors Rust's `as i64` (risk R9). Rust renders
+                // this value with `n.to_string()`, so a FRACTIONAL bound value
+                // reads differently here — banked in §7.1.
+                case .number(let n): return String(saturatingInt(n))
                 default: return ""
                 }
             }

@@ -421,7 +421,8 @@ public enum LayersPanel {
             var index = 0
             if let s = spec["index"] as? String {
                 if case .number(let n) = evaluate(s, context: callCtx) {
-                    index = Int(n)
+                    // saturatingInt mirrors Rust's `n as usize` (risk R9).
+                    index = saturatingInt(n)
                 }
             } else if let n = spec["index"] as? Int {
                 index = n

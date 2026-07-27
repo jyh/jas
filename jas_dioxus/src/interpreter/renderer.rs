@@ -6030,6 +6030,30 @@ fn compute_color_from_panel(field: &str, new_val: f64, panel: &serde_json::Value
     Some(color)
 }
 
+/// Clamp a widget commit to the bounds its YAML DECLARES, leaving an
+/// undeclared bound alone (Tracking is signed and declares neither).
+///
+/// One function rather than an inline pair of `if`s at each call site because
+/// the two call sites disagreed: the panel branch of `render_number_input`
+/// clamped and the dialog branch did not, so typing 150 into the Color Picker's
+/// `c` field (declared `max: 100`) committed 100 in JasSwift — whose
+/// `renderNumberInput` clamps on commit — and 150 here, and that 150 then
+/// reached `cmyk()`. Risk R9's widget half, transcripts/CORPUS_CENSUS.md §7.
+fn clamp_to_declared(v: f64, min: Option<f64>, max: Option<f64>) -> f64 {
+    let mut v = v;
+    if let Some(lo) = min {
+        if v < lo {
+            v = lo;
+        }
+    }
+    if let Some(hi) = max {
+        if v > hi {
+            v = hi;
+        }
+    }
+    v
+}
+
 fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let min = el.get("min").and_then(|m| m.as_f64()).unwrap_or(0.0);
@@ -6078,9 +6102,8 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         let mut revision = revision;
         let panel_ctx = panel_for_color.clone();
         Some(EventHandler::new(move |evt: Event<FormData>| {
-            let mut new_val: f64 = evt.value().parse().unwrap_or(0.0);
-            if let Some(lo) = min_clamp { if new_val < lo { new_val = lo; } }
-            if let Some(hi) = max_clamp { if new_val > hi { new_val = hi; } }
+            let new_val: f64 =
+                clamp_to_declared(evt.value().parse().unwrap_or(0.0), min_clamp, max_clamp);
             let f = f.clone();
             let app = app.clone();
             let mut revision = revision;
@@ -6194,7 +6217,10 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 value: "{value}",
                 style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
                 oninput: move |evt: Event<FormData>| {
-                    let new_val: f64 = evt.value().parse().unwrap_or(0.0);
+                    // Clamped to the declared bounds, same as the panel branch
+                    // above and same as JasSwift's commit (risk R9).
+                    let new_val: f64 = clamp_to_declared(
+                        evt.value().parse().unwrap_or(0.0), min_clamp, max_clamp);
                     if let BindTarget::Dialog(ref field) = bind_target {
                         if let Some(mut ds) = dialog_signal() {
                             ds.set_value(field, serde_json::json!(new_val));
@@ -6325,8 +6351,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 revision += 1;
                 return;
             };
-            if let Some(lo) = min_clamp { if new_val < lo { new_val = lo; } }
-            if let Some(hi) = max_clamp { if new_val > hi { new_val = hi; } }
+            let new_val = clamp_to_declared(new_val, min_clamp, max_clamp);
             let f = f.clone();
             let app = app.clone();
             let mut revision = revision;
@@ -10806,6 +10831,25 @@ mod tests {
         st.app_default_fill = Color::from_hex(fill_hex).map(Fill::new);
         st.app_default_stroke = Color::from_hex(stroke_hex).map(|c| Stroke::new(c, 1.0));
         st
+    }
+
+    /// A number_input's commit is clamped to its DECLARED bounds, on the dialog
+    /// path as well as the panel path.
+    ///
+    /// This was the widget half of risk R9 (transcripts/CORPUS_CENSUS.md §7).
+    /// The panel branch clamped and the dialog branch did not, so typing 150
+    /// into the Color Picker's `c` field — which declares `max: 100` — committed
+    /// 100 in JasSwift (whose `renderNumberInput` clamps on commit) and 150
+    /// here, and the 150 then reached `cmyk()`. An UNDECLARED bound must stay
+    /// unclamped: Tracking is signed and declares neither.
+    #[test]
+    fn declared_bounds_clamp_a_number_commit() {
+        assert_eq!(clamp_to_declared(150.0, Some(0.0), Some(100.0)), 100.0);
+        assert_eq!(clamp_to_declared(-5.0, Some(0.0), Some(100.0)), 0.0);
+        assert_eq!(clamp_to_declared(42.0, Some(0.0), Some(100.0)), 42.0);
+        assert_eq!(clamp_to_declared(-50.0, None, None), -50.0);
+        assert_eq!(clamp_to_declared(1e9, Some(1.0), None), 1e9);
+        assert_eq!(clamp_to_declared(0.0, Some(1.0), None), 1.0);
     }
 
     #[test]

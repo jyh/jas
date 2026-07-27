@@ -148,7 +148,8 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         guard let args = spec as? [String: Any],
               let path = args["path"] as? String, !path.isEmpty
         else { return nil }
-        let index = Int(evalNumber(args["index"], store: store, ctx: ctx))
+        // saturatingInt mirrors Rust's `as usize` (risk R9).
+        let index = saturatingInt(evalNumber(args["index"], store: store, ctx: ctx))
         guard var arr = store.getDataPath(path) as? [Any] else { return nil }
         if index >= 0 && index < arr.count {
             arr.remove(at: index)
@@ -162,7 +163,8 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
               let path = args["path"] as? String, !path.isEmpty
         else { return nil }
         let value = resolveValueOrExpr(args["value"], store: store, ctx: ctx)
-        let index = Int(evalNumber(args["index"], store: store, ctx: ctx))
+        // saturatingInt mirrors Rust's `as usize` (risk R9).
+        let index = saturatingInt(evalNumber(args["index"], store: store, ctx: ctx))
         var arr = (store.getDataPath(path) as? [Any]) ?? []
         let i = max(0, min(index, arr.count))
         arr.insert(value ?? NSNull(), at: i)
@@ -2234,7 +2236,8 @@ private func buildElement(
         let y1 = evalNumber(spec["y1"], store: store, ctx: ctx)
         let x2 = evalNumber(spec["x2"], store: store, ctx: ctx)
         let y2 = evalNumber(spec["y2"], store: store, ctx: ctx)
-        let sidesRaw = Int(evalNumber(spec["sides"], store: store, ctx: ctx))
+        // saturatingInt mirrors Rust's `as usize` (risk R9).
+        let sidesRaw = saturatingInt(evalNumber(spec["sides"], store: store, ctx: ctx))
         let sides = sidesRaw <= 0 ? 5 : sidesRaw
         let pts = regularPolygonPoints(x1, y1, x2, y2, sides)
         return .polygon(Polygon(points: pts, fill: fill, stroke: stroke))
@@ -2243,7 +2246,8 @@ private func buildElement(
         let y1 = evalNumber(spec["y1"], store: store, ctx: ctx)
         let x2 = evalNumber(spec["x2"], store: store, ctx: ctx)
         let y2 = evalNumber(spec["y2"], store: store, ctx: ctx)
-        let raw = Int(evalNumber(spec["points"], store: store, ctx: ctx))
+        // saturatingInt mirrors Rust's `as usize` (risk R9).
+        let raw = saturatingInt(evalNumber(spec["points"], store: store, ctx: ctx))
         let n = raw <= 0 ? 5 : raw
         let pts = starPoints(x1, y1, x2, y2, n)
         return .polygon(Polygon(points: pts, fill: fill, stroke: stroke))
@@ -3077,8 +3081,8 @@ private func extractPath(
                     out.append(n.intValue)
                 } else if let i = item.value as? Int {
                     out.append(i)
-                } else if let d = item.value as? Double, d == Double(Int(d)) {
-                    out.append(Int(d))
+                } else if let d = item.value as? Double, let i = intIfIntegral(d) {
+                    out.append(i)
                 } else {
                     return nil
                 }
@@ -3757,7 +3761,7 @@ private func artboardTranslateFromPreview(
             var path: [Int] = []
             for v in inner {
                 if let i = v as? Int { path.append(i) }
-                else if let d = v as? Double { path.append(Int(d)) }
+                else if let d = v as? Double { path.append(saturatingInt(d)) }
             }
             if path.count == 2 { dupPaths.append(path) }
         }

@@ -77,7 +77,10 @@ enum Value: Equatable {
                     if let i = n as? Int {
                         idx.append(i)
                     } else if let d = n as? Double {
-                        idx.append(Int(d))
+                        // saturatingInt (risk R9). Rust requires `as_u64()` here
+                        // and falls back to a STRING when it fails, so this
+                        // branch is laxer than Rust's — banked in §7.1.
+                        idx.append(saturatingInt(d))
                     } else if let num = n as? NSNumber {
                         idx.append(num.intValue)
                     } else {
