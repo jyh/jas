@@ -159,8 +159,11 @@ import Testing
     //   trisection `d1`   -> t = 0.5199939854
     //   trisection `d2`   -> t = 0.4800060146
     //   final `bestDist`  -> d = +inf
-    // The tolerances below are 100x tighter than the smallest of those
-    // deviations (0.02 in t), so none of the four can pass.
+    // The `t` expectation is what catches the first three: its 1e-4 bound is
+    // 200x tighter than the smallest of their t deviations (0.0199939854). The
+    // fourth is caught by `isFinite`. Do not lean on the distance bound alone —
+    // for the `d1`/`d2` mutations the relative distance error is only
+    // 1.9986e-4, barely past 1e-4.
     let (d, t) = closestOnCubic(0, 0, 1e200 / 3, 0, 2e200 / 3, 0, 1e200, 0,
                                 5e199, 1e200)
     #expect(d.isFinite)
