@@ -2800,6 +2800,7 @@ private func blobBrushCommitPainting(
         var visibility: Visibility = .preview
         var blendMode: BlendMode = .normal
         var mask: Mask? = nil
+        var name: String? = nil
         if matches.count >= 2 {
             var existingIds = doc.elementIds
             guard let minted = mintUniqueIds(1, existing: &existingIds,
@@ -2842,6 +2843,26 @@ private func blobBrushCommitPainting(
             if let v = unanimous({ $0.visibility }) { visibility = v }
             if let v = unanimous({ $0.locked }) { locked = v }
             if let v = unanimous({ $0.mask }) { mask = v }
+
+            // `name` — ASSERTING-SOURCES (JYH, ratified 2026-07-27;
+            // EDIT_SEMANTICS_FREEZE.md §3.3). For `name` ONLY, unanimity
+            // ranges over the sources that ASSERT one: silence is not a
+            // competing claim, so "hull" + unnamed yields "hull". Two
+            // DIFFERENT assertions are T2 shape 2 — a value across disagreeing
+            // sources — and take the documented default (no name) per T3; no
+            // winner is elected by z-order, area or document position.
+            //
+            // Why not strict unanimity: no drawing tool writes `name`, so the
+            // commonest real case is one named source among unnamed
+            // neighbours. Strict unanimity would delete the artist's word
+            // exactly there, and the id is already dying at this arm — the
+            // product would be left with no handle of any kind. Rust's twin
+            // carries the identical rule.
+            let asserted = sources.compactMap { $0.name }
+            if let first = asserted.first,
+               asserted.allSatisfy({ $0 == first }) {
+                name = first
+            }
         }
         // `transform` is left nil on this arm — for n == 0 because a fresh
         // blob has no matrix, for n >= 2 because the unanimity carry excludes
@@ -2857,6 +2878,7 @@ private func blobBrushCommitPainting(
             blendMode: blendMode,
             mask: mask,
             toolOrigin: "blob_brush",
+            name: name,
             id: freshId,
             // T1's RING TERM, as on the 1 -> 1 arm above: `unified` is a
             // machine-wound polygon set (the swept dabs on the 0 -> 1 arm, the

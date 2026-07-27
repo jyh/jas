@@ -5222,6 +5222,30 @@ fn blob_brush_commit_painting(
             if let Some(v) = unanimous(&sources, |pe| pe.common.mask.clone()) {
                 common.mask = v;
             }
+
+            // `name` — ASSERTING-SOURCES (JYH, ratified 2026-07-27;
+            // EDIT_SEMANTICS_FREEZE.md §3.3). For `name` ONLY, unanimity
+            // ranges over the sources that ASSERT one: silence is not a
+            // competing claim, so "hull" + unnamed yields "hull". Two
+            // DIFFERENT assertions are T2 shape 2 — a value across disagreeing
+            // sources — and take the documented default (no name) per T3; no
+            // winner is elected by z-order, area or document position.
+            //
+            // Why not strict unanimity: no drawing tool writes `common.name`,
+            // so the commonest real case is one named source among unnamed
+            // neighbours. Strict unanimity would delete the artist's word
+            // exactly there, and the id is already dying at this arm — the
+            // product would be left with no handle of any kind. Swift's twin
+            // carries the identical rule.
+            let asserted: Vec<String> = sources
+                .iter()
+                .filter_map(|pe| pe.common.name.clone())
+                .collect();
+            if let Some(first) = asserted.first()
+                && asserted.iter().all(|n| n == first)
+            {
+                common.name = Some(first.clone());
+            }
         }
         Element::Path(PathElem {
             // `common.transform` is left at its default (None) on this arm —
@@ -11071,6 +11095,84 @@ mod tests {
             (50.0, 130.0, 120.0));
         assert_eq!(out.common.transform, None,
             "a unanimous transform must NOT ride onto the merge");
+    }
+
+    // ── `name` at an N -> 1 merge: ASSERTING-SOURCES ──
+    //
+    // JYH, ratified 2026-07-27 (EDIT_SEMANTICS_FREEZE.md §3.3, the `name`
+    // bullet): for `name` ONLY, unanimity ranges over the sources that ASSERT
+    // a name — silence is not a competing claim. "hull" + unnamed -> "hull";
+    // "hull" + "keel" -> the documented default (no name), per T3. This is not
+    // "the largest source keeps it" in disguise: nothing geometric elects the
+    // survivor, no float is compared, and the two-asserting-and-disagreeing
+    // case falls to the default rather than to a winner.
+    //
+    // The reason the STRICT variant was rejected is in the freeze: no drawing
+    // tool writes `common.name`, so the commonest real case is ONE named
+    // source among unnamed neighbours — strict unanimity would delete the
+    // artist's word exactly there, and with the id already dying at a merge
+    // the product would be left with no handle of any kind.
+
+    fn named(name: Option<&str>) -> CommonProps {
+        CommonProps { name: name.map(str::to_string), ..CommonProps::default() }
+    }
+
+    /// ONE source asserts a name; the other is silent. The assertion carries.
+    ///
+    /// Separation from the pre-fix behaviour: `name` was not carried at all,
+    /// so this returned `None`.
+    #[test]
+    fn blob_merge_carries_a_name_only_one_source_asserts() {
+        let out = merge_two_blobs(named(Some("hull")), named(None),
+                                  "name_one_asserts", (10.0, 90.0, 50.0));
+        assert_eq!(out.common.name.as_deref(), Some("hull"),
+            "a silent source does not veto the only name asserted");
+    }
+
+    /// The silent source may be either operand — the carry must not depend on
+    /// document order, which is geometry (z-order) wearing a different hat.
+    ///
+    /// Separation: as above, `None` before the fix. This vector additionally
+    /// separates an order-sensitive implementation ("the first source's name
+    /// wins"), which would return `None` here while the vector above passes.
+    #[test]
+    fn blob_merge_carries_a_name_asserted_by_the_second_source_only() {
+        let out = merge_two_blobs(named(None), named(Some("keel")),
+                                  "name_second_asserts", (10.0, 90.0, 50.0));
+        assert_eq!(out.common.name.as_deref(), Some("keel"),
+            "which operand asserts the name cannot change the answer");
+    }
+
+    /// ALL-SILENT: nothing is asserted, so the merged element takes the
+    /// documented default — no name. The anti-invention pin: it goes red the
+    /// moment anyone synthesises a name at a merge.
+    #[test]
+    fn blob_merge_of_silent_sources_has_no_name() {
+        let out = merge_two_blobs(named(None), named(None),
+                                  "name_all_silent", (10.0, 90.0, 50.0));
+        assert_eq!(out.common.name, None,
+            "no source asserted a name, so the default (none) stands");
+    }
+
+    /// DISAGREEMENT: two sources assert DIFFERENT names. That is exactly T2
+    /// shape 2 — a value across disagreeing sources — so T3 takes the
+    /// documented default. No winner by z-order, area or document position.
+    #[test]
+    fn blob_merge_of_disagreeing_names_takes_the_default() {
+        let out = merge_two_blobs(named(Some("hull")), named(Some("keel")),
+                                  "name_disagree", (10.0, 90.0, 50.0));
+        assert_eq!(out.common.name, None,
+            "two asserted names disagree, so neither is elected");
+    }
+
+    /// AGREEMENT: both sources assert the SAME name. Asserting-sources reduces
+    /// to plain unanimity here, so the agreed name carries.
+    #[test]
+    fn blob_merge_carries_a_name_both_sources_agree_on() {
+        let out = merge_two_blobs(named(Some("hull")), named(Some("hull")),
+                                  "name_agree", (10.0, 90.0, 50.0));
+        assert_eq!(out.common.name.as_deref(), Some("hull"),
+            "agreeing sources carry their name, as any unanimous field does");
     }
 
     // ── T1's RING TERM: the fill rule belongs to whoever made the rings ──

@@ -712,6 +712,7 @@ private struct BlobAttrs {
     var visibility: Visibility = .preview
     var blendMode: BlendMode = .normal
     var mask: Mask? = nil
+    var name: String? = nil
 }
 
 /// Two overlapping blob-brush sources (left + right, same red fill) bridged by
@@ -733,6 +734,7 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
                    locked: a.locked, visibility: a.visibility,
                    blendMode: a.blendMode, mask: a.mask,
                    toolOrigin: "blob_brush",
+                   name: a.name,
                    fillRule: .nonzero))
     }
     let model = Model(document: Document(
@@ -807,6 +809,68 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
                                          sweep: (50, 130, 120)))
     #expect(out.transform == nil,
             "a unanimous transform must NOT ride onto the merge")
+}
+
+// MARK: - `name` at an N -> 1 merge: ASSERTING-SOURCES
+//
+// JYH, ratified 2026-07-27 (EDIT_SEMANTICS_FREEZE.md §3.3, the `name` bullet):
+// for `name` ONLY, unanimity ranges over the sources that ASSERT a name —
+// silence is not a competing claim. "hull" + unnamed -> "hull"; "hull" +
+// "keel" -> the documented default (no name), per T3. Nothing geometric elects
+// the survivor. Mirrors Rust's twin vectors exactly.
+
+/// ONE source asserts a name; the other is silent. The assertion carries.
+///
+/// Separation from the pre-fix behaviour: `name` was not carried at all (the
+/// merge arm's `Path(...)` passed no `name:`), so this returned nil.
+@Test func blobMergeCarriesANameOnlyOneSourceAsserts() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(name: "hull"), BlobAttrs(),
+                                         buffer: "name_one_asserts_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.name == "hull",
+            "a silent source does not veto the only name asserted")
+}
+
+/// The silent source may be either operand — the carry must not depend on
+/// document order, which is geometry (z-order) wearing a different hat.
+@Test func blobMergeCarriesANameAssertedByTheSecondSourceOnly() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(), BlobAttrs(name: "keel"),
+                                         buffer: "name_second_asserts_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.name == "keel",
+            "which operand asserts the name cannot change the answer")
+}
+
+/// ALL-SILENT: nothing is asserted, so the documented default (no name)
+/// stands. The anti-invention pin.
+@Test func blobMergeOfSilentSourcesHasNoName() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(), BlobAttrs(),
+                                         buffer: "name_all_silent_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.name == nil,
+            "no source asserted a name, so the default (none) stands")
+}
+
+/// DISAGREEMENT: two sources assert DIFFERENT names — T2 shape 2 — so T3 takes
+/// the documented default. No winner by z-order, area or document position.
+@Test func blobMergeOfDisagreeingNamesTakesTheDefault() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(name: "hull"),
+                                         BlobAttrs(name: "keel"),
+                                         buffer: "name_disagree_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.name == nil,
+            "two asserted names disagree, so neither is elected")
+}
+
+/// AGREEMENT: both sources assert the SAME name, so asserting-sources reduces
+/// to plain unanimity and the agreed name carries.
+@Test func blobMergeCarriesANameBothSourcesAgreeOn() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(name: "hull"),
+                                         BlobAttrs(name: "hull"),
+                                         buffer: "name_agree_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.name == "hull",
+            "agreeing sources carry their name, as any unanimous field does")
 }
 
 // MARK: - T1's RING TERM: the fill rule belongs to whoever made the rings
