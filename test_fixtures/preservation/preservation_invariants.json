@@ -347,5 +347,148 @@
       "rust": [],
       "swift": []
     }
+  },
+  {
+    "name": "lock_a_group_keeps_the_group_itself",
+    "doc": "T4 in its purest form. Locking a group speaks to `locked` and nothing else, so the container must come back carrying its own id, name, opacity and transform. Swift's Controller.lockSelection rebuilt the Group from an inline five-argument literal, so the very container the artist locked lost its identity; Rust's lock_element is clone-then-mutate and never had the hole. The lock materializes onto the descendants too (both ports recurse), so r_back and r_front are subjects rather than bystanders here; lyr_main and r_bystander are the T4 witnesses.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [
+      "grp_inner",
+      "r_back",
+      "r_front"
+    ],
+    "speaks_to": [
+      "locked"
+    ],
+    "must_change": [
+      "locked"
+    ],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "lock the inner group",
+        "ops": [
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "grp_inner"
+            ]
+          },
+          {
+            "op": "lock_selection"
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "unlock_all_keeps_every_container_it_walks",
+    "doc": "T4. unlock_all rewrites `locked` on every element in the document, so it rebuilds EVERY container on the way down; each of those containers is a bystander whose own fields must survive. The lock in this vector is put on a LEAF (r_front) so the only container-rebuilding op under test is unlock_all itself, and the lock/unlock pair nets to zero — the document's one real change is the r_bystander nudge, which is what keeps the run from being byte-identical and therefore vacuous.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [
+      "r_bystander"
+    ],
+    "speaks_to": [
+      "x",
+      "y"
+    ],
+    "must_change": [
+      "x"
+    ],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "nudge one rect, then lock a leaf and unlock everything",
+        "ops": [
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_bystander"
+            ]
+          },
+          {
+            "op": "move_selection",
+            "dx": 5.0,
+            "dy": 0.0
+          },
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_front"
+            ]
+          },
+          {
+            "op": "lock_selection"
+          },
+          {
+            "op": "unlock_all"
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "show_all_keeps_every_container_it_walks",
+    "doc": "T4. show_all walks the whole document resetting `visibility`, rebuilding every container it passes; those containers are bystanders. The hide is applied to a LEAF (r_front) so show_all is the only container-rebuilding op under test, and hide/show nets to zero — the r_bystander nudge is the document's one real change, so the run is not byte-identical and the invariants are not vacuous.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [
+      "r_bystander"
+    ],
+    "speaks_to": [
+      "x",
+      "y"
+    ],
+    "must_change": [
+      "x"
+    ],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "nudge one rect, then hide a leaf and show everything",
+        "ops": [
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_bystander"
+            ]
+          },
+          {
+            "op": "move_selection",
+            "dx": 5.0,
+            "dy": 0.0
+          },
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_front"
+            ]
+          },
+          {
+            "op": "hide_selection"
+          },
+          {
+            "op": "show_all"
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
   }
 ]

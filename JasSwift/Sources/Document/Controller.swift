@@ -840,9 +840,16 @@ public class Controller {
         func lockRecursive(_ elem: Element) -> Element {
             switch elem {
             case .group(let g):
-                return .group(Group(children: g.children.map { lockRecursive($0) },
-                                    opacity: g.opacity, transform: g.transform, locked: true,
-                                    visibility: g.visibility))
+                // T4: locking speaks to `locked`. The Group is the very thing
+                // the artist named, so everything else about it — id, name,
+                // blendMode, mask, isolatedBlending, knockoutGroup — must come
+                // back. The inline five-argument literal this replaced kept
+                // five of eleven fields and DESTROYED the locked group's own
+                // `id`. Rust's `lock_element` is clone-then-mutate and never
+                // had the hole.
+                var v = g.withChildren(g.children.map { lockRecursive($0) })
+                v.locked = true
+                return .group(v)
             default:
                 return elem.withLocked(true)
             }
@@ -883,26 +890,29 @@ public class Controller {
         func unlockChildren(_ elements: [Element]) -> [Element] {
             elements.map { elem in
                 switch elem {
+                // T4: unlocking speaks to `locked`; every other field of every
+                // container this walk rebuilds comes back untouched. The three
+                // inline literals this replaced kept five or six of eleven
+                // fields, so unlock-all destroyed the `id` of EVERY layer and
+                // group in the document (and a Group's `name` besides). Rust's
+                // `unlock_element` is clone-then-mutate and never had the hole.
                 case .group(let g):
-                    let children = unlockChildren(g.children)
-                    return Element.group(Group(children: children, opacity: g.opacity,
-                                              transform: g.transform, locked: false,
-                                              visibility: g.visibility))
+                    var v = g.withChildren(unlockChildren(g.children))
+                    v.locked = false
+                    return Element.group(v)
                 case .layer(let l):
-                    let children = unlockChildren(l.children)
-                    return Element.layer(Layer(name: l.name, children: children,
-                                              opacity: l.opacity, transform: l.transform, locked: false,
-                                              visibility: l.visibility))
+                    var v = l.withChildren(unlockChildren(l.children))
+                    v.locked = false
+                    return Element.layer(v)
                 default:
                     return elem.isLocked ? elem.withLocked(false) : elem
                 }
             }
         }
-        let newLayers = doc.layers.map { layer in
-            let children = unlockChildren(layer.children)
-            return Layer(name: layer.name, children: children,
-                         opacity: layer.opacity, transform: layer.transform, locked: false,
-                         visibility: layer.visibility)
+        let newLayers = doc.layers.map { layer -> Layer in
+            var v = layer.withChildren(unlockChildren(layer.children))
+            v.locked = false
+            return v
         }
         let newDoc = doc.replacing(layers: newLayers, selection: [])
         var newSelection: Selection = []
@@ -946,21 +956,21 @@ public class Controller {
                 newElem = elem.withVisibility(.preview)
                 shownPaths.append(path)
             }
+            // T4: show-all speaks to `visibility`, already written onto
+            // `newElem` above. Rebuilding the container to carry the rewritten
+            // children must change NOTHING else — the two inline literals this
+            // replaced kept five or six of eleven fields, so showing all
+            // destroyed the `id` of every layer and group in the document (and
+            // a Group's `name`). Rust's `show_all_in` is clone-then-mutate.
             switch newElem {
             case .group(let g):
-                let newChildren = g.children.enumerated().map { (i, c) in
+                return .group(g.withChildren(g.children.enumerated().map { (i, c) in
                     showIn(c, path + [i])
-                }
-                return .group(Group(children: newChildren, opacity: g.opacity,
-                                    transform: g.transform, locked: g.locked,
-                                    visibility: g.visibility))
+                }))
             case .layer(let l):
-                let newChildren = l.children.enumerated().map { (i, c) in
+                return .layer(l.withChildren(l.children.enumerated().map { (i, c) in
                     showIn(c, path + [i])
-                }
-                return .layer(Layer(name: l.name, children: newChildren,
-                                    opacity: l.opacity, transform: l.transform, locked: l.locked,
-                                    visibility: l.visibility))
+                }))
             default:
                 return newElem
             }
