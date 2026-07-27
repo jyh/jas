@@ -347,6 +347,75 @@ def check_measure_injection():
 
 
 # ---------------------------------------------------------------
+# Preflight: one JSON string escaper per port
+# ---------------------------------------------------------------
+#
+# The same shape as check_measure_injection, for the same reason. Until
+# 2026-07-27 each active port carried FOUR independent copies of the
+# canonical-JSON string escaper -- geometry test_json, workspace test_json,
+# the dependency index, and (Rust only) `canonical_value`'s `{:?}` -- and
+# three of them said in their own doc comments that they matched the first.
+# They did not: `canonical_value` spelled U+0001 `\u{1}` where JasSwift
+# emitted it raw, and none of the two-replacement copies escaped a control
+# character at all, so the byte oracle behind the codec gates could not
+# express a newline (coverage gap `codec-no-control-chars`, census 5.5).
+#
+# Each port now has ONE escaper -- `json_escape_string` / `jsonEscapeString`,
+# gated across both ports by test_fixtures/algorithms/canonical_json_string.json
+# -- and the check below requires that no other file re-derives it. A doc
+# comment claiming to match a writer is not a mechanism; this is.
+ESCAPER_HOMES = {
+    "jas_dioxus/src/geometry/test_json.rs",
+    "JasSwift/Sources/Geometry/TestJson.swift",
+}
+
+ESCAPER_ROOTS = [
+    ("jas_dioxus/src", ".rs", "json_escape_string"),
+    ("JasSwift/Sources", ".swift", "jsonEscapeString"),
+]
+
+# The two-replacement idiom, as it appears in each language's source text.
+ESCAPER_SIGNATURES = [
+    ('.replace(\'\\\\\', "\\\\\\\\")', "Rust"),
+    ('replacingOccurrences(of: "\\\\", with: "\\\\\\\\")', "Swift"),
+]
+
+
+def check_json_string_escapers():
+    """Returns a list of problem strings (empty when each port has one)."""
+    problems = []
+    for rel_root, ext, helper in ESCAPER_ROOTS:
+        root = os.path.join(REPO_ROOT, rel_root)
+        if not os.path.isdir(root):
+            problems.append(f"{rel_root}: not a directory")
+            continue
+        for dirpath, _dirs, files in os.walk(root):
+            for fname in sorted(files):
+                if not fname.endswith(ext):
+                    continue
+                path = os.path.join(dirpath, fname)
+                rel = os.path.relpath(path, REPO_ROOT)
+                if rel in ESCAPER_HOMES:
+                    continue
+                try:
+                    with open(path, encoding="utf-8") as fh:
+                        lines = fh.readlines()
+                except (OSError, UnicodeDecodeError) as e:
+                    problems.append(f"{rel}: cannot read ({e})")
+                    continue
+                for i, ln in enumerate(lines):
+                    for sig, lang in ESCAPER_SIGNATURES:
+                        if sig in ln:
+                            problems.append(
+                                f"{rel}:{i + 1}: a {lang} inline JSON string "
+                                f"escaper — call {helper}() instead. A local "
+                                f"copy cannot escape a control character and "
+                                f"re-opens `codec-no-control-chars`: "
+                                f"{ln.strip()}")
+    return problems
+
+
+# ---------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------
 
@@ -382,6 +451,13 @@ def main():
     # surfacing later as a mysterious text_layout mismatch.
     for problem in check_measure_injection():
         print(f"  FAIL: harness/measure-unit {problem}")
+        failed += 1
+
+    # Preflight (see check_json_string_escapers): a second inline escaper is a
+    # PORT fault that no family can see, because every fixture string is
+    # printable ASCII. Reported here by name for the same reason.
+    for problem in check_json_string_escapers():
+        print(f"  FAIL: port/json-string-escaper {problem}")
         failed += 1
 
     for algo in algos:

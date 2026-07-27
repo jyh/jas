@@ -512,27 +512,25 @@ public func dependencyIndexToTestJson(_ idx: DependencyIndex) -> String {
         + "\"topo_order\":\(arrayJson(idx.topoOrder))}"
 }
 
-/// Escape a string for embedding in a canonical-JSON string literal. Matches
-/// `WorkspaceTestJson.swift`'s `JsonObj.str` (backslash then double-quote).
-private func escapeJson(_ s: String) -> String {
-    s.replacingOccurrences(of: "\\", with: "\\\\")
-     .replacingOccurrences(of: "\"", with: "\\\"")
-}
-
 /// Render a string array verbatim (preserving the input's order). Used for the
 /// already-sorted `cycles`/`dangling` arrays AND for `topoOrder`, whose order is
 /// deliberately the topological sequence (NOT sorted) — its order is the data,
 /// so it must be rendered as-is.
+///
+/// Quoting goes through `jsonEscapeString`, THE shared escaper, rather than a
+/// fourth local copy: the copy that used to live here claimed in its own doc
+/// comment to match `JsonObj.str`, and would have silently stopped matching the
+/// moment that writer learned control characters.
 private func arrayJson(_ v: [String]) -> String {
-    let items = v.map { "\"\(escapeJson($0))\"" }
+    let items = v.map { jsonEscapeString($0) }
     return "[\(items.joined(separator: ","))]"
 }
 
 /// Render `{id: [sorted ids]}` with keys sorted and value lists already sorted.
 private func mapJson(_ m: [String: [String]]) -> String {
     let entries = m.keys.sorted().map { k -> String in
-        let items = m[k]!.map { "\"\(escapeJson($0))\"" }
-        return "\"\(escapeJson(k))\":[\(items.joined(separator: ","))]"
+        let items = m[k]!.map { jsonEscapeString($0) }
+        return "\(jsonEscapeString(k)):[\(items.joined(separator: ","))]"
     }
     return "{\(entries.joined(separator: ","))}"
 }

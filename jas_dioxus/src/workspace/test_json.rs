@@ -38,9 +38,13 @@ impl JsonObj {
     }
 
     fn str_val(&mut self, key: &str, v: &str) {
+        // THE shared escaper, not a second copy of it. This file's header
+        // says it follows `geometry::test_json`'s conventions, and a local
+        // two-replacement copy stopped being true of that the moment the
+        // geometry writer learned control characters.
         self.entries.push((
             key.to_string(),
-            format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\"")),
+            crate::geometry::test_json::json_escape_string(v),
         ));
     }
 

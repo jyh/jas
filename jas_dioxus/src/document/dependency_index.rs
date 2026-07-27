@@ -499,11 +499,12 @@ pub fn orphaned_references(doc: &Document, deletion_paths: &[Vec<usize>]) -> Vec
 // object/array/string-escape conventions match the test_json serializer
 // exactly (compact, sorted keys, `\\`/`"` escaped).
 
-/// Escape a string for embedding in a canonical-JSON string literal. Matches
-/// `geometry::test_json::JsonObj::str_val` (backslash then double-quote).
-fn escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
-}
+/// The canonical-JSON spelling of one string, quotes included. THE shared
+/// escaper (`geometry::test_json::json_escape_string`) rather than a fourth
+/// local copy of it: the copy that used to live here claimed in its own doc
+/// comment to match `JsonObj::str_val`, and would have silently stopped
+/// matching the moment that writer learned control characters.
+use crate::geometry::test_json::json_escape_string as escape_quoted;
 
 /// Render `{id: [sorted ids]}` with sorted keys (the map is already a
 /// `BTreeMap`, so iteration is sorted; value lists are sorted at build time).
@@ -511,8 +512,8 @@ fn map_json(m: &BTreeMap<String, Vec<String>>) -> String {
     let entries: Vec<String> = m
         .iter()
         .map(|(k, v)| {
-            let items: Vec<String> = v.iter().map(|s| format!("\"{}\"", escape(s))).collect();
-            format!("\"{}\":[{}]", escape(k), items.join(","))
+            let items: Vec<String> = v.iter().map(|s| escape_quoted(s)).collect();
+            format!("{}:[{}]", escape_quoted(k), items.join(","))
         })
         .collect();
     format!("{{{}}}", entries.join(","))
@@ -523,7 +524,7 @@ fn map_json(m: &BTreeMap<String, Vec<String>>) -> String {
 /// order is deliberately the topological sequence (NOT sorted) — its order is
 /// the data, so it must be rendered as-is.
 fn array_json(v: &[String]) -> String {
-    let items: Vec<String> = v.iter().map(|s| format!("\"{}\"", escape(s))).collect();
+    let items: Vec<String> = v.iter().map(|s| escape_quoted(s)).collect();
     format!("[{}]", items.join(","))
 }
 
