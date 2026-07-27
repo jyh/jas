@@ -508,6 +508,56 @@ oracle behind all three codec gates structurally cannot express multi-line text,
 be added for it until the writer is fixed.** Verified: no `\n`, `\t` or `\u` anywhere in
 `test_fixtures/expected/`.
 
+**5.5 — CLOSED 2026-07-27** (`CTRLCHAR`). The ceiling is lifted, and **three of this entry's own
+claims were wrong or too wide**, each corrected by measurement rather than by argument.
+
+**(a) "Neither writer" undercounted by six.** There were **four** canonical-JSON string escapers per
+active port, at **three different escaping levels**, and only one of them was named above:
+`geometry/test_json.rs:61` and `TestJson.swift:31` (two replacements); `workspace/test_json.rs:43` and
+`WorkspaceTestJson.swift:31` (two replacements); `document/dependency_index.rs:504` and
+`DependencyIndex.swift:517` (two replacements, and **each one's doc comment claimed to match the
+geometry writer**); plus Rust's `canonical_value` and Swift's `canonicalRecordedValue`. Within
+`geometry/test_json.rs` alone, `opt_str_vec:128` and `text_decoration_json:316` quoted with **no
+escaping at all**, as did Swift's `textDecorationJson` and the recipe `targets` list.
+
+**(b) It was NOT purely a shared ceiling — the params path was a live byte DIVERGENCE.** Rust's
+`canonical_value` spelled strings with `{:?}`, i.e. `char::escape_debug`: U+0000 became `\0` and
+U+0001 became `\u{1}` (neither is JSON), and **every scalar Rust calls non-printable** was escaped
+too — a combining acute became `ae\u{301}b`, a ZWJ `\u{200d}`, NBSP `\u{a0}`. Swift's mirror emitted
+all of those **raw**. So a recipe param, a recorded op name or a generated concept param containing a
+combining mark serialised to *different bytes in the two ports*, and Rust's were not JSON. Measured
+by probe, both ports, on `2d56bbf3`. This entry's "not a silent divergence" was true of the writer it
+examined and false of the one it did not.
+
+**(c) "No fixture can express multi-line text" was wider than what was verified.** The claim checked
+`test_fixtures/expected/` and generalised to the fixture format. The **fixture format never had this
+ceiling**: `algorithms/text_layout.json` already carried `"content": "ab\ncd"` (vector
+`hard_newline`), and `text_layout_paragraph.json` the same — the algorithms harness feeds those
+straight to `layout_text`, never through the document writer. Only the **document codec** had the
+ceiling. Also unverified and now measured: U+007F is the one character *above* the ceiling that both
+parsers accept **raw** (serde_json and `JSONSerialization` both ACCEPT it), and no fixture anywhere
+had ever carried one.
+
+**The fix.** One escaper per port (`json_escape_string` / `jsonEscapeString`), all four copies routed
+through it, with the rule adjudicated by `json.dumps(s, ensure_ascii=False)` — five short escapes,
+`\u00xx` lower-case hex below U+0020, everything at U+0020 and above literal, solidus not escaped.
+`test_fixtures/algorithms/canonical_json_string.json` (23 vectors, every `canonical` field produced
+by that `json.dumps` call in `scripts/derive_canonical_json_string_goldens.py`, not typed) is the
+contract, run by both ports. A newline-bearing Text now survives
+`document_to_test_json` → `test_json_to_document` → `document_to_test_json` in each port.
+`check_json_string_escapers` in `cross_language_algorithms.py` stops a fifth copy, in the shape §5.9
+established for the measure unit.
+
+**Not one golden byte moved**, by measurement: a scan of all 543 files under `test_fixtures/` and
+`workspace/` finds zero C0 bytes in any `.json`, zero U+007F anywhere, and zero scalars Rust's
+`escape_debug` would have escaped; and the two suites went 2669 → 2671 and 2598 → 2600, which is
+exactly the tests added.
+
+**Residue**, carried as coverage gap `codec-control-chars-unit-gated-only`: the escaping is gated at
+the writer and at the document round trip, but every `expected/*.json` golden comes from parsing an
+SVG, and **whether the two SVG text parsers preserve a newline in element content was not measured**.
+That is the next thing to measure, before any `svg/` fixture is added.
+
 **5.6 — Swift has two effect dispatchers that disagree, and the corpus drives the wrong one.**
 `Effects.swift` registers the full verb set and reads panel state; `LayersPanel.swift:839` registers
 **4** boolean verbs and hardcodes defaults. The Swift action-corpus arm goes through **the second**, so
@@ -621,7 +671,8 @@ duplicate ids and an *absent* key are all errors), and **printed on every run be
 `stale-known-gap`. Nine rows landed: `text-index-unit`, `element-bounds-untransformed`,
 `flatten-wrong-flattener`, `flatten-no-curves`, `fit-curve-first-pass-only`,
 `codec-optional-fields-unset`, `codec-no-control-chars`, `identity-view-only`,
-`panel-text-width-scalar-count-only`.
+`panel-text-width-scalar-count-only`. (Of those nine, `codec-no-control-chars` was **closed and
+replaced** on 2026-07-27 by `codec-control-chars-unit-gated-only` — see §5.5.)
 
 **Three figures above did not survive re-measurement, and this is the argument for §0's warning
 applying to §5 too:**

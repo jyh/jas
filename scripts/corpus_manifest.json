@@ -462,11 +462,11 @@
       "census": "5.4"
     },
     {
-      "id": "codec-no-control-chars",
-      "title": "The canonical test-JSON writers escape only backslash and quote, so no fixture can express text containing a control character",
-      "evidence": "JsonObj::str_val in jas_dioxus/src/geometry/test_json.rs and JsonObj.str in JasSwift/Sources/Geometry/TestJson.swift each apply exactly two replacements (\\\\ and \\\") and no U+0000-U+001F escaping. Consistent with that, zero of the 39 test_fixtures/expected/*.json contain an escaped control character.",
-      "blocks": "The byte oracle behind all three codec gates structurally cannot express multi-line text, so no fixture can be added for it until the writers are fixed. It fails LOUDLY (both parsers reject), so it is a ceiling rather than a silent divergence.",
-      "unblock": "Add U+0000-U+001F escaping to both writers, then add a text fixture containing a newline.",
+      "id": "codec-control-chars-unit-gated-only",
+      "title": "The codec now round-trips control characters, but only two per-port unit tests say so -- the SVG-driven golden lane still carries none, and nobody has established whether an SVG fixture could express one",
+      "evidence": "Replaces `codec-no-control-chars`, which is CLOSED: json_escape_string / jsonEscapeString escape U+0000-U+001F, test_fixtures/algorithms/canonical_json_string.json pins 23 vectors byte-for-byte in both ports, and multi_line_text_round_trips_through_test_json / multiLineTextRoundTripsThroughTestJson drive a newline-bearing Text through the document writer, the parser and the writer again in each port. What remains: all 39 test_fixtures/expected/*.json goldens are produced by parsing test_fixtures/svg/*.svg, and a scan of every file under test_fixtures/ and workspace/ on this commit (543 files) finds zero C0 bytes in any .json and zero U+007F anywhere, so no SVG-driven golden exercises the new escaping. Whether the two SVG parsers preserve a newline inside a <text> element was NOT measured.",
+      "blocks": "The escaping rule is gated at the writer and at the document round trip, but the path an actual multi-line text element would travel in production -- SVG import, then serialise -- has no vector. A port whose SVG text parser collapsed or dropped a newline would pass every gate that exists today.",
+      "unblock": "Measure first, then decide: probe both SVG text parsers for what they do with a literal newline in element content (XML whitespace handling is a real ruling, not an obvious one). If the two ports agree and preserve it, add one svg/ + expected/ pair with multi-line content. If they disagree, that divergence outranks the fixture and belongs with the Captain.",
       "census": "5.5"
     },
     {
