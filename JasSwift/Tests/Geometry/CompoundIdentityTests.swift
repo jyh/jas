@@ -203,6 +203,80 @@ private func bbox(_ points: [(Double, Double)]) -> (Double, Double, Double, Doub
     #expect(src.operands[1].id == "op-front")
 }
 
+// MARK: - `Element.withCommon` over a live element
+
+/// A LIVE DIVERGENCE found by this wave's own enumeration of Element.swift,
+/// not by the brief. `withCommon`'s `.live` arm read
+///
+///   _ = (opacity, blendMode)          // "no LiveElement setter"
+///   if let t = transform { ... }
+///
+/// so a Properties-panel Opacity or Blend Mode edit over a selected compound
+/// shape (or reference / recorded / generated element) was a SILENT NO-OP in
+/// JasSwift, while `apply_properties_panel_field` in jas_dioxus writes
+/// `ne.common_mut().opacity = op` — which reaches a Live element like any
+/// other. Both fields exist on all four Swift conformers; only the setters
+/// were missing. This is not a preservation violation — nothing was dropped —
+/// it is the same generative cause one step over: a hand-written per-kind
+/// switch whose live arm was left a stub.
+///
+/// The reference interpreter has no apply half of this panel at all
+/// (`workspace_interpreter/effects.py` carries only the display sync), so this
+/// is a Rust-vs-Swift divergence with no third opinion, resolved Rust-ward per
+/// the house rule that Rust implements first.
+@Test func withCommonAppliesOpacityAndBlendModeToALiveCompound() {
+    let cs = richCompound(.union)
+    assertCompoundFixtureIsRich(cs)
+    let edited = Element.live(.compoundShape(cs))
+        .withCommon(opacity: 0.75, blendMode: .screen)
+    guard case .live(.compoundShape(let out)) = edited else {
+        Issue.record("expected a compound shape back"); return
+    }
+    #expect(out.opacity == 0.75, "the edit's own subject did not land")
+    #expect(out.blendMode == .screen, "the edit's own subject did not land")
+    // §3.1: it speaks to those two and preserves the rest.
+    #expect(out.id == "cs-1", "an opacity edit must not touch identity")
+    #expect(out.transform == cs.transform)
+    #expect(out.mask == cs.mask)
+    #expect(out.fill == cs.fill)
+    #expect(out.stroke == cs.stroke)
+    #expect(out.locked == cs.locked)
+    #expect(out.visibility == cs.visibility)
+    #expect(out.operation == cs.operation)
+    // MANDATORY GEOMETRY PAIRING: the operands are untouched bystanders (T4).
+    #expect(out.operands.count == 2)
+    guard out.operands.count == 2,
+          case .rect(let r0) = out.operands[0],
+          case .rect(let r1) = out.operands[1] else {
+        Issue.record("expected two rect operands"); return
+    }
+    #expect(abs(r0.x - 0) < 1e-9 && abs(r0.width - 10) < 1e-9,
+            "operand 0 moved: x=\(r0.x) w=\(r0.width)")
+    #expect(abs(r1.x - 5) < 1e-9 && abs(r1.width - 10) < 1e-9,
+            "operand 1 moved: x=\(r1.x) w=\(r1.width)")
+    #expect(r0.id == "op-back" && r1.id == "op-front",
+            "the operands keep their own ids")
+}
+
+/// The nil-means-keep contract, at the live arm too: an edit that names only
+/// `blendMode` must not reset `opacity` to a default on its way through.
+@Test func withCommonOverALiveCompoundLeavesUnnamedFieldsAlone() {
+    let cs = richCompound(.union)
+    let onlyBlend = Element.live(.compoundShape(cs)).withCommon(blendMode: .screen)
+    guard case .live(.compoundShape(let a)) = onlyBlend else {
+        Issue.record("expected a compound shape back"); return
+    }
+    #expect(a.blendMode == .screen)
+    #expect(a.opacity == cs.opacity, "an unnamed field must be kept, not defaulted")
+    let onlyOpacity = Element.live(.compoundShape(cs)).withCommon(opacity: 0.75)
+    guard case .live(.compoundShape(let b)) = onlyOpacity else {
+        Issue.record("expected a compound shape back"); return
+    }
+    #expect(b.opacity == 0.75)
+    #expect(b.blendMode == cs.blendMode, "an unnamed field must be kept, not defaulted")
+    #expect(b.transform == cs.transform, "transform stays nil-means-keep as before")
+}
+
 // MARK: - `CompoundShape.expand` — §3.6's "Compound Shape EXPAND" row
 
 /// THE FIELD VIOLATION (§3.1 / §3.2). `expand` hand-forwarded SIX of the nine

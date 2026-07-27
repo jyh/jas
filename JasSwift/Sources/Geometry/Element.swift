@@ -1655,11 +1655,17 @@ public enum Element: Equatable {
             v.transform = transform ?? v.transform
             v.blendMode = blendMode ?? v.blendMode
             return .layer(v)
-        case .live(let v):
-            // Transform is settable on a Live element; opacity / blend have no
-            // LiveElement setter, so leave them unchanged (rare edge case).
-            _ = (opacity, blendMode)
-            if let t = transform { return .live(v.withTransform(t)) }
+        case .live(var v):
+            // All three are settable on a Live element — every conformer
+            // STORES `opacity` and `blendMode`, and jas_dioxus writes them
+            // through `common_mut()` at the Properties-panel apply. This arm
+            // used to discard both (`_ = (opacity, blendMode)`, "no
+            // LiveElement setter"), which made an Opacity or Blend Mode edit
+            // over a selected compound shape a SILENT NO-OP in this port
+            // alone. `nil` still means keep, exactly as on the other arms.
+            if let o = opacity { v = v.withOpacity(o) }
+            if let b = blendMode { v = v.withBlendMode(b) }
+            if let t = transform { v = v.withTransform(t) }
             return .live(v)
         }
     }

@@ -1449,6 +1449,55 @@ public enum LiveVariant: Equatable {
         }
     }
 
+    /// Return a copy with the live element's own `opacity` replaced. Every
+    /// conformer already STORES `opacity` (and reports it through the
+    /// ``opacity`` accessor); only the setter was missing, which made
+    /// `Element.withCommon`'s live arm a silent no-op for a Properties-panel
+    /// Opacity edit while jas_dioxus wrote it through `common_mut()`.
+    public func withOpacity(_ opacity: Double) -> LiveVariant {
+        switch self {
+        case .compoundShape(let cs):
+            var updated = cs
+            updated.opacity = opacity
+            return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.opacity = opacity
+            return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.opacity = opacity
+            return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.opacity = opacity
+            return .generated(updated)
+        }
+    }
+
+    /// Return a copy with the live element's own `blendMode` replaced. The
+    /// `withOpacity` note applies verbatim.
+    public func withBlendMode(_ blendMode: BlendMode) -> LiveVariant {
+        switch self {
+        case .compoundShape(let cs):
+            var updated = cs
+            updated.blendMode = blendMode
+            return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.blendMode = blendMode
+            return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.blendMode = blendMode
+            return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.blendMode = blendMode
+            return .generated(updated)
+        }
+    }
+
     public func withTransform(_ transform: Transform?) -> LiveVariant {
         switch self {
         case .compoundShape(let cs):
