@@ -1,0 +1,207 @@
+{
+  "_doc": [
+    "The canonical Test-JSON STRING escaping rule, pinned byte-for-byte.",
+    "",
+    "Every string a canonical Test-JSON writer emits -- an element name, a tspan's",
+    "content, a recipe op name, a recorded input id, a text-decoration member, a",
+    "concept param -- passes through ONE escaper per port: `json_escape_string` in",
+    "jas_dioxus/src/geometry/test_json.rs and `jsonEscapeString` in",
+    "JasSwift/Sources/Geometry/TestJson.swift. This file is that escaper's whole",
+    "contract, and it is the only place the rule is written down.",
+    "",
+    "WHY IT EXISTS. Before 2026-07-27 there were three different string writers per",
+    "port at three different escaping levels, and the byte oracle behind the codec",
+    "gates could not express a control character at all (coverage gap",
+    "`codec-no-control-chars`, CORPUS_CENSUS.md 5.5). Measured on that commit:",
+    "  (a) `JsonObj::str_val` / `JsonObj.str` applied exactly two replacements",
+    "      (backslash, quote), so a text content of 'a<LF>b' serialised to a raw LF",
+    "      inside a JSON string -- which serde_json AND JSONSerialization both",
+    "      REJECT. A loud ceiling, not a silent divergence.",
+    "  (b) Rust's `canonical_value` (recipe params, recorded ops) used Rust's `{:?}`",
+    "      Debug, which spells U+0000 as \\\\0 and U+0001 as \\\\u{1} -- neither is JSON",
+    "      -- and also escapes any scalar Rust calls non-printable, so a combining",
+    "      mark, a ZWJ, NBSP or a soft hyphen became \\\\u{301} and friends. Swift's",
+    "      mirror `canonicalRecordedValue` emitted every one of those RAW. The two",
+    "      ports therefore disagreed byte-for-byte on the params path, and no",
+    "      fixture reached it. That was a LIVE divergence, not a ceiling.",
+    "  (c) `opt_str_vec`, `text_decoration_json` and the recipe `targets` list",
+    "      quoted with no escaping at all, in both ports.",
+    "",
+    "THE RULE, and who adjudicates it. Python's json.dumps(s, ensure_ascii=False),",
+    "per the house adjudication hierarchy (absent a guiding principle, the Python",
+    "reference decides): the two-character escapes for backslash, quote, U+0008,",
+    "U+000C, U+000A, U+000D and U+0009; \\\\u00xx with LOWER-CASE hex for every other",
+    "scalar below U+0020; every scalar at U+0020 and above emitted literally --",
+    "including U+007F DEL, which JSON does not require escaping and which no vector",
+    "in this corpus had carried before this file. Solidus is NOT escaped.",
+    "",
+    "Every `canonical` below was produced BY that json.dumps call rather than typed,",
+    "and every `reparses` was measured by feeding `canonical` back through",
+    "json.loads and comparing with `input`.",
+    "",
+    "Each vector's `input` and `canonical` are ordinary JSON strings, so the FIXTURE",
+    "format never had this ceiling -- only the document codec did. The corpus already",
+    "carried multi-line text in text_layout.json's `hard_newline` vector, which the",
+    "algorithms harness feeds to layoutText directly, never through the document",
+    "writer.",
+    "",
+    "Driven in Rust by geometry::test_json::tests::canonical_json_string_corpus and",
+    "in Swift by CanonicalJsonStringTests.canonicalJsonStringCorpus."
+  ],
+  "vectors": [
+    {
+      "name": "plain_ascii",
+      "why": "The baseline: nothing to escape, and the overwhelming majority of every existing golden.",
+      "input": "abc",
+      "canonical": "\"abc\"",
+      "reparses": true
+    },
+    {
+      "name": "empty",
+      "why": "An empty string is a pair of quotes, not null -- the null-for-empty rule lives one level up in empty_as_null / emptyAsNull.",
+      "input": "",
+      "canonical": "\"\"",
+      "reparses": true
+    },
+    {
+      "name": "quote",
+      "why": "One of the two characters the pre-lift writers already handled; pinned so the lift cannot lose it.",
+      "input": "a\"b",
+      "canonical": "\"a\\\"b\"",
+      "reparses": true
+    },
+    {
+      "name": "backslash",
+      "why": "The other pre-lift escape.",
+      "input": "a\\b",
+      "canonical": "\"a\\\\b\"",
+      "reparses": true
+    },
+    {
+      "name": "backslash_before_quote",
+      "why": "Escape ORDER, made observable: a pass that replaced the quote before the backslash emits three backslashes here instead of two.",
+      "input": "a\\\"b",
+      "canonical": "\"a\\\\\\\"b\"",
+      "reparses": true
+    },
+    {
+      "name": "solidus_is_not_escaped",
+      "why": "JSON permits \\/ but does not require it, and json.dumps does not emit it. A port that escaped it would still produce valid JSON and would still diverge byte-for-byte.",
+      "input": "a/b",
+      "canonical": "\"a/b\"",
+      "reparses": true
+    },
+    {
+      "name": "newline",
+      "why": "THE LIFT. Serialised to a raw LF before 2026-07-27, which both parsers rejected.",
+      "input": "a\nb",
+      "canonical": "\"a\\nb\"",
+      "reparses": true
+    },
+    {
+      "name": "tab",
+      "why": "Same class as newline; the short escape is the json.dumps spelling, not \\u0009.",
+      "input": "a\tb",
+      "canonical": "\"a\\tb\"",
+      "reparses": true
+    },
+    {
+      "name": "carriage_return",
+      "why": "The third short escape a text content can plausibly carry (a CRLF paste).",
+      "input": "a\rb",
+      "canonical": "\"a\\rb\"",
+      "reparses": true
+    },
+    {
+      "name": "backspace",
+      "why": "U+0008 has a short escape in JSON; a port emitting \\u0008 here is still valid JSON and still a byte divergence.",
+      "input": "a\bb",
+      "canonical": "\"a\\bb\"",
+      "reparses": true
+    },
+    {
+      "name": "form_feed",
+      "why": "U+000C, the last of the five short escapes.",
+      "input": "a\fb",
+      "canonical": "\"a\\fb\"",
+      "reparses": true
+    },
+    {
+      "name": "nul",
+      "why": "U+0000 has NO short escape in JSON. Rust's Debug spelled it \\0, which is not JSON.",
+      "input": "a\u0000b",
+      "canonical": "\"a\\u0000b\"",
+      "reparses": true
+    },
+    {
+      "name": "unit_separator_lowercase_hex",
+      "why": "U+001F, the top of the escaped range, and the case convention: json.dumps emits lower-case hex, so \\u001f and not \\u001F.",
+      "input": "a\u001fb",
+      "canonical": "\"a\\u001fb\"",
+      "reparses": true
+    },
+    {
+      "name": "space_is_the_first_literal",
+      "why": "U+0020 is the boundary itself: the first scalar emitted literally.",
+      "input": "a b",
+      "canonical": "\"a b\"",
+      "reparses": true
+    },
+    {
+      "name": "del_is_literal",
+      "why": "U+007F needs no JSON escape and both parsers accept it raw -- measured. It is the one character the format could ALWAYS express and that no fixture had ever carried. Rust's Debug escaped it to \\u{7f}, which is not JSON.",
+      "input": "ab",
+      "canonical": "\"ab\"",
+      "reparses": true
+    },
+    {
+      "name": "non_ascii_bmp",
+      "why": "Non-ASCII is emitted literally (ensure_ascii=False), which existing goldens already rely on.",
+      "input": "aéb",
+      "canonical": "\"aéb\"",
+      "reparses": true
+    },
+    {
+      "name": "astral",
+      "why": "A scalar above the BMP is one Rust char and one Swift unicode scalar but two UTF-16 code units; it must not become a surrogate pair on the wire.",
+      "input": "a😀b",
+      "canonical": "\"a😀b\"",
+      "reparses": true
+    },
+    {
+      "name": "combining_mark",
+      "why": "Rust's escape_debug escapes grapheme-extend scalars, so the pre-lift params writer emitted \\u{301} here while Swift emitted the mark raw. This is divergence (b), reduced to one character.",
+      "input": "aéb",
+      "canonical": "\"aéb\"",
+      "reparses": true
+    },
+    {
+      "name": "zero_width_joiner",
+      "why": "U+200D is category Cf, so Rust's Debug escaped it and Swift did not -- the same divergence, on the family-emoji sequence the text corpus already measures.",
+      "input": "👨‍👩",
+      "canonical": "\"👨‍👩\"",
+      "reparses": true
+    },
+    {
+      "name": "no_break_space",
+      "why": "U+00A0 is Zs-other-than-space, the third arm of Rust's non-printable rule.",
+      "input": "a b",
+      "canonical": "\"a b\"",
+      "reparses": true
+    },
+    {
+      "name": "multi_line_text",
+      "why": "The reason the ceiling mattered: text is the largest untested surface in the app, and a fixture format that cannot express a newline cannot gate multi-line text at all.",
+      "input": "line one\nline two",
+      "canonical": "\"line one\\nline two\"",
+      "reparses": true
+    },
+    {
+      "name": "every_escape_at_once",
+      "why": "One string exercising all five short escapes, both literal escapes, the \\u00xx arm and a literal above U+0020, so a port that gets one arm's order wrong cannot pass by getting each arm right in isolation.",
+      "input": "\"\\\b\f\n\r\t\u0001 z",
+      "canonical": "\"\\\"\\\\\\b\\f\\n\\r\\t\\u0001 z\"",
+      "reparses": true
+    }
+  ]
+}
