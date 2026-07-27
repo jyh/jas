@@ -261,6 +261,24 @@ Worth a council ruling.
 Whichever way it is resolved, the YAML English must change in the same commit or the next reader will
 "fix" Rust back.
 
+> **ROWS RE-VERIFIED AND RECORDED — VIEWSEED, 2026-07-27.** All three re-measured at
+> `arc2-edit-semantics` with probe vectors run through both action corpora, and each is now a
+> coverage-gap row carrying its seed, its spec-derived triple and both ports' observed output:
+> `view-anchor-default-divergence` (#6), `view-zoom-set-pan-divergence` (#7),
+> `view-actions-bypass-yaml-in-swift` (#8). Three corrections to the account above:
+>
+> - **#6 has TWO causes, and Swift's anchor is the canvas top-left, not the document origin** —
+>   Swift never merges the action's declared `default: -1`, so the `< 0` branch this row cites is
+>   never reached (see the ROW NARROWED note at §5.7).
+> - **#7: the spec is not merely stale, it is doubled.** `transcripts/ZOOM_TOOL.md` says "pan
+>   unchanged" in BOTH its shortcut table and its prose, and `actions.yaml` a third time. Rust's
+>   `doc.zoom.set` comment cites a ZOOM_TOOL.md sentence that is **not in that file** (grep for
+>   "approximately" returns nothing). So this is not "Swift is behind" — by every written rule
+>   **Swift is right and Rust diverges**, and the row needs a ruling, not a port fix.
+> - **#8's fix has an ORDER dependency this row does not state.** Routing Swift's menu/keyboard
+>   through the YAML pipeline today would REGRESS the menu: native `zoomIn` anchors at the viewport
+>   centre (correct), the YAML path in Swift anchors at the top-left corner. #6 first, then #8.
+
 ---
 
 ## 3. WHAT IS GENUINELY COVERED
@@ -506,6 +524,28 @@ which argues for a **shared registration** rather than a third per-domain patch.
 build the model at the identity view where screen↔doc is algebraically the identity. **The
 multiply/divide-by-zoom half of every tool is ungated**, and no fixture can currently express
 otherwise — the runners would need a view-state seed. This is a machinery limit, not a missing family.
+
+> **ROW NARROWED — VIEWSEED, 2026-07-27.** The machinery limit is gone: both runners in both ports
+> take an optional `view` seed, and the action runner an `expected_view` assertion. `test_fixtures/
+> actions/view_state.json` (7 vectors, spec-derived from ZOOM_TOOL.md's anchor/clamp block via
+> CPython) and `test_fixtures/gestures/draw_rect_zoomed.json` (1 vector) are the first fixtures
+> anywhere that set the view. **9 of the 72 action/gesture driver cases now run off the identity;
+> 63 still do not**, so the row is narrowed, not closed — see the re-measured `identity-view-only`
+> row in `scripts/corpus_manifest.json` for what remains and for the per-family unblock.
+>
+> The family found **two Swift bugs neither this section nor row #8 predicted**, both fixed:
+> `LayersPanel.dispatchYamlAction` registered **no `doc.zoom.*` handler at all** (so all six View
+> verbs were silent no-ops through the generic dispatcher, while the Zoom *tool* could zoom), and
+> its eval ctx carried **no `preferences` namespace** (so `factor: preferences.viewport.zoom_step`
+> evaluated to 0 and a zoom-IN clamped the canvas to `min_zoom` — a zoom-in that zooms all the way
+> out). Rust had both.
+>
+> **Correction to this section's own account of #6.** It says Swift anchors at "the document
+> origin's screen position". Measured through the action dispatcher it anchors at **screen (0, 0)**,
+> the canvas top-left, because Swift also fails to merge an action's declared param **defaults**, so
+> `param.anchor_x` arrives as null→0 rather than the declared −1. The `< 0 ? px` fallback the row
+> cites is real but is never reached. Two causes, not one; both recorded in
+> `view-anchor-default-divergence`.
 
 **5.8 — The `bind.*` value surface is unpinned in both ports.** `panel_widget_tree` records the
 **sorted key names** of `bind`/`style` and nothing about their values, and deliberately does not
