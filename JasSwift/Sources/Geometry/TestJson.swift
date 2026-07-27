@@ -794,8 +794,10 @@ private func parseTransform(_ v: Any?) -> Transform? {
 /// The test-JSON transform parser, reachable from the AlgorithmRoundtrip
 /// target so a fixture's `layer_transform` (the element_evaluated_bounds
 /// family's ancestor leg) goes through the SAME parser the element's own
-/// `transform` does. Distinctly named because three other files in this
-/// module already declare a file-private `parseTransform` of their own.
+/// `transform` does. Distinctly named because widening this one to `package`
+/// made the call in OpApply.swift ambiguous: the module holds three other
+/// `parseTransform` declarations (private free functions in OpApply.swift and
+/// Svg.swift, and a private static one in WorkspaceIcon.swift).
 package func parseTestJsonTransform(_ v: Any?) -> Transform? {
     parseTransform(v)
 }
