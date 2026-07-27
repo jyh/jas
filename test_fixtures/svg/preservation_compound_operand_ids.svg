@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Setup for the PRESERVATION corpus: an ILL-FORMED import whose duplicate id
+     is carried by a live compound shape's OPERAND, not by a tree child.
+
+     REFERENCE_GRAPH.md 2.5 says element ids are unique document-wide, and every
+     document reader runs dedupe_element_ids / dedupeElementIds to enforce that
+     on import. Those walks descended through group/layer children only, so an
+     operand duplicate rode straight through the reader and the loaded document
+     violated the invariant the reader exists to establish. This setup is the
+     smallest document that says so.
+
+     Structure (canonical pre-order):
+       lyr_main  (Layer, id + name + opacity)
+         grp_inner  (Group, id + name + opacity)
+           r_dup    (Rect, id + name)          first use of "r_dup": keeps it
+           cmp      (live compound shape, id)
+             r_dup  (Rect operand, SAME id)    later duplicate: import clears it
+             op_b   (Rect operand, id + name)
+         r_bystander (Rect, id + name)         the vector's subject
+
+     cmp is a g element carrying data-jas-live="compound_shape", so its two
+     operands are REAL elements carrying their own common.id. They are part of
+     the one document-wide id space, and they are exactly what
+     Element::children() and the Swift Group|Layer switch do NOT report.
+
+     Deliberately NOT set: mask, blendMode, visibility. The SVG reader
+     populates none of them, so writing them here would assert nothing. Same
+     discipline as preservation_nested_attrs.svg.
+
+     NOTE for future authors: keep tag-like text out of this comment. The
+     hand-rolled SVG readers in both ports do not skip comment bodies before
+     tokenizing, so an angle-bracketed element name written INSIDE a comment
+     is parsed as markup and the whole document silently loads EMPTY. Measured
+     on this fixture: an earlier draft of this comment spelled the compound as
+     a literal bracketed g tag and both ports produced a one-empty-layer
+     document. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 200 200" width="200" height="200">
+  <g inkscape:groupmode="layer" inkscape:label="Main Layer" id="lyr_main" opacity="0.9">
+    <g inkscape:label="Inner Group" id="grp_inner" opacity="0.8">
+      <rect id="r_dup" inkscape:label="First Dup Rect" x="0" y="0" width="100" height="100" fill="rgb(255,0,0)" stroke="none"/>
+      <g data-jas-live="compound_shape" data-jas-operation="union" id="cmp">
+        <rect id="r_dup" x="20" y="20" width="60" height="60" fill="rgb(0,0,255)" stroke="none"/>
+        <rect id="op_b" inkscape:label="Operand B" x="40" y="40" width="60" height="60" fill="rgb(0,255,0)" stroke="none"/>
+      </g>
+    </g>
+    <rect id="r_bystander" inkscape:label="Bystander Rect" x="160" y="160" width="20" height="20" fill="rgb(0,255,0)" stroke="none"/>
+  </g>
+</svg>

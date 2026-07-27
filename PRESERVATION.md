@@ -24,7 +24,7 @@ says where it still cannot.
 | Piece | Path |
 |---|---|
 | Vectors | `test_fixtures/preservation/preservation_invariants.json` |
-| Setup document | `test_fixtures/svg/preservation_nested_attrs.svg` |
+| Setup documents | `test_fixtures/svg/preservation_nested_attrs.svg`, `test_fixtures/svg/preservation_compound_operand_ids.svg` |
 | Rust gate | `jas_dioxus/src/cross_language_test.rs` — `preservation_invariants` |
 | Swift gate | `JasSwift/Tests/CrossLanguageTests.swift` — `preservationInvariants` |
 | Data/anti-vacuity gate | `scripts/check_preservation_corpus.py` (CI: workspace-json-fresh lane) |
@@ -104,10 +104,45 @@ Two findings this gate produced that no golden in the corpus could:
    18 setup SVGs the operations corpus uses DO carry element ids — the gap is
    specific to the boolean fixtures, not general.)
 
-Why the containers had to be new: of the 47 SVGs in `test_fixtures/svg/`,
-exactly one other carries a `<g>` with an `id` (`live_compound_id.svg`, a
-compound-shape live element). No pre-existing setup gave a Layer or Group an
-identity, which is why the `withChildren` class had never been seen.
+Why the containers had to be new: when this sentence was first written, of the
+47 SVGs then in `test_fixtures/svg/`, exactly one other carried a `<g>` with an
+`id` (`live_compound_id.svg`, a compound-shape live element). No pre-existing
+setup gave a Layer or Group an identity, which is why the `withChildren` class
+had never been seen. **Re-counted on this commit** (comments stripped first, so
+only real markup is counted): the directory now holds 53 SVGs and 5 of them
+carry a `<g>` with an `id` — the two above plus `nested_containers.svg` (added
+after this paragraph by the BYSTANDER round), and the two added by DEDUPEIDS,
+`dup_id_compound_operand.svg` and `preservation_compound_operand_ids.svg`. The
+original count was correct when written and has since gone stale; the
+conclusion it supports is unchanged.
+
+### 5.1 The serialization boundary — `id_uniqueness` before the edit even runs
+
+`compound_operand_dup_id_is_deduped_on_import` is the family's first vector
+whose subject is what the **reader** hands the edit, not what the edit does. A
+serialization boundary that fails to establish an invariant is the same defect
+class as an edit that breaks one: the round trip speaks to nothing, so it must
+preserve — and re-establish — everything.
+
+Its setup SVG is ill-formed on purpose: a live compound shape's OPERAND repeats
+the id of an earlier tree child. `dedupe_element_ids` / `dedupeElementIds` are
+supposed to normalize that away on import, but both walked group/layer children
+only, so the duplicate rode through and the loaded document violated
+REFERENCE_GRAPH.md §2.5. The vector's edit is a deliberately trivial 1:1 move of
+a bystander rect; because `id_uniqueness` is evaluated on the POST-edit
+document, an import-time duplicate is carried straight through to it.
+
+Measured, both ports, by reverting the DEDUPEIDS fix one port at a time:
+
+```
+[compound_operand_dup_id_is_deduped_on_import] id_uniqueness VIOLATED:
+    id(s) appear more than once after the edit: ["r_dup"]
+```
+
+Green in both ports with the fix in place. This is a SECOND, independent gate on
+that fix — the first is the parse golden `expected/dup_id_compound_operand.json`
+— and the two watch different things: the golden pins the exact normalized
+document, this one pins the document-wide predicate.
 
 The Swift boolean's two causes were separated by *isolating mutation*, not by
 reading: with `withChildren` temporarily made field-preserving, four of the
