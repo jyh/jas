@@ -557,17 +557,13 @@ func canonicalRecordedValue(_ v: Any) -> String {
     case let i as Int:
         return recordedFmt(Double(i))
     case let s as String:
-        let escaped = s.replacingOccurrences(of: "\\", with: "\\\\")
-                       .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
+        return jsonEscapeString(s)
     case let arr as [Any]:
         return "[\(arr.map(canonicalRecordedValue).joined(separator: ","))]"
     case let obj as [String: Any]:
         let keys = obj.keys.sorted()
         let entries = keys.map { k -> String in
-            let escaped = k.replacingOccurrences(of: "\\", with: "\\\\")
-                           .replacingOccurrences(of: "\"", with: "\\\"")
-            return "\"\(escaped)\":\(canonicalRecordedValue(obj[k]!))"
+            "\(jsonEscapeString(k)):\(canonicalRecordedValue(obj[k]!))"
         }
         return "{\(entries.joined(separator: ","))}"
     default:
@@ -578,10 +574,9 @@ func canonicalRecordedValue(_ v: Any) -> String {
 /// Canonical JSON of a single recipe op: `{op, params, targets}` with sorted
 /// params keys. Mirrors the Rust op emitter in `element_json`.
 func canonicalRecordedOp(_ op: PrimitiveOp) -> String {
-    let targets = op.targets.map { "\"\($0)\"" }.joined(separator: ",")
-    let opEscaped = op.op.replacingOccurrences(of: "\\", with: "\\\\")
-                        .replacingOccurrences(of: "\"", with: "\\\"")
-    return "{\"op\":\"\(opEscaped)\",\"params\":\(canonicalRecordedValue(op.params))," +
+    let targets = op.targets.map { jsonEscapeString($0) }.joined(separator: ",")
+    return "{\"op\":\(jsonEscapeString(op.op))," +
+        "\"params\":\(canonicalRecordedValue(op.params))," +
         "\"targets\":[\(targets)]}"
 }
 

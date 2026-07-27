@@ -61,6 +61,8 @@ DOC = [
 VECTORS = [
     ("plain_ascii", "abc",
      "The baseline: nothing to escape, and the overwhelming majority of every existing golden."),
+    ("mixed_case_is_verbatim", "Aa Zz MiXeD",
+     "A literal is copied through byte-for-byte, case included. Added because a mutation that lower-cased the pass-through arm survived the first 22 vectors: every one of them was lower-case, so nothing in the corpus could see it."),
     ("empty", "",
      "An empty string is a pair of quotes, not null -- the null-for-empty rule lives one level up in empty_as_null / emptyAsNull."),
     ("quote", "a\"b",
