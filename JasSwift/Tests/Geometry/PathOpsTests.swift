@@ -102,6 +102,45 @@ import Testing
     #expect(abs(t - 0.5) < 1e-2)
 }
 
+// MARK: - Projection distances must not overflow
+//
+// The three projection distances come from a real hypot, matching Rust's six
+// `.hypot` sites in geometry/path_ops.rs. The naive `sqrt(dx*dx + dy*dy)`
+// squares first, so at coordinates above ~1e154 every distance saturates to
+// +inf — and `closestOnCubic` then compares +inf against +inf, which makes its
+// coarse-scan and trisection branches take the wrong side. These live in a
+// per-port test rather than the shared corpus because path_ops has no corpus
+// family or roundtrip-harness entry to hang a vector on.
+
+@Test func closestOnLineDegenerateSegmentDoesNotOverflow() {
+    // Zero-length segment at the origin: distance is |p| = 1.414e200.
+    let (d, t) = closestOnLine(0, 0, 0, 0, 1e200, 1e200)
+    #expect(d.isFinite)
+    #expect(abs(d - 1.4142135623730951e200) / 1.4142135623730951e200 < 1e-12)
+    #expect(t == 0)
+}
+
+@Test func closestOnLineProjectedDistanceDoesNotOverflow() {
+    // Segment (0,0)-(1e100,0); the point sits above its midpoint, 1e200 away.
+    let (d, t) = closestOnLine(0, 0, 1e100, 0, 5e99, 1e200)
+    #expect(d.isFinite)
+    #expect(abs(d - 1e200) / 1e200 < 1e-12)
+    #expect(abs(t - 0.5) < 1e-9)
+}
+
+@Test func closestOnCubicDoesNotOverflow() {
+    // A cubic tracing the straight line (0,0)-(1e200,0). The point is 1e200
+    // directly above the START, so the closest t is 0 and the distance is
+    // 1e200. With saturating distances, no coarse sample beats the initial
+    // +inf and the trisection walks `lo` up instead of pulling `hi` down, so
+    // t lands near the far end of the first bracket (0.02) instead of 0.
+    let (d, t) = closestOnCubic(0, 0, 1e200 / 3, 0, 2e200 / 3, 0, 1e200, 0,
+                                0, 1e200)
+    #expect(d.isFinite)
+    #expect(abs(d - 1e200) / 1e200 < 1e-6)
+    #expect(t < 1e-5)
+}
+
 @Test func closestSegmentAndTPicksCorrectSegment() {
     let cmds: [PathCommand] = [
         .moveTo(0, 0),

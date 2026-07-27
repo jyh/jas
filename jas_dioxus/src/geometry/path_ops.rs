@@ -928,6 +928,50 @@ mod tests {
         ]
     }
 
+    // ---- Projection distances must not overflow ----
+    //
+    // The three projection distances come from `f64::hypot`. The naive
+    // `(dx*dx + dy*dy).sqrt()` squares first, so at coordinates above ~1e154
+    // every distance saturates to +inf — and `closest_on_cubic` then compares
+    // +inf against +inf, which makes its coarse-scan and trisection branches
+    // take the wrong side. Mirrored by JasSwift's
+    // `closestOnLine*DoesNotOverflow` / `closestOnCubicDoesNotOverflow`.
+    // Per-port rather than a corpus vector: path_ops has no corpus family or
+    // roundtrip-harness entry to hang one on.
+
+    #[test]
+    fn closest_on_line_degenerate_segment_does_not_overflow() {
+        // Zero-length segment at the origin: distance is |p| = 1.414e200.
+        let (d, t) = closest_on_line(0.0, 0.0, 0.0, 0.0, 1e200, 1e200);
+        assert!(d.is_finite());
+        assert!((d - 1.4142135623730951e200).abs() / 1.4142135623730951e200 < 1e-12);
+        assert_eq!(t, 0.0);
+    }
+
+    #[test]
+    fn closest_on_line_projected_distance_does_not_overflow() {
+        // Segment (0,0)-(1e100,0); the point sits above its midpoint, 1e200 away.
+        let (d, t) = closest_on_line(0.0, 0.0, 1e100, 0.0, 5e99, 1e200);
+        assert!(d.is_finite());
+        assert!((d - 1e200).abs() / 1e200 < 1e-12);
+        assert!((t - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn closest_on_cubic_does_not_overflow() {
+        // A cubic tracing the straight line (0,0)-(1e200,0). The point is
+        // 1e200 directly above the START, so the closest t is 0 and the
+        // distance is 1e200. With saturating distances, no coarse sample beats
+        // the initial +inf and the trisection walks `lo` up instead of pulling
+        // `hi` down, so t lands near the far end of the first bracket (0.02).
+        let (d, t) = closest_on_cubic(
+            0.0, 0.0, 1e200 / 3.0, 0.0, 2e200 / 3.0, 0.0, 1e200, 0.0, 0.0, 1e200,
+        );
+        assert!(d.is_finite());
+        assert!((d - 1e200).abs() / 1e200 < 1e-6);
+        assert!(t < 1e-5);
+    }
+
     #[test]
     fn delete_interior_anchor_merges_curves() {
         let result = delete_anchor_from_path(&cubic_chain(), 2).unwrap();

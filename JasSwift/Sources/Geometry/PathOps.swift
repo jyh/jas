@@ -126,6 +126,12 @@ public func flattenWithCmdMap(
 }
 
 // MARK: - Projection
+//
+// Every distance below comes from Foundation's `hypot`, matching Rust's six
+// `.hypot` calls in geometry/path_ops.rs. The naive
+// `(dx*dx + dy*dy).squareRoot()` squares first and saturates to +inf above
+// ~1e154, which turns `closestOnCubic`'s scan and trisection comparisons into
+// +inf-against-+inf.
 
 /// Closest-point projection onto a line segment. Returns (distance, t).
 public func closestOnLine(
@@ -136,14 +142,14 @@ public func closestOnLine(
     let dy = y1 - y0
     let lenSq = dx * dx + dy * dy
     if lenSq == 0 {
-        let d = ((px - x0) * (px - x0) + (py - y0) * (py - y0)).squareRoot()
+        let d = hypot(px - x0, py - y0)
         return (d, 0)
     }
     var t = ((px - x0) * dx + (py - y0) * dy) / lenSq
     t = max(0, min(1, t))
     let qx = x0 + t * dx
     let qy = y0 + t * dy
-    let d = ((px - qx) * (px - qx) + (py - qy) * (py - qy)).squareRoot()
+    let d = hypot(px - qx, py - qy)
     return (d, t)
 }
 
@@ -162,7 +168,7 @@ public func closestOnCubic(
     for i in 0...steps {
         let t = Double(i) / Double(steps)
         let (bx, by) = evalCubic(x0, y0, x1, y1, x2, y2, x3, y3, t)
-        let d = ((px - bx) * (px - bx) + (py - by) * (py - by)).squareRoot()
+        let d = hypot(px - bx, py - by)
         if d < bestDist { bestDist = d; bestT = t }
     }
     var lo = max(bestT - 1.0 / Double(steps), 0)
@@ -172,13 +178,13 @@ public func closestOnCubic(
         let t2 = hi - (hi - lo) / 3
         let (bx1, by1) = evalCubic(x0, y0, x1, y1, x2, y2, x3, y3, t1)
         let (bx2, by2) = evalCubic(x0, y0, x1, y1, x2, y2, x3, y3, t2)
-        let d1 = ((px - bx1) * (px - bx1) + (py - by1) * (py - by1)).squareRoot()
-        let d2 = ((px - bx2) * (px - bx2) + (py - by2) * (py - by2)).squareRoot()
+        let d1 = hypot(px - bx1, py - by1)
+        let d2 = hypot(px - bx2, py - by2)
         if d1 < d2 { hi = t2 } else { lo = t1 }
     }
     bestT = (lo + hi) / 2
     let (bx, by) = evalCubic(x0, y0, x1, y1, x2, y2, x3, y3, bestT)
-    bestDist = ((px - bx) * (px - bx) + (py - by) * (py - by)).squareRoot()
+    bestDist = hypot(px - bx, py - by)
     return (bestDist, bestT)
 }
 
