@@ -490,3 +490,114 @@ private let theseusSquare: [PathCommand] = [
     expectOnlyDChanged(src, try #require(pathAt(model, [0, 0])),
                        "erase then blob_brush merge")
 }
+
+// MARK: - Unanimous attributes on an N -> 1 merge
+//
+// JYH, ratified 2026-07-26: if EVERY source agrees on a non-paint attribute
+// the result carries it; if they disagree, the tool's default is taken. No
+// winner is ever picked — "the largest source keeps it" was rejected in both
+// directions. The rationale is the Theseus principle: an edit preserves what
+// it does not speak to, and painting a stroke says nothing about opacity.
+// `transform` is EXCLUDED regardless (see the site).
+
+/// A test-only mask, so `mask` can be given a non-default value.
+private func unanimityMask() -> Mask {
+    Mask(subtreeElement: .rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                    fill: Fill(color: Color(r: 1, g: 1, b: 1)))),
+         clip: true, invert: true, disabled: false, linked: false,
+         unlinkTransform: Transform())
+}
+
+/// The non-paint attributes one blob-brush source carries into a merge.
+private struct BlobAttrs {
+    var opacity: Double = 1.0
+    var transform: Transform? = nil
+    var locked: Bool = false
+    var visibility: Visibility = .preview
+    var blendMode: BlendMode = .normal
+    var mask: Mask? = nil
+}
+
+/// Two overlapping blob-brush sources (left + right, same red fill) bridged by
+/// ONE sweep, so the commit takes the N = 2 merge arm. Returns the merged
+/// element. `buffer` must be unique per test — the point buffers are
+/// process-global and tests run in parallel. Mirrors Rust `merge_two_blobs`.
+private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
+                           buffer: String) -> Path? {
+    let red = Fill(color: Color.fromHex("#ff0000")!)
+    func blob(_ x0: Double, _ x1: Double, _ a: BlobAttrs) -> Element {
+        .path(Path(d: [.moveTo(x0, 40), .lineTo(x1, 40),
+                       .lineTo(x1, 60), .lineTo(x0, 60), .closePath],
+                   fill: red,
+                   opacity: a.opacity, transform: a.transform,
+                   locked: a.locked, visibility: a.visibility,
+                   blendMode: a.blendMode, mask: a.mask,
+                   toolOrigin: "blob_brush",
+                   fillRule: .nonzero))
+    }
+    let model = Model(document: Document(
+        layers: [Layer(children: [blob(0, 40, left), blob(60, 100, right)])],
+        selectedLayer: 0, selection: []))
+    let store = StateStore()
+    store.set("fill_color", red.color.toHex())
+    store.set("blob_brush_size", 10.0)
+    store.set("blob_brush_angle", 0.0)
+    store.set("blob_brush_roundness", 100.0)
+    seedBlobBrushSweepIn(buffer, 10, 90, 50)
+    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    #expect(model.document.layers[0].children.count == 1,
+            "the sweep bridged both blobs, so both were merged away")
+    return pathAt(model, [0, 0])
+}
+
+/// UNANIMOUS: both sources carry the same five non-paint attributes, so all
+/// five ride onto the merged element.
+///
+/// Separation from the pre-fix behaviour: the old code built the result from
+/// the initializer defaults, so it returned opacity 1.0, .normal, .preview,
+/// locked false and mask nil — the opposite of every value asserted here.
+@Test func blobMergeCarriesUnanimousAttributes() throws {
+    let agreed = BlobAttrs(opacity: 0.5, locked: true, visibility: .outline,
+                           blendMode: .multiply, mask: unanimityMask())
+    let out = try #require(mergeTwoBlobs(agreed, agreed, buffer: "unanimity_agree_swift"))
+    #expect(out.opacity == 0.5)
+    #expect(out.blendMode == .multiply)
+    #expect(out.visibility == .outline)
+    #expect(out.locked)
+    #expect(out.mask == unanimityMask())
+}
+
+/// DISAGREEMENT: the sources differ on every one of the five, so the merged
+/// element takes the tool's defaults. No source is ever the winner.
+///
+/// This vector does NOT separate the pre-fix behaviour (which also produced
+/// the defaults) — it is the anti-arbitrariness pin, and it goes red the
+/// moment anyone implements "the first/largest source wins".
+@Test func blobMergeOfDisagreeingSourcesTakesTheDefaults() throws {
+    let left = BlobAttrs(opacity: 0.5, locked: true, visibility: .outline,
+                         blendMode: .multiply, mask: unanimityMask())
+    let right = BlobAttrs(opacity: 0.25, locked: false, visibility: .preview,
+                          blendMode: .screen, mask: nil)
+    let out = try #require(mergeTwoBlobs(left, right, buffer: "unanimity_disagree_swift"))
+    #expect(out.opacity == 1.0)
+    #expect(out.blendMode == .normal)
+    #expect(out.visibility == .preview)
+    #expect(!out.locked)
+    #expect(out.mask == nil)
+}
+
+/// `transform` is EXCLUDED even when the sources agree. The merge matches raw
+/// geometry against a document-space sweep, so it is already transform-blind
+/// (transcripts/BLOB_BRUSH_TOOL.md); carrying a unanimous transform would
+/// COMPOUND that bug by relocating the merged artwork.
+///
+/// This vector does not separate the pre-fix behaviour either — it is the pin
+/// that stops `transform` being swept into the unanimity list later.
+@Test func blobMergeNeverCarriesTransformEvenWhenUnanimous() throws {
+    let withTransform = BlobAttrs(
+        transform: Transform(a: 1, b: 0, c: 0, d: 1, e: 40, f: 70))
+    let out = try #require(mergeTwoBlobs(withTransform, withTransform,
+                                         buffer: "unanimity_transform_swift"))
+    #expect(out.transform == nil,
+            "a unanimous transform must NOT ride onto the merge")
+}

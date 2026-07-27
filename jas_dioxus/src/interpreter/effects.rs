@@ -5058,6 +5058,57 @@ fn blob_brush_commit_painting(
                 return;
             };
             common.id = Some(ids[0].clone());
+
+            // UNANIMITY CARRY (JYH, ratified 2026-07-26): if EVERY source
+            // agrees on a non-paint attribute, the merged element carries it;
+            // if they disagree, the default above stands. No winner is ever
+            // picked — "the largest source keeps it" was rejected in both
+            // directions. The rationale is the Theseus principle: an edit
+            // preserves what it does not speak to, and painting a stroke says
+            // nothing about opacity, so merging two 50%-opaque blobs must not
+            // yield a fully opaque one.
+            //
+            // `transform` is EXCLUDED regardless of agreement. This merge
+            // matches RAW geometry against a DOCUMENT-space sweep, so it is
+            // already transform-blind (transcripts/BLOB_BRUSH_TOOL.md);
+            // carrying a unanimous transform would COMPOUND that bug by
+            // relocating the merged artwork. `tool_origin` is set by the tool
+            // above, `id` is minted fresh, and the paint attributes are what
+            // the stroke DOES speak to — so `common`'s five compositing
+            // fields below are the whole list. Swift's twin carries the same
+            // five.
+            let sources: Vec<&PathElem> = matches
+                .iter()
+                .filter_map(|p| match doc.get_element(p) {
+                    Some(Element::Path(pe)) => Some(pe),
+                    _ => None,
+                })
+                .collect();
+            fn unanimous<T: PartialEq + Clone>(
+                sources: &[&PathElem],
+                get: impl Fn(&PathElem) -> T,
+            ) -> Option<T> {
+                let first = get(sources.first()?);
+                sources
+                    .iter()
+                    .all(|pe| get(pe) == first)
+                    .then_some(first)
+            }
+            if let Some(v) = unanimous(&sources, |pe| pe.common.opacity) {
+                common.opacity = v;
+            }
+            if let Some(v) = unanimous(&sources, |pe| pe.common.mode) {
+                common.mode = v;
+            }
+            if let Some(v) = unanimous(&sources, |pe| pe.common.visibility) {
+                common.visibility = v;
+            }
+            if let Some(v) = unanimous(&sources, |pe| pe.common.locked) {
+                common.locked = v;
+            }
+            if let Some(v) = unanimous(&sources, |pe| pe.common.mask.clone()) {
+                common.mask = v;
+            }
         }
         Element::Path(PathElem {
             d: new_d,
@@ -10412,5 +10463,168 @@ mod tests {
         );
         assert_only_d_changed(
             &src, &path_at(&model, &[0, 0]), "erase then blob_brush merge");
+    }
+
+    // ── Unanimous attributes on an N -> 1 merge ──
+    //
+    // JYH, ratified 2026-07-26: if EVERY source agrees on a non-paint
+    // attribute the result carries it; if they disagree, the tool's default
+    // is taken. No winner is ever picked — "the largest source keeps it" was
+    // rejected in both directions. The rationale is the Theseus principle: an
+    // edit preserves what it does not speak to, and painting a stroke says
+    // nothing about opacity. `transform` is EXCLUDED regardless (see the
+    // site).
+
+    /// A test-only mask, so `mask` can be given a non-default value.
+    fn unanimity_mask() -> crate::geometry::element::Mask {
+        use crate::geometry::element::{Mask, Transform};
+        Mask {
+            subtree: Box::new(Element::Rect(RectElem {
+                x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::rgb(1.0, 1.0, 1.0))),
+                stroke: None,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            })),
+            clip: true, invert: true, disabled: false, linked: false,
+            unlink_transform: Some(Transform::default()),
+        }
+    }
+
+    /// Two overlapping blob-brush sources (left + right, same red fill)
+    /// bridged by ONE sweep, so the commit takes the N = 2 merge arm. Returns
+    /// the merged element. `buffer` must be unique per test — the point
+    /// buffers are process-global and tests run in parallel.
+    fn merge_two_blobs(
+        left: CommonProps, right: CommonProps, buffer: &str,
+    ) -> PathElem {
+        use crate::geometry::element::FillRule;
+        use std::rc::Rc;
+        let red = Fill::new(Color::from_hex("#ff0000").unwrap());
+        let blob = |x0: f64, x1: f64, common: CommonProps| {
+            Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: x0, y: 40.0 },
+                    PathCommand::LineTo { x: x1, y: 40.0 },
+                    PathCommand::LineTo { x: x1, y: 60.0 },
+                    PathCommand::LineTo { x: x0, y: 60.0 },
+                    PathCommand::ClosePath,
+                ],
+                fill: Some(red),
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps {
+                    tool_origin: Some("blob_brush".to_string()),
+                    ..common
+                },
+                fill_gradient: None,
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })
+        };
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(blob(0.0, 40.0, left)));
+            children.push(Rc::new(blob(60.0, 100.0, right)));
+        }
+        let mut model = Model::new(doc, None);
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!(red.color.to_hex()));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the sweep bridged both blobs, so both were merged away"
+        );
+        path_at(&model, &[0, 0])
+    }
+
+    /// UNANIMOUS: both sources carry the same five non-paint attributes, so
+    /// all five ride onto the merged element.
+    ///
+    /// Separation from the pre-fix behaviour: the old code built the result
+    /// from `CommonProps::default()`, so it returned opacity 1.0, Normal,
+    /// Preview, locked false and mask None — the opposite of every value
+    /// asserted here.
+    #[test]
+    fn blob_merge_carries_unanimous_attributes() {
+        use crate::geometry::element::{BlendMode, Visibility};
+        let agreed = || CommonProps {
+            opacity: 0.5,
+            mode: BlendMode::Multiply,
+            visibility: Visibility::Outline,
+            locked: true,
+            mask: Some(Box::new(unanimity_mask())),
+            ..CommonProps::default()
+        };
+        let out = merge_two_blobs(agreed(), agreed(), "unanimity_agree");
+        assert_eq!(out.common.opacity, 0.5);
+        assert_eq!(out.common.mode, BlendMode::Multiply);
+        assert_eq!(out.common.visibility, Visibility::Outline);
+        assert!(out.common.locked);
+        assert_eq!(out.common.mask, Some(Box::new(unanimity_mask())));
+    }
+
+    /// DISAGREEMENT: the sources differ on every one of the five, so the
+    /// merged element takes the tool's defaults. No source is ever the winner.
+    ///
+    /// This vector does NOT separate the pre-fix behaviour (which also
+    /// produced the defaults) — it is the anti-arbitrariness pin, and it goes
+    /// red the moment anyone implements "the first/largest source wins".
+    #[test]
+    fn blob_merge_of_disagreeing_sources_takes_the_defaults() {
+        use crate::geometry::element::{BlendMode, Visibility};
+        let left = CommonProps {
+            opacity: 0.5,
+            mode: BlendMode::Multiply,
+            visibility: Visibility::Outline,
+            locked: true,
+            mask: Some(Box::new(unanimity_mask())),
+            ..CommonProps::default()
+        };
+        let right = CommonProps {
+            opacity: 0.25,
+            mode: BlendMode::Screen,
+            visibility: Visibility::Preview,
+            locked: false,
+            mask: None,
+            ..CommonProps::default()
+        };
+        let out = merge_two_blobs(left, right, "unanimity_disagree");
+        let d = CommonProps::default();
+        assert_eq!(out.common.opacity, d.opacity);
+        assert_eq!(out.common.mode, d.mode);
+        assert_eq!(out.common.visibility, d.visibility);
+        assert_eq!(out.common.locked, d.locked);
+        assert_eq!(out.common.mask, d.mask);
+    }
+
+    /// `transform` is EXCLUDED even when the sources agree. The merge matches
+    /// raw geometry against a document-space sweep, so it is already
+    /// transform-blind (transcripts/BLOB_BRUSH_TOOL.md); carrying a unanimous
+    /// transform would COMPOUND that bug by relocating the merged artwork.
+    ///
+    /// This vector does not separate the pre-fix behaviour either — it is the
+    /// pin that stops `transform` being swept into the unanimity list later.
+    #[test]
+    fn blob_merge_never_carries_transform_even_when_unanimous() {
+        use crate::geometry::element::Transform;
+        let with_transform = || CommonProps {
+            transform: Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 40.0, f: 70.0 }),
+            ..CommonProps::default()
+        };
+        let out = merge_two_blobs(
+            with_transform(), with_transform(), "unanimity_transform");
+        assert_eq!(out.common.transform, None,
+            "a unanimous transform must NOT ride onto the merge");
     }
 }

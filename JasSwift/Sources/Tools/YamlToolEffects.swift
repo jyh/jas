@@ -2657,17 +2657,61 @@ private func blobBrushCommitPainting(
         // This branch is `matches.count != 1`, so a non-empty `matches` here
         // is exactly the N >= 2 merge.
         var freshId: String? = nil
+        // The tool's own defaults, matching `Path.init`'s and Rust's
+        // `CommonProps::default()`. Overwritten below only where the sources
+        // are UNANIMOUS.
+        var opacity = 1.0
+        var locked = false
+        var visibility: Visibility = .preview
+        var blendMode: BlendMode = .normal
+        var mask: Mask? = nil
         if matches.count >= 2 {
             var existingIds = doc.elementIds
             guard let minted = mintUniqueIds(1, existing: &existingIds,
                                              mint: { generateElementId() })
             else { return }
             freshId = minted[0]
+
+            // UNANIMITY CARRY (JYH, ratified 2026-07-26): if EVERY source
+            // agrees on a non-paint attribute, the merged element carries it;
+            // if they disagree, the default above stands. No winner is ever
+            // picked — "the largest source keeps it" was rejected in both
+            // directions. The rationale is the Theseus principle: an edit
+            // preserves what it does not speak to, and painting a stroke says
+            // nothing about opacity, so merging two 50%-opaque blobs must not
+            // yield a fully opaque one.
+            //
+            // `transform` is EXCLUDED regardless of agreement. This merge
+            // matches RAW geometry against a DOCUMENT-space sweep, so it is
+            // already transform-blind (transcripts/BLOB_BRUSH_TOOL.md);
+            // carrying a unanimous transform would COMPOUND that bug by
+            // relocating the merged artwork. `toolOrigin` is set by the tool
+            // below, `id` is minted fresh, and the paint attributes are what
+            // the stroke DOES speak to — so these five compositing fields are
+            // the whole list. Rust's twin carries the same five.
+            let sources: [Path] = matches.compactMap {
+                if case .path(let pe) = doc.getElement($0) { return pe }
+                return nil
+            }
+            func unanimous<T: Equatable>(_ get: (Path) -> T) -> T? {
+                guard let first = sources.first.map(get) else { return nil }
+                return sources.allSatisfy { get($0) == first } ? first : nil
+            }
+            if let v = unanimous({ $0.opacity }) { opacity = v }
+            if let v = unanimous({ $0.blendMode }) { blendMode = v }
+            if let v = unanimous({ $0.visibility }) { visibility = v }
+            if let v = unanimous({ $0.locked }) { locked = v }
+            if let v = unanimous({ $0.mask }) { mask = v }
         }
         newElem = Path(
             d: newD,
             fill: newFill, stroke: nil,
             widthPoints: [],
+            opacity: opacity,
+            locked: locked,
+            visibility: visibility,
+            blendMode: blendMode,
+            mask: mask,
             toolOrigin: "blob_brush",
             id: freshId,
             // Rust's blob_brush_commit_painting stamps NonZero on the
