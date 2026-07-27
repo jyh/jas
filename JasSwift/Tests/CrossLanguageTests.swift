@@ -645,6 +645,200 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("boolean_collapse_default.json")
 }
 
+// MARK: - PRESERVATION corpus — the DOCUMENT-LEVEL INVARIANT GATE
+//
+// transcripts/EDIT_SEMANTICS_FREEZE.md §4.1, the primary enforcement tier, and
+// the exact twin of Rust's `preservation_invariants`. The freeze's finding is
+// that a per-copy-API battery is structurally blind to the gravest violation
+// class — inline container rebuilds are not copy APIs, so no battery would
+// ever be written for them. This gate inspects no copy site: it serializes the
+// WHOLE document before and after an edit and asserts six invariants over the
+// canonical test JSON, "one predicate both ports can fail identically" (§4.2).
+//
+// A vector may PIN a known violation for this port. A pinned invariant is
+// asserted to FAIL, so fixing the site turns this gate red until the pin is
+// removed and a pin can never rot into a silent suppression.
+// scripts/check_preservation_corpus.py gates the data shape (V1–V5).
+
+/// Every id-bearing element of a canonical document JSON: the ids in document
+/// order, and each id's own attributes as key -> canonical-JSON-of-value with
+/// `children` stripped (a container that legitimately gained or lost a child
+/// still has ITS OWN fields compared — the T4 bystander predicate).
+private struct PreservationSnapshot {
+    var ids: [String] = []
+    var attrs: [String: [String: String]] = [:]
+}
+
+private func preservationCanonical(_ value: Any) -> String {
+    let data = try! JSONSerialization.data(
+        withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed])
+    return String(data: data, encoding: .utf8)!
+}
+
+private func preservationWalk(_ node: Any, _ snap: inout PreservationSnapshot) {
+    if let arr = node as? [Any] {
+        for item in arr { preservationWalk(item, &snap) }
+        return
+    }
+    guard let obj = node as? [String: Any] else { return }
+    if obj["type"] != nil, let id = obj["id"] as? String {
+        snap.ids.append(id)
+        var fields: [String: String] = [:]
+        for (k, v) in obj where k != "children" {
+            fields[k] = preservationCanonical(v)
+        }
+        snap.attrs[id] = fields
+    }
+    for key in ["layers", "children", "symbols"] {
+        if let v = obj[key] { preservationWalk(v, &snap) }
+    }
+}
+
+private func preservationSnapshot(_ docJson: String) -> PreservationSnapshot {
+    let parsed = try! JSONSerialization.jsonObject(
+        with: docJson.data(using: .utf8)!, options: [])
+    var snap = PreservationSnapshot()
+    preservationWalk(parsed, &snap)
+    return snap
+}
+
+/// Evaluate the six document-level invariants for one vector. `nil` = held.
+private func preservationInvariantsFor(
+    _ tc: [String: Any], _ before: PreservationSnapshot, _ after: PreservationSnapshot
+) -> [(String, String?)] {
+    let subject = Set(tc["subject_ids"] as! [String])
+    let consumed = Set(tc["consumed_ids"] as! [String])
+    let speaksTo = Set(tc["speaks_to"] as! [String])
+    let wantFresh = (tc["expected_fresh_ids"] as! NSNumber).intValue
+
+    let beforeSet = Set(before.ids)
+    let afterSet = Set(after.ids)
+    var out: [(String, String?)] = []
+
+    // id_uniqueness — the REFERENCE_GRAPH.md §2.5 uniqueness invariant.
+    var counts: [String: Int] = [:]
+    for id in after.ids { counts[id, default: 0] += 1 }
+    let dups = counts.filter { $0.value > 1 }.keys.sorted()
+    out.append(("id_uniqueness", dups.isEmpty ? nil
+        : "id(s) appear more than once after the edit: \(dups)"))
+
+    // id_survival — every identity the edit did not consume is still there.
+    let lost = beforeSet.filter { !consumed.contains($0) && !afterSet.contains($0) }.sorted()
+    out.append(("id_survival", lost.isEmpty ? nil
+        : "id(s) present before and NOT consumed vanished: \(lost)"))
+
+    // consumed_ids_die — over-preservation is a violation too (§3.3).
+    let survived = consumed.filter { afterSet.contains($0) }.sorted()
+    out.append(("consumed_ids_die", survived.isEmpty ? nil
+        : "id(s) the edit consumed rode out on the result: \(survived)"))
+
+    // fresh_ids — how many identities the edit minted.
+    let fresh = afterSet.subtracting(beforeSet).sorted()
+    out.append(("fresh_ids", fresh.count == wantFresh ? nil
+        : "expected \(wantFresh) freshly minted id(s), got \(fresh.count) (\(fresh))"))
+
+    // bystanders_unchanged — T4, including the containers the edit rebuilt to
+    // reach its target. Compared only for bystanders that still carry their id;
+    // a bystander whose id was destroyed is id_survival's failure, not this one's.
+    var bystFail: [String] = []
+    for id in beforeSet.sorted() {
+        if subject.contains(id) || consumed.contains(id) { continue }
+        guard let b = before.attrs[id], let a = after.attrs[id] else { continue }
+        // Report the DIFFERING KEYS only — dumping both whole attribute maps
+        // buries the one changed field under twenty unchanged ones.
+        for key in Set(b.keys).union(a.keys).sorted() where b[key] != a[key] {
+            bystFail.append("\(id).\(key): \(b[key] ?? "<absent>") -> \(a[key] ?? "<absent>")")
+        }
+    }
+    out.append(("bystanders_unchanged", bystFail.isEmpty ? nil
+        : "bystander attributes changed: \(bystFail)"))
+
+    // subject_fields_only — clause 1: only the spoken-to keys may differ.
+    var subjFail: [String] = []
+    for id in subject.sorted() {
+        guard let b = before.attrs[id], let a = after.attrs[id] else { continue }
+        for key in Set(b.keys).union(a.keys).sorted() {
+            if speaksTo.contains(key) { continue }
+            if b[key] != a[key] {
+                subjFail.append("\(id).\(key): \(b[key] ?? "<absent>") -> \(a[key] ?? "<absent>")")
+            }
+        }
+    }
+    out.append(("subject_fields_only", subjFail.isEmpty ? nil
+        : "subject changed keys outside speaks_to \(speaksTo.sorted()): \(subjFail)"))
+
+    return out
+}
+
+/// Apply one preservation vector's transactions through the production
+/// `opApply` dispatcher (the same shape `runOperationFixture` uses) and return
+/// the canonical document JSON before and after.
+private func runPreservationVector(_ tc: [String: Any]) -> (before: String, after: String) {
+    let svg = readFixture("svg/\(tc["setup_svg"] as! String)")
+    let beforeJson = documentToTestJson(svgToDocument(svg))
+
+    let model = Model(document: svgToDocument(svg))
+    let controller = Controller(model: model)
+    if let txns = tc["txns"] as? [[String: Any]] {
+        for txn in txns {
+            model.beginTxn()
+            if let txnName = txn["name"] as? String { model.nameTxn(txnName) }
+            for op in (txn["ops"] as! [[String: Any]]) {
+                applyFixtureOp(model, controller, op)
+            }
+            model.commitTxn()
+        }
+    } else {
+        model.beginTxn()
+        for op in (tc["ops"] as! [[String: Any]]) {
+            applyFixtureOp(model, controller, op)
+        }
+        model.commitTxn()
+    }
+    return (beforeJson, documentToTestJson(model.document))
+}
+
+/// THE DOCUMENT-LEVEL INVARIANT GATE. Mirrors Rust `preservation_invariants`.
+@Test func preservationInvariants() throws {
+    let raw = readFixture("preservation/preservation_invariants.json")
+    let vectors = try JSONSerialization.jsonObject(
+        with: raw.data(using: .utf8)!, options: []) as! [[String: Any]]
+    var failures: [String] = []
+
+    for tc in vectors {
+        let name = tc["name"] as! String
+        let (beforeJson, afterJson) = runPreservationVector(tc)
+        let before = preservationSnapshot(beforeJson)
+        let after = preservationSnapshot(afterJson)
+
+        // Runtime anti-vacuity (the data-shape half lives in
+        // scripts/check_preservation_corpus.py).
+        #expect(beforeJson != afterJson,
+            "preservation vector '\(name)' left the document byte-identical — every invariant over it would be vacuously true")
+        let named = (tc["subject_ids"] as! [String]) + (tc["consumed_ids"] as! [String])
+        for id in named {
+            #expect(before.ids.contains(id),
+                "preservation vector '\(name)' names id '\(id)', which is absent from the loaded setup document")
+        }
+        #expect(before.ids.contains(where: { !named.contains($0) }),
+            "preservation vector '\(name)' has no bystander — T4 is unwatchable here")
+
+        let pinned = (tc["expected_violations"] as! [String: Any])["swift"] as! [[String: Any]]
+        for (inv, result) in preservationInvariantsFor(tc, before, after) {
+            let pin = pinned.first { ($0["invariant"] as! String) == inv }
+            if pin == nil, let why = result {
+                failures.append("[\(name)] \(inv) VIOLATED: \(why)")
+            } else if let pin, result == nil {
+                failures.append(
+                    "[\(name)] \(inv) is PINNED as a known violation (\(pin["row"] as! String)) but now HOLDS — remove the pin from the vector")
+            }
+        }
+    }
+
+    #expect(failures.isEmpty,
+        "preservation invariant gate: \(failures.count) failure(s):\n  \(failures.joined(separator: "\n  "))")
+}
+
 // MARK: - OP_LOG.md §9 verb33 unification fixtures (P1–P7)
 //
 // The shared test_fixtures/operations/* fixtures the Rust P1–P7 phases added are

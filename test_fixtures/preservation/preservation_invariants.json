@@ -4,20 +4,43 @@
     "doc": "T1/§3.1 Theseus. Move one rect nested two levels deep. Speaks to the rect's own geometry only; every id in the document survives, and both containers (lyr_main, grp_inner) are bystanders that must come back byte-identical.",
     "setup_svg": "preservation_nested_attrs.svg",
     "cardinality": "one_to_one",
-    "subject_ids": ["r_front"],
-    "speaks_to": ["x", "y"],
+    "subject_ids": [
+      "r_front"
+    ],
+    "speaks_to": [
+      "x",
+      "y"
+    ],
     "consumed_ids": [],
     "expected_fresh_ids": 0,
     "txns": [
       {
         "name": "move front rect",
         "ops": [
-          { "op": "select_by_ids", "ids": ["r_front"] },
-          { "op": "move_selection", "dx": 10.0, "dy": 0.0 }
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_front"
+            ]
+          },
+          {
+            "op": "move_selection",
+            "dx": 10.0,
+            "dy": 0.0
+          }
         ]
       }
     ],
-    "expected_violations": { "rust": [], "swift": [] }
+    "expected_violations": {
+      "rust": [],
+      "swift": [
+        {
+          "invariant": "id_survival",
+          "row": "§3.5 ▲ 'Swift Document private withChildren (replace/delete/insertAfter paths)' — JasSwift/Sources/Document/Document.swift",
+          "note": "MEASURED by this gate: grp_inner and lyr_main (a nested edit rebuilds both) lost its id across the edit. Document.swift's private withChildren rebuilds Layer/Group from four fields (children/opacity/transform/locked, plus name for Layer), so every structural mutation destroys the container's id — T4's gravest site. Rust's replace_in_children mutates the container in place and this gate is green there. NOTE: while the id is destroyed, bystanders_unchanged cannot see this container at all (it matches by id), so that clause stays MASKED for Swift containers until this row is fixed."
+        }
+      ]
+    }
   },
   {
     "name": "delete_bystander_leaf_keeps_containers",
@@ -26,17 +49,34 @@
     "cardinality": "delete",
     "subject_ids": [],
     "speaks_to": [],
-    "consumed_ids": ["r_bystander"],
+    "consumed_ids": [
+      "r_bystander"
+    ],
     "expected_fresh_ids": 0,
     "txns": [
       {
         "name": "delete the bystander rect",
         "ops": [
-          { "op": "delete_at", "path": [0, 1] }
+          {
+            "op": "delete_at",
+            "path": [
+              0,
+              1
+            ]
+          }
         ]
       }
     ],
-    "expected_violations": { "rust": [], "swift": [] }
+    "expected_violations": {
+      "rust": [],
+      "swift": [
+        {
+          "invariant": "id_survival",
+          "row": "§3.5 ▲ 'Swift Document private withChildren (replace/delete/insertAfter paths)' — JasSwift/Sources/Document/Document.swift",
+          "note": "MEASURED by this gate: lyr_main lost its id across the edit. Document.swift's private withChildren rebuilds Layer/Group from four fields (children/opacity/transform/locked, plus name for Layer), so every structural mutation destroys the container's id — T4's gravest site. Rust's replace_in_children mutates the container in place and this gate is green there. NOTE: while the id is destroyed, bystanders_unchanged cannot see this container at all (it matches by id), so that clause stays MASKED for Swift containers until this row is fixed."
+        }
+      ]
+    }
   },
   {
     "name": "boolean_union_merges_two_rects",
@@ -45,14 +85,25 @@
     "cardinality": "merge",
     "subject_ids": [],
     "speaks_to": [],
-    "consumed_ids": ["r_back", "r_front"],
+    "consumed_ids": [
+      "r_back",
+      "r_front"
+    ],
     "expected_fresh_ids": 1,
     "txns": [
       {
         "name": "union the two nested rects",
         "ops": [
-          { "op": "select_by_ids", "ids": ["r_back", "r_front"] },
-          { "op": "boolean_union" }
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_back",
+              "r_front"
+            ]
+          },
+          {
+            "op": "boolean_union"
+          }
         ]
       }
     ],
@@ -69,7 +120,18 @@
           "note": "The result is built from the frontmost's CommonProps, so the shared mint_unique_ids loop is never reached from this path and the merge mints nothing. MEASURED: 0 fresh ids where the law requires 1."
         }
       ],
-      "swift": []
+      "swift": [
+        {
+          "invariant": "id_survival",
+          "row": "§3.5 ▲ 'Swift inline Layer(/Group( literals' — JasSwift/Sources/Document/Controller.swift applyDestructiveBoolean's insert-site Layer(name:children:opacity:transform:), PLUS the private withChildren row it shares with the other four vectors",
+          "note": "MEASURED, and ATTRIBUTED to two independent sites by an isolating mutation: with withChildren temporarily made field-preserving, this vector still loses lyr_main — so the boolean's own inline Layer literal is a SECOND, separate T4 violation, one the §3.5 table names only as a class ('41 production sites, 39 omitting id'), not as a row. grp_inner's loss is the withChildren row and disappears under that same mutation. This is exactly what §4.1 predicts a document-level invariant does that no per-copy-API battery can: an inline container rebuild is not a copy API, so no battery would ever be written for it."
+        },
+        {
+          "invariant": "fresh_ids",
+          "row": "§3.6 UNION row ('id: fresh mint') — JasSwift/Sources/Document/Controller.swift applyDestructiveBoolean",
+          "note": "MEASURED: 0 fresh ids where the law requires 1. The Swift rebuild passes no id at all to the Polygon/Path initializer (its own source comment banks name/id/toolOrigin/mask for a ruling), so the merge mints nothing. This is the SAME clause Rust fails, by the OPPOSITE route: Rust carries the frontmost's id, Swift carries none — a live cross-port divergence that the golden-based corpus cannot see, because the operations goldens run on setups whose elements have no ids at all."
+        }
+      ]
     }
   },
   {
@@ -85,11 +147,35 @@
       {
         "name": "wrap the two nested rects",
         "ops": [
-          { "op": "wrap_in_group", "paths": [[0, 0, 0], [0, 0, 1]], "id": "grp_wrap" }
+          {
+            "op": "wrap_in_group",
+            "paths": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                1
+              ]
+            ],
+            "id": "grp_wrap"
+          }
         ]
       }
     ],
-    "expected_violations": { "rust": [], "swift": [] }
+    "expected_violations": {
+      "rust": [],
+      "swift": [
+        {
+          "invariant": "id_survival",
+          "row": "§3.5 ▲ 'Swift Document private withChildren (replace/delete/insertAfter paths)' — JasSwift/Sources/Document/Document.swift",
+          "note": "MEASURED by this gate: grp_inner and lyr_main lost its id across the edit. Document.swift's private withChildren rebuilds Layer/Group from four fields (children/opacity/transform/locked, plus name for Layer), so every structural mutation destroys the container's id — T4's gravest site. Rust's replace_in_children mutates the container in place and this gate is green there. NOTE: while the id is destroyed, bystanders_unchanged cannot see this container at all (it matches by id), so that clause stays MASKED for Swift containers until this row is fixed."
+        }
+      ]
+    }
   },
   {
     "name": "unpack_inner_group",
@@ -98,16 +184,33 @@
     "cardinality": "unwrap",
     "subject_ids": [],
     "speaks_to": [],
-    "consumed_ids": ["grp_inner"],
+    "consumed_ids": [
+      "grp_inner"
+    ],
     "expected_fresh_ids": 0,
     "txns": [
       {
         "name": "unpack the inner group",
         "ops": [
-          { "op": "unpack_group_at", "path": [0, 0] }
+          {
+            "op": "unpack_group_at",
+            "path": [
+              0,
+              0
+            ]
+          }
         ]
       }
     ],
-    "expected_violations": { "rust": [], "swift": [] }
+    "expected_violations": {
+      "rust": [],
+      "swift": [
+        {
+          "invariant": "id_survival",
+          "row": "§3.5 ▲ 'Swift Document private withChildren (replace/delete/insertAfter paths)' — JasSwift/Sources/Document/Document.swift",
+          "note": "MEASURED by this gate: lyr_main lost its id across the edit. Document.swift's private withChildren rebuilds Layer/Group from four fields (children/opacity/transform/locked, plus name for Layer), so every structural mutation destroys the container's id — T4's gravest site. Rust's replace_in_children mutates the container in place and this gate is green there. NOTE: while the id is destroyed, bystanders_unchanged cannot see this container at all (it matches by id), so that clause stays MASKED for Swift containers until this row is fixed."
+        }
+      ]
+    }
   }
 ]
