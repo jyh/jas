@@ -23,7 +23,10 @@
   "families": {
     "test_fixtures/actions": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "name-list (ACTION_FIXTURES in src/cross_language_test.rs) + data references",
@@ -33,7 +36,11 @@
     },
     "test_fixtures/algorithms": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "rust": "path literals (cross_language_test.rs + module-scattered tests, e.g. geometry/tspan.rs)",
@@ -45,7 +52,9 @@
     },
     "test_fixtures/artboards": {
       "kind": "fixtures",
-      "required_consumers": ["reference"],
+      "required_consumers": [
+        "reference"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "reference": "os.path.join segments (test_artboards_effects.py)"
@@ -54,7 +63,11 @@
     },
     "test_fixtures/character_apply": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift", "reference"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (read_fixture in src/cross_language_test.rs character_apply_panel_edit_corpus)",
@@ -65,7 +78,12 @@
     },
     "test_fixtures/concept_constraints": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference",
+        "scripts"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
@@ -77,7 +95,12 @@
     },
     "test_fixtures/concept_fitters": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference",
+        "scripts"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
@@ -89,7 +112,12 @@
     },
     "test_fixtures/concept_operations": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference",
+        "scripts"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
@@ -101,7 +129,12 @@
     },
     "test_fixtures/concepts": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference",
+        "scripts"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
@@ -113,7 +146,11 @@
     },
     "test_fixtures/expected": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "rust": "name-lists (json/binary/svg round-trip arrays) + assert_svg_parse helper calls + path literals",
@@ -124,7 +161,11 @@
     },
     "test_fixtures/expressions": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "scripts"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
@@ -135,7 +176,10 @@
     },
     "test_fixtures/gestures": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "name-list (GESTURE_FIXTURES) + data references",
@@ -145,7 +189,10 @@
     },
     "test_fixtures/keys": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "name-list (KEY_FIXTURES) + data references",
@@ -155,7 +202,10 @@
     },
     "test_fixtures/operations": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literals (run_operation_fixture calls + txn/drag_coalesce/recorded literals) + data references",
@@ -165,7 +215,10 @@
     },
     "test_fixtures/production_capture": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literals (production_capture/eye_demo*.json) + data references",
@@ -175,7 +228,11 @@
     },
     "test_fixtures/stroke_apply": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift", "reference"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (read_fixture in src/cross_language_test.rs stroke_apply_panel_edit_corpus)",
@@ -186,7 +243,11 @@
     },
     "test_fixtures/svg": {
       "kind": "source",
-      "required_consumers": ["rust", "swift", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "rust": "DIRECTORY GLOB (tests/cross_language_test.rs json_roundtrip_all_fixtures reads every svg/*.svg) + name-lists + data references",
@@ -197,7 +258,10 @@
     },
     "test_fixtures/workspace_operations": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literals (run_workspace_operation_fixture calls) + data references",
@@ -207,7 +271,9 @@
     },
     "workspace/tests/concept_constraints.yaml": {
       "kind": "source",
-      "required_consumers": ["scripts"],
+      "required_consumers": [
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "scripts": "compile source (compile_concept_constraints_corpus.py + check_concept_constraints_corpus.sh)"
@@ -216,7 +282,9 @@
     },
     "workspace/tests/concept_fitters.yaml": {
       "kind": "source",
-      "required_consumers": ["scripts"],
+      "required_consumers": [
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "scripts": "compile source (compile_concept_fitters_corpus.py + check_concept_fitters_corpus.sh)"
@@ -225,7 +293,9 @@
     },
     "workspace/tests/concept_operations.yaml": {
       "kind": "source",
-      "required_consumers": ["scripts"],
+      "required_consumers": [
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "scripts": "compile source (compile_concept_operations_corpus.py + check_concept_operations_corpus.sh)"
@@ -234,7 +304,9 @@
     },
     "workspace/tests/concepts.yaml": {
       "kind": "source",
-      "required_consumers": ["scripts"],
+      "required_consumers": [
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "scripts": "compile source (compile_concept_corpus.py + check_concept_corpus.sh)"
@@ -243,7 +315,10 @@
     },
     "workspace/tests/expressions.yaml": {
       "kind": "source",
-      "required_consumers": ["reference", "scripts"],
+      "required_consumers": [
+        "reference",
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "reference": "os.path.join segments (test_expr.py runs the yaml directly)",
@@ -253,7 +328,9 @@
     },
     "workspace/tests/gradient_primitives.yaml": {
       "kind": "source",
-      "required_consumers": ["reference"],
+      "required_consumers": [
+        "reference"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "reference": "os.path.join segments (test_gradient_primitives.py)"
@@ -262,7 +339,9 @@
     },
     "workspace/tests/phase3": {
       "kind": "source",
-      "required_consumers": ["reference"],
+      "required_consumers": [
+        "reference"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "reference": "DIRECTORY GLOB (test_phase3_fixtures.py globs *.yaml)"
@@ -271,7 +350,9 @@
     },
     "workspace/tests/set_effect": {
       "kind": "source",
-      "required_consumers": ["reference"],
+      "required_consumers": [
+        "reference"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "reference": "DIRECTORY GLOB (test_set_effect.py globs *.yaml)"
@@ -330,7 +411,7 @@
     {
       "id": "flatten-no-arcs",
       "title": "flatten.json has no arc command, so the A-degrades-to-a-line branch of the flattener is ungated",
-      "evidence": "Re-counted mechanically over the parsed fixture on this commit: 12 vectors, with 8 of them carrying a C and 4 a Q (8 C commands and 4 Q commands in total), and ZERO A commands. The census row this replaces said 3 vectors and no curve command at all -- true when it was written, and closed since by the cubic/quadratic vectors; the arc leg is what survives of it.",
+      "evidence": "Re-counted mechanically over the parsed fixture on this commit: 18 vectors, with 8 of them carrying a C and 4 a Q (8 C commands and 4 Q commands in total), and ZERO A commands. The census row this replaces said 3 vectors and no curve command at all -- true when it was written, and closed since by the cubic/quadratic vectors; the arc leg is what survives of it.",
       "blocks": "Both flatteners send SmoothCurveTo / SmoothQuadTo / ArcTo to their endpoint as a straight line, in a catch-all arm no vector enters. The same arm also carries the current-point write for those commands, which is the defect class cubic_then_quad_current_point_chain was added to catch for cubics.",
       "unblock": "Fixture-only: add an arc vector, and one where an arc is followed by a command that reads the current point.",
       "census": "5.2"
