@@ -141,12 +141,18 @@ element.
 
 ### Preservation rules
 
+**The Ship of Theseus law (JYH, ratified 2026-07-26):** an edit
+commit rewrites `d` and **preserves everything else**. Stated as
+a law, not a field list, so it cannot rot as fields are added to
+the Path element: the brush reference and overrides, fill and
+stroke, both gradients, the variable-width profile, `transform`,
+the element id, the name, opacity, visibility, blend mode, mask
+and tool origin all carry across unchanged.
+
 | Attribute                        | On edit commit                                 |
 |----------------------------------|------------------------------------------------|
-| `jas:stroke-brush`               | preserved                                      |
-| `jas:stroke-brush-overrides`     | preserved                                      |
-| `stroke`, `stroke-width`, `fill` | preserved                                      |
 | `d`                              | `[c0..c1]` replaced; outside verbatim          |
+| everything else                  | preserved (the law above)                      |
 | Selection                        | target stays selected (independent of `paintbrush_keep_selected`, which governs new-path commits) |
 
 Tool-state values (`state.stroke_brush`, `state.stroke_color`,

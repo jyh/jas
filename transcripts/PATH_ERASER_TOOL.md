@@ -49,6 +49,44 @@ When any path is modified, the selection is cleared as a side
 effect (matching native behavior — the old selection entries
 reference paths that may no longer exist).
 
+## What the fragments inherit
+
+**The Ship of Theseus law (JYH, ratified 2026-07-26):** "the ship
+is the same ship even when planks are removed, replaced, the
+anchor is heaved — that's what an artist will expect." **Erase
+does not remove identity** — it is still the same object.
+
+Stated as a law rather than a field list, so it cannot rot as
+fields are added to the Path element:
+
+- **Exactly one surviving fragment** — always the case for a
+  closed path (`split_path_at_eraser`'s closed branch returns a
+  single unwrapped path), and also reachable on an open path
+  erased near either end, where the short side has too few
+  commands to survive the `≥ 2` filter. The fragment is the
+  SAME element: everything except `d`
+  carries across, including `transform`, the element id, the
+  name, fill and stroke, both gradients, the variable-width
+  profile, the brush reference and overrides, opacity,
+  visibility, blend mode, mask and tool origin.
+- **More than one surviving fragment** (a severing erase) —
+  appearance, `transform` and `name` carry to every fragment,
+  but the element **id does not**, because a live document may
+  not hold two elements with the same id (`REFERENCE_GRAPH.md`
+  §2.5) and nothing on the erase path can mint a fresh one.
+  Minting deterministic per-fragment ids is deferred; so is
+  remapping a linear gradient's stops onto each fragment's own
+  bounding box, so a fragment currently re-fits the whole ramp
+  rather than showing its slice. Both are named in
+  `BOOLEAN.md` §"Does a path EDIT preserve the declared rule?".
+
+The same law governs the other path edits — delete / insert
+anchor, the anchor-point conversions, Smooth, and the
+Paintbrush edit-gesture splice. Each replaces one element with
+one element and so preserves everything but `d`. (Delete-anchor
+has one non-edit outcome: on a path with too few anchors left it
+removes the element entirely rather than rewriting it.)
+
 ## eraser_size parameter
 
 `eraser_size` is the half-extent of the eraser rectangle
