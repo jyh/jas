@@ -58,14 +58,6 @@ fn seed_case_view(model: &mut Model, tc: &Value) {
     if let Some(v) = num("viewport_h") { model.viewport_h = v; }
 }
 
-/// The view triple a case's `expected_view` block is compared against:
-/// `(zoom_level, view_offset_x, view_offset_y)`. Read back off the
-/// Model the run produced — view state is NOT part of the document, so
-/// no document golden can see it.
-pub fn model_view_triple(model: &Model) -> (f64, f64, f64) {
-    (model.zoom_level, model.view_offset_x, model.view_offset_y)
-}
-
 /// Run a gesture case against `setup_svg` CONTENT and return the
 /// resulting Model. Loads the setup into a Model (identity view unless
 /// the case names a `view` block — see [`seed_case_view`]), builds the

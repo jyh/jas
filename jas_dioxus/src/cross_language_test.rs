@@ -1396,8 +1396,11 @@ mod tests {
         let Some(expected) = tc.get("expected_view").and_then(|v| v.as_object())
         else { return };
         let name = tc["name"].as_str().unwrap();
+        // Read the triple straight off the Model the run produced: view
+        // state is NOT document content, so the golden cannot carry it.
         let model = &st.tabs[st.active_tab].model;
-        let (zoom, offx, offy) = crate::recorder::replay::model_view_triple(model);
+        let (zoom, offx, offy) =
+            (model.zoom_level, model.view_offset_x, model.view_offset_y);
         for (key, want) in expected {
             let want = want.as_f64().unwrap_or_else(|| {
                 panic!("Action test '{}': expected_view.{} is not a number", name, key)
