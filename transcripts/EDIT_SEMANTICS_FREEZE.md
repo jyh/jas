@@ -1,5 +1,17 @@
 # EDIT SEMANTICS FREEZE — what survives an edit?
 
+> **RATIFIED BY JYH, 2026-07-27.** The law, its six defined terms, the §3.5
+> violation table as the repair queue, the §4 enforcement doctrine, and the
+> ratification condition (*the law is not reported ENFORCED until the corpus can
+> see it*) are adopted as the edit-semantics constitution beside the cardinality
+> law. **All three §8 questions ruled on the recommendation:**
+> **(1)** `name` at a merge — **ASSERTING-SOURCES** (a source that asserts a name
+> carries it; silent sources do not veto).
+> **(2)** Lossy UNWRAP — **WARNED** (Ungroup proceeds, the artist is told what
+> cannot compose exactly; never silent, never refused).
+> **(3)** Rect→Polygon `rx`/`ry` — **FLATTEN the rounding into the emitted
+> points** (WYSIWYG at promotion).
+
 **Status: RATIFICATION-READY. The refuter gauntlet has run and is folded in.**
 Drafted 2026-07-27 (Starbuck, design seat) per the fleet-council ruling of the
 same date; revised the same day after four adversarial refuters returned
