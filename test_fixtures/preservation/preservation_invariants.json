@@ -97,18 +97,7 @@
     ],
     "expected_violations": {
       "rust": [],
-      "swift": [
-        {
-          "invariant": "id_survival",
-          "row": "§3.5 ▲ 'Swift inline Layer(/Group( literals' — JasSwift/Sources/Document/Controller.swift applyDestructiveBoolean's insert-site Layer(name:children:opacity:transform:), PLUS the private withChildren row it shares with the other four vectors",
-          "note": "MEASURED, and ATTRIBUTED to two independent sites by an isolating mutation: with withChildren temporarily made field-preserving, this vector still loses lyr_main — so the boolean's own inline Layer literal is a SECOND, separate T4 violation, one the §3.5 table names only as a class ('41 production sites, 39 omitting id'), not as a row. grp_inner's loss is the withChildren row and disappears under that same mutation. This is exactly what §4.1 predicts a document-level invariant does that no per-copy-API battery can: an inline container rebuild is not a copy API, so no battery would ever be written for it."
-        },
-        {
-          "invariant": "fresh_ids",
-          "row": "§3.6 UNION row ('id: fresh mint') — JasSwift/Sources/Document/Controller.swift applyDestructiveBoolean",
-          "note": "MEASURED: 0 fresh ids where the law requires 1. The Swift rebuild passes no id at all to the Polygon/Path initializer (its own source comment banks name/id/toolOrigin/mask for a ruling), so the merge mints nothing. This is the SAME clause Rust fails, by the OPPOSITE route: Rust carries the frontmost's id, Swift carries none — a live cross-port divergence that the golden-based corpus cannot see: BOTH boolean fixtures in the operations corpus (boolean_ops.json -> overlapping_rects.svg, boolean_collapse_default.json -> boolean_collinear_union.svg) run on setups whose elements carry no id, so the two ports emit byte-identical goldens. COUNTED on this commit: 9 of the 18 setup SVGs the operations corpus uses DO carry element ids — the blind spot is specific to the boolean fixtures, not general."
-        }
-      ]
+      "swift": []
     }
   },
   {
