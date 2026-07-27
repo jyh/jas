@@ -320,13 +320,28 @@ public struct Document: Equatable {
     }
 
     /// Every element `id` present in this document: the whole layer forest
-    /// (recursing into groups and nested layers) plus the off-canvas symbol
-    /// masters. Id-less elements contribute nothing.
+    /// (recursing into groups and nested layers, and into the operands a live
+    /// compound shape OWNS) plus the off-canvas symbol masters. Id-less
+    /// elements contribute nothing.
     ///
     /// This is the avoid-set for `mintUniqueIds` at every element-id mint.
     /// Masters ARE included: a master's id is a real element id that instances
     /// target by name, so a canvas element must not be minted onto it. Rust's
     /// `Document::element_ids` is the twin.
+    ///
+    /// A compound's operands are NOT path-addressable tree children (they are
+    /// not reported by `childrenOf`), so the walk matches the live payload
+    /// itself. Of the four `LiveVariant` arms only `compoundShape` owns child
+    /// `Element`s; `reference`, `recorded` and `generated` name their inputs
+    /// by id and own none. The inner switch is exhaustive so a future payload
+    /// that gains owned children forces this decision to be made again rather
+    /// than silently going unwalked.
+    ///
+    /// Deliberately UNLIKE `rebuildIdIndex`, which is operands-opaque on
+    /// purpose (an operand is not a reference resolution target). The two
+    /// walks answer different questions: "what may a reference name?" vs
+    /// "what id is already taken?". Uniqueness spans the whole document
+    /// (REFERENCE_GRAPH.md §2.5), so this one must be wider.
     public var elementIds: Set<String> {
         var out: Set<String> = []
         func walk(_ elem: Element) {
@@ -334,6 +349,11 @@ public struct Document: Equatable {
             switch elem {
             case .group(let g): for c in g.children { walk(c) }
             case .layer(let l): for c in l.children { walk(c) }
+            case .live(let variant):
+                switch variant {
+                case .compoundShape(let cs): for operand in cs.operands { walk(operand) }
+                case .reference, .recorded, .generated: break
+                }
             default: break
             }
         }

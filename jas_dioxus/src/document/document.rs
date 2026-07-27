@@ -278,13 +278,28 @@ impl Document {
     }
 
     /// Every `common.id` present in this document: the whole layer forest
-    /// (recursing into groups and nested layers) plus the off-canvas symbol
-    /// masters. Id-less elements contribute nothing.
+    /// (recursing into groups and nested layers, and into the operands a live
+    /// compound shape OWNS) plus the off-canvas symbol masters. Id-less
+    /// elements contribute nothing.
     ///
     /// This is the avoid-set for [`crate::document::artboard::mint_unique_ids`]
     /// at every element-id mint. Masters ARE included: a master's id is a real
     /// element id that instances target by name, so a canvas element must not
     /// be minted onto it. Swift's `Document.elementIds` is the twin.
+    ///
+    /// `Element::children()` deliberately does NOT report a compound's
+    /// operands — they are not path-addressable tree children — so the walk
+    /// matches the live payloads itself. Of the four `LiveVariant` arms only
+    /// `CompoundShape` owns child `Element`s; `Reference`, `Recorded` and
+    /// `Generated` name their inputs by id and own none. The match is
+    /// exhaustive so a future payload that gains owned children forces this
+    /// decision to be made again rather than silently going unwalked.
+    ///
+    /// Deliberately UNLIKE [`crate::document::id_index::rebuild_id_index`],
+    /// which is operands-opaque on purpose (an operand is not a reference
+    /// resolution target). The two walks answer different questions: "what may
+    /// a reference name?" vs "what id is already taken?". Uniqueness spans the
+    /// whole document (REFERENCE_GRAPH.md §2.5), so this one must be wider.
     pub fn element_ids(&self) -> HashSet<String> {
         fn walk(elem: &Element, out: &mut HashSet<String>) {
             if let Some(id) = elem.common().id.as_deref() {
@@ -293,6 +308,18 @@ impl Document {
             if let Some(children) = elem.children() {
                 for c in children {
                     walk(c, out);
+                }
+            }
+            if let Element::Live(variant) = elem {
+                match variant {
+                    crate::geometry::live::LiveVariant::CompoundShape(cs) => {
+                        for operand in &cs.operands {
+                            walk(operand, out);
+                        }
+                    }
+                    crate::geometry::live::LiveVariant::Reference(_)
+                    | crate::geometry::live::LiveVariant::Recorded(_)
+                    | crate::geometry::live::LiveVariant::Generated(_) => {}
                 }
             }
         }
@@ -749,6 +776,83 @@ mod tests {
         let mut sorted: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
         sorted.sort();
         assert_eq!(sorted, vec!["grp", "inner", "lyr", "master"]);
+    }
+
+    /// A compound shape OWNS its operands (`CompoundShape.operands` is a
+    /// `Vec<Rc<Element>>`), and each operand is a real element carrying its
+    /// own `common.id`. Those ids are part of the document's id space
+    /// (REFERENCE_GRAPH.md §2.5 uniqueness), so the mint avoid-set must see
+    /// them — otherwise a fresh mint can land on an operand id. The walk
+    /// must also keep recursing THROUGH an operand subtree (an operand that
+    /// is itself a group). Swift's `elementIdsSeesIdsInsideLiveElements` is
+    /// the twin.
+    #[test]
+    fn element_ids_sees_ids_inside_live_elements() {
+        use crate::geometry::live::{
+            CompoundOperation, CompoundShape, ElementRef, GeneratedElem, LiveVariant,
+            RecordedElem, ReferenceElem,
+        };
+        let with_id = |elem: Element, id: &str| -> Element {
+            let mut e = elem;
+            e.common_mut().id = Some(id.to_string());
+            e
+        };
+        let id_common = |id: &str| CommonProps {
+            id: Some(id.to_string()),
+            ..Default::default()
+        };
+
+        // Operand 1 is a plain rect; operand 2 is a GROUP whose child also
+        // carries an id, so the walk has to descend past the operand itself.
+        let operand_a = with_id(make_rect(0.0, 0.0, 1.0, 1.0), "op-a");
+        let nested = with_id(make_rect(2.0, 2.0, 1.0, 1.0), "op-b-inner");
+        let operand_b = with_id(make_group(vec![nested]), "op-b");
+        // An id-less operand contributes nothing (and must not trip the walk).
+        let operand_c = make_line(0.0, 0.0, 1.0, 1.0);
+        let compound = Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation: CompoundOperation::Union,
+            operands: vec![
+                Rc::new(operand_a),
+                Rc::new(operand_b),
+                Rc::new(operand_c),
+            ],
+            fill: None,
+            stroke: None,
+            common: id_common("cmp"),
+        }));
+
+        // The other three LiveVariant payloads own NO child elements — they
+        // name their inputs by id — so each contributes exactly its own id.
+        let reference = Element::Live(LiveVariant::Reference(ReferenceElem::new(
+            ElementRef("op-a".to_string()),
+            id_common("ref"),
+        )));
+        let recorded = Element::Live(LiveVariant::Recorded(RecordedElem::new(
+            vec![],
+            vec![ElementRef("op-a".to_string())],
+            id_common("rec"),
+        )));
+        let generated = Element::Live(LiveVariant::Generated(GeneratedElem::new(
+            "concept".to_string(),
+            serde_json::json!({}),
+            id_common("gen"),
+        )));
+
+        let layer = with_id(
+            make_layer("L", vec![compound, reference, recorded, generated]),
+            "lyr",
+        );
+        let doc = Document {
+            layers: vec![layer],
+            ..Document::default()
+        };
+        let ids = doc.element_ids();
+        let mut sorted: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+        sorted.sort();
+        assert_eq!(
+            sorted,
+            vec!["cmp", "gen", "lyr", "op-a", "op-b", "op-b-inner", "rec", "ref"]
+        );
     }
 
     #[test]

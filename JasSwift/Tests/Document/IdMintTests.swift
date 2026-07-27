@@ -82,3 +82,41 @@ private func withCorpusIdCounter<T>(_ body: () -> T) -> T {
                        selectedLayer: 0, selection: [])
     #expect(doc.elementIds.sorted() == ["grp", "inner", "lyr", "master"])
 }
+
+/// A compound shape OWNS its operands (`CompoundShape.operands` is `[Element]`),
+/// and each operand is a real element carrying its own id. Those ids are part
+/// of the document's id space (REFERENCE_GRAPH.md §2.5 uniqueness), so the mint
+/// avoid-set must see them — otherwise a fresh mint can land on an operand id.
+/// The walk must also keep recursing THROUGH an operand subtree (an operand
+/// that is itself a group). Rust's `element_ids_sees_ids_inside_live_elements`
+/// is the twin.
+@Test func elementIdsSeesIdsInsideLiveElements() {
+    // Operand 1 is a plain rect; operand 2 is a GROUP whose child also
+    // carries an id, so the walk has to descend past the operand itself.
+    let operandA = Element.rect(Rect(x: 0, y: 0, width: 1, height: 1, id: "op-a"))
+    let nested = Element.rect(Rect(x: 2, y: 2, width: 1, height: 1, id: "op-b-inner"))
+    let operandB = Element.group(Group(children: [nested], id: "op-b"))
+    // An id-less operand contributes nothing (and must not trip the walk).
+    let operandC = Element.line(Line(x1: 0, y1: 0, x2: 1, y2: 1))
+    let compound = Element.live(.compoundShape(CompoundShape(
+        operation: .union,
+        operands: [operandA, operandB, operandC],
+        id: "cmp")))
+
+    // The other three LiveVariant payloads own NO child elements — they name
+    // their inputs by id — so each contributes exactly its own id.
+    let reference = Element.live(.reference(ReferenceElem(
+        target: ElementRef("op-a"), id: "ref")))
+    let recorded = Element.live(.recorded(RecordedElem(
+        ops: [], inputs: [ElementRef("op-a")], id: "rec")))
+    let generated = Element.live(.generated(GeneratedElem(
+        conceptId: "concept", params: [:], id: "gen")))
+
+    let layer = Layer(name: "L",
+                      children: [compound, reference, recorded, generated],
+                      id: "lyr")
+    let doc = Document(layers: [layer], symbols: [],
+                       selectedLayer: 0, selection: [])
+    #expect(doc.elementIds.sorted()
+            == ["cmp", "gen", "lyr", "op-a", "op-b", "op-b-inner", "rec", "ref"])
+}
