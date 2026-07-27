@@ -1869,6 +1869,15 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
             let polyRaw = tc["polygon"] as! [[Double]]
             let poly = polyRaw.map { ($0[0], $0[1]) }
             actual = pointInPolygon(args[0], args[1], poly)
+        // Element-level marquee / lasso: `element` is a test-JSON element,
+        // `args` the marquee rect x/y/w/h, `polygon` the lasso outline.
+        case "element_intersects_rect":
+            let elem = parseElement(tc["element"]!)
+            actual = elementIntersectsRect(elem, args[0], args[1], args[2], args[3])
+        case "element_intersects_polygon":
+            let elem = parseElement(tc["element"]!)
+            let polyRaw = tc["polygon"] as! [[Double]]
+            actual = elementIntersectsPolygon(elem, polyRaw.map { ($0[0], $0[1]) })
         default:
             Issue.record("Unknown function: \(function)")
             continue

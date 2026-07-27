@@ -453,6 +453,17 @@ mod tests {
                                                       args[4], args[5], args[6], args[7], filled),
                 "point_in_polygon" =>
                     hit_test::point_in_polygon(args[0], args[1], &polygon),
+                // Element-level marquee / lasso: `element` is a test-JSON
+                // element, `args` the marquee rect x/y/w/h, `polygon` the
+                // lasso outline.
+                "element_intersects_rect" => {
+                    let elem = crate::geometry::test_json::parse_element(&tc["element"]);
+                    hit_test::element_intersects_rect(&elem, args[0], args[1], args[2], args[3])
+                }
+                "element_intersects_polygon" => {
+                    let elem = crate::geometry::test_json::parse_element(&tc["element"]);
+                    hit_test::element_intersects_polygon(&elem, &polygon)
+                }
                 _ => panic!("Unknown function: {}", func),
             };
 

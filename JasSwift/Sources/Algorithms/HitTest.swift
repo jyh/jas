@@ -112,6 +112,27 @@ public func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Doub
         return (0..<pts.count-1).map { i in
             (pts[i].0, pts[i].1, pts[i+1].0, pts[i+1].1)
         }
+    // A compound shape's segments are the edges of EVERY evaluated ring,
+    // each ring closed — so a hole's boundary is a boundary and the hole's
+    // interior is not part of the shape. Mirrors Rust's `Element::Live`
+    // arm (algorithms/hit_test.rs). The other live variants contribute no
+    // segments there either.
+    case .live(let v):
+        switch v {
+        case .compoundShape(let cs):
+            var segs: [(Double, Double, Double, Double)] = []
+            for ring in cs.evaluate(precision: DEFAULT_PRECISION) {
+                if ring.count < 2 { continue }
+                for i in 0..<ring.count-1 {
+                    segs.append((ring[i].0, ring[i].1, ring[i+1].0, ring[i+1].1))
+                }
+                let last = ring.last!, first = ring.first!
+                segs.append((last.0, last.1, first.0, first.1))
+            }
+            return segs
+        case .reference, .recorded, .generated:
+            return []
+        }
     default:
         return []
     }
@@ -185,6 +206,21 @@ private func elementIntersectsRectLocal(_ elem: Element,
     case .text:
         let b = elem.bounds
         return rectsIntersect(b.x, b.y, b.width, b.height, rx, ry, rw, rh)
+    // A live element hit-tests against its own segments, not its bounding
+    // box — otherwise a marquee inside a compound shape's hole selects it.
+    // Same body as the `.path` arm, reading the fill generically. Mirrors
+    // Rust's catch-all arm, which Element::Live falls into.
+    case .live:
+        let segs = segmentsOfElement(elem)
+        if elem.fill != nil {
+            let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
+            if endpoints.contains(where: { pointInRect($0.s, $0.t, rx, ry, rw, rh) }) {
+                return true
+            }
+        }
+        return segs.contains { s in
+            segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
+        }
     default:
         let b = elem.bounds
         return rectsIntersect(b.x, b.y, b.width, b.height, rx, ry, rw, rh)
@@ -295,7 +331,20 @@ private func elementIntersectsPolygonLocal(_ elem: Element, _ poly: [(Double, Do
         return segs.contains { s in
             segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
         }
-    case .text, .textPath, .group, .layer, .live:
+    // A live element hit-tests against its own segments, not its bounding
+    // box — otherwise a lasso inside a compound shape's hole selects it.
+    // Same body as the `.path` arm, reading the fill generically. Mirrors
+    // Rust's catch-all arm, which Element::Live falls into (its bbox arm
+    // lists only Text | TextPath | Group | Layer).
+    case .live:
+        let segs = segmentsOfElement(elem)
+        if elem.fill != nil {
+            let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
+            if endpoints.contains(where: { pointInPolygon($0.s, $0.t, poly) }) { return true }
+            if poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+        }
+        return segs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
+    case .text, .textPath, .group, .layer:
         let b = elem.bounds
         let corners = [(b.x, b.y), (b.x + b.width, b.y),
                        (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
