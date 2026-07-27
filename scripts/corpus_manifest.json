@@ -374,6 +374,13 @@
       "blocks": "A bind-value divergence in one of the 13 unseeded panels is still invisible, as is any divergence in a panel enabled_when. panel_widget_tree remains key-names-only by design (widening it would rewrite every record it emits), so nothing else covers those panels.",
       "unblock": "Fixture-only for the panel coverage: add BIND_SEED entries in scripts/gen_panel_layout_fixture.py and regenerate. enabled_when needs a one-line arm in each of the three bind_values implementations PLUS a seeded gradient vector -- and must not be added without the vector, since an unexercised arm is exactly the shape this list exists to keep visible.",
       "census": "5.8"
+    },
+    {
+      "id": "art-flatten-drops-path-after-leading-close",
+      "title": "art_along_path's first-subpath flattener is driven by no corpus family, and a leading ClosePath makes it discard the whole path in BOTH ports",
+      "evidence": "Measured on this commit through a throwaway probe in each port, then removed. flatten (jas_dioxus/src/algorithms/art_along_path.rs) and flattenArtPath (JasSwift/Sources/Algorithms/ArtAlongPath.swift) both return [] for d = [Z, M(3,2), L(13,2)], and [(3,2),(13,2)] for the same path without the leading Z. Both close arms are `if cx != sx || cy != sy { push(sx, sy) }` followed by an unconditional `return out`, and at a leading close cx == sx == cy == sy == 0, so the function returns the empty accumulator. The two ports AGREE, so no port-vs-port comparison can see it; and no fixture reaches either function, since neither roundtrip binary calls it -- grep for art_along_path / flattenArtPath in jas_dioxus/src/bin/algorithm_roundtrip.rs and JasSwift/ToolsAlgorithm/AlgorithmRoundtrip.swift matches 0 lines in each.",
+      "blocks": "S-4 (a leading ClosePath is a no-op, ruled by JYH 2026-07-27) is honoured by flatten_path_commands in both ports and by flatten_path_to_rings, but NOT here: this flattener treats a leading close as end-of-first-subpath and drops the real subpath that follows, so an art / pattern-along-path / bristle brush applied to such a path flattens to nothing. It is a SHARED defect rather than a divergence, which is exactly the class a port-vs-port equivalence gate is blind to.",
+      "unblock": "Needs a corpus family before a fix, per the fixture-first law: teach both roundtrip binaries an art-flatten verb over this function, add a leading-close vector, and only then decide whether the close arm should continue past a no-op close instead of returning."
     }
   ]
 }

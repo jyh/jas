@@ -3656,9 +3656,15 @@ mod tests {
     //
     // Rust already implemented the ruling when these were written, so
     // unlike their Swift counterparts these went in GREEN: they are
-    // regression pins for a guard that had no in-suite test at all. Each
-    // was checked to discriminate by deleting the `!pts.is_empty()`
-    // condition and observing the stated failure.
+    // regression pins for a guard that had no in-suite test at all
+    // (`flatten_multi_subpath_closes_to_subpath_start` is the closest
+    // existing test and never reaches the guard's empty branch).
+    //
+    // The FOUR leading-close tests were shown to discriminate by deleting
+    // the `!pts.is_empty()` condition: exactly those four then fail. The
+    // two scope-boundary tests below do NOT fail under that deletion --
+    // they are pinned against different wrong implementations, and each
+    // names its own in its own doc comment.
 
     /// A path that is nothing but Z flattens to nothing. Without the
     /// guard this returns the uninitialised subpath start, [(0, 0)].

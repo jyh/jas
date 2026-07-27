@@ -328,8 +328,13 @@ class TestLeadingClose:
     @pytest.mark.parametrize("align", [False, True])
     def test_leading_close_real_subpath_is_non_empty(self, align):
         """Guards the previous test against the vacuous pass where both
-        sides are (). Measured on the fixed reference: 4 dashes in
-        preserve mode and 4 in align mode for M(0,0) L(20,0) at 4/2."""
+        sides are ().
+
+        The number comes from the two ACTIVE ports, which already
+        conformed and so supplied the golden the reference had to reach:
+        their `leading_close_does_not_suppress_the_real_subpath` tests
+        assert 4 for M(0,0) L(20,0) at dash 4 / gap 2 in both modes, and
+        passed before this file was touched."""
         out = expand_dashed_stroke((Z(), M(0, 0), L(20, 0)),
                                    dash_array=(4.0, 2.0), align_anchors=align)
         assert len(out) == 4
