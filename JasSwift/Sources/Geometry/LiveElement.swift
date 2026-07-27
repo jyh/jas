@@ -87,8 +87,14 @@ public struct BooleanOptions: Equatable {
     /// If true, DIVIDE drops fragments with no fill and no stroke.
     public let divideRemoveUnpainted: Bool
 
+    /// Defaults are the ones `workspace/state.yaml` declares for the
+    /// backing `state.boolean_*` fields, so an options-free call and a
+    /// call driven by an untouched store agree. `removeRedundantPoints`
+    /// defaulted to `true` here while `state.yaml` and Rust's
+    /// `BooleanOptions::default()` said `false` — so the collapse pass
+    /// ran in exactly one port.
     public init(precision: Double = DEFAULT_PRECISION,
-                removeRedundantPoints: Bool = true,
+                removeRedundantPoints: Bool = false,
                 divideRemoveUnpainted: Bool = false) {
         self.precision = precision
         self.removeRedundantPoints = removeRedundantPoints
