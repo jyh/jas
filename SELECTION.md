@@ -32,6 +32,20 @@ The two cases capture two distinct user intents:
 | `All` | The element is selected as a whole — bounding-box selection, the typical Selection Tool result. | Move/copy translates the primitive in place; Rect stays a Rect, Circle stays a Circle. |
 | `Partial(s)` | Only the listed control points are selected (Partial Selection). `s` is a `SortedCps` — sorted, de-duplicated, fixed-width. | Move drags only the listed CPs; Rect/Circle/Ellipse may convert to a Polygon when the resulting shape is no longer axis-aligned. |
 
+A Rect that converts carries its ROUNDING with it: `rx`/`ry` have no
+counterpart on a Polygon, and JYH's ratified answer (3) of
+`transcripts/EDIT_SEMANTICS_FREEZE.md` is to flatten the rounding into the
+emitted points (WYSIWYG at promotion) rather than let it silently vanish.
+Each corner becomes a RUN of points (`rounded_rect_corner_runs`), and a
+square rect still yields exactly its four corners. Because a corner drag is
+a multi-sample gesture, the promotion also remaps the control-point
+selection onto the run it came from (`remap_cp_selection_after_move`), or
+the next mousemove would address indices that no longer mean what they did.
+Landed in Rust 2026-07-27; JasSwift's `moveControlPoints` Rect arm still
+emits four square corners, so the two ports currently disagree on rounded
+rects (coverage gap `partial-cp-drag-unreached` — no corpus vector reaches
+a control-point drag at all).
+
 `Partial(SortedCps[0..n))` (every CP listed individually) is *not* the
 same as `All`: the user picked CPs one at a time and expects per-CP
 manipulation, not whole-element translation.

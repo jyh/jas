@@ -1372,10 +1372,13 @@ impl Controller {
 
     /// Make a compound shape from the current selection using the
     /// given operation. Selected elements must be siblings. The
-    /// frontmost (last in path order) operand's fill, stroke, and
-    /// common attributes are copied onto the new compound shape.
-    /// Selection becomes the new compound shape. See BOOLEAN.md
-    /// §Compound shapes.
+    /// frontmost (last in path order) operand's PAINT — fill, stroke,
+    /// opacity and blend mode, the four properties BOOLEAN.md
+    /// §Operand and paint rules names — is copied onto the new compound
+    /// shape; the rest of its `common` is NOT (this is a WRAP: the
+    /// container is 0 -> 1 and never wears a member's identity, see
+    /// transcripts/EDIT_SEMANTICS_FREEZE.md §3.4). Selection becomes
+    /// the new compound shape. See BOOLEAN.md §Compound shapes.
     pub fn make_compound_shape_with_op(
         model: &mut Model,
         operation: crate::geometry::live::CompoundOperation,
@@ -1423,16 +1426,35 @@ impl Controller {
         //
         // The wrapper takes the frontmost's paint per the ratified BOOLEAN.md
         // rule — fill, stroke, `opacity`, blend mode. The rest of `common`
-        // stays fresh, and deliberately so: cloning the frontmost's
-        // `transform` onto the wrapper while the operand keeps its own would
-        // apply it twice, and cloning its `mask` would composite the mask
-        // twice as well.
+        // stays fresh: cloning the frontmost's `mask` onto the wrapper while
+        // the operand keeps its own would composite the mask twice, and its
+        // `name` and `tool_origin` belong to the element that earned them.
+        //
+        // `transform` is the ONE exception, and it is BUG CONTAINMENT, not
+        // law. `CompoundShape::evaluate_with` flattens operands through
+        // `element_to_polygon_set_with`, which has ZERO transform references:
+        // an operand's own transform is ignored by the evaluator and only the
+        // wrapper's is applied at render, so a fresh-default wrapper would
+        // make a compound built from transformed operands jump to the
+        // untransformed position. A UNANIMOUS transform therefore carries —
+        // no winner elected — and disagreement takes the default. Delete this
+        // carry when the compound evaluator becomes transform-aware (the S-3
+        // transform-blind class), not before.
         let frontmost = elements.last().unwrap();
         let fill = frontmost.fill().copied();
         let stroke = frontmost.stroke().copied();
+        let unanimous_transform = {
+            let first = elements[0].common().transform;
+            elements
+                .iter()
+                .all(|e| e.common().transform == first)
+                .then_some(first)
+                .flatten()
+        };
         let common = crate::geometry::element::CommonProps {
             opacity: frontmost.common().opacity,
             mode: frontmost.common().mode,
+            transform: unanimous_transform,
             ..crate::geometry::element::CommonProps::default()
         };
 
@@ -5517,6 +5539,56 @@ mod preservation_law_tests {
                     wrapper as well (it would composite twice)");
         assert_eq!(out.common().tool_origin, None,
                    "a capability marker belongs to the element that earned it");
+    }
+
+    /// BUG CONTAINMENT, not law, and pinned so it cannot be mistaken for
+    /// law. `CompoundShape::evaluate_with` flattens each operand through
+    /// `element_to_polygon_set_with`, which contains ZERO transform
+    /// references — an operand's own transform is IGNORED by the evaluator,
+    /// and only the wrapper's is applied at render. So a WRAP that leaves the
+    /// wrapper's transform at its fresh default would make a compound built
+    /// from transformed operands jump to the untransformed position.
+    ///
+    /// A UNANIMOUS transform therefore carries — no winner is elected, and it
+    /// is the only transform under which the raw rings mean anything.
+    /// Disagreement takes the default, exactly as §3.3 rules for every other
+    /// field. Delete this carry when the compound evaluator becomes
+    /// transform-aware (the S-3 class), not before.
+    #[test]
+    fn compound_shape_make_carries_a_unanimous_transform_only() {
+        use crate::geometry::element::Transform;
+        let t = Transform::default().translated(12.0, 34.0);
+        // Unanimous: both operands carry the same transform -> it rides.
+        let mut model = rich_pair(None, None, 0.5, 0.5);
+        {
+            let doc = model.document().clone();
+            let mut new_doc = doc.clone();
+            for p in [vec![0, 0], vec![0, 1]] {
+                let mut e = (*doc.get_element(&p).unwrap()).clone();
+                e.common_mut().transform = Some(t);
+                new_doc = new_doc.replace_element(&p, e);
+            }
+            model.edit_document(new_doc);
+        }
+        Controller::make_compound_shape_with_op(
+            &mut model, crate::geometry::live::CompoundOperation::Union);
+        assert_eq!(only_child(&model).common().transform, Some(t),
+                   "a unanimous transform must ride the wrapper while the \
+                    compound evaluator is transform-blind");
+
+        // Disagreement: the default stands. No operand is elected.
+        let mut model = rich_pair(None, None, 0.5, 0.5);
+        {
+            let doc = model.document().clone();
+            let mut front = (*doc.get_element(&vec![0, 1]).unwrap()).clone();
+            front.common_mut().transform = Some(t);
+            let new_doc = doc.replace_element(&vec![0, 1], front);
+            model.edit_document(new_doc);
+        }
+        Controller::make_compound_shape_with_op(
+            &mut model, crate::geometry::live::CompoundOperation::Union);
+        assert_eq!(only_child(&model).common().transform, None,
+                   "disagreeing transforms must fall to the default");
     }
 
     // ── The corner drag is a MULTI-SAMPLE gesture ─────────────────────────
