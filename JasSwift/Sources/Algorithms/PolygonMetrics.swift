@@ -10,7 +10,9 @@ import Foundation
 // and once into Tests/Algorithms/BooleanTests.swift -- with nothing
 // comparing the copies, and mirrored again by hand from Rust. A drift in a
 // measuring instrument silently rewrites what the boolean families appear
-// to prove, so this file is the single Swift copy. Its Rust mirror is
+// to prove, so this file is the single Swift copy and the
+// `polygon_metrics` corpus family pins its outputs against
+// independently-derived expectations. Its Rust mirror is
 // jas_dioxus/src/algorithms/polygon_metrics.rs.
 //
 // FILL RULE. These are even-odd metrics. transcripts/BOOLEAN.md clause 1
@@ -63,27 +65,119 @@ public func pointInPolygonSet(_ ps: BoolPolygonSet, _ pt: (Double, Double)) -> B
     return count % 2 == 1
 }
 
-/// Area of a region, as the harness has computed it up to now: sum
-/// |shoelace| over the rings, signing each ring by its NESTING DEPTH --
-/// the number of other rings that contain the ring's FIRST VERTEX, even
-/// meaning plus and odd meaning minus.
+/// Every directed edge of every ring. Rings with fewer than three
+/// vertices bound no region and are skipped.
+private func polygonEdges(_ ps: BoolPolygonSet) -> [((Double, Double), (Double, Double))] {
+    var out: [((Double, Double), (Double, Double))] = []
+    for ring in ps {
+        let n = ring.count
+        if n < 3 { continue }
+        for i in 0..<n { out.append((ring[i], ring[(i + 1) % n])) }
+    }
+    return out
+}
+
+/// The y at which two edges cross, if they do. Liberal on purpose:
+/// endpoint touches count, and only exactly-parallel pairs are rejected.
+/// The value is used solely to subdivide the scanline bands in
+/// polygonSetArea, and an extra band boundary cannot change that
+/// integral -- a missing one can.
+private func edgeCrossingY(_ a: ((Double, Double), (Double, Double)),
+                           _ b: ((Double, Double), (Double, Double))) -> Double? {
+    let ((ax1, ay1), (ax2, ay2)) = a
+    let ((bx1, by1), (bx2, by2)) = b
+    let dxa = ax2 - ax1, dya = ay2 - ay1
+    let dxb = bx2 - bx1, dyb = by2 - by1
+    let denom = dxa * dyb - dya * dxb
+    if denom == 0 { return nil }
+    let dxab = ax1 - bx1, dyab = ay1 - by1
+    let s = (dxb * dyab - dyb * dxab) / denom
+    let t = (dxa * dyab - dya * dxab) / denom
+    if s < 0 || s > 1 || t < 0 || t > 1 { return nil }
+    return ay1 + s * dya
+}
+
+/// Total width of the odd-parity part of the horizontal line at `y`.
 ///
-/// Moved here verbatim from ToolsAlgorithm/AlgorithmRoundtrip.swift and
-/// Tests/Algorithms/BooleanTests.swift so that there is one Swift copy;
-/// behaviour is unchanged by the move. The depth heuristic is correct
-/// only for a canonical set (pairwise disjoint or strictly nested simple
-/// rings) and is replaced in the commit that follows.
-public func polygonSetArea(_ ps: BoolPolygonSet) -> Double {
-    var total = 0.0
-    for (i, ring) in ps.enumerated() {
-        let a = abs(ringSignedArea(ring))
-        var depth = 0
-        if let pt = ring.first {
-            for (j, other) in ps.enumerated() where i != j {
-                if pointInRing(other, pt) { depth += 1 }
-            }
+/// Every edge strictly straddling `y` contributes one crossing x. Sorted,
+/// those crossings alternate outside/inside/outside/..., so the
+/// odd-parity measure is the sum of the 1st-to-2nd, 3rd-to-4th, ... gaps.
+/// Horizontal edges straddle nothing and drop out, which is what the
+/// even-odd rule wants.
+private func oddParityWidth(_ edges: [((Double, Double), (Double, Double))],
+                            _ y: Double) -> Double {
+    var xs: [Double] = []
+    for ((x1, y1), (x2, y2)) in edges {
+        let lo = min(y1, y2), hi = max(y1, y2)
+        if y > lo && y < hi {
+            xs.append(x1 + (y - y1) * (x2 - x1) / (y2 - y1))
         }
-        total += depth % 2 == 0 ? a : -a
+    }
+    xs.sort()
+    var total = 0.0
+    var i = 0
+    while i + 1 < xs.count {
+        total += xs[i + 1] - xs[i]
+        i += 2
+    }
+    return total
+}
+
+/// Even-odd net area of a ring set -- the true measure of the region, for
+/// ANY ring set, including ones whose rings partially overlap each other
+/// or cross themselves.
+///
+/// This replaces a nesting-depth heuristic that signed each ring by how
+/// many other rings contained its FIRST VERTEX (even = plus, odd = minus)
+/// and summed |shoelace|. That is right only for a canonical set --
+/// pairwise disjoint or strictly nested simple rings -- and the two ways
+/// it was wrong are exactly the two the boolean corpus most needs to see:
+/// two partially overlapping rings both score depth 0, so it reported
+/// A1 + A2 instead of A1 + A2 - 2*overlap, and because the probe is the
+/// first vertex, the answer moved when a ring was merely LISTED from a
+/// different vertex. Since isRingSimple is intra-ring only, the corpus
+/// then had no instrument that could see inter-ring partial overlap at
+/// all, and a normalizer regression leaving such an overlap in its output
+/// could satisfy every golden.
+///
+/// Method: sweep in y. Cut the plane into bands at every vertex y and
+/// every edge-edge crossing y. Inside one open band no edge starts, ends
+/// or changes places with another, so oddParityWidth is LINEAR in y
+/// there; the mean of a linear function over an interval is the average
+/// of its values at the interval's quarter and three-quarter points, so
+/// h * (w(1/4) + w(3/4)) / 2 is the band's exact contribution -- and both
+/// samples sit strictly inside the band, which keeps every vertex off the
+/// scanline. Only arithmetic is used: no arrangement, no planar, no
+/// boolean, so the instrument does not lean on anything it measures.
+///
+/// Cost is O(E^2) for the crossing scan plus O(B*E) for the bands, where
+/// B <= 2V + (number of crossings). The corpus's ring sets are tens of
+/// vertices.
+public func polygonSetArea(_ ps: BoolPolygonSet) -> Double {
+    let edges = polygonEdges(ps)
+    if edges.isEmpty { return 0 }
+    var ys: [Double] = []
+    ys.reserveCapacity(edges.count * 2)
+    for (p, q) in edges {
+        ys.append(p.1)
+        ys.append(q.1)
+    }
+    for i in 0..<edges.count {
+        for j in (i + 1)..<edges.count {
+            if let y = edgeCrossingY(edges[i], edges[j]) { ys.append(y) }
+        }
+    }
+    ys.sort()
+    var bands: [Double] = []
+    for y in ys where bands.last != y { bands.append(y) }
+    var total = 0.0
+    for k in 0..<max(bands.count - 1, 0) {
+        let y0 = bands[k], y1 = bands[k + 1]
+        let h = y1 - y0
+        if !(h > 0) { continue }
+        let a = oddParityWidth(edges, y0 + h * 0.25)
+        let b = oddParityWidth(edges, y0 + h * 0.75)
+        total += h * (a + b) * 0.5
     }
     return total
 }

@@ -55,6 +55,7 @@ case "hit_test":          results = runHitTest(activeVectors)
 case "path_project":      results = runPathProject(activeVectors)
 case "boolean":           results = runBoolean(activeVectors)
 case "boolean_normalize": results = runBooleanNormalize(activeVectors)
+case "polygon_metrics":   results = runPolygonMetrics(activeVectors)
 case "fit_curve":         results = runFitCurve(activeVectors)
 case "shape_recognize":   results = runShapeRecognize(activeVectors)
 case "planar":            results = runPlanar(activeVectors)
@@ -411,6 +412,34 @@ func runBooleanNormalize(_ vectors: [[String: Any]]) -> [[String: Any]] {
             "ring_count": res.count,
             "all_rings_simple": allRingsSimple(res),
             "rings": rings
+        ] as [String: Any]] as [String: Any]
+    }
+}
+
+// MARK: - Polygon Metrics
+//
+// Gates the harness's OWN instruments. No boolean operation runs here:
+// the fixture's ring sets go straight into
+// Sources/Algorithms/PolygonMetrics.swift, so a red vector accuses a
+// measuring instrument and nothing else. Fixture shape:
+//   { name, rings: [[[x,y]...]...], sample_points: [[x,y]...] }
+
+func runPolygonMetrics(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as! String
+        let rings = parsePolygonSet(tc["rings"]!)
+        let raw = (tc["sample_points"] as? [Any]) ?? []
+        let samples: [[String: Any]] = raw.map { p in
+            let pt = parsePoint(p)
+            return ["point": [pt.0, pt.1], "inside": pointInPolygonSet(rings, pt)]
+        }
+        return ["name": name, "result": [
+            "ring_count": rings.count,
+            "ring_signed_areas": rings.map { ringSignedArea($0) },
+            "ring_simple": rings.map { isRingSimple($0) },
+            "all_rings_simple": allRingsSimple(rings),
+            "area": polygonSetArea(rings),
+            "sample_points": samples
         ] as [String: Any]] as [String: Any]
     }
 }

@@ -456,6 +456,21 @@ Swift's copies are computed on every run, emitted into the payload, and **read b
 the same class of thing as an overlay deriving h/s/b differently from the conforming function beside
 it: **the measuring instruments can drift silently.**
 
+> **RESOLVED 2026-07-26 (POLYAREA).** Both halves. The metric is now an exact even-odd net area
+> computed by a y-band scanline (`jas_dioxus/src/algorithms/polygon_metrics.rs`,
+> `JasSwift/Sources/Algorithms/PolygonMetrics.swift`), correct for partially overlapping and
+> self-crossing rings and independent of which vertex a ring is listed from. Measured on two
+> 10x10 squares overlapping in a 4x4 corner: the depth heuristic answered **200.0** when the
+> second ring was listed from a vertex outside the first and **0.0** when it was listed from a
+> vertex inside — one region, two answers — against the true 168.0. The instruments themselves
+> moved from hand-copies in five files (three Rust, two Swift) to one copy per port, and the new
+> `polygon_metrics` corpus family drives them directly — no boolean operation in the loop — with
+> every expectation derived independently (shoelace, exact rectilinear cell decomposition, and a
+> dense-grid Riemann sum). **No existing golden changed**: all 33 pinned `area` values in
+> `boolean.json` and `boolean_normalize.json` are reproduced bit-for-bit by the new metric, which
+> also says every one of today's outputs is canonical. `is_ring_simple` is still intra-ring only,
+> by design; inter-ring overlap is now the `area`'s job.
+
 **5.4 — The codec gate's real coverage is "the field subset some fixture happens to populate."**
 Every codec gate is a canonical-JSON before/after comparison, which catches a dropped field
 perfectly — **but only for fields a fixture sets.** A grep of all 25 `test_fixtures/expected/*.json`

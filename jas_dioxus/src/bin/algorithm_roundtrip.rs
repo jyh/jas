@@ -80,6 +80,7 @@ fn main() {
         "path_project" => run_path_project(&vectors),
         "boolean" => run_boolean(&vectors),
         "boolean_normalize" => run_boolean_normalize(&vectors),
+        "polygon_metrics" => run_polygon_metrics(&vectors),
         "fit_curve" => run_fit_curve(&vectors),
         "shape_recognize" => run_shape_recognize(&vectors),
         "planar" => run_planar(&vectors),
@@ -546,6 +547,54 @@ fn run_boolean_normalize(vectors: &[Value]) -> Vec<Value> {
                     "ring_count": result.len(),
                     "all_rings_simple": all_rings_simple(&result),
                     "rings": rings
+                }
+            })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// polygon_metrics
+// ---------------------------------------------------------------
+//
+// Gates the harness's OWN instruments. No boolean operation runs here:
+// the fixture's ring sets go straight into
+// `jas_dioxus::algorithms::polygon_metrics`, so a red vector accuses a
+// measuring instrument and nothing else. Fixture shape:
+//   { name, rings: [[[x,y]...]...], sample_points: [[x,y]...] }
+
+fn run_polygon_metrics(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::polygon_metrics::{is_ring_simple, ring_signed_area};
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap();
+            let rings = parse_polygon_set(&tc["rings"]);
+            let sample_points: Vec<Value> = tc["sample_points"]
+                .as_array()
+                .map(|pts| {
+                    pts.iter()
+                        .map(|p| {
+                            let pt = parse_point(p);
+                            json!({
+                                "point": [pt.0, pt.1],
+                                "inside": point_in_polygon_set(&rings, pt)
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            json!({
+                "name": name,
+                "result": {
+                    "ring_count": rings.len(),
+                    "ring_signed_areas": rings.iter().map(ring_signed_area)
+                        .collect::<Vec<f64>>(),
+                    "ring_simple": rings.iter().map(is_ring_simple)
+                        .collect::<Vec<bool>>(),
+                    "all_rings_simple": all_rings_simple(&rings),
+                    "area": polygon_set_area(&rings),
+                    "sample_points": sample_points,
                 }
             })
         })

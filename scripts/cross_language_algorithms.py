@@ -51,6 +51,13 @@ ALGORITHMS = {
     "number_commit":     ("exact", None),
     "boolean":           ("exact_boolean", None),
     "boolean_normalize": ("exact_boolean", None),
+    # The harness's OWN region metrics, which every boolean golden is
+    # expressed in. Whole-object tolerance, so `expected` must pin EVERY
+    # emitted key -- an instrument family that let a key go unpinned would
+    # reproduce the defect it exists to close. 1e-9 because the vectors are
+    # small-integer geometry: the answers are exact, and the discriminating
+    # failures are whole units wide (e.g. 168 vs 0).
+    "polygon_metrics":   ("tolerance", 1e-9),
     "fit_curve":         ("tolerance", 0.5),
     "shape_recognize":   ("shape", 0.5),
     "planar":            ("property_planar", 0.01),
