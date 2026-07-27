@@ -566,8 +566,11 @@ mod tests {
     // ---- filled polyline: the fill closes the point list implicitly ----
     //
     // A `<polyline>` with a fill paints as though the last point were joined
-    // back to the first (canvas `fill()` closes every subpath), so its filled
-    // region is NOT the stroked open run. `[[0,0],[0,100],[100,100],[100,0]]`
+    // back to the first — filling an open subpath closes it implicitly (SVG /
+    // canvas fill semantics), and `painter::element_render` does emit a fill
+    // over an UNCLOSED path for this element (`polyline_painter_inputs` →
+    // `poly_path(&e.points, false)` plus `conv_fill`). So the filled region is
+    // NOT the stroked open run. `[[0,0],[0,100],[100,100],[100,0]]`
     // strokes as a U but FILLS as the full 100x100 square, and a marquee
     // dropped in the U's opening lands inside that fill. The reference
     // (jas/algorithms/hit_test.py, `case Polyline()`) and JasSwift both answer
