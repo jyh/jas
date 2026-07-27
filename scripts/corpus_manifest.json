@@ -14,7 +14,11 @@
     "claimed sets (after the transitive data-reference closure) must be",
     "identical for the family. claim_style is documentation of HOW each",
     "consumer registers fixtures — the checker's extraction rules implement",
-    "exactly these conventions."
+    "exactly these conventions.",
+    "TWO gap lists, of opposite shapes: known_gaps SUPPRESSES a named",
+    "mechanical check (and a row that suppresses nothing is reported stale);",
+    "coverage_gaps DECLARES what the corpus cannot reach at all and is",
+    "printed on every run. See _coverage_gaps_doc at the foot of this file."
   ],
   "families": {
     "test_fixtures/actions": {
@@ -274,5 +278,101 @@
       "notes": "Reference-only BY DESIGN: the set-effect matrix pins the interpreter's `set:` semantics (typing, nullability, shadowing, panel routing) at the spec level; the ports exercise set: through the panel/action corpora rather than this matrix. Glob claim — orphan detection vacuous, directory-existence asserted by the gate."
     }
   },
-  "known_gaps": []
+  "known_gaps": [],
+  "_coverage_gaps_doc": [
+    "The SECOND gap list, and the opposite shape from known_gaps above.",
+    "known_gaps is a suppressor: each row names one mechanical check on one",
+    "family/file and downgrades its failure to a warning, so it can only",
+    "ever speak about a check this gate already runs. coverage_gaps records",
+    "what the gate does NOT check -- a family whose fixtures never reach the",
+    "interesting branch, a field no fixture sets, a divergence no",
+    "port-vs-port comparison can see. It suppresses nothing; every row is",
+    "printed on every run, precisely so a green gate stops implying a",
+    "completeness it never had.",
+    "Required keys: id, title, evidence, blocks, unblock (census optional).",
+    "`evidence` must be a claim someone can re-run, because a gap you cannot",
+    "state precisely is not ready to record. Every row below was re-measured",
+    "on this commit rather than copied from the census -- three census",
+    "figures did not survive that (noted in the rows), and the census's",
+    "hit_test/marquee row is not here at all because it has since CLOSED:",
+    "element_intersects_rect and element_intersects_polygon are now driven",
+    "by both roundtrip binaries over 6 of hit_test.json's 40 vectors.",
+    "Census rows 5.3, 5.6, 5.10 and 5.11 are deliberately absent: they are",
+    "real, but this pass did not re-verify them, and an unverified row here",
+    "would be the same false assurance the empty list was."
+  ],
+  "coverage_gaps": [
+    {
+      "id": "text-index-unit",
+      "title": "Swift indexes text by grapheme cluster; Rust and the reference index by Unicode scalar, so no non-ASCII vector can be added to the three text families",
+      "evidence": "Measured through the roundtrip harnesses at char_width 10 on this commit. content \"ae\\u0301b\" (4 scalars / 3 clusters): reference and Rust give char_count 4 with 4 glyphs, Swift gives 3 with 3. The ZWJ family emoji U+1F468 U+200D U+1F469 U+200D U+1F467 (5 scalars / 1 cluster): reference and Rust give 5, Swift gives 1. Total line advance now AGREES (40 and 50 both ports) because the injected measurer counts scalars; it is the per-glyph subdivision and every index derived from it that diverge. Root cause is `Array(content)` in TextLayout.swift / TextLayoutParagraph.swift / PathTextLayout.swift.",
+      "blocks": "text_layout, text_layout_paragraph and path_text_layout are ASCII-only families. The rust-vs-swift comparison has no oracle-holdout mechanism (only property_planar and exact_boolean get one), so a non-ASCII vector cannot be added and marked -- it would simply red the gate.",
+      "unblock": "Move Swift's three layout files onto scalar indices, in the SAME sweep as TextEditSession/TypeTool/TypeOnPathTool, which do their cursor arithmetic in `Character` counts (`text.count`, `key.count == 1`) and would otherwise desync from the layout for exactly these strings.",
+      "census": "5.9(a), extended: the census called this a harness bug only. The harness half is fixed (HARNESSUNIT); this is the product half it was hiding."
+    },
+    {
+      "id": "element-bounds-untransformed",
+      "title": "Every element_bounds vector has transform: null, so the transform-aware bounds the Properties panel shows are ungated",
+      "evidence": "All 17 vectors in test_fixtures/algorithms/element_bounds.json carry \"transform\": null -- counted mechanically over the parsed fixture on this commit.",
+      "blocks": "The family name reports bounds as covered while the transform branch of element_bounds is never entered.",
+      "unblock": "Fixture-only work: add vectors with a non-identity transform (rotation and non-uniform scale are the cases where a naive corner-transform diverges from a true bound).",
+      "census": "5.1"
+    },
+    {
+      "id": "flatten-wrong-flattener",
+      "title": "The flatten family gates flatten_path_commands; the flattener the boolean pipeline calls is in neither roundtrip binary",
+      "evidence": "Both harnesses call flatten_path_commands / flattenPathCommands (jas_dioxus/src/bin/algorithm_roundtrip.rs and JasSwift/ToolsAlgorithm/AlgorithmRoundtrip.swift). flatten_path_to_rings / flattenPathToRings have 6 references each across the two ports' sources and zero in either harness.",
+      "blocks": "A family-name audit reports flatten as covered while the subdivision the boolean pipeline depends on is uncovered.",
+      "unblock": "Either drive flatten_path_to_rings from a family of its own, or state in the manifest row that flatten covers the command-level flattener only.",
+      "census": "5.1"
+    },
+    {
+      "id": "flatten-no-curves",
+      "title": "flatten.json contains no curve command at all, so it gates the subpath bookkeeping and nothing about subdivision",
+      "evidence": "3 vectors; a literal count over the whole file gives 0 occurrences each of \"C\", \"Q\", \"A\", \"CurveTo\", \"QuadTo\", \"curve\" and \"quad\".",
+      "blocks": "Registered, driven, and vacuous for the part of flattening that actually differs between implementations.",
+      "unblock": "Fixture-only: the family, its registration and its 1e-9 comparison already exist; add cubic, quadratic and arc vectors.",
+      "census": "5.2"
+    },
+    {
+      "id": "fit-curve-first-pass-only",
+      "title": "No fit_curve vector reaches the iterative refinement or the recursive split, so Schneider's algorithm is gated only through its first pass",
+      "evidence": "Instrumented fit_cubic with per-branch probes and ran the fixture through the Rust harness on this commit: generate_bezier reached 3 times (the 3 vectors with n_pts > 2 -- collinear_points_one_segment, horizontal_line, vertical_line), and reparameterize, newton_raphson and the recursive split reached ZERO times, because every one of those fits within tolerance on the first pass. The other 4 of 7 vectors return at the points.len() < 2 guard or the n_pts == 2 early exit. NOTE: the census claimed none of the 7 reaches generate_bezier; that is over-wide -- 3 do.",
+      "blocks": "reparameterize, newton_raphson and the recursive split carry the algorithm's actual difficulty and are unexercised by the corpus.",
+      "unblock": "Fixture-only: add a vector whose curvature exceeds the error tolerance on one segment, so the split fires.",
+      "census": "5.2"
+    },
+    {
+      "id": "codec-optional-fields-unset",
+      "title": "The codec gates cover only the field subset some fixture happens to populate, and the most divergence-prone fields are populated by none",
+      "evidence": "Across all 39 test_fixtures/expected/*.json (the census said 25 -- re-counted on this commit), the keys mode, mask, fill_gradient, stroke_gradient, fill_rule, tool_origin, dash_align_anchors and width_points appear in ZERO files.",
+      "blocks": "A canonical-JSON before/after comparison catches a dropped field perfectly, but only for fields a fixture sets. The gate passes loudly and says nothing about the region where the known CommonProps/Document field losses live.",
+      "unblock": "One maximal fixture per element type with every optional field set to a non-default value -- the single highest-leverage addition in the serialization domain.",
+      "census": "5.4"
+    },
+    {
+      "id": "codec-no-control-chars",
+      "title": "The canonical test-JSON writers escape only backslash and quote, so no fixture can express text containing a control character",
+      "evidence": "JsonObj::str_val in jas_dioxus/src/geometry/test_json.rs and JsonObj.str in JasSwift/Sources/Geometry/TestJson.swift each apply exactly two replacements (\\\\ and \\\") and no U+0000-U+001F escaping. Consistent with that, zero of the 39 test_fixtures/expected/*.json contain an escaped control character.",
+      "blocks": "The byte oracle behind all three codec gates structurally cannot express multi-line text, so no fixture can be added for it until the writers are fixed. It fails LOUDLY (both parsers reject), so it is a ceiling rather than a silent divergence.",
+      "unblock": "Add U+0000-U+001F escaping to both writers, then add a text fixture containing a newline.",
+      "census": "5.5"
+    },
+    {
+      "id": "identity-view-only",
+      "title": "No fixture sets zoom_level or view_offset, so the screen-to-document half of every tool runs only where it is the identity",
+      "evidence": "grep for zoom_level and view_offset across all of test_fixtures/ and workspace/tests/ returns no file on this commit.",
+      "blocks": "The multiply/divide-by-zoom path of every tool is ungated, and no fixture can currently express otherwise -- the runners build the model at the identity view and have no view-state seed. A machinery limit, not a missing family.",
+      "unblock": "Teach both roundtrip runners to seed zoom_level and view_offset from the fixture, then add non-identity-view vectors to the gesture corpus.",
+      "census": "5.7"
+    },
+    {
+      "id": "panel-text-width-scalar-count-only",
+      "title": "panel_layout pins resolved text as a scalar COUNT times a constant, so any two strings of equal length are indistinguishable to the gate",
+      "evidence": "text_w in jas_dioxus/src/interpreter/panel_layout.rs is eval_text(...).chars().count() * CHAR_WIDTH with CHAR_WIDTH = 10, and PanelLayout.textW in JasSwift/Sources/Interpreter/PanelLayout.swift is resolved.unicodeScalars.count * charWidth. So \"664040\" and \"664141\" produce identical layout -- which is the byte pattern of the colour bug, inside the gate meant to catch it. Alongside it, panel_widget_tree records only the SORTED KEY NAMES of bind/style (sorted_keys in widget_tree.rs) and collapses dynamic visibility to a dyn_visible boolean rather than evaluating it.",
+      "blocks": "The bind.* VALUE surface is unpinned in both ports. Panel visible/enabled_when booleans are gated only for menus, via the 4-vector menu_state family.",
+      "unblock": "A value-level panel snapshot family that resolves bind.* expressions and pins the resulting strings, not their lengths.",
+      "census": "5.8"
+    }
+  ]
 }
