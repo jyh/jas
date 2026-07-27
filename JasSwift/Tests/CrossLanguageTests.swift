@@ -3224,6 +3224,13 @@ private let actionFixtures = [
     // here. The second case pins the Mixed outcome (the declared default
     // stands — absent is not null).
     "fill_stroke_action_scope.json",
+    // VIEWSEED: the FIRST fixtures anywhere in test_fixtures/ that set
+    // zoom_level / view_offset. Every other case runs at the identity view,
+    // where screen<->doc conversion is algebraically the identity and so cannot
+    // fail (CORPUS_CENSUS.md §5.7). These cases seed a non-identity view via
+    // `view` and assert the resulting view triple via `expected_view` — a fact
+    // NO document golden can see, because view state is not document content.
+    "view_state.json",
 ]
 
 /// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml

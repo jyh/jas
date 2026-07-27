@@ -1,0 +1,269 @@
+[
+  {
+    "_doc": [
+      "VIEW-STATE family (VIEWSEED, 2026-07-27). The first fixtures anywhere in",
+      "test_fixtures/ that set zoom_level / view_offset — every other case in the",
+      "corpus runs at the IDENTITY view, where screen<->document conversion is",
+      "algebraically the identity and therefore cannot fail. See",
+      "transcripts/CORPUS_CENSUS.md 5.7 and the `identity-view-only` row in",
+      "scripts/corpus_manifest.json.",
+      "",
+      "Each case seeds the per-tab view through the new `view` block",
+      "{zoom_level, view_offset_x, view_offset_y, viewport_w, viewport_h} and",
+      "asserts the resulting triple through `expected_view`. The document golden",
+      "is asserted too and is the UNCHANGED two_rects import: a view action must",
+      "not touch document content, and pinning that is half the value of the",
+      "family.",
+      "",
+      "GOLDENS ARE SPEC-DERIVED, NOT PORT-CAPTURED. Every expected_view triple",
+      "below is the transcripts/ZOOM_TOOL.md 'Anchor and clamp math' block",
+      "evaluated in IEEE-754 double by a third implementation (CPython), then",
+      "checked against both ports:",
+      "  doc_ax = (ax - px) / z ; doc_ay = (ay - py) / z",
+      "  z_new  = clamp(z * f, min_zoom, max_zoom)",
+      "  px_new = ax - doc_ax * z_new ; py_new = ay - doc_ay * z_new",
+      "and, for the fit_* verbs, the same file's zoom_fit_rect primitive:",
+      "  z = clamp(min((vw - 2*pad)/w, (vh - 2*pad)/h), min_zoom, max_zoom)",
+      "  px = vw/2 - (x + w/2)*z ; py = vh/2 - (y + h/2)*z",
+      "The long decimals are exact double results, not rounded transcriptions.",
+      "",
+      "WHAT IS DELIBERATELY ABSENT: the two default-anchor verbs. zoom_in /",
+      "zoom_out with no anchor params, and zoom_to_actual_size, are LIVE",
+      "DIVERGENCES between the ports at this commit and each fix lands in a file",
+      "reserved by a concurrent wave. Both are written out, with their",
+      "spec-derived triples and the observed per-port outputs, in the",
+      "`view-anchor-default-divergence` and `view-zoom-set-pan-divergence` rows of",
+      "scripts/corpus_manifest.json coverage_gaps. Pinning either one here today",
+      "would red a lane; pinning a port's current output instead would be a test",
+      "whose expected value coincides with the bug."
+    ],
+    "name": "zoom_in_explicit_anchor",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 2.0,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "zoom_in", "params": { "anchor_x": 300.0, "anchor_y": 200.0 } }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 2.4,
+      "view_offset_x": -180.0,
+      "view_offset_y": -100.0
+    }
+  },
+  {
+    "_doc": [
+      "The reciprocal factor (1.0 / zoom_step). Same anchor, same seed, so the",
+      "pair brackets the anchor algebra in both directions; the ugly decimals are",
+      "what the formula actually produces at f = 1/1.2 and are bit-identical in",
+      "both ports (the literals below are shortest-round-trip forms)."
+    ],
+    "name": "zoom_out_explicit_anchor",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 2.0,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "zoom_out", "params": { "anchor_x": 300.0, "anchor_y": 200.0 } }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 1.6666666666666667,
+      "view_offset_x": -33.33333333333337,
+      "view_offset_y": -8.333333333333343
+    }
+  },
+  {
+    "_doc": [
+      "AT-CLAMP anchor stability. z = 60 with zoom_step 1.2 asks for 72; the",
+      "clamp caps it at max_zoom = 64. ZOOM_TOOL.md requires the ACTUALLY APPLIED",
+      "factor to drive the pan recompute, so the document point under (300, 200)",
+      "must still be under (300, 200) afterwards. A port that panned with the",
+      "requested 72 instead would land at px = -400 rather than -126.67, i.e. the",
+      "canvas would jump at the zoom limit."
+    ],
+    "name": "zoom_in_clamped_at_max_zoom",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 60.0,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "zoom_in", "params": { "anchor_x": 300.0, "anchor_y": 200.0 } }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 64.0,
+      "view_offset_x": -126.66666666666669,
+      "view_offset_y": -66.66666666666669
+    }
+  },
+  {
+    "_doc": [
+      "The min_zoom mirror: already at 0.1, a zoom_out is a silent no-op in BOTH",
+      "coordinates. Note the pan is unchanged only because the applied factor is",
+      "1.0 after clamping — the effect still runs the full anchor recompute, so a",
+      "port that clamped zoom but not the pan factor would move the offsets here."
+    ],
+    "name": "zoom_out_clamped_at_min_zoom",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 0.1,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "zoom_out", "params": { "anchor_x": 300.0, "anchor_y": 200.0 } }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 0.1,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0
+    }
+  },
+  {
+    "_doc": [
+      "Two step zooms in a row from a NON-identity seed, anchored at two",
+      "different points. The single-action cases above cannot see a port that",
+      "reads the view from a stale snapshot instead of the live model, because",
+      "one action has nothing to be stale against. Derived by applying the anchor",
+      "block twice: (2, -100, -50) -anchor(300,200)-> (2.4, -180, -100)",
+      "-anchor(500,400)-> (2.88, -316.0000000000001, -200). The trailing 1 ulp",
+      "on x is genuine — it is what the formula's exact double arithmetic",
+      "produces — and pinning it rather than a rounded -316 is deliberate: the",
+      "two ports must agree bit for bit, not to within a tolerance."
+    ],
+    "name": "zoom_in_twice_moving_anchor",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 2.0,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "zoom_in", "params": { "anchor_x": 300.0, "anchor_y": 200.0 } },
+      { "action": "zoom_in", "params": { "anchor_x": 500.0, "anchor_y": 400.0 } }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 2.88,
+      "view_offset_x": -316.0000000000001,
+      "view_offset_y": -200.0
+    }
+  },
+  {
+    "_doc": [
+      "fit_in_window over the element bounding box, from a seed that is wrong in",
+      "BOTH zoom and pan so neither can be inherited. two_rects.svg imports at the",
+      "0.75 px->pt scale, so the two 96x96 rects occupy doc 0..144 x 0..72. The",
+      "fit is the zoom_fit_rect primitive with padding = fit_padding_px, whose",
+      "declared default in workspace/preferences.yaml is 20. That the effect arg",
+      "'preferences.viewport.fit_padding_px' RESOLVES (rather than evaluating to",
+      "0, which several sibling effects fall back to for min_zoom / max_zoom) is",
+      "itself pinned here: at padding 0 the triple would be",
+      "(5.555555555555555, 0, 100) instead."
+    ],
+    "name": "fit_in_window_from_wrong_view",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 3.0,
+      "view_offset_x": 500.0,
+      "view_offset_y": 400.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "fit_in_window", "params": {} }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 5.277777777777778,
+      "view_offset_x": 20.0,
+      "view_offset_y": 110.0
+    }
+  },
+  {
+    "_doc": [
+      "fit_all_artboards over the UNION of the document's artboards, which is a",
+      "different rect from the element bbox the previous case fits — the whole",
+      "distinction actions.yaml draws between the three fit verbs. The setup",
+      "changes to two_artboards.svg (misnamed upstream: it declares THREE pages,",
+      "at x = 0, 120, 240, each 96x96, importing at the 0.75 px->pt scale to",
+      "doc 0..252 x 0..72) because an SVG without <inkscape:page> elements",
+      "imports with an EMPTY artboards list, and on an empty list this effect is",
+      "an early-return no-op in both ports. That no-op is real but it is a",
+      "property of the fixture, not of the verb, and a vector that asserts",
+      "'nothing happened' would pass in a port that never implemented the verb."
+    ],
+    "name": "fit_all_artboards_from_wrong_view",
+    "setup_svg": "two_artboards.svg",
+    "view": {
+      "zoom_level": 3.0,
+      "view_offset_x": 500.0,
+      "view_offset_y": 400.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "fit_all_artboards", "params": {} }
+    ],
+    "expected_json": "view_state_two_artboards_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 3.015873015873016,
+      "view_offset_x": 20.0,
+      "view_offset_y": 191.42857142857144
+    }
+  },
+  {
+    "_doc": [
+      "fit_active_artboard resolves ONE artboard rather than the union, through",
+      "'active_document.current_artboard.{x,y,width,height}' in actions.yaml. With",
+      "no panel selection the current artboard is the first (ARTBOARDS.md",
+      "§Selection semantics), so this fits the 0..72 x 0..72 board and lands at a",
+      "different zoom from the union case above — which is what separates it from",
+      "fit_all_artboards. It also gates the scope plumbing: a port whose action",
+      "dispatch does not publish active_document.current_artboard resolves all",
+      "four args to 0 and the effect early-returns on w <= 0, leaving the seeded",
+      "(3.0, 500, 400) standing.",
+      "NOT COVERED: the same verb with the SECOND artboard panel-selected, which",
+      "is where the census's row #8 puts a divergence. The action fixture format",
+      "has no way to express a panel selection — see the",
+      "`view-current-artboard-panel-selection` coverage-gap row."
+    ],
+    "name": "fit_active_artboard_from_wrong_view",
+    "setup_svg": "two_artboards.svg",
+    "view": {
+      "zoom_level": 3.0,
+      "view_offset_x": 500.0,
+      "view_offset_y": 400.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "fit_active_artboard", "params": {} }
+    ],
+    "expected_json": "view_state_two_artboards_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 7.777777777777778,
+      "view_offset_x": 120.0,
+      "view_offset_y": 20.0
+    }
+  }
+]
