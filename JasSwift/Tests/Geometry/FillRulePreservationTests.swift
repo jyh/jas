@@ -3,9 +3,15 @@ import Testing
 
 /// Every copy of a Path must carry its `fillRule` across unchanged.
 ///
-/// Swift has no equivalent of Rust's `PathElem { d, ..p.clone() }`, so
-/// every Swift edit of a Path is an open-coded rebuild that restates
-/// each field by hand. Most of the Rust twins CANNOT lose a field:
+/// Swift has no equivalent of Rust's `PathElem { d, ..p.clone() }` — but it
+/// does have the next best thing, and this comment predates it: the element
+/// structs' stored properties are `internal(set) var`, so a copy helper can be
+/// written `case .path(var v): v.field = x; return .path(v)` and omission
+/// stops being expressible (EDIT_SEMANTICS_FREEZE.md §3.1, grade (a)). Every
+/// Element-level copy helper is now in that form or passes every field; what
+/// remains open-coded is FEATURE code that rebuilds a Path inline (section 3
+/// below), which is exactly where this file still earns its keep.
+/// Most of the Rust twins CANNOT lose a field:
 /// `clear_ids` (element.rs) and `assign_id` (controller.rs) mutate
 /// `common` in place, `apply_appearance` mutates `common_mut()`, and
 /// `blob_brush_commit_erasing` uses `..pe.clone()`. The exception is
