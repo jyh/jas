@@ -290,6 +290,111 @@ private func expectOnlySubjectChanged(_ before: Any, _ after: Any,
     }
 }
 
+// MARK: - withFillGradient / withStrokeGradient
+//
+// The same clause and the same method, on the two Element-level helpers the
+// Gradient panel writes through (`Controller.setSelectionFillGradient` /
+// `setSelectionStrokeGradient`). Both were open-coded rebuilds: NO arm of
+// either passed `name:` or `id:`, and the `.path` arm of each also omitted
+// `toolOrigin:`, `strokeBrush:` and `strokeBrushOverrides:`. Setting a fill
+// gradient on a named, cited, brush-stroked path therefore destroyed its
+// identity, its brush and its blob-brush tool origin on a 1→1 edit.
+//
+// Rust's twins are `RectElem { fill_gradient: gradient, ..e.clone() }` at
+// every arm and conform, so each of these was a one-sided live divergence in
+// the same class as `withMask` / `withWidthPoints`.
+//
+// The kinds each helper actually rewrites differ, and the "returned
+// unchanged" arms are themselves a preservation claim: `withFillGradient`
+// rewrites six kinds (Line has no fill gradient), `withStrokeGradient`
+// rewrites seven.
+
+/// Writing the fill gradient an element already carries must be the identity.
+@Test func withFillGradientIsIdentityWhenUnchanged() {
+    for (kind, e) in populated() {
+        #expect(withFillGradient(e, fillGradient: e.fillGradient) == e,
+                "withFillGradient dropped a field on \(kind)")
+    }
+}
+
+/// Writing a different fill gradient must change `fillGradient` and nothing
+/// else — including on the kinds that have none, which must come back whole.
+@Test func withFillGradientChangesOnlyTheFillGradient() {
+    let fresh = grad(123)
+    for (kind, e) in populated() {
+        let after = withFillGradient(e, fillGradient: fresh)
+        switch after {
+        case .rect, .circle, .ellipse, .polyline, .polygon, .path:
+            // Value pairing: the subject actually moved.
+            #expect(after.fillGradient == fresh,
+                    "withFillGradient did not set the gradient on \(kind)")
+            expectOnlySubjectChanged(payload(e), payload(after),
+                                     subject: "fillGradient",
+                                     "withFillGradient on \(kind)")
+        default:
+            #expect(after == e,
+                    "withFillGradient altered \(kind), which has no fill gradient")
+        }
+    }
+    // Clearing a gradient is the same edit in the other direction.
+    for (kind, e) in populated() {
+        let after = withFillGradient(e, fillGradient: nil)
+        switch after {
+        case .rect, .circle, .ellipse, .polyline, .polygon, .path:
+            #expect(after.fillGradient == nil,
+                    "withFillGradient(nil) did not clear the gradient on \(kind)")
+            expectOnlySubjectChanged(payload(e), payload(after),
+                                     subject: "fillGradient",
+                                     "withFillGradient(nil) on \(kind)")
+        default:
+            #expect(after == e,
+                    "withFillGradient(nil) altered \(kind), which has no fill gradient")
+        }
+    }
+}
+
+/// Writing the stroke gradient an element already carries must be the identity.
+@Test func withStrokeGradientIsIdentityWhenUnchanged() {
+    for (kind, e) in populated() {
+        #expect(withStrokeGradient(e, strokeGradient: e.strokeGradient) == e,
+                "withStrokeGradient dropped a field on \(kind)")
+    }
+}
+
+/// Writing a different stroke gradient must change `strokeGradient` and
+/// nothing else.
+@Test func withStrokeGradientChangesOnlyTheStrokeGradient() {
+    let fresh = grad(123)
+    for (kind, e) in populated() {
+        let after = withStrokeGradient(e, strokeGradient: fresh)
+        switch after {
+        case .line, .rect, .circle, .ellipse, .polyline, .polygon, .path:
+            #expect(after.strokeGradient == fresh,
+                    "withStrokeGradient did not set the gradient on \(kind)")
+            expectOnlySubjectChanged(payload(e), payload(after),
+                                     subject: "strokeGradient",
+                                     "withStrokeGradient on \(kind)")
+        default:
+            #expect(after == e,
+                    "withStrokeGradient altered \(kind), which has no stroke gradient")
+        }
+    }
+    for (kind, e) in populated() {
+        let after = withStrokeGradient(e, strokeGradient: nil)
+        switch after {
+        case .line, .rect, .circle, .ellipse, .polyline, .polygon, .path:
+            #expect(after.strokeGradient == nil,
+                    "withStrokeGradient(nil) did not clear the gradient on \(kind)")
+            expectOnlySubjectChanged(payload(e), payload(after),
+                                     subject: "strokeGradient",
+                                     "withStrokeGradient(nil) on \(kind)")
+        default:
+            #expect(after == e,
+                    "withStrokeGradient(nil) altered \(kind), which has no stroke gradient")
+        }
+    }
+}
+
 @Test func withWidthPointsChangesOnlyTheWidthPoints() {
     let fresh = [StrokeWidthPoint(t: 0, widthLeft: 9, widthRight: 9),
                  StrokeWidthPoint(t: 0.5, widthLeft: 1, widthRight: 1),

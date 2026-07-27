@@ -1875,92 +1875,46 @@ public enum Element: Equatable {
 /// Return a copy of `element` with the fill replaced. Line has no fill
 /// (returned unchanged). Group and Layer have no fill (returned unchanged).
 /// Return a copy of the element with its `fillGradient` replaced.
-/// Elements that do not support a fill gradient are returned unchanged.
+/// Elements that do not support a fill gradient (Line, Text, TextPath,
+/// Group, Layer, Live) are returned unchanged.
+///
+/// EDIT_SEMANTICS_FREEZE.md §3.1: this is a 1→1 edit that speaks to
+/// `fillGradient` and nothing else, so every other field survives — `name`,
+/// `id`, `toolOrigin`, `strokeBrush`, `strokeBrushOverrides` included. The
+/// clone-then-mutate form is what makes that true structurally rather than by
+/// hand-audit; the open-coded rebuild it replaced passed no `name:`/`id:` at
+/// ANY arm and additionally dropped the Path's brush and tool-origin fields,
+/// so setting a gradient from the Gradient panel destroyed the identity that
+/// references, symbols and the ledger are keyed on. Rust's twin
+/// (`RectElem { fill_gradient: gradient, ..e.clone() }`) always conformed.
 public func withFillGradient(_ element: Element, fillGradient: Gradient?) -> Element {
     switch element {
-    case .rect(let v):
-        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: fillGradient, strokeGradient: v.strokeGradient))
-    case .circle(let v):
-        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                              fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                              fillGradient: fillGradient, strokeGradient: v.strokeGradient))
-    case .ellipse(let v):
-        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                fill: v.fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                fillGradient: fillGradient, strokeGradient: v.strokeGradient))
-    case .polyline(let v):
-        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                  fillGradient: fillGradient, strokeGradient: v.strokeGradient))
-    case .polygon(let v):
-        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                fillGradient: fillGradient, strokeGradient: v.strokeGradient))
-    case .path(let v):
-        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
-                          widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: fillGradient, strokeGradient: v.strokeGradient, fillRule: v.fillRule))
+    case .rect(var v): v.fillGradient = fillGradient; return .rect(v)
+    case .circle(var v): v.fillGradient = fillGradient; return .circle(v)
+    case .ellipse(var v): v.fillGradient = fillGradient; return .ellipse(v)
+    case .polyline(var v): v.fillGradient = fillGradient; return .polyline(v)
+    case .polygon(var v): v.fillGradient = fillGradient; return .polygon(v)
+    case .path(var v): v.fillGradient = fillGradient; return .path(v)
     default:
         return element
     }
 }
 
 /// Return a copy of the element with its `strokeGradient` replaced.
-/// Elements that do not support a stroke gradient are returned unchanged.
+/// Elements that do not support a stroke gradient (Text, TextPath, Group,
+/// Layer, Live) are returned unchanged.
+///
+/// Same clause, same class, same repair as ``withFillGradient(_:strokeGradient:)``
+/// — see its note. Rust's twin is `..e.clone()` at every arm.
 public func withStrokeGradient(_ element: Element, strokeGradient: Gradient?) -> Element {
     switch element {
-    case .line(let v):
-        return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                          stroke: v.stroke, widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          strokeGradient: strokeGradient))
-    case .rect(let v):
-        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: v.fillGradient, strokeGradient: strokeGradient))
-    case .circle(let v):
-        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                              fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                              fillGradient: v.fillGradient, strokeGradient: strokeGradient))
-    case .ellipse(let v):
-        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                fill: v.fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                fillGradient: v.fillGradient, strokeGradient: strokeGradient))
-    case .polyline(let v):
-        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                  fillGradient: v.fillGradient, strokeGradient: strokeGradient))
-    case .polygon(let v):
-        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                fillGradient: v.fillGradient, strokeGradient: strokeGradient))
-    case .path(let v):
-        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
-                          widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: v.fillGradient, strokeGradient: strokeGradient, fillRule: v.fillRule))
+    case .line(var v): v.strokeGradient = strokeGradient; return .line(v)
+    case .rect(var v): v.strokeGradient = strokeGradient; return .rect(v)
+    case .circle(var v): v.strokeGradient = strokeGradient; return .circle(v)
+    case .ellipse(var v): v.strokeGradient = strokeGradient; return .ellipse(v)
+    case .polyline(var v): v.strokeGradient = strokeGradient; return .polyline(v)
+    case .polygon(var v): v.strokeGradient = strokeGradient; return .polygon(v)
+    case .path(var v): v.strokeGradient = strokeGradient; return .path(v)
     default:
         return element
     }
