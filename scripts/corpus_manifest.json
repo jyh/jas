@@ -213,6 +213,17 @@
       },
       "notes": "The op_apply corpus — the journal/undo spine's byte gate. 60+ of these files exist ONLY as data references (expected_json / expected_journal_json inside the driver fixtures); the transitive pass claims them. Port symmetry here is the gate's founding case: the Swift registration set lacked tspan_ops.json until S4 forced the remediation."
     },
+    "test_fixtures/preservation": {
+      "kind": "fixtures",
+      "required_consumers": ["rust", "swift", "scripts"],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literal (read_fixture in src/cross_language_test.rs preservation_invariants) + data references",
+        "swift": "path literal (readFixture in CrossLanguageTests.swift preservationInvariants) + data references",
+        "scripts": "whole-directory read (check_preservation_corpus.py)"
+      },
+      "notes": "The PRESERVATION corpus (transcripts/EDIT_SEMANTICS_FREEZE.md §4.1, the DOCUMENT-LEVEL INVARIANT GATE). Unlike every other fixtures family here it pins no golden document: it asserts six invariants (id_uniqueness / id_survival / consumed_ids_die / fresh_ids / bystanders_unchanged / subject_fields_only) over the canonical test JSON before and after an edit. That is what lets ONE vector be evaluated identically by both ports while each fails on its OWN sites — a golden could not, since the ports diverge on exactly the keys the law legislates. Setup SVGs are claimed transitively via setup_svg. A vector may PIN a known violation per port (expected_violations); a pinned invariant is asserted to FAIL, so fixing the site turns the gate red until the pin is removed — a pin cannot rot into a silent suppression. scripts/check_preservation_corpus.py gates the DATA shape with five anti-vacuity guards (V1-V5)."
+    },
     "test_fixtures/production_capture": {
       "kind": "fixtures",
       "required_consumers": [
@@ -384,6 +395,20 @@
     "would be the same false assurance the empty list was."
   ],
   "coverage_gaps": [
+    {
+      "id": "preservation-op-vocabulary-only",
+      "title": "The preservation gate can only reach violations expressible in op_apply's verb vocabulary, so six of EDIT_SEMANTICS_FREEZE.md §3.5's rows stay invisible to it",
+      "evidence": "Measured on this commit by grepping the dispatchers. op_apply has exactly ONE boolean verb in each port (jas_dioxus/src/document/op_apply.rs `\"boolean_union\"`, JasSwift/Sources/Document/OpApply.swift `case \"boolean_union\"`) and ZERO verbs matching apply_mask / set_width_points / make_compound_shape / boolean_subtract / boolean_intersect / boolean_divide. No verb can produce a PARTIAL (control-point) selection either: the string `Partial` occurs once in the whole of op_apply.rs, inside a `#[derive(...)]`. Consequently these §3.5 rows are unreachable from this corpus: Swift `withMask` .path arm; Swift `withWidthPoints` .path arm; Rust `move_control_points` Rect->Polygon arm (needs a corner drag, i.e. a partial selection); Rust `make_compound_shape_with_op` duplicate id; the boolean SURVIVOR arms (subtract_front / subtract_back / crop / trim / divide) and their Swift `locked: false` + dropped name/id/toolOrigin/mask; and both blob-brush `fillRule` arms (a gesture, not an op).",
+      "blocks": "Of the §3.5 table, this gate today catches the Rust UNION frontmost-id carry, the Swift withChildren class (5 vectors), and one of the 41 Swift inline Layer(/Group( literals. The rest of the table is not gated by anything cross-language.",
+      "unblock": "Two independent routes, both fixture-plus-verb: (a) widen the op vocabulary with the missing boolean verbs and a mask/width-points setter, then add preservation vectors for the 1->1 survivor arms — where subject_fields_only is exactly the right predicate; (b) give the GESTURE corpus the same invariant gate, which reaches the blob-brush arms and the Rect corner drag that the op corpus cannot address."
+    },
+    {
+      "id": "preservation-minted-element-fields",
+      "title": "The six preservation invariants say nothing about the FIELDS of a freshly minted element, so the boolean result's lossy kind demotion and its dropped non-paint fields are invisible",
+      "evidence": "The invariants are id_uniqueness / id_survival / consumed_ids_die / fresh_ids / bystanders_unchanged / subject_fields_only. Every one of them is keyed on an id that existed BEFORE the edit; a minted element has no before-image to diff against, so nothing in the set constrains it. Concretely, on the boolean_union_merges_two_rects vector both ports emit a single-ring `Polygon` — the §3.5 row 'Boolean flatten, single-ring arm, both ports' calls that a lossy demotion (a Polygon has no slot for widthPoints / strokeBrush / strokeBrushOverrides / fillRule) — and the gate reports nothing, because the invariants never look at the output's kind or its non-identity fields.",
+      "blocks": "§3.3's unanimity carry, §3.6's per-op paint column, and T1's representation term (no lossy demotion) are all statements ABOUT the minted element. None of them is gated here.",
+      "unblock": "Add a seventh declarative invariant to the vector shape — an `expected_output` block naming the required kind and the fields the result must carry (unanimous values, RESULT_FILL_RULE) — and implement it in both port gates. This is additive to the existing five vectors and needs no new op verbs."
+    },
     {
       "id": "text-index-unit",
       "title": "Swift indexes text by grapheme cluster; Rust and the reference index by Unicode scalar, so no non-ASCII vector can be added to the three text families",
