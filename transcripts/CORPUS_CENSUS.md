@@ -727,3 +727,34 @@ call chains are proven by tests and by reading, but no site was reproduced in a 
 
 *Read-only census. Nothing under `/Users/jyh/projects/claude/jas` was modified, added, or committed.
 Scratch notes and the sweeps' throwaway verification programs are in the session scratchpad.*
+
+---
+
+## 9. RESIDUALS FROM THE OVERNIGHT QUEUE (2026-07-26, batch 1)
+
+Batch 1 closed four census rows. Three landed clean; **row 5 and the hypot row are
+NOT fully closed**, recorded here so closing the batch does not lose them.
+
+**(a) TWO OF SIX HYPOT SITES ARE UNPINNED — production code is CORRECT, the pin is
+missing.** `JasSwift/Sources/Geometry/PathOps.swift:171,182` (closestOnCubic's
+coarse-scan `d` and `d2`) and `jas_dioxus/src/geometry/path_ops.rs:533,547`.
+Reverting each INDIVIDUALLY leaves the full suite and the cross-language gate green;
+the writer's mutation reverted all six at once, which masked it.
+**The root cause is worth remembering: the overflow test puts the true answer at
+t=0, which is exactly where both failure modes also land** — `best_t` starts at 0.0
+so a saturating coarse scan never updates it, and the trisection collapses to lo=0,
+so `t < 1e-5` passes either way. A test whose expected value coincides with the bug's
+output is not a test. The lens supplied the discriminating vector:
+`closest_on_cubic(0,0, 1e200/3,0, 2e200/3,0, 1e200,0, 5e199, 1e200)` -> expected
+(1e200, t=0.5); observed with the naive form t=0.0199969927 (an 11% distance error)
+at :533 and t=0.4800060146 at :547.
+
+**(b) CENSUS ROW 5 IS HALF DONE — the filled-polyline leg still ships.** The row reads
+"`segmentsOfElement` has no `.live` case; filled polyline goes bbox-only". Only the
+`.live` leg was fixed. Driven by the lens: a FILLED polyline
+`[[0,0],[0,100],[100,100],[100,0]]` (a 'U') with a marquee at (40,20,20,20) in the
+concave opening gives **Rust `false`, Swift `true`** — Swift's filled-polyline arm
+returns `rectsIntersect(bounds...)` while Rust falls into the segments-based
+catch-all. Unfilled agrees, and the lasso variant agrees, so it is specifically
+**filled + marquee** — everyday marquee-select behaviour. Rust is right: the concave
+opening of a filled U is outside the fill.
