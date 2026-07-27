@@ -222,23 +222,58 @@ public struct CompoundShape: Equatable {
         boundsOfPolygonSet(evaluate(precision: DEFAULT_PRECISION))
     }
 
-    /// Replace the compound shape with Polygon elements derived
-    /// from its evaluated geometry. Each polygon carries the
-    /// compound shape's own fill / stroke / common props; rings
-    /// with fewer than 3 points are dropped. See BOOLEAN.md §
-    /// Expand and Release semantics.
+    /// Replace the compound shape with Polygon elements derived from its
+    /// evaluated geometry. Each polygon carries every field the compound
+    /// shape itself carries — fill, stroke, `opacity`, `transform`, `locked`,
+    /// `visibility`, `blendMode` AND `mask` (it used to hand-forward six of
+    /// those and silently drop `blendMode` and `mask`, so a masked, multiplied
+    /// compound expanded to rings that were neither). Rings with fewer than 3
+    /// points are dropped. See BOOLEAN.md § Expand and Release semantics.
+    ///
+    /// IDENTITY is the exception, and the arrow is counted off the ring count
+    /// (T5, transcripts/EDIT_SEMANTICS_FREEZE.md §3.6's "Compound Shape
+    /// EXPAND" row) — matching Rust `CompoundShape::expand` branch for branch:
+    ///
+    ///   one ring    -> 1 -> 1. The identity is PRESERVABLE, so it is
+    ///                  preserved. Killing it would be as much a guess as
+    ///                  carrying one that is not — the branch `pathEraseAtRect`
+    ///                  and the DIVIDE arm already take. A NAMED DELTA from
+    ///                  §3.6, whose EXPAND row writes "fresh mint" flat: the
+    ///                  row describes its 1 -> N heading, and the degenerate
+    ///                  1 -> 1 falls to §3.1.
+    ///   two or more -> 1 -> N. The identity DIES (the cardinality law), so no
+    ///                  ring may wear it; a ring that did would put two live
+    ///                  elements under one id into the caller's hands, and a
+    ///                  reference to that id silently REBINDS to whichever the
+    ///                  index walk reaches first (§3.7).
+    ///
+    /// KNOWN PORT DELTA, stated rather than papered over: on the split arm
+    /// Rust's effect layer (`Controller::expand_compound_shape_minting`) mints
+    /// one FRESH id per fragment against an avoid-set, because a pure function
+    /// has no document and cannot mint. JasSwift's `Controller.expandCompoundShape`
+    /// does not mint, so its fragments are born id-LESS. That is the T3
+    /// documented default rather than a guess, and it is the pre-existing
+    /// Swift behaviour on every arm; closing the delta needs a mint loop in
+    /// the effect layer and is not this function's to make.
+    ///
+    /// `fillGradient` / `strokeGradient` go to nil in both ports: a
+    /// `CompoundShape` has no gradient slot to forward from (a target-only
+    /// field with no counterpart source, per T1's representation term).
     public func expand(precision: Double) -> [Element] {
-        let ps = evaluate(precision: precision)
-        return ps.compactMap { ring -> Element? in
-            guard ring.count >= 3 else { return nil }
-            return .polygon(Polygon(
+        let rings = evaluate(precision: precision).filter { $0.count >= 3 }
+        let identityDies = rings.count > 1
+        return rings.map { ring in
+            .polygon(Polygon(
                 points: ring,
                 fill: fill,
                 stroke: stroke,
                 opacity: opacity,
                 transform: transform,
                 locked: locked,
-                visibility: visibility
+                visibility: visibility,
+                blendMode: blendMode,
+                mask: mask,
+                id: identityDies ? nil : id
             ))
         }
     }

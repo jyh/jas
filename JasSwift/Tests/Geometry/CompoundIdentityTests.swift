@@ -202,3 +202,137 @@ private func bbox(_ points: [(Double, Double)]) -> (Double, Double, Double, Doub
     #expect(src.operands[0].id == "op-back")
     #expect(src.operands[1].id == "op-front")
 }
+
+// MARK: - `CompoundShape.expand` — §3.6's "Compound Shape EXPAND" row
+
+/// THE FIELD VIOLATION (§3.1 / §3.2). `expand` hand-forwarded SIX of the nine
+/// fields `CompoundShape` carries and dropped three: `id`, `blendMode` and
+/// `mask`. A masked, multiplied compound expanded to rings that were neither
+/// masked nor multiplied — the artwork changes on a verb whose whole job is to
+/// freeze the artwork as it stands. Rust's twin passes the compound's entire
+/// `common` through.
+@Test func expandForwardsEveryFieldTheCompoundCarriesToEveryRing() {
+    let cs = richCompound(.exclude)
+    assertCompoundFixtureIsRich(cs)
+    let expanded = cs.expand(precision: DEFAULT_PRECISION)
+    #expect(expanded.count == 2, "XOR of two overlapping rects -> 2 rings")
+    guard expanded.count == 2 else { return }
+    // MANDATORY GEOMETRY PAIRING: XOR really is the two outer bars.
+    var bars: [(Double, Double)] = []
+    for (i, e) in expanded.enumerated() {
+        guard case .polygon(let p) = e else {
+            Issue.record("ring \(i) should be a polygon"); return
+        }
+        let (minX, _, maxX, _) = bbox(p.points)
+        bars.append((minX, maxX))
+        // Every non-identity field of the compound reaches every ring.
+        #expect(p.fill == cs.fill, "ring \(i) lost the compound's fill")
+        #expect(p.stroke == cs.stroke, "ring \(i) lost the compound's stroke")
+        #expect(p.opacity == cs.opacity, "ring \(i) lost the compound's opacity")
+        #expect(p.transform == cs.transform, "ring \(i) lost the compound's transform")
+        #expect(p.locked == cs.locked, "ring \(i) lost the compound's locked")
+        #expect(p.visibility == cs.visibility, "ring \(i) lost the compound's visibility")
+        #expect(p.blendMode == cs.blendMode, "ring \(i) lost the compound's blend mode")
+        #expect(p.mask == cs.mask, "ring \(i) lost the compound's mask")
+    }
+    bars.sort { $0.0 < $1.0 }
+    #expect(abs(bars[0].0 - 0) < 1e-9 && abs(bars[0].1 - 5) < 1e-9,
+            "left bar should span x 0..5, got \(bars[0])")
+    #expect(abs(bars[1].0 - 10) < 1e-9 && abs(bars[1].1 - 15) < 1e-9,
+            "right bar should span x 10..15, got \(bars[1])")
+}
+
+/// THE IDENTITY VIOLATION, the 1 -> 1 half. A compound that evaluates to ONE
+/// ring is a 1 -> 1 edit: its identity is PRESERVABLE, so §3.1 preserves it —
+/// killing a preservable identity is as much a guess as carrying one that is
+/// not (the branch `pathEraseAtRect` and the DIVIDE arm already take, and the
+/// branch Rust's `expand` now takes). `expand` dropped it unconditionally.
+@Test func expandOfASingleRingCompoundKeepsItsIdentity() {
+    let cs = richCompound(.union)
+    assertCompoundFixtureIsRich(cs)
+    let expanded = cs.expand(precision: DEFAULT_PRECISION)
+    #expect(expanded.count == 1, "union of two overlapping rects -> 1 ring")
+    guard case .polygon(let p) = expanded.first else {
+        Issue.record("expected one polygon"); return
+    }
+    // MANDATORY GEOMETRY PAIRING: the ring is the merged bar [0..15].
+    let (minX, _, maxX, _) = bbox(p.points)
+    #expect(abs(minX - 0) < 1e-9 && abs(maxX - 15) < 1e-9,
+            "union should span x 0..15, got \(minX)..\(maxX)")
+    #expect(p.id == "cs-1",
+            "a 1 -> 1 expansion preserves the identity it could keep, got \(String(describing: p.id))")
+}
+
+/// The OVER-REACH guard and the cardinality law's other side: two or more
+/// rings is 1 -> N, identity DIES, and no ring may wear the compound's id.
+///
+/// STATED PLAINLY: this battery was GREEN BEFORE the repair as well, because
+/// the pre-repair `expand` dropped `id` on every arm unconditionally. Its
+/// expected value therefore coincided with the old output, so it is NOT
+/// evidence of the repair — it is the guard that stops the 1 -> 1 branch from
+/// over-reaching into the split arm. Its mutation proof runs in that direction
+/// (see the commit message): widening the preserve to `>= 1` reds it.
+@Test func expandOfASplitCompoundDoesNotReplicateItsId() {
+    let cs = richCompound(.exclude)
+    assertCompoundFixtureIsRich(cs)
+    let expanded = cs.expand(precision: DEFAULT_PRECISION)
+    #expect(expanded.count == 2, "XOR of two overlapping rects -> 2 rings")
+    for (i, e) in expanded.enumerated() {
+        guard case .polygon(let p) = e else {
+            Issue.record("ring \(i) should be a polygon"); return
+        }
+        #expect(p.id == nil,
+                "a 1 -> N expansion may not hand its identity to ring \(i); got \(String(describing: p.id))")
+    }
+}
+
+/// The same two arms as DOCUMENT invariants, through the controller — the only
+/// layer at which id UNIQUENESS is even expressible.
+@Test func expandCompoundShapeAtTheDocumentPreservesOrKillsIdentityByArrow() {
+    for (op, wantRings) in [(CompoundOperation.union, 1),
+                            (CompoundOperation.exclude, 2)] {
+        let cs = Element.live(.compoundShape(richCompound(op)))
+        let layer = Layer(name: "L0", children: [cs])
+        let doc = Document(layers: [layer], selection: [ElementSelection.all([0, 0])])
+        let ctrl = Controller(model: Model(document: doc))
+        ctrl.expandCompoundShape()
+        let kids = ctrl.document.layers[0].children
+        #expect(kids.count == wantRings, "\(op) -> \(wantRings) ring(s)")
+        guard kids.count == wantRings else { continue }
+        // MANDATORY GEOMETRY PAIRING at the document, not only at the value.
+        var bars: [(Double, Double)] = []
+        for (i, k) in kids.enumerated() {
+            guard case .polygon(let p) = k else {
+                Issue.record("child \(i) should be a polygon"); return
+            }
+            let (minX, _, maxX, _) = bbox(p.points)
+            bars.append((minX, maxX))
+        }
+        bars.sort { $0.0 < $1.0 }
+        if wantRings == 1 {
+            #expect(abs(bars[0].0 - 0) < 1e-9 && abs(bars[0].1 - 15) < 1e-9,
+                    "the union ring should span x 0..15, got \(bars[0])")
+        } else {
+            #expect(abs(bars[0].0 - 0) < 1e-9 && abs(bars[0].1 - 5) < 1e-9,
+                    "left bar should span x 0..5, got \(bars[0])")
+            #expect(abs(bars[1].0 - 10) < 1e-9 && abs(bars[1].1 - 15) < 1e-9,
+                    "right bar should span x 10..15, got \(bars[1])")
+        }
+        // Identity, by the arrow.
+        let ids = kids.map(\.id)
+        if wantRings == 1 {
+            #expect(ids == ["cs-1"],
+                    "a 1 -> 1 expansion carries the compound's id, got \(ids)")
+        } else {
+            #expect(ids.allSatisfy { $0 == nil },
+                    "a 1 -> N expansion leaves no ring wearing cs-1, got \(ids)")
+        }
+        // Uniqueness holds either way.
+        var seen: Set<String> = []
+        var dupes: [String] = []
+        for id in ids.compactMap({ $0 }) where !seen.insert(id).inserted {
+            dupes.append(id)
+        }
+        #expect(dupes.isEmpty, "expand left duplicate id(s): \(dupes)")
+    }
+}
