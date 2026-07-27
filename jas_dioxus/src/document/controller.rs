@@ -6172,6 +6172,55 @@ mod preservation_law_tests {
         Model::new(doc, None)
     }
 
+    /// A COPY is born id-less — the landed rule, stated in `copy_selection`'s
+    /// own words ("A copy must not inherit the source's stable id (no two
+    /// elements may share an identity)") and carried out by `clear_ids`. But
+    /// `clear_ids` walked `children_mut()` only, and a compound shape's
+    /// operands are NOT `children()`: they live on `CompoundShape.operands`,
+    /// which is exactly why `Document::element_ids` has a separate arm for
+    /// them. So copying a compound shape left every OPERAND id duplicated,
+    /// one level below the id the helper was written to clear.
+    #[test]
+    fn copy_selection_of_a_compound_shape_clears_its_operands_ids_too() {
+        let mut model = rich_compound(crate::geometry::live::CompoundOperation::Union);
+        let before: std::collections::HashSet<String> =
+            model.document().element_ids();
+        assert!(before.contains("op-back") && before.contains("op-front"));
+        Controller::copy_selection(&mut model, 20.0, 0.0);
+        let kids = model.document().layers[0].children().unwrap().to_vec();
+        assert_eq!(kids.len(), 2, "the copy landed beside the source");
+        let LiveVariant::CompoundShape(copy) = (match kids[1].as_ref() {
+            Element::Live(v) => v,
+            other => panic!("expected a compound shape, got {other:?}"),
+        }) else { panic!("expected a compound shape") };
+        // MANDATORY GEOMETRY PAIRING: the copy carries the source's operand
+        // geometry. It is NOT offset by (dx, dy): `move_control_points` falls
+        // through to a bare clone for a compound shape (`_ => elem.clone()`),
+        // so Edit > Copy of a live compound lands the copy exactly on top of
+        // its source. That is a pre-existing behaviour gap, recorded here
+        // because a geometry assertion must state what actually happened —
+        // it is not this wave's subject and is not repaired here.
+        let Element::Rect(r) = copy.operands[0].as_ref() else { panic!("rect") };
+        assert!((r.x - 0.0).abs() < 1e-9 && (r.width - 10.0).abs() < 1e-9,
+                "the copy carries the back operand's geometry, got x={} w={}",
+                r.x, r.width);
+        assert!(copy.common.id.is_none(), "the copy itself is born id-less");
+        for (i, operand) in copy.operands.iter().enumerate() {
+            assert!(operand.common().id.is_none(),
+                    "operand {i} of the COPY still wears {:?} — an identity \
+                     that is still live on the source's operand",
+                    operand.common().id);
+        }
+        // And the source is a bystander (T4): untouched, ids included.
+        let LiveVariant::CompoundShape(src) = (match kids[0].as_ref() {
+            Element::Live(v) => v,
+            other => panic!("expected a compound shape, got {other:?}"),
+        }) else { panic!("expected a compound shape") };
+        assert_eq!(src.common.id.as_deref(), Some("cs-1"));
+        assert_eq!(src.operands[0].common().id.as_deref(), Some("op-back"));
+        assert_eq!(src.operands[1].common().id.as_deref(), Some("op-front"));
+    }
+
     /// THE VIOLATION, as a document invariant. Expanding an EXCLUDE compound
     /// emits two rings, and every ring wore `cs-1` — two live elements
     /// sharing one identity, breaching REFERENCE_GRAPH.md §2.5's uniqueness
