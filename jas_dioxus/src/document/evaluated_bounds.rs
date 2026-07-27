@@ -2,10 +2,11 @@
 //!
 //! `Element::bounds` and `Element::geometric_bounds` report an element's own
 //! coordinate-space box and ignore `common.transform` entirely. The box the
-//! Properties panel shows, and the one the selection highlight is drawn
-//! around, is this one: the geometric box's four corners mapped through the
-//! element's own transform and every ancestor (group / layer) transform, then
-//! axis-aligned.
+//! Properties panel shows is this one: the geometric box's four corners mapped
+//! through the element's own transform and every ancestor (group / layer)
+//! transform, then axis-aligned. It walks the same ancestor chain as
+//! `selection_handle_rects`, which is what keeps the panel's numbers agreeing
+//! with the drawn selection box.
 //!
 //! The logic lived in `canvas::render`, which is `feature = "web"` — so it was
 //! structurally unreachable from the native `algorithm_roundtrip` binary and
