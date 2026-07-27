@@ -3644,3 +3644,139 @@ private func assertKeyTest(_ group: [String: Any]) {
         }
     }
 }
+
+// MARK: - Codec field survival
+
+// Every other codec gate in this file compares `documentToTestJson` STRINGS.
+// That catches a dropped field perfectly -- but only for fields the canonical
+// test-JSON itself emits, and the set of fields the BINARY codec drops is a
+// strict SUBSET of the set the test-JSON drops. So no fixture, however
+// saturated, can red-light a binary-codec drop through the string oracle: it
+// would be normalized back to default on the way in and pass, green and
+// vacuous.
+//
+// This gate compares at the MODEL level instead (Equatable on Path), which is
+// what lets it see the fields the oracle cannot express. The saturated Path
+// below is mirrored by `survival_saturated_path` in
+// jas_dioxus/src/cross_language_test.rs and stated once in prose in the
+// fixture's `saturated_path` block. See transcripts/EDIT_SEMANTICS_FREEZE.md:
+// a round trip speaks to NOTHING, so it must preserve EVERYTHING.
+
+private func survivalGradient() -> Gradient {
+    Gradient(type: .radial, angle: 45, aspectRatio: 200, method: .smooth,
+             dither: true, strokeSubMode: .along,
+             stops: [GradientStop(color: "#ff0000", opacity: 100, location: 0, midpointToNext: 25),
+                     GradientStop(color: "#0000ff", opacity: 50, location: 100, midpointToNext: 50)])
+}
+
+/// The attribute-SATURATED Path: every optional field on the kind set to a
+/// non-default value. Mirrors `survival_saturated_path()` in Rust.
+private func saturatedPath() -> Path {
+    Path(
+        d: [.moveTo(0, 0), .lineTo(10, 10), .closePath],
+        fill: Fill(color: .hsb(h: 120, s: 0.5, b: 0.6, a: 0.8), opacity: 0.6),
+        stroke: Stroke(color: .cmyk(c: 0.1, m: 0.2, y: 0.3, k: 0.4, a: 0.9),
+                       width: 4.5, linecap: .round, linejoin: .bevel,
+                       miterLimit: 7.5, align: .inside,
+                       dashPattern: [4, 2, 1, 3], dashAlignAnchors: true,
+                       startArrow: .closedArrow, endArrow: .circle,
+                       startArrowScale: 150, endArrowScale: 75,
+                       arrowAlign: .centerAtEnd, opacity: 0.75),
+        widthPoints: [StrokeWidthPoint(t: 0, widthLeft: 1, widthRight: 2),
+                      StrokeWidthPoint(t: 1, widthLeft: 3, widthRight: 4)],
+        opacity: 0.5,
+        transform: Transform(a: 2, b: 0, c: 0, d: 3, e: 5, f: 7),
+        locked: true,
+        visibility: .outline,
+        blendMode: .multiply,
+        mask: Mask(subtreeElement: .rect(Rect(x: 1, y: 2, width: 3, height: 4,
+                                              fill: Fill(color: Color(r: 1, g: 1, b: 1)))),
+                   clip: true, invert: true, disabled: false, linked: false,
+                   unlinkTransform: Transform(a: 1, b: 0, c: 0, d: 1, e: 9, f: 9)),
+        fillGradient: survivalGradient(),
+        strokeGradient: survivalGradient(),
+        strokeBrush: "basic/calligraphic_5",
+        strokeBrushOverrides: "{\"angle\":30}",
+        toolOrigin: "blob_brush",
+        name: "name_path",
+        id: "id_path",
+        fillRule: .evenodd
+    )
+}
+
+private func survivalDoc() -> Document {
+    Document(rawLayers: [Layer(name: "Layer 1", children: [.path(saturatedPath())])],
+             rawSelectedLayer: 0, rawSelection: [], rawArtboards: [],
+             rawArtboardOptions: .default)
+}
+
+private func survivalFirstPath(_ d: Document) -> Path? {
+    guard let l = d.layers.first, let e = l.children.first else { return nil }
+    if case .path(let p) = e { return p }
+    return nil
+}
+
+/// PRESERVED / DROPPED for each watched field of `after` against `before`.
+/// The key order matches the Rust `survival_row` vector.
+private func survivalRow(_ before: Path, _ after: Path?) -> [(String, String)] {
+    guard let a = after else {
+        Issue.record("codecFieldSurvival: the saturated Path did not survive the round trip AT ALL")
+        return []
+    }
+    func s(_ ok: Bool) -> String { ok ? "PRESERVED" : "DROPPED" }
+    return [
+        ("common.mask", s(a.mask == before.mask)),
+        ("common.mode", s(a.blendMode == before.blendMode)),
+        ("common.tool_origin", s(a.toolOrigin == before.toolOrigin)),
+        ("fill_gradient", s(a.fillGradient == before.fillGradient)),
+        ("fill_rule", s(a.fillRule == before.fillRule)),
+        ("stroke.dash_align_anchors", s(a.stroke?.dashAlignAnchors == before.stroke?.dashAlignAnchors)),
+        ("stroke_brush", s(a.strokeBrush == before.strokeBrush)),
+        ("stroke_brush_overrides", s(a.strokeBrushOverrides == before.strokeBrushOverrides)),
+        ("stroke_gradient", s(a.strokeGradient == before.strokeGradient)),
+        ("width_points", s(a.widthPoints == before.widthPoints)),
+    ]
+}
+
+@Test func codecFieldSurvival() throws {
+    let raw = readFixture("expected/codec_field_survival.json")
+    let fx = try JSONSerialization.jsonObject(with: raw.data(using: .utf8)!) as! [String: Any]
+    let fields = fx["fields"] as! [String]
+    #expect(!fields.isEmpty, "codecFieldSurvival: the field list is empty")
+    let survival = fx["survival"] as! [String: [String: String]]
+    let overrides = (fx["port_overrides"] as! [String: Any])["entries"] as! [[String: Any]]
+
+    let doc = survivalDoc()
+    let before = survivalFirstPath(doc)!
+
+    let viaJson = testJsonToDocument(documentToTestJson(doc))
+    let viaBin = try binaryToDocument(documentToBinary(doc, compress: false))
+    let viaSvg = svgToDocument(documentToSvg(doc))
+
+    for (codec, rt) in [("test_json", viaJson), ("binary", viaBin), ("svg", viaSvg)] {
+        let got = survivalRow(before, survivalFirstPath(rt))
+        #expect(got.count == fields.count,
+                "codecFieldSurvival: the gate watches \(got.count) fields, the fixture declares \(fields.count)")
+        for (field, actual) in got {
+            #expect(fields.contains(field),
+                    "codecFieldSurvival: field '\(field)' is watched by the gate but absent from the fixture's `fields` list")
+            // A `port_overrides` entry means the two ports measurably disagree
+            // on this cell today; this port is asserted to produce the OTHER
+            // value, so closing the divergence reds this gate until the entry
+            // is deleted.
+            let overrideVal = overrides.first {
+                ($0["codec"] as? String) == codec && ($0["field"] as? String) == field
+                    && ($0["port"] as? String) == "swift"
+            }?["value"] as? String
+            guard let expected = overrideVal ?? survival[codec]?[field] else {
+                Issue.record("codecFieldSurvival: fixture declares no cell for \(codec)/\(field)")
+                continue
+            }
+            let pinNote = overrideVal != nil
+                ? " (a port_overrides entry pins this cell; if the divergence closed, delete the entry)"
+                : ""
+            #expect(expected == actual,
+                    "codecFieldSurvival: \(codec)/\(field) -- fixture says \(expected), swift measured \(actual)\(pinNote)")
+        }
+    }
+}

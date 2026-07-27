@@ -5367,6 +5367,204 @@ mod tests {
         }
     }
 
+
+    // ---------------------------------------------------------------
+    // CODEC FIELD SURVIVAL
+    //
+    // Every other codec gate in this file compares `document_to_test_json`
+    // STRINGS. That catches a dropped field perfectly -- but only for fields
+    // the canonical test-JSON itself emits, and the set of fields the BINARY
+    // codec drops is a strict SUBSET of the set the test-JSON drops. So no
+    // fixture, however saturated, can red-light a binary-codec drop through
+    // the string oracle: it would be normalized back to default on the way in
+    // and pass, green and vacuous.
+    //
+    // This gate compares at the MODEL level instead (PartialEq on PathElem),
+    // which is what lets it see the fields the oracle cannot express. The
+    // saturated Path below is mirrored in JasSwift/Tests/CrossLanguageTests
+    // .swift (`saturatedPath`) and stated once in prose in the fixture's
+    // `saturated_path` block. See transcripts/EDIT_SEMANTICS_FREEZE.md: a
+    // round trip speaks to NOTHING, so it must preserve EVERYTHING.
+    // ---------------------------------------------------------------
+
+    fn survival_gradient() -> Box<crate::geometry::element::Gradient> {
+        use crate::geometry::element::*;
+        Box::new(Gradient {
+            gtype: GradientType::Radial,
+            angle: 45.0,
+            aspect_ratio: 200.0,
+            method: GradientMethod::Smooth,
+            dither: true,
+            stroke_sub_mode: StrokeSubMode::Along,
+            stops: vec![
+                GradientStop { color: Color::Rgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+                               opacity: 100.0, location: 0.0, midpoint_to_next: 25.0 },
+                GradientStop { color: Color::Rgb { r: 0.0, g: 0.0, b: 1.0, a: 1.0 },
+                               opacity: 50.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: vec![],
+        })
+    }
+
+    /// The attribute-SATURATED Path: every optional field on the kind set to a
+    /// non-default value. Mirrored by `saturatedPath()` in JasSwift.
+    fn survival_saturated_path() -> crate::geometry::element::PathElem {
+        use crate::geometry::element::*;
+        PathElem {
+            d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 10.0, y: 10.0 },
+                    PathCommand::ClosePath],
+            fill: Some(Fill { color: Color::Hsb { h: 120.0, s: 0.5, b: 0.6, a: 0.8 }, opacity: 0.6 }),
+            stroke: Some(Stroke {
+                color: Color::Cmyk { c: 0.1, m: 0.2, y: 0.3, k: 0.4, a: 0.9 },
+                width: 4.5,
+                linecap: LineCap::Round,
+                linejoin: LineJoin::Bevel,
+                miter_limit: 7.5,
+                align: StrokeAlign::Inside,
+                dash_pattern: [4.0, 2.0, 1.0, 3.0, 0.0, 0.0],
+                dash_len: 4,
+                dash_align_anchors: true,
+                start_arrow: Arrowhead::ClosedArrow,
+                end_arrow: Arrowhead::Circle,
+                start_arrow_scale: 150.0,
+                end_arrow_scale: 75.0,
+                arrow_align: ArrowAlign::CenterAtEnd,
+                opacity: 0.75,
+            }),
+            width_points: vec![
+                StrokeWidthPoint { t: 0.0, width_left: 1.0, width_right: 2.0 },
+                StrokeWidthPoint { t: 1.0, width_left: 3.0, width_right: 4.0 },
+            ],
+            common: CommonProps {
+                opacity: 0.5,
+                mode: BlendMode::Multiply,
+                transform: Some(Transform { a: 2.0, b: 0.0, c: 0.0, d: 3.0, e: 5.0, f: 7.0 }),
+                locked: true,
+                visibility: Visibility::Outline,
+                mask: Some(Box::new(Mask {
+                    subtree: Box::new(Element::Rect(RectElem {
+                        x: 1.0, y: 2.0, width: 3.0, height: 4.0, rx: 0.0, ry: 0.0,
+                        fill: Some(Fill::new(Color::Rgb { r: 1.0, g: 1.0, b: 1.0, a: 1.0 })),
+                        stroke: None,
+                        common: CommonProps::default(),
+                        fill_gradient: None,
+                        stroke_gradient: None,
+                    })),
+                    clip: true,
+                    invert: true,
+                    disabled: false,
+                    linked: false,
+                    unlink_transform: Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 9.0, f: 9.0 }),
+                })),
+                tool_origin: Some("blob_brush".to_string()),
+                name: Some("name_path".to_string()),
+                id: Some("id_path".to_string()),
+            },
+            fill_gradient: Some(survival_gradient()),
+            stroke_gradient: Some(survival_gradient()),
+            fill_rule: FillRule::EvenOdd,
+            stroke_brush: Some("basic/calligraphic_5".to_string()),
+            stroke_brush_overrides: Some("{\"angle\":30}".to_string()),
+        }
+    }
+
+    fn survival_doc() -> crate::document::document::Document {
+        use crate::geometry::element::*;
+        let mut d = crate::document::document::Document::default();
+        let mut lc = CommonProps::default();
+        lc.name = Some("Layer 1".to_string());
+        d.layers = vec![Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(Element::Path(survival_saturated_path()))],
+            common: lc,
+            isolated_blending: false,
+            knockout_group: false,
+        })];
+        d
+    }
+
+    fn survival_first_path(
+        d: &crate::document::document::Document,
+    ) -> Option<crate::geometry::element::PathElem> {
+        use crate::geometry::element::Element;
+        let kids = match d.layers.first()? { Element::Layer(e) => &e.children, _ => return None };
+        match kids.first()?.as_ref() { Element::Path(p) => Some(p.clone()), _ => None }
+    }
+
+    /// PRESERVED / DROPPED for each watched field of `after` against `before`.
+    fn survival_row(
+        before: &crate::geometry::element::PathElem,
+        after: Option<&crate::geometry::element::PathElem>,
+    ) -> Vec<(&'static str, &'static str)> {
+        let a = match after {
+            Some(a) => a,
+            None => panic!("codec_field_survival: the saturated Path did not survive the \
+                            round trip AT ALL -- every field row below is meaningless"),
+        };
+        let s = |ok: bool| if ok { "PRESERVED" } else { "DROPPED" };
+        vec![
+            ("common.mask", s(a.common.mask == before.common.mask)),
+            ("common.mode", s(a.common.mode == before.common.mode)),
+            ("common.tool_origin", s(a.common.tool_origin == before.common.tool_origin)),
+            ("fill_gradient", s(a.fill_gradient == before.fill_gradient)),
+            ("fill_rule", s(a.fill_rule == before.fill_rule)),
+            ("stroke.dash_align_anchors",
+             s(a.stroke.map(|x| x.dash_align_anchors) == before.stroke.map(|x| x.dash_align_anchors))),
+            ("stroke_brush", s(a.stroke_brush == before.stroke_brush)),
+            ("stroke_brush_overrides", s(a.stroke_brush_overrides == before.stroke_brush_overrides)),
+            ("stroke_gradient", s(a.stroke_gradient == before.stroke_gradient)),
+            ("width_points", s(a.width_points == before.width_points)),
+        ]
+    }
+
+    #[test]
+    fn codec_field_survival() {
+        let raw = read_fixture("expected/codec_field_survival.json");
+        let fx: serde_json::Value = serde_json::from_str(&raw)
+            .expect("codec_field_survival.json is not valid JSON");
+        let fields: Vec<String> = fx["fields"].as_array().unwrap().iter()
+            .map(|v| v.as_str().unwrap().to_string()).collect();
+        assert!(!fields.is_empty(), "codec_field_survival: the field list is empty");
+
+        let doc = survival_doc();
+        let before = survival_first_path(&doc).expect("saturated doc has a Path");
+
+        let via_json = test_json_to_document(&document_to_test_json(&doc));
+        let via_bin = binary_to_document(&document_to_binary(&doc, false))
+            .expect("binary round trip of the saturated doc");
+        let via_svg = svg_to_document(&document_to_svg(&doc));
+
+        for (codec, rt) in [("test_json", &via_json), ("binary", &via_bin), ("svg", &via_svg)] {
+            let got = survival_row(&before, survival_first_path(rt).as_ref());
+            assert_eq!(got.len(), fields.len(),
+                "codec_field_survival: the gate watches {} fields, the fixture declares {}",
+                got.len(), fields.len());
+            for (field, actual) in got {
+                assert!(fields.iter().any(|f| f == field),
+                    "codec_field_survival: field '{}' is watched by the gate but absent \
+                     from the fixture's `fields` list", field);
+                // A `port_overrides` entry means the two ports measurably
+                // disagree on this cell today; this port is asserted to produce
+                // the OTHER value, so closing the divergence reds this gate
+                // until the entry is deleted.
+                let override_val = fx["port_overrides"]["entries"].as_array().unwrap().iter()
+                    .find(|e| e["codec"] == codec && e["field"] == field && e["port"] == "rust")
+                    .and_then(|e| e["value"].as_str());
+                let expected = override_val.unwrap_or_else(|| {
+                    fx["survival"][codec][field].as_str().unwrap_or_else(|| panic!(
+                        "codec_field_survival: fixture declares no cell for {}/{}", codec, field))
+                });
+                assert_eq!(expected, actual,
+                    "codec_field_survival: {}/{} -- fixture says {}, rust measured {}{}",
+                    codec, field, expected, actual,
+                    if override_val.is_some() {
+                        " (a port_overrides entry pins this cell; if the divergence closed, \
+                          delete the entry)"
+                    } else { "" });
+            }
+        }
+    }
+
     #[cfg(feature = "web")]
     #[test]
     fn state_defaults() {

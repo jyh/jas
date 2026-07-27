@@ -1,0 +1,169 @@
+{
+  "_doc": [
+    "CODEC FIELD SURVIVAL -- the shared matrix that says, per codec and per field,",
+    "whether an attribute-SATURATED element survives a round trip.",
+    "",
+    "WHY THIS FILE EXISTS. Every codec gate in this repository (SVG parse, SVG",
+    "round-trip, canonical test-JSON round-trip, binary round-trip) compares",
+    "`document_to_test_json` STRINGS before and after. That catches a dropped field",
+    "perfectly -- but only for fields the canonical test-JSON itself emits. Measured",
+    "on this commit by round-tripping one saturated Path through all three codecs in",
+    "both ports: the set of fields the BINARY codec drops is a strict SUBSET of the",
+    "set the canonical test-JSON drops. So no fixture, however saturated, can",
+    "red-light a single one of the binary codec's drops through the existing gates.",
+    "The corpus census's prescription (§5.4: 'one maximal fixture per element",
+    "type') is therefore NOT EXECUTABLE against the string oracle -- a saturated",
+    "fixture would be normalized back to default on the way in and pass, green and",
+    "vacuous.",
+    "",
+    "This family sidesteps the string oracle. Both ports build the same saturated",
+    "Path IN CODE (the shape is spelled out in `saturated_path` below, and mirrored",
+    "in jas_dioxus/src/cross_language_test.rs and JasSwift/Tests/CrossLanguageTests",
+    ".swift), round-trip it, and compare field values at the MODEL level (Rust",
+    "PartialEq / Swift Equatable). The matrix below is then asserted cell by cell.",
+    "",
+    "HOW TO READ A CELL. PRESERVED = the field came back equal. DROPPED = it did",
+    "not. A DROPPED cell is a PINNED gap, not an accepted one: fixing the site turns",
+    "this gate RED until the cell is updated, so a gap here can never rot into a",
+    "silent suppression (the same discipline as `expected_violations` in",
+    "test_fixtures/preservation/).",
+    "",
+    "THE PRESERVATION LAW (transcripts/EDIT_SEMANTICS_FREEZE.md, ratified",
+    "2026-07-27) frames every DROPPED cell: a round trip speaks to NOTHING, so it",
+    "must preserve EVERYTHING. `classification` therefore separates the two shapes",
+    "the law distinguishes, and the distinction is evidence-based, not editorial:",
+    "",
+    "  REPRESENTABLE_BUT_DROPPED -- the output representation demonstrably carries",
+    "    this class of value ALREADY, somewhere this codebase can be pointed at (an",
+    "    attribute one port writes, an attribute this port's own reader parses, or a",
+    "    slot the format has been extended with before). Dropping it is a defect.",
+    "  NO_COUNTERPART -- the output representation has no construct for the value",
+    "    and neither port writes an extension for it. An honest representation",
+    "    limit, which the law says must be DOCUMENTED rather than guessed at.",
+    "",
+    "`classification` is prose analysis and is NOT machine-asserted; only",
+    "`survival` and `port_overrides` are."
+  ],
+
+  "saturated_path": {
+    "_doc": "The element both ports construct in code. Recorded here so the two mirrors can be diffed against one statement of intent; it is NOT parsed by either gate (the canonical test-JSON cannot express most of these keys -- that is the whole point).",
+    "d": "M 0 0 L 10 10 Z",
+    "fill": { "color": "hsb(120, 0.5, 0.6, 0.8)", "opacity": 0.6 },
+    "stroke": {
+      "color": "cmyk(0.1, 0.2, 0.3, 0.4, 0.9)", "width": 4.5,
+      "linecap": "round", "linejoin": "bevel", "miter_limit": 7.5,
+      "align": "inside", "dash_pattern": [4, 2, 1, 3], "dash_align_anchors": true,
+      "start_arrow": "closed_arrow", "end_arrow": "circle",
+      "start_arrow_scale": 150, "end_arrow_scale": 75,
+      "arrow_align": "center_at_end", "opacity": 0.75
+    },
+    "width_points": [
+      { "t": 0.0, "width_left": 1.0, "width_right": 2.0 },
+      { "t": 1.0, "width_left": 3.0, "width_right": 4.0 }
+    ],
+    "common": {
+      "opacity": 0.5, "mode": "multiply", "locked": true, "visibility": "outline",
+      "transform": { "a": 2, "b": 0, "c": 0, "d": 3, "e": 5, "f": 7 },
+      "tool_origin": "blob_brush", "name": "name_path", "id": "id_path",
+      "mask": {
+        "subtree": "rect(1, 2, 3x4, fill #ffffff)",
+        "clip": true, "invert": true, "disabled": false, "linked": false,
+        "unlink_transform": { "a": 1, "b": 0, "c": 0, "d": 1, "e": 9, "f": 9 }
+      }
+    },
+    "fill_gradient": "radial, angle 45, aspect 200, smooth, dither, along-stroke, 2 stops",
+    "stroke_gradient": "radial, angle 45, aspect 200, smooth, dither, along-stroke, 2 stops",
+    "fill_rule": "evenodd",
+    "stroke_brush": "basic/calligraphic_5",
+    "stroke_brush_overrides": "{\"angle\":30}"
+  },
+
+  "fields": [
+    "common.mask",
+    "common.mode",
+    "common.tool_origin",
+    "fill_gradient",
+    "fill_rule",
+    "stroke.dash_align_anchors",
+    "stroke_brush",
+    "stroke_brush_overrides",
+    "stroke_gradient",
+    "width_points"
+  ],
+
+  "survival": {
+    "test_json": {
+      "common.mask": "DROPPED",
+      "common.mode": "DROPPED",
+      "common.tool_origin": "DROPPED",
+      "fill_gradient": "DROPPED",
+      "fill_rule": "PRESERVED",
+      "stroke.dash_align_anchors": "DROPPED",
+      "stroke_brush": "DROPPED",
+      "stroke_brush_overrides": "DROPPED",
+      "stroke_gradient": "DROPPED",
+      "width_points": "DROPPED"
+    },
+    "binary": {
+      "common.mask": "DROPPED",
+      "common.mode": "DROPPED",
+      "common.tool_origin": "DROPPED",
+      "fill_gradient": "DROPPED",
+      "fill_rule": "PRESERVED",
+      "stroke.dash_align_anchors": "PRESERVED",
+      "stroke_brush": "DROPPED",
+      "stroke_brush_overrides": "DROPPED",
+      "stroke_gradient": "DROPPED",
+      "width_points": "PRESERVED"
+    },
+    "svg": {
+      "common.mask": "DROPPED",
+      "common.mode": "DROPPED",
+      "common.tool_origin": "PRESERVED",
+      "fill_gradient": "DROPPED",
+      "fill_rule": "PRESERVED",
+      "stroke.dash_align_anchors": "PRESERVED",
+      "stroke_brush": "DROPPED",
+      "stroke_brush_overrides": "DROPPED",
+      "stroke_gradient": "DROPPED",
+      "width_points": "DROPPED"
+    }
+  },
+
+  "port_overrides": {
+    "_doc": "A cell where the two ports MEASURABLY DISAGREE today. The `survival` value above is what both ports must reach; a port listed here is asserted to produce the stated OTHER value, so closing the divergence turns this gate red until the entry is deleted. Empty is the goal state.",
+    "entries": [
+      {
+        "codec": "svg",
+        "field": "common.tool_origin",
+        "port": "rust",
+        "value": "DROPPED",
+        "note": "LIVE ONE-PORT DIVERGENCE, measured by this fixture's own gate in both ports. JasSwift's <path> writer emits jas:tool-origin (JasSwift/Sources/Geometry/Svg.swift, `toolOriginAttr`) and reads it back; Rust's `parse_common` (jas_dioxus/src/geometry/svg.rs) READS jas:tool-origin for every element but Rust's writer emits it nowhere. Consequence: blob-brush art saved to SVG and reopened keeps its merge identity in Swift and loses it in Rust, so the next sweep merges into the existing element in one port and starts a new element in the other."
+      }
+    ]
+  },
+
+  "classification": {
+    "test_json": {
+      "_all_dropped": "REPRESENTABLE_BUT_DROPPED. The canonical test-JSON is a hand-built object writer that already emits nested objects (`transform`, `fill`, `stroke`, `tspans`) and already emits keys CONDITIONALLY on non-default (`id`, and `fill_rule` -- the one PRESERVED row here, written only when `evenodd`). Nothing about the format prevents any of these keys; the writer simply has none. THIS IS THE BLINDNESS MECHANISM: every codec gate compares test-JSON strings, so each DROPPED row here makes the corresponding row in `binary` and `svg` unreachable by any fixture. The binary codec's dropped set is a strict SUBSET of this one.",
+      "fill_rule": "PRESERVED -- written at jas_dioxus/src/geometry/test_json.rs `o.str_val(\"fill_rule\", \"evenodd\")` and mirrored in JasSwift/Sources/Geometry/TestJson.swift. It is the proof that the conditional-key mechanism works and generalises."
+    },
+    "binary": {
+      "_all_dropped": "REPRESENTABLE_BUT_DROPPED. The binary codec is msgpack over per-tag positional arrays; it has been EXTENDED TWICE by appending slots (the `symbols` master store at document index 3, tolerated via `arr.get(3)`; the live-element instance transform at TAG_LIVE slot 9). The mechanism is established and in use, so these seven fields are omitted, not unrepresentable. `pack_common` carries 6 of CommonProps' 9 fields (jas_dioxus/src/geometry/binary.rs, JasSwift/Sources/Geometry/Binary.swift); `mode`, `mask` and `tool_origin` are hard-coded to defaults on the unpack side. Live consequence: apply a brush or set a blend mode, relaunch, and the setting is gone.",
+      "stroke.dash_align_anchors": "PRESERVED -- pack_stroke carries the full Stroke including dash pattern, dash length, align, miter limit and both arrowheads. The census row that grouped `dash_align_anchors` and `width_points` with the binary codec's losses is corrected here by measurement: they survive.",
+      "width_points": "PRESERVED -- packed for Line and Path."
+    },
+    "svg": {
+      "common.tool_origin": "REPRESENTABLE_BUT_DROPPED (Rust, until this wave). `jas:tool-origin` is written by JasSwift's <path> arm AND parsed by Rust's own `parse_common` for every element -- so the representation exists, this port's reader consumes it, and only this port's writer omitted it. Closed in the same wave as this fixture.",
+      "common.mask": "NO_COUNTERPART as things stand. SVG has <mask>, but neither port writes or reads any mask construct, and jas's Mask carries `invert`, `disabled`, `linked` and `unlink_transform` with no SVG analogue. Documented, not guessed.",
+      "common.mode": "NO_COUNTERPART as things stand. CSS `mix-blend-mode` covers the 16 modes, but neither port writes or reads it.",
+      "fill_gradient": "NO_EXACT_COUNTERPART. SVG <linearGradient>/<radialGradient> exist, but jas's Gradient carries `midpoint_to_next` per stop plus `aspect_ratio`, `dither` and `stroke_sub_mode`, none of which SVG expresses. A faithful export needs a jas: extension alongside the standard element -- a design question, not a one-line fix.",
+      "stroke_gradient": "NO_EXACT_COUNTERPART -- as fill_gradient, plus the stroke sub-mode has no SVG meaning at all.",
+      "stroke_brush": "NO_COUNTERPART as things stand. A jas-private reference (\"<library>/<brush>\"); it would ride a jas: attribute exactly as tool-origin does, but no port writes one.",
+      "stroke_brush_overrides": "NO_COUNTERPART as things stand -- same shape as stroke_brush.",
+      "width_points": "NO_COUNTERPART as things stand. The variable-width profile has no SVG stroke analogue; a faithful export means emitting the OUTLINE, which is a different document, or a jas: extension.",
+      "fill_rule": "PRESERVED -- both ports write `fill-rule=\"evenodd\"` and both read it.",
+      "stroke.dash_align_anchors": "PRESERVED -- rides the dash attributes both ports already write."
+    }
+  }
+}
