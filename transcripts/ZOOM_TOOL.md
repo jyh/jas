@@ -426,3 +426,27 @@ corrects a third verb nobody is watching. Gate it while you are there.
 
 This ruling and the `zoom_to_actual_size` ruling above are the same principle in two
 verbs: **the zoom family keeps the artist's view.**
+
+## RULED 2026-07-27 (JYH): Swift's MENU AND KEYBOARD must route through the YAML
+## pipeline — and it rides WITH the zoom work, not after it
+
+Six Swift View actions bypass the YAML pipeline via native `Model` methods with
+hardcoded constants. The `doc.zoom.*` effects exist and are correct (the Zoom TOOL
+uses them); the menu and keyboard never reach them.
+
+**Why this outranks an ordinary coverage gap:** the corpus CAN gate those effects and
+does — so a fix lands, the gate goes green, and **nothing a user can see changes.**
+The gate is testing a road nobody drives, which manufactures false confidence and is
+worse than an honest hole.
+
+**Why it rides WITH the two zoom rulings rather than after them:** if the menu and
+keyboard do not route through the effects, then fixing the effects **does not fix
+Ctrl+1.** Landing the zoom rulings alone would turn both gates green while the
+flagship port still recentres wrongly on every keystroke. JYH: *"better to do now
+than later."*
+
+Scope honestly: this is a refactor in the more important artist-facing port, touching
+the menu and keyboard paths, and **it has no fixture coverage today** — no vector can
+reach the menu or keyboard route — so the work must build its own gate alongside. The
+rejected alternative was to fix the effects and declare the user-path divergence as a
+gap; strictly better than the status quo, but it leaves the artist's experience wrong.
