@@ -995,10 +995,28 @@ command is `Z` therefore diverges.** The lens proved it live with a throwaway pr
 (`d = [Z, L(5,5)]`): `FAIL: flatten/PROBE_leading_close [rust vs swift]`. Decide the
 right answer from the reference, then fix and gate it.
 
-**(c) The `bind_values` list contract is unpinned.** All 3 list rows in the 225-row
+**(c) The `bind_values` list contract is unpinned.** ~~All 3 list rows in the 225-row
 corpus are the single-element `[lib1:0]`, so the documented "bracketed and
 comma-joined element-wise" behaviour survives a mutation: changing the separator to
-`;` leaves both ports' tests green. Needs a multi-element and a nested-list vector.
+`;` leaves both ports' tests green. Needs a multi-element and a nested-list vector.~~
+**CLOSED 2026-07-27, fixture-only.** Three seeds added to `BIND_SEED` in
+`scripts/gen_panel_layout_fixture.py`; the corpus is now 7 vectors / 281 rows with 10
+list rows. `swatches@multi_selection` is a three-element selection over two libraries;
+`swatches@nested_selection` is a deliberately SYNTHETIC list of lists (no binding in
+the bundle produces one — see the seed comment) covering an inner multi-element list,
+an EMPTY inner list, and a doubly-nested element; `layers@selection_lists` binds the
+tree_view's `element_selection` as a list of PATH values, an element arm `type` that
+occurred ZERO times in the previous 225 rows. Both ports matched the
+reference-generated golden on their first run — no divergence. Discrimination
+measured, per port, one mutation at a time and reverted individually:
+separator `,`→`;` reds `swatches@multi_selection` in Rust
+(`algorithm_bind_values_vectors` asserts per vector and aborts there, so the four
+pre-existing vectors compared EQUAL under the mutation) and reds exactly the three
+new vectors in Swift (`testAlgorithmBindValues` reports per vector without aborting:
+3 issues, none of them a pre-existing vector). A second mutation replacing the
+element-wise recursion with a flat `to_string_coerce` reds exactly ONE vector in each
+port — `swatches@nested_selection` — so the nested vector, and only it, pins the
+recursion.
 
 **(d) FALSE ACCOUNTING IN A COMMIT MESSAGE (durable record).** Commit `64282375`
 says the carried set is "the WHOLE non-paint set" and then accounts for only EIGHT of
