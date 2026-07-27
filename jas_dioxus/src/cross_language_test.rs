@@ -1918,6 +1918,320 @@ mod tests {
         }
     }
 
+    // ===============================================================
+    // PRESERVATION corpus — the DOCUMENT-LEVEL INVARIANT GATE
+    // (transcripts/EDIT_SEMANTICS_FREEZE.md §4.1, the primary tier).
+    //
+    // The freeze's own finding is that a per-copy-API battery is
+    // structurally blind to the gravest violation class: inline
+    // container rebuilds are not copy APIs, so no battery would ever be
+    // written for them. This gate does not look at any copy site. It
+    // serializes the WHOLE document before and after an edit and asserts
+    // six invariants over the canonical (cross-language) test JSON —
+    // "one predicate both ports can fail identically" (§4.2). The Swift
+    // twin in JasSwift/Tests/CrossLanguageTests.swift evaluates exactly
+    // the same six names over exactly the same vectors.
+    //
+    // A vector may PIN a known violation for this port. A pinned
+    // invariant is asserted to FAIL: fixing the site turns this gate red
+    // until the pin is removed, so a pin can never rot into a silent
+    // suppression. `scripts/check_preservation_corpus.py` gates the data
+    // shape (V1-V5 anti-vacuity).
+    // ===============================================================
+
+    /// One evaluated invariant: `None` = held, `Some(why)` = violated.
+    type InvResult = (&'static str, Option<String>);
+
+    /// Recursively collect every id-bearing element of a canonical
+    /// document JSON: the ids in document order, and each id's own
+    /// attribute object with `children` stripped (a container that
+    /// legitimately gained or lost a child still has ITS OWN fields
+    /// compared — that is the T4 bystander predicate).
+    fn preservation_walk(
+        node: &serde_json::Value,
+        ids: &mut Vec<String>,
+        attrs: &mut std::collections::HashMap<String, serde_json::Value>,
+    ) {
+        match node {
+            serde_json::Value::Array(items) => {
+                for it in items {
+                    preservation_walk(it, ids, attrs);
+                }
+            }
+            serde_json::Value::Object(obj) => {
+                if obj.contains_key("type")
+                    && let Some(id) = obj.get("id").and_then(|v| v.as_str())
+                {
+                    ids.push(id.to_string());
+                    let mut stripped = obj.clone();
+                    stripped.remove("children");
+                    attrs.insert(id.to_string(), serde_json::Value::Object(stripped));
+                }
+                for key in ["layers", "children", "symbols"] {
+                    if let Some(v) = obj.get(key) {
+                        preservation_walk(v, ids, attrs);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    struct PreservationSnapshot {
+        ids: Vec<String>,
+        attrs: std::collections::HashMap<String, serde_json::Value>,
+    }
+
+    fn preservation_snapshot(doc_json: &str) -> PreservationSnapshot {
+        let v: serde_json::Value = serde_json::from_str(doc_json)
+            .expect("canonical document JSON parses");
+        let mut ids = Vec::new();
+        let mut attrs = std::collections::HashMap::new();
+        preservation_walk(&v, &mut ids, &mut attrs);
+        PreservationSnapshot { ids, attrs }
+    }
+
+    fn str_list(tc: &serde_json::Value, key: &str) -> Vec<String> {
+        tc[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("preservation vector needs a '{key}' array"))
+            .iter()
+            .map(|v| v.as_str().expect("a string").to_string())
+            .collect()
+    }
+
+    /// Evaluate the six document-level invariants for one vector.
+    fn preservation_invariants_for(
+        tc: &serde_json::Value,
+        before: &PreservationSnapshot,
+        after: &PreservationSnapshot,
+    ) -> Vec<InvResult> {
+        use std::collections::BTreeSet;
+        let subject: BTreeSet<String> = str_list(tc, "subject_ids").into_iter().collect();
+        let consumed: BTreeSet<String> = str_list(tc, "consumed_ids").into_iter().collect();
+        let speaks_to: BTreeSet<String> = str_list(tc, "speaks_to").into_iter().collect();
+        let want_fresh = tc["expected_fresh_ids"].as_u64().expect("expected_fresh_ids") as usize;
+
+        let before_set: BTreeSet<&String> = before.ids.iter().collect();
+        let after_set: BTreeSet<&String> = after.ids.iter().collect();
+
+        let mut out: Vec<InvResult> = Vec::new();
+
+        // id_uniqueness — the REFERENCE_GRAPH.md §2.5 uniqueness invariant,
+        // document-wide, after the edit.
+        let mut dups: Vec<&String> = Vec::new();
+        for id in &after.ids {
+            if after.ids.iter().filter(|o| *o == id).count() > 1 && !dups.contains(&id) {
+                dups.push(id);
+            }
+        }
+        out.push((
+            "id_uniqueness",
+            if dups.is_empty() {
+                None
+            } else {
+                Some(format!("id(s) appear more than once after the edit: {dups:?}"))
+            },
+        ));
+
+        // id_survival — every identity the edit did not consume is still there.
+        let lost: Vec<&&String> = before_set
+            .iter()
+            .filter(|id| !consumed.contains(**id) && !after_set.contains(**id))
+            .collect();
+        out.push((
+            "id_survival",
+            if lost.is_empty() {
+                None
+            } else {
+                Some(format!("id(s) present before and NOT consumed vanished: {lost:?}"))
+            },
+        ));
+
+        // consumed_ids_die — over-preservation is a violation too (§3.3).
+        let survived: Vec<&String> = consumed.iter().filter(|id| after_set.contains(id)).collect();
+        out.push((
+            "consumed_ids_die",
+            if survived.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "id(s) the edit consumed rode out on the result: {survived:?}"
+                ))
+            },
+        ));
+
+        // fresh_ids — how many identities the edit minted.
+        let fresh: Vec<&&String> = after_set.iter().filter(|id| !before_set.contains(**id)).collect();
+        out.push((
+            "fresh_ids",
+            if fresh.len() == want_fresh {
+                None
+            } else {
+                Some(format!(
+                    "expected {want_fresh} freshly minted id(s), got {} ({fresh:?})",
+                    fresh.len()
+                ))
+            },
+        ));
+
+        // bystanders_unchanged — T4, including the containers the edit
+        // rebuilt to reach its target. Compared only for bystanders that
+        // still carry their id after the edit; a bystander whose id was
+        // destroyed is id_survival's failure, not this one's.
+        let mut byst_fail: Vec<String> = Vec::new();
+        for id in &before_set {
+            if subject.contains(*id) || consumed.contains(*id) {
+                continue;
+            }
+            let (Some(b), Some(a)) = (before.attrs.get(*id), after.attrs.get(*id)) else {
+                continue;
+            };
+            if b != a {
+                byst_fail.push(format!("{id}: {b} -> {a}"));
+            }
+        }
+        out.push((
+            "bystanders_unchanged",
+            if byst_fail.is_empty() {
+                None
+            } else {
+                Some(format!("bystander attributes changed: {byst_fail:?}"))
+            },
+        ));
+
+        // subject_fields_only — clause 1: only the spoken-to keys may differ.
+        let mut subj_fail: Vec<String> = Vec::new();
+        for id in &subject {
+            let (Some(b), Some(a)) = (before.attrs.get(id), after.attrs.get(id)) else {
+                continue;
+            };
+            let bo = b.as_object().unwrap();
+            let ao = a.as_object().unwrap();
+            let keys: BTreeSet<&String> = bo.keys().chain(ao.keys()).collect();
+            for k in keys {
+                if speaks_to.contains(k) {
+                    continue;
+                }
+                if bo.get(k) != ao.get(k) {
+                    subj_fail.push(format!("{id}.{k}: {:?} -> {:?}", bo.get(k), ao.get(k)));
+                }
+            }
+        }
+        out.push((
+            "subject_fields_only",
+            if subj_fail.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "subject changed keys outside speaks_to {speaks_to:?}: {subj_fail:?}"
+                ))
+            },
+        ));
+
+        out
+    }
+
+    /// Anti-vacuity, asserted at RUNTIME (the data-shape half lives in
+    /// `scripts/check_preservation_corpus.py`): the edit must have changed
+    /// the document, every named id must have existed before it, and there
+    /// must be at least one bystander to watch.
+    fn assert_preservation_not_vacuous(
+        name: &str,
+        tc: &serde_json::Value,
+        before_json: &str,
+        after_json: &str,
+        before: &PreservationSnapshot,
+    ) {
+        assert_ne!(
+            before_json, after_json,
+            "preservation vector '{name}' left the document byte-identical — \
+             every invariant over it would be vacuously true"
+        );
+        for key in ["subject_ids", "consumed_ids"] {
+            for id in str_list(tc, key) {
+                assert!(
+                    before.ids.contains(&id),
+                    "preservation vector '{name}' names {key} id '{id}', which is \
+                     absent from the loaded setup document"
+                );
+            }
+        }
+        let named: Vec<String> = str_list(tc, "subject_ids")
+            .into_iter()
+            .chain(str_list(tc, "consumed_ids"))
+            .collect();
+        let bystanders = before.ids.iter().filter(|i| !named.contains(i)).count();
+        assert!(
+            bystanders > 0,
+            "preservation vector '{name}' has no bystander — T4 is unwatchable here"
+        );
+    }
+
+    /// THE DOCUMENT-LEVEL INVARIANT GATE. Runs every
+    /// `test_fixtures/preservation/*.json` vector through the production op
+    /// dispatcher and asserts the six invariants over the whole document.
+    #[test]
+    fn preservation_invariants() {
+        let json_str = read_fixture("preservation/preservation_invariants.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str)
+            .expect("preservation_invariants.json parses");
+        let mut failures: Vec<String> = Vec::new();
+
+        for tc in tests.as_array().expect("an array of vectors") {
+            let name = tc["name"].as_str().expect("a name");
+
+            // BEFORE: the setup document, loaded and serialized with no ops.
+            let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
+            let before_model = Model::new(svg_to_document(&setup_svg), None);
+            let before_json = <DocumentOps as OpWorld>::to_test_json(&before_model);
+
+            // AFTER: the same fixture shape the operations corpus uses.
+            let after_json = <DocumentOps as OpWorld>::to_test_json(&run_operation_model(tc));
+
+            let before = preservation_snapshot(&before_json);
+            let after = preservation_snapshot(&after_json);
+            assert_preservation_not_vacuous(name, tc, &before_json, &after_json, &before);
+
+            let pinned: Vec<(String, String)> = tc["expected_violations"]["rust"]
+                .as_array()
+                .expect("expected_violations.rust is an array")
+                .iter()
+                .map(|r| {
+                    (
+                        r["invariant"].as_str().expect("invariant").to_string(),
+                        r["row"].as_str().expect("row").to_string(),
+                    )
+                })
+                .collect();
+
+            for (inv, result) in preservation_invariants_for(tc, &before, &after) {
+                let pin = pinned.iter().find(|(p, _)| p == inv);
+                match (pin, &result) {
+                    // Unpinned invariant that failed — the law is broken here.
+                    (None, Some(why)) => failures.push(format!(
+                        "[{name}] {inv} VIOLATED: {why}"
+                    )),
+                    // Pinned violation that no longer reproduces — the pin is
+                    // stale and must be deleted (this is what stops a pin from
+                    // rotting into a suppression).
+                    (Some((_, row)), None) => failures.push(format!(
+                        "[{name}] {inv} is PINNED as a known violation ({row}) but now \
+                         HOLDS — remove the pin from the vector"
+                    )),
+                    _ => {}
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "preservation invariant gate: {} failure(s):\n  {}",
+            failures.len(),
+            failures.join("\n  ")
+        );
+    }
+
     /// `OpWorld` trait-level pin for the DOCUMENT world (OP_LOG.md §2 Fork 5 /
     /// §12). Proves `DocumentOps` is genuinely wired through the trait — apply a
     /// known op via `<DocumentOps as OpWorld>::apply` through the unified

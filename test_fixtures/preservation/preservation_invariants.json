@@ -56,7 +56,21 @@
         ]
       }
     ],
-    "expected_violations": { "rust": [], "swift": [] }
+    "expected_violations": {
+      "rust": [
+        {
+          "invariant": "consumed_ids_die",
+          "row": "§3.5 'Rust apply_destructive_boolean, UNION/INTERSECTION/EXCLUDE arm' — jas_dioxus/src/document/controller.rs",
+          "note": "The union arm pushes front.common().clone(), so the frontmost operand's id (r_front) rides out on the N→1 result. That is 'the frontmost source keeps the id' — the rule JYH refused in both directions — wearing ..clone() as its hat. MEASURED by this gate: consumed_ids_die reports r_front surviving."
+        },
+        {
+          "invariant": "fresh_ids",
+          "row": "§3.6 UNION row ('id: fresh mint') — jas_dioxus/src/document/controller.rs apply_destructive_boolean",
+          "note": "The result is built from the frontmost's CommonProps, so the shared mint_unique_ids loop is never reached from this path and the merge mints nothing. MEASURED: 0 fresh ids where the law requires 1."
+        }
+      ],
+      "swift": []
+    }
   },
   {
     "name": "wrap_two_rects_in_group",
