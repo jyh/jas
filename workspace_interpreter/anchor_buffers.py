@@ -89,6 +89,6 @@ def close_hit(name: str, x: float, y: float, radius: float) -> bool:
     dy = y - first_a.y
     # math.hypot, not (dx*dx + dy*dy) ** 0.5: the naive form overflows to
     # +inf on the intermediate square and would report a miss for a point
-    # that IS within radius. Matches this module's sibling `hypot`
-    # expression builtin (expr_eval.py) and Rust `dx.hypot(dy)`.
+    # that IS within radius. Matches the `hypot` expression builtin in
+    # expr_eval.py and Rust `dx.hypot(dy)`.
     return math.hypot(dx, dy) <= radius
