@@ -770,12 +770,23 @@ private func preservationInvariantsFor(
     return out
 }
 
-/// Apply one preservation vector's transactions through the production
-/// `opApply` dispatcher (the same shape `runOperationFixture` uses) and return
-/// the canonical document JSON before and after.
+/// Apply one preservation vector's edit and return the canonical document JSON
+/// before and after.
+///
+/// A vector drives its edit through ONE of two production paths, chosen by its
+/// own shape: `events` replays pointer input through the real tool (the gesture
+/// corpus's runner), `txns`/`ops` dispatches through `opApply` (the same shape
+/// `runOperationFixture` uses). The gesture arm is not a convenience — the blob
+/// brush's commit arms are a YAML effect with NO `opApply` verb, so an op-only
+/// gate is structurally blind to them, the same shape of blindness §4.1 records
+/// for per-copy-API batteries. Mirrors Rust `preservation_invariants`.
 private func runPreservationVector(_ tc: [String: Any]) -> (before: String, after: String) {
     let svg = readFixture("svg/\(tc["setup_svg"] as! String)")
     let beforeJson = documentToTestJson(svgToDocument(svg))
+
+    if tc["events"] != nil {
+        return (beforeJson, documentToTestJson(runGestureModel(tc).document))
+    }
 
     let model = Model(document: svgToDocument(svg))
     let controller = Controller(model: model)
@@ -822,6 +833,27 @@ private func runPreservationVector(_ tc: [String: Any]) -> (before: String, afte
         }
         #expect(before.ids.contains(where: { !named.contains($0) }),
             "preservation vector '\(name)' has no bystander — T4 is unwatchable here")
+
+        // `must_change` (optional) turns `speaks_to` from a PERMISSION into a
+        // CLAIM. `subject_fields_only` only forbids differences OUTSIDE
+        // `speaks_to`, so listing a key there makes the gate blind to it: an
+        // implementation that stopped writing the key entirely would still be
+        // green. Naming it here asserts the edit really does rewrite it, which
+        // is what lets a corpus vector separate a behaviour rather than merely
+        // tolerate it. Mirrors Rust's arm in
+        // `assert_preservation_not_vacuous`.
+        if let mustChange = tc["must_change"] as? [String] {
+            for id in (tc["subject_ids"] as! [String]) {
+                guard let b = before.attrs[id], let a = after.attrs[id] else {
+                    Issue.record("preservation vector '\(name)' declares must_change but subject '\(id)' is missing from one of the snapshots")
+                    continue
+                }
+                for key in mustChange {
+                    #expect(b[key] != a[key],
+                        "preservation vector '\(name)' claims the edit rewrites \(id).\(key), but it is unchanged — the claim is stale, or the behaviour it watches has regressed")
+                }
+            }
+        }
 
         let pinned = (tc["expected_violations"] as! [String: Any])["swift"] as! [[String: Any]]
         for (inv, result) in preservationInvariantsFor(tc, before, after) {

@@ -20,13 +20,31 @@ gating nothing:
       container bystander, the T4 clause the family exists to watch has
       nothing to watch;
   V3  the vector's op list contains at least one op outside the
-      selection-only vocabulary, so it edits the document at all;
+      selection-only vocabulary, so it edits the document at all -- or, for a
+      GESTURE-driven vector, it names a tool and dispatches a press and a
+      release, which is the least that can commit anything;
   V4  a one-to-one vector with a subject declares a non-empty `speaks_to`,
       because "only the spoken-to keys may differ" is vacuously true when the
       subject set is empty;
   V5  every `expected_violations` row names a KNOWN invariant and states both
       the site (`row`) and prose (`note`), so a pinned violation can never be
-      an unexplained suppression.
+      an unexplained suppression;
+  V6  every `must_change` key is also in `speaks_to` (claiming the edit
+      rewrites a key the vector forbids it to touch is a contradiction), and
+      the vector has a subject for the claim to range over.
+
+A vector drives its edit through ONE of two production paths, chosen by its
+shape: `events` replays pointer input through the real tool, `txns`/`ops`
+dispatches through the shared op vocabulary. The gesture arm exists because
+some ratified edits have NO op verb at all -- the blob brush's commit arms are
+a YAML effect -- so an op-only family is structurally blind to them.
+
+`must_change` (optional) turns `speaks_to` from a permission into a claim.
+`subject_fields_only` only forbids differences OUTSIDE `speaks_to`, so listing
+a key there makes the gate blind to it: an implementation that stopped writing
+it would still be green. Naming it in `must_change` asserts the edit really
+does rewrite it, which is what lets a vector SEPARATE a behaviour rather than
+merely tolerate it.
 
 The runtime half — that each declared violation still reproduces, and that
 each non-declared invariant holds — lives in the two ports' gates
@@ -145,17 +163,36 @@ def check_vector(path: str, vec, seen_names: set) -> list:
             f"bystander clause is unwatchable here (V2)"
         )
 
-    # V3 — the vector must actually edit the document.
-    ops = vector_ops(vec)
-    if not ops:
-        errs.append(f"{tag}: no ops (V3)")
-    else:
-        verbs = [o.get("op") for o in ops]
-        if all(v in SELECTION_ONLY_OPS for v in verbs):
+    # V3 — the vector must actually edit the document, through whichever of
+    # the two drivers it declares.
+    if "events" in vec:
+        if not str(vec.get("tool", "")).strip():
             errs.append(
-                f"{tag}: every op is selection-only ({verbs}) — this vector "
-                f"cannot change the document (V3)"
+                f"{tag}: gesture-driven (has `events`) but names no `tool` — "
+                f"the runner has nothing to dispatch through (V3)"
             )
+        kinds = [e.get("kind") for e in vec["events"]]
+        if "press" not in kinds or "release" not in kinds:
+            errs.append(
+                f"{tag}: gesture events {kinds} lack a press and/or a release "
+                f"— no tool commits without both (V3)"
+            )
+        if vector_ops(vec):
+            errs.append(
+                f"{tag}: declares BOTH `events` and ops — the two drivers are "
+                f"exclusive, and only one of them would run (V3)"
+            )
+    else:
+        ops = vector_ops(vec)
+        if not ops:
+            errs.append(f"{tag}: no ops (V3)")
+        else:
+            verbs = [o.get("op") for o in ops]
+            if all(v in SELECTION_ONLY_OPS for v in verbs):
+                errs.append(
+                    f"{tag}: every op is selection-only ({verbs}) — this vector "
+                    f"cannot change the document (V3)"
+                )
 
     # V4 — a subject without a subject set is not an assertion.
     if vec["cardinality"] == "one_to_one" and vec["subject_ids"]:
@@ -163,6 +200,20 @@ def check_vector(path: str, vec, seen_names: set) -> list:
             errs.append(
                 f"{tag}: one_to_one with subject_ids but empty speaks_to — "
                 f"`subject_fields_only` would be vacuously true (V4)"
+            )
+
+    # V6 — a `must_change` claim must be well-formed.
+    if "must_change" in vec:
+        if not vec["subject_ids"]:
+            errs.append(
+                f"{tag}: declares must_change but has no subject_ids — the "
+                f"claim ranges over the subjects, so it asserts nothing (V6)"
+            )
+        stray = [k for k in vec["must_change"] if k not in vec["speaks_to"]]
+        if stray:
+            errs.append(
+                f"{tag}: must_change names {stray}, which `speaks_to` does not "
+                f"allow the edit to touch — a self-contradicting vector (V6)"
             )
 
     # V5 — pinned violations must be legible.

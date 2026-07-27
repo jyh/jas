@@ -2975,13 +2975,32 @@ private func blobBrushInsertAt(
     var children = layer.children
     let clamped = max(0, min(childIdx, children.count))
     children.insert(element, at: clamped)
-    layers[layerIdx] = Layer(
-        name: layer.name, children: children,
-        opacity: layer.opacity, transform: layer.transform)
+    // THE BYSTANDER CLAUSE (EDIT_SEMANTICS_FREEZE.md T4): an edit preserves
+    // every element it does not name, INCLUDING the containers it rebuilds to
+    // reach its target. This line used to be an inline
+    // `Layer(name:children:opacity:transform:)` — one of the 41 literals §3.5
+    // enumerates — which forwarded four fields and destroyed the layer's `id`,
+    // `mask`, `blendMode`, `visibility`, `isolatedBlending` and
+    // `knockoutGroup` on EVERY blob commit. `Layer.withChildren` is the
+    // whole-struct copy that cannot drop one. Found red by the corpus, not by
+    // reading: `blob_paint_beside_everything_creates_without_minting` reported
+    // `id_survival VIOLATED: ["lyr_blob"]` in the Swift lane while Rust's twin
+    // held.
+    layers[layerIdx] = layer.withChildren(children)
+    // The Document rebuild is still a hand list, because `Document`'s stored
+    // properties are `let` and the only whole-document copy helper in the port
+    // (`withLayers`) is private to OpApply.swift. It forwards all EIGHT
+    // fields; the four it used to omit — `symbols`, `documentSetup`,
+    // `printPreferences` (and the layer id above) — are exactly the T4 class.
+    // The durable fix is an internal `Document.withLayers`, which belongs in
+    // the Document file rather than here.
     return Document(
-        layers: layers, selectedLayer: doc.selectedLayer,
+        layers: layers, symbols: doc.symbols,
+        selectedLayer: doc.selectedLayer,
         selection: doc.selection, artboards: doc.artboards,
-        artboardOptions: doc.artboardOptions)
+        artboardOptions: doc.artboardOptions,
+        documentSetup: doc.documentSetup,
+        printPreferences: doc.printPreferences)
 }
 
 // MARK: - Path validity

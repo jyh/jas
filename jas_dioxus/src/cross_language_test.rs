@@ -2208,6 +2208,7 @@ mod tests {
         before_json: &str,
         after_json: &str,
         before: &PreservationSnapshot,
+        after: &PreservationSnapshot,
     ) {
         assert_ne!(
             before_json, after_json,
@@ -2232,6 +2233,35 @@ mod tests {
             bystanders > 0,
             "preservation vector '{name}' has no bystander — T4 is unwatchable here"
         );
+
+        // `must_change` (optional) turns `speaks_to` from a PERMISSION into a
+        // CLAIM. `subject_fields_only` only forbids differences OUTSIDE
+        // `speaks_to`, so listing a key there makes the gate blind to it: an
+        // implementation that stopped writing the key entirely would still be
+        // green. Naming it here asserts the edit really does rewrite it, which
+        // is what lets a corpus vector separate a behaviour rather than merely
+        // tolerate it — e.g. the blob 1-match vector, whose `fill_rule` claim
+        // is the ring term (T1's third closure) made visible to the corpus.
+        if let Some(keys) = tc.get("must_change").and_then(|v| v.as_array()) {
+            for id in str_list(tc, "subject_ids") {
+                let (Some(b), Some(a)) = (before.attrs.get(&id), after.attrs.get(&id))
+                else {
+                    panic!(
+                        "preservation vector '{name}' declares must_change but \
+                         subject '{id}' is missing from one of the snapshots"
+                    );
+                };
+                for key in keys {
+                    let key = key.as_str().expect("must_change entries are strings");
+                    assert_ne!(
+                        b.get(key), a.get(key),
+                        "preservation vector '{name}' claims the edit rewrites \
+                         {id}.{key}, but it is unchanged — the claim is stale, \
+                         or the behaviour it watches has regressed"
+                    );
+                }
+            }
+        }
     }
 
     /// THE DOCUMENT-LEVEL INVARIANT GATE. Runs every
@@ -2252,12 +2282,24 @@ mod tests {
             let before_model = Model::new(svg_to_document(&setup_svg), None);
             let before_json = <DocumentOps as OpWorld>::to_test_json(&before_model);
 
-            // AFTER: the same fixture shape the operations corpus uses.
-            let after_json = <DocumentOps as OpWorld>::to_test_json(&run_operation_model(tc));
+            // AFTER. A vector drives its edit through ONE of two production
+            // paths, chosen by its own shape: `events` replays pointer input
+            // through the real tool (the gesture corpus's runner), `txns`
+            // dispatches ops. The gesture arm is not a convenience — the blob
+            // brush's commit arms are a YAML effect with NO `op_apply` verb, so
+            // an op-only gate is structurally blind to them, which is the same
+            // shape of blindness §4.1 records for per-copy-API batteries.
+            let after_model = if tc.get("events").is_some() {
+                run_gesture_model(tc)
+            } else {
+                run_operation_model(tc)
+            };
+            let after_json = <DocumentOps as OpWorld>::to_test_json(&after_model);
 
             let before = preservation_snapshot(&before_json);
             let after = preservation_snapshot(&after_json);
-            assert_preservation_not_vacuous(name, tc, &before_json, &after_json, &before);
+            assert_preservation_not_vacuous(
+                name, tc, &before_json, &after_json, &before, &after);
 
             let pinned: Vec<(String, String)> = tc["expected_violations"]["rust"]
                 .as_array()

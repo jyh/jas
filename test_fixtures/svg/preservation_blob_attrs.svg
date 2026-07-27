@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Attribute-rich BLOB-BRUSH setup for the PRESERVATION corpus.
+     Prose lives in each vector's doc field in preservation_invariants.json;
+     KEEP THIS COMMENT SHORT AND PLAIN. Both hand-rolled SVG readers mis-parse
+     a long top-level comment and silently return an EMPTY document, which
+     would make every vector below vacuous instead of red. Measured triggers:
+     Rust drops the document on an equals sign anywhere in this comment; Swift
+     drops it on a double quote. Neither reader skips a comment ahead of the
+     svg element at all, so the prose is scanned as tag attributes.
+     lyr_blob holds blob_left (named Hull), blob_right (unnamed), and
+     r_bystander. The reader scales px by three quarters into points.
+     sym_master sits in defs, so it lands in doc.symbols rather than a layer:
+     it is the bystander that catches a whole-document rebuild dropping the
+     symbol store, which no layer-resident element can see. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" xmlns:jas="urn:jas:1" viewBox="0 0 816 1056" width="816" height="1056">
+  <sodipodi:namedview id="namedview1">
+    <inkscape:page x="0" y="0" width="816" height="1056" id="pblobprs" inkscape:label="Artboard 1"/>
+  </sodipodi:namedview>
+  <defs>
+    <rect id="sym_master" inkscape:label="Master Rect" x="0" y="0" width="8" height="8" fill="rgb(0,0,255)" stroke="none"/>
+  </defs>
+  <g inkscape:groupmode="layer" inkscape:label="Blob Layer" id="lyr_blob" opacity="0.9">
+    <path id="blob_left" inkscape:label="Hull" d="M 0 40 L 40 40 L 40 60 L 0 60 Z" fill="rgb(255,0,0)" stroke="none" jas:tool-origin="blob_brush"/>
+    <path id="blob_right" d="M 80 40 L 120 40 L 120 60 L 80 60 Z" fill="rgb(255,0,0)" stroke="none" jas:tool-origin="blob_brush"/>
+    <rect id="r_bystander" inkscape:label="Bystander Rect" x="160" y="160" width="20" height="20" fill="rgb(0,255,0)" stroke="none"/>
+  </g>
+</svg>

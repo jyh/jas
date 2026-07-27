@@ -1,7 +1,7 @@
 [
   {
     "name": "move_nested_rect_is_1to1",
-    "doc": "T1/§3.1 Theseus. Move one rect nested two levels deep. Speaks to the rect's own geometry only; every id in the document survives, and both containers (lyr_main, grp_inner) are bystanders that must come back byte-identical.",
+    "doc": "T1/\u00a73.1 Theseus. Move one rect nested two levels deep. Speaks to the rect's own geometry only; every id in the document survives, and both containers (lyr_main, grp_inner) are bystanders that must come back byte-identical.",
     "setup_svg": "preservation_nested_attrs.svg",
     "cardinality": "one_to_one",
     "subject_ids": [
@@ -38,7 +38,7 @@
   },
   {
     "name": "delete_bystander_leaf_keeps_containers",
-    "doc": "§3.7 / T4. Deleting one leaf ends exactly one identity. The two containers are rebuilt to reach the target — the bystander clause says they must survive the rebuild unchanged.",
+    "doc": "\u00a73.7 / T4. Deleting one leaf ends exactly one identity. The two containers are rebuilt to reach the target \u2014 the bystander clause says they must survive the rebuild unchanged.",
     "setup_svg": "preservation_nested_attrs.svg",
     "cardinality": "delete",
     "subject_ids": [],
@@ -68,7 +68,7 @@
   },
   {
     "name": "boolean_union_merges_two_rects",
-    "doc": "§3.3 / §3.6 UNION row. N→1: both operand identities die and the result mints a fresh id. Neither operand's id may ride out on the result — 'the frontmost source keeps the id' is the rejected rule, and over-preservation is as much a violation as under-preservation.",
+    "doc": "\u00a73.3 / \u00a73.6 UNION row. N\u21921: both operand identities die and the result mints a fresh id. Neither operand's id may ride out on the result \u2014 'the frontmost source keeps the id' is the rejected rule, and over-preservation is as much a violation as under-preservation.",
     "setup_svg": "preservation_nested_attrs.svg",
     "cardinality": "merge",
     "subject_ids": [],
@@ -102,7 +102,7 @@
   },
   {
     "name": "wrap_two_rects_in_group",
-    "doc": "§3.4 WRAP / T5. The arrow counts material at stake: 0→1 for the new container, 1→1 for each child. Every child id survives; the wrapper's id is the one supplied by the op, and must not duplicate an existing one.",
+    "doc": "\u00a73.4 WRAP / T5. The arrow counts material at stake: 0\u21921 for the new container, 1\u21921 for each child. Every child id survives; the wrapper's id is the one supplied by the op, and must not duplicate an existing one.",
     "setup_svg": "preservation_nested_attrs.svg",
     "cardinality": "wrap",
     "subject_ids": [],
@@ -139,7 +139,7 @@
   },
   {
     "name": "unpack_inner_group",
-    "doc": "§3.4 UNWRAP / T5. The container's identity ends; the children keep theirs (both ports' apply_unpack_group_at already say 'children keep their ids — NO minting'). The outer layer is a bystander it must rebuild to reach the group.",
+    "doc": "\u00a73.4 UNWRAP / T5. The container's identity ends; the children keep theirs (both ports' apply_unpack_group_at already say 'children keep their ids \u2014 NO minting'). The outer layer is a bystander it must rebuild to reach the group.",
     "setup_svg": "preservation_nested_attrs.svg",
     "cardinality": "unwrap",
     "subject_ids": [],
@@ -160,6 +160,150 @@
             ]
           }
         ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "blob_paint_into_one_blob_is_1to1",
+    "doc": "\u00a73.1 Theseus + T1's RING TERM, driven through the production blob-brush gesture rather than op_apply (the commit arms have no op verb at all). The sweep overlaps blob_left only, so the commit takes the 1-match arm: the element survives with its id, and the ONLY keys that may differ are `d` and `fill_rule` \u2014 the latter because the union RE-DERIVED the rings, which is exactly what T1's third closure says such an edit speaks to. blob_right, r_bystander and the container lyr_blob are bystanders. `must_change` names both keys, which is what makes this vector SEPARATE the ring term rather than merely tolerate it: `subject_fields_only` is blind to anything listed in `speaks_to`, so without the claim an arm that carried the source's rule would stay green here (measured: it does).",
+    "setup_svg": "preservation_blob_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [
+      "blob_left"
+    ],
+    "speaks_to": [
+      "d",
+      "fill_rule"
+    ],
+    "must_change": [
+      "d",
+      "fill_rule"
+    ],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "tool": "blob_brush",
+    "app_state": {
+      "fill_color": "#ff0000",
+      "blob_brush_size": 10.0,
+      "blob_brush_merge_only_with_selection": false
+    },
+    "events": [
+      {
+        "kind": "press",
+        "x": 5.0,
+        "y": 37.5
+      },
+      {
+        "kind": "move",
+        "x": 15.0,
+        "y": 37.5,
+        "dragging": true
+      },
+      {
+        "kind": "move",
+        "x": 25.0,
+        "y": 37.5,
+        "dragging": true
+      },
+      {
+        "kind": "release",
+        "x": 25.0,
+        "y": 37.5
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "blob_paint_merges_two_blobs",
+    "doc": "\u00a73.3 / the cardinality law, at the arm \u00a74's ratification condition records as having ZERO corpus coverage: 'no gesture fixture reaches the N>=2 merge arm'. One sweep bridges blob_left and blob_right, so both identities die and the result wears exactly one freshly minted id. Neither source's id may ride out \u2014 over-preservation is as much a violation as under-preservation. lyr_blob and r_bystander are the bystanders.",
+    "setup_svg": "preservation_blob_attrs.svg",
+    "cardinality": "merge",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": [
+      "blob_left",
+      "blob_right"
+    ],
+    "expected_fresh_ids": 1,
+    "tool": "blob_brush",
+    "app_state": {
+      "fill_color": "#ff0000",
+      "blob_brush_size": 10.0,
+      "blob_brush_merge_only_with_selection": false
+    },
+    "events": [
+      {
+        "kind": "press",
+        "x": 10.0,
+        "y": 37.5
+      },
+      {
+        "kind": "move",
+        "x": 45.0,
+        "y": 37.5,
+        "dragging": true
+      },
+      {
+        "kind": "move",
+        "x": 80.0,
+        "y": 37.5,
+        "dragging": true
+      },
+      {
+        "kind": "release",
+        "x": 80.0,
+        "y": 37.5
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "blob_paint_beside_everything_creates_without_minting",
+    "doc": "The 0 -> 1 arm. The sweep lands where nothing matches, so the commit creates a brand-new blob beside the existing artwork. No creation tool in this app mints an element id (\u00a75.1), so expected_fresh_ids is 0 \u2014 and all THREE existing elements plus the container are bystanders, which makes this the widest T4 watch in the family.",
+    "setup_svg": "preservation_blob_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "tool": "blob_brush",
+    "app_state": {
+      "fill_color": "#ff0000",
+      "blob_brush_size": 10.0,
+      "blob_brush_merge_only_with_selection": false
+    },
+    "events": [
+      {
+        "kind": "press",
+        "x": 10.0,
+        "y": 90.0
+      },
+      {
+        "kind": "move",
+        "x": 30.0,
+        "y": 90.0,
+        "dragging": true
+      },
+      {
+        "kind": "move",
+        "x": 50.0,
+        "y": 90.0,
+        "dragging": true
+      },
+      {
+        "kind": "release",
+        "x": 50.0,
+        "y": 90.0
       }
     ],
     "expected_violations": {
