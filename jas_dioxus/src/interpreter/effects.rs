@@ -3520,9 +3520,57 @@ fn artboard_delete_panel_selected(model: &mut Model, store: &mut StateStore) {
 /// this explicit path tracking, the containment rule would skip the
 /// copies (they're contained in BOTH source and duplicate at start
 /// of drag, since the duplicate sits at source's position).
+/// Give every identified element in `elem`'s subtree a FRESH id, drawn from
+/// the shared `mint_unique_ids` loop against `existing`.
+///
+/// A COPY IS A NEW ELEMENT: it may not wear an identity that is still live on
+/// the element it was copied from (REFERENCE_GRAPH.md §2.5's uniqueness
+/// invariant; transcripts/EDIT_SEMANTICS_FREEZE.md §3.7's silent-rebinding
+/// hazard). Nothing else is touched — appearance, `transform`, `mask`,
+/// `visibility`, `name` and `tool_origin` all copy verbatim.
+///
+/// An id-LESS element stays id-less: minting one would invent an identity the
+/// artist never asked for, and the lazy assign-on-create slot is the
+/// documented default for "no id yet".
+///
+/// The walk mirrors `Document::element_ids` — it descends `children()` AND a
+/// compound shape's owned operands, which `children()` does not expose.
+/// Returns `false` if any mint exhausted its retry budget, so the caller can
+/// abort the whole edit instead of committing a half-identified copy.
+fn remint_subtree_ids(
+    elem: &mut crate::geometry::element::Element,
+    existing: &mut std::collections::HashSet<String>,
+    mint: &mut dyn FnMut() -> String,
+) -> bool {
+    use crate::geometry::element::Element;
+    use std::rc::Rc;
+    if elem.common().id.is_some() {
+        match crate::document::artboard::mint_unique_ids(1, existing, mint) {
+            Some(ids) => elem.common_mut().id = Some(ids[0].clone()),
+            None => return false,
+        }
+    }
+    if let Some(children) = elem.children_mut() {
+        for c in children.iter_mut() {
+            if !remint_subtree_ids(Rc::make_mut(c), existing, mint) {
+                return false;
+            }
+        }
+    }
+    if let Element::Live(crate::geometry::live::LiveVariant::CompoundShape(cs)) = elem {
+        for operand in cs.operands.iter_mut() {
+            if !remint_subtree_ids(Rc::make_mut(operand), existing, mint) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
     use crate::document::artboard::{
-        generate_artboard_id, mint_unique_ids, next_artboard_name, Artboard,
+        generate_artboard_id, generate_element_id, mint_unique_ids,
+        next_artboard_name, Artboard,
     };
     use crate::geometry::element::{Element, LayerElem};
     use std::rc::Rc;
@@ -3559,6 +3607,19 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
     // and append to the same layer. Track each new copy's path so
     // move_apply can translate it.
     let mut duplicated_paths: Vec<Vec<usize>> = Vec::new();
+    // A COPY IS A NEW ELEMENT, so it may not wear the identity that is still
+    // live on the original (REFERENCE_GRAPH.md §2.5 uniqueness; the
+    // silent-rebinding hazard of transcripts/EDIT_SEMANTICS_FREEZE.md §3.7).
+    // This loop used to push `Rc::new((**child).clone())` verbatim, so
+    // duplicating an artboard's contents left two live elements wearing each
+    // id — at EVERY depth, since the clone is deep. The duplicate ARTBOARD's
+    // own id has always gone through the one mint loop below; its contents
+    // now do too, against an avoid-set built ONCE from the pre-edit document
+    // so two copies cannot collide with each other either. Everything else —
+    // appearance, `transform`, `mask`, `name`, `tool_origin` — copies
+    // verbatim, and the ORIGINAL is a bystander (T4): untouched, id included.
+    let mut element_ids = new_doc.element_ids();
+    let mut mint_failed = false;
     let new_layers: Vec<Element> = new_doc
         .layers
         .iter()
@@ -3581,7 +3642,17 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
                         // derived; Rc::new wraps a fresh allocation
                         // so the deep copy is independent of the
                         // original.
-                        new_children.push(Rc::new((**child).clone()));
+                        let mut copy = (**child).clone();
+                        if !mint_failed
+                            && !remint_subtree_ids(
+                                &mut copy,
+                                &mut element_ids,
+                                &mut || generate_element_id(None),
+                            )
+                        {
+                            mint_failed = true;
+                        }
+                        new_children.push(Rc::new(copy));
                         duplicated_paths.push(vec![
                             layer_idx,
                             original_count + appended,
@@ -3597,6 +3668,11 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
             other => other.clone(),
         })
         .collect();
+    // ALL-OR-NOTHING: a failed mint aborts the whole duplication rather than
+    // committing a half-identified copy, exactly as the split arms do.
+    if mint_failed {
+        return;
+    }
     new_doc.layers = new_layers;
 
     // Mint the duplicate artboard's id through THE ONE MINT LOOP.
@@ -9203,6 +9279,242 @@ mod tests {
             .get("hit_artboard_id").unwrap()
             .as_str().unwrap().to_string();
         assert_eq!(new_hit, dup.id);
+    }
+
+    // ── THE PRESERVATION LAW at `artboard_duplicate_init` ─────────────────
+    //
+    // The same 1 -> N identity defect as `CompoundShape::expand` and the
+    // boolean DIVIDE arm, in a third place: the deep-copy loop pushes
+    // `Rc::new((**child).clone())` into the SAME layer while the original
+    // stays, so every duplicated element that carried an id left TWO live
+    // elements wearing it (REFERENCE_GRAPH.md §2.5 uniqueness; the
+    // silent-rebinding hazard of EDIT_SEMANTICS_FREEZE.md §3.7). The
+    // function already mints the duplicate ARTBOARD's id through the one
+    // mint loop, four lines below — the contents were simply never given
+    // the same treatment. Every pre-existing test here builds its rects with
+    // `CommonProps::default()`, i.e. NO id, which is exactly the blindness
+    // the corpus manifest declares as `identity-law-boolean-operands-id-less`.
+
+    /// A rect whose `common` differs from the default in every legislated
+    /// field, so the batteries below cannot pass on nothing (§3.1
+    /// ANTI-VACUITY).
+    #[cfg(test)]
+    fn rich_dup_rect(x: f64, y: f64, id: &str) -> crate::geometry::element::RectElem {
+        use crate::geometry::element::{
+            BlendMode, Color, CommonProps, Element, Fill, Mask, RectElem, Visibility,
+        };
+        RectElem {
+            x, y, width: 20.0, height: 20.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps {
+                opacity: 0.25,
+                mode: BlendMode::Multiply,
+                transform: None,
+                locked: false,
+                visibility: Visibility::Outline,
+                mask: Some(Box::new(Mask {
+                    subtree: Box::new(Element::Rect(RectElem {
+                        x: 0.0, y: 0.0, width: 4.0, height: 4.0, rx: 0.0, ry: 0.0,
+                        fill: Some(Fill::new(Color::BLACK)), stroke: None,
+                        common: CommonProps::default(),
+                        fill_gradient: None, stroke_gradient: None,
+                    })),
+                    clip: false, invert: false, disabled: false, linked: true,
+                    unlink_transform: None,
+                })),
+                tool_origin: Some("blob_brush".to_string()),
+                name: Some("hull".to_string()),
+                id: Some(id.to_string()),
+            },
+            fill_gradient: None, stroke_gradient: None,
+        }
+    }
+
+    /// Build the fixture used by the three duplicate batteries: one 100x100
+    /// source artboard holding a GROUP whose own `common` is rich and whose
+    /// single child is rich too, so the walk has to descend past the
+    /// duplicated element itself.
+    #[cfg(test)]
+    fn duplicate_fixture() -> (StateStore, Model) {
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        use crate::geometry::element::{CommonProps, Element, GroupElem, LayerElem};
+        use std::rc::Rc;
+
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("src00001".into());
+        a.x = 0.0; a.y = 0.0; a.width = 100.0; a.height = 100.0;
+        doc.artboards.push(a);
+        let inner = Element::Rect(rich_dup_rect(10.0, 10.0, "r-inner"));
+        let mut group_common = rich_dup_rect(0.0, 0.0, "g-outer").common;
+        group_common.name = Some("keel".to_string());
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(inner)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: group_common,
+        });
+        // ANTI-VACUITY: the fixture really is rich.
+        let d = CommonProps::default();
+        assert_ne!(group.common().opacity, d.opacity);
+        assert_ne!(group.common().mode, d.mode);
+        assert_ne!(group.common().visibility, d.visibility);
+        assert_ne!(group.common().mask, d.mask);
+        assert_ne!(group.common().tool_origin, d.tool_origin);
+        assert!(group.common().id.is_some() && group.common().name.is_some());
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: vec![Rc::new(group)],
+            ..LayerElem::default()
+        })];
+        let model = Model::new(doc, None);
+        store.set_tool("artboard", "hit_artboard_id",
+            serde_json::json!("src00001"));
+        (store, model)
+    }
+
+    #[cfg(test)]
+    fn run_duplicate_init(store: &mut StateStore, model: &mut Model) {
+        let effects = vec![serde_json::json!({
+            "doc.artboard.duplicate_init": {}
+        })];
+        run_effects(&effects, &serde_json::json!({}), store,
+            Some(model), None, None, None);
+    }
+
+    /// Every id in the document, WITH repeats — `Document::element_ids`
+    /// returns a `HashSet`, which silently dedupes exactly the duplicate
+    /// this battery exists to catch.
+    #[cfg(test)]
+    fn dup_ids_with_repeats(model: &Model) -> Vec<String> {
+        use crate::geometry::element::Element;
+        fn walk(e: &Element, out: &mut Vec<String>) {
+            if let Some(id) = e.common().id.as_ref() {
+                out.push(id.clone());
+            }
+            if let Some(children) = e.children() {
+                for c in children { walk(c, out); }
+            }
+        }
+        let mut out = Vec::new();
+        for layer in &model.document().layers { walk(layer, &mut out); }
+        out
+    }
+
+    /// THE VIOLATION, as a document invariant.
+    #[test]
+    fn artboard_duplicate_leaves_no_duplicate_id_in_the_document() {
+        use crate::geometry::element::Element;
+        let (mut store, mut model) = duplicate_fixture();
+        run_duplicate_init(&mut store, &mut model);
+        // MANDATORY GEOMETRY PAIRING: the copy really landed, at the source
+        // position (the translate op moves it afterwards, not here).
+        let Element::Layer(le) = &model.document().layers[0] else { panic!("layer") };
+        assert_eq!(le.children.len(), 2, "the deep copy was appended");
+        for child in &le.children {
+            let Element::Group(g) = child.as_ref() else { panic!("group") };
+            let Element::Rect(r) = g.children[0].as_ref() else { panic!("rect") };
+            assert!((r.x - 10.0).abs() < 1e-9 && (r.y - 10.0).abs() < 1e-9,
+                    "duplicate_init copies at the source position, got {},{}", r.x, r.y);
+        }
+        let seen = dup_ids_with_repeats(&model);
+        let mut sorted = seen.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), seen.len(),
+                   "artboard duplicate left a duplicate id in the document: {seen:?}");
+    }
+
+    /// The copy is a NEW element, so its identity is fresh — never the
+    /// source's — and the walk must reach NESTED ids too, not just the
+    /// duplicated element's own.
+    #[test]
+    fn artboard_duplicate_copy_wears_fresh_ids_at_every_depth() {
+        use crate::geometry::element::Element;
+        let (mut store, mut model) = duplicate_fixture();
+        let before: std::collections::HashSet<String> =
+            model.document().element_ids();
+        assert!(before.contains("g-outer") && before.contains("r-inner"));
+        run_duplicate_init(&mut store, &mut model);
+        let Element::Layer(le) = &model.document().layers[0] else { panic!("layer") };
+        let Element::Group(copy) = le.children[1].as_ref() else { panic!("group") };
+        let copy_id = copy.common.id.clone().expect("the copy is identified");
+        assert!(!before.contains(&copy_id),
+                "the copy wears the source's id {copy_id:?} — an identity that \
+                 is still live on the original");
+        let Element::Rect(inner) = copy.children[0].as_ref() else { panic!("rect") };
+        let inner_id = inner.common.id.clone().expect("the nested copy is identified");
+        assert!(!before.contains(&inner_id),
+                "a NESTED id rode out on the copy: {inner_id:?}");
+        assert_ne!(copy_id, inner_id);
+    }
+
+    /// The other half: identity is the ONLY thing the copy does not inherit,
+    /// and the ORIGINAL is a bystander (T4) — untouched, id included.
+    #[test]
+    fn artboard_duplicate_copies_every_other_field_and_leaves_the_source_alone() {
+        use crate::geometry::element::{BlendMode, Element, Visibility};
+        let (mut store, mut model) = duplicate_fixture();
+        run_duplicate_init(&mut store, &mut model);
+        let Element::Layer(le) = &model.document().layers[0] else { panic!("layer") };
+        let Element::Group(src) = le.children[0].as_ref() else { panic!("group") };
+        assert_eq!(src.common.id.as_deref(), Some("g-outer"),
+                   "the ORIGINAL is a bystander: duplicating never touches it");
+        let Element::Rect(src_inner) = src.children[0].as_ref() else { panic!("rect") };
+        assert_eq!(src_inner.common.id.as_deref(), Some("r-inner"));
+        let Element::Group(copy) = le.children[1].as_ref() else { panic!("group") };
+        assert_eq!(copy.common.name.as_deref(), Some("keel"));
+        assert_eq!(copy.common.opacity, 0.25);
+        assert_eq!(copy.common.mode, BlendMode::Multiply);
+        assert_eq!(copy.common.visibility, Visibility::Outline);
+        assert_eq!(copy.common.mask, src.common.mask);
+        assert_eq!(copy.common.tool_origin.as_deref(), Some("blob_brush"));
+        let Element::Rect(cin) = copy.children[0].as_ref() else { panic!("rect") };
+        assert_eq!(cin.common.name.as_deref(), Some("hull"));
+        assert_eq!(cin.common.opacity, 0.25);
+    }
+
+    /// GUARD against over-reach. An id-LESS element's copy stays id-less:
+    /// minting there would invent an identity the artist never asked for,
+    /// and `id: None` is the documented lazy assign-on-create default. This
+    /// is the direction the DIVIDE arm's own comment names as a delta — a
+    /// SPLIT mints unconditionally because the source's identity died; a
+    /// COPY only has to avoid an identity that is still live, and an absent
+    /// one cannot collide.
+    #[test]
+    fn artboard_duplicate_of_an_id_less_element_mints_nothing() {
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
+        use std::rc::Rc;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("src00001".into());
+        a.x = 0.0; a.y = 0.0; a.width = 100.0; a.height = 100.0;
+        doc.artboards.push(a);
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: vec![Rc::new(Element::Rect(RectElem {
+                x: 10.0, y: 10.0, width: 20.0, height: 20.0, rx: 0.0, ry: 0.0,
+                fill: None, stroke: None, common: CommonProps::default(),
+                fill_gradient: None, stroke_gradient: None,
+            }))],
+            ..LayerElem::default()
+        })];
+        let mut model = Model::new(doc, None);
+        store.set_tool("artboard", "hit_artboard_id",
+            serde_json::json!("src00001"));
+        run_duplicate_init(&mut store, &mut model);
+        let Element::Layer(le) = &model.document().layers[0] else { panic!("layer") };
+        assert_eq!(le.children.len(), 2, "the copy landed");
+        // MANDATORY GEOMETRY PAIRING: the copy really is the source rect.
+        let Element::Rect(copy) = le.children[1].as_ref() else { panic!("rect") };
+        assert!((copy.x - 10.0).abs() < 1e-9 && (copy.width - 20.0).abs() < 1e-9);
+        assert!(copy.common.id.is_none(),
+                "an id-less source's copy must stay id-less, got {:?}",
+                copy.common.id);
+        assert!(dup_ids_with_repeats(&model).is_empty());
     }
 
     #[test]
