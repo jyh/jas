@@ -190,8 +190,10 @@ pub fn coerce_value(
             if let Some(n) = val.as_f64() {
                 return Ok(serde_json::json!(n));
             }
+            // The reference's numeric-string grammar, not a bare
+            // `parse::<f64>` — see `coerce_number_rejects_strings_the_reference_rejects`.
             if let Some(s) = val.as_str() {
-                if let Ok(n) = s.parse::<f64>() {
+                if let Some(n) = super::widget_commit::parse_numeric_string(s) {
                     return Ok(serde_json::json!(n));
                 }
             }
@@ -281,6 +283,37 @@ mod tests {
     fn coerce_number_from_string() {
         let entry = get_entry("stroke_width").unwrap();
         assert_eq!(coerce_value(&json!("2.5"), &entry).unwrap(), json!(2.5));
+    }
+
+    /// The strings a number-typed field REFUSES. The live reference accepts a
+    /// string for `type: number` only if it matches `_NUMBER_STR_RE`
+    /// (`^-?\d+(\.\d+)?$`, `workspace_interpreter/schema.py`); this port used a
+    /// bare `str::parse::<f64>`, which is wider, so `set: {stroke_width: "1e10"}`
+    /// wrote 1e10 here and raised `type_mismatch` in the reference and in
+    /// JasSwift (whose `coerceValue` has always applied that grammar).
+    /// `"inf"` and `"NaN"` were the sharp end: `parse` accepts both and
+    /// `json!` stores a non-finite `f64` as `null`, so a NON-NULLABLE number
+    /// field ended up holding JSON null.
+    #[test]
+    fn coerce_number_rejects_strings_the_reference_rejects() {
+        let entry = get_entry("stroke_width").unwrap();
+        for s in ["1e10", "+5", ".5", "12.", " 12 ", "inf", "NaN", "0x1p3", "1,5", "--5", ""] {
+            assert_eq!(
+                coerce_value(&json!(s), &entry).unwrap_err(),
+                "type_mismatch",
+                "coerce_value should reject {:?} for a number field",
+                s,
+            );
+        }
+    }
+
+    /// The accepted forms, for the same reason: whole, fractional, signed.
+    #[test]
+    fn coerce_number_accepts_the_reference_grammar() {
+        let entry = get_entry("stroke_width").unwrap();
+        for (s, want) in [("12", 12.0), ("12.50", 12.5), ("-2.25", -2.25), ("0", 0.0)] {
+            assert_eq!(coerce_value(&json!(s), &entry).unwrap(), json!(want), "{:?}", s);
+        }
     }
 
     #[test]
