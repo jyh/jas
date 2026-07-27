@@ -50,9 +50,15 @@ fn fmt(v: f64) -> String {
 
 /// The canonical Test-JSON spelling of one string, quotes included.
 ///
-/// EVERY string this file emits goes through here — element names and ids,
-/// tspan content, enum tags, text-decoration members, recipe op names,
-/// recorded input ids, concept params. Before 2026-07-27 there were three
+/// Every string VALUE this file emits goes through here — element names and
+/// ids, tspan content, enum tags, text-decoration members, recipe op names,
+/// recorded input ids, concept params. Object KEYS deliberately do not: they
+/// are compile-time literals in this file (`JsonObj::build`, the `partial`
+/// wrapper in `selection_json`), never data, and routing them would suggest
+/// otherwise. The one key that IS data — a recipe param's object key — does
+/// go through here, in `canonical_value`.
+///
+/// Before 2026-07-27 there were three
 /// different escaping levels in this one file, only one of which produced
 /// JSON for a control character; the third (`canonical_value`'s `{:?}`) also
 /// disagreed byte-for-byte with JasSwift's mirror on combining marks, ZWJ,

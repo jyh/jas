@@ -27,9 +27,14 @@ private func fmt(_ v: Double) -> String {
 
 /// The canonical Test-JSON spelling of one string, quotes included.
 ///
-/// EVERY string the canonical writers emit goes through here -- element names
-/// and ids, tspan content, enum tags, text-decoration members, recipe op
-/// names, recorded input ids, concept params. Before 2026-07-27 this port had
+/// Every string VALUE the canonical writers emit goes through here -- element
+/// names and ids, tspan content, enum tags, text-decoration members, recipe op
+/// names, recorded input ids, concept params. Object KEYS deliberately do not:
+/// they are compile-time literals in these files (`JsonObj.build`), never
+/// data. The one key that IS data -- a recipe param's object key -- does go
+/// through here, in `canonicalRecordedValue`.
+///
+/// Before 2026-07-27 this port had
 /// two escaping levels, neither of which produced JSON for a control
 /// character, and the params level disagreed byte-for-byte with jas_dioxus's
 /// `canonical_value` (which used Rust's `{:?}` Debug, escaping combining
