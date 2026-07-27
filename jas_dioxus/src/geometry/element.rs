@@ -3650,6 +3650,99 @@ mod tests {
         assert!(pts.is_empty());
     }
 
+    // S-4: a leading ClosePath is a no-op. Ruled by JYH at the fleet
+    // council, 2026-07-27 -- a ClosePath appearing before any point has
+    // been established contributes nothing and must not emit a point.
+    //
+    // Rust already implemented the ruling when these were written, so
+    // unlike their Swift counterparts these went in GREEN: they are
+    // regression pins for a guard that had no in-suite test at all. Each
+    // was checked to discriminate by deleting the `!pts.is_empty()`
+    // condition and observing the stated failure.
+
+    /// A path that is nothing but Z flattens to nothing. Without the
+    /// guard this returns the uninitialised subpath start, [(0, 0)].
+    #[test]
+    fn flatten_leading_close_alone_emits_nothing() {
+        assert!(flatten_path_commands(&[PathCommand::ClosePath]).is_empty());
+    }
+
+    /// A leading Z contributes nothing, so a following LineTo is the only
+    /// point. Without the guard this returns [(0, 0), (5, 5)].
+    #[test]
+    fn flatten_leading_close_then_line_to() {
+        let pts = flatten_path_commands(&[
+            PathCommand::ClosePath,
+            PathCommand::LineTo { x: 5.0, y: 5.0 },
+        ]);
+        assert_eq!(pts, vec![(5.0, 5.0)]);
+    }
+
+    /// A leading Z in front of a real subpath: the leading close is a
+    /// no-op, the trailing close still returns to the MoveTo (4, 1). The
+    /// MoveTo is deliberately off the origin so the phantom point differs
+    /// by value as well as by count. Without the guard this returns 5
+    /// points led by (0, 0).
+    #[test]
+    fn flatten_leading_close_then_closed_subpath() {
+        let pts = flatten_path_commands(&[
+            PathCommand::ClosePath,
+            PathCommand::MoveTo { x: 4.0, y: 1.0 },
+            PathCommand::LineTo { x: 14.0, y: 1.0 },
+            PathCommand::LineTo { x: 14.0, y: 11.0 },
+            PathCommand::ClosePath,
+        ]);
+        assert_eq!(pts, vec![(4.0, 1.0), (14.0, 1.0), (14.0, 11.0), (4.0, 1.0)]);
+    }
+
+    /// A leading Z in front of TWO subpaths: each real close still returns
+    /// to its OWN subpath start. Without the guard this returns 7 points
+    /// led by (0, 0).
+    #[test]
+    fn flatten_leading_close_multi_subpath() {
+        let pts = flatten_path_commands(&[
+            PathCommand::ClosePath,
+            PathCommand::MoveTo { x: 3.0, y: 2.0 },
+            PathCommand::LineTo { x: 13.0, y: 2.0 },
+            PathCommand::ClosePath,
+            PathCommand::MoveTo { x: 23.0, y: 2.0 },
+            PathCommand::LineTo { x: 33.0, y: 2.0 },
+            PathCommand::ClosePath,
+        ]);
+        assert_eq!(
+            pts,
+            vec![(3.0, 2.0), (13.0, 2.0), (3.0, 2.0), (23.0, 2.0), (33.0, 2.0), (23.0, 2.0)]
+        );
+    }
+
+    /// SCOPE BOUNDARY, and not a discriminator for the leading-close bug.
+    /// After M, L a point IS established, so the ruling does not reach the
+    /// second Z and it still emits the subpath start. Guarding the close
+    /// on last-point-inequality instead of on emptiness returns 3 points.
+    #[test]
+    fn flatten_redundant_trailing_close_still_emits() {
+        let pts = flatten_path_commands(&[
+            PathCommand::MoveTo { x: 2.0, y: 3.0 },
+            PathCommand::LineTo { x: 12.0, y: 3.0 },
+            PathCommand::ClosePath,
+            PathCommand::ClosePath,
+        ]);
+        assert_eq!(pts, vec![(2.0, 3.0), (12.0, 3.0), (2.0, 3.0), (2.0, 3.0)]);
+    }
+
+    /// SCOPE BOUNDARY, and likewise not a discriminator for the
+    /// leading-close bug. One MoveTo has established a point, so the
+    /// following Z is not a leading close and does emit. Requiring two
+    /// points before closing returns 1.
+    #[test]
+    fn flatten_move_to_then_close_still_emits() {
+        let pts = flatten_path_commands(&[
+            PathCommand::MoveTo { x: 6.0, y: 7.0 },
+            PathCommand::ClosePath,
+        ]);
+        assert_eq!(pts, vec![(6.0, 7.0), (6.0, 7.0)]);
+    }
+
     #[test]
     fn flatten_curve_path() {
         let d = vec![
