@@ -1532,8 +1532,12 @@ fn run_doc_effect(
             // stashed by doc.paintbrush.edit_start, computes exit_idx
             // on the target's flat polyline from the final drag point,
             // and replaces the affected command range with a cubic-
-            // Bezier fit of the drag buffer. Preserves all non-`d`
-            // attributes. See PAINTBRUSH_TOOL.md §Edit gesture.
+            // Bezier fit of the drag buffer. The rebuild is a struct
+            // update over the source element, so every field except `d`
+            // is carried (Ship of Theseus law; pinned by
+            // theseus_paintbrush_edit_commit_preserves_everything_but_d,
+            // which asserts whole-struct equality rather than a field
+            // list). See PAINTBRUSH_TOOL.md §Edit gesture.
             if let serde_json::Value::Object(args) = spec {
                 let buffer = args.get("buffer").and_then(|v| v.as_str())
                     .unwrap_or("").to_string();
@@ -4418,25 +4422,43 @@ fn path_erase_at_rect(
                 .d
                 .iter()
                 .any(|c| matches!(c, PathCommand::ClosePath));
-            let results = split_path_at_eraser(&path_elem.d, &hit, is_closed);
+            let results: Vec<Vec<PathCommand>> =
+                split_path_at_eraser(&path_elem.d, &hit, is_closed)
+                    .into_iter()
+                    .filter(|cmds| cmds.len() >= 2)
+                    .collect();
+            // ERASE DOES NOT REMOVE IDENTITY — "it is still the same object".
+            // Branch on the surviving-fragment count; Swift's pathEraseAtRect
+            // branches identically so the two ports agree in both arms.
+            let severed = results.len() > 1;
             if let Some(layer_children) = new_doc.layers[li].children_mut() {
                 layer_children.remove(ci);
                 for cmds in results.into_iter().rev() {
-                    if cmds.len() >= 2 {
-                        let new_path = Element::Path(PathElem {
-                            d: cmds,
-                            fill: path_elem.fill,
-                            stroke: path_elem.stroke,
-                            width_points: path_elem.width_points.clone(),
-                            common: crate::geometry::element::CommonProps::default(),
-                            fill_gradient: None,
-                            stroke_gradient: None,
-                            stroke_brush: path_elem.stroke_brush.clone(),
-                            stroke_brush_overrides: path_elem.stroke_brush_overrides.clone(),
-                            fill_rule: crate::geometry::element::FillRule::NonZero,
-                        });
-                        layer_children.insert(ci, Rc::new(new_path));
+                    // One fragment -> the one-element case: everything but `d`
+                    // survives, `id` included. Several fragments -> phase 1
+                    // keeps appearance, transform and `name` but WITHHOLDS
+                    // `id`: nothing on this path can mint one (Controller
+                    // never mints — the initiator carries the id in the
+                    // operation payload — and dedupe_element_ids only CLEARS
+                    // duplicates, and only in document readers), so copying it
+                    // would leave N live elements sharing an id and break the
+                    // unique-id invariant of REFERENCE_GRAPH.md §2.5.
+                    //
+                    // PHASE 2 OWES, for the severing case: fresh deterministic
+                    // cross-port ids per fragment, and a linear-gradient stop
+                    // remap (a gradient carries no position — linear resolves
+                    // angle + stops against the element's OWN bbox centre and
+                    // half-diagonal — so each fragment currently re-fits the
+                    // whole ramp instead of showing its slice; the fix is an
+                    // affine remap of stop locations with clipping and
+                    // interpolated endpoint colours). Radial cannot be
+                    // preserved without a model change; the recentre is
+                    // accepted. The severing case is NOT finished.
+                    let mut frag = PathElem { d: cmds, ..path_elem.clone() };
+                    if severed {
+                        frag.common.id = None;
                     }
+                    layer_children.insert(ci, Rc::new(Element::Path(frag)));
                 }
                 changed = true;
             }
@@ -4548,9 +4570,11 @@ fn path_paintbrush_edit_start(
 /// Reads `edit_target_path` + `edit_entry_idx` from tool state, finds
 /// the exit_idx on the target's flat polyline closest to the buffer's
 /// last point, and if within range, splices fit_curve output over the
-/// target's command range [c0..c1]. Preserves all non-`d` attributes
-/// (fill, stroke, stroke-width, stroke_brush, stroke_brush_overrides).
-/// No-op when target missing, exit out-of-range, or range degenerate.
+/// target's command range [c0..c1]. The rebuild is `PathElem { d, ..pe }`,
+/// so every field except `d` is carried across — no enumeration, and a
+/// field added to PathElem later is covered by construction (Ship of
+/// Theseus law). No-op when the target is missing, the exit is
+/// out-of-range, or the range is degenerate.
 fn path_paintbrush_edit_commit(
     model: &mut Model,
     store: &StateStore,
@@ -4666,23 +4690,13 @@ fn path_paintbrush_edit_commit(
         new_cmds.push(*cmd);
     }
 
-    // Carries over most non-`d` attributes, but NOT all: fill_gradient,
-    // stroke_gradient and fill_rule are reset below rather than forwarded.
-    // That is a divergence from Swift's `pathWithCommands`, which forwards the
-    // rule — banked in transcripts/BOOLEAN.md pending a ruling on whether a path
-    // EDIT should preserve the declared fill rule. Do not restate this as
-    // "preserves all non-`d` attributes"; it does not.
+    // Struct update, not a field list: only `d` changes (Ship of Theseus law,
+    // ratified 2026-07-26 — "the ship is the same ship even when planks are
+    // removed, replaced, the anchor is heaved"). Swift's `pathWithCommands`
+    // has to restate each field by hand; this form cannot drop one.
     let new_elem = Element::Path(PathElem {
         d: new_cmds,
-        fill: target_path_elem.fill,
-        stroke: target_path_elem.stroke,
-        width_points: target_path_elem.width_points.clone(),
-        common: target_path_elem.common.clone(),
-        fill_gradient: None,
-        stroke_gradient: None,
-        stroke_brush: target_path_elem.stroke_brush.clone(),
-        stroke_brush_overrides: target_path_elem.stroke_brush_overrides.clone(),
-        fill_rule: crate::geometry::element::FillRule::NonZero,
+        ..target_path_elem.clone()
     });
     let new_doc = doc.replace_element(&target_path, new_elem);
     model.edit_document(new_doc);
@@ -5460,17 +5474,10 @@ fn path_smooth_at_cursor(
         if new_cmds.len() >= path_elem.d.len() {
             continue;
         }
+        // Struct update, not a field list: only `d` changes (Ship of Theseus law).
         let new_elem = Element::Path(PathElem {
             d: new_cmds,
-            fill: path_elem.fill,
-            stroke: path_elem.stroke,
-            width_points: path_elem.width_points.clone(),
-            common: path_elem.common.clone(),
-            fill_gradient: None,
-            stroke_gradient: None,
-            stroke_brush: path_elem.stroke_brush.clone(),
-            stroke_brush_overrides: path_elem.stroke_brush_overrides.clone(),
-            fill_rule: crate::geometry::element::FillRule::NonZero,
+            ..path_elem.clone()
         });
         new_doc = new_doc.replace_element(path, new_elem);
         changed = true;
@@ -5578,17 +5585,10 @@ fn path_insert_anchor_on_segment_near(
     };
     model.begin_txn();
     let ins = insert_point_in_path(&pe.d, seg_idx, t);
+    // Struct update, not a field list: only `d` changes (Ship of Theseus law).
     let new_pe = crate::geometry::element::PathElem {
         d: ins.commands,
-        fill: pe.fill,
-        stroke: pe.stroke,
-        width_points: pe.width_points.clone(),
-        common: pe.common.clone(),
-        fill_gradient: pe.fill_gradient.clone(),
-        stroke_gradient: pe.stroke_gradient.clone(),
-        stroke_brush: pe.stroke_brush.clone(),
-        stroke_brush_overrides: pe.stroke_brush_overrides.clone(),
-        fill_rule: crate::geometry::element::FillRule::NonZero,
+        ..pe.clone()
     };
     let doc = model.document().replace_element(
         &path, Element::Path(new_pe));
@@ -5602,8 +5602,8 @@ fn path_delete_anchor_near(model: &mut Model, x: f64, y: f64, radius: f64) {
         Some(hit) => hit,
         None => return,
     };
-    // Capture the existing PathElem for its non-command fields (fill,
-    // stroke, width_points, common).
+    // Capture the existing PathElem: the edit rewrites `d` and carries
+    // every other field across (Ship of Theseus law).
     let pe = match model.document().get_element(&path) {
         Some(Element::Path(pe)) => pe.clone(),
         _ => return,
@@ -5611,17 +5611,11 @@ fn path_delete_anchor_near(model: &mut Model, x: f64, y: f64, radius: f64) {
     model.begin_txn();
     match delete_anchor_from_path(&pe.d, anchor_idx) {
         Some(new_cmds) => {
+            // Struct update, not a field list: a field added to PathElem
+            // is carried without editing this site.
             let new_pe = crate::geometry::element::PathElem {
                 d: new_cmds,
-                fill: pe.fill,
-                stroke: pe.stroke,
-                width_points: pe.width_points.clone(),
-                common: pe.common.clone(),
-                fill_gradient: pe.fill_gradient.clone(),
-                stroke_gradient: pe.stroke_gradient.clone(),
-                stroke_brush: pe.stroke_brush.clone(),
-                stroke_brush_overrides: pe.stroke_brush_overrides.clone(),
-                fill_rule: crate::geometry::element::FillRule::NonZero,
+                ..pe.clone()
             };
             let new_elem = Element::Path(new_pe);
             let mut doc = model.document().replace_element(&path, new_elem);
@@ -9787,5 +9781,258 @@ mod tests {
             Some("default_brushes/flat_10".to_string()),
             "the brush id is composed from the params, not the literal {{}} template"
         );
+    }
+
+    // ── The Ship of Theseus law: a path edit preserves everything but `d` ──
+    //
+    // "The ship is the same ship even when planks are removed, replaced, the
+    // anchor is heaved." A path edit that yields ONE element must return an
+    // element identical to its source except for `d`. Stated as a law, not a
+    // field list, so it cannot rot as fields are added to PathElem.
+    //
+    // The assertion below is deliberately field-list-FREE: it grafts the
+    // source's `d` onto the output and demands whole-struct equality. A field
+    // added to PathElem tomorrow is covered without editing this file.
+
+    /// Every non-`d` field of `src` set to a NON-default, distinguishable
+    /// value, so a dropped field is observable. `locked` stays false (a locked
+    /// path is skipped by every edit site) and `visibility` stays renderable.
+    fn theseus_path(d: Vec<PathCommand>) -> PathElem {
+        use crate::geometry::element::{
+            BlendMode, FillRule, Gradient, GradientStop, GradientType, Mask,
+            StrokeWidthPoint, Transform, Visibility,
+        };
+        let ramp = Gradient {
+            gtype: GradientType::Linear,
+            angle: 30.0,
+            stops: vec![
+                GradientStop {
+                    color: Color::rgb(1.0, 0.0, 0.0),
+                    opacity: 100.0,
+                    location: 0.0,
+                    midpoint_to_next: 50.0,
+                },
+                GradientStop {
+                    color: Color::rgb(0.0, 0.0, 1.0),
+                    opacity: 100.0,
+                    location: 100.0,
+                    midpoint_to_next: 50.0,
+                },
+            ],
+            ..Gradient::default()
+        };
+        PathElem {
+            d,
+            fill: Some(Fill::new(Color::rgb(0.2, 0.4, 0.6))),
+            stroke: Some(Stroke::new(Color::rgb(0.1, 0.1, 0.1), 3.0)),
+            width_points: vec![
+                StrokeWidthPoint { t: 0.0, width_left: 1.0, width_right: 1.0 },
+                StrokeWidthPoint { t: 1.0, width_left: 4.0, width_right: 4.0 },
+            ],
+            common: CommonProps {
+                opacity: 0.5,
+                mode: BlendMode::Multiply,
+                transform: Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 40.0, f: 70.0 }),
+                locked: false,
+                visibility: Visibility::Outline,
+                mask: Some(Box::new(Mask {
+                    subtree: Box::new(Element::Rect(RectElem {
+                        x: 0.0, y: 0.0, width: 10.0, height: 10.0,
+                        rx: 0.0, ry: 0.0,
+                        fill: Some(Fill::new(Color::rgb(1.0, 1.0, 1.0))),
+                        stroke: None,
+                        common: CommonProps::default(),
+                        fill_gradient: None,
+                        stroke_gradient: None,
+                    })),
+                    clip: true,
+                    invert: true,
+                    disabled: false,
+                    linked: false,
+                    unlink_transform: Some(Transform::default()),
+                })),
+                tool_origin: Some("blob_brush".to_string()),
+                name: Some("theseus".to_string()),
+                id: Some("keep-me".to_string()),
+            },
+            fill_gradient: Some(Box::new(ramp.clone())),
+            stroke_gradient: Some(Box::new(ramp)),
+            fill_rule: FillRule::EvenOdd,
+            stroke_brush: Some("default_brushes/flat_10".to_string()),
+            stroke_brush_overrides: Some("{\"size\":2}".to_string()),
+        }
+    }
+
+    /// Guard the fixture: if any non-`d` field of `theseus_path` matched the
+    /// default PathElem, the batteries below could pass while dropping it.
+    #[test]
+    fn theseus_fixture_differs_from_default_in_every_non_d_field() {
+        let src = theseus_path(vec![PathCommand::MoveTo { x: 0.0, y: 0.0 }]);
+        let bare = PathElem { d: src.d.clone(), ..PathElem::default() };
+        // Whole-struct inequality is not enough — check each field the law
+        // covers individually so a defaulted one cannot hide.
+        assert_ne!(src.fill, bare.fill);
+        assert_ne!(src.stroke, bare.stroke);
+        assert_ne!(src.width_points, bare.width_points);
+        assert_ne!(src.fill_gradient, bare.fill_gradient);
+        assert_ne!(src.stroke_gradient, bare.stroke_gradient);
+        assert_ne!(src.fill_rule, bare.fill_rule);
+        assert_ne!(src.stroke_brush, bare.stroke_brush);
+        assert_ne!(src.stroke_brush_overrides, bare.stroke_brush_overrides);
+        assert_ne!(src.common.opacity, bare.common.opacity);
+        assert_ne!(src.common.mode, bare.common.mode);
+        assert_ne!(src.common.transform, bare.common.transform);
+        assert_ne!(src.common.visibility, bare.common.visibility);
+        assert_ne!(src.common.mask, bare.common.mask);
+        assert_ne!(src.common.tool_origin, bare.common.tool_origin);
+        assert_ne!(src.common.name, bare.common.name);
+        assert_ne!(src.common.id, bare.common.id);
+        // `locked` is deliberately left at the default: every edit site skips
+        // a locked path, so a locked fixture would make the batteries vacuous.
+        assert!(!src.common.locked);
+    }
+
+    /// The law, as an assertion. Grafts `src.d` onto `out` and demands the
+    /// whole struct match — no field list, so it cannot go stale.
+    fn assert_only_d_changed(src: &PathElem, out: &PathElem, label: &str) {
+        assert_ne!(
+            out.d, src.d,
+            "{label}: `d` is unchanged — the fixture did not exercise an edit"
+        );
+        let grafted = PathElem { d: src.d.clone(), ..out.clone() };
+        assert_eq!(
+            &grafted, src,
+            "{label}: a non-`d` field changed (Ship of Theseus law)"
+        );
+    }
+
+    fn model_with_theseus(d: Vec<PathCommand>) -> (Model, PathElem) {
+        use crate::document::document::Document;
+        use std::rc::Rc;
+        let src = theseus_path(d);
+        let mut doc = Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(Element::Path(src.clone())));
+        }
+        (Model::new(doc, None), src)
+    }
+
+    fn path_at(model: &Model, path: &[usize]) -> PathElem {
+        match model.document().get_element(&path.to_vec()) {
+            Some(Element::Path(p)) => p.clone(),
+            other => panic!("expected a Path at {path:?}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn theseus_delete_anchor_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 50.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+        ]);
+        path_delete_anchor_near(&mut model, 50.0, 0.0, 8.0);
+        assert_only_d_changed(&src, &path_at(&model, &[0, 0]), "delete_anchor_near");
+    }
+
+    #[test]
+    fn theseus_insert_anchor_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+        ]);
+        path_insert_anchor_on_segment_near(&mut model, 50.0, 0.0, 8.0);
+        assert_only_d_changed(
+            &src, &path_at(&model, &[0, 0]), "insert_anchor_on_segment_near");
+    }
+
+    #[test]
+    fn theseus_smooth_at_cursor_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 5.0 },
+            PathCommand::LineTo { x: 20.0, y: -5.0 },
+            PathCommand::LineTo { x: 30.0, y: 0.0 },
+        ]);
+        let mut doc = model.document().clone();
+        doc.selection.push(
+            crate::document::document::ElementSelection::all(vec![0, 0]));
+        model.set_document_unbracketed(doc, NonUndoableIntent::Selection);
+        path_smooth_at_cursor(&mut model, 15.0, 0.0, 50.0, 3.0);
+        assert_only_d_changed(&src, &path_at(&model, &[0, 0]), "smooth_at_cursor");
+    }
+
+    #[test]
+    fn theseus_paintbrush_edit_commit_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 50.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 150.0, y: 0.0 },
+        ]);
+        let buffer = "theseus_paintbrush_edit";
+        super::super::point_buffers::clear(buffer);
+        super::super::point_buffers::push(buffer, 50.0, 10.0);
+        super::super::point_buffers::push(buffer, 75.0, 20.0);
+        super::super::point_buffers::push(buffer, 100.0, 0.0);
+        let mut store = StateStore::new();
+        set_tool_path_generic(&mut store, "paintbrush", "edit_target_path", &vec![0, 0]);
+        store.set_tool("paintbrush", "edit_entry_idx", serde_json::json!(1));
+        path_paintbrush_edit_commit(&mut model, &store, buffer, 4.0, 12.0);
+        super::super::point_buffers::clear(buffer);
+        assert_only_d_changed(
+            &src, &path_at(&model, &[0, 0]), "paintbrush.edit_commit");
+    }
+
+    /// A CLOSED path erased at one spot becomes exactly ONE open fragment
+    /// (path_ops::split_path_at_eraser's closed branch returns a single
+    /// fragment). That is the one-element case, so the law applies in full —
+    /// including `id`.
+    #[test]
+    fn theseus_erase_single_fragment_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 100.0 },
+            PathCommand::LineTo { x: 0.0, y: 100.0 },
+            PathCommand::ClosePath,
+        ]);
+        path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0);
+        let children = match model.document().layers[0].children() {
+            Some(c) => c.len(),
+            None => 0,
+        };
+        assert_eq!(children, 1, "a closed path erased once yields one fragment");
+        assert_only_d_changed(
+            &src, &path_at(&model, &[0, 0]), "erase_at_rect (one fragment)");
+    }
+
+    /// A SEVERING erase yields several fragments. Phase 1 preserves their
+    /// appearance and `name` but must NOT propagate `id`: Controller cannot
+    /// mint ids (the initiator carries them in the op payload) and
+    /// dedupe_element_ids runs only in document readers, so duplicated ids
+    /// would persist live and break the unique-id invariant of
+    /// REFERENCE_GRAPH.md §2.5. Fresh per-fragment ids are phase 2.
+    #[test]
+    fn theseus_erase_split_preserves_appearance_and_name_but_not_id() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+        ]);
+        path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0);
+        let n = model.document().layers[0].children().map_or(0, |c| c.len());
+        assert_eq!(n, 2, "a severing erase of an open path yields two fragments");
+        for i in 0..n {
+            let frag = path_at(&model, &[0, i]);
+            let label = format!("erase fragment {i}");
+            // Appearance + name + transform survive; only `id` is withheld.
+            let grafted = PathElem {
+                d: src.d.clone(),
+                common: CommonProps { id: src.common.id.clone(), ..frag.common.clone() },
+                ..frag.clone()
+            };
+            assert_eq!(&grafted, &src, "{label}: a non-`d`, non-`id` field changed");
+            assert_eq!(frag.common.id, None, "{label}: split fragments must not share an id");
+        }
     }
 }
