@@ -452,7 +452,7 @@ func runTextLayout(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let maxWidth = tc["max_width"] as! Double
         let fontSize = tc["font_size"] as! Double
         let charWidth = tc["char_width"] as! Double
-        let measure: (String) -> Double = { s in Double(s.count) * charWidth }
+        let measure = fixedCharWidthMeasure(charWidth)
         let layout = layoutText(content, maxWidth: maxWidth, fontSize: fontSize,
                                 measure: measure)
         let glyphs: [[String: Any]] = layout.glyphs.map { g in
@@ -516,7 +516,7 @@ func runTextLayoutParagraph(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let charWidth = tc["char_width"] as! Double
         let segs: [ParagraphSegment] = (tc["paragraphs"] as? [[String: Any]] ?? [])
             .map(parseSeg)
-        let measure: (String) -> Double = { s in Double(s.count) * charWidth }
+        let measure = fixedCharWidthMeasure(charWidth)
         let layout = layoutTextWithParagraphs(content, maxWidth: maxWidth,
                                                 fontSize: fontSize,
                                                 paragraphs: segs,
@@ -543,7 +543,7 @@ func runPathTextLayout(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let startOffset = tc["start_offset"] as! Double
         let fontSize = tc["font_size"] as! Double
         let charWidth = tc["char_width"] as! Double
-        let measure: (String) -> Double = { s in Double(s.count) * charWidth }
+        let measure = fixedCharWidthMeasure(charWidth)
         let layout = layoutPathText(pathCmds, content: content,
                                     startOffset: startOffset, fontSize: fontSize,
                                     measure: measure)

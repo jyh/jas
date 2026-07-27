@@ -13,6 +13,7 @@ use jas_dioxus::algorithms::boolean::{
     boolean_union_ruled, PolyFillRule, PolygonSet, Ring, RuledPolygonSet,
 };
 use jas_dioxus::algorithms::boolean_normalize::normalize;
+use jas_dioxus::algorithms::corpus_text_measure::fixed_char_width_measure;
 use jas_dioxus::algorithms::fit_curve::fit_curve;
 use jas_dioxus::algorithms::hit_test;
 use jas_dioxus::algorithms::path_text_layout::layout_path_text;
@@ -659,7 +660,7 @@ fn run_text_layout(vectors: &[Value]) -> Vec<Value> {
             let font_size = tc["font_size"].as_f64().unwrap();
             let char_width = tc["char_width"].as_f64().unwrap();
 
-            let measure = |s: &str| s.chars().count() as f64 * char_width;
+            let measure = fixed_char_width_measure(char_width);
             let layout = text_layout::layout(content, max_width, font_size, &measure);
 
             let glyphs: Vec<Value> = layout
@@ -751,7 +752,7 @@ fn run_text_layout_paragraph(vectors: &[Value]) -> Vec<Value> {
                 .map(|a| a.iter().map(parse_seg).collect())
                 .unwrap_or_default();
 
-            let measure = |s: &str| s.chars().count() as f64 * char_width;
+            let measure = fixed_char_width_measure(char_width);
             let layout = layout_with_paragraphs(content, max_width, font_size, &segs, &measure);
 
             let glyphs: Vec<Value> = layout.glyphs.iter().map(|g| {
@@ -790,7 +791,7 @@ fn run_path_text_layout(vectors: &[Value]) -> Vec<Value> {
             let font_size = tc["font_size"].as_f64().unwrap();
             let char_width = tc["char_width"].as_f64().unwrap();
 
-            let measure = |s: &str| s.chars().count() as f64 * char_width;
+            let measure = fixed_char_width_measure(char_width);
             let layout =
                 layout_path_text(&path_cmds, content, start_offset, font_size, &measure);
 
