@@ -588,12 +588,30 @@ private func childrenOf(_ elem: Element) -> [Element] {
     }
 }
 
+/// Replace a container's children and change NOTHING else.
+///
+/// EDIT_SEMANTICS_FREEZE.md T4, the BYSTANDER CLAUSE: *an edit preserves,
+/// unchanged, every element it does not name — including the containers it
+/// rebuilds to reach its target.* `replaceInGroup` / `removeFromGroup` /
+/// `insertAfterInGroup` rebuild every container on the path down to the element
+/// the caller named, and those containers are bystanders.
+///
+/// This used to be a private twin that rebuilt Layer/Group from FOUR fields,
+/// destroying the container's `id`, `mask`, `blendMode`, `visibility`,
+/// `isolatedBlending`, `knockoutGroup` and a Group's `name` on EVERY nested
+/// element edit in the port — so a hidden group un-hid itself when a shape
+/// inside it moved, and every reference bound to a container's id was orphaned.
+/// It now delegates to `Group.withChildren` / `Layer.withChildren`
+/// (`Geometry/Element.swift`), which forward every field, so there is ONE
+/// children-rebuild body per container kind and the omission is not expressible
+/// twice. Rust needs no twin at all: `replace_element` rewrites the child slot
+/// in place, so the parent's `common` is never reconstructed.
 private func withChildren(_ elem: Element, _ newChildren: [Element]) -> Element {
     switch elem {
     case .group(let g):
-        return .group(Group(children: newChildren, opacity: g.opacity, transform: g.transform, locked: g.locked))
+        return .group(g.withChildren(newChildren))
     case .layer(let l):
-        return .layer(Layer(name: l.name, children: newChildren, opacity: l.opacity, transform: l.transform, locked: l.locked))
+        return .layer(l.withChildren(newChildren))
     default:
         fatalError("Element has no children")
     }
