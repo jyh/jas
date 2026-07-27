@@ -62,6 +62,80 @@ fn fills_merge_equal(a: &Option<Fill>, b: &Option<Fill>) -> bool {
     }
 }
 
+/// The `CommonProps` an N -> 1 merge product wears, minus its id (the caller
+/// mints that). transcripts/EDIT_SEMANTICS_FREEZE.md §3.3, ratified
+/// 2026-07-27.
+///
+/// PAINT rides from `front`: BOOLEAN.md §Operand and paint rules names four
+/// properties — fill, stroke, `opacity`, blend mode — as what a boolean op
+/// SPEAKS TO, and two of them (`opacity`, `mode`) live on `CommonProps`.
+///
+/// EVERYTHING ELSE follows UNANIMITY: when every source agrees, carrying the
+/// value IS preservation — well-defined, no winner elected — and when they
+/// disagree the fresh element's documented default stands. Nothing geometric
+/// ever breaks the tie; "the frontmost/largest source keeps it" was rejected
+/// in both directions.
+///
+/// `name` follows ASSERTING-SOURCES unanimity (JYH's ratified answer (1)):
+/// unanimity ranges over the sources that ASSERT a name, because absence is
+/// not a competing claim. "hull" + unnamed -> "hull"; "hull" + "keel" ->
+/// the default. Nothing geometric elects the survivor there either — the only
+/// assertion present survives.
+///
+/// `transform` is carried unanimously and no further. The flattening walk
+/// (`element_to_polygon_set_with`) contains ZERO transform references, so the
+/// result rings are RAW: a unanimous transform is the only one under which
+/// they are meaningful, and operands that disagree already produced nonsense
+/// geometry before this function existed. What changes is that no operand is
+/// elected to donate one. Widening this is S-3's job (§3.3).
+fn merged_common(
+    sources: &[Rc<Element>],
+    front: &Rc<Element>,
+) -> crate::geometry::element::CommonProps {
+    use crate::geometry::element::CommonProps;
+    fn unanimous<T: PartialEq + Clone>(
+        sources: &[Rc<Element>],
+        get: impl Fn(&Element) -> T,
+    ) -> Option<T> {
+        let first = get(sources.first()?);
+        sources
+            .iter()
+            .all(|e| get(e) == first)
+            .then_some(first)
+    }
+    let mut common = CommonProps {
+        // Paint, per the ratified four-property rule.
+        opacity: front.common().opacity,
+        mode: front.common().mode,
+        ..CommonProps::default()
+    };
+    if let Some(v) = unanimous(sources, |e| e.common().transform) {
+        common.transform = v;
+    }
+    if let Some(v) = unanimous(sources, |e| e.common().locked) {
+        common.locked = v;
+    }
+    if let Some(v) = unanimous(sources, |e| e.common().visibility) {
+        common.visibility = v;
+    }
+    if let Some(v) = unanimous(sources, |e| e.common().mask.clone()) {
+        common.mask = v;
+    }
+    if let Some(v) = unanimous(sources, |e| e.common().tool_origin.clone()) {
+        common.tool_origin = v;
+    }
+    // ASSERTING-SOURCES: silent sources are not voters.
+    let named: Vec<Rc<Element>> = sources
+        .iter()
+        .filter(|e| e.common().name.is_some())
+        .cloned()
+        .collect();
+    if let Some(v) = unanimous(&named, |e| e.common().name.clone()) {
+        common.name = v;
+    }
+    common
+}
+
 /// Collapse each ring point whose perpendicular distance to the line
 /// between its two neighbors is smaller than `tol`. Single-pass;
 /// acceptable for boolean-op outputs which already have clean right-
@@ -1331,11 +1405,36 @@ impl Controller {
         if elements.len() != paths.len() {
             return;
         }
-        // Inherit the frontmost operand's paint (last in path order).
+        // Inherit the frontmost operand's PAINT — and only its paint.
+        //
+        // This used to clone the frontmost's whole `common`, id included,
+        // onto the wrapper while that operand REMAINED a child: two live
+        // elements wearing one id. That breaks the uniqueness invariant
+        // (REFERENCE_GRAPH.md §2.5) the cardinality law leans on, and it is
+        // worse than a broken reference — a reference to the duplicated id
+        // silently REBINDS to whichever element the index walk reaches
+        // first, the one outcome §3.7 exists to prevent.
+        //
+        // WRAP (transcripts/EDIT_SEMANTICS_FREEZE.md §3.4, §3.6 MAKE row) is
+        // 0 -> 1 for the container and 1 -> 1 for every child: the wrapper is
+        // a FRESH container that never wears a member's identity, and the
+        // children are re-parented untouched. `group_selection` has always
+        // done exactly this with `CommonProps::default()`.
+        //
+        // The wrapper takes the frontmost's paint per the ratified BOOLEAN.md
+        // rule — fill, stroke, `opacity`, blend mode. The rest of `common`
+        // stays fresh, and deliberately so: cloning the frontmost's
+        // `transform` onto the wrapper while the operand keeps its own would
+        // apply it twice, and cloning its `mask` would composite the mask
+        // twice as well.
         let frontmost = elements.last().unwrap();
         let fill = frontmost.fill().copied();
         let stroke = frontmost.stroke().copied();
-        let common = frontmost.common().clone();
+        let common = crate::geometry::element::CommonProps {
+            opacity: frontmost.common().opacity,
+            mode: frontmost.common().mode,
+            ..crate::geometry::element::CommonProps::default()
+        };
 
         let compound = Element::Live(LiveVariant::CompoundShape(CompoundShape {
             operation,
@@ -1537,6 +1636,26 @@ impl Controller {
         op_name: &str,
         options: &BooleanOptions,
     ) {
+        // `generate_element_id`'s contract keeps minting OUT of Controller
+        // methods so they stay deterministic; the id source is therefore a
+        // parameter of the minting method and this wrapper names it. Passing
+        // `None` routes through the thread-local test override the corpus
+        // runners install, exactly as `path_erase_at_rect` does.
+        Self::apply_destructive_boolean_minting(model, op_name, options, &mut || {
+            crate::document::artboard::generate_element_id(None)
+        })
+    }
+
+    /// `apply_destructive_boolean` with the identity source supplied by the
+    /// caller. The UNION / INTERSECTION / EXCLUDE arm is N -> 1: identity is
+    /// preservable exactly when the edit is one-to-one (the cardinality law),
+    /// so the product's id is MINTED, never inherited.
+    pub fn apply_destructive_boolean_minting(
+        model: &mut Model,
+        op_name: &str,
+        options: &BooleanOptions,
+        mint: &mut dyn FnMut() -> String,
+    ) {
         use crate::algorithms::boolean::{
             boolean_intersect, boolean_subtract, boolean_union, PolygonSet,
         };
@@ -1589,11 +1708,61 @@ impl Controller {
                 };
                 let result = apply_operation(op, &operand_sets);
                 let front = elements.last().unwrap();
+                // N -> 1. THE REJECTED RULE IN DISGUISE used to live here:
+                // `front.common().clone()` carried the FRONTMOST operand's id
+                // through a merge — "the frontmost source keeps the id",
+                // elected by z-order rather than area, hiding inside a
+                // `..clone()`. JYH rejected that rule twice. Identity is
+                // preservable exactly when the edit is one-to-one (the
+                // cardinality law), so preserving it here is not generosity:
+                // OVER-PRESERVATION IS A GUESS TOO.
+                //
+                // What the product wears instead
+                // (transcripts/EDIT_SEMANTICS_FREEZE.md §3.3, §3.6):
+                //   id      — minted fresh through the shared loop.
+                //   paint   — the frontmost's four ratified properties
+                //             (fill, stroke, opacity, blend mode: what the op
+                //             SPEAKS TO per BOOLEAN.md).
+                //   the rest — UNANIMITY. All sources agree -> the value
+                //             carries (well-defined, no winner elected); any
+                //             disagreement -> the fresh element's default.
+                //   `name`  — ASSERTING-SOURCES unanimity, JYH's ratified
+                //             answer (1): a source that asserts a name
+                //             carries it, a silent source does not veto.
+                let mut common = merged_common(&elements, front);
+                // Identity is minted only when an identity is actually AT
+                // STAKE — i.e. when some operand carried one. Identity in
+                // this app is LAZY (VISION.md §6.2: an element is born
+                // id-less and mints only when it first becomes a reference
+                // target or is first named), so a merge of id-less operands
+                // kills nothing and the product takes the documented default
+                // for a fresh element, which is `None`. That is §5.1's
+                // creation doctrine, not a guess: nothing geometric is
+                // consulted either way. When an id IS at stake it dies and a
+                // fresh one is minted through the shared collision loop.
+                //
+                // NAMED DELTA from EDIT_SEMANTICS_FREEZE.md §3.6, which
+                // writes "fresh mint" unconditionally: `path_erase_at_rect`'s
+                // split arm mints unconditionally, so the split and merge
+                // arms differ on the id-less case. Reconciling them is one
+                // ruling, not a code change, and it must land in both ports
+                // at once — see the wave report.
+                if elements.iter().any(|e| e.common().id.is_some()) {
+                    let mut existing_ids = doc.element_ids();
+                    match crate::document::artboard::mint_unique_ids(
+                        1, &mut existing_ids, mint,
+                    ) {
+                        Some(ids) => common.id = Some(ids[0].clone()),
+                        // A failed mint aborts the whole edit — never a
+                        // half-identified merge.
+                        None => return,
+                    }
+                }
                 outputs.push((
                     result,
                     front.fill().copied(),
                     front.stroke().copied(),
-                    front.common().clone(),
+                    common,
                 ));
             }
             "subtract_front" | "crop" => {
