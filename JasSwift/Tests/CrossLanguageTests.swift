@@ -2628,6 +2628,35 @@ private let gestureFixtures = [
     "recorded_blob_dot.json",
     "recorded_blob_merge.json",
     "recorded_blob_separate.json",
+    // TRANSFORM-BLIND MERGE gate (S-3). The setup's only element is a
+    // blob-brush path whose LOCAL `d` is the square 0..72 (doc units) and
+    // whose `transform` is translate(300,300) — so it RENDERS at doc
+    // 300..372. The sweep runs at doc y=50 from x=50 to x=150, i.e. the
+    // painted region is x 45..155 / y 45..55, which does not come within 145
+    // units of where that blob is drawn. The correct document therefore has
+    // TWO children: the existing blob untouched, plus a new blob at the
+    // painted location.
+    //
+    // What the transform-blind code produced: the match test ran
+    // `pathToPolygonSet(pe.d)` on the RAW `d` (0..72), which DOES overlap the
+    // sweep, so the two merged into ONE child whose `d` was the doc-space
+    // union pushed back through no matrix at all — one child, and the new ink
+    // drawn 300 units from where the artist put it. See
+    // transcripts/BLOB_BRUSH_TOOL.md §Transform.
+    "blob_transform_no_merge.json",
+    // The POSITIVE half of the pair above, and the only gate in the corpus
+    // that can see `jas:tool-origin` survive an SVG IMPORT. The setup is the
+    // same square 0..72 with the transform removed, so it sits exactly under
+    // the sweep and the merge is CORRECT: one child, the union, at doc
+    // x 0..155.
+    //
+    // `tool_origin` is not a key of the canonical test JSON, so no
+    // serialization gate can observe it directly; the merge is the only
+    // behaviour that depends on it, which makes this fixture the sole reader.
+    // It caught `normalizeElement` rebuilding an imported Path field-by-field
+    // WITHOUT `toolOrigin`, so every path opened from a file reached the tool
+    // untagged and Swift never merged where Rust did.
+    "blob_import_merge.json",
 ]
 
 /// Apply a gesture fixture's optional `app_state` precondition onto the
