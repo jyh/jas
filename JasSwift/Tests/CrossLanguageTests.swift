@@ -114,6 +114,13 @@ private func assertSvgRoundtrip(_ name: String) {
 /// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
 /// id="dup"; after dedupe the first keeps it and the second has no id.
 @Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
+/// The same §2.5 normalization, reaching INSIDE a live compound's operands —
+/// operands are real elements carrying their own common.id, so they share the
+/// one document-wide id space. Both directions are pinned: the operand whose
+/// id repeats an earlier layer child is cleared, and the operand id that is
+/// first-seen enters the seen set, so a later layer child repeating it is
+/// cleared in turn.
+@Test func svgParseDupIdCompoundOperand() { assertSvgParse("dup_id_compound_operand") }
 /// REFERENCE_GRAPH.md Phase 2a: a <use href="#id"> imports as a live
 /// reference (F-svg-use); the href minus '#' becomes the target.
 @Test func svgParseLiveReference() { assertSvgParse("live_reference") }

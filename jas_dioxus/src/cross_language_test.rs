@@ -216,6 +216,8 @@ mod tests {
             "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
             // Import normalization: duplicate ids collapse to first-pre-order-wins.
             "dup_id_import",
+            // The same normalization reaching INSIDE a live compound's operands.
+            "dup_id_compound_operand",
             // A compound shape carrying its own stable id (round-trips through
             // all three codecs; id is the only common field SVG preserves for
             // live elements — name is intentionally excluded).
@@ -385,6 +387,18 @@ mod tests {
         // first pre-order occurrence keeps the id, later ones are cleared
         // (REFERENCE_GRAPH.md §2.5). All apps normalize identically.
         assert_svg_parse("dup_id_import");
+    }
+
+    #[test]
+    fn svg_parse_dup_id_compound_operand() {
+        // The same §2.5 normalization, reaching INSIDE a live compound's
+        // operands — the operands are real elements carrying their own
+        // common.id, so they are part of the one document-wide id space.
+        // The vector pins both directions of that: the operand whose id
+        // repeats an earlier layer child is CLEARED, and the operand id that
+        // is first-seen ENTERS the seen set, so a later layer child repeating
+        // it is cleared in turn.
+        assert_svg_parse("dup_id_compound_operand");
     }
 
     #[test]

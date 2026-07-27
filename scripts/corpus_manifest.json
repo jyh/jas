@@ -157,7 +157,7 @@
         "swift": "name-lists (jsonRoundtripAllExpected / binaryRoundtripAllExpected / binaryReadPythonFixtures) + assertSvgParse/assertWorkspaceFixture helper calls + path literals",
         "scripts": "commutativity FIXTURE_NAMES + _golden() calls + structural-golden checkers (check_menu_structure.py, check_toolbar_structure.py)"
       },
-      "notes": "Rust-authored canonical goldens (parse/roundtrip expectations, .bin byte pins, dependency-index and workspace-layout goldens, structural goldens). Port symmetry is hand-maintained per name-list (the S5-symmetrized json/binary/svg arrays) rather than machine-checked: a per-file symmetry rule would false-red the legitimately single-consumer members (menu_structure.json and toolbar_structure.json are scripts-only structural goldens; dup_id_import.json is parse-only). Orphan detection here is REAL (no glob claims this directory)."
+      "notes": "Rust-authored canonical goldens (parse/roundtrip expectations, .bin byte pins, dependency-index and workspace-layout goldens, structural goldens). Port symmetry is hand-maintained per name-list (the S5-symmetrized json/binary/svg arrays) rather than machine-checked: a per-file symmetry rule would false-red the legitimately single-consumer members (menu_structure.json and toolbar_structure.json are scripts-only structural goldens; dup_id_import.json and dup_id_compound_operand.json are parse-only). Orphan detection here is REAL (no glob claims this directory)."
     },
     "test_fixtures/expressions": {
       "kind": "compiled",
