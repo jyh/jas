@@ -297,3 +297,135 @@ private func pathAt(_ model: Model, _ p: ElementPath) -> Path? {
                 "erase fragment \(i): the name must survive the split")
     }
 }
+
+// MARK: - The cardinality law at the blob-brush merge
+//
+// JYH, ratified 2026-07-26: "Identity survives a one-to-one edit. It does not
+// survive a change in cardinality." So `doc.blob_brush.commit_painting` picks
+// its arm by the MATCH COUNT:
+//   0 matches -> a brand-new blob with the tool's own attributes;
+//   1 match   -> the 1 -> 1 case, so the Theseus law applies in full;
+//   N >= 2    -> a merge, so identity dies and the result carries no id.
+// "The largest source keeps the id" was explicitly REJECTED in both
+// directions, so no arm tie-breaks among sources. Rust's
+// `blob_brush_commit_painting` branches on the same predicate.
+
+/// The state `doc.blob_brush.commit_painting` reads. `fill_color` comes FROM
+/// the source so `blobBrushFillMatches` accepts it — that helper compares
+/// lowercased hex plus opacity, and `Color.toHex` round-trips.
+private func seedBlobBrushMergeState(_ store: StateStore, _ src: Path) {
+    store.set("fill_color", src.fill!.color.toHex())
+    store.set("blob_brush_size", 10.0)
+    store.set("blob_brush_angle", 0.0)
+    store.set("blob_brush_roundness", 100.0)
+}
+
+/// A 6-point horizontal sweep along `y` from `x0` to `x1`, in a test-private
+/// buffer (the point buffers are process-global and tests run in parallel).
+private func seedBlobBrushSweepIn(_ buffer: String, _ x0: Double,
+                                  _ x1: Double, _ y: Double) {
+    pointBuffersClear(buffer)
+    for i in 0...5 {
+        let t = Double(i) / 5.0
+        pointBuffersPush(buffer, x0 + (x1 - x0) * t, y)
+    }
+}
+
+private func runBlobBrushCommitPainting(_ model: Model, _ store: StateStore,
+                                        buffer: String) {
+    runEffects([["doc.blob_brush.commit_painting": [
+                    "buffer": buffer,
+                    "fidelity_epsilon": "5.0",
+                    "merge_only_with_selection": "false",
+                    "keep_selected": "false",
+                ]]],
+               ctx: [:], store: store,
+               platformEffects: buildYamlToolEffects(model: model))
+    pointBuffersClear(buffer)
+}
+
+private let theseusSquare: [PathCommand] = [
+    .moveTo(0, 0), .lineTo(100, 0), .lineTo(100, 100), .lineTo(0, 100),
+    .closePath,
+]
+
+/// EXACTLY ONE match is the 1 -> 1 case: one Path in, one out with a rewritten
+/// `d`. The law applies in full, `id` included. `fill` is not re-derived from
+/// `state.fill_color` — the match loop already gated on fill equality, so the
+/// source's fill matches the stroke's.
+@Test func theseusBlobBrushMergeOneMatchPreservesEverythingButD() throws {
+    let (model, src) = modelWithTheseus(theseusSquare)
+    let store = StateStore()
+    seedBlobBrushMergeState(store, src)
+    let buffer = "theseus_blob_merge_one_swift"
+    seedBlobBrushSweepIn(buffer, 50, 150, 50)
+    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    #expect(model.document.layers[0].children.count == 1,
+            "the sweep overlapped the one existing blob, so it merged")
+    expectOnlyDChanged(src, try #require(pathAt(model, [0, 0])),
+                       "doc.blob_brush.commit_painting (exactly one match)")
+}
+
+/// TWO matches change cardinality, so identity DIES: the merged element
+/// carries NO id. Nothing here can mint one (`Controller.assignId` never mints
+/// — the initiator carries the id in the operation payload — and
+/// `dedupeElementIds` only CLEARS duplicates, and only in document readers),
+/// so carrying a source's id would leave the merged element wearing a dead
+/// ship's name. Whether attributes the sources AGREE on should carry is
+/// UNRULED, and this test deliberately pins none of them.
+@Test func blobBrushMergeOfTwoSourcesCarriesNoId() throws {
+    let red = Fill(color: Color.fromHex("#ff0000")!)
+    func blob(_ id: String, _ x0: Double, _ x1: Double) -> Element {
+        .path(Path(d: [.moveTo(x0, 40), .lineTo(x1, 40),
+                       .lineTo(x1, 60), .lineTo(x0, 60), .closePath],
+                   fill: red, toolOrigin: "blob_brush", id: id,
+                   fillRule: .nonzero))
+    }
+    let model = Model(document: Document(
+        layers: [Layer(children: [blob("left", 0, 40), blob("right", 60, 100)])],
+        selectedLayer: 0, selection: []))
+    let store = StateStore()
+    store.set("fill_color", red.color.toHex())
+    store.set("blob_brush_size", 10.0)
+    store.set("blob_brush_angle", 0.0)
+    store.set("blob_brush_roundness", 100.0)
+    let buffer = "theseus_blob_merge_two_swift"
+    seedBlobBrushSweepIn(buffer, 10, 90, 50)
+    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    // Both sources plus the sweep collapsed into ONE child: had only one
+    // matched, the other would still be sitting there.
+    #expect(model.document.layers[0].children.count == 1,
+            "the sweep bridged both blobs, so both were merged away")
+    let out = try #require(pathAt(model, [0, 0]))
+    #expect(out.id == nil,
+            "a merge of two sources must not wear either source's id")
+    #expect(out.toolOrigin == "blob_brush",
+            "the merged blob stays a blob-brush element")
+}
+
+/// The erase arm PRESERVES `toolOrigin` where the initializer defaults used to
+/// clear it, so an erased fragment is now a blob-merge candidate it previously
+/// was not. A closed path erased once yields ONE fragment (the 1 -> 1 arm),
+/// and a sweep over that fragment is again 1 -> 1, so the whole chain must
+/// preserve everything but `d`. If erase dropped `toolOrigin`, the sweep would
+/// append a SECOND element instead.
+@Test func theseusEraseThenBlobMergePreservesEverythingButD() throws {
+    let (model, src) = modelWithTheseus(theseusSquare)
+    runEffects([["doc.path.erase_at_rect":
+                    ["last_x": 50, "last_y": 0, "x": 50, "y": 0,
+                     "eraser_size": 2]]],
+               ctx: [:], store: StateStore(),
+               platformEffects: buildYamlToolEffects(model: model))
+    let fragment = try #require(pathAt(model, [0, 0]))
+    #expect(fragment.toolOrigin == "blob_brush",
+            "the erased fragment keeps toolOrigin — that is what makes it a merge candidate")
+    let store = StateStore()
+    seedBlobBrushMergeState(store, src)
+    let buffer = "theseus_blob_merge_after_erase_swift"
+    seedBlobBrushSweepIn(buffer, 50, 150, 50)
+    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    #expect(model.document.layers[0].children.count == 1,
+            "the erased fragment was merged into, not left beside a new blob")
+    expectOnlyDChanged(src, try #require(pathAt(model, [0, 0])),
+                       "erase then blob_brush merge")
+}

@@ -2565,15 +2565,48 @@ private func blobBrushCommitPainting(
 
     let newD = polygonSetToPath(unified)
     if newD.isEmpty { return }
-    let newElem = Path(
-        d: newD,
-        fill: newFill, stroke: nil,
-        widthPoints: [],
-        toolOrigin: "blob_brush",
-        // Rust's blob_brush_commit_painting stamps NonZero on the
-        // unified region; parity, not preference.
-        fillRule: .nonzero
-    )
+    // THE CARDINALITY LAW (JYH, ratified 2026-07-26): "Identity survives a
+    // one-to-one edit. It does not survive a change in cardinality." The arm
+    // is chosen by the MATCH COUNT, and Rust's blob_brush_commit_painting
+    // branches on the same predicate so the two cannot drift.
+    let mergedSource: Path? = {
+        guard matches.count == 1 else { return nil }
+        guard case .path(let pe) = doc.getElement(matches[0]) else { return nil }
+        return pe
+    }()
+    let newElem: Path
+    if let src = mergedSource {
+        // 1 -> 1: one existing path in, one out with a rewritten `d`. It is the
+        // same object, so everything but `d` travels — pathWithCommands, never
+        // a field list here (an earlier enumeration of this law omitted
+        // `transform`, which RELOCATES the artwork).
+        //
+        // `fill` deliberately keeps the SOURCE's value rather than `newFill`:
+        // the match loop above ran blobBrushFillMatches, so the source's fill
+        // already equals the stroke's under that comparison (lowercased hex
+        // plus opacity within 1e-9). No paint rule is needed here.
+        newElem = pathWithCommands(src, newD, identity: .sameElement)
+    } else {
+        // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both mint
+        // a fresh element carrying the tool's own attributes. For the merge
+        // that is the law's verdict on identity: no source's id may travel, and
+        // nothing here can mint a replacement (Controller.assignId never mints
+        // — the initiator carries the id in the operation payload — and
+        // dedupeElementIds only CLEARS duplicates, and only in document
+        // readers), so the initializer's `id: nil` is the outcome, not an
+        // accident. Whether attributes the sources AGREE on should carry is
+        // UNRULED: do not invent a rule here. "The largest source keeps the id"
+        // was explicitly rejected in both directions.
+        newElem = Path(
+            d: newD,
+            fill: newFill, stroke: nil,
+            widthPoints: [],
+            toolOrigin: "blob_brush",
+            // Rust's blob_brush_commit_painting stamps NonZero on the
+            // unified region; parity, not preference.
+            fillRule: .nonzero
+        )
+    }
 
     // Build new document: remove matches in reverse (so earlier
     // indices stay valid), then insert the unified element.
