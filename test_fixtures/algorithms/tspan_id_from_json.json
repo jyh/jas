@@ -59,6 +59,11 @@
       "expected": 0
     },
     {
+      "name": "true_id",
+      "input": {"type": "text", "tspans": [{"id": true, "content": "A"}]},
+      "expected": 0
+    },
+    {
       "name": "string_id",
       "input": {"type": "text", "tspans": [{"id": "3", "content": "A"}]},
       "expected": 0

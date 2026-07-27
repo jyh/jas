@@ -855,7 +855,11 @@ private func parsePoints(_ v: Any?) -> [(Double, Double)] {
 /// those two answers survived, and
 /// `test_fixtures/algorithms/tspan_id_from_json.json` for the shared gate.
 func tspanIdFromJson(_ any: Any?) -> UInt32 {
-    guard let n = any as? NSNumber else { return 0 }
+    // A JSON `true` is boxed as an NSNumber whose doubleValue is 1, so without
+    // `isBool` this read `"id": true` as the id 1 while jas_dioxus's `as_f64()`
+    // on a JSON bool is None and read 0. A boolean is not a number; it takes the
+    // same road as a string or a null.
+    guard let n = any as? NSNumber, !n.isBool else { return 0 }
     let d = n.doubleValue
     guard d >= 0, d <= 4_294_967_295, d == d.rounded(.towardZero) else { return 0 }
     return UInt32(d)
