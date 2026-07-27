@@ -26,7 +26,12 @@ private func propChildren(_ e: Element) -> [Element] {
 
 /// Document-space AABB of the element at `path` (its own + ancestor transforms
 /// folded into the geometric-bounds corners). `nil` when `path` does not resolve.
-func elementEvaluatedBBox(_ doc: Document, _ path: ElementPath) -> BBox? {
+///
+/// `public` so the AlgorithmRoundtrip target can drive it: `Element.bounds`
+/// ignores `transform` entirely, so this is the ONLY transform-aware bbox in
+/// the port, and until the `element_evaluated_bounds` family it was gated by
+/// nothing cross-language (CORPUS_CENSUS.md 5.1).
+public func elementEvaluatedBBox(_ doc: Document, _ path: ElementPath) -> BBox? {
     guard !path.isEmpty, path[0] < doc.layers.count else { return nil }
     var node: Element = .layer(doc.layers[path[0]])
     var ancestors: [Transform?] = []  // outermost (layer) first

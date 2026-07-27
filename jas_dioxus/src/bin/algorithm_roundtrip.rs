@@ -7,7 +7,10 @@
 /// algorithm, and outputs a JSON array of results to stdout.
 
 use jas_dioxus::geometry::measure::{Measure, parse_unit};
-use jas_dioxus::geometry::test_json::parse_element;
+use jas_dioxus::geometry::test_json::{parse_element, parse_transform};
+use jas_dioxus::document::document::Document;
+use jas_dioxus::document::evaluated_bounds::element_evaluated_bbox;
+use jas_dioxus::geometry::element::{CommonProps, LayerElem};
 use jas_dioxus::algorithms::boolean::{
     boolean_exclude_ruled, boolean_intersect_ruled, boolean_subtract_ruled,
     boolean_union_ruled, PolyFillRule, PolygonSet, Ring, RuledPolygonSet,
@@ -67,6 +70,7 @@ fn main() {
     let results: Vec<Value> = match algo.as_str() {
         "measure" => run_measure(&vectors),
         "element_bounds" => run_element_bounds(&vectors),
+        "element_evaluated_bounds" => run_element_evaluated_bounds(&vectors),
         "flatten" => run_flatten(&vectors),
         "arrow_trim" => run_arrow_trim(&vectors),
         "length" => run_length(&vectors),
@@ -190,6 +194,41 @@ fn run_element_bounds(vectors: &[Value]) -> Vec<Value> {
             let elem = parse_element(elem_json);
             let (x, y, w, h) = elem.bounds();
             json!({"name": name, "result": [x, y, w, h]})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// element_evaluated_bounds (transform-aware bbox, DOCUMENT space)
+// ---------------------------------------------------------------
+
+/// Each vector is one element placed as the single child of one layer, so the
+/// gated path is `[0, 0]`: the element's own `transform` is folded first, then
+/// the layer's `layer_transform` as the sole ancestor. Building the document
+/// here (rather than shipping a whole document per vector) keeps the fixture
+/// readable; the geometry under test is entirely inside the port function.
+fn run_element_evaluated_bounds(vectors: &[Value]) -> Vec<Value> {
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem = parse_element(&tc["element"]);
+            let layer_transform = parse_transform(&tc["layer_transform"]);
+            let mut doc = Document::default();
+            doc.layers = vec![Element::Layer(LayerElem {
+                children: vec![std::rc::Rc::new(elem)],
+                common: CommonProps {
+                    transform: layer_transform,
+                    ..Default::default()
+                },
+                isolated_blending: false,
+                knockout_group: false,
+            })];
+            let result = match element_evaluated_bbox(&doc, &[0, 0]) {
+                Some((x, y, w, h)) => json!([x, y, w, h]),
+                None => Value::Null,
+            };
+            json!({"name": name, "result": result})
         })
         .collect()
 }

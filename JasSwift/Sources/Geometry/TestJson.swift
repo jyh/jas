@@ -791,6 +791,15 @@ private func parseTransform(_ v: Any?) -> Transform? {
                      d: parseF(d["d"]), e: parseF(d["e"]), f: parseF(d["f"]))
 }
 
+/// The test-JSON transform parser, reachable from the AlgorithmRoundtrip
+/// target so a fixture's `layer_transform` (the element_evaluated_bounds
+/// family's ancestor leg) goes through the SAME parser the element's own
+/// `transform` does. Distinctly named because three other files in this
+/// module already declare a file-private `parseTransform` of their own.
+package func parseTestJsonTransform(_ v: Any?) -> Transform? {
+    parseTransform(v)
+}
+
 private func parseVisibility(_ v: Any?) -> Visibility {
     switch v as? String ?? "preview" {
     case "invisible": return .invisible

@@ -1093,7 +1093,10 @@ fn parse_stroke(v: &serde_json::Value) -> Option<Stroke> {
     Some(Stroke { color: parse_color(&v["color"]), width: parse_f(&v["width"]), linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, dash_align_anchors: false, start_arrow: Arrowhead::None, end_arrow: Arrowhead::None, start_arrow_scale: 100.0, end_arrow_scale: 100.0, arrow_align: ArrowAlign::TipAtEnd, opacity: v["opacity"].as_f64().unwrap_or(1.0) })
 }
 
-fn parse_transform(v: &serde_json::Value) -> Option<Transform> {
+/// Public so the `algorithm_roundtrip` harness can read a fixture's
+/// `layer_transform` (the `element_evaluated_bounds` family's ancestor leg)
+/// through the SAME parser the element's own `transform` goes through.
+pub fn parse_transform(v: &serde_json::Value) -> Option<Transform> {
     if v.is_null() { return None; }
     Some(Transform {
         a: parse_f(&v["a"]), b: parse_f(&v["b"]), c: parse_f(&v["c"]),

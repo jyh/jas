@@ -1,0 +1,55 @@
+[
+  {"name": "rect_no_transform_control", "function": "element_evaluated_bounds",
+   "_comment": "The control: no element transform and no layer transform, so the evaluated bbox must equal the plain geometric bbox. Separates a runner that mis-builds the document or applies a stray matrix; it does NOT separate a port that ignores transforms (nothing to ignore), which is why the eight vectors below exist.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [0.0, 0.0, 10.0, 10.0]},
+
+  {"name": "rect_translate", "function": "element_evaluated_bounds",
+   "_comment": "translate(100,50). A port that ignores the element transform returns [0,0,10,10].",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 50.0}, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [100.0, 50.0, 10.0, 10.0]},
+
+  {"name": "rect_scale_nonuniform", "function": "element_evaluated_bounds",
+   "_comment": "scale(2,3) about the document origin on a rect at (5,10), so the ORIGIN moves too: [10,30,20,30]. A port that scales the size but leaves the position returns [5,10,20,30]; one that ignores the transform returns [5,10,10,10].",
+   "element": {"type": "rect", "x": 5.0, "y": 10.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 3.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [10.0, 30.0, 20.0, 30.0]},
+
+  {"name": "rect_rotate_45", "function": "element_evaluated_bounds",
+   "_comment": "rotate(45 degrees) about the origin of a 10x10 rect at the origin: the AABB is the square's diagonal, 10*sqrt(2) on a side, spanning x in [-5*sqrt(2), 5*sqrt(2)] and y in [0, 10*sqrt(2)]. Chosen because the answer is NOT axis-aligned-invariant: swapping b and c (the classic wrong-space slip, i.e. rotating by -45) returns [0,-7.0710678118654755,14.142135623730951,14.142135623730951] - the same extent, transposed. Ignoring the transform returns [0,0,10,10].",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": {"a": 0.7071067811865476, "b": 0.7071067811865476, "c": -0.7071067811865476, "d": 0.7071067811865476, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [-7.0710678118654755, 0.0, 14.142135623730951, 14.142135623730951]},
+
+  {"name": "rect_skew_x", "function": "element_evaluated_bounds",
+   "_comment": "skewX with c = 0.5: x' = x + 0.5*y, so the 10x10 rect shears to a 15-wide, 10-tall AABB. Swapping b and c (skewY instead) returns [0,0,10,15] - the transpose, which is why width and height differ here.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.5, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [0.0, 0.0, 15.0, 10.0]},
+
+  {"name": "rect_composed_matrix", "function": "element_evaluated_bounds",
+   "_comment": "A general matrix with every entry live (a=2 b=1 c=-0.5 d=1.5 e=7 f=-3) on a 4x6 rect at (1,2). Corners map to (8,1) (16,5) (13,14) (5,10), so the AABB is [5,1,11,13] - all four values differ from the untransformed [1,2,4,6], and swapping b and c gives [11,-2.5,14,11].",
+   "element": {"type": "rect", "x": 1.0, "y": 2.0, "width": 4.0, "height": 6.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 1.0, "c": -0.5, "d": 1.5, "e": 7.0, "f": -3.0}, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [5.0, 1.0, 11.0, 13.0]},
+
+  {"name": "rect_layer_transform_only", "function": "element_evaluated_bounds",
+   "_comment": "The ANCESTOR leg: the element carries no transform and the containing layer carries translate(20,30). A port that folds only the element's own matrix returns [0,0,10,10].",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "layer_transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 20.0, "f": 30.0},
+   "expected": [20.0, 30.0, 10.0, 10.0]},
+
+  {"name": "rect_element_then_layer_order", "function": "element_evaluated_bounds",
+   "_comment": "COMPOSITION ORDER, the one thing a commuting pair cannot pin: the element scales 2x and the layer translates (5,5). Innermost-first (correct) maps (10,10) to (20,20) then to (25,25), giving [5,5,20,20]; outermost-first would give [10,10,20,20]. Same two matrices, different answer - so this vector is what separates the order.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "layer_transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 5.0, "f": 5.0},
+   "expected": [5.0, 5.0, 20.0, 20.0]},
+
+  {"name": "rect_stroked_uses_geometric_bounds", "function": "element_evaluated_bounds",
+   "_comment": "The evaluated bbox is built from GEOMETRIC bounds, so a 4-wide stroke must NOT inflate it: [0,0,10,10], not the preview bbox [-2,-2,14,14]. The transform is the identity here so the vector isolates that one choice.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": {"color": {"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 4.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [0.0, 0.0, 10.0, 10.0]}
+]

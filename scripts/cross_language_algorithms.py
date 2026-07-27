@@ -26,6 +26,12 @@ FIXTURES_DIR = os.path.join(REPO_ROOT, "test_fixtures", "algorithms")
 ALGORITHMS = {
     "measure":           ("tolerance", 1e-4),
     "element_bounds":    ("tolerance", 1e-4),
+    # The TRANSFORM-AWARE bbox the Properties panel shows: geometric bounds
+    # mapped through the element's own matrix and every ancestor's, then
+    # axis-aligned. A separate family because `element_bounds` gates
+    # `Element::bounds`, which ignores `transform` entirely in both ports
+    # (measured: a rect with translate(100,50) still reports [0,0,10,10]).
+    "element_evaluated_bounds": ("tolerance", 1e-4),
     "flatten":           ("tolerance", 1e-9),
     "arrow_trim":        ("tolerance", 1e-4),
     "length":            ("tolerance", 1e-9),

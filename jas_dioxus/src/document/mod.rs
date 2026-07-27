@@ -3,6 +3,7 @@ pub mod controller;
 pub mod dependency_index;
 pub mod document;
 pub mod document_setup;
+pub mod evaluated_bounds;
 pub mod id_index;
 pub mod model;
 pub mod op_apply;

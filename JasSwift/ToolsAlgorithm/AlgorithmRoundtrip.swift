@@ -45,6 +45,7 @@ let results: [[String: Any]]
 switch algo {
 case "measure":           results = runMeasure(activeVectors)
 case "element_bounds":    results = runElementBounds(activeVectors)
+case "element_evaluated_bounds": results = runElementEvaluatedBounds(activeVectors)
 case "flatten":           results = runFlatten(activeVectors)
 case "arrow_trim":        results = runArrowTrim(activeVectors)
 case "length":            results = runLength(activeVectors)
@@ -78,6 +79,27 @@ func runElementBounds(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let elemJson = tc["element"]!
         let elem = parseElement(elemJson)
         let b = elem.bounds
+        return ["name": name, "result": [b.x, b.y, b.width, b.height]]
+    }
+}
+
+// MARK: - Element Evaluated Bounds (transform-aware bbox, DOCUMENT space)
+
+/// Each vector is one element placed as the single child of one layer, so the
+/// gated path is `[0, 0]`: the element's own `transform` is folded first, then
+/// the layer's `layer_transform` as the sole ancestor. Building the document
+/// here (rather than shipping a whole document per vector) keeps the fixture
+/// readable; the geometry under test is entirely inside the port function.
+func runElementEvaluatedBounds(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        let layerTransform = parseTestJsonTransform(tc["layer_transform"])
+        let doc = Document(layers: [Layer(name: "Layer", children: [elem],
+                                         transform: layerTransform)])
+        guard let b = elementEvaluatedBBox(doc, [0, 0]) else {
+            return ["name": name, "result": NSNull()]
+        }
         return ["name": name, "result": [b.x, b.y, b.width, b.height]]
     }
 }
