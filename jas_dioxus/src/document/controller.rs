@@ -1641,10 +1641,10 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
-    /// Destructively apply one of the six implemented boolean ops to
-    /// the current selection. Supported: `"union"`, `"intersection"`,
-    /// `"exclude"`, `"subtract_front"`, `"subtract_back"`, `"crop"`.
-    /// DIVIDE / TRIM / MERGE land in a later pass.
+    /// Destructively apply one of the nine implemented boolean ops to the
+    /// current selection: `"union"`, `"intersection"`, `"exclude"`,
+    /// `"subtract_front"`, `"subtract_back"`, `"crop"`, `"divide"`,
+    /// `"trim"`, `"merge"`. Any other name is a no-op.
     ///
     /// UNION / INTERSECTION / EXCLUDE: every operand is consumed; the
     /// resulting polygon(s) carry the frontmost operand's paint.
@@ -1652,7 +1652,17 @@ impl Controller {
     /// cutter and is consumed; each remaining survivor emits a
     /// subtracted polygon carrying its own paint. CROP: the frontmost
     /// operand is the mask and is consumed; each remaining survivor
-    /// emits the intersection carrying its own paint.
+    /// emits the intersection carrying its own paint. DIVIDE: the union is
+    /// partitioned into regions, each carrying its frontmost covering
+    /// operand's paint. TRIM: each operand emits itself minus everything in
+    /// front of it, keeping its own paint. MERGE: TRIM, then union the
+    /// survivors that share an exactly-equal solid fill, the group taking its
+    /// frontmost contributor's paint.
+    ///
+    /// What each arm does with the operands' `common` — identity, `name`,
+    /// mask, visibility, capability markers — is the PRESERVATION LAW's, not
+    /// this docstring's: see `apply_destructive_boolean_minting` and
+    /// transcripts/EDIT_SEMANTICS_FREEZE.md §3.6.
     pub fn apply_destructive_boolean(
         model: &mut Model,
         op_name: &str,
@@ -1926,7 +1936,12 @@ impl Controller {
                     .iter()
                     .map(|e| element_to_polygon_set(e, precision))
                     .collect();
-                let mut trimmed: Vec<(PolygonSet, Option<Fill>, Option<Stroke>, CommonProps)> =
+                // Each survivor carries the OPERAND INDEX it came from, not a
+                // snapshot of that operand's `common`. Which identity an
+                // output wears is decided per merged GROUP below, and it
+                // cannot be decided from a copy that has already forgotten
+                // who made it.
+                let mut trimmed: Vec<(PolygonSet, Option<Fill>, Option<Stroke>, usize)> =
                     Vec::new();
                 for i in 0..elements.len() {
                     let mut region = operand_sets[i].clone();
@@ -1938,29 +1953,67 @@ impl Controller {
                             region,
                             elements[i].fill().copied(),
                             elements[i].stroke().copied(),
-                            elements[i].common().clone(),
+                            i,
                         ));
                     }
                 }
                 if op_name == "trim" {
-                    outputs.extend(trimmed);
+                    // §3.6's TRIM row: every operand is 1 -> 1, so full
+                    // Theseus preservation — identity included.
+                    for (region, fill, stroke, i) in trimmed {
+                        outputs.push((
+                            region, fill, stroke, elements[i].common().clone(),
+                        ));
+                    }
                 } else {
                     // MERGE: union touching trimmed survivors that
                     // share an exactly-equal solid-color fill. None
                     // fills never merge (predicate per BOOLEAN.md).
                     // Grouping is O(N^2) by linear scan; acceptable for
                     // the selection sizes this panel handles.
+                    //
+                    // THE REJECTED RULE, IN PLAIN TEXT, used to live in this
+                    // loop: `common_winner = trim_j.3.clone()` handed the
+                    // merged output the FRONTMOST contributor's whole
+                    // `common` — id and name included — and the comment
+                    // beside it stated the election outright ("j is
+                    // frontmost; its stroke/common wins"). z-order is
+                    // geometry, so T3 forbids it exactly as it forbids
+                    // "the largest fragment keeps the id".
+                    //
+                    // §3.6's MERGE row is the blob brush's two arms:
+                    //   ONE contributor  -> 1 -> 1. §3.1: everything
+                    //                       survives, identity included.
+                    //   TWO or more      -> N -> 1. §3.3: the id dies and a
+                    //                       fresh one is minted; every field
+                    //                       the op does not speak to follows
+                    //                       UNANIMITY (`name` by
+                    //                       ASSERTING-SOURCES), and only
+                    //                       PAINT rides from the frontmost
+                    //                       contributor — the four ratified
+                    //                       properties, which is what the op
+                    //                       speaks to (T1).
+                    // `merged_common` is the shared implementation of that
+                    // rule, the same one the UNION / INTERSECTION / EXCLUDE
+                    // arm calls, so the two N -> 1 arms cannot drift.
                     let mut consumed = vec![false; trimmed.len()];
+                    // Built ONCE from the pre-edit document, as the split
+                    // arm's is; it still holds the operand ids about to
+                    // vanish, which is conservative, never wrong.
+                    let mut existing_ids = doc.element_ids();
                     for i in 0..trimmed.len() {
                         if consumed[i] {
                             continue;
                         }
                         consumed[i] = true;
-                        let (region_i, fill_i, stroke_i, common_i) =
+                        let (region_i, fill_i, stroke_i, src_i) =
                             trimmed[i].clone();
                         let mut merged = region_i;
                         let mut stroke_winner = stroke_i;
-                        let mut common_winner = common_i;
+                        // The group's contributors in operand z-order, so
+                        // `last()` is the frontmost. This is a PAINT
+                        // designation (§3.6), not an identity election.
+                        let mut group: Vec<usize> = vec![src_i];
                         if fill_i.is_some() {
                             for (j, trim_j) in trimmed.iter().enumerate().skip(i + 1) {
                                 if consumed[j] {
@@ -1968,16 +2021,35 @@ impl Controller {
                                 }
                                 if fills_merge_equal(&fill_i, &trim_j.1) {
                                     merged = boolean_union(&merged, &trim_j.0);
-                                    // j > i in operand z-order, so j
-                                    // is frontmost; its stroke/common
-                                    // wins on the merged output.
                                     stroke_winner = trim_j.2;
-                                    common_winner = trim_j.3.clone();
+                                    group.push(trim_j.3);
                                     consumed[j] = true;
                                 }
                             }
                         }
-                        outputs.push((merged, fill_i, stroke_winner, common_winner));
+                        let front = &elements[*group.last().unwrap()];
+                        let common = if group.len() == 1 {
+                            front.common().clone()
+                        } else {
+                            let sources: Vec<Rc<Element>> =
+                                group.iter().map(|k| elements[*k].clone()).collect();
+                            let mut c = merged_common(&sources, front);
+                            // Identity is LAZY (VISION.md §6.2), so it is
+                            // minted only when one was actually AT STAKE —
+                            // the same condition the UNION arm applies, and
+                            // deliberately the same: both are N -> 1.
+                            if sources.iter().any(|e| e.common().id.is_some()) {
+                                match crate::document::artboard::mint_unique_ids(
+                                    1, &mut existing_ids, mint,
+                                ) {
+                                    Some(ids) => c.id = Some(ids[0].clone()),
+                                    // A failed mint aborts the whole edit.
+                                    None => return,
+                                }
+                            }
+                            c
+                        };
+                        outputs.push((merged, fill_i, stroke_winner, common));
                     }
                 }
             }
@@ -5642,6 +5714,134 @@ mod preservation_law_tests {
                    "the operand divide did not split is 1 -> 1: its id lives");
         assert_eq!(kids[0].common().name.as_deref(), Some("hull"));
         assert_eq!(kids[0].common().opacity, 0.25);
+    }
+
+    // ── §3.6 MERGE row: singleton survives, multi is an N -> 1 ────────────
+    //
+    // On `rich_pair` both rects carry the same solid fill, so TRIM's two
+    // survivors ([0..5] from back, [5..15] from front) merge into one
+    // [0..15] bar — a two-contributor group, i.e. an N -> 1.
+
+    /// THE REJECTED RULE, IN PLAIN TEXT. The merge arm elected the frontmost
+    /// contributor's whole `common` — id and name included — and its own
+    /// comment stated the z-order election outright ("j is frontmost; its
+    /// stroke/common wins"). z-order is geometry, so T3 forbids it: the
+    /// product of an N -> 1 wears an id that belonged to NEITHER contributor.
+    #[test]
+    fn boolean_merge_multi_contributor_group_mints_a_fresh_id() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        Controller::apply_destructive_boolean(
+            &mut model, "merge", &BooleanOptions::default());
+        let out = only_child(&model);
+        // MANDATORY GEOMETRY PAIRING: the merged bar really is [0..15].
+        let (bx, by, bw, bh) = polygon_point_bbox(&out);
+        assert!((bx - 0.0).abs() < 1e-9 && (by - 0.0).abs() < 1e-9
+                && (bw - 15.0).abs() < 1e-9 && (bh - 10.0).abs() < 1e-9,
+                "merge bbox should be [0..15]x[0..10], got {bx},{by},{bw},{bh}");
+        let id = out.common().id.clone();
+        assert!(id.is_some(), "an N->1 merge mints a fresh id");
+        assert_ne!(id.as_deref(), Some("id-front"),
+                   "the frontmost CONTRIBUTOR's id survived an N->1 merge — \
+                    the rejected rule, elected by z-order");
+        assert_ne!(id.as_deref(), Some("id-back"));
+        assert_ids_unique(&model, "merge");
+    }
+
+    /// ASSERTING-SOURCES (JYH's ratified answer (1)) reaches this arm too:
+    /// the only asserted name survives. Under the z-order election the
+    /// BACKmost contributor's word was simply deleted.
+    #[test]
+    fn boolean_merge_name_carries_from_the_only_asserting_contributor() {
+        let mut model = rich_pair(Some("hull"), None, 0.25, 0.75);
+        Controller::apply_destructive_boolean(
+            &mut model, "merge", &BooleanOptions::default());
+        assert_eq!(only_child(&model).common().name.as_deref(), Some("hull"),
+                   "the only name asserted must survive the merged group");
+    }
+
+    /// §3.3: contributors DISAGREE on a field the op does not speak to, so
+    /// the fresh element's documented default stands. Under the z-order
+    /// election the frontmost's value won instead.
+    #[test]
+    fn boolean_merge_disagreeing_field_falls_to_the_default() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        {
+            let doc = model.document().clone();
+            let mut back = (*doc.get_element(&vec![0, 0]).unwrap()).clone();
+            back.common_mut().visibility = Visibility::Invisible;
+            let new_doc = doc.replace_element(&vec![0, 0], back);
+            model.edit_document(new_doc);
+        }
+        Controller::apply_destructive_boolean(
+            &mut model, "merge", &BooleanOptions::default());
+        let out = only_child(&model);
+        assert_eq!(out.common().visibility, CommonProps::default().visibility,
+                   "disagreeing contributors must fall to the default");
+        assert_eq!(out.common().name, None,
+                   "two asserted names disagree -> the default");
+    }
+
+    /// GUARD: the §3.6 MERGE row keeps paint at "the frontmost contributor's",
+    /// so `opacity` and blend mode must NOT be swept away with the identity.
+    #[test]
+    fn boolean_merge_still_takes_the_frontmost_contributor_s_paint() {
+        let mut model = rich_pair(None, None, 0.25, 0.75);
+        Controller::apply_destructive_boolean(
+            &mut model, "merge", &BooleanOptions::default());
+        let out = only_child(&model);
+        assert_eq!(out.common().opacity, 0.75,
+                   "opacity is paint: the frontmost contributor's");
+        assert_eq!(out.common().mode, BlendMode::Multiply);
+        assert!(out.fill().is_some());
+        assert!(out.stroke().is_some());
+    }
+
+    /// GUARD, the other arm of the same row: a merged group of ONE is a
+    /// 1 -> 1, so the survivor keeps everything. Different fill colours mean
+    /// the two trimmed survivors never join, so each group is a singleton.
+    #[test]
+    fn boolean_merge_singleton_group_keeps_its_own_identity() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        {
+            let doc = model.document().clone();
+            let mut back = (*doc.get_element(&vec![0, 0]).unwrap()).clone();
+            let Element::Rect(r) = &mut back else { panic!("a Rect") };
+            r.fill = Some(Fill::new(Color::Rgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }));
+            let new_doc = doc.replace_element(&vec![0, 0], back);
+            model.edit_document(new_doc);
+        }
+        Controller::apply_destructive_boolean(
+            &mut model, "merge", &BooleanOptions::default());
+        let kids = children_by_left_edge(&model);
+        assert_eq!(kids.len(), 2, "different fills never merge");
+        let (bx, _, bw, _) = polygon_point_bbox(&kids[0]);
+        assert!((bx - 0.0).abs() < 1e-9 && (bw - 5.0).abs() < 1e-9,
+                "the back survivor is the trimmed [0..5], got x={bx} w={bw}");
+        assert_eq!(kids[0].common().id.as_deref(), Some("id-back"),
+                   "a one-contributor merge group is 1 -> 1: its id lives");
+        assert_eq!(kids[0].common().name.as_deref(), Some("hull"));
+        assert_eq!(kids[1].common().id.as_deref(), Some("id-front"));
+        assert_eq!(kids[1].common().name.as_deref(), Some("keel"));
+    }
+
+    /// GUARD for the arm the merge fix shares its code with: §3.6 makes every
+    /// TRIM operand a 1 -> 1, so trim must keep preserving everything.
+    #[test]
+    fn boolean_trim_operands_keep_their_own_identity() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        Controller::apply_destructive_boolean(
+            &mut model, "trim", &BooleanOptions::default());
+        let kids = children_by_left_edge(&model);
+        assert_eq!(kids.len(), 2);
+        let (bx, _, bw, _) = polygon_point_bbox(&kids[0]);
+        assert!((bx - 0.0).abs() < 1e-9 && (bw - 5.0).abs() < 1e-9,
+                "the back operand is trimmed to [0..5], got x={bx} w={bw}");
+        assert_eq!(kids[0].common().id.as_deref(), Some("id-back"));
+        assert_eq!(kids[0].common().name.as_deref(), Some("hull"));
+        assert_eq!(kids[0].common().opacity, 0.25);
+        assert_eq!(kids[1].common().id.as_deref(), Some("id-front"));
+        assert_eq!(kids[1].common().name.as_deref(), Some("keel"));
+        assert_eq!(kids[1].common().opacity, 0.75);
     }
 
     // ── §3.4 WRAP: Make Compound Shape ────────────────────────────────────
