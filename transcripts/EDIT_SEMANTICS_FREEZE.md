@@ -459,6 +459,7 @@ Verified at `ff3e62aa`; rows added by the gauntlet are marked ▲.
 | Swift boolean rebuild, non-paint fields | `locked` written `false`; `name`/`id`/`toolOrigin`/`mask` dropped (source comment concedes it and banks it for a ruling) | **VIOLATION of §3.1** for the 1→1 survivor arms, **of §3.3** for the N→1 arms |
 | ▲ Boolean flatten, single-ring arm, both ports | emits `Polygon` — a kind with NO slot for `widthPoints`, `strokeBrush`, `strokeBrushOverrides`, or `fillRule` **[read: `PolygonElem`'s six fields]**; even the multi-ring Path arm writes them empty | **VIOLATION of §3.1 for the 1→1 survivor arms** — not an amendment; the first draft misfiled the gradient half of this as one. Per T1's representation term: emit the survivor's own kind or Path (the superset), never a lossy demotion |
 | Eyedropper apply | speaks to the sampled appearance family by spec | conforming in intent; its Swift path inherits the `withWidthPoints` violation |
+| ▲ Swift `withStrokeBrush` / `withStrokeBrushOverrides`, all four arms | four same-kind `Path`→`Path` rebuilds still open in `Element.swift` AFTER the class was declared closed there (`cb7e2a78`; see correction 8). Each restates all 18 `Path` fields by hand; the two `.line`/`.polyline` arms restate the Path that `promoteToPathForBrush` just produced, so the file rebuilds its own output. Two more of the same shape outside the "element-struct" scope of that commit's pass: `Stroke.withWidth`, `Stroke.withLinecap` (14 fields each) **[read; argument labels balanced-paren-parsed and diffed against the stored-property lists]** | field-COMPLETE at HEAD — **no live drop**, so NOT a violation today; an UNGATED SHAPE of the §3.1 class, and the only battery that reached them (`FillRulePreservationTests`) watched 1 field of 18. `BrushHelperTheseusTests.swift` now pins all four Path arms (9 tests, green on arrival, mutation-proved one site at a time). Repair to clone-then-mutate is still owed |
 
 ▲▲ **RE-CENSUS of the Swift container-literal row, 2026-07-27 — the class
 is OPEN, and here is exactly what remains.** Two waves have repaired 15 of
@@ -867,6 +868,54 @@ both layers are kept honest here.
    this round, the Document-level `withChildren` and the inline
    Layer/Group literal class, which belong to no copy-helper family and
    are gated by §4.1 instead.
+8. **A FALSE CLOSURE CLAIM IS IN PERMANENT COMMIT HISTORY.** Commit
+   `cb7e2a78` ("PRESERVE: Swift — the last same-kind rebuilds in
+   Element.swift go clone-then-mutate") states: *"After this commit pass
+   (1) reports ZERO same-kind rebuilds in Element.swift. The only
+   open-coded constructor sites left are the three CROSS-KIND
+   promotions — Rect→Polygon in moveControlPoints, Line→Path and
+   Polyline→Path in promoteToPathForBrush."* Both sentences are false, and
+   one enumeration refutes both. Git history cannot be rewritten in place,
+   so the correction lives here, and the §3.5 table carries the sites.
+
+   **What was actually still open**, at that commit and at this one: FOUR
+   same-kind `Path`→`Path` rebuilds — `withStrokeBrush`'s `.path` arm and
+   its `.line`/`.polyline` arm, and `withStrokeBrushOverrides`'s two
+   matching arms. That is SEVEN element-struct constructor sites in the
+   file, not three. The two promotion arms are the sharpest: each restates
+   all eighteen fields of the Path that `promoteToPathForBrush` produced one
+   line earlier. Two further sites of the same shape sit outside that
+   commit's stated "element-struct" scope but inside its sentence's scope:
+   `Stroke.withWidth` and `Stroke.withLinecap`, 14 fields each, same file.
+
+   **The method that found them**, so it can be refuted in turn: declaration
+   boundaries by brace matching, then every UpperCamel-identifier-followed-by-`(`
+   in the whole file treated as a candidate constructor call — not a
+   name-scoped grep, and not scoped to the functions the earlier pass chose
+   to look at — then each site read, and each site's argument labels
+   balanced-paren-parsed and diffed against the struct's stored-property
+   list. Its **blind spots**: scoped to `Element.swift`, because the refuted
+   sentence was; classifies by SHAPE, and all seven element-struct sites
+   were read but not every `Transform(` / `StrokeWidthPoint(` site; a
+   rebuild expressed through `Self(…)`, a type alias or a generic factory
+   would not match `Kind(`.
+
+   **The severity, stated no wider than measured:** all six sites are
+   field-COMPLETE today, so there is no live field drop and no §3.1
+   violation at HEAD — this is the ungated SHAPE, which is what the class
+   closure was about. `BrushHelperTheseusTests.swift` pins the four Path
+   arms as of `acdacd94` (green on arrival, mutation-proved one site at a
+   time, including the no-op over-reach that the `Mirror` walk is blind
+   to). The conversion to clone-then-mutate is still owed, and the two
+   `Stroke` sites are still unpinned.
+
+   **The pattern, not the instance.** `cb7e2a78` was the fourth
+   consecutive round to claim a class closed and be refuted by a later
+   lens's own enumeration. Its own header said the method was stated "so it
+   can be refuted"; the refutation is that the method's SCOPE was narrower
+   than the sentence built on it. A closure claim must state both what the
+   pass covered and what it could not see — and this correction's own
+   blind-spot paragraph is the shape that costs.
 
 ---
 

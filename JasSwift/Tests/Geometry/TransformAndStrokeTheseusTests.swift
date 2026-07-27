@@ -1,8 +1,16 @@
 import Testing
 @testable import JasLib
 
-/// EDIT_SEMANTICS_FREEZE.md §3.1, applied to the LAST open-coded same-kind
+/// EDIT_SEMANTICS_FREEZE.md §3.1, applied to three of the open-coded same-kind
 /// rebuilds in `Element.swift`.
+///
+/// NOT "the last" ones, though this header and cb7e2a78 both said so — see
+/// EDIT_SEMANTICS_FREEZE.md §6 correction 8. The pass behind that word looked
+/// only at the functions it had already named; a brace-matched pass over the
+/// whole file finds four same-kind `Path` rebuilds still open in
+/// `withStrokeBrush` / `withStrokeBrushOverrides`, plus two in
+/// `Stroke.withWidth` / `Stroke.withLinecap`. `BrushHelperTheseusTests.swift`
+/// pins the four Path arms; the two Stroke ones are still unpinned.
 ///
 /// A mechanical enumeration of the file (every element-struct initializer call
 /// site, argument labels vs the memberwise init's parameters) found three
