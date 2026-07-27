@@ -190,9 +190,11 @@ element iff **all** of:
 - The element carries `jas:tool-origin == "blob_brush"`.
 - The element has a solid (non-gradient, non-null) fill whose
   sRGB hex form **and** opacity exactly match `state.fill_color`.
-- The element's bounding box intersects the swept region's
-  bounding box (cheap precheck; supplemented by the polygon
-  intersection test in § Commit pipeline step 2).
+- The element's geometry has a non-empty polygon INTERSECTION
+  with the swept region. There is **no bounding-box precheck** in
+  either active port — both go straight to `boolean_intersect`.
+  (An earlier version of this line described a bbox precheck that
+  neither port has ever performed.)
 - (If `blob_brush_merge_only_with_selection` is on) the element
   is part of the current canvas selection.
 
@@ -233,8 +235,45 @@ set):
      `d`**. Stated as a law and implemented as a whole-struct
      copy, never as an enumeration: an earlier enumeration of
      this law omitted `transform`, and dropping `transform`
-     relocates the artwork. Fill needs no rule of its own —
-     § Merge condition already gated on fill equality.
+     relocates the artwork. **Fill keeps the SOURCE's value, and
+     the reason is the law, not the gate.** § Merge condition
+     matches on lowercased sRGB hex plus opacity, which is a
+     MATCH criterion and NOT an equality guarantee: `to_hex`
+     discards alpha and flattens the colour space, so a
+     translucent, a CMYK, or a near-rounding colour all compare
+     equal to the tool's. So painting into a translucent or CMYK
+     blob now PRESERVES that blob's colour where it previously
+     overwrote it with the tool's — a real behaviour change,
+     recorded here rather than implied.
+
+> **BANKED STONE — THE MERGE PIPELINE IS TRANSFORM-BLIND.** Found by the
+> cardinality round's verify lens, driven in both ports. The match test and the
+> union run on the element's RAW `d` (`path_to_polygon_set(&pe.d)` /
+> `pathToPolygonSet(pe.d)` — no matrix anywhere), while the swept region arrives
+> in DOCUMENT space. `common.transform` is applied to neither side.
+>
+> REPRO, identical in both ports: a blob whose local `d` is the square
+> (0,0)-(100,100) with `transform translate(200,200)` RENDERS at 200..300. Paint
+> a sweep at doc y=50, x=50..150 — some 150 units clear of it. Both ports report
+> `children=1`: **it merges with artwork the artist never touched**, and the new
+> ink is pushed through the matrix, landing near doc (250,250)..(355,300).
+>
+> REACHABLE: `compose_matrix_over_paths` (op_apply.rs) writes `common.transform`
+> for every selected element, so that is the Scale/Rotate/Shear path — draw a
+> blob, scale it, paint into it. Path MOVE is safe because it bakes into `d`
+> (`translate_element`), which is why the blind spot survived this long.
+>
+> NOT A REGRESSION, but a CHANGED FAILURE MODE: before the cardinality fix the
+> output carried `transform: None`, so the SOURCE jumped and the new ink landed
+> where painted; now the source stays put and the NEW INK is offset. Both are
+> wrong, and the root cause is the transform-blind match, not the preservation.
+> The fix is to carry `common.transform` into both sides of the match and union
+> — its own round, because it changes which elements match at all.
+>
+> HOW THE ROUND MISSED IT: the field-list-free tests graft the source's `d` onto
+> the output and never inspect `d`'s VALUE. That method is correct for attributes
+> and **structurally blind to geometry** — worth remembering wherever it is reused.
+
    - **`n >= 2`** — cardinality changed, so identity dies. The
      unified Path is a fresh element carrying the tool's own
      attributes, and it carries **no id**: no source's identity

@@ -4975,7 +4975,14 @@ fn blob_brush_commit_painting(
         // `fill` deliberately keeps the SOURCE's value rather than `new_fill`:
         // the match loop above ran blob_brush_fill_matches, so the source's
         // fill already equals the stroke's under that comparison (lowercased
-        // hex plus opacity within 1e-9). No paint rule is needed here.
+        // hex plus opacity within 1e-9) — which is a MATCH criterion, NOT an
+        // equality guarantee: `Color::to_hex` discards alpha and flattens the
+        // Color variant, so Rgb{a:0.5}, Cmyk, and any RGB within half a 1/255
+        // step all hex-compare equal to the state colour. Keeping the source's
+        // fill therefore follows from the cardinality law (a surviving element
+        // keeps its own attributes), NOT from the fills being identical. Real
+        // consequence: painting into a translucent or CMYK blob now preserves
+        // that blob's colour instead of overwriting it with the tool's.
         let src = match doc.get_element(&matches[0]) {
             Some(Element::Path(pe)) => pe.clone(),
             // Unreachable: the path was collected from this same `doc` above.

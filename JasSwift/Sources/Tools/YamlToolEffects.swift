@@ -2574,6 +2574,13 @@ private func blobBrushCommitPainting(
         guard case .path(let pe) = doc.getElement(matches[0]) else { return nil }
         return pe
     }()
+    // Unreachable: matches[0] was collected from this same `doc` above. Rust
+    // ABORTS the effect here rather than continuing (`_ => return`), so abort
+    // too — otherwise a nil source would fall through to the n >= 2 arm and
+    // COMMIT a fresh element, which is a different document than Rust produces
+    // from the same input. Agreeing on unreachable paths costs one line and
+    // stops a future refactor turning it into a silent divergence.
+    if matches.count == 1 && mergedSource == nil { return }
     let newElem: Path
     if let src = mergedSource {
         // 1 -> 1: one existing path in, one out with a rewritten `d`. It is the
@@ -2584,7 +2591,14 @@ private func blobBrushCommitPainting(
         // `fill` deliberately keeps the SOURCE's value rather than `newFill`:
         // the match loop above ran blobBrushFillMatches, so the source's fill
         // already equals the stroke's under that comparison (lowercased hex
-        // plus opacity within 1e-9). No paint rule is needed here.
+        // plus opacity within 1e-9) — a MATCH criterion, NOT an equality
+        // guarantee: `Color.toHex()` discards alpha and flattens the Color
+        // case, so a translucent, a CMYK, or a near-rounding colour all
+        // hex-compare equal. Keeping the source's fill follows from the
+        // cardinality law (a surviving element keeps its own attributes), not
+        // from the fills being identical. Consequence: painting into a
+        // translucent or CMYK blob preserves its colour rather than
+        // overwriting it with the tool's.
         newElem = pathWithCommands(src, newD, identity: .sameElement)
     } else {
         // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both mint
