@@ -3942,7 +3942,15 @@ public func flattenPathCommands(_ d: [PathCommand]) -> [(Double, Double)] {
             }
             cx = x; cy = y
         case .closePath:
-            pts.append(firstPt)
+            // A close before any point has been established is a NO-OP
+            // (S-4, ruled by JYH at the fleet council 2026-07-27: the
+            // artist never means a close-before-anything). Without this
+            // guard the arm appends the still-uninitialised `firstPt`,
+            // putting a phantom vertex at the document origin. Matches
+            // Rust's `flatten_path_commands`. `firstPt` tracks the CURRENT
+            // subpath start, so a close after a point still returns to the
+            // MoveTo -- the guard is on emptiness, nothing else.
+            if !pts.isEmpty { pts.append(firstPt) }
         default:
             if let ep = cmd.endpoint {
                 pts.append(ep)
