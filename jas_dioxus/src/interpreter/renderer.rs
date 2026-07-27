@@ -682,8 +682,9 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
         use crate::document::controller::Controller;
 
         // Mint `count` collision-free element ids against every id already in
-        // the document — layer forest plus master store, see
-        // `Document::element_ids` — through THE ONE MINT LOOP.
+        // the document — layer forest, the operands a live compound shape
+        // owns, and the master store; see `Document::element_ids` — through
+        // THE ONE MINT LOOP.
         fn mint(
             model: &crate::document::model::Model,
             count: usize,

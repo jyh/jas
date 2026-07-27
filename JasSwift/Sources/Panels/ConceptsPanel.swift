@@ -50,8 +50,9 @@ public enum ConceptsPanel {
     }
 
     /// Mint one collision-free element id against every id already in `doc`
-    /// (layer forest plus master store — `Document.elementIds`) through THE ONE
-    /// MINT LOOP. nil means the caller mints nothing and aborts.
+    /// (layer forest, the operands a live compound shape owns, and the master
+    /// store — `Document.elementIds`) through THE ONE MINT LOOP. nil means
+    /// the caller mints nothing and aborts.
     private static func mint(_ doc: Document) -> String? {
         var existing = doc.elementIds
         return mintUniqueIds(1, existing: &existing,
