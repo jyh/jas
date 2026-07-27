@@ -5508,8 +5508,16 @@ mod tests {
             ("common.tool_origin", s(a.common.tool_origin == before.common.tool_origin)),
             ("fill_gradient", s(a.fill_gradient == before.fill_gradient)),
             ("fill_rule", s(a.fill_rule == before.fill_rule)),
+            ("stroke.align", s(a.stroke.map(|x| x.align) == before.stroke.map(|x| x.align))),
             ("stroke.dash_align_anchors",
              s(a.stroke.map(|x| x.dash_align_anchors) == before.stroke.map(|x| x.dash_align_anchors))),
+            // The ACTIVE slice, not the fixed six-slot array: the two ports
+            // store the pattern differently (Rust [f64; 6] + dash_len, Swift a
+            // Vec), and `dash_array()` / `dashPattern` is the shape they share.
+            ("stroke.dash_pattern",
+             s(a.stroke.map(|x| x.dash_array().to_vec()) == before.stroke.map(|x| x.dash_array().to_vec()))),
+            ("stroke.miter_limit",
+             s(a.stroke.map(|x| x.miter_limit) == before.stroke.map(|x| x.miter_limit))),
             ("stroke_brush", s(a.stroke_brush == before.stroke_brush)),
             ("stroke_brush_overrides", s(a.stroke_brush_overrides == before.stroke_brush_overrides)),
             ("stroke_gradient", s(a.stroke_gradient == before.stroke_gradient)),

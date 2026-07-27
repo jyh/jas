@@ -3730,7 +3730,13 @@ private func survivalRow(_ before: Path, _ after: Path?) -> [(String, String)] {
         ("common.tool_origin", s(a.toolOrigin == before.toolOrigin)),
         ("fill_gradient", s(a.fillGradient == before.fillGradient)),
         ("fill_rule", s(a.fillRule == before.fillRule)),
+        ("stroke.align", s(a.stroke?.align == before.stroke?.align)),
         ("stroke.dash_align_anchors", s(a.stroke?.dashAlignAnchors == before.stroke?.dashAlignAnchors)),
+        // The ACTIVE slice, not the fixed six-slot array: the two ports store
+        // the pattern differently (Rust [f64; 6] + dash_len, Swift a Vec), and
+        // `dash_array()` / `dashPattern` is the shape they share.
+        ("stroke.dash_pattern", s(a.stroke?.dashPattern == before.stroke?.dashPattern)),
+        ("stroke.miter_limit", s(a.stroke?.miterLimit == before.stroke?.miterLimit)),
         ("stroke_brush", s(a.strokeBrush == before.strokeBrush)),
         ("stroke_brush_overrides", s(a.strokeBrushOverrides == before.strokeBrushOverrides)),
         ("stroke_gradient", s(a.strokeGradient == before.strokeGradient)),

@@ -84,7 +84,10 @@
     "common.tool_origin",
     "fill_gradient",
     "fill_rule",
+    "stroke.align",
     "stroke.dash_align_anchors",
+    "stroke.dash_pattern",
+    "stroke.miter_limit",
     "stroke_brush",
     "stroke_brush_overrides",
     "stroke_gradient",
@@ -98,7 +101,10 @@
       "common.tool_origin": "DROPPED",
       "fill_gradient": "DROPPED",
       "fill_rule": "PRESERVED",
+      "stroke.align": "DROPPED",
       "stroke.dash_align_anchors": "DROPPED",
+      "stroke.dash_pattern": "DROPPED",
+      "stroke.miter_limit": "DROPPED",
       "stroke_brush": "DROPPED",
       "stroke_brush_overrides": "DROPPED",
       "stroke_gradient": "DROPPED",
@@ -110,7 +116,10 @@
       "common.tool_origin": "DROPPED",
       "fill_gradient": "DROPPED",
       "fill_rule": "PRESERVED",
+      "stroke.align": "PRESERVED",
       "stroke.dash_align_anchors": "PRESERVED",
+      "stroke.dash_pattern": "PRESERVED",
+      "stroke.miter_limit": "PRESERVED",
       "stroke_brush": "DROPPED",
       "stroke_brush_overrides": "DROPPED",
       "stroke_gradient": "DROPPED",
@@ -122,7 +131,10 @@
       "common.tool_origin": "PRESERVED",
       "fill_gradient": "DROPPED",
       "fill_rule": "PRESERVED",
+      "stroke.align": "DROPPED",
       "stroke.dash_align_anchors": "PRESERVED",
+      "stroke.dash_pattern": "DROPPED",
+      "stroke.miter_limit": "DROPPED",
       "stroke_brush": "DROPPED",
       "stroke_brush_overrides": "DROPPED",
       "stroke_gradient": "DROPPED",
@@ -143,6 +155,7 @@
     "binary": {
       "_all_dropped": "REPRESENTABLE_BUT_DROPPED. The binary codec is msgpack over per-tag positional arrays; it has been EXTENDED TWICE by appending slots (the `symbols` master store at document index 3, tolerated via `arr.get(3)`; the live-element instance transform at TAG_LIVE slot 9). The mechanism is established and in use, so these seven fields are omitted, not unrepresentable. `pack_common` carries 6 of CommonProps' 9 fields (jas_dioxus/src/geometry/binary.rs, JasSwift/Sources/Geometry/Binary.swift); `mode`, `mask` and `tool_origin` are hard-coded to defaults on the unpack side. Live consequence: apply a brush or set a blend mode, relaunch, and the setting is gone.",
       "stroke.dash_align_anchors": "PRESERVED -- pack_stroke carries the full Stroke including dash pattern, dash length, align, miter limit and both arrowheads. The census row that grouped `dash_align_anchors` and `width_points` with the binary codec's losses is corrected here by measurement: they survive.",
+      "_stroke_all": "stroke.align, stroke.dash_pattern and stroke.miter_limit are PRESERVED for the same reason: pack_stroke is complete. The binary codec is the ONLY one of the three that carries the whole Stroke.",
       "width_points": "PRESERVED -- packed for Line and Path."
     },
     "svg": {
@@ -155,7 +168,10 @@
       "stroke_brush_overrides": "NO_COUNTERPART as things stand -- same shape as stroke_brush.",
       "width_points": "NO_COUNTERPART as things stand. The variable-width profile has no SVG stroke analogue; a faithful export means emitting the OUTLINE, which is a different document, or a jas: extension.",
       "fill_rule": "PRESERVED -- both ports write `fill-rule=\"evenodd\"` and both read it.",
-      "stroke.dash_align_anchors": "PRESERVED -- rides the dash attributes both ports already write."
+      "stroke.dash_align_anchors": "PRESERVED -- both ports write `data-jas-dash-align-anchors=\"true\"` and both read it.",
+      "stroke.dash_pattern": "REPRESENTABLE_BUT_DROPPED, in BOTH ports. `stroke-dasharray` is a STANDARD SVG presentation attribute and neither port writes it or reads it: grep for `dasharray` returns zero hits in jas_dioxus/src/geometry/svg.rs and JasSwift/Sources/Geometry/Svg.swift, and each reader hard-codes an empty pattern (Rust `dash_pattern: [0.0; 6], dash_len: 0`; Swift the same). Draw a dashed stroke, save as SVG, reopen: it comes back solid, in both ports. The flag that says HOW to lay the dashes out survives; the dashes do not.",
+      "stroke.miter_limit": "REPRESENTABLE_BUT_DROPPED, in BOTH ports. `stroke-miterlimit` is a STANDARD SVG presentation attribute; neither port writes it, and each reader hard-codes 10.0.",
+      "stroke.align": "NO_COUNTERPART as things stand. Inside/outside stroke alignment has no attribute in SVG 1.1 (`stroke-alignment` is an unshipped SVG 2 draft), so a faithful export needs a jas: extension -- which is a naming decision, not a repair, and is banked rather than guessed."
     }
   }
 }
