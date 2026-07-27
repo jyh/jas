@@ -1663,12 +1663,37 @@ private func remapFragmentLinearGradients(
                 fillRule: frag.fillRule)
 }
 
+/// Where the rebuilt Path's ring structure came from — T1's RING TERM
+/// (EDIT_SEMANTICS_FREEZE.md §1.1, third closure): *the fill rule belongs to
+/// whoever made the rings.* There is no default, deliberately, for the same
+/// reason `PathEditIdentity` has none: the compiler, not a reviewer, then
+/// enumerates every call site whenever this distinction changes — and this is
+/// exactly the distinction a hand audit got wrong at the blob-brush arms.
+private enum PathEditRings {
+    /// The edit rewrote `d` while PRESERVING the ring structure the artist's
+    /// own path had — anchor move, insert, smooth, eraser split. The declared
+    /// `fillRule` still describes those rings, so it is preserved.
+    case preserved
+    /// The edit RE-DERIVED the rings through the polygon-set layer (a boolean
+    /// union / subtract). The rings on the way out are machine-wound, so the
+    /// generated-geometry constant is stamped: a non-zero declaration over
+    /// machine-wound rings silently fills holes (`Boolean.swift` documents
+    /// why in its own words).
+    case regenerated
+}
+
 private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand],
-                              identity: PathEditIdentity) -> Path {
+                              identity: PathEditIdentity,
+                              rings: PathEditRings) -> Path {
     let newId: String?
     switch identity {
     case .sameElement: newId = pe.id
     case .splitFragment(let id): newId = id
+    }
+    let newFillRule: FillRule
+    switch rings {
+    case .preserved: newFillRule = pe.fillRule
+    case .regenerated: newFillRule = FillRule(boolResultFillRule)
     }
     return Path(d: cmds, fill: pe.fill, stroke: pe.stroke,
                 widthPoints: pe.widthPoints,
@@ -1684,7 +1709,7 @@ private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand],
                 toolOrigin: pe.toolOrigin,
                 name: pe.name,
                 id: newId,
-                fillRule: pe.fillRule)
+                fillRule: newFillRule)
 }
 
 /// Implementation of doc.path.delete_anchor_near.
@@ -1699,7 +1724,7 @@ private func pathDeleteAnchorNear(
     // runEffects owner txn when one is open). Mirrors Rust's doc.snapshot ->
     // begin_txn pattern; replaces the legacy snapshot() + bare write.
     if let newCmds = deleteAnchorFromPath(pe.d, anchorIdx) {
-        let newPe = pathWithCommands(pe, newCmds, identity: .sameElement)
+        let newPe = pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved)
         var doc = model.document.replaceElement(path, with: .path(newPe))
         // Keep the path in the selection (matches native Delete-anchor).
         var sel = doc.selection
@@ -1744,7 +1769,7 @@ private func pathInsertAnchorOnSegmentNear(
     guard let hit = best, hit.3 <= radius else { return }
     guard case .path(let pe) = model.document.getElement(hit.0) else { return }
     let ins = insertPointInPath(pe.d, hit.1, hit.2)
-    let newPe = pathWithCommands(pe, ins.commands, identity: .sameElement)
+    let newPe = pathWithCommands(pe, ins.commands, identity: .sameElement, rings: .preserved)
     // Undoable edit (editDocument self-brackets; joins the owner txn if open).
     model.editDocument(model.document.replaceElement(hit.0, with: .path(newPe)))
 }
@@ -1854,7 +1879,7 @@ private func pathEraseAtRect(
             let severed = results.count > 1
             for (cmds, identity) in zip(results, identities) {
                 let open = cmds.filter { if case .closePath = $0 { return false }; return true }
-                var frag = pathWithCommands(pe, open, identity: identity)
+                var frag = pathWithCommands(pe, open, identity: identity, rings: .preserved)
                 if severed {
                     // LINEAR GRADIENTS ARE REMAPPED on the severing arm (S-2,
                     // ruled 2026-07-26). A gradient carries no position -- a
@@ -2050,14 +2075,14 @@ private func pathCommitAnchorEdit(
     case "pressed_smooth":
         let newCmds = convertSmoothToCorner(pe.d, anchorIdx: anchorIdx)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved))))
     case "pressed_corner":
         let moved = hypot(targetX - originX, targetY - originY)
         if moved <= 1.0 { return }
         let newCmds = convertCornerToSmooth(
             pe.d, anchorIdx: anchorIdx, hx: targetX, hy: targetY)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved))))
     case "pressed_handle":
         let handleType = (store.getTool("anchor_point", "handle_type") as? String) ?? ""
         let dx = targetX - originX, dy = targetY - originY
@@ -2066,7 +2091,7 @@ private func pathCommitAnchorEdit(
             pe.d, anchorIdx: anchorIdx,
             handleType: handleType, dx: dx, dy: dy)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved))))
     default: break
     }
 }
@@ -2282,7 +2307,7 @@ private func paintbrushEditCommit(
     newCmds.append(contentsOf: targetPe.d[(c1 + 1)...])
 
     let newDoc = model.document.replaceElement(
-        targetPath, with: .path(pathWithCommands(targetPe, newCmds, identity: .sameElement)))
+        targetPath, with: .path(pathWithCommands(targetPe, newCmds, identity: .sameElement, rings: .preserved)))
     model.editDocument(newDoc)
 }
 
@@ -2331,7 +2356,7 @@ private func pathSmoothAtCursor(
         newCmds.append(contentsOf: pe.d[(lastCmd + 1)...])
         guard newCmds.count < pe.d.count else { continue }
         newDoc = newDoc.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement)))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved)))
         changed = true
     }
     if changed {
@@ -2740,8 +2765,14 @@ private func blobBrushCommitPainting(
         } else {
             local = unified
         }
+        // `rings: .regenerated` — T1's RING TERM. `local` came out of
+        // `booleanUnion` above, so the rings this arm writes are MACHINE-WOUND,
+        // not the artist's, and `fillRule` is therefore a field this edit
+        // SPEAKS TO. Carrying the source's rule here is OVER-preservation,
+        // which the law forbids in the same breath as under-preservation.
+        // Everything else still travels, because the arm is 1 -> 1.
         newElem = pathWithCommands(src, polygonSetToPath(local),
-                                   identity: .sameElement)
+                                   identity: .sameElement, rings: .regenerated)
     } else {
         // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both build
         // a fresh element carrying the tool's own attributes. For the merge
@@ -2827,9 +2858,13 @@ private func blobBrushCommitPainting(
             mask: mask,
             toolOrigin: "blob_brush",
             id: freshId,
-            // Rust's blob_brush_commit_painting stamps NonZero on the
-            // unified region; parity, not preference.
-            fillRule: .nonzero
+            // T1's RING TERM, as on the 1 -> 1 arm above: `unified` is a
+            // machine-wound polygon set (the swept dabs on the 0 -> 1 arm, the
+            // union with the sources on the N -> 1 arm), so the
+            // generated-rings constant is stamped. This used to be a literal
+            // `.nonzero` — "parity, not preference", as the comment here
+            // conceded — which fills exactly the holes `booleanUnion` can wind.
+            fillRule: FillRule(boolResultFillRule)
         )
     }
 
@@ -2885,20 +2920,20 @@ private func blobBrushCommitErasing(
             if newD.isEmpty {
                 newDoc = newDoc.deleteElement(path)
             } else {
-                let newPe = Path(
-                    d: newD,
-                    fill: pe.fill, stroke: pe.stroke,
-                    widthPoints: pe.widthPoints,
-                    opacity: pe.opacity, transform: pe.transform,
-                    locked: pe.locked, visibility: pe.visibility,
-                    blendMode: pe.blendMode, mask: pe.mask,
-                    fillGradient: pe.fillGradient,
-                    strokeGradient: pe.strokeGradient,
-                    strokeBrush: pe.strokeBrush,
-                    strokeBrushOverrides: pe.strokeBrushOverrides,
-                    toolOrigin: pe.toolOrigin,
-                    name: pe.name, id: pe.id,
-                    fillRule: pe.fillRule)
+                // A surviving remainder is 1 -> 1, so everything but the
+                // geometry travels — routed through `pathWithCommands` rather
+                // than a second hand-written field list, which is how this
+                // site used to be spelled and is exactly the omission
+                // pathology §3.1 exists to stop.
+                //
+                // `rings: .regenerated` — T1's RING TERM, and this is the arm
+                // where the failure mode bites hardest: `booleanSubtract` can
+                // punch a HOLE ring into the source, and a carried `.nonzero`
+                // declaration over machine-wound rings fills exactly that hole
+                // back in — the artist erases a doughnut and sees a disc.
+                let newPe = pathWithCommands(pe, newD,
+                                             identity: .sameElement,
+                                             rings: .regenerated)
                 newDoc = newDoc.replaceElement(path, with: .path(newPe))
             }
         }

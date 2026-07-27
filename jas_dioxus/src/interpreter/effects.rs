@@ -5124,7 +5124,21 @@ fn blob_brush_commit_painting(
             },
             None => unified.clone(),
         };
-        Element::Path(PathElem { d: polygon_set_to_path(&local), ..src })
+        // T1'S RING TERM (EDIT_SEMANTICS_FREEZE.md §1.1, third closure): *the
+        // fill rule belongs to whoever made the rings.* `local` came out of
+        // `boolean_union` above, so the rings this arm writes are
+        // MACHINE-WOUND, not the artist's — and `boolean.rs` documents in its
+        // own words why a non-zero declaration over machine-wound rings
+        // silently fills holes. `fill_rule` is therefore a field this edit
+        // SPEAKS TO, and `..src` carrying the source's rule is
+        // OVER-preservation, which the law forbids in the same breath as
+        // under-preservation. Everything else still travels by struct update:
+        // the arm is 1 -> 1, so the Theseus clause governs the rest.
+        Element::Path(PathElem {
+            d: polygon_set_to_path(&local),
+            fill_rule: crate::algorithms::boolean::RESULT_FILL_RULE.into(),
+            ..src
+        })
     } else {
         // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both build
         // a fresh element carrying the tool's own attributes. For the merge
@@ -5224,7 +5238,12 @@ fn blob_brush_commit_painting(
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
-            fill_rule: crate::geometry::element::FillRule::NonZero,
+            // T1's RING TERM, as on the 1 -> 1 arm above: `unified` is a
+            // machine-wound polygon set (the swept dabs on the 0 -> 1 arm, the
+            // union with the sources on the N -> 1 arm), so the generated-rings
+            // constant is stamped. This used to be a literal `NonZero`, which
+            // fills exactly the holes `boolean_union` can wind.
+            fill_rule: crate::algorithms::boolean::RESULT_FILL_RULE.into(),
         })
     };
 
@@ -5306,8 +5325,17 @@ fn blob_brush_commit_erasing(
             if new_d.is_empty() {
                 new_doc = new_doc.delete_element(&path);
             } else {
+                // T1's RING TERM again, and this is the arm where the failure
+                // mode bites hardest: `boolean_subtract` can punch a HOLE ring
+                // into the source, and a carried `NonZero` declaration over
+                // machine-wound rings fills exactly that hole back in — the
+                // artist erases a doughnut and sees a disc. Everything else
+                // travels by struct update; the arm is 1 -> 1 for a surviving
+                // element, so the Theseus clause governs the rest.
                 let new_elem = Element::Path(PathElem {
                     d: new_d,
+                    fill_rule: crate::algorithms::boolean::RESULT_FILL_RULE
+                        .into(),
                     ..pe.clone()
                 });
                 new_doc = new_doc.replace_element(&path, new_elem);
@@ -10162,6 +10190,40 @@ mod tests {
         );
     }
 
+    /// The law at a RING-REGENERATING 1 -> 1 site (T1's third closure): `d`
+    /// AND `fill_rule` are both spoken to, everything else is preserved. The
+    /// exemption is not a loosening — the rule is asserted positively against
+    /// `RESULT_FILL_RULE`, so a site that silently kept the source's rule
+    /// still goes red.
+    ///
+    /// Kept separate from `assert_only_d_changed` on purpose: the ordinary
+    /// path edits (anchor move, insert, eraser split) preserve ring structure
+    /// and therefore preserve the rule, and must keep failing if they ever
+    /// stamp it.
+    fn assert_only_d_and_ring_rule_changed(
+        src: &PathElem, out: &PathElem, label: &str,
+    ) {
+        assert_ne!(
+            out.d, src.d,
+            "{label}: `d` is unchanged — the fixture did not exercise an edit"
+        );
+        assert_eq!(
+            out.fill_rule,
+            crate::geometry::element::FillRule::from(
+                crate::algorithms::boolean::RESULT_FILL_RULE),
+            "{label}: rings regenerated through the polygon-set layer wear \
+             the generated-geometry rule"
+        );
+        let grafted = PathElem {
+            d: src.d.clone(), fill_rule: src.fill_rule, ..out.clone()
+        };
+        assert_eq!(
+            &grafted, src,
+            "{label}: a field outside {{d, fill_rule}} changed (Ship of \
+             Theseus law)"
+        );
+    }
+
     fn model_with_theseus(d: Vec<PathCommand>) -> (Model, PathElem) {
         use crate::document::document::Document;
         use std::rc::Rc;
@@ -10643,7 +10705,13 @@ mod tests {
             model.document().layers[0].children().map_or(0, |c| c.len()), 1,
             "the sweep overlapped the one existing blob, so it merged"
         );
-        assert_only_d_changed(
+        // Ring-regenerating: the union rewrote `d` AND re-derived the ring
+        // structure, so `fill_rule` is spoken to as well (T1's third closure).
+        // The theseus fixture happens to declare EvenOdd, which is also the
+        // generated-rings constant, so this vector cannot separate carrying
+        // from stamping — `blob_merge_one_match_stamps_the_generated_rings_fill_rule`
+        // is the vector that does, on a NonZero source.
+        assert_only_d_and_ring_rule_changed(
             &src, &path_at(&model, &[0, 0]),
             "blob_brush.commit_painting (exactly one match)");
     }
@@ -10749,7 +10817,10 @@ mod tests {
             model.document().layers[0].children().map_or(0, |c| c.len()), 1,
             "the erased fragment was merged into, not left beside a new blob"
         );
-        assert_only_d_changed(
+        // The final step is the blob merge's 1 -> 1 arm, which regenerates
+        // rings — see the note on the vector above for why the fixture's own
+        // EvenOdd cannot separate the two behaviours here.
+        assert_only_d_and_ring_rule_changed(
             &src, &path_at(&model, &[0, 0]), "erase then blob_brush merge");
     }
 
@@ -11000,5 +11071,179 @@ mod tests {
             (50.0, 130.0, 120.0));
         assert_eq!(out.common.transform, None,
             "a unanimous transform must NOT ride onto the merge");
+    }
+
+    // ── T1's RING TERM: the fill rule belongs to whoever made the rings ──
+    //
+    // EDIT_SEMANTICS_FREEZE.md §1.1 T1, third closure: "An edit that
+    // re-derives an element's ring structure through the polygon-set layer
+    // (every boolean-result emitter, both blob-brush arms) stamps the
+    // generated-geometry constant (RESULT_FILL_RULE)". Every blob-brush commit
+    // arm builds its `d` from a polygon set — `boolean_union` on the paint
+    // arms, `boolean_subtract` on the erase arm — so the rings on the way out
+    // are MACHINE-WOUND, and boolean.rs documents in its own words why a
+    // non-zero declaration over machine-wound rings silently fills holes.
+    //
+    // The subtlety at the 1-match arm: it is a 1 -> 1 edit, so the Theseus
+    // clause preserves everything else — but the rings were REGENERATED, so
+    // `fill_rule` is precisely a field the edit speaks to. Carrying the
+    // source's rule there is OVER-preservation, which the law forbids in the
+    // same breath as under-preservation.
+
+    /// `spans` are local `x0..x1` boxes at y 40..60, each a blob-brush source
+    /// declaring `rule`; the store is seeded for a commit whose fill matches.
+    /// An empty `spans` gives the 0 -> 1 (brand-new blob) arm.
+    fn blob_doc_with_rule(
+        spans: &[(f64, f64)], rule: crate::geometry::element::FillRule,
+    ) -> (Model, StateStore) {
+        use std::rc::Rc;
+        let red = Fill::new(Color::from_hex("#ff0000").unwrap());
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            for (x0, x1) in spans {
+                children.push(Rc::new(Element::Path(PathElem {
+                    d: vec![
+                        PathCommand::MoveTo { x: *x0, y: 40.0 },
+                        PathCommand::LineTo { x: *x1, y: 40.0 },
+                        PathCommand::LineTo { x: *x1, y: 60.0 },
+                        PathCommand::LineTo { x: *x0, y: 60.0 },
+                        PathCommand::ClosePath,
+                    ],
+                    fill: Some(red),
+                    stroke: None,
+                    width_points: Vec::new(),
+                    common: CommonProps {
+                        tool_origin: Some("blob_brush".to_string()),
+                        id: Some(format!("src{x0}")),
+                        ..CommonProps::default()
+                    },
+                    fill_gradient: None,
+                    stroke_gradient: None,
+                    stroke_brush: None,
+                    stroke_brush_overrides: None,
+                    fill_rule: rule,
+                })));
+            }
+        }
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!(red.color.to_hex()));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+        (Model::new(doc, None), store)
+    }
+
+    /// The 1 -> 1 arm regenerates its rings by union, so it stamps
+    /// `RESULT_FILL_RULE` instead of carrying the source's `NonZero`.
+    ///
+    /// Separation from the pre-fix behaviour: the source declares `NonZero`
+    /// and the arm was `..src`, so this returned `NonZero`. The declared value
+    /// is deliberately the OPPOSITE of the constant — a source already at
+    /// `EvenOdd` (as the `theseus_path` fixture is) could not tell carrying
+    /// from stamping.
+    #[test]
+    fn blob_merge_one_match_stamps_the_generated_rings_fill_rule() {
+        use crate::geometry::element::FillRule;
+        let (mut model, mut store) =
+            blob_doc_with_rule(&[(0.0, 100.0)], FillRule::NonZero);
+        let buffer = "ring_rule_one_match";
+        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the sweep overlapped the one source, so it took the 1 -> 1 arm");
+        let out = path_at(&model, &[0, 0]);
+        assert_eq!(out.common.id.as_deref(), Some("src0"),
+            "the 1 -> 1 arm is still a survivor — its identity must not die");
+        assert_eq!(
+            out.fill_rule,
+            FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE),
+            "union-generated rings wear the generated-geometry rule, not the \
+             source's");
+    }
+
+    /// The N -> 1 merge arm stamps `RESULT_FILL_RULE` too — it must not
+    /// hardcode `NonZero` (the Swift twin's own comment called that "parity,
+    /// not preference").
+    ///
+    /// Separation: the arm wrote a literal `FillRule::NonZero`, which is the
+    /// opposite of the constant.
+    #[test]
+    fn blob_merge_of_two_sources_stamps_the_generated_rings_fill_rule() {
+        use crate::geometry::element::FillRule;
+        let out = merge_two_blobs(CommonProps::default(), CommonProps::default(),
+                                  "ring_rule_merge", (10.0, 90.0, 50.0));
+        assert_eq!(
+            out.fill_rule,
+            FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE),
+            "a merge's rings come out of boolean_union, so they wear the \
+             generated-geometry rule");
+    }
+
+    /// The 0 -> 1 arm — a brand-new blob — also builds its `d` from a unioned
+    /// polygon set (the swept dabs), so it stamps the constant as well.
+    ///
+    /// Separation: the same literal `FillRule::NonZero` served this arm.
+    #[test]
+    fn blob_new_blob_stamps_the_generated_rings_fill_rule() {
+        use crate::geometry::element::FillRule;
+        let (mut model, mut store) = blob_doc_with_rule(&[], FillRule::NonZero);
+        let buffer = "ring_rule_new_blob";
+        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "an empty document plus a sweep commits exactly one new blob");
+        assert_eq!(
+            path_at(&model, &[0, 0]).fill_rule,
+            FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE),
+            "the swept region is a machine-wound polygon set like any other");
+    }
+
+    /// The ERASE arm is the third ring-regenerating blob site, and the one
+    /// where the F4 corruption is easiest to reach: `boolean_subtract` can
+    /// punch a HOLE ring into a source, and a `NonZero` declaration over
+    /// machine-wound rings fills exactly that hole back in. So it stamps the
+    /// constant rather than carrying `..pe.clone()`'s rule.
+    ///
+    /// Separation: the source declares `NonZero` and the arm was `..pe.clone()`,
+    /// so this returned `NonZero`.
+    #[test]
+    fn blob_erase_stamps_the_generated_rings_fill_rule() {
+        use crate::geometry::element::FillRule;
+        let (mut model, mut store) =
+            blob_doc_with_rule(&[(0.0, 100.0)], FillRule::NonZero);
+        let buffer = "ring_rule_erase";
+        // A short sweep well inside the source's y 40..60 band, so the
+        // subtract bites a notch rather than clearing the element away.
+        seed_blob_brush_sweep_in(buffer, 40.0, 60.0, 50.0);
+        run_effects(
+            &[serde_json::json!({
+                "doc.blob_brush.commit_erasing": {
+                    "buffer": buffer, "fidelity_epsilon": "5.0"
+                }
+            })],
+            &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the notch leaves a non-empty remainder, so the element survives");
+        let out = path_at(&model, &[0, 0]);
+        assert_ne!(out.d.len(), 5,
+            "the erase actually bit into `d` — otherwise the rule assertion \
+             below would be watching an unedited element");
+        assert_eq!(out.common.id.as_deref(), Some("src0"),
+            "erase is 1 -> 1 for a surviving element — its identity lives");
+        assert_eq!(
+            out.fill_rule,
+            FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE),
+            "subtract-generated rings wear the generated-geometry rule");
     }
 }

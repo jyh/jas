@@ -117,6 +117,27 @@ private func expectOnlyDChanged(
     }
 }
 
+/// The law at a RING-REGENERATING 1 -> 1 site (EDIT_SEMANTICS_FREEZE.md §1.1
+/// T1, third closure): `d` AND `fillRule` are both spoken to, everything else
+/// is preserved. The exemption is not a loosening — the rule is asserted
+/// positively against `boolResultFillRule`, so a site that silently kept the
+/// source's rule still goes red.
+///
+/// Kept separate from `expectOnlyDChanged` on purpose: the ordinary path edits
+/// (anchor move, insert, eraser split) preserve ring structure and therefore
+/// preserve the rule, and must keep failing if they ever stamp it. Mirrors
+/// Rust `assert_only_d_and_ring_rule_changed`.
+private func expectOnlyDAndRingRuleChanged(
+    _ src: Path, _ out: Path, _ label: String,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    #expect(out.fillRule == FillRule(boolResultFillRule),
+            "\(label): rings regenerated through the polygon-set layer wear the generated-geometry rule",
+            sourceLocation: sourceLocation)
+    expectOnlyDChanged(src, out, label, alsoExempt: ["fillRule"],
+                       sourceLocation: sourceLocation)
+}
+
 private func modelWithTheseus(_ d: [PathCommand]) -> (Model, Path) {
     let src = theseusPath(d)
     return (Model(document: Document(
@@ -535,8 +556,15 @@ private let theseusSquare: [PathCommand] = [
     runBlobBrushCommitPainting(model, store, buffer: buffer)
     #expect(model.document.layers[0].children.count == 1,
             "the sweep overlapped the one existing blob, so it merged")
-    expectOnlyDChanged(src, try #require(pathAt(model, [0, 0])),
-                       "doc.blob_brush.commit_painting (exactly one match)")
+    // Ring-regenerating: the union rewrote `d` AND re-derived the ring
+    // structure, so `fillRule` is spoken to as well (T1's third closure). The
+    // theseus fixture happens to declare `.evenodd`, which is also the
+    // generated-rings constant, so this vector cannot separate carrying from
+    // stamping — `blobMergeOneMatchStampsTheGeneratedRingsFillRule` is the
+    // vector that does, on a `.nonzero` source.
+    expectOnlyDAndRingRuleChanged(
+        src, try #require(pathAt(model, [0, 0])),
+        "doc.blob_brush.commit_painting (exactly one match)")
 }
 
 /// TWO matches change cardinality, so identity DIES: the merged element
@@ -652,8 +680,11 @@ private let theseusSquare: [PathCommand] = [
     runBlobBrushCommitPainting(model, store, buffer: buffer)
     #expect(model.document.layers[0].children.count == 1,
             "the erased fragment was merged into, not left beside a new blob")
-    expectOnlyDChanged(src, try #require(pathAt(model, [0, 0])),
-                       "erase then blob_brush merge")
+    // The final step is the blob merge's 1 -> 1 arm, which regenerates rings —
+    // see the note on the vector above for why the fixture's own `.evenodd`
+    // cannot separate the two behaviours here.
+    expectOnlyDAndRingRuleChanged(src, try #require(pathAt(model, [0, 0])),
+                                  "erase then blob_brush merge")
 }
 
 // MARK: - Unanimous attributes on an N -> 1 merge
@@ -776,4 +807,113 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
                                          sweep: (50, 130, 120)))
     #expect(out.transform == nil,
             "a unanimous transform must NOT ride onto the merge")
+}
+
+// MARK: - T1's RING TERM: the fill rule belongs to whoever made the rings
+//
+// EDIT_SEMANTICS_FREEZE.md §1.1 T1, third closure: an edit that re-derives an
+// element's ring structure through the polygon-set layer stamps the
+// generated-geometry constant (`boolResultFillRule`). Every blob-brush commit
+// arm builds its `d` from a polygon set — `booleanUnion` on the paint arms,
+// `booleanSubtract` on the erase arm — so its rings are MACHINE-WOUND, and a
+// non-zero declaration over machine-wound rings silently fills holes.
+//
+// The subtlety at the 1-match arm: it is a 1 -> 1 edit, so Theseus preserves
+// everything else — but the rings were REGENERATED, so `fillRule` is precisely
+// a field the edit speaks to. Carrying the source's rule there is
+// OVER-preservation, which the law forbids just as firmly.
+
+/// `spans` are local `x0..x1` boxes at y 40..60, each a blob-brush source
+/// declaring `rule`; the store is seeded for a commit whose fill matches. An
+/// empty `spans` gives the 0 -> 1 (brand-new blob) arm. Mirrors Rust
+/// `blob_doc_with_rule`.
+private func blobDocWithRule(_ spans: [(Double, Double)],
+                             _ rule: FillRule) -> (Model, StateStore) {
+    let red = Fill(color: Color.fromHex("#ff0000")!)
+    let children: [Element] = spans.map { (x0, x1) in
+        .path(Path(d: [.moveTo(x0, 40), .lineTo(x1, 40),
+                       .lineTo(x1, 60), .lineTo(x0, 60), .closePath],
+                   fill: red, toolOrigin: "blob_brush",
+                   id: "src\(x0)", fillRule: rule))
+    }
+    let model = Model(document: Document(
+        layers: [Layer(children: children)], selectedLayer: 0, selection: []))
+    let store = StateStore()
+    store.set("fill_color", red.color.toHex())
+    store.set("blob_brush_size", 10.0)
+    store.set("blob_brush_angle", 0.0)
+    store.set("blob_brush_roundness", 100.0)
+    return (model, store)
+}
+
+/// The 1 -> 1 arm regenerates its rings by union, so it stamps
+/// `boolResultFillRule` instead of carrying the source's `.nonzero`.
+///
+/// Separation from the pre-fix behaviour: the source declares `.nonzero` and
+/// the arm forwarded `pe.fillRule`, so this returned `.nonzero`. The declared
+/// value is deliberately the OPPOSITE of the constant — a source already at
+/// `.evenodd` (as `theseusPath` is) could not tell carrying from stamping.
+@Test func blobMergeOneMatchStampsTheGeneratedRingsFillRule() throws {
+    let (model, store) = blobDocWithRule([(0, 100)], .nonzero)
+    let buffer = "ring_rule_one_match_swift"
+    seedBlobBrushSweepIn(buffer, 10, 90, 50)
+    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    #expect(model.document.layers[0].children.count == 1,
+            "the sweep overlapped the one source, so it took the 1 -> 1 arm")
+    let out = try #require(pathAt(model, [0, 0]))
+    #expect(out.id == "src0.0",
+            "the 1 -> 1 arm is still a survivor — its identity must not die")
+    #expect(out.fillRule == FillRule(boolResultFillRule),
+            "union-generated rings wear the generated-geometry rule, not the source's")
+}
+
+/// The N -> 1 merge arm stamps the constant too — it must not hardcode
+/// `.nonzero` ("parity, not preference", as the arm's own comment conceded).
+@Test func blobMergeOfTwoSourcesStampsTheGeneratedRingsFillRule() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(), BlobAttrs(),
+                                         buffer: "ring_rule_merge_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.fillRule == FillRule(boolResultFillRule),
+            "a merge's rings come out of booleanUnion, so they wear the generated-geometry rule")
+}
+
+/// The 0 -> 1 arm — a brand-new blob — also builds its `d` from a unioned
+/// polygon set (the swept dabs), so it stamps the constant as well.
+@Test func blobNewBlobStampsTheGeneratedRingsFillRule() throws {
+    let (model, store) = blobDocWithRule([], .nonzero)
+    let buffer = "ring_rule_new_blob_swift"
+    seedBlobBrushSweepIn(buffer, 10, 90, 50)
+    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    #expect(model.document.layers[0].children.count == 1,
+            "an empty document plus a sweep commits exactly one new blob")
+    let out = try #require(pathAt(model, [0, 0]))
+    #expect(out.fillRule == FillRule(boolResultFillRule),
+            "the swept region is a machine-wound polygon set like any other")
+}
+
+/// The ERASE arm is the third ring-regenerating blob site, and the one where
+/// the corruption is easiest to reach: `booleanSubtract` can punch a HOLE ring
+/// into a source, and a carried `.nonzero` declaration over machine-wound
+/// rings fills exactly that hole back in.
+@Test func blobEraseStampsTheGeneratedRingsFillRule() throws {
+    let (model, store) = blobDocWithRule([(0, 100)], .nonzero)
+    let buffer = "ring_rule_erase_swift"
+    // A short sweep well inside the source's y 40..60 band, so the subtract
+    // bites a notch rather than clearing the element away.
+    seedBlobBrushSweepIn(buffer, 40, 60, 50)
+    runEffects([["doc.blob_brush.commit_erasing": [
+                    "buffer": buffer, "fidelity_epsilon": "5.0",
+                ]]],
+               ctx: [:], store: store,
+               platformEffects: buildYamlToolEffects(model: model))
+    pointBuffersClear(buffer)
+    #expect(model.document.layers[0].children.count == 1,
+            "the notch leaves a non-empty remainder, so the element survives")
+    let out = try #require(pathAt(model, [0, 0]))
+    #expect(out.d.count != 5,
+            "the erase actually bit into `d` — otherwise the rule assertion below would be watching an unedited element")
+    #expect(out.id == "src0.0",
+            "erase is 1 -> 1 for a surviving element — its identity lives")
+    #expect(out.fillRule == FillRule(boolResultFillRule),
+            "subtract-generated rings wear the generated-geometry rule")
 }
