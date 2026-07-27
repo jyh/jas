@@ -449,8 +449,8 @@ Verified at `ff3e62aa`; rows added by the gauntlet are marked ▲.
 | Rust `path_erase_at_rect`, fields | `..path_elem.clone()` + fresh ids on severing | conforming on FIELDS; placement is in the transform-blind class (§3.2) |
 | Blob commit, 1-match arm, both ports, fields | `..src` / `pathWithCommands(src, …, .sameElement)` | conforming on fields — including paint: the hex match gate does not overwrite a translucent/CMYK source (attacked and held, §7.3) |
 | ▲ Blob commit, BOTH arms, `fillRule` | 1-match arm carries the source's rule onto union-generated rings; N→1 arm stamps `NonZero` (`effects.rs:5123` **[read]**; Swift twin's own comment: "parity, not preference") | **VIOLATION of T1's ring term and of the ratified generated-rings ruling — a LIVE DIVERGENCE from ratified law (adjudication tier 4: outranks feature work).** Both arms stamp `RESULT_FILL_RULE`/`boolResultFillRule` |
-| Swift `withMask`, `.path` arm | drops 7: `fillGradient`, `strokeGradient`, `strokeBrush`, `strokeBrushOverrides`, `toolOrigin`, `name`, `id`; the `.line` arm additionally drops `strokeGradient` (gauntlet understatement-correction); only the Layer arm passes `name:`/`id:` | **VIOLATION of §3.1.** Masking a cited path destroys its identity on a 1→1 edit. Rust's twins (clone + `common_mut().mask`) conform — a live one-sided divergence |
-| Swift `withWidthPoints`, `.path` arm | drops 9 (the 7 plus `blendMode`, `mask`); call sites `Controller.swift` (panel) and `Eyedropper.swift` | **VIOLATION of §3.1.** Rust's `with_width_points` is `..e.clone()` on both arms — conforms |
+| Swift `withMask`, `.path` arm | drops 7: `fillGradient`, `strokeGradient`, `strokeBrush`, `strokeBrushOverrides`, `toolOrigin`, `name`, `id`; the `.line` arm additionally drops `strokeGradient` (gauntlet understatement-correction); only the Layer arm passes `name:`/`id:` | **VIOLATION of §3.1.** Masking a cited path destroys its identity on a 1→1 edit. Rust's twins (clone + `common_mut().mask`) conform — a live one-sided divergence. **REPAIRED and re-verified 2026-07-27:** every one of the twelve arms is now `case .path(var v): v.mask = mask; return .path(v)` — clone-then-mutate, so omission is no longer expressible; the `.live` arm delegates to `LiveVariant.withMask`, which was already clone-then-mutate **[read at `Element.swift`, this commit]** |
+| Swift `withWidthPoints`, `.path` arm | drops 9 (the 7 plus `blendMode`, `mask`); call sites `Controller.swift` (panel) and `Eyedropper.swift` | **VIOLATION of §3.1.** Rust's `with_width_points` is `..e.clone()` on both arms — conforms. **REPAIRED and re-verified 2026-07-27:** both arms are clone-then-mutate **[read at `Element.swift`, this commit]** |
 | ▲ Rust `move_control_points`, Rect→Polygon arm | hard-codes `fill_gradient: None, stroke_gradient: None` **[read]**; the Swift twin forwards both — the divergence runs Rust-ward here | **VIOLATION of §3.1** on a 1→1 kind change: a gradient-filled rounded rect, corner-dragged, silently loses both gradients **[driven]**. The only non-spread `fill_gradient: None` in production element.rs (gauntlet brace-matched enumeration; the other is the Line→Path promotion, where a Line genuinely has none) |
 | ▲ Swift `Document` private `withChildren` (replace/delete/insertAfter paths) | rebuilds Layer/Group from 4 fields; destroys the container's `id`, `mask`, `blendMode`, `visibility`, `isolatedBlending`, `knockoutGroup`, and Group `name` on EVERY nested edit **[read + driven, both ports probed — Rust preserves all of it]** | **VIOLATION of T4 — the gravest site in either port: every element edit in the Swift port silently orphans container references and erases the ledger's handle.** The fix sits in the same codebase: `Group.withChildren`/`Layer.withChildren` in `Element.swift` preserve every field; delete the private twin, route the three mutators through them |
 | ▲ Swift inline `Layer(`/`Group(` literals | gauntlet enumeration (brace-matched regex over Sources, serialization/normalization files excluded): 41 production sites, 39 omitting `id`; exemplar: `pathEraseAtRect`'s layer rebuild hand-forwards TEN fields and omits exactly `id` | **VIOLATION class of T4.** Nine right and the tenth is identity — the hand-audit pathology, found inside the first draft's own proof-of-conformance site. Gated by §4.1's document-level invariant, which no per-site audit can substitute for |
@@ -459,6 +459,61 @@ Verified at `ff3e62aa`; rows added by the gauntlet are marked ▲.
 | Swift boolean rebuild, non-paint fields | `locked` written `false`; `name`/`id`/`toolOrigin`/`mask` dropped (source comment concedes it and banks it for a ruling) | **VIOLATION of §3.1** for the 1→1 survivor arms, **of §3.3** for the N→1 arms |
 | ▲ Boolean flatten, single-ring arm, both ports | emits `Polygon` — a kind with NO slot for `widthPoints`, `strokeBrush`, `strokeBrushOverrides`, or `fillRule` **[read: `PolygonElem`'s six fields]**; even the multi-ring Path arm writes them empty | **VIOLATION of §3.1 for the 1→1 survivor arms** — not an amendment; the first draft misfiled the gradient half of this as one. Per T1's representation term: emit the survivor's own kind or Path (the superset), never a lossy demotion |
 | Eyedropper apply | speaks to the sampled appearance family by spec | conforming in intent; its Swift path inherits the `withWidthPoints` violation |
+
+▲▲ **RE-CENSUS of the Swift container-literal row, 2026-07-27 — the class
+is OPEN, and here is exactly what remains.** Two waves have repaired 15 of
+these sites (8 + 7) and both scoped their enumeration to
+`Tools/YamlToolEffects.swift` alone; the second's subject line, "the seven
+remaining container literals — CLOSED", reads port-wide and is not. A fresh
+census over ALL of `JasSwift/Sources` finds **46** `Layer(`/`Group(`
+literals, **none of them in YamlToolEffects.swift any more** (the two waves'
+work is real), decomposing as:
+
+- **21 REBUILDS of an existing container that drop `id`** — every one a live
+  T4 violation, all in files no wave has owned yet:
+  `Clipboard/EditClipboard.swift` 65, 85 (paste-into-layer), 129, 132
+  (`translateElement`); `Document/Controller.swift` 162
+  (`addElementToLayer`), 476 (a mask-subtree Group; drops only `name`+`id`),
+  843 (`lockSelection`), 888, 893, 903 (`unlockSelection`), 954, 961
+  (show-all), and the five identical layer rebuilds at 1008
+  (`groupSelection`), 1044 (`ungroupSelection`), 1110 (make compound), 1157
+  (release compound), 1207 (`expandCompoundShape`);
+  `Interpreter/YamlPanelBodyView.swift` 4138 (layer rename);
+  `Menu/MenuActions.swift` 57, 69 (flatten); `Panels/LayersPanel.swift` 251.
+  Seventeen of the 21 also drop `blendMode`, `mask`, `isolatedBlending` and
+  `knockoutGroup`; ten also drop `visibility`. Consequence in plain words:
+  **Object > Lock, Object > Unlock, Group, Ungroup, layer rename, and every
+  compound-shape lifecycle verb each destroy their layer's or group's
+  identity and opacity mask as collateral.** Every one has `withChildren` /
+  `Document.replacing` already available to it, exactly as the 15 repaired
+  sites did.
+- **9 CREATIONS** (0→1), where fresh defaults are the §3.4 WRAP rule rather
+  than a defect: `EditClipboard.swift` 25 and `LayersPanel.swift` 548
+  (throwaway docs for SVG serialization), `Controller.swift` 1001 (the new
+  Group in `groupSelection` — correct: never a member's identity), 1745 (an
+  empty Group as a Mask subtree), `Document.swift` 208, 237 (the default
+  document layer), `LayersPanel.swift` 423 (`doc.create_layer`), and
+  `OpApply.swift` 799, 833 (wrap-in-group / wrap-in-layer — these two pass
+  `id:` from the mint, the model the other sites should follow).
+- **16 in serialization / normalization** (`Binary.swift`, `Normalize.swift`,
+  `Svg.swift`, `TestJson.swift`), the exemption this row already declares.
+
+**METHOD, so it can be re-run and audited:** brace-matched scan of every
+`\b(Layer|Group)\(` token over `JasSwift/Sources/**/*.swift` with `//` and
+`/* */` comments blanked (string literals preserved), each call's top-level
+argument list harvested for `label:` tokens and compared against the struct's
+own stored-property set, itself harvested from the struct body. **BLIND
+SPOTS, stated:** (i) it checks label PRESENCE, not that the value passed is
+the right one — a site forwarding `l.opacity` under `opacity:` and a garbage
+constant look alike; (ii) it cannot distinguish a rebuild from a creation, so
+that split was made by READING all 30 non-codec sites, not mechanically;
+(iii) `bounds` and `displayName` are computed properties that the harvester
+initially reported as stored, and were excluded by reading the structs; (iv)
+it does not see clone-then-mutate sites at all, which is correct — those
+cannot omit a field; (v) it does not scan `Document(` literals, which the
+earlier wave did. **None of the 21 is repaired here** — this wave owned
+`Geometry/Element.swift` and `Geometry/LiveElement.swift` only, and both are
+CLEAN of container literals under the same census.
 
 ▲ **Cross-port field vocabulary (gauntlet finding; latent but
 structural):** `tool_origin` lives on Rust's `CommonProps` — all eleven
@@ -932,6 +987,24 @@ four adversarial passes is stronger evidence than a law nobody attacked:
   session boundary.
 - **Clipboard/duplicate flows are truly creations** — both ports'
   clear-id paths are field-preserving; §5.4 is real, not a hole.
+  **NARROWED 2026-07-27, twice, by driven counter-examples.** The sentence
+  was true about FIELDS and read as wider than reality about IDENTITY: at
+  the time it was written, `clear_ids` and `clearingIds()` both walked
+  children only, so a copy of a COMPOUND SHAPE was born id-less at the top
+  and id-DUPLICATING underneath — a compound's `operands` are not
+  `children` (measured in both ports: `id_uniqueness VIOLATED … ["op_b"]`
+  after `copy_selection` over a compound). Both walks now descend
+  `operands` and mirror `Document::element_ids` / `Document.elementIds`
+  (Rust: "clear_ids missed a compound's operands"; Swift: "Swift
+  clearingIds was blind to a compound's operands"). Two things the reader
+  should not infer from the repair: the flows are STILL corpus-blind at
+  this property (both repairs landed with the preservation gate green —
+  the pin needs a cardinality word for a duplicate, which no ruling has
+  yet supplied; `scripts/corpus_manifest.json` gap
+  `clear-ids-blind-to-compound-operands` carries the state), and PASTE is
+  not one of these paths in either port (`clipboard_read_and_paste` /
+  `EditClipboard.translateElement` copy the id verbatim) — both ports'
+  doc comments used to claim it was, and both have been struck.
 - **The `orphaned_references` call-site audit was exact** — five non-test
   sites per port, symmetric; extending the seam is bounded work, not a
   from-scratch build.
