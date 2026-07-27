@@ -119,15 +119,15 @@ public class Controller {
         model.filename = filename
     }
 
+    /// Append a layer. T4: this speaks to `layers` and nothing else, so it goes
+    /// through `Document.replacing`. The inline `Document(...)` it replaced
+    /// passed five of eight fields, and the designated init defaults the rest —
+    /// so adding a layer erased the off-canvas symbol masters (SYMBOLS.md §6),
+    /// the Document Setup record and the Print preferences. Exactly the failure
+    /// mode `addElement`'s comment below describes, in the method above it.
     public func addLayer(_ layer: Layer) {
         let old = model.document
-        model.editDocument(Document(
-            layers: old.layers + [layer],
-            selectedLayer: old.selectedLayer,
-            selection: old.selection,
-            artboards: old.artboards,
-            artboardOptions: old.artboardOptions
-        ))
+        model.editDocument(old.replacing(layers: old.layers + [layer]))
     }
 
     public func removeLayer(at index: Int) {
@@ -159,25 +159,27 @@ public class Controller {
         let idx = doc.selectedLayer
         let target = doc.layers[idx]
         let childIdx = target.children.count
-        let newLayer = Layer(name: target.name, children: target.children + [element],
-                                opacity: target.opacity, transform: target.transform)
+        // T4: the layer names no part of this edit — the op only appends to it —
+        // so every one of ITS fields comes back unchanged. The inline
+        // `Layer(name:children:opacity:transform:)` this replaced kept four of
+        // eleven, silently erasing the target layer's `id`, `locked`,
+        // `visibility`, `blendMode`, `isolatedBlending`, `knockoutGroup` and
+        // `mask` on EVERY element the artist drew. Rust never had the hole:
+        // `layers[i].children_mut()` mutates in place.
+        let newLayer = target.withChildren(target.children + [element])
         var layers = doc.layers
         layers[idx] = newLayer
         let es = ElementSelection.all([idx, childIdx])
-        // Preserve every non-layer document field — Document's default
-        // initializer zeros symbols / artboards / artboardOptions /
-        // documentSetup / printPreferences if they aren't passed, so a
-        // shorter call wiped the artboard out from under the user the
-        // moment they drew their first shape. The off-canvas master store
-        // (SYMBOLS.md §6) must survive the same way, so placeInstance /
-        // makeSymbol / createReference don't drop the masters.
-        model.editDocument(Document(layers: layers, symbols: doc.symbols,
-                                  selectedLayer: idx,
-                                  selection: [es],
-                                  artboards: doc.artboards,
-                                  artboardOptions: doc.artboardOptions,
-                                  documentSetup: doc.documentSetup,
-                                  printPreferences: doc.printPreferences))
+        // Preserve every non-layer document field the same structural way:
+        // Document's designated initializer defaults symbols / artboards /
+        // artboardOptions / documentSetup / printPreferences when they aren't
+        // passed, so a shorter call wiped the artboard out from under the user
+        // the moment they drew their first shape. `replacing` forwards
+        // everything not named, so the off-canvas master store (SYMBOLS.md §6)
+        // and the setup/print records survive without a field list to maintain.
+        model.editDocument(doc.replacing(layers: layers,
+                                         selectedLayer: idx,
+                                         selection: [es]))
     }
 
     /// Stamp a stable `id` onto the element at `path` — the lazy
@@ -473,17 +475,12 @@ public class Controller {
         // Only Group / Layer accept new children; on any other root
         // the caller falls back to layer-append.
         guard case .group(let g) = mask.subtreeElement else { return false }
-        let newGroup = Group(
-            children: g.children + [element],
-            opacity: g.opacity,
-            transform: g.transform,
-            locked: g.locked,
-            visibility: g.visibility,
-            blendMode: g.blendMode,
-            isolatedBlending: g.isolatedBlending,
-            knockoutGroup: g.knockoutGroup,
-            mask: g.mask
-        )
+        // T4: the mask's subtree root is a bystander this append rebuilds to
+        // reach its children. The nine-argument literal this replaced looked
+        // exhaustive and still dropped the two fields it never named — the
+        // group's `name` and its `id` — which is precisely why the fix is a
+        // structural one and not a longer list.
+        let newGroup = g.withChildren(g.children + [element])
         let newMask = Mask(
             subtreeElement: .group(newGroup),
             clip: mask.clip,
@@ -1015,8 +1012,10 @@ public class Controller {
         let layer = newDoc.layers[layerIdx]
         var newChildren = layer.children
         newChildren.insert(group, at: childIdx)
-        let newLayer = Layer(name: layer.name, children: newChildren,
-                            opacity: layer.opacity, transform: layer.transform)
+        // T4 bystander clause: the layer is rebuilt only to reach its children.
+        // See `addElement` — the same four-of-eleven literal, same seven fields
+        // lost, and the containing layer is the artist's, not this op's.
+        let newLayer = layer.withChildren(newChildren)
         var newLayers = newDoc.layers
         newLayers[layerIdx] = newLayer
         let newSelection: Selection = [ElementSelection.all(insertPath)]
@@ -1051,8 +1050,9 @@ public class Controller {
             let layer = newDoc.layers[layerIdx]
             var newChildren = layer.children
             newChildren.insert(contentsOf: children, at: childIdx)
-            let newLayer = Layer(name: layer.name, children: newChildren,
-                                opacity: layer.opacity, transform: layer.transform)
+            // T4 bystander clause: see `addElement`. Same four-of-eleven
+            // literal, same seven fields lost, once per iteration.
+            let newLayer = layer.withChildren(newChildren)
             var newLayers = newDoc.layers
             newLayers[layerIdx] = newLayer
             newDoc = newDoc.replacing(layers: newLayers, selection: [])
@@ -1117,8 +1117,10 @@ public class Controller {
         let layer = newDoc.layers[layerIdx]
         var newChildren = layer.children
         newChildren.insert(compound, at: childIdx)
-        let newLayer = Layer(name: layer.name, children: newChildren,
-                            opacity: layer.opacity, transform: layer.transform)
+        // T4 bystander clause: the layer is rebuilt only to reach its children.
+        // See `addElement` — the same four-of-eleven literal, same seven fields
+        // lost, and the containing layer is the artist's, not this op's.
+        let newLayer = layer.withChildren(newChildren)
         var newLayers = newDoc.layers
         newLayers[layerIdx] = newLayer
         let newSelection: Selection = [ElementSelection.all(insertPath)]
@@ -1164,8 +1166,9 @@ public class Controller {
             let layer = newDoc.layers[layerIdx]
             var newChildren = layer.children
             newChildren.insert(contentsOf: cs.operands, at: childIdx)
-            let newLayer = Layer(name: layer.name, children: newChildren,
-                                opacity: layer.opacity, transform: layer.transform)
+            // T4 bystander clause: see `addElement`. Same four-of-eleven
+            // literal, same seven fields lost, once per iteration.
+            let newLayer = layer.withChildren(newChildren)
             var newLayers = newDoc.layers
             newLayers[layerIdx] = newLayer
             newDoc = newDoc.replacing(layers: newLayers, selection: [])
@@ -1214,8 +1217,9 @@ public class Controller {
             let layer = newDoc.layers[layerIdx]
             var newChildren = layer.children
             newChildren.insert(contentsOf: expanded, at: childIdx)
-            let newLayer = Layer(name: layer.name, children: newChildren,
-                                opacity: layer.opacity, transform: layer.transform)
+            // T4 bystander clause: see `addElement`. Same four-of-eleven
+            // literal, same seven fields lost, once per iteration.
+            let newLayer = layer.withChildren(newChildren)
             var newLayers = newDoc.layers
             newLayers[layerIdx] = newLayer
             newDoc = newDoc.replacing(layers: newLayers, selection: [])
