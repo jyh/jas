@@ -34,6 +34,11 @@ ALGORITHMS = {
     # family exists to catch, and any tolerance would swallow it.
     "color_convert":     ("exact", None),
     "hit_test":          ("exact", None),
+    # Closest-point projection onto a segment / cubic. Distances are reported
+    # divided by each vector's declared `scale`, so 1e-9 is a tight relative
+    # bound even for the 1e200-magnitude overflow vectors; the discriminating
+    # failures it must catch are 0.02-to-0.48 wide in `t`.
+    "path_project":      ("tolerance", 1e-9),
     # The number_input commit rule. EXACT: the whole point is which strings are
     # accepted at all (a null result vs a value) and the clamp landing exactly on
     # the declared bound, so any tolerance would swallow the divergence.

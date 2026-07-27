@@ -930,14 +930,27 @@ mod tests {
 
     // ---- Projection distances must not overflow ----
     //
-    // The three projection distances come from `f64::hypot`. The naive
+    // All SIX projection distances in this file come from `f64::hypot`
+    // (`grep -c hypot` over the non-comment lines of geometry/path_ops.rs = 6:
+    // two in `closest_on_line`, four in `closest_on_cubic`). The naive
     // `(dx*dx + dy*dy).sqrt()` squares first, so at coordinates above ~1e154
     // every distance saturates to +inf — and `closest_on_cubic` then compares
     // +inf against +inf, which makes its coarse-scan and trisection branches
     // take the wrong side. Mirrored by JasSwift's
-    // `closestOnLine*DoesNotOverflow` / `closestOnCubicDoesNotOverflow`.
-    // Per-port rather than a corpus vector: path_ops has no corpus family or
-    // roundtrip-harness entry to hang one on.
+    // `closestOnLine*DoesNotOverflow` / `closestOnCubic*DoesNotOverflow`.
+    //
+    // These four tests are the FAST-suite copy; the cross-language pin is the
+    // `path_project` corpus family (test_fixtures/algorithms/path_project.json),
+    // whose `cubic_overflow_point_above_middle` vector is what individually
+    // discriminates each of the six sites in both ports.
+    //
+    // `closest_on_cubic_does_not_overflow` alone pins only three of the four
+    // cubic sites, and that is worth remembering: it puts the true answer at
+    // t = 0, which is also where two of the saturating failure modes land
+    // (`best_t` starts at 0.0, so a saturating coarse scan never updates it,
+    // and a saturating `d2` collapses the trisection onto lo = 0). Hence
+    // `closest_on_cubic_point_above_middle_does_not_overflow` below, whose
+    // answer is t = 0.5 — far from both.
 
     #[test]
     fn closest_on_line_degenerate_segment_does_not_overflow() {
@@ -970,6 +983,25 @@ mod tests {
         assert!(d.is_finite());
         assert!((d - 1e200).abs() / 1e200 < 1e-6);
         assert!(t < 1e-5);
+    }
+
+    #[test]
+    fn closest_on_cubic_point_above_middle_does_not_overflow() {
+        // Same cubic, but the point sits 1e200 above the MIDDLE, so the answer
+        // is t = 0.5 and the distance is 1e200. Observed values with one
+        // saturating site at a time (each reverted on its own):
+        //   coarse-scan `d`  -> t = 0.0199969927, d = 1.1092e200 (11% high)
+        //   trisection `d1`  -> t = 0.5199939854
+        //   trisection `d2`  -> t = 0.4800060146
+        //   final `best_dist`-> d = +inf
+        // The tolerances below are 100x tighter than the smallest of those
+        // deviations (0.02 in t), so none of the four can pass.
+        let (d, t) = closest_on_cubic(
+            0.0, 0.0, 1e200 / 3.0, 0.0, 2e200 / 3.0, 0.0, 1e200, 0.0, 5e199, 1e200,
+        );
+        assert!(d.is_finite());
+        assert!((d - 1e200).abs() / 1e200 < 1e-4);
+        assert!((t - 0.5).abs() < 1e-4);
     }
 
     #[test]

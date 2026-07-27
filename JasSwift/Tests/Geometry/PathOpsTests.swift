@@ -104,13 +104,23 @@ import Testing
 
 // MARK: - Projection distances must not overflow
 //
-// The three projection distances come from a real hypot, matching Rust's six
-// `.hypot` sites in geometry/path_ops.rs. The naive `sqrt(dx*dx + dy*dy)`
-// squares first, so at coordinates above ~1e154 every distance saturates to
-// +inf — and `closestOnCubic` then compares +inf against +inf, which makes its
-// coarse-scan and trisection branches take the wrong side. These live in a
-// per-port test rather than the shared corpus because path_ops has no corpus
-// family or roundtrip-harness entry to hang a vector on.
+// All SIX projection distances in Sources/Geometry/PathOps.swift come from
+// Foundation's `hypot` (two in `closestOnLine`, four in `closestOnCubic`),
+// matching Rust's six `.hypot` sites in geometry/path_ops.rs. The naive
+// `sqrt(dx*dx + dy*dy)` squares first, so at coordinates above ~1e154 every
+// distance saturates to +inf — and `closestOnCubic` then compares +inf against
+// +inf, which makes its coarse-scan and trisection branches take the wrong
+// side.
+//
+// These four are the FAST-suite copy; the cross-language pin is the
+// `path_project` corpus family (test_fixtures/algorithms/path_project.json).
+//
+// `closestOnCubicDoesNotOverflow` alone pins only three of the four cubic
+// sites: it puts the true answer at t = 0, which is also where two of the
+// saturating failure modes land (`bestT` starts at 0, so a saturating coarse
+// scan never updates it, and a saturating `d2` collapses the trisection onto
+// lo = 0). Hence `closestOnCubicPointAboveMiddleDoesNotOverflow` below, whose
+// answer is t = 0.5 — far from both.
 
 @Test func closestOnLineDegenerateSegmentDoesNotOverflow() {
     // Zero-length segment at the origin: distance is |p| = 1.414e200.
@@ -139,6 +149,23 @@ import Testing
     #expect(d.isFinite)
     #expect(abs(d - 1e200) / 1e200 < 1e-6)
     #expect(t < 1e-5)
+}
+
+@Test func closestOnCubicPointAboveMiddleDoesNotOverflow() {
+    // Same cubic, but the point sits 1e200 above the MIDDLE, so the answer is
+    // t = 0.5 and the distance is 1e200. Observed values with one saturating
+    // site at a time (each reverted on its own):
+    //   coarse-scan `d`   -> t = 0.0199969927, d = 1.1092e200 (11% high)
+    //   trisection `d1`   -> t = 0.5199939854
+    //   trisection `d2`   -> t = 0.4800060146
+    //   final `bestDist`  -> d = +inf
+    // The tolerances below are 100x tighter than the smallest of those
+    // deviations (0.02 in t), so none of the four can pass.
+    let (d, t) = closestOnCubic(0, 0, 1e200 / 3, 0, 2e200 / 3, 0, 1e200, 0,
+                                5e199, 1e200)
+    #expect(d.isFinite)
+    #expect(abs(d - 1e200) / 1e200 < 1e-4)
+    #expect(abs(t - 0.5) < 1e-4)
 }
 
 @Test func closestSegmentAndTPicksCorrectSegment() {

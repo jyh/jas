@@ -1,0 +1,9 @@
+[
+  {"name": "cubic_flat_line_point_above_middle", "function": "closest_on_cubic", "args": [0.0, 0.0, 10.0, 0.0, 20.0, 0.0, 30.0, 0.0, 15.0, 3.0], "scale": 1.0, "expected": {"distance_over_scale": 3.000000000688993, "t": 0.499997856804683}},
+  {"name": "line_projected_midpoint", "function": "closest_on_line", "args": [0.0, 0.0, 10.0, 0.0, 5.0, 3.0], "scale": 1.0, "expected": {"distance_over_scale": 3.0, "t": 0.5}},
+  {"name": "line_clamped_past_end", "function": "closest_on_line", "args": [0.0, 0.0, 10.0, 0.0, 20.0, 0.0], "scale": 1.0, "expected": {"distance_over_scale": 10.0, "t": 1.0}},
+  {"name": "line_degenerate_segment_overflow", "function": "closest_on_line", "args": [0.0, 0.0, 0.0, 0.0, 1e+200, 1e+200], "scale": 1e+200, "expected": {"distance_over_scale": 1.4142135623730951, "t": 0.0}},
+  {"name": "line_projected_overflow", "function": "closest_on_line", "args": [0.0, 0.0, 1e+100, 0.0, 5e+99, 1e+200], "scale": 1e+200, "expected": {"distance_over_scale": 1.0, "t": 0.5}},
+  {"name": "cubic_overflow_point_above_start", "function": "closest_on_cubic", "args": [0.0, 0.0, 3.3333333333333334e+199, 0.0, 6.666666666666667e+199, 0.0, 1e+200, 0.0, 0.0, 1e+200], "scale": 1e+200, "expected": {"distance_over_scale": 1.000000000004522, "t": 3.007286598217175e-06}},
+  {"name": "cubic_overflow_point_above_middle", "function": "closest_on_cubic", "args": [0.0, 0.0, 3.3333333333333334e+199, 0.0, 6.666666666666667e+199, 0.0, 1e+200, 0.0, 5e+199, 1e+200], "scale": 1e+200, "expected": {"distance_over_scale": 1.0000000000022968, "t": 0.499997856804683}}
+]

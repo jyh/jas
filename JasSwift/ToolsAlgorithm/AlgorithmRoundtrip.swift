@@ -51,6 +51,7 @@ case "length":            results = runLength(activeVectors)
 case "color_convert":     results = runColorConvert(activeVectors)
 case "number_commit":     results = runNumberCommit(activeVectors)
 case "hit_test":          results = runHitTest(activeVectors)
+case "path_project":      results = runPathProject(activeVectors)
 case "boolean":           results = runBoolean(activeVectors)
 case "boolean_normalize": results = runBooleanNormalize(activeVectors)
 case "fit_curve":         results = runFitCurve(activeVectors)
@@ -167,6 +168,48 @@ func runNumberCommit(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let committed = numberInputCommit(text: text, min: minVal, max: maxVal)
         return ["name": name, "result": committed ?? NSNull()]
     }
+}
+
+// MARK: - path_project (closest-point projection onto a segment / cubic)
+//
+// The distance is reported DIVIDED BY the vector's `scale`. The family exists
+// for coordinates above ~1e154 — the magnitudes at which a naive
+// `(dx*dx + dy*dy).squareRoot()` saturates to +inf while `hypot` does not —
+// and an absolute tolerance against a raw 1e200 distance is meaningless (one
+// ulp there is ~1.6e184), so the comparison happens on the ratio. `scale` is
+// 1.0 for the ordinary-magnitude vectors. Mirrors `run_path_project` in
+// jas_dioxus/src/bin/algorithm_roundtrip.rs.
+
+func runPathProject(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let fn = tc["function"] as? String ?? ""
+        let a = (tc["args"] as? [NSNumber])?.map { $0.doubleValue } ?? []
+        let scale = (tc["scale"] as? NSNumber)?.doubleValue ?? 1.0
+        let out: (Double, Double)
+        switch fn {
+        case "closest_on_line":
+            out = closestOnLine(a[0], a[1], a[2], a[3], a[4], a[5])
+        case "closest_on_cubic":
+            out = closestOnCubic(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9])
+        default:
+            fputs("Unknown path_project function: \(fn)\n", stderr)
+            exit(1)
+        }
+        return ["name": name,
+                "result": ["distance_over_scale": jsonNumber(out.0 / scale),
+                           "t": jsonNumber(out.1)]]
+    }
+}
+
+/// JSON has no infinity or NaN. serde_json emits `null` for a non-finite
+/// f64, while `JSONSerialization` throws — which would abort this whole
+/// binary and report the family as one opaque ERROR instead of naming the
+/// vector that overflowed. Emitting `null` here keeps the two ports'
+/// serialization agreeing, so a saturating distance shows up as a localized
+/// `distance_over_scale: null` mismatch in both.
+private func jsonNumber(_ v: Double) -> Any {
+    v.isFinite ? v : NSNull()
 }
 
 // MARK: - Color conversion (the Color panel's four primitives)

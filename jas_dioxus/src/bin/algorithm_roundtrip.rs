@@ -73,6 +73,7 @@ fn main() {
         "color_convert" => run_color_convert(&vectors),
         "number_commit" => run_number_commit(&vectors),
         "hit_test" => run_hit_test(&vectors),
+        "path_project" => run_path_project(&vectors),
         "boolean" => run_boolean(&vectors),
         "boolean_normalize" => run_boolean_normalize(&vectors),
         "fit_curve" => run_fit_curve(&vectors),
@@ -92,6 +93,48 @@ fn main() {
         "{}",
         serde_json::to_string(&results).expect("Failed to serialize results")
     );
+}
+
+// ---------------------------------------------------------------
+// path_project (closest-point projection onto a segment / cubic)
+// ---------------------------------------------------------------
+//
+// The distance is reported DIVIDED BY the vector's `scale`, because the
+// family's reason to exist is coordinates above ~1e154 — the magnitudes at
+// which the naive `(dx*dx + dy*dy).sqrt()` saturates to +inf while `hypot`
+// does not. An absolute tolerance is meaningless against a raw 1e200
+// distance (one ulp there is ~1.6e184), so every vector declares the scale
+// its distance is measured in and the comparison happens on the ratio.
+// `scale` is 1.0 for the ordinary-magnitude vectors.
+
+fn run_path_project(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::geometry::path_ops::{closest_on_cubic, closest_on_line};
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let func = tc["function"].as_str().unwrap_or("");
+            let a: Vec<f64> = tc["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            let scale = tc["scale"].as_f64().unwrap_or(1.0);
+            let (dist, t) = match func {
+                "closest_on_line" => closest_on_line(a[0], a[1], a[2], a[3], a[4], a[5]),
+                "closest_on_cubic" => closest_on_cubic(
+                    a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9],
+                ),
+                _ => {
+                    eprintln!("Unknown path_project function: {}", func);
+                    std::process::exit(1);
+                }
+            };
+            json!({"name": name,
+                   "result": {"distance_over_scale": dist / scale, "t": t}})
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------
