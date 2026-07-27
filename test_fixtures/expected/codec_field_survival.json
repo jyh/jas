@@ -52,7 +52,7 @@
     "stroke": {
       "color": "cmyk(0.1, 0.2, 0.3, 0.4, 0.9)", "width": 4.5,
       "linecap": "round", "linejoin": "bevel", "miter_limit": 7.5,
-      "align": "inside", "dash_pattern": [4, 2, 1, 3], "dash_align_anchors": true,
+      "align": "inside", "dash_pattern": [3, 1.5, 6, 0.75], "dash_align_anchors": true,
       "start_arrow": "closed_arrow", "end_arrow": "circle",
       "start_arrow_scale": 150, "end_arrow_scale": 75,
       "arrow_align": "center_at_end", "opacity": 0.75
@@ -133,8 +133,8 @@
       "fill_rule": "PRESERVED",
       "stroke.align": "DROPPED",
       "stroke.dash_align_anchors": "PRESERVED",
-      "stroke.dash_pattern": "DROPPED",
-      "stroke.miter_limit": "DROPPED",
+      "stroke.dash_pattern": "PRESERVED",
+      "stroke.miter_limit": "PRESERVED",
       "stroke_brush": "DROPPED",
       "stroke_brush_overrides": "DROPPED",
       "stroke_gradient": "DROPPED",
@@ -169,8 +169,8 @@
       "width_points": "NO_COUNTERPART as things stand. The variable-width profile has no SVG stroke analogue; a faithful export means emitting the OUTLINE, which is a different document, or a jas: extension.",
       "fill_rule": "PRESERVED -- both ports write `fill-rule=\"evenodd\"` and both read it.",
       "stroke.dash_align_anchors": "PRESERVED -- both ports write `data-jas-dash-align-anchors=\"true\"` and both read it.",
-      "stroke.dash_pattern": "REPRESENTABLE_BUT_DROPPED, in BOTH ports. `stroke-dasharray` is a STANDARD SVG presentation attribute and neither port writes it or reads it: grep for `dasharray` returns zero hits in jas_dioxus/src/geometry/svg.rs and JasSwift/Sources/Geometry/Svg.swift, and each reader hard-codes an empty pattern (Rust `dash_pattern: [0.0; 6], dash_len: 0`; Swift the same). Draw a dashed stroke, save as SVG, reopen: it comes back solid, in both ports. The flag that says HOW to lay the dashes out survives; the dashes do not.",
-      "stroke.miter_limit": "REPRESENTABLE_BUT_DROPPED, in BOTH ports. `stroke-miterlimit` is a STANDARD SVG presentation attribute; neither port writes it, and each reader hard-codes 10.0.",
+      "stroke.dash_pattern": "PRESERVED as of CODECSAT. It was REPRESENTABLE_BUT_DROPPED in BOTH ports: `stroke-dasharray` is a STANDARD SVG presentation attribute and neither port wrote it or read it, so a dashed stroke saved to SVG came back SOLID while the jas-private flag saying HOW to lay the dashes out was carried faithfully. NOTE ON THE FIXTURE'S OWN VALUES: SVG lengths are written in px at 4 decimal places, so a pt value whose px form is not exact at 4dp does not come back bit-equal (4pt -> 5.3333px -> 3.999975pt). The saturated pattern is 3 / 1.5 / 6 / 0.75 pt = 4 / 2 / 8 / 1 px exactly, so this cell reads DROPPED only for an OMISSION and never for a rounding. Every other SVG length in this document has the same ~1e-5 property; the string-oracle gates absorb it because canonical test-JSON rounds to 4dp.",
+      "stroke.miter_limit": "PRESERVED as of CODECSAT. It was REPRESENTABLE_BUT_DROPPED in BOTH ports: `stroke-miterlimit` is a STANDARD SVG presentation attribute; neither port wrote it and each reader hard-coded 10.0. Unitless, so no px conversion and no rounding question.",
       "stroke.align": "NO_COUNTERPART as things stand. Inside/outside stroke alignment has no attribute in SVG 1.1 (`stroke-alignment` is an unshipped SVG 2 draft), so a faithful export needs a jas: extension -- which is a naming decision, not a repair, and is banked rather than guessed."
     }
   }

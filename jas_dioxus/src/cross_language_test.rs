@@ -5422,7 +5422,13 @@ mod tests {
                 linejoin: LineJoin::Bevel,
                 miter_limit: 7.5,
                 align: StrokeAlign::Inside,
-                dash_pattern: [4.0, 2.0, 1.0, 3.0, 0.0, 0.0],
+                // Chosen so the SVG round trip is EXACT: the writer emits
+                // lengths in px at 4 decimal places, so a pt value whose px
+                // form is not exact at 4dp (4pt -> 5.3333px -> 3.999975pt)
+                // comes back off by ~1e-5 and the cell would read DROPPED for
+                // a PRECISION reason rather than an omission. 3/1.5/6/0.75 pt
+                // are 4/2/8/1 px exactly. Mirrored in JasSwift.
+                dash_pattern: [3.0, 1.5, 6.0, 0.75, 0.0, 0.0],
                 dash_len: 4,
                 dash_align_anchors: true,
                 start_arrow: Arrowhead::ClosedArrow,

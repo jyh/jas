@@ -65,6 +65,17 @@ private func strokeAttrs(_ stroke: Stroke?) -> String {
     case .bevel: s += " stroke-linejoin=\"bevel\""
     }
     if stroke.opacity < 1.0 { s += " stroke-opacity=\"\(fmt(stroke.opacity))\"" }
+    // STANDARD SVG presentation attributes, both identity-omitted so a plain
+    // stroke stays byte-clean. Lengths ride the same pt→px conversion as
+    // `stroke-width`; `stroke-miterlimit` is a ratio and is unitless. Until
+    // CODECSAT neither was written and neither was read, so a dashed stroke
+    // saved to SVG came back SOLID in both ports — while the jas-private
+    // attribute that says HOW to lay the dashes out (below) was carried
+    // faithfully. Mirrors `stroke_attrs` in jas_dioxus/src/geometry/svg.rs.
+    if !stroke.dashPattern.isEmpty {
+        s += " stroke-dasharray=\"" + stroke.dashPattern.map { fmt(px($0)) }.joined(separator: ",") + "\""
+    }
+    if stroke.miterLimit != 10.0 { s += " stroke-miterlimit=\"\(fmt(stroke.miterLimit))\"" }
     // Workspace-private attribute — see DASH_ALIGN.md §Persistence.
     // Identity-omitted when false; round-trips through jas-authored
     // files; ignored on import from non-jas SVG.
@@ -1058,6 +1069,21 @@ private func parseStroke(_ node: XMLElement) -> Stroke? {
     let lc: LineCap = lcStr == "round" ? .round : lcStr == "square" ? .square : .butt
     let lj: LineJoin = ljStr == "round" ? .round : ljStr == "bevel" ? .bevel : .miter
     let opacity = Double(node.attribute(forName: "stroke-opacity")?.stringValue ?? "1") ?? 1.0
+    // `stroke-dasharray` accepts commas, whitespace, or both as separators
+    // (SVG 1.1 "list of lengths"), and `none` for no dashing. Values arrive in
+    // px and are stored in pt. The model holds at most SIX, so a longer list
+    // from a foreign file is TRUNCATED rather than silently reinterpreted —
+    // mirrors the Rust ceiling, which is a fixed [f64; 6].
+    var dashPattern: [Double] = []
+    let dashRaw = (node.attribute(forName: "stroke-dasharray")?.stringValue ?? "")
+    if dashRaw.trimmingCharacters(in: .whitespaces) != "none" {
+        for tok in dashRaw.split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\t" || $0 == "\n" }) {
+            if dashPattern.count == 6 { break }
+            guard let v = Double(tok) else { dashPattern = []; break }
+            dashPattern.append(toPt(v))
+        }
+    }
+    let miterLimit = Double(node.attribute(forName: "stroke-miterlimit")?.stringValue ?? "10") ?? 10.0
     let dashAlign = (node.attribute(forName: "data-jas-dash-align-anchors")?.stringValue ?? "")
         .trimmingCharacters(in: .whitespaces)
     let dashAlignAnchors = (dashAlign == "true" || dashAlign == "1")
@@ -1070,7 +1096,8 @@ private func parseStroke(_ node: XMLElement) -> Stroke? {
     let arrowAlign: ArrowAlign =
         (node.attribute(forName: "jas:arrow-align")?.stringValue == "center_at_end") ? .centerAtEnd : .tipAtEnd
     return Stroke(color: c, width: width, linecap: lc, linejoin: lj,
-                  dashAlignAnchors: dashAlignAnchors,
+                  miterLimit: miterLimit,
+                  dashPattern: dashPattern, dashAlignAnchors: dashAlignAnchors,
                   startArrow: startArrow, endArrow: endArrow,
                   startArrowScale: startArrowScale, endArrowScale: endArrowScale,
                   arrowAlign: arrowAlign, opacity: opacity)

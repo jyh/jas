@@ -3678,7 +3678,14 @@ private func saturatedPath() -> Path {
         stroke: Stroke(color: .cmyk(c: 0.1, m: 0.2, y: 0.3, k: 0.4, a: 0.9),
                        width: 4.5, linecap: .round, linejoin: .bevel,
                        miterLimit: 7.5, align: .inside,
-                       dashPattern: [4, 2, 1, 3], dashAlignAnchors: true,
+                       // Chosen so the SVG round trip is EXACT: the writer emits
+                       // lengths in px at 4 decimal places, so a pt value whose
+                       // px form is not exact at 4dp (4pt -> 5.3333px ->
+                       // 3.999975pt) comes back off by ~1e-5 and the cell would
+                       // read DROPPED for a PRECISION reason rather than an
+                       // omission. 3/1.5/6/0.75 pt are 4/2/8/1 px exactly.
+                       // Mirrored in Rust.
+                       dashPattern: [3, 1.5, 6, 0.75], dashAlignAnchors: true,
                        startArrow: .closedArrow, endArrow: .circle,
                        startArrowScale: 150, endArrowScale: 75,
                        arrowAlign: .centerAtEnd, opacity: 0.75),

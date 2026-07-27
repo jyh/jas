@@ -72,6 +72,22 @@ fn stroke_attrs(stroke: &Option<Stroke>) -> String {
             if s.opacity < 1.0 {
                 parts.push(format!(" stroke-opacity=\"{}\"", fmt(s.opacity)));
             }
+            // STANDARD SVG presentation attributes, both identity-omitted so
+            // a plain stroke stays byte-clean. Lengths ride the same pt→px
+            // conversion as `stroke-width`; `stroke-miterlimit` is a ratio and
+            // is unitless. Until CODECSAT neither was written and neither was
+            // read, so a dashed stroke saved to SVG came back SOLID in both
+            // ports — while the jas-private attribute that says HOW to lay the
+            // dashes out (below) was carried faithfully.
+            if s.dash_len > 0 {
+                let vals: Vec<String> = s.dash_array().iter()
+                    .map(|v| fmt(px(*v)))
+                    .collect();
+                parts.push(format!(" stroke-dasharray=\"{}\"", vals.join(",")));
+            }
+            if s.miter_limit != 10.0 {
+                parts.push(format!(" stroke-miterlimit=\"{}\"", fmt(s.miter_limit)));
+            }
             // Custom workspace-private attribute — see DASH_ALIGN.md
             // §Persistence. Identity-omitted when false; round-trips
             // through jas-authored files; ignored on import from
@@ -1199,6 +1215,27 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
         _ => LineJoin::Miter,
     };
     let opacity = get_f(node, "stroke-opacity", 1.0);
+    // `stroke-dasharray` accepts commas, whitespace, or both as separators
+    // (SVG 1.1 "list of lengths"), and `none` for no dashing. Values arrive in
+    // px and are stored in pt. The model holds at most SIX, so a longer list
+    // from a foreign file is TRUNCATED rather than silently reinterpreted —
+    // mirrored in JasSwift so the two ports keep the same ceiling.
+    let (dash_pattern, dash_len) = {
+        let mut arr = [0.0f64; 6];
+        let mut n = 0usize;
+        let raw = get_s(node, "stroke-dasharray", "");
+        if raw.trim() != "none" {
+            for tok in raw.split([',', ' ', '\t', '\n']).filter(|t| !t.is_empty()) {
+                if n == 6 { break; }
+                match tok.parse::<f64>() {
+                    Ok(v) => { arr[n] = v * PX_TO_PT; n += 1; }
+                    Err(_) => { n = 0; break; }
+                }
+            }
+        }
+        (arr, n as u8)
+    };
+    let miter_limit = get_f(node, "stroke-miterlimit", 10.0);
     let dash_align_anchors = matches!(
         get_s(node, "data-jas-dash-align-anchors", "").trim(),
         "true" | "1"
@@ -1213,7 +1250,7 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
         "center_at_end" => ArrowAlign::CenterAtEnd,
         _ => ArrowAlign::TipAtEnd,
     };
-    Some(Stroke { color, width, linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, dash_align_anchors, start_arrow, end_arrow, start_arrow_scale, end_arrow_scale, arrow_align, opacity })
+    Some(Stroke { color, width, linecap: lc, linejoin: lj, miter_limit, align: StrokeAlign::Center, dash_pattern, dash_len, dash_align_anchors, start_arrow, end_arrow, start_arrow_scale, end_arrow_scale, arrow_align, opacity })
 }
 
 fn parse_transform(node: &XmlNode) -> Option<Transform> {
