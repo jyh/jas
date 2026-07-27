@@ -355,6 +355,69 @@ private func documentWithCompound() -> Document {
     #expect(compared.count == 10, "compared \(compared.count) Layer fields: \(compared)")
 }
 
+// MARK: - Mask: the one container-holder in this file still rebuilt by hand
+
+// `Mask` holds the mask subtree, so it is a container too, and Controller.swift
+// rebuilds it at five sites (`addElementToMask` plus the four mask-field
+// setters). Unlike Layer and Group it has no `with*` helper to route through —
+// its stored properties are `public let` and it lives in `Element.swift`, which
+// this wave does not touch — so all five sites restate all six fields by hand.
+// They are complete AS OF THIS COMMIT (each was read); these two tests are the
+// only thing standing between that and a seventh field silently vanishing from
+// five places at once. Neither found a defect; both are tripwires.
+
+@Test func maskRebuildSitesRestateEveryStoredProperty() {
+    let m = Mirror(reflecting: distinctMask(1))
+    #expect(m.children.count == 6,
+            """
+            Mask's stored-property count changed. Controller.swift rebuilds \
+            Mask from a full field list at FIVE sites (addElementToMask, \
+            setMaskClipOnSelection, setMaskInvertOnSelection, \
+            toggleMaskDisabledOnSelection, toggleMaskLinkedOnSelection); a new \
+            field must be added to every one of them, and there is no \
+            `withSubtree`-style helper making that structural. Update this \
+            count once you have.
+            """)
+}
+
+@Test func maskFieldSettersPreserveEveryOtherMaskField() {
+    let rich = distinctMask(31)
+    let doc = fullyPopulatedDocument(children: [withMask(rect(0, "alpha"), mask: rich)],
+                                     selection: [ElementSelection.all([1, 0])])
+    // Each setter, paired with the field(s) it speaks to and a claim that it
+    // really rewrites them — without that claim, `except:` would make a setter
+    // that quietly stopped writing anything pass this test.
+    let cases: [(String, Set<String>, (Controller) -> Void, (Mask) -> Bool)] = [
+        ("setMaskClipOnSelection", ["clip"],
+         { $0.setMaskClipOnSelection(true) }, { $0.clip == true }),
+        ("setMaskInvertOnSelection", ["invert"],
+         { $0.setMaskInvertOnSelection(false) }, { $0.invert == false }),
+        ("toggleMaskDisabledOnSelection", ["disabled"],
+         { $0.toggleMaskDisabledOnSelection() }, { $0.disabled == false }),
+        ("toggleMaskLinkedOnSelection", ["linked", "unlinkTransform"],
+         { $0.toggleMaskLinkedOnSelection() },
+         { $0.linked == true && $0.unlinkTransform == nil }),
+    ]
+    for (what, spokenTo, apply, claim) in cases {
+        let model = Model(document: doc)
+        apply(Controller(model: model))
+        guard let after = model.document.getElement([1, 0]).mask else {
+            Issue.record("\(what) destroyed the mask outright"); return
+        }
+        // GEOMETRY-VALUE pairing: the mask's subtree geometry is where it was.
+        guard case .rect(let r) = after.subtreeElement else {
+            Issue.record("\(what): mask subtree is no longer a Rect"); return
+        }
+        #expect(r.x == 31 && r.y == 31, "\(what) moved the mask's own geometry")
+        #expect(claim(after),
+                "\(what) did not write the field it speaks to — the rest of this case asserts nothing")
+
+        let compared = expectOnlyChanged(rich, after, except: spokenTo, what)
+        #expect(compared.count == 6 - spokenTo.count,
+                "\(what) compared \(compared.count) Mask fields: \(compared)")
+    }
+}
+
 // MARK: - the nested-Layer arms the corpus fixture cannot reach
 
 // `unlockChildren` and `showIn` each carry a `.layer` arm for a Layer nested
