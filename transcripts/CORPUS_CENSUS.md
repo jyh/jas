@@ -515,6 +515,34 @@ snapshot stays eval-free"). `panel_layout` resolves `{{ }}` but pins only
 gate — `"664040"` vs `"664141"` would pass.** That is the colour bug's byte pattern, in the gate.
 Panel `visible`/`enabled_when` booleans are gated only for **menus** (`menu_state`, 4 vectors).
 
+**5.8 — PARTLY CLOSED 2026-07-26** (`BINDVALUE`). The stated unblock — "a value-level panel
+snapshot family that resolves `bind.*` expressions and pins the resulting strings, not their
+lengths" — is built, as a THIRD pass rather than a widening of `panel_widget_tree`: that family's
+key-names-only contract is what makes it stable, and widening it would rewrite every record it
+emits. `bind_values(panel, ctx)` emits one `{path, id, key, type, value}` record per resolved
+binding, pre-order, on `widget_tree`'s path scheme; values come only from each port's existing
+`{{ }}` interpolation coercion, so no new number-formatting surface appears. Landed in all three
+LIVE implementations (reference, Rust, Swift), pinned by
+`test_fixtures/algorithms/panel_bind_values.json` — **4 vectors, 225 rows**, seeded by expression
+SHAPE (a colour swatch, length_input numerics, the five conditional `bind.visible` containers, two
+nested `foreach` levels including a `{{ }}` label). Both ports matched the reference-generated
+golden on their **first** run.
+
+**The claim in this section is now a test, not a sentence.** Each of the three implementations
+asserts it directly: the two data scopes differing only in `panel.hex` — `"664040"` vs `"664141"` —
+give byte-identical `widget_tree` output *and* byte-identical `layout_panel` rects, and differ in
+exactly one `bind_values` row (`cp_hex`, `bind.value`). Re-injecting the defect (canonicalizing a
+string to `len=N`) turns that assertion red in both ports, with the diff count falling to 0.
+
+**What did NOT close, measured on the same commit:** 311 declared `bind` entries across the 16
+panels, of which **136** are in the three seeded panels (color 82, stroke 36, swatches 18) and
+**175** are not — paragraph (30) and character (24) are the largest uncovered. Panel
+`enabled_when` is gated by nothing: **3** nodes carry it, all in `gradient_panel_content`, all with
+the literal expression `false`; the arm was deliberately NOT added to the three passes, because
+adding it without a seeded gradient vector would ship an unexercised branch. And `panel_layout`
+itself is untouched — still `chars().count() * 10` / `unicodeScalars.count * charWidth`. The
+`panel-text-width-scalar-count-only` `coverage_gaps` row carries all of that residue.
+
 **5.9 — Two harness self-inconsistencies to fix before extending, or the first new vector is
 mis-triaged.** (a) The text harness injects `chars().count()` in Rust and `s.count` in Swift (#26) —
 **fix the harness before adding any non-ASCII vector**, or the failure will be attributed to

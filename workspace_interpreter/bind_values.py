@@ -50,11 +50,14 @@ panel's binding surface rather than its widget count.
 ``number``, ``string``, ``color``, ``list``, ``path``, ``closure``), which is
 what keeps a null distinguishable from an empty string — both render as ``""``.
 
-DETERMINISM.  ``value`` is built only from the shared string coercions the apps
-already use for ``{{ }}`` interpolation (``Value.to_string`` in this module's
-port, ``to_string_coerce`` / ``toStringCoerce`` in Rust and Swift, all three
-routing numbers through ``number_to_canonical_string``), so
-this pass introduces no new number-formatting surface.  Lists are bracketed and
+DETERMINISM.  ``value`` is built only from the string coercion each port already
+uses for ``{{ }}`` interpolation — ``Value.to_string`` here,
+``Value::to_string_coerce`` in Rust, ``Value.toStringCoerce()`` in Swift — so
+this pass adds no new number-formatting surface of its own.  (This port and
+Swift factor the number arm out as ``number_to_canonical_string`` /
+``numberToCanonicalString``; Rust inlines the same rule in ``expr_types.rs``.
+The three agree on every number the corpus reaches, which is what the shared
+golden proves.)  Lists are bracketed and
 comma-joined element-wise.  A ``bind`` expression whose value is a JSON OBJECT
 is coerced to a JSON string by the evaluator itself, and the key order of that
 string is a known cross-port divergence (census row #50) — no vector in

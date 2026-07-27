@@ -129,6 +129,18 @@ is snapshot-able as data even where its *pixels* are framework-rendered.
   **compile-time** `type:` validator in the compiler, and a per-app *dispatch*-coverage
   assert (the snapshot pins the SHARED resolved tree + vocab; it does not yet record each
   app's own dispatch-table result).
+- **Widget VALUES** — the widget-tree snapshot records `bind`/`style` *key names* and
+  collapses dynamic visibility to a flag, on purpose: that is what keeps it stable. The
+  values themselves are pinned by a third pass, `bind_values(panel, ctx)` →
+  per-binding `{path, id, key, type, value}`, in
+  `test_fixtures/algorithms/panel_bind_values.json` (4 vectors over the Color, Stroke and
+  Swatches panels; 225 rows), driven by the reference, Rust and Swift. Coverage is by
+  expression SHAPE, not by panel: a colour swatch, a numeric field, the five conditional
+  `bind.visible` containers, and two nested `foreach` levels including a `{{ }}` label.
+  Measured residue on the commit that landed it: 136 of the bundle's 311 declared `bind`
+  entries are in the three seeded panels; panel `enabled_when` (3 nodes, all in the
+  Gradient panel, all the literal `false`) is evaluated by no gate. See the
+  `panel-text-width-scalar-count-only` row in `scripts/corpus_manifest.json`.
 - **Toolbar** — `toolbar_structure_json` gates a **stale mirror** (see §7); re-source from
   the real toolbar.
 - **Menu bar** — gated at three depths:
