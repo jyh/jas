@@ -40,10 +40,15 @@ import Testing
 ///      assertions cannot see. It also asserts the reflected child count is
 ///      non-zero per kind, so a payload Mirror cannot silently walk nothing.
 ///
-/// The kinds covered are the nine struct kinds `withMask` rebuilds field by
-/// field. `.text` / `.textPath` are NOT covered here (their fixtures are a
-/// separate body of work) and `.live` delegates to `LiveVariant.withMask`,
+/// The kinds covered are the eleven struct kinds — the nine `withMask` rebuilds
+/// plus `.text` / `.textPath`, added when `withFill` and the two `withTspans`
+/// helpers joined this battery. `.live` delegates to `LiveVariant.withMask`,
 /// which is already clone-then-mutate.
+///
+/// Both text fixtures deliberately carry TWO tspans, because the open-coded
+/// rebuilds route through the `content:` convenience initializer, which
+/// concatenates the run structure into a single tspan. A one-tspan fixture
+/// would round-trip through that collapse unchanged and see nothing.
 
 // MARK: - Fixture helpers
 
@@ -64,6 +69,9 @@ private let richFill = Fill(color: Color(r: 0.2, g: 0.4, b: 0.6))
 private let richStroke = Stroke(color: Color(r: 0.9, g: 0.1, b: 0.1), width: 3.5)
 private let richWidthPoints = [StrokeWidthPoint(t: 0, widthLeft: 0.5, widthRight: 2.5),
                                StrokeWidthPoint(t: 1, widthLeft: 2.5, widthRight: 0.5)]
+/// TWO runs — see the header note on why one would be blind.
+private let richTspans = [Tspan(id: 0, content: "Hel"),
+                          Tspan(id: 1, content: "lo")]
 
 /// Every stored property set away from its default (except the geometry, which
 /// has no default), for each kind `withMask` rebuilds by hand.
@@ -115,6 +123,35 @@ private func populated() -> [(String, Element)] {
                             strokeBrushOverrides: "{\"angle\":45}",
                             toolOrigin: "blob_brush",
                             name: "my-path", id: "path-1", fillRule: .evenodd))),
+        ("text", .text(Text(x: 1, y: 2, tspans: richTspans,
+                            fontFamily: "Georgia", fontSize: 22,
+                            fontWeight: "bold", fontStyle: "italic",
+                            textDecoration: "underline",
+                            textTransform: "uppercase", fontVariant: "small-caps",
+                            baselineShift: "super", lineHeight: "1.5",
+                            letterSpacing: "2", xmlLang: "fr",
+                            aaMode: "crisp", rotate: "5",
+                            horizontalScale: "120", verticalScale: "80",
+                            kerning: "3", width: 40, height: 20,
+                            fill: richFill, stroke: richStroke,
+                            opacity: 0.42, transform: Transform.translate(7, 11),
+                            locked: true, visibility: .outline, blendMode: .multiply,
+                            mask: probe(10), name: "my-text", id: "text-1"))),
+        ("textPath", .textPath(TextPath(d: [.moveTo(0, 0), .lineTo(10, 10)],
+                            tspans: richTspans, startOffset: 12,
+                            fontFamily: "Georgia", fontSize: 22,
+                            fontWeight: "bold", fontStyle: "italic",
+                            textDecoration: "underline",
+                            textTransform: "uppercase", fontVariant: "small-caps",
+                            baselineShift: "super", lineHeight: "1.5",
+                            letterSpacing: "2", xmlLang: "fr",
+                            aaMode: "crisp", rotate: "5",
+                            horizontalScale: "120", verticalScale: "80",
+                            kerning: "3",
+                            fill: richFill, stroke: richStroke,
+                            opacity: 0.42, transform: Transform.translate(7, 11),
+                            locked: true, visibility: .outline, blendMode: .multiply,
+                            mask: probe(11), name: "my-textpath", id: "textpath-1"))),
         ("group", .group(Group(children: [.rect(Rect(x: 0, y: 0, width: 1, height: 1))],
                                opacity: 0.42, transform: Transform.translate(7, 11),
                                locked: true, visibility: .outline, blendMode: .multiply,
@@ -140,6 +177,9 @@ private func minimal() -> [(String, Element)] {
         ("polyline", .polyline(Polyline(points: [(0, 0), (10, 10)]))),
         ("polygon", .polygon(Polygon(points: [(0, 0), (10, 0), (10, 10)]))),
         ("path", .path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)], fillRule: .nonzero))),
+        ("text", .text(Text(x: 1, y: 2, tspans: richTspans))),
+        ("textPath", .textPath(TextPath(d: [.moveTo(0, 0), .lineTo(10, 10)],
+                                        tspans: richTspans))),
         ("group", .group(Group(children: [.rect(Rect(x: 0, y: 0, width: 1, height: 1))]))),
         ("layer", .layer(Layer(children: [.rect(Rect(x: 0, y: 0, width: 1, height: 1))]))),
     ]
@@ -189,9 +229,12 @@ private func expectOnlySubjectChanged(_ before: Any, _ after: Any,
         #expect(!r.isEmpty, "\(kind): reflected zero stored properties")
         // Geometry fields have no default and are equal by construction; the
         // guard covers every field a copy helper could silently drop.
+        // `tspans` is a text element's payload, the counterpart of `d` /
+        // `points` — equal by construction, and it is the SUBJECT of the
+        // withTspans battery, which asserts on it directly.
         let geometry: Set<String> = ["x1", "y1", "x2", "y2", "x", "y", "width",
                                      "height", "cx", "cy", "r", "rx", "ry",
-                                     "points", "d", "children"]
+                                     "points", "d", "children", "tspans"]
         for (label, value) in r where !geometry.contains(label) {
             #expect(value != p[label],
                     "\(kind).\(label) is at its default in the fixture — a drop of that field would be invisible to these tests")
@@ -288,6 +331,115 @@ private func expectOnlySubjectChanged(_ before: Any, _ after: Any,
         expectOnlySubjectChanged(payload(e), payload(after),
                                  subject: "locked", "withLocked on \(kind)")
     }
+}
+
+// MARK: - withFill
+//
+// The Color panel's write path (`Controller.setSelectionFill` →
+// `fillApplied` → `withFill`), and the widest omission in the class: the
+// open-coded rebuild it replaced stopped at `visibility:`, so setting a fill
+// colour on a named, cited, masked, brush-stroked path destroyed its `name`,
+// `id`, `mask`, `blendMode`, `strokeGradient`, `strokeBrush`,
+// `strokeBrushOverrides` and `toolOrigin` — and on a Text it collapsed every
+// tspan run into one. Rust's `with_fill` is `RectElem { fill, ..e.clone() }`
+// and always conformed.
+//
+// SUBJECT. `withFill` speaks to `fill` AND to `fillGradient`, which shadows it
+// on the render chain (`apply_fill` returns early on the gradient branch):
+// EDIT_SEMANTICS_FREEZE.md T1's SHADOWING-FAMILY closure says an edit that
+// writes one member of a shadowing family speaks to the whole family, so the
+// gradient goes to the fresh default rather than being carried. That is what
+// this port does and has always done, and it is what these tests pin.
+//
+// NAMED CROSS-PORT DELTA, not repaired here: Rust's `..e.clone()` CARRIES
+// `fill_gradient`, so a colour pick on a gradient-filled element leaves the
+// gradient shadowing the new colour there and clears it here. Which port is
+// right is the §3.6 gradients-as-paint AMENDMENT — a ruling that must land in
+// both ports at once — so this battery deliberately preserves Swift's current
+// answer rather than silently legislating either way.
+
+@Test func withFillIsIdentityWhenUnchanged() {
+    for (kind, e) in populated() {
+        switch e {
+        case .line, .group, .layer:
+            // No fill slot: returned unchanged, itself a preservation claim.
+            #expect(withFill(e, fill: e.fill) == e, "withFill altered \(kind)")
+        default:
+            // `fillGradient` is spoken to (shadowing family), so the identity
+            // law here is "everything BUT the fill family survives".
+            let after = withFill(e, fill: e.fill)
+            #expect(after.fillGradient == nil,
+                    "withFill must clear the shadowing gradient on \(kind)")
+            #expect(withFillGradient(after, fillGradient: e.fillGradient) == e,
+                    "withFill dropped a field outside the fill family on \(kind)")
+        }
+    }
+}
+
+@Test func withFillChangesOnlyTheFillFamily() {
+    let fresh = Fill(color: Color(r: 0.05, g: 0.95, b: 0.15))
+    for (kind, e) in populated() {
+        let after = withFill(e, fill: fresh)
+        switch e {
+        case .line, .group, .layer:
+            #expect(after == e, "withFill altered \(kind), which has no fill")
+            continue
+        default:
+            break
+        }
+        // Value pairing: the subject actually moved.
+        #expect(after.fill == fresh, "withFill did not set the fill on \(kind)")
+        #expect(after.fillGradient == nil,
+                "withFill must clear the shadowing gradient on \(kind)")
+        // Compare everything else by restoring the two fill-family fields.
+        let restored = withFillGradient(withFill(after, fill: e.fill),
+                                        fillGradient: e.fillGradient)
+        #expect(restored == e, "withFill changed a field outside the fill family on \(kind)")
+    }
+}
+
+// MARK: - Text.withTspans / TextPath.withTspans / with(content:)
+//
+// `TextEditSession.applyToDocument`'s write path. Same clause, same class:
+// each was an open-coded rebuild that stopped at `locked:`, dropping
+// `visibility`, `blendMode`, `mask`, `name` and `id` — so committing a text
+// edit destroyed the element's identity. `withTspans`' own doc comment claimed
+// "Preserves every other field", which it did not; Rust's twin is
+// `t.clone()` + `new_t.tspans = ...` (tools/text_edit.rs) and conforms.
+
+@Test func textWithTspansIsIdentityWhenUnchanged() {
+    guard case .text(let t) = populated().first(where: { $0.0 == "text" })!.1,
+          case .textPath(let tp) = populated().first(where: { $0.0 == "textPath" })!.1
+    else { Issue.record("missing text fixtures"); return }
+    #expect(t.withTspans(t.tspans) == t, "Text.withTspans dropped a field")
+    #expect(tp.withTspans(tp.tspans) == tp, "TextPath.withTspans dropped a field")
+}
+
+@Test func textWithTspansChangesOnlyTheTspans() {
+    let fresh = [Tspan(id: 7, content: "new")]
+    guard case .text(let t) = populated().first(where: { $0.0 == "text" })!.1,
+          case .textPath(let tp) = populated().first(where: { $0.0 == "textPath" })!.1
+    else { Issue.record("missing text fixtures"); return }
+    let a = t.withTspans(fresh)
+    #expect(a.tspans == fresh, "Text.withTspans did not set the tspans")
+    expectOnlySubjectChanged(t, a, subject: "tspans", "Text.withTspans")
+    let b = tp.withTspans(fresh)
+    #expect(b.tspans == fresh, "TextPath.withTspans did not set the tspans")
+    expectOnlySubjectChanged(tp, b, subject: "tspans", "TextPath.withTspans")
+}
+
+/// `with(content:)` is `withTspans` over a single freshly-built run; it is in
+/// the same class and was open-coded the same way.
+@Test func textWithContentChangesOnlyTheTspans() {
+    guard case .text(let t) = populated().first(where: { $0.0 == "text" })!.1,
+          case .textPath(let tp) = populated().first(where: { $0.0 == "textPath" })!.1
+    else { Issue.record("missing text fixtures"); return }
+    let a = t.with(content: "brand new")
+    #expect(a.content == "brand new", "Text.with(content:) did not set the content")
+    expectOnlySubjectChanged(t, a, subject: "tspans", "Text.with(content:)")
+    let b = tp.with(content: "brand new")
+    #expect(b.content == "brand new", "TextPath.with(content:) did not set the content")
+    expectOnlySubjectChanged(tp, b, subject: "tspans", "TextPath.with(content:)")
 }
 
 // MARK: - withFillGradient / withStrokeGradient

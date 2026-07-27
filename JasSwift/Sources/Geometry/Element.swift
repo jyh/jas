@@ -1920,56 +1920,38 @@ public func withStrokeGradient(_ element: Element, strokeGradient: Gradient?) ->
     }
 }
 
+/// EDIT_SEMANTICS_FREEZE.md §3.1 + T1's SHADOWING-FAMILY closure. This edit
+/// speaks to the fill family — `fill` AND the `fillGradient` that shadows it on
+/// the render chain — and to nothing else: `name`, `id`, `mask`, `blendMode`,
+/// `strokeGradient`, `strokeBrush`, `strokeBrushOverrides`, `toolOrigin` and a
+/// text element's tspan RUN STRUCTURE all survive.
+///
+/// The open-coded rebuild this replaced stopped at `visibility:` and dropped
+/// every one of them, so a Colour-panel fill on a named, cited, masked,
+/// brush-stroked path destroyed its identity, and on a Text it collapsed every
+/// run into one (it routed through the `content:` convenience initializer).
+///
+/// NAMED CROSS-PORT DELTA: Rust's `with_fill` is
+/// `RectElem { fill, ..e.clone() }`, which CARRIES `fill_gradient` — so there a
+/// colour pick leaves the gradient shadowing the new colour, and here it
+/// clears it. This port's answer is unchanged by this repair (it always
+/// cleared) and is the one T1's closure states; which port is right is the
+/// §3.6 gradients-as-paint AMENDMENT, a ruling that must land in both ports at
+/// once. Not guessed here.
 public func withFill(_ element: Element, fill: Fill?) -> Element {
     switch element {
     case .line:
         return element
-    case .rect(let v):
-        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                          rx: v.rx, ry: v.ry, fill: fill, stroke: v.stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility))
-    case .circle(let v):
-        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                              fill: fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: v.visibility))
-    case .ellipse(let v):
-        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                fill: fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility))
-    case .polyline(let v):
-        return .polyline(Polyline(points: v.points, fill: fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility))
-    case .polygon(let v):
-        return .polygon(Polygon(points: v.points, fill: fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility))
-    case .path(let v):
-        return .path(Path(d: v.d, fill: fill, stroke: v.stroke,
-                          widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, fillRule: v.fillRule))
-    case .text(let v):
-        return .text(Text(x: v.x, y: v.y, content: v.content,
-                          fontFamily: v.fontFamily, fontSize: v.fontSize,
-                          fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                          textDecoration: v.textDecoration,
-                          width: v.width, height: v.height,
-                          fill: fill, stroke: v.stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility))
-    case .textPath(let v):
-        return .textPath(TextPath(d: v.d, content: v.content,
-                                  startOffset: v.startOffset,
-                                  fontFamily: v.fontFamily, fontSize: v.fontSize,
-                                  fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                                  textDecoration: v.textDecoration,
-                                  fill: fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility))
+    case .rect(var v): v.fill = fill; v.fillGradient = nil; return .rect(v)
+    case .circle(var v): v.fill = fill; v.fillGradient = nil; return .circle(v)
+    case .ellipse(var v): v.fill = fill; v.fillGradient = nil; return .ellipse(v)
+    case .polyline(var v): v.fill = fill; v.fillGradient = nil; return .polyline(v)
+    case .polygon(var v): v.fill = fill; v.fillGradient = nil; return .polygon(v)
+    case .path(var v): v.fill = fill; v.fillGradient = nil; return .path(v)
+    // Text and TextPath carry no gradient in this port, so the fill family is
+    // `fill` alone there.
+    case .text(var v): v.fill = fill; return .text(v)
+    case .textPath(var v): v.fill = fill; return .textPath(v)
     case .group, .layer:
         return element
     case .live(let v):
@@ -3228,42 +3210,25 @@ public struct Text: Equatable {
         }
     }
 
-    /// Return a copy of this Text with the given fields replaced. Used by
-    /// `TextEditSession.applyToDocument` so the field list lives in one
-    /// place.
+    /// Return a copy of this Text with the content replaced by one run. Used
+    /// by `TextEditSession.applyToDocument`; expressed through ``withTspans``
+    /// so there is exactly one preservation site for both.
     public func with(content: String) -> Text {
-        Text(x: x, y: y, content: content,
-             fontFamily: fontFamily, fontSize: fontSize,
-             fontWeight: fontWeight, fontStyle: fontStyle,
-             textDecoration: textDecoration,
-             textTransform: textTransform, fontVariant: fontVariant,
-             baselineShift: baselineShift, lineHeight: lineHeight,
-             letterSpacing: letterSpacing, xmlLang: xmlLang,
-             aaMode: aaMode, rotate: rotate,
-             horizontalScale: horizontalScale, verticalScale: verticalScale,
-             kerning: kerning,
-             width: width, height: height,
-             fill: fill, stroke: stroke,
-             opacity: opacity, transform: transform, locked: locked)
+        withTspans([Tspan(id: 0, content: content)])
     }
 
-    /// Return a copy with the tspans list replaced. Preserves every
-    /// other field. Used by `TextEditSession.applyToDocument` after
-    /// reconciling content so per-range overrides survive.
+    /// Return a copy with the tspans list replaced, preserving every other
+    /// field. Used by `TextEditSession.applyToDocument` after reconciling
+    /// content so per-range overrides survive.
+    ///
+    /// EDIT_SEMANTICS_FREEZE.md §3.1: this was an open-coded rebuild that
+    /// stopped at `locked:`, so committing a text edit destroyed the element's
+    /// `visibility`, `blendMode`, `mask`, `name` and `id` — while its own doc
+    /// comment claimed it preserved everything. Rust's twin is `t.clone()` +
+    /// `new_t.tspans = ...` (tools/text_edit.rs) and always conformed. The
+    /// clone-then-mutate form is what makes the claim true structurally.
     public func withTspans(_ tspans: [Tspan]) -> Text {
-        Text(x: x, y: y, tspans: tspans,
-             fontFamily: fontFamily, fontSize: fontSize,
-             fontWeight: fontWeight, fontStyle: fontStyle,
-             textDecoration: textDecoration,
-             textTransform: textTransform, fontVariant: fontVariant,
-             baselineShift: baselineShift, lineHeight: lineHeight,
-             letterSpacing: letterSpacing, xmlLang: xmlLang,
-             aaMode: aaMode, rotate: rotate,
-             horizontalScale: horizontalScale, verticalScale: verticalScale,
-             kerning: kerning,
-             width: width, height: height,
-             fill: fill, stroke: stroke,
-             opacity: opacity, transform: transform, locked: locked)
+        var v = self; v.tspans = tspans; return v
     }
 
     public var bounds: BBox {
@@ -3407,36 +3372,18 @@ public struct TextPath: Equatable {
         return inflateBounds(pathBounds(d), stroke)
     }
 
-    /// Return a copy of this TextPath with `content` replaced.
+    /// Return a copy of this TextPath with the content replaced by one run.
+    /// Expressed through ``withTspans`` so there is one preservation site.
     public func with(content: String) -> TextPath {
-        TextPath(d: d, content: content, startOffset: startOffset,
-                 fontFamily: fontFamily, fontSize: fontSize,
-                 fontWeight: fontWeight, fontStyle: fontStyle,
-                 textDecoration: textDecoration,
-                 textTransform: textTransform, fontVariant: fontVariant,
-                 baselineShift: baselineShift, lineHeight: lineHeight,
-                 letterSpacing: letterSpacing, xmlLang: xmlLang,
-                 aaMode: aaMode, rotate: rotate,
-                 horizontalScale: horizontalScale, verticalScale: verticalScale,
-                 kerning: kerning,
-                 fill: fill, stroke: stroke,
-                 opacity: opacity, transform: transform, locked: locked)
+        withTspans([Tspan(id: 0, content: content)])
     }
 
-    /// Return a copy with the tspans list replaced.
+    /// Return a copy with the tspans list replaced, preserving every other
+    /// field. Same clause and same repair as ``Text/withTspans(_:)`` — see its
+    /// note; the rebuild this replaced dropped `visibility`, `blendMode`,
+    /// `mask`, `name` and `id`.
     public func withTspans(_ tspans: [Tspan]) -> TextPath {
-        TextPath(d: d, tspans: tspans, startOffset: startOffset,
-                 fontFamily: fontFamily, fontSize: fontSize,
-                 fontWeight: fontWeight, fontStyle: fontStyle,
-                 textDecoration: textDecoration,
-                 textTransform: textTransform, fontVariant: fontVariant,
-                 baselineShift: baselineShift, lineHeight: lineHeight,
-                 letterSpacing: letterSpacing, xmlLang: xmlLang,
-                 aaMode: aaMode, rotate: rotate,
-                 horizontalScale: horizontalScale, verticalScale: verticalScale,
-                 kerning: kerning,
-                 fill: fill, stroke: stroke,
-                 opacity: opacity, transform: transform, locked: locked)
+        var v = self; v.tspans = tspans; return v
     }
 }
 
