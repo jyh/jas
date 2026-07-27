@@ -4928,7 +4928,9 @@ fn blob_brush_commit_painting(
     use crate::algorithms::boolean::boolean_union;
     use crate::document::artboard::{generate_element_id, mint_unique_ids};
     use crate::geometry::element::{Element, PathElem, CommonProps};
-    use crate::geometry::path_ops::{path_to_polygon_set, polygon_set_to_path};
+    use crate::geometry::path_ops::{
+        path_to_polygon_set, polygon_set_to_path, transform_polygon_set,
+    };
 
     let points: Vec<(f64, f64)> = super::point_buffers::with_points(
         buffer_name, |p| p.to_vec());
@@ -4977,7 +4979,41 @@ fn blob_brush_commit_painting(
             if merge_only_with_selection && !selected.contains(&path) {
                 continue;
             }
-            let existing = path_to_polygon_set(&pe.d);
+            // BOTH SIDES IN DOCUMENT SPACE (BLOB_BRUSH_TOOL.md §Transform).
+            // `swept` came from the point buffer in document coordinates;
+            // `pe.d` is in the element's own space, which `common.transform`
+            // maps to the document. Testing them against each other without
+            // the matrix matches on where the artwork is STORED, not where it
+            // is DRAWN: a scaled blob 300 units away used to union with a
+            // sweep that never came near it.
+            //
+            // A SINGULAR matrix disqualifies the element rather than matching
+            // it. Such an element collapses to a line or a point on screen, so
+            // there is nothing to paint into, and the n == 1 arm below could
+            // not write the result back into its space anyway — the inverse
+            // that maps the unified doc-space region into local coordinates
+            // does not exist. Skipping is the only answer that leaves the
+            // document unchanged instead of guessing at one.
+            //
+            // NO FIXTURE SEPARATES THIS GUARD, and the reason is worth
+            // recording: `transform_polygon_set` maps a singular source onto a
+            // zero-area figure, and `boolean_intersect` reports empty for
+            // that, so the loop `continue`s one line later anyway.
+            // `blob_merge_skips_a_source_whose_transform_is_singular` pins the
+            // OUTCOME (source untouched, sweep committed beside it) — which
+            // the guard and the boolean layer agree on — not the guard. What
+            // the guard adds is that the skip is a stated RULE instead of a
+            // consequence of the boolean layer's treatment of degenerate
+            // input, which no comment there promises.
+            let existing = match pe.common.transform {
+                Some(t) => {
+                    if t.inverse().is_none() {
+                        continue;
+                    }
+                    transform_polygon_set(&path_to_polygon_set(&pe.d), &t)
+                }
+                None => path_to_polygon_set(&pe.d),
+            };
             // Cheap reject: union-check via is_empty-after-intersect
             use crate::algorithms::boolean::boolean_intersect;
             let intersection = boolean_intersect(&unified, &existing);
@@ -5000,8 +5036,13 @@ fn blob_brush_commit_painting(
         (lowest[0], Some(lowest[1]))
     };
 
-    let new_d = polygon_set_to_path(&unified);
-    if new_d.is_empty() {
+    // `unified` is in DOCUMENT space. Where it is written back depends on the
+    // arm below: the n == 1 arm keeps the source element, hence the source's
+    // `transform`, so its `d` must be expressed in the source's LOCAL space;
+    // the n == 0 and n >= 2 arms build a transform-less element, whose local
+    // space IS the document. The emptiness guard reads the document-space set,
+    // which is the one that decides whether anything was painted at all.
+    if polygon_set_to_path(&unified).is_empty() {
         return;
     }
     // THE CARDINALITY LAW (JYH, ratified 2026-07-26): "Identity survives a
@@ -5030,7 +5071,20 @@ fn blob_brush_commit_painting(
             // Unreachable: the path was collected from this same `doc` above.
             _ => return,
         };
-        Element::Path(PathElem { d: new_d, ..src })
+        // The survivor keeps its `transform`, so its `d` is read through that
+        // matrix — write the unified region back in the element's OWN space.
+        // The `None` arm of `inverse()` is not reachable (the match loop
+        // `continue`d past every singular source), and is written as an abort
+        // rather than an unwrap so that a future change to that loop degrades
+        // into a no-op edit instead of a panic in the tool.
+        let local = match src.common.transform {
+            Some(t) => match t.inverse() {
+                Some(inv) => transform_polygon_set(&unified, &inv),
+                None => return,
+            },
+            None => unified.clone(),
+        };
+        Element::Path(PathElem { d: polygon_set_to_path(&local), ..src })
     } else {
         // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both build
         // a fresh element carrying the tool's own attributes. For the merge
@@ -5068,11 +5122,16 @@ fn blob_brush_commit_painting(
             // nothing about opacity, so merging two 50%-opaque blobs must not
             // yield a fully opaque one.
             //
-            // `transform` is EXCLUDED regardless of agreement. This merge
-            // matches RAW geometry against a DOCUMENT-space sweep, so it is
-            // already transform-blind (transcripts/BLOB_BRUSH_TOOL.md);
-            // carrying a unanimous transform would COMPOUND that bug by
-            // relocating the merged artwork. `tool_origin` is set by the tool
+            // `transform` is EXCLUDED regardless of agreement. The reason has
+            // changed and the exclusion has not: it was excluded because the
+            // merge matched RAW geometry against a DOCUMENT-space sweep, so
+            // carrying a matrix would have compounded that. That blindness is
+            // now fixed — `unified` is document-space and this arm's element
+            // is transform-less, which is CONSISTENT on its own terms. So the
+            // exclusion is no longer forced by a bug; whether a unanimous
+            // transform should now carry (and `d` be expressed in its space)
+            // is JYH's to rule. Until then this stays as ruled.
+            // `tool_origin` is set by the tool
             // above, `id` is minted fresh, and the paint attributes are what
             // the stroke DOES speak to — so `common`'s five compositing
             // fields below are the whole list. Swift's twin carries the same
@@ -5111,7 +5170,12 @@ fn blob_brush_commit_painting(
             }
         }
         Element::Path(PathElem {
-            d: new_d,
+            // `common.transform` is left at its default (None) on this arm —
+            // for n == 0 because a fresh blob has no matrix, for n >= 2
+            // because the unanimity carry excludes `transform`. Either way the
+            // element's local space IS the document, so the document-space
+            // union is written straight in.
+            d: polygon_set_to_path(&unified),
             fill: new_fill,
             stroke: None,
             width_points: Vec::new(),
@@ -10313,6 +10377,11 @@ mod tests {
     /// A 6-point horizontal sweep along `y` from `x0` to `x1`, in a
     /// test-private buffer (the point buffers are process-global, and tests
     /// run in parallel).
+    ///
+    /// The coordinates are DOCUMENT space, as the point buffer's are on the
+    /// live canvas. For a source carrying a `transform` that is not the
+    /// element's own `d` space, so a sweep meant to land ON such a source must
+    /// be given the coordinates where the source is DRAWN.
     fn seed_blob_brush_sweep_in(buffer: &str, x0: f64, x1: f64, y: f64) {
         super::super::point_buffers::clear(buffer);
         for i in 0..=5 {
@@ -10348,7 +10417,12 @@ mod tests {
         let mut store = StateStore::new();
         seed_blob_brush_merge_state(&mut store, &src);
         let buffer = "theseus_blob_merge_one";
-        seed_blob_brush_sweep_in(buffer, 50.0, 150.0, 50.0);
+        // The theseus fixture carries transform translate(40,70), so its local
+        // square 0..100 is DRAWN at doc x 40..140, y 70..170. The sweep is
+        // aimed there. (It used to run at doc y=50, which is where the square
+        // is STORED and 20 units above where it appears; the merge matched
+        // anyway, which was the transform-blind bug.)
+        seed_blob_brush_sweep_in(buffer, 90.0, 190.0, 120.0);
         run_effects(
             &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
             &mut store, Some(&mut model), None, None, None);
@@ -10452,7 +10526,9 @@ mod tests {
         let mut store = StateStore::new();
         seed_blob_brush_merge_state(&mut store, &src);
         let buffer = "theseus_blob_merge_after_erase";
-        seed_blob_brush_sweep_in(buffer, 50.0, 150.0, 50.0);
+        // Doc space, as above: the fragment carries translate(40,70), so it is
+        // drawn at doc x 40..140, y 70..170.
+        seed_blob_brush_sweep_in(buffer, 90.0, 190.0, 120.0);
         run_effects(
             &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
             &mut store, Some(&mut model), None, None, None);
@@ -10496,8 +10572,13 @@ mod tests {
     /// bridged by ONE sweep, so the commit takes the N = 2 merge arm. Returns
     /// the merged element. `buffer` must be unique per test — the point
     /// buffers are process-global and tests run in parallel.
+    ///
+    /// The sources' local `d` spans x 0..40 and 60..100 at y 40..60; `sweep`
+    /// is `(x0, x1, y)` in DOCUMENT space, so a caller that gives its sources a
+    /// `transform` must offset the sweep by it to land on them.
     fn merge_two_blobs(
         left: CommonProps, right: CommonProps, buffer: &str,
+        sweep: (f64, f64, f64),
     ) -> PathElem {
         use crate::geometry::element::FillRule;
         use std::rc::Rc;
@@ -10536,7 +10617,7 @@ mod tests {
         store.set("blob_brush_size", serde_json::json!(10.0));
         store.set("blob_brush_angle", serde_json::json!(0.0));
         store.set("blob_brush_roundness", serde_json::json!(100.0));
-        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        seed_blob_brush_sweep_in(buffer, sweep.0, sweep.1, sweep.2);
         run_effects(
             &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
             &mut store, Some(&mut model), None, None, None);
@@ -10566,7 +10647,8 @@ mod tests {
             mask: Some(Box::new(unanimity_mask())),
             ..CommonProps::default()
         };
-        let out = merge_two_blobs(agreed(), agreed(), "unanimity_agree");
+        let out = merge_two_blobs(agreed(), agreed(), "unanimity_agree",
+                                  (10.0, 90.0, 50.0));
         assert_eq!(out.common.opacity, 0.5);
         assert_eq!(out.common.mode, BlendMode::Multiply);
         assert_eq!(out.common.visibility, Visibility::Outline);
@@ -10599,13 +10681,88 @@ mod tests {
             mask: None,
             ..CommonProps::default()
         };
-        let out = merge_two_blobs(left, right, "unanimity_disagree");
+        let out = merge_two_blobs(left, right, "unanimity_disagree",
+                                  (10.0, 90.0, 50.0));
         let d = CommonProps::default();
         assert_eq!(out.common.opacity, d.opacity);
         assert_eq!(out.common.mode, d.mode);
         assert_eq!(out.common.visibility, d.visibility);
         assert_eq!(out.common.locked, d.locked);
         assert_eq!(out.common.mask, d.mask);
+    }
+
+    /// A SINGULAR `transform` disqualifies a source from the merge.
+    ///
+    /// `scale(1, 0)` flattens the element onto a horizontal line: it has no
+    /// area on screen, so there is nothing to paint into, and it has no
+    /// inverse, so the unified document-space region could not be written back
+    /// into its space even if it did match. The sweep must therefore commit a
+    /// SECOND element and leave the degenerate one untouched.
+    ///
+    /// HONEST SCOPE: this vector does NOT separate the singular-matrix guard
+    /// in the match loop. `transform_polygon_set` collapses the source to a
+    /// zero-area figure and `boolean_intersect` reports empty for that, so
+    /// deleting the guard leaves this assertion green (verified by deleting
+    /// it: 2634 passed, 0 failed). What it pins is the OUTCOME — a degenerate
+    /// source is left alone and the sweep commits beside it, with no panic —
+    /// which is the corner case a user can actually reach by scaling a blob to
+    /// zero height.
+    #[test]
+    fn blob_merge_skips_a_source_whose_transform_is_singular() {
+        use crate::geometry::element::{FillRule, Transform};
+        use std::rc::Rc;
+        let red = Fill::new(Color::from_hex("#ff0000").unwrap());
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: 0.0, y: 40.0 },
+                    PathCommand::LineTo { x: 100.0, y: 40.0 },
+                    PathCommand::LineTo { x: 100.0, y: 60.0 },
+                    PathCommand::LineTo { x: 0.0, y: 60.0 },
+                    PathCommand::ClosePath,
+                ],
+                fill: Some(red),
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps {
+                    tool_origin: Some("blob_brush".to_string()),
+                    // det == 0: everything lands on the line y = 50.
+                    transform: Some(Transform {
+                        a: 1.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0, f: 50.0,
+                    }),
+                    ..CommonProps::default()
+                },
+                fill_gradient: None,
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })));
+        }
+        let mut model = Model::new(doc, None);
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!(red.color.to_hex()));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+        let buffer = "blob_singular_transform";
+        // Straight along the collapsed line, so the degenerate source is as
+        // reachable as it can be.
+        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 2,
+            "the degenerate source is skipped, so the sweep commits its own \
+             element beside it"
+        );
+        let untouched = path_at(&model, &[0, 0]);
+        assert_eq!(untouched.d.len(), 5, "the degenerate source keeps its `d`");
+        assert_eq!(path_at(&model, &[0, 1]).common.transform, None,
+            "the new blob is the transform-less one");
     }
 
     /// `transform` is EXCLUDED even when the sources agree. The merge matches
@@ -10622,8 +10779,13 @@ mod tests {
             transform: Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 40.0, f: 70.0 }),
             ..CommonProps::default()
         };
+        // Both sources carry translate(40,70), so their local x 0..40 /
+        // 60..100 at y 40..60 are DRAWN at doc x 40..80 / 100..140, y
+        // 110..130. The sweep is aimed there — at the old doc y=50 the fixture
+        // no longer merges at all, and the assertion below would be vacuous.
         let out = merge_two_blobs(
-            with_transform(), with_transform(), "unanimity_transform");
+            with_transform(), with_transform(), "unanimity_transform",
+            (50.0, 130.0, 120.0));
         assert_eq!(out.common.transform, None,
             "a unanimous transform must NOT ride onto the merge");
     }

@@ -909,6 +909,25 @@ pub fn polygon_set_to_path(
     out
 }
 
+/// Push a `PolygonSet` through an affine matrix, vertex by vertex.
+///
+/// The Blob Brush merge needs this because its two inputs live in different
+/// spaces: the swept region arrives in DOCUMENT space from the point buffer,
+/// while an element's `d` is in the element's own LOCAL space, related to the
+/// document by `common.transform`. Comparing them raw makes the merge match
+/// on where the artwork is STORED rather than where it is DRAWN.
+/// Ring order and vertex order are preserved; a mirroring matrix flips
+/// winding, which the boolean layer re-derives, so nothing here depends on it.
+/// See BLOB_BRUSH_TOOL.md §Transform.
+pub fn transform_polygon_set(
+    ps: &[Vec<(f64, f64)>],
+    t: &crate::geometry::element::Transform,
+) -> Vec<Vec<(f64, f64)>> {
+    ps.iter()
+        .map(|ring| ring.iter().map(|&(x, y)| t.apply_point(x, y)).collect())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

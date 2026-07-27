@@ -978,6 +978,20 @@ mod tests {
         // work: a matrix-aware merge must leave a transform-less element's
         // result byte-identical to what it was before.
         "blob_import_merge.json",
+        // The n == 1 arm WITH a matrix — the only gate that reads the value of
+        // a merged `d` rather than just its presence. Same setup as
+        // blob_transform_no_merge (local square 0..72, translate(300,300), so
+        // drawn at doc 300..372); this sweep runs at doc y=336 from x=320 to
+        // x=420, which DOES cross it. One child results, keeping the source's
+        // id and its matrix, and `d` must come back in the source's LOCAL
+        // space: the square unioned with the sweep mapped through the inverse,
+        // spanning local x 0..125, y 0..72.
+        //
+        // Without the inverse the union is written in document coordinates and
+        // the whole element jumps 300 units down-right on the next render,
+        // while every field-list test (`assert_only_d_changed`) still passes —
+        // they graft the source's `d` onto the output and never look at it.
+        "blob_transform_merge.json",
     ];
 
     /// Run a gesture fixture and return the resulting Model. Resolves
