@@ -4370,6 +4370,30 @@ fn path_move_latched_handle(
 /// ports' id source identically (`set_test_id_rng`), exactly as the creation
 /// verbs are already gated. See OP_LOG.md §9 for what the 33-verb unification
 /// owes this verb.
+/// Re-express `frag`'s LINEAR fill and stroke gradients on its own extent,
+/// given the `parent` bbox they were authored against. In-place; a gradient
+/// that is not linear, or a gradient-less field, is untouched.
+///
+/// `parent` and `fragment` must be the boxes the PAINTER resolves gradients
+/// against, which for a Path is `Element::bounds()` on both the fill and the
+/// stroke arm (`painter::element_render`, the `tuple_bounds(elem)` call feeding
+/// `emit_fill_path` and `stroke_brush`).
+fn remap_linear_gradients(
+    frag: &mut crate::geometry::element::PathElem,
+    parent: (f64, f64, f64, f64),
+    fragment: (f64, f64, f64, f64),
+) {
+    use crate::algorithms::gradient_remap::remap_linear_stops;
+    use crate::geometry::element::GradientType;
+    for slot in [&mut frag.fill_gradient, &mut frag.stroke_gradient] {
+        let Some(g) = slot.as_deref_mut() else { continue };
+        if g.gtype != GradientType::Linear {
+            continue;
+        }
+        g.stops = remap_linear_stops(&g.stops, g.angle, parent, fragment);
+    }
+}
+
 fn path_erase_at_rect(
     model: &mut Model,
     last_x: f64, last_y: f64,
@@ -4467,13 +4491,19 @@ fn path_erase_at_rect(
             // REFERENCE_GRAPH.md §2.5. A failed mint aborts the whole erase —
             // never a half-identified split.
             //
-            // STILL OWED for the severing case: a linear-gradient stop remap
-            // (a gradient carries no position — linear resolves angle + stops
-            // against the element's OWN bbox centre and half-diagonal — so
-            // each fragment re-fits the whole ramp instead of showing its
-            // slice; the fix is an affine remap of stop locations with
-            // clipping and interpolated endpoint colours). Radial cannot be
-            // preserved without a model change; the recentre is accepted.
+            // LINEAR GRADIENTS ARE REMAPPED on the severing arm (S-2, ruled
+            // 2026-07-26). A gradient carries no position — linear resolves
+            // angle + stops against the element's OWN bbox centre and
+            // half-diagonal — so a fragment that inherited the parent's stops
+            // verbatim re-fitted the whole ramp to its own smaller box. Each
+            // fragment's stops are re-expressed on its own extent below; see
+            // algorithms::gradient_remap.
+            //
+            // RADIAL is deliberately left alone: its centre is forced to the
+            // bbox centre and the model has nowhere to record an anchor, so a
+            // fragment necessarily re-centres. JYH accepted that; "gradient
+            // anchor" is a separate stone. FREEFORM paints nothing
+            // (resolve_gradient returns None), so there is nothing to preserve.
             let severed = results.len() > 1;
             let fragment_ids: Vec<Option<String>> = if severed {
                 let Some(ids) = mint_unique_ids(
@@ -4490,6 +4520,16 @@ fn path_erase_at_rect(
             for (cmds, id) in results.into_iter().zip(fragment_ids) {
                 let mut frag = PathElem { d: cmds, ..path_elem.clone() };
                 frag.common.id = id;
+                if severed {
+                    // Only the severing arm needs this. A single surviving
+                    // fragment is the 1 -> 1 case, and even there the bbox
+                    // shrinks — but that arm is the Theseus law's, which
+                    // preserves everything but `d`, and re-fitting a ramp to a
+                    // trimmed outline is what a non-severing erase has always
+                    // done. Changing it is a separate ruling.
+                    let frag_bbox = Element::Path(frag.clone()).bounds();
+                    remap_linear_gradients(&mut frag, bounds, frag_bbox);
+                }
                 new_children.push(Rc::new(Element::Path(frag)));
             }
             layer_changed = true;
@@ -10263,13 +10303,28 @@ mod tests {
         for i in 0..n {
             let frag = path_at(&model, &[0, i]);
             let label = format!("erase fragment {i}");
-            // Appearance + name + transform survive; only `id` differs.
+            // Appearance + name + transform survive; `id` differs, and so do
+            // the LINEAR gradients' stop LOCATIONS + endpoint colours, which
+            // S-2 re-expresses on each fragment's own extent (a gradient
+            // carries no position, so an un-remapped fragment re-fits the
+            // whole ramp). The gradient slots are grafted back for the same
+            // reason `d` and `id` are: this assertion is about the fields the
+            // erase must NOT speak to, and after S-2 the gradients are fields
+            // it does. `gradient_split_remaps_linear_stops_onto_each_fragment`
+            // is what pins their new values.
             let grafted = PathElem {
                 d: src.d.clone(),
+                fill_gradient: src.fill_gradient.clone(),
+                stroke_gradient: src.stroke_gradient.clone(),
                 common: CommonProps { id: src.common.id.clone(), ..frag.common.clone() },
                 ..frag.clone()
             };
-            assert_eq!(&grafted, &src, "{label}: a non-`d`, non-`id` field changed");
+            assert_eq!(&grafted, &src, "{label}: a non-`d`, non-`id`, \
+                non-gradient field changed");
+            // The gradient DID move: a fragment that still carried the
+            // parent's stops verbatim would be the S-2 bug.
+            assert_ne!(frag.fill_gradient, src.fill_gradient,
+                "{label}: the linear fill gradient must be remapped");
             let id = frag.common.id.clone().unwrap_or_else(|| {
                 panic!("{label}: a split fragment must carry a fresh id")
             });
@@ -10277,6 +10332,163 @@ mod tests {
                 "{label}: no fragment may wear the severed source's id");
             assert!(!seen.contains(&id), "{label}: fragments must not share an id");
             seen.push(id);
+        }
+    }
+
+    /// S-2 AT THE SEAM: a severing erase re-expresses each fragment's LINEAR
+    /// gradient on that fragment's own extent.
+    ///
+    /// Geometry chosen so every number is hand-derivable, exactly as the
+    /// `gradient_remap` corpus family's vectors are. A horizontal segment from
+    /// (0,0) to (120,0) carries a red-to-blue linear gradient at angle 0. The
+    /// painter resolves it against `Element::bounds()`, which for this
+    /// stroke-less path is (0,0,120,0): centre.u = 60, half = 60, so the ramp
+    /// runs 0..120. Erasing a 2-wide bite at x = 60 severs it into
+    /// (0,0)-(59,0) and (61,0)-(120,0).
+    ///
+    /// Fragment 0's box is (0,0,59,0): centre.u = 29.5, half = 29.5. The red
+    /// stop sits at absolute 0 -> L' = 50*((0-29.5)/29.5 + 1) = 0. The blue
+    /// stop sits at 120 -> L' = 50*((120-29.5)/29.5 + 1) ~ 203.39, clipped;
+    /// the endpoint sample at 100 is t = 100/203.39 = 0.49166... of the way
+    /// from red to blue, so r = 1 - t. What the UNFIXED code produced instead:
+    /// the parent's stops verbatim, r = 1 and r = 0 — a fragment covering the
+    /// left half of the ramp painting the WHOLE red-to-blue.
+    #[test]
+    fn gradient_split_remaps_linear_stops_onto_each_fragment() {
+        use crate::geometry::element::{
+            FillRule, Gradient, GradientStop, GradientType,
+        };
+        use std::rc::Rc;
+        let ramp = Gradient {
+            gtype: GradientType::Linear,
+            angle: 0.0,
+            stops: vec![
+                GradientStop {
+                    color: Color::rgb(1.0, 0.0, 0.0),
+                    opacity: 100.0, location: 0.0, midpoint_to_next: 50.0,
+                },
+                GradientStop {
+                    color: Color::rgb(0.0, 0.0, 1.0),
+                    opacity: 100.0, location: 100.0, midpoint_to_next: 50.0,
+                },
+            ],
+            ..Gradient::default()
+        };
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 120.0, y: 0.0 },
+                ],
+                fill: None,
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps::default(),
+                fill_gradient: Some(Box::new(ramp)),
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })));
+        }
+        let mut model = Model::new(doc, None);
+        with_corpus_id_counter(|| {
+            path_erase_at_rect(&mut model, 60.0, 0.0, 60.0, 0.0, 1.0)
+        });
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 2,
+            "the bite at x = 60 severs the segment in two");
+
+        let frag0 = path_at(&model, &[0, 0]);
+        let g0 = frag0.fill_gradient.as_deref()
+            .expect("the fragment keeps a fill gradient");
+        assert_eq!(g0.stops.len(), 2);
+        assert_eq!(g0.stops[0].location, 0.0);
+        assert_eq!(g0.stops[1].location, 100.0);
+        // Fragment 0 spans x 0..59.
+        let (fx, _, fw, _) = Element::Path(frag0.clone()).bounds();
+        assert!((fx - 0.0).abs() < 1e-9 && (fw - 59.0).abs() < 1e-9,
+            "fragment 0 is the 0..59 piece, got x={fx} w={fw}");
+        let half = fw / 2.0;
+        let t = 100.0 / (50.0 * ((120.0 - half) / half + 1.0));
+        let (r0, _, b0, _) = g0.stops[0].color.to_rgba();
+        let (r1, _, b1, _) = g0.stops[1].color.to_rgba();
+        assert!((r0 - 1.0).abs() < 1e-9 && b0.abs() < 1e-9,
+            "the fragment's near end is still full red");
+        assert!((r1 - (1.0 - t)).abs() < 1e-9 && (b1 - t).abs() < 1e-9,
+            "the fragment's far end is the ramp colour at t={t}, got \
+             r={r1} b={b1} — an un-remapped fragment would report r=0 b=1");
+    }
+
+    /// A RADIAL gradient is NOT remapped, and its stops come through a
+    /// severing erase byte-identical.
+    ///
+    /// This is the ruled behaviour, not an oversight: a radial gradient's
+    /// centre is forced to the element's bbox centre and the model has nowhere
+    /// to record an anchor, so a fragment necessarily re-centres. JYH accepted
+    /// the recentre (2026-07-26); "gradient anchor" is a separate stone. What
+    /// this vector forbids is running the LINEAR remap on it anyway — the
+    /// linear map would move stop locations along an axis a radial ramp does
+    /// not have, which is worse than the accepted recentre.
+    ///
+    /// Same geometry as the linear vector above, so the ONLY difference is
+    /// `gtype`: drop the linear-only guard in `remap_linear_gradients` and
+    /// this fragment's stops move to 0 and 100 with a blended far end.
+    #[test]
+    fn gradient_split_leaves_a_radial_gradient_alone() {
+        use crate::geometry::element::{
+            FillRule, Gradient, GradientStop, GradientType,
+        };
+        use std::rc::Rc;
+        let stops = vec![
+            GradientStop {
+                color: Color::rgb(1.0, 0.0, 0.0),
+                opacity: 100.0, location: 0.0, midpoint_to_next: 50.0,
+            },
+            GradientStop {
+                color: Color::rgb(0.0, 0.0, 1.0),
+                opacity: 100.0, location: 80.0, midpoint_to_next: 50.0,
+            },
+        ];
+        let ramp = Gradient {
+            gtype: GradientType::Radial,
+            angle: 0.0,
+            stops: stops.clone(),
+            ..Gradient::default()
+        };
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 120.0, y: 0.0 },
+                ],
+                fill: None,
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps::default(),
+                fill_gradient: Some(Box::new(ramp)),
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })));
+        }
+        let mut model = Model::new(doc, None);
+        with_corpus_id_counter(|| {
+            path_erase_at_rect(&mut model, 60.0, 0.0, 60.0, 0.0, 1.0)
+        });
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 2,
+            "the bite at x = 60 severs the segment in two");
+        for i in 0..2 {
+            let g = path_at(&model, &[0, i]).fill_gradient.clone()
+                .expect("the fragment keeps its fill gradient");
+            assert_eq!(g.gtype, GradientType::Radial);
+            assert_eq!(g.stops, stops,
+                "fragment {i}: a radial gradient's stops are untouched — \
+                 the 80 would become 100 under the linear remap");
         }
     }
 

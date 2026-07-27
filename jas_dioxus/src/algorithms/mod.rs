@@ -1,6 +1,7 @@
 pub mod align;
 pub mod arrangement;
 pub mod arrow_trim;
+pub mod gradient_remap;
 pub mod boolean;
 pub mod calligraphic_outline;
 pub mod art_along_path;

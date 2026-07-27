@@ -73,6 +73,7 @@ fn main() {
         "element_evaluated_bounds" => run_element_evaluated_bounds(&vectors),
         "flatten" => run_flatten(&vectors),
         "arrow_trim" => run_arrow_trim(&vectors),
+        "gradient_remap" => run_gradient_remap(&vectors),
         "length" => run_length(&vectors),
         "color_convert" => run_color_convert(&vectors),
         "number_commit" => run_number_commit(&vectors),
@@ -272,6 +273,63 @@ fn cmd_to_json(cmd: &PathCommand) -> Value {
         PathCommand::ClosePath => json!({"cmd": "Z"}),
         _ => json!({"cmd": "?"}),
     }
+}
+
+// ---------------------------------------------------------------
+// gradient_remap (linear-gradient stop remap onto a split fragment)
+// ---------------------------------------------------------------
+
+fn stop_from_json(v: &Value) -> jas_dioxus::geometry::element::GradientStop {
+    use jas_dioxus::geometry::element::{Color, GradientStop};
+    GradientStop {
+        color: Color::from_hex(v["hex"].as_str().unwrap_or("000000"))
+            .unwrap_or(Color::rgb(0.0, 0.0, 0.0)),
+        opacity: v["opacity"].as_f64().unwrap_or(100.0),
+        location: v["location"].as_f64().unwrap_or(0.0),
+        midpoint_to_next: v["midpoint"].as_f64().unwrap_or(50.0),
+    }
+}
+
+fn bbox_from_json(v: &Value) -> (f64, f64, f64, f64) {
+    let a = v.as_array().cloned().unwrap_or_default();
+    let g = |i: usize| a.get(i).and_then(|x| x.as_f64()).unwrap_or(0.0);
+    (g(0), g(1), g(2), g(3))
+}
+
+fn run_gradient_remap(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::gradient_remap::remap_linear_stops;
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let stops: Vec<_> = tc["stops"]
+                .as_array()
+                .map(|a| a.iter().map(stop_from_json).collect())
+                .unwrap_or_default();
+            let out = remap_linear_stops(
+                &stops,
+                tc["angle"].as_f64().unwrap_or(0.0),
+                bbox_from_json(&tc["parent"]),
+                bbox_from_json(&tc["fragment"]),
+            );
+            let result: Vec<Value> = out
+                .iter()
+                .map(|s| {
+                    // Reported as 8-bit hex, not f64 channels: a Swift
+                    // GradientStop stores its colour AS a hex string, so hex is
+                    // the widest value the two stop models share. See the
+                    // fixture's _doc.
+                    json!({
+                        "hex": s.color.to_hex(),
+                        "opacity": s.opacity,
+                        "location": s.location,
+                        "midpoint": s.midpoint_to_next,
+                    })
+                })
+                .collect();
+            json!({"name": name, "result": result})
+        })
+        .collect()
 }
 
 fn run_arrow_trim(vectors: &[Value]) -> Vec<Value> {

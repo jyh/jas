@@ -48,6 +48,7 @@ case "element_bounds":    results = runElementBounds(activeVectors)
 case "element_evaluated_bounds": results = runElementEvaluatedBounds(activeVectors)
 case "flatten":           results = runFlatten(activeVectors)
 case "arrow_trim":        results = runArrowTrim(activeVectors)
+case "gradient_remap":    results = runGradientRemap(activeVectors)
 case "length":            results = runLength(activeVectors)
 case "color_convert":     results = runColorConvert(activeVectors)
 case "number_commit":     results = runNumberCommit(activeVectors)
@@ -131,6 +132,41 @@ func cmdToJSON(_ cmd: PathCommand) -> [String: Any] {
         return ["cmd": "Q", "x1": x1, "y1": y1, "x": x, "y": y]
     case .closePath: return ["cmd": "Z"]
     default: return ["cmd": "?"]
+    }
+}
+
+// MARK: - Gradient Remap
+//
+// LINEAR gradient stop remap onto a split fragment (S-2). Colours travel as
+// 8-bit hex in BOTH directions, because a GradientStop's colour IS a hex string
+// here while Rust's is a Color with f64 channels -- hex is the widest value the
+// two stop models share, so the corpus compares it exactly.
+
+func runGradientRemap(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    func bbox(_ v: Any?) -> GradientBBox {
+        let a = (v as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue } ?? []
+        func g(_ i: Int) -> Double { i < a.count ? a[i] : 0.0 }
+        return (g(0), g(1), g(2), g(3))
+    }
+    return vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let stops: [GradientStop] = (tc["stops"] as? [[String: Any]] ?? []).map { s in
+            GradientStop(
+                color: s["hex"] as? String ?? "000000",
+                opacity: (s["opacity"] as? NSNumber)?.doubleValue ?? 100.0,
+                location: (s["location"] as? NSNumber)?.doubleValue ?? 0.0,
+                midpointToNext: (s["midpoint"] as? NSNumber)?.doubleValue ?? 50.0)
+        }
+        let out = remapLinearStops(
+            stops,
+            angleDeg: (tc["angle"] as? NSNumber)?.doubleValue ?? 0.0,
+            parent: bbox(tc["parent"]),
+            fragment: bbox(tc["fragment"]))
+        let result: [[String: Any]] = out.map { s in
+            ["hex": s.color, "opacity": s.opacity,
+             "location": s.location, "midpoint": s.midpointToNext]
+        }
+        return ["name": name, "result": result]
     }
 }
 

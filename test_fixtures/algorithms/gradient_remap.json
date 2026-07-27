@@ -1,0 +1,142 @@
+{
+  "_doc": "LINEAR gradient stop remap for split fragments (S-2, ruled 2026-07-26). A gradient carries NO position: a linear gradient is an angle plus stops, and the painter resolves it against the element's OWN bbox -- the ramp runs from centre - half_diag*u to centre + half_diag*u, u = (cos t, -sin t), half_diag = half the bbox diagonal (painter::element_render::resolve_gradient / the Swift twin). So a fragment that inherits its parent's gradient verbatim RE-FITS the whole ramp to its own smaller box: three fragments of a red-to-blue hull each run the full red-to-blue instead of each showing its slice. Parent and fragment share the angle, so both project onto the SAME direction and every parent stop has a well-defined absolute position along it; re-expressing that position as a fraction of the fragment's span is a plain affine map of `location`. Stops outside [0,100] are then CLIPPED, with interpolated colours inserted at the endpoints so the visible ramp is exact. Every `expected` below is hand-derived from that arithmetic, NOT captured from an implementation: each vector's _comment carries the derivation. Boxes are given zero height (or zero width) where possible so half_diag is exactly half the extent and every number stays checkable by eye. COLOURS ARE 8-BIT HEX on both sides, because that is what a stop can hold: JasSwift's GradientStop.color is a hex String while jas_dioxus's is a Color with f64 channels, so hex is the widest value the two models actually share and the comparison is EXACT rather than toleranced. The quantisation is stated per vector where a blend lands off a byte boundary. RADIAL is deliberately absent: its centre is forced to the fragment's bbox centre and the model has nowhere to record an anchor, so the recentre stands (JYH accepted it; `gradient anchor` is a separate stone). FREEFORM is absent because resolve_gradient returns None for it -- nothing is painted, so there is nothing to preserve. `midpoint` is carried through unchanged and pinned so a future change to that decision is visible; the painter does not read it today.",
+  "vectors": [
+    {
+      "name": "left_half_of_a_two_stop_ramp",
+      "_comment": "angle 0 => u = (1,0). Parent (0,0,120,0): centre.u = 60, half = 60, so the ramp runs 0..120. Fragment (0,0,60,0): centre.u = 30, half = 30. Stop L=0 sits at 60 + (-1)(60) = 0 -> L' = 50*((0-30)/30 + 1) = 0. Stop L=100 sits at 120 -> L' = 50*((120-30)/30 + 1) = 200, clipped. The endpoint sample at 100 falls at t = 100/200 = 0.5 between the two, so it is the midpoint colour (0.5, 0, 0.5) -> 127.5 rounds to 128 = 0x80 -> 800080. WITHOUT the remap the fragment would run the full red-to-blue over its left half -- the whole point of the stone.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 120.0, 0.0],
+      "fragment": [0.0, 0.0, 60.0, 0.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "800080", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "middle_half_clips_both_ends",
+      "_comment": "Same parent ramp 0..120. Fragment (30,0,60,0): centre.u = 60, half = 30. L=0 -> abs 0 -> L' = 50*((0-60)/30 + 1) = -50. L=100 -> abs 120 -> L' = 50*((120-60)/30 + 1) = 150. BOTH ends clip. Sample at 0: t = (0 - -50)/200 = 0.25 -> (0.75, 0, 0.25) -> 191.25 rounds to 191 = 0xbf and 63.75 rounds to 64 = 0x40 -> bf0040. Sample at 100: t = 150/200 = 0.75 -> the mirror, 4000bf. A middle fragment shows the MIDDLE of the ramp, which is the behaviour being bought.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 120.0, 0.0],
+      "fragment": [30.0, 0.0, 60.0, 0.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "bf0040", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "4000bf", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "three_stops_left_half_drops_the_far_stop",
+      "_comment": "Parent ramp 0..120 with red@0, green@50, blue@100. Fragment (0,0,60,0), centre.u = 30, half = 30. L=0 -> abs 0 -> L' = 0. L=50 -> abs 60 -> L' = 50*((60-30)/30 + 1) = 100. L=100 -> abs 120 -> L' = 200. No stop lands strictly inside (0,100), so the output is just the two sampled endpoints: red at 0, and at 100 the sample lands exactly ON the green stop (no quantisation, the colour is copied). Blue is gone, correctly -- the left half of the parent never showed any blue.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 120.0, 0.0],
+      "fragment": [0.0, 0.0, 60.0, 0.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "00ff00", "opacity": 100.0, "location": 50.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "00ff00", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "fragment_larger_than_parent_keeps_interior_stops",
+      "_comment": "The one vector where stops SURVIVE the interior filter, so the pass-through arm is exercised rather than only the two endpoint samples. Parent ramp 0..120 with red@0, green@50, blue@100. Fragment (0,0,240,0): centre.u = 120, half = 120. L=0 -> abs 0 -> L' = 50*((0-120)/120 + 1) = 0. L=50 -> abs 60 -> L' = 50*((60-120)/120 + 1) = 25. L=100 -> abs 120 -> L' = 50. Green at 25 and blue at 50 are both strictly inside and pass through UNCHANGED, midpoint 40 included; the sample at 100 is past the last stop, so a linear ramp paints its end colour flat and blue repeats at 100.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 120.0, 0.0],
+      "fragment": [0.0, 0.0, 240.0, 0.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "00ff00", "opacity": 100.0, "location": 50.0, "midpoint": 40.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "00ff00", "opacity": 100.0, "location": 25.0, "midpoint": 40.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 50.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "fragment_past_the_end_is_flat",
+      "_comment": "Parent ramp 0..120. Fragment (200,0,40,0): centre.u = 220, half = 20. L=0 -> L' = 50*((0-220)/20 + 1) = -500; L=100 -> L' = 50*((120-220)/20 + 1) = -200. Both ends of the fragment are past the last remapped stop, so both samples clamp to blue and the fragment is a flat blue -- which is exactly what the parent's ramp painted out there.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 120.0, 0.0],
+      "fragment": [200.0, 0.0, 40.0, 0.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "0000ff", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "angle_90_pins_the_y_down_sign",
+      "_comment": "u = (cos 90, -sin 90) = (0,-1), so projections are NEGATED y. Parent (0,0,0,120): centre (0,60), centre.u = -60, half = 60. Fragment (0,0,0,60): centre (0,30), centre.u = -30, half = 30. L=0 -> abs = -60 + (-1)(60) = -120 -> L' = 50*((-120 + 30)/30 + 1) = -100. L=100 -> abs = 0 -> L' = 50*((0 + 30)/30 + 1) = 100. Sample at 0 is the halfway colour 800080; at 100 it lands exactly on the last stop. Drop the minus on sin and this vector inverts.",
+      "angle": 90.0,
+      "parent": [0.0, 0.0, 0.0, 120.0],
+      "fragment": [0.0, 0.0, 0.0, 60.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "800080", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "stop_opacity_interpolates_with_the_colour",
+      "_comment": "Same geometry as left_half_of_a_two_stop_ramp (L' = 0 and 200, sample at t = 0.5), but the stops differ in `opacity` as well as colour. The inserted endpoint must carry opacity 50, not the 100 of the stop it replaced -- a remap that moved only colours would leave a fully opaque edge on a ramp that fades out.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 120.0, 0.0],
+      "fragment": [0.0, 0.0, 60.0, 0.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 0.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "800080", "opacity": 50.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "degenerate_fragment_is_returned_unchanged",
+      "_comment": "A fragment bbox with zero width AND zero height has half_diag 0: there is no span to map onto, and the division would produce infinities. The stops come back exactly as given. Reachable: a severing erase can leave a fragment that is a single point.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 120.0, 0.0],
+      "fragment": [10.0, 10.0, 0.0, 0.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "single_stop_is_returned_unchanged",
+      "_comment": "resolve_gradient refuses to build a brush from fewer than two stops (it returns None), so a one-stop gradient paints nothing and there is no ramp to re-express. Returned as-is rather than padded to two, so the remap never invents a gradient the painter would then honour.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 120.0, 0.0],
+      "fragment": [0.0, 0.0, 60.0, 0.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 }
+      ]
+    }
+  ]
+}

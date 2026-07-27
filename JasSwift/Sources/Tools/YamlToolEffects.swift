@@ -1622,13 +1622,47 @@ private enum PathEditIdentity {
 /// `identity: .splitFragment(id:)` swaps in the caller's freshly minted id and
 /// carries everything else: copying the source's id onto every fragment would
 /// leave N live elements sharing one id and break the unique-id invariant of
-/// REFERENCE_GRAPH.md §2.5. STILL OWED for the severing case: a
-/// linear-gradient stop remap (a gradient carries no position — linear
-/// resolves angle + stops against the element's OWN bbox centre and
-/// half-diagonal — so each fragment re-fits the whole ramp instead of showing
-/// its slice; the fix is an affine remap of stop locations with clipping and
-/// interpolated endpoint colours). Radial cannot be preserved without a model
-/// change; the recentre is accepted.
+/// REFERENCE_GRAPH.md §2.5. The severing case ALSO re-expresses each
+/// fragment's LINEAR gradients on its own extent — see
+/// `remapFragmentLinearGradients`, applied by the caller after this returns.
+/// Re-express `frag`'s LINEAR fill and stroke gradients on its own extent,
+/// given the `parent` bbox they were authored against. A gradient that is not
+/// linear, or a gradient-less slot, is returned untouched.
+///
+/// `parent` and `fragment` must be the boxes the PAINTER resolves gradients
+/// against, which for a Path is `Element.bounds` on both the fill and the
+/// stroke arm. Mirrors Rust `remap_linear_gradients`.
+private func remapFragmentLinearGradients(
+    _ frag: Path, parent: GradientBBox, fragment: GradientBBox
+) -> Path {
+    func remapped(_ g: Gradient?) -> Gradient? {
+        guard let g = g, g.type == .linear else { return g }
+        // Gradient's properties are `let`, so this is a full rebuild rather
+        // than a field write. Every field but `stops` is forwarded verbatim.
+        return Gradient(type: g.type, angle: g.angle,
+                        aspectRatio: g.aspectRatio, method: g.method,
+                        dither: g.dither, strokeSubMode: g.strokeSubMode,
+                        stops: remapLinearStops(g.stops, angleDeg: g.angle,
+                                                parent: parent,
+                                                fragment: fragment),
+                        nodes: g.nodes)
+    }
+    return Path(d: frag.d, fill: frag.fill, stroke: frag.stroke,
+                widthPoints: frag.widthPoints,
+                opacity: frag.opacity, transform: frag.transform,
+                locked: frag.locked,
+                visibility: frag.visibility,
+                blendMode: frag.blendMode,
+                mask: frag.mask,
+                fillGradient: remapped(frag.fillGradient),
+                strokeGradient: remapped(frag.strokeGradient),
+                strokeBrush: frag.strokeBrush,
+                strokeBrushOverrides: frag.strokeBrushOverrides,
+                toolOrigin: frag.toolOrigin,
+                name: frag.name, id: frag.id,
+                fillRule: frag.fillRule)
+}
+
 private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand],
                               identity: PathEditIdentity) -> Path {
     let newId: String?
@@ -1817,10 +1851,32 @@ private func pathEraseAtRect(
                 else { return }
                 identities = minted.map { .splitFragment(id: $0) }
             }
+            let severed = results.count > 1
             for (cmds, identity) in zip(results, identities) {
                 let open = cmds.filter { if case .closePath = $0 { return false }; return true }
-                newChildren.append(.path(
-                    pathWithCommands(pe, open, identity: identity)))
+                var frag = pathWithCommands(pe, open, identity: identity)
+                if severed {
+                    // LINEAR GRADIENTS ARE REMAPPED on the severing arm (S-2,
+                    // ruled 2026-07-26). A gradient carries no position -- a
+                    // linear one resolves angle + stops against the element's
+                    // OWN bbox centre and half-diagonal -- so a fragment that
+                    // inherited the parent's stops verbatim re-fitted the
+                    // whole ramp to its own smaller box.
+                    //
+                    // Only the severing arm needs this. A single surviving
+                    // fragment is the 1 -> 1 case, which the Theseus law owns;
+                    // changing it is a separate ruling. RADIAL is deliberately
+                    // left alone (its centre is forced to the bbox centre and
+                    // the model has nowhere to record an anchor; JYH accepted
+                    // the recentre) and FREEFORM paints nothing. Mirrors
+                    // Rust's remap_linear_gradients call site.
+                    let fb = Element.path(frag).bounds
+                    frag = remapFragmentLinearGradients(
+                        frag,
+                        parent: (bounds.x, bounds.y, bounds.width, bounds.height),
+                        fragment: (fb.x, fb.y, fb.width, fb.height))
+                }
+                newChildren.append(.path(frag))
             }
             layerChanged = true
         }

@@ -34,6 +34,13 @@ ALGORITHMS = {
     "element_evaluated_bounds": ("tolerance", 1e-4),
     "flatten":           ("tolerance", 1e-9),
     "arrow_trim":        ("tolerance", 1e-4),
+    # LINEAR gradient stop remap onto a split fragment (S-2). EXACT: colours
+    # are reported as 8-bit hex (a Swift GradientStop stores its colour as a
+    # hex string, so that is the widest value the two stop models share), and
+    # locations are hand-derived halves and quarters that both ports reach by
+    # the same arithmetic. A tolerance here would only hide a quantisation
+    # disagreement, which is precisely what the family is for.
+    "gradient_remap":    ("exact", None),
     "length":            ("tolerance", 1e-9),
     # Colour conversion is integer-valued in every channel (the panel's units),
     # so the comparison is EXACT: a one-unit miss is exactly the bug this

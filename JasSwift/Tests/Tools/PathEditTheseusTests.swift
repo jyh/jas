@@ -296,7 +296,14 @@ private func eraseAtRect(_ model: Model, lastX: Double, lastY: Double,
 /// transform and `name`, but must NOT propagate `id`: copying it would leave N
 /// live elements sharing an id and break the unique-id invariant of
 /// REFERENCE_GRAPH.md §2.5. Each fragment gets a FRESH id, minted inside the
-/// effect. (The linear-gradient stop remap is still owed.)
+/// effect.
+///
+/// `fillGradient` / `strokeGradient` join `id` on the exempt list: S-2 makes
+/// the severing arm re-express a LINEAR gradient on each fragment's own
+/// extent, so they are now fields the erase DOES speak to. This assertion is
+/// about the ones it must not; `gradientSplitRemapsLinearStopsOntoEachFragment`
+/// pins their new values, and the #expect below refuses a fragment that still
+/// carries the parent's ramp verbatim.
 @Test func theseusEraseSplitKeepsAppearanceAndNameWithFreshIds() throws {
     let (model, src) = modelWithTheseus([.moveTo(0, 0), .lineTo(100, 0)])
     withCorpusIdCounter {
@@ -307,7 +314,10 @@ private func eraseAtRect(_ model: Model, lastX: Double, lastY: Double,
     var seen: [String] = []
     for i in 0..<n {
         let frag = try #require(pathAt(model, [0, i]))
-        expectOnlyDChanged(src, frag, "erase fragment \(i)", alsoExempt: ["id"])
+        expectOnlyDChanged(src, frag, "erase fragment \(i)",
+                           alsoExempt: ["id", "fillGradient", "strokeGradient"])
+        #expect(frag.fillGradient != src.fillGradient,
+                "erase fragment \(i): the linear fill gradient must be remapped")
         let id = try #require(frag.id,
                               "erase fragment \(i): a split fragment must carry a fresh id")
         #expect(id != src.id,
@@ -317,6 +327,100 @@ private func eraseAtRect(_ model: Model, lastX: Double, lastY: Double,
         seen.append(id)
         #expect(frag.name == "theseus",
                 "erase fragment \(i): the name must survive the split")
+    }
+}
+
+
+/// S-2 AT THE SEAM: a severing erase re-expresses each fragment's LINEAR
+/// gradient on that fragment's own extent. Twin of Rust's
+/// `gradient_split_remaps_linear_stops_onto_each_fragment`.
+///
+/// Geometry chosen so every number is hand-derivable, exactly as the
+/// `gradient_remap` corpus family's vectors are. A horizontal segment from
+/// (0,0) to (120,0) carries a red-to-blue linear gradient at angle 0. The
+/// painter resolves it against `Element.bounds`, which for this stroke-less
+/// path is (0,0,120,0): centre.u = 60, half = 60, so the ramp runs 0..120.
+/// Erasing a 2-wide bite at x = 60 severs it into (0,0)-(59,0) and
+/// (61,0)-(120,0).
+///
+/// Fragment 0's box is (0,0,59,0): centre.u = 29.5, half = 29.5. The red stop
+/// sits at absolute 0 -> L' = 0. The blue stop sits at 120 -> L' ~ 203.39,
+/// clipped; the endpoint sample at 100 is t = 100/203.39 of the way from red to
+/// blue. What the UNFIXED code produced instead: the parent's stops verbatim,
+/// ff0000 and 0000ff -- a fragment covering the left half of the ramp painting
+/// the WHOLE red-to-blue.
+@Test func gradientSplitRemapsLinearStopsOntoEachFragment() throws {
+    let ramp = Gradient(type: .linear, angle: 0, stops: [
+        GradientStop(color: "ff0000", opacity: 100, location: 0),
+        GradientStop(color: "0000ff", opacity: 100, location: 100),
+    ])
+    let model = Model(document: Document(
+        layers: [Layer(children: [
+            .path(Path(d: [.moveTo(0, 0), .lineTo(120, 0)],
+                       fillGradient: ramp, fillRule: .nonzero)),
+        ])],
+        selectedLayer: 0, selection: []))
+    withCorpusIdCounter {
+        eraseAtRect(model, lastX: 60, lastY: 0, x: 60, y: 0, eraserSize: 1)
+    }
+    #expect(model.document.layers[0].children.count == 2,
+            "the bite at x = 60 severs the segment in two")
+    let frag0 = try #require(pathAt(model, [0, 0]))
+    let g0 = try #require(frag0.fillGradient)
+    #expect(g0.stops.count == 2)
+    #expect(g0.stops[0].location == 0.0)
+    #expect(g0.stops[1].location == 100.0)
+    let fb = Element.path(frag0).bounds
+    #expect(abs(fb.x - 0.0) < 1e-9 && abs(fb.width - 59.0) < 1e-9,
+            "fragment 0 is the 0..59 piece, got x=\(fb.x) w=\(fb.width)")
+    let half = fb.width / 2.0
+    let t = 100.0 / (50.0 * ((120.0 - half) / half + 1.0))
+    let c0 = try #require(Color.fromHex(g0.stops[0].color)).toRgba()
+    let c1 = try #require(Color.fromHex(g0.stops[1].color)).toRgba()
+    #expect(abs(c0.0 - 1.0) < 1e-9 && abs(c0.2) < 1e-9,
+            "the fragment's near end is still full red")
+    // Both stop colours are 8-bit hex here, so the far end is compared at
+    // quantisation width rather than 1e-9: 1/255 is 0.0039, and the value this
+    // separates from is 0 (an un-remapped fragment reports 0000ff).
+    #expect(abs(c1.0 - (1.0 - t)) < 1.0 / 255.0 && abs(c1.2 - t) < 1.0 / 255.0,
+            "the fragment's far end is the ramp colour at t=\(t), got \(g0.stops[1].color) \u{2014} an un-remapped fragment would report 0000ff")
+}
+
+/// A RADIAL gradient is NOT remapped, and its stops come through a severing
+/// erase unchanged. Twin of Rust's
+/// `gradient_split_leaves_a_radial_gradient_alone`.
+///
+/// This is the ruled behaviour, not an oversight: a radial gradient's centre is
+/// forced to the element's bbox centre and the model has nowhere to record an
+/// anchor, so a fragment necessarily re-centres. JYH accepted the recentre
+/// (2026-07-26); "gradient anchor" is a separate stone. What this vector
+/// forbids is running the LINEAR remap on it anyway.
+///
+/// Same geometry as the linear vector above, so the ONLY difference is `type`:
+/// drop the linear-only guard and this fragment's 80 moves to 100.
+@Test func gradientSplitLeavesARadialGradientAlone() throws {
+    let stops = [
+        GradientStop(color: "ff0000", opacity: 100, location: 0),
+        GradientStop(color: "0000ff", opacity: 100, location: 80),
+    ]
+    let model = Model(document: Document(
+        layers: [Layer(children: [
+            .path(Path(d: [.moveTo(0, 0), .lineTo(120, 0)],
+                       fillGradient: Gradient(type: .radial, angle: 0, stops: stops),
+                       fillRule: .nonzero)),
+        ])],
+        selectedLayer: 0, selection: []))
+    withCorpusIdCounter {
+        eraseAtRect(model, lastX: 60, lastY: 0, x: 60, y: 0, eraserSize: 1)
+    }
+    #expect(model.document.layers[0].children.count == 2,
+            "the bite at x = 60 severs the segment in two")
+    for i in 0..<2 {
+        let frag = try #require(pathAt(model, [0, i]))
+        let g = try #require(frag.fillGradient)
+        #expect(g.type == .radial)
+        #expect(g.stops == stops,
+                "fragment \(i): a radial gradient's stops are untouched \u{2014} the 80 would become 100 under the linear remap")
     }
 }
 
