@@ -847,7 +847,8 @@ mod tests {
                          "operations/transform_shear.json",
                          "operations/transform_copy.json",
                          "operations/id_primary_move.json",
-                         "operations/id_primary_copy.json"] {
+                         "operations/id_primary_copy.json",
+                         "operations/boolean_collapse_default.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -2782,6 +2783,23 @@ mod tests {
     #[test]
     fn operation_boolean_ops() {
         run_operation_fixture("operations/boolean_ops.json");
+    }
+
+    /// `state.boolean_remove_redundant_points` defaults to FALSE
+    /// (`workspace/state.yaml`), so the collinear-collapse pass does NOT
+    /// run on a default boolean. The setup is two rects overlapping in x
+    /// with the same y-extent, so the union's top and bottom edges each
+    /// carry two vertices the sweep inserted at the operands' vertical
+    /// edges — vertices the collapse pass would delete. The golden pins
+    /// them present, which is what makes this fixture DISCRIMINATE the
+    /// default instead of being blind to it (Swift defaulted the flag to
+    /// true, so the pass ran in exactly one port). The same golden pins
+    /// BOOLEAN.md's paint rule for UNION: the result carries the
+    /// frontmost operand's fill and opacity (blue, 0.5), not the
+    /// backmost's (red, 0.8) and not a reset 1.0.
+    #[test]
+    fn operation_boolean_collapse_default() {
+        run_operation_fixture("operations/boolean_collapse_default.json");
     }
 
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*

@@ -633,6 +633,18 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("boolean_ops.json")
 }
 
+/// `state.boolean_remove_redundant_points` defaults to FALSE
+/// (`workspace/state.yaml`), so the collinear-collapse pass does NOT run on a
+/// default boolean. Two rects overlapping in x with the same y-extent: the
+/// union's top and bottom edges each carry two vertices the sweep inserted at
+/// the operands' vertical edges, and the collapse pass would delete all four.
+/// The golden pins them PRESENT, so this fixture discriminates the default
+/// rather than being blind to it. It also pins BOOLEAN.md's UNION paint rule:
+/// the result carries the frontmost operand's fill and opacity (blue, 0.5).
+@Test func operationBooleanCollapseDefault() throws {
+    try runOperationFixture("boolean_collapse_default.json")
+}
+
 // MARK: - OP_LOG.md §9 verb33 unification fixtures (P1–P7)
 //
 // The shared test_fixtures/operations/* fixtures the Rust P1–P7 phases added are
