@@ -723,6 +723,21 @@
     "type": "number"
   },
   {
+    "expr": "hypot(pow(10, 200), pow(10, 200)) / pow(10, 200)",
+    "expected": 1.4142135623730951,
+    "type": "number"
+  },
+  {
+    "expr": "hypot(pow(10, 200), 0) / pow(10, 200)",
+    "expected": 1,
+    "type": "number"
+  },
+  {
+    "expr": "hypot(3 * pow(10, -200), 4 * pow(10, -200)) * pow(10, 200)",
+    "expected": 5,
+    "type": "number"
+  },
+  {
     "expr": "sqrt(16)",
     "expected": 4,
     "type": "number"
