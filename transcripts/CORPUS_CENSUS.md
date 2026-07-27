@@ -929,3 +929,44 @@ open triangle's empty bbox corner answers `true` in the reference and in both po
    question (which is the intended marquee rule: Rect/Circle/Ellipse/Polyline's
    area semantics, or Polygon/Path's outline semantics), and the reference is
    internally inconsistent about it, so it wants a ruling rather than a patch.
+
+---
+
+## 10. OPEN AFTER BATCH 3 (2026-07-27, banked at the merge)
+
+Five lens findings that did not block the merge. Two are real defects; three are
+records that claim more than the code.
+
+**(a) `element_ids` misses ids inside LIVE elements — the mint avoid-set is
+incomplete.** `Element::children()` returns `None` for `Element::Live` (Rust,
+element.rs:1431-1433) and Swift's `.live` falls to `default: break`, but
+`CompoundShape` holds `operands: Vec<Rc<Element>>` — real child elements carrying
+their own `common.id`. So a compound shape's operand ids are invisible to the
+collision check, and both walks' doc comments ("every `common.id` present in this
+document") are false. NOT A REGRESSION: the five open-coded walks this consolidated
+had the same blind spot. Collision probability is negligible (8-char base36 ~ 2.8e12),
+which is why it did not block. Fix = walk all four `LiveVariant` payloads in both
+ports, with a cross-port test; correct the two comments at the same time.
+
+**(b) A LIVE, PRE-EXISTING, UNDECLARED cross-port divergence in flatten's ClosePath
+arm.** Rust guards the close — `if !pts.is_empty() { pts.push((sx, sy)); }`
+(element.rs:2093) — and Swift appends `firstPt` UNCONDITIONALLY. **A path whose first
+command is `Z` therefore diverges.** The lens proved it live with a throwaway probe
+(`d = [Z, L(5,5)]`): `FAIL: flatten/PROBE_leading_close [rust vs swift]`. Decide the
+right answer from the reference, then fix and gate it.
+
+**(c) The `bind_values` list contract is unpinned.** All 3 list rows in the 225-row
+corpus are the single-element `[lib1:0]`, so the documented "bracketed and
+comma-joined element-wise" behaviour survives a mutation: changing the separator to
+`;` leaves both ports' tests green. Needs a multi-element and a nested-list vector.
+
+**(d) FALSE ACCOUNTING IN A COMMIT MESSAGE (durable record).** Commit `64282375`
+says the carried set is "the WHOLE non-paint set" and then accounts for only EIGHT of
+`CommonProps`' NINE fields — `name` is silently dropped, and `name` IS non-paint.
+Cannot be corrected in place without rewriting history; corrected here instead.
+
+**(e) Half a census claim is vacuous for the OLDER gates.** `widget_tree` and
+`layout_panel` for `color_panel_content` return identical output for `{}` and a full
+ctx — they ignore ctx entirely for that panel — and `layout_panel` is also identical
+for an 11-character hex versus a 6-character one. The new value-level family is real;
+the claim that the older gates were the ones improved is not.
