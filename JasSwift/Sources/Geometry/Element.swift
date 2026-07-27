@@ -1323,19 +1323,30 @@ public enum Element: Equatable {
     }
 
     /// Return a copy of this element with its stable `id` cleared (set to
-    /// nil) on the element itself AND, for groups/layers, recursively on
-    /// every descendant.
+    /// nil) on the element itself AND recursively on every descendant.
     ///
     /// A DUPLICATED element must not inherit the source's identity — two
-    /// elements cannot share an id — so a copy is born id-less (lazy) and
-    /// mints a fresh id only if/when it later becomes a reference target.
-    /// Used by every duplication path (copy/paste/duplicate). Mirrors the
-    /// reference implementation's `clear_ids`. See the stable-identity
-    /// initiative (VISION.md §6.2).
+    /// elements cannot share an id (REFERENCE_GRAPH.md §2.5), and a duplicate
+    /// that did would be worse than a loud break: a reference to the shared id
+    /// silently REBINDS to whichever element the index walk reaches first
+    /// (transcripts/EDIT_SEMANTICS_FREEZE.md §3.7). So a copy is born id-less
+    /// (lazy) and mints a fresh id only if/when it later becomes a reference
+    /// target; `id: nil` is the documented default T3 allows in place of a
+    /// mint. Mirrors the reference implementation's `clear_ids`. See the
+    /// stable-identity initiative (VISION.md §6.2).
     ///
-    /// Leaf elements (and `.live`, whose id rides inline on each conformer)
-    /// only clear their own id; only `.group`/`.layer` carry children to
-    /// recurse into, matching the reference's `children_mut` (None elsewhere).
+    /// The walk mirrors ``Document/elementIds``: it descends `children` AND a
+    /// compound shape's owned `operands`, which are not `children` at all —
+    /// exactly why that walk carries a separate arm for them. It used to stop
+    /// at a live element's own inline id, so copying a compound shape cleared
+    /// the compound's id and left EVERY OPERAND id duplicated, one level below
+    /// the id this helper exists to clear.
+    ///
+    /// Callers: ``Controller/copySelection(dx:dy:)`` and
+    /// ``Controller/detach(_:)``. NOT the clipboard paste path
+    /// (`EditClipboard.translateElement` is a field-preserving copy, id
+    /// included) — this comment used to claim "every duplication path
+    /// (copy/paste/duplicate)", which was never true of paste.
     public func clearingIds() -> Element {
         switch self {
         case .line(let v): return .line(v.withId(nil))
@@ -1352,11 +1363,21 @@ public enum Element: Equatable {
         case .layer(let v):
             return .layer(v.withId(nil).withChildren(v.children.map { $0.clearingIds() }))
         case .live(let v):
-            // Live elements carry their id inline on each conformer; clear
-            // it like any other element. They expose no uniform children
-            // mutator here (mirroring the reference's `children_mut`
-            // returning None for Live), so operands are not recursed into.
-            return .live(v.withId(nil))
+            // Live elements carry their id inline on each conformer; clear it
+            // like any other element. A compound shape ALSO owns its
+            // `operands`, which are not `children`, so they must be walked
+            // here or they keep the source's ids. The inner switch is
+            // exhaustive so a future payload that gains owned children forces
+            // this decision to be made again rather than silently going
+            // unwalked — the same discipline ``Document/elementIds`` uses.
+            let cleared = v.withId(nil)
+            switch cleared {
+            case .compoundShape(var cs):
+                cs.operands = cs.operands.map { $0.clearingIds() }
+                return .live(.compoundShape(cs))
+            case .reference, .recorded, .generated:
+                return .live(cleared)
+            }
         }
     }
 
