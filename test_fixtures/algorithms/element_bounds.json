@@ -90,5 +90,39 @@
      {"cmd": "A", "rx": 50.0, "ry": 30.0, "x_rotation": 0.0, "large_arc": false, "sweep": true, "x": 100.0, "y": 0.0},
      {"cmd": "Z"}
    ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
-   "expected": [0.0, -30.0, 100.0, 30.0]}
+   "expected": [0.0, -30.0, 100.0, 30.0]},
+
+  {"name": "rect_transform_is_ignored", "function": "bounds",
+   "_comment": "TRANSFORM IS IGNORED (CORPUS_CENSUS.md 5.1) -- this and the four vectors after it carry a live `transform` and expect the UNTRANSFORMED bounds, because that is the contract: `Element::bounds` / `Element.bounds()` report the element's own coordinate space and never fold `common.transform` (jas_dioxus/src/document/evaluated_bounds.rs module docs; JasSwift/Sources/Interpreter/PropertiesPanelSync.swift lines 29-33). The transform-AWARE box the Properties panel shows is the separate `element_evaluated_bounds` family. Until these five existed every one of the 17 vectors above carried a null transform, so a port that started folding the matrix here -- silently double-applying it wherever a caller applies the CTM itself -- moved no golden. Measured on this commit: both ports return the untransformed value for all five. Expectations are the twin vector's own `expected`, copied unchanged, so no new geometry is derived here -- which matters because the live reference implements no element bounds at all (workspace_interpreter duck-types `elem.bounds()` off the frozen port's geometry, doc_primitives.py line 85). THIS vector: translate(100,50) on the rect_bounds geometry; a port that folded it would return [105,60,100,50].",
+   "element": {"type": "rect", "x": 5.0, "y": 10.0, "width": 100.0, "height": 50.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null,
+    "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 50.0}, "locked": false, "visibility": "preview"},
+   "expected": [5.0, 10.0, 100.0, 50.0]},
+
+  {"name": "ellipse_rotate_is_ignored", "function": "bounds",
+   "_comment": "rotate(45) on the ellipse_bounds geometry. Non-commuting with axis-alignment, so it separates the ignore-contract from every folding rule at once: corner-mapping would give [-35.3553,35.3553,70.7107,70.7107] and a true rotated-ellipse bound [-25.4951,45.2156,50.9902,50.9902].",
+   "element": {"type": "ellipse", "cx": 50.0, "cy": 50.0, "rx": 30.0, "ry": 20.0, "fill": null, "stroke": null,
+    "opacity": 1.0, "transform": {"a": 0.7071067811865476, "b": 0.7071067811865476, "c": -0.7071067811865476, "d": 0.7071067811865476, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "expected": [20.0, 30.0, 60.0, 40.0]},
+
+  {"name": "path_cubic_matrix_is_ignored", "function": "bounds",
+   "_comment": "The path_cubic_tight_bounds curve under a general matrix (a=2 b=1 c=-0.5 d=1.5 e=7 f=-3), every entry live. Corner-mapping would give [3.25,-3,43.75,31.25] and the tight bounds of the TRANSFORMED curve [7,-3,40,23.923]; both differ from the answer, and from each other, in at least three components.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "C", "x1": 5.0, "y1": 10.0, "x2": 15.0, "y2": 10.0, "x": 20.0, "y": 0.0}], "fill": null, "stroke": null,
+    "opacity": 1.0, "transform": {"a": 2.0, "b": 1.0, "c": -0.5, "d": 1.5, "e": 7.0, "f": -3.0}, "locked": false, "visibility": "preview"},
+   "expected": [0.0, 0.0, 20.0, 7.5]},
+
+  {"name": "line_stroke_scale_is_ignored", "function": "bounds",
+   "_comment": "scale(3) on line_with_stroke. The pair that separates the two inflations: the STROKE half-width still widens the box (the answer is line_with_stroke's [-1,-1,12,22], not the bare [0,0,10,20]) while the matrix does nothing. A port that folded the matrix and then inflated would return [-1,-1,32,62].",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 10.0, "y2": 20.0,
+    "stroke": {"color": {"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 2.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0},
+    "opacity": 1.0, "transform": {"a": 3.0, "b": 0.0, "c": 0.0, "d": 3.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "expected": [-1.0, -1.0, 12.0, 22.0]},
+
+  {"name": "group_transform_is_ignored", "function": "bounds",
+   "_comment": "The CONTAINER leg: group_bounds' two children under translate(-40,-40) on the group itself. A port that folded the group matrix into the union would return [-35,-30,100,55].",
+   "element": {"type": "group",
+    "children": [
+      {"type": "rect", "x": 5.0, "y": 10.0, "width": 100.0, "height": 50.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      {"type": "ellipse", "cx": 50.0, "cy": 50.0, "rx": 25.0, "ry": 15.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}],
+    "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": -40.0, "f": -40.0}, "locked": false, "visibility": "preview"},
+   "expected": [5.0, 10.0, 100.0, 55.0]}
 ]

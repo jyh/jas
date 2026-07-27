@@ -636,6 +636,21 @@ applying to §5 too:**
   `element_intersects_polygon` are now driven by **both** roundtrip binaries over **6** of that
   family's **40** vectors, so the family gates 9 predicates, not 7. Not recorded as a gap. The
   `element_bounds` leg (17 of 17 vectors at `transform: null`) and the `flatten` leg both stand.
+  - **UPDATE 2026-07-27, fixture-only.** The `element_bounds` leg is now **half closed, and the
+    half that closed is not the half the row expected.** `Element::bounds` ignoring `transform` is
+    the *contract*, not the gap (`evaluated_bounds.rs` module docs; `PropertiesPanelSync.swift`
+    lines 29-33), and the transform-aware box already had its own family. What was missing was
+    that **neither** fact was pinned. Both now are: `element_bounds` is **22** vectors, the last
+    five carrying a live matrix and expecting the UNTRANSFORMED box, and
+    `element_evaluated_bounds` is **17**, the eight new ones being the first NON-RECT geometry it
+    has ever seen. That matters because the family maps the four CORNERS of the geometric bbox —
+    on a rect that is indistinguishable from bounding the transformed shape, and on an ellipse or
+    a curve it is not (rotate 45 on a 60x40 ellipse: corner-mapped **70.7107** square vs a true
+    **50.9902** square, 28% narrower). The reference `_element_evaluated_bbox` corner-maps too, so
+    per the hierarchy the corner rule is the **ratified** answer — it is what keeps the Properties
+    panel's numbers equal to the drawn selection box — not a shared slip to be fixed. **No port
+    disagreed on any new vector.** Still open: every evaluated vector sits at `layers[0].children[0]`,
+    so the ancestor walk is one level deep and a group whose CHILDREN carry matrices is ungated.
 
 §5.3, §5.6, §5.10 and §5.11 are deliberately **not** in `coverage_gaps`: they are real, but this
 pass did not re-verify them, and an unverified row there would be the same false assurance the
