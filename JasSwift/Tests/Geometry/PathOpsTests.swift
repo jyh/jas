@@ -115,7 +115,7 @@ import Testing
 // These four are the FAST-suite copy; the cross-language pin is the
 // `path_project` corpus family (test_fixtures/algorithms/path_project.json).
 //
-// `closestOnCubicDoesNotOverflow` alone pins only three of the four cubic
+// `closestOnCubicDoesNotOverflow` alone pins only two of the four cubic
 // sites: it puts the true answer at t = 0, which is also where two of the
 // saturating failure modes land (`bestT` starts at 0, so a saturating coarse
 // scan never updates it, and a saturating `d2` collapses the trisection onto

@@ -944,7 +944,7 @@ mod tests {
     // whose `cubic_overflow_point_above_middle` vector is what individually
     // discriminates each of the six sites in both ports.
     //
-    // `closest_on_cubic_does_not_overflow` alone pins only three of the four
+    // `closest_on_cubic_does_not_overflow` alone pins only two of the four
     // cubic sites, and that is worth remembering: it puts the true answer at
     // t = 0, which is also where two of the saturating failure modes land
     // (`best_t` starts at 0.0, so a saturating coarse scan never updates it,

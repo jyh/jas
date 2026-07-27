@@ -23,6 +23,11 @@
 //! `scripts/cross_language_algorithms.py` naming the line.
 
 /// The corpus `measure` closure: `char_width` units per Unicode scalar.
+// Consumed only by the `algorithm_roundtrip` binary and this module's tests, so
+// the library build (and the wasm target in particular) sees it as dead. Allowed
+// per item rather than module-wide: everything else here IS reachable, and this
+// helper exists precisely so the three roundtrip call sites cannot drift apart.
+#[allow(dead_code)]
 pub fn fixed_char_width_measure(char_width: f64) -> impl Fn(&str) -> f64 {
     move |s: &str| s.chars().count() as f64 * char_width
 }

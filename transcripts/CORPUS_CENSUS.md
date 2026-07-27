@@ -520,7 +520,7 @@ copies per port is the shape that drifted once). Effect, measured at `char_width
 advance now **agrees** — 40 for `"a" + "e" + U+0301 + "b"` (4 scalars, 3 clusters) and 50 for
 the ZWJ family emoji `U+1F468 U+200D U+1F469 U+200D U+1F467` (5 scalars, 1 cluster), where Swift
 previously gave 30 and 10. **The residual is a PRODUCT divergence, not a harness one**: Swift's
-three layout files index `Array(content)`, i.e. grapheme clusters, so `char_count` is 3 and 1 where
+TWO layout files index `Array(content)`, i.e. grapheme clusters (TextLayout.swift and PathTextLayout.swift; TextLayoutParagraph.swift was cited here in error and contains no `Array(` at all), so `char_count` is 3 and 1 where
 Rust and the reference give 4 and 5. A non-ASCII vector still cannot be added — the rust-vs-swift
 comparison has no oracle-holdout mechanism (only `property_planar` and `exact_boolean` do), so the
 vector would simply red the gate. Recorded as coverage gap `text-index-unit`, whose unblock is the

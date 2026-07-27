@@ -78,7 +78,7 @@
     },
     {
       "name": "least_squares_single_fit_asymmetric_alphas",
-      "_comment": "15 uniform-t samples of the cubic (0,0) (5,5) (20,100) (100,100). The first fit is accepted (max squared error 13.17 < error 20), so this vector gates generate_bezier's least-squares solve on a genuinely non-collinear input: alpha_l = 55.33, alpha_r = 65.76. The alpha < epsilon fallback would put both controls at chord/3 = 47.14 along the tangents, and swapping alpha_l with alpha_r moves each control by 10.4 - both far outside the 0.5 gate tolerance.",
+      "_comment": "15 uniform-t samples of the cubic (0,0) (5,5) (20,100) (100,100). The first fit is accepted (max squared error 17.069473 < error 20), so this vector gates generate_bezier's least-squares solve on a genuinely non-collinear input: alpha_l = 55.33, alpha_r = 65.76. The alpha < epsilon fallback would put both controls at chord/3 = 47.14 along the tangents, and swapping alpha_l with alpha_r moves each control by 10.4 - both far outside the 0.5 gate tolerance.",
       "points": [
         [0.0, 0.0], [1.244534, 2.38156], [2.915452, 7.113703], [5.133017, 13.79191],
         [8.017493, 22.011662], [11.68914, 31.36844], [16.268222, 41.457726], [21.875, 51.875],
@@ -183,7 +183,7 @@
     },
     {
       "name": "reparam_exhausts_iterations_then_splits",
-      "_comment": "the other side of that loop: all four iterations run (7.98, 6.58, 6.02, 5.73) and none reaches error 4.5, so the fit falls through to the recursive split carrying the last u forward. 2 segments.",
+      "_comment": "the other side of that loop: all four iterations run (7.98, 6.58, 6.02, 5.73) and none reaches error 4.5, so the fit falls through to the recursive split. NOTE: u is NOT carried forward - after the loop only split_point is read, and each recursive child re-derives u from chord_length_parameterize, so the final `u = u_prime` is a dead store. 2 segments.",
       "points": [
         [0.0, 0.0], [1.244534, 2.38156], [2.915452, 7.113703], [5.133017, 13.79191],
         [8.017493, 22.011662], [11.68914, 31.36844], [16.268222, 41.457726], [21.875, 51.875],
