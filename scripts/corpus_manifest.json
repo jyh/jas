@@ -312,10 +312,10 @@
     },
     {
       "id": "element-bounds-untransformed",
-      "title": "Every element_bounds vector has transform: null, so the transform-aware bounds the Properties panel shows are ungated",
-      "evidence": "All 17 vectors in test_fixtures/algorithms/element_bounds.json carry \"transform\": null -- counted mechanically over the parsed fixture on this commit.",
-      "blocks": "The family name reports bounds as covered while the transform branch of element_bounds is never entered.",
-      "unblock": "Fixture-only work: add vectors with a non-identity transform (rotation and non-uniform scale are the cases where a naive corner-transform diverges from a true bound).",
+      "title": "element_bounds gates a function that ignores transform entirely; the transform-aware bbox is now gated by its own family, but only for a single-layer path",
+      "evidence": "All 17 vectors in test_fixtures/algorithms/element_bounds.json carry \"transform\": null. That is not a fixture oversight: Element::bounds / Element.bounds IGNORE common.transform in both ports -- measured through the two roundtrip binaries on this commit, a 10x10 rect at the origin carrying translate(100,50) reports [0,0,10,10] from Rust and from Swift alike. So transform-bearing vectors added HERE would pin the transform being ignored, not the transform-aware path. The transform-aware function is element_evaluated_bbox / elementEvaluatedBBox, and it is now driven by the element_evaluated_bounds family (9 vectors: translate, non-uniform scale, rotate 45, skewX, a full composed matrix, an ancestor-only layer transform, an element-then-layer composition-order vector, a stroked geometric-vs-preview vector, and a no-transform control).",
+      "blocks": "Two narrower things than before. (1) The new family places every vector as layers[0].children[0], so the ancestor walk is exercised at ONE level -- a nested group chain, and a group whose CHILDREN carry transforms (geometric_children_bounds does not fold those), are still ungated. (2) Whether Element::bounds SHOULD stay transform-blind is an open product question, not a corpus one: both ports agree today, so there is no divergence to catch, and the corpus pins the agreement.",
+      "unblock": "For (1), extend element_evaluated_bounds with group-nesting vectors once the runners can express a nested document. For (2), a ruling on whether the untransformed bbox is the intended contract of Element::bounds.",
       "census": "5.1"
     },
     {
@@ -327,11 +327,11 @@
       "census": "5.1"
     },
     {
-      "id": "flatten-no-curves",
-      "title": "flatten.json contains no curve command at all, so it gates the subpath bookkeeping and nothing about subdivision",
-      "evidence": "3 vectors; a literal count over the whole file gives 0 occurrences each of \"C\", \"Q\", \"A\", \"CurveTo\", \"QuadTo\", \"curve\" and \"quad\".",
-      "blocks": "Registered, driven, and vacuous for the part of flattening that actually differs between implementations.",
-      "unblock": "Fixture-only: the family, its registration and its 1e-9 comparison already exist; add cubic, quadratic and arc vectors.",
+      "id": "flatten-no-arcs",
+      "title": "flatten.json has no arc command, so the A-degrades-to-a-line branch of the flattener is ungated",
+      "evidence": "Re-counted mechanically over the parsed fixture on this commit: 12 vectors, with 8 of them carrying a C and 4 a Q (8 C commands and 4 Q commands in total), and ZERO A commands. The census row this replaces said 3 vectors and no curve command at all -- true when it was written, and closed since by the cubic/quadratic vectors; the arc leg is what survives of it.",
+      "blocks": "Both flatteners send SmoothCurveTo / SmoothQuadTo / ArcTo to their endpoint as a straight line, in a catch-all arm no vector enters. The same arm also carries the current-point write for those commands, which is the defect class cubic_then_quad_current_point_chain was added to catch for cubics.",
+      "unblock": "Fixture-only: add an arc vector, and one where an arc is followed by a command that reads the current point.",
       "census": "5.2"
     },
     {
