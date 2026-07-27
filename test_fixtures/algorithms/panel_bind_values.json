@@ -1,0 +1,2797 @@
+[
+  {
+    "name": "color@hsb_selected",
+    "function": "bind_values",
+    "args": {
+      "panel": "color_panel_content",
+      "ctx": {
+        "state": {
+          "fill_color": "#664040",
+          "stroke_color": "#112233",
+          "fill_on_top": true
+        },
+        "panel": {
+          "mode": "hsb",
+          "hex": "664040",
+          "h": 0,
+          "s": 37.254902,
+          "b": 40,
+          "r": 102,
+          "g": 64,
+          "bl": 64,
+          "c": 0,
+          "m": 37.254902,
+          "y": 37.254902,
+          "k": 60,
+          "recent_colors": [
+            "#664040",
+            "#112233",
+            "#ffffff"
+          ]
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          1
+        ],
+        "id": "cp_black_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#000000"
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "id": "cp_white_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#ffffff"
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "id": "cp_recent_0",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#664040"
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "id": "cp_recent_1",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#112233"
+      },
+      {
+        "path": [
+          0,
+          6
+        ],
+        "id": "cp_recent_2",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#ffffff"
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "id": "cp_recent_3",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "id": "cp_recent_4",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "id": "cp_recent_5",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          10
+        ],
+        "id": "cp_recent_6",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "id": "cp_recent_7",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          12
+        ],
+        "id": "cp_recent_8",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "id": "cp_recent_9",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          0,
+          0
+        ],
+        "id": "cp_fill_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#664040"
+      },
+      {
+        "path": [
+          1,
+          0,
+          0
+        ],
+        "id": "cp_fill_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "2"
+      },
+      {
+        "path": [
+          1,
+          0,
+          1
+        ],
+        "id": "cp_stroke_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#112233"
+      },
+      {
+        "path": [
+          1,
+          0,
+          1
+        ],
+        "id": "cp_stroke_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "1"
+      },
+      {
+        "path": [
+          1,
+          0,
+          4,
+          1
+        ],
+        "id": "cp_gradient_btn",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0
+        ],
+        "id": "cp_sliders_grayscale",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          1
+        ],
+        "id": "cp_k",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          1
+        ],
+        "id": "cp_k",
+        "key": "bind.value",
+        "type": "number",
+        "value": "60"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          2
+        ],
+        "id": "cp_k_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          2
+        ],
+        "id": "cp_k_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "60"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1
+        ],
+        "id": "cp_sliders_hsb",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          0,
+          1
+        ],
+        "id": "cp_h",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          0,
+          1
+        ],
+        "id": "cp_h",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          0,
+          2
+        ],
+        "id": "cp_h_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          0,
+          2
+        ],
+        "id": "cp_h_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "id": "cp_s",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "id": "cp_s",
+        "key": "bind.value",
+        "type": "number",
+        "value": "37.254902"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          1,
+          2
+        ],
+        "id": "cp_s_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          1,
+          2
+        ],
+        "id": "cp_s_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "37.254902"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          2,
+          1
+        ],
+        "id": "cp_b",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          2,
+          1
+        ],
+        "id": "cp_b",
+        "key": "bind.value",
+        "type": "number",
+        "value": "40"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          2,
+          2
+        ],
+        "id": "cp_b_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          2,
+          2
+        ],
+        "id": "cp_b_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "40"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2
+        ],
+        "id": "cp_sliders_rgb",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          1
+        ],
+        "id": "cp_r",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          1
+        ],
+        "id": "cp_r",
+        "key": "bind.value",
+        "type": "number",
+        "value": "102"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          2
+        ],
+        "id": "cp_r_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          2
+        ],
+        "id": "cp_r_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "102"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          1
+        ],
+        "id": "cp_g",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          1
+        ],
+        "id": "cp_g",
+        "key": "bind.value",
+        "type": "number",
+        "value": "64"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          2
+        ],
+        "id": "cp_g_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          2
+        ],
+        "id": "cp_g_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "64"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          2,
+          1
+        ],
+        "id": "cp_bl",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          2,
+          1
+        ],
+        "id": "cp_bl",
+        "key": "bind.value",
+        "type": "number",
+        "value": "64"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          2,
+          2
+        ],
+        "id": "cp_bl_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          2,
+          2
+        ],
+        "id": "cp_bl_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "64"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3
+        ],
+        "id": "cp_sliders_cmyk",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          0,
+          1
+        ],
+        "id": "cp_c",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          0,
+          1
+        ],
+        "id": "cp_c",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          0,
+          2
+        ],
+        "id": "cp_c_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          0,
+          2
+        ],
+        "id": "cp_c_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          1,
+          1
+        ],
+        "id": "cp_m",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          1,
+          1
+        ],
+        "id": "cp_m",
+        "key": "bind.value",
+        "type": "number",
+        "value": "37.254902"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          1,
+          2
+        ],
+        "id": "cp_m_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          1,
+          2
+        ],
+        "id": "cp_m_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "37.254902"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          2,
+          1
+        ],
+        "id": "cp_y",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          2,
+          1
+        ],
+        "id": "cp_y",
+        "key": "bind.value",
+        "type": "number",
+        "value": "37.254902"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          2,
+          2
+        ],
+        "id": "cp_y_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          2,
+          2
+        ],
+        "id": "cp_y_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "37.254902"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          3,
+          1
+        ],
+        "id": "cp_k_cmyk",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          3,
+          1
+        ],
+        "id": "cp_k_cmyk",
+        "key": "bind.value",
+        "type": "number",
+        "value": "60"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          3,
+          2
+        ],
+        "id": "cp_k_cmyk_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          3,
+          2
+        ],
+        "id": "cp_k_cmyk_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "60"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4
+        ],
+        "id": "cp_sliders_web_safe",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          0,
+          1
+        ],
+        "id": "cp_r_ws",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          0,
+          1
+        ],
+        "id": "cp_r_ws",
+        "key": "bind.value",
+        "type": "number",
+        "value": "102"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          0,
+          2
+        ],
+        "id": "cp_r_ws_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          0,
+          2
+        ],
+        "id": "cp_r_ws_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "102"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          1,
+          1
+        ],
+        "id": "cp_g_ws",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          1,
+          1
+        ],
+        "id": "cp_g_ws",
+        "key": "bind.value",
+        "type": "number",
+        "value": "64"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          1,
+          2
+        ],
+        "id": "cp_g_ws_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          1,
+          2
+        ],
+        "id": "cp_g_ws_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "64"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          2,
+          1
+        ],
+        "id": "cp_bl_ws",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          2,
+          1
+        ],
+        "id": "cp_bl_ws",
+        "key": "bind.value",
+        "type": "number",
+        "value": "64"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          2,
+          2
+        ],
+        "id": "cp_bl_ws_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          2,
+          2
+        ],
+        "id": "cp_bl_ws_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "64"
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "id": "cp_hex",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "id": "cp_hex",
+        "key": "bind.value",
+        "type": "string",
+        "value": "664040"
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "cp_color_bar",
+        "key": "bind.brightness",
+        "type": "number",
+        "value": "40"
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "cp_color_bar",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      }
+    ]
+  },
+  {
+    "name": "color@cmyk_no_active_color",
+    "function": "bind_values",
+    "args": {
+      "panel": "color_panel_content",
+      "ctx": {
+        "state": {
+          "fill_color": null,
+          "stroke_color": "#112233",
+          "fill_on_top": true
+        },
+        "panel": {
+          "mode": "cmyk",
+          "hex": "",
+          "h": 0,
+          "s": 0,
+          "b": 0,
+          "r": 0,
+          "g": 0,
+          "bl": 0,
+          "c": 0,
+          "m": 0,
+          "y": 0,
+          "k": 0,
+          "recent_colors": []
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          1
+        ],
+        "id": "cp_black_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#000000"
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "id": "cp_white_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#ffffff"
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "id": "cp_recent_0",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "id": "cp_recent_1",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          6
+        ],
+        "id": "cp_recent_2",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "id": "cp_recent_3",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "id": "cp_recent_4",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "id": "cp_recent_5",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          10
+        ],
+        "id": "cp_recent_6",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "id": "cp_recent_7",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          12
+        ],
+        "id": "cp_recent_8",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "id": "cp_recent_9",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          0,
+          0
+        ],
+        "id": "cp_fill_swatch",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          1,
+          0,
+          0
+        ],
+        "id": "cp_fill_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "2"
+      },
+      {
+        "path": [
+          1,
+          0,
+          1
+        ],
+        "id": "cp_stroke_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#112233"
+      },
+      {
+        "path": [
+          1,
+          0,
+          1
+        ],
+        "id": "cp_stroke_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "1"
+      },
+      {
+        "path": [
+          1,
+          0,
+          4,
+          1
+        ],
+        "id": "cp_gradient_btn",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0
+        ],
+        "id": "cp_sliders_grayscale",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          1
+        ],
+        "id": "cp_k",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          1
+        ],
+        "id": "cp_k",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          2
+        ],
+        "id": "cp_k_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          0,
+          0,
+          2
+        ],
+        "id": "cp_k_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1
+        ],
+        "id": "cp_sliders_hsb",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          0,
+          1
+        ],
+        "id": "cp_h",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          0,
+          1
+        ],
+        "id": "cp_h",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          0,
+          2
+        ],
+        "id": "cp_h_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          0,
+          2
+        ],
+        "id": "cp_h_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "id": "cp_s",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          1,
+          1
+        ],
+        "id": "cp_s",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          1,
+          2
+        ],
+        "id": "cp_s_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          1,
+          2
+        ],
+        "id": "cp_s_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          2,
+          1
+        ],
+        "id": "cp_b",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          2,
+          1
+        ],
+        "id": "cp_b",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          2,
+          2
+        ],
+        "id": "cp_b_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          1,
+          2,
+          2
+        ],
+        "id": "cp_b_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2
+        ],
+        "id": "cp_sliders_rgb",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          1
+        ],
+        "id": "cp_r",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          1
+        ],
+        "id": "cp_r",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          2
+        ],
+        "id": "cp_r_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          0,
+          2
+        ],
+        "id": "cp_r_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          1
+        ],
+        "id": "cp_g",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          1
+        ],
+        "id": "cp_g",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          2
+        ],
+        "id": "cp_g_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          1,
+          2
+        ],
+        "id": "cp_g_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          2,
+          1
+        ],
+        "id": "cp_bl",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          2,
+          1
+        ],
+        "id": "cp_bl",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          2,
+          2
+        ],
+        "id": "cp_bl_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          2,
+          2,
+          2
+        ],
+        "id": "cp_bl_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3
+        ],
+        "id": "cp_sliders_cmyk",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          0,
+          1
+        ],
+        "id": "cp_c",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          0,
+          1
+        ],
+        "id": "cp_c",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          0,
+          2
+        ],
+        "id": "cp_c_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          0,
+          2
+        ],
+        "id": "cp_c_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          1,
+          1
+        ],
+        "id": "cp_m",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          1,
+          1
+        ],
+        "id": "cp_m",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          1,
+          2
+        ],
+        "id": "cp_m_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          1,
+          2
+        ],
+        "id": "cp_m_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          2,
+          1
+        ],
+        "id": "cp_y",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          2,
+          1
+        ],
+        "id": "cp_y",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          2,
+          2
+        ],
+        "id": "cp_y_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          2,
+          2
+        ],
+        "id": "cp_y_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          3,
+          1
+        ],
+        "id": "cp_k_cmyk",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          3,
+          1
+        ],
+        "id": "cp_k_cmyk",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          3,
+          2
+        ],
+        "id": "cp_k_cmyk_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          3,
+          3,
+          2
+        ],
+        "id": "cp_k_cmyk_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4
+        ],
+        "id": "cp_sliders_web_safe",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          0,
+          1
+        ],
+        "id": "cp_r_ws",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          0,
+          1
+        ],
+        "id": "cp_r_ws",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          0,
+          2
+        ],
+        "id": "cp_r_ws_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          0,
+          2
+        ],
+        "id": "cp_r_ws_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          1,
+          1
+        ],
+        "id": "cp_g_ws",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          1,
+          1
+        ],
+        "id": "cp_g_ws",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          1,
+          2
+        ],
+        "id": "cp_g_ws_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          1,
+          2
+        ],
+        "id": "cp_g_ws_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          2,
+          1
+        ],
+        "id": "cp_bl_ws",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          2,
+          1
+        ],
+        "id": "cp_bl_ws",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          2,
+          2
+        ],
+        "id": "cp_bl_ws_val",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1,
+          4,
+          2,
+          2
+        ],
+        "id": "cp_bl_ws_val",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "id": "cp_hex",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "id": "cp_hex",
+        "key": "bind.value",
+        "type": "string",
+        "value": ""
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "cp_color_bar",
+        "key": "bind.brightness",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "cp_color_bar",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      }
+    ]
+  },
+  {
+    "name": "swatches@two_libraries",
+    "function": "bind_values",
+    "args": {
+      "panel": "swatches_panel_content",
+      "ctx": {
+        "state": {
+          "fill_color": "#ff0000",
+          "stroke_color": null,
+          "fill_on_top": false
+        },
+        "panel": {
+          "open_libraries": [
+            {
+              "id": "lib1",
+              "collapsed": false
+            },
+            {
+              "id": "lib2",
+              "collapsed": true
+            }
+          ],
+          "selected_swatches": [
+            "lib1:0"
+          ],
+          "recent_colors": [
+            "#ff0000"
+          ],
+          "thumbnail_size": 16
+        },
+        "data": {
+          "swatch_libraries": {
+            "lib1": {
+              "name": "Default",
+              "swatches": [
+                {
+                  "color": "#ff0000"
+                },
+                {
+                  "color": "#00ff00"
+                }
+              ]
+            },
+            "lib2": {
+              "name": "Grays",
+              "swatches": [
+                {
+                  "color": "#808080"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0,
+          0
+        ],
+        "id": "sp_fill_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#ff0000"
+      },
+      {
+        "path": [
+          0,
+          0,
+          0
+        ],
+        "id": "sp_fill_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "1"
+      },
+      {
+        "path": [
+          0,
+          0,
+          1
+        ],
+        "id": "sp_stroke_swatch",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          0,
+          1
+        ],
+        "id": "sp_stroke_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "2"
+      },
+      {
+        "path": [
+          0,
+          0,
+          4,
+          1
+        ],
+        "id": "sp_gradient_btn",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          2,
+          0
+        ],
+        "id": "sp_recent_0",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#ff0000"
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "id": "sp_recent_1",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          2
+        ],
+        "id": "sp_recent_2",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          3
+        ],
+        "id": "sp_recent_3",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          4
+        ],
+        "id": "sp_recent_4",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          5
+        ],
+        "id": "sp_recent_5",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          6
+        ],
+        "id": "sp_recent_6",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          7
+        ],
+        "id": "sp_recent_7",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          8
+        ],
+        "id": "sp_recent_8",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          9
+        ],
+        "id": "sp_recent_9",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          0
+        ],
+        "id": "",
+        "key": "bind.collapsed",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          0
+        ],
+        "id": "",
+        "key": "label",
+        "type": "string",
+        "value": "Default"
+      },
+      {
+        "path": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "id": "",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#ff0000"
+      },
+      {
+        "path": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "id": "",
+        "key": "bind.selected_in",
+        "type": "list",
+        "value": "[lib1:0]"
+      },
+      {
+        "path": [
+          3,
+          0,
+          0,
+          1
+        ],
+        "id": "",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#00ff00"
+      },
+      {
+        "path": [
+          3,
+          0,
+          0,
+          1
+        ],
+        "id": "",
+        "key": "bind.selected_in",
+        "type": "list",
+        "value": "[lib1:0]"
+      },
+      {
+        "path": [
+          3,
+          1
+        ],
+        "id": "",
+        "key": "bind.collapsed",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          3,
+          1
+        ],
+        "id": "",
+        "key": "label",
+        "type": "string",
+        "value": "Grays"
+      },
+      {
+        "path": [
+          3,
+          1,
+          0,
+          0
+        ],
+        "id": "",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#808080"
+      },
+      {
+        "path": [
+          3,
+          1,
+          0,
+          0
+        ],
+        "id": "",
+        "key": "bind.selected_in",
+        "type": "list",
+        "value": "[lib1:0]"
+      }
+    ]
+  },
+  {
+    "name": "stroke@dashed_bevel",
+    "function": "bind_values",
+    "args": {
+      "panel": "stroke_panel_content",
+      "ctx": {
+        "state": {
+          "stroke_brush": null
+        },
+        "panel": {
+          "weight": 2.5,
+          "cap": "round",
+          "join": "bevel",
+          "miter_limit": 4,
+          "align_stroke": "inside",
+          "dashed": true,
+          "dash_align_anchors": false,
+          "dash_1": 6,
+          "gap_1": 3,
+          "dash_2": 0.5,
+          "gap_2": 1.25,
+          "dash_3": 0,
+          "gap_3": 0,
+          "start_arrowhead": "none",
+          "end_arrowhead": "Arrow 5",
+          "start_arrowhead_scale": 100,
+          "end_arrowhead_scale": 200,
+          "link_arrowhead_scale": true,
+          "arrow_align": "tip_at_end",
+          "profile": "Width Profile 1",
+          "profile_flipped": false
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          1
+        ],
+        "id": "stk_weight",
+        "key": "bind.value",
+        "type": "number",
+        "value": "2.5"
+      },
+      {
+        "path": [
+          1,
+          1
+        ],
+        "id": "stk_cap_butt",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          2
+        ],
+        "id": "stk_cap_round",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          3
+        ],
+        "id": "stk_cap_square",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "id": "stk_join_miter",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          2,
+          2
+        ],
+        "id": "stk_join_round",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          2,
+          3
+        ],
+        "id": "stk_join_bevel",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          2,
+          5
+        ],
+        "id": "stk_miter_limit",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          2,
+          5
+        ],
+        "id": "stk_miter_limit",
+        "key": "bind.value",
+        "type": "number",
+        "value": "4"
+      },
+      {
+        "path": [
+          3,
+          1
+        ],
+        "id": "stk_align_stroke_center",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          2
+        ],
+        "id": "stk_align_stroke_inside",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          3,
+          3
+        ],
+        "id": "stk_align_stroke_outside",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          4,
+          0
+        ],
+        "id": "stk_dashed",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          4,
+          1
+        ],
+        "id": "stk_dash_preserve",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          4,
+          2
+        ],
+        "id": "stk_dash_align_anchors",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          5,
+          0,
+          0
+        ],
+        "id": "stk_dash_1",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          5,
+          0,
+          0
+        ],
+        "id": "stk_dash_1",
+        "key": "bind.value",
+        "type": "number",
+        "value": "6"
+      },
+      {
+        "path": [
+          5,
+          1,
+          0
+        ],
+        "id": "stk_gap_1",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          5,
+          1,
+          0
+        ],
+        "id": "stk_gap_1",
+        "key": "bind.value",
+        "type": "number",
+        "value": "3"
+      },
+      {
+        "path": [
+          5,
+          2,
+          0
+        ],
+        "id": "stk_dash_2",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          5,
+          2,
+          0
+        ],
+        "id": "stk_dash_2",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0.5"
+      },
+      {
+        "path": [
+          5,
+          3,
+          0
+        ],
+        "id": "stk_gap_2",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          5,
+          3,
+          0
+        ],
+        "id": "stk_gap_2",
+        "key": "bind.value",
+        "type": "number",
+        "value": "1.25"
+      },
+      {
+        "path": [
+          5,
+          4,
+          0
+        ],
+        "id": "stk_dash_3",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          5,
+          4,
+          0
+        ],
+        "id": "stk_dash_3",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          5,
+          5,
+          0
+        ],
+        "id": "stk_gap_3",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          5,
+          5,
+          0
+        ],
+        "id": "stk_gap_3",
+        "key": "bind.value",
+        "type": "number",
+        "value": "0"
+      },
+      {
+        "path": [
+          6,
+          1
+        ],
+        "id": "stk_start_arrowhead",
+        "key": "bind.value",
+        "type": "string",
+        "value": "none"
+      },
+      {
+        "path": [
+          6,
+          2
+        ],
+        "id": "stk_end_arrowhead",
+        "key": "bind.value",
+        "type": "string",
+        "value": "Arrow 5"
+      },
+      {
+        "path": [
+          7,
+          1
+        ],
+        "id": "stk_start_arrowhead_scale",
+        "key": "bind.value",
+        "type": "number",
+        "value": "100"
+      },
+      {
+        "path": [
+          7,
+          2
+        ],
+        "id": "stk_end_arrowhead_scale",
+        "key": "bind.value",
+        "type": "number",
+        "value": "200"
+      },
+      {
+        "path": [
+          7,
+          3
+        ],
+        "id": "stk_link_arrowhead_scale",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          8,
+          1
+        ],
+        "id": "stk_arrow_tip_at_end",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          8,
+          2
+        ],
+        "id": "stk_arrow_center_at_end",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          9,
+          1
+        ],
+        "id": "stk_profile",
+        "key": "bind.value",
+        "type": "string",
+        "value": "Width Profile 1"
+      },
+      {
+        "path": [
+          9,
+          2
+        ],
+        "id": "stk_flip_profile",
+        "key": "bind.checked",
+        "type": "bool",
+        "value": "false"
+      }
+    ]
+  }
+]

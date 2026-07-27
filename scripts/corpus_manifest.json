@@ -38,9 +38,10 @@
       "claim_style": {
         "rust": "path literals (cross_language_test.rs + module-scattered tests, e.g. geometry/tspan.rs)",
         "swift": "path literals (AlignFixtureTests full paths; TspanPrimitivesTests loadFixture)",
-        "scripts": "ALGORITHMS dict in cross_language_algorithms.py (name -> algorithms/<name>.json)"
+        "scripts": "ALGORITHMS dict in cross_language_algorithms.py (name -> algorithms/<name>.json)",
+        "reference": "os.path.join segments (workspace_interpreter/tests/test_bind_values.py)"
       },
-      "notes": "Port symmetry is deliberately NOT machine-checked per registration list here: every algorithm in cross_language_algorithms.py's ALGORITHMS dict is gated across both active ports by that script (each port's roundtrip binary runs every fixture), while the in-port unit registrations legitimately differ (Rust natively gates the pane/panel/menu vectors; Swift natively gates align + the tspan primitives). The count is not restated here on purpose -- it was stale at '14' while the dict held 15."
+      "notes": "Port symmetry is deliberately NOT machine-checked per registration list here: every algorithm in cross_language_algorithms.py's ALGORITHMS dict is gated across both active ports by that script (each port's roundtrip binary runs every fixture), while the in-port unit registrations legitimately differ (Rust natively gates the pane/panel/menu vectors; Swift natively gates align + the tspan primitives). The count is not restated here on purpose -- it was stale at '14' while the dict held 15. The three PANEL vectors are in-port only (not in the ALGORITHMS dict, so not driven by the roundtrip binaries): panel_layout.json pins rects, panel_widget_tree.json pins structure, and panel_bind_values.json pins RESOLVED bind.* VALUES -- the last is also driven by the reference (test_bind_values.py), which additionally asserts the golden is not stale relative to it."
     },
     "test_fixtures/artboards": {
       "kind": "fixtures",
