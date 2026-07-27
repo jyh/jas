@@ -3521,7 +3521,9 @@ fn artboard_delete_panel_selected(model: &mut Model, store: &mut StateStore) {
 /// copies (they're contained in BOTH source and duplicate at start
 /// of drag, since the duplicate sits at source's position).
 fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
-    use crate::document::artboard::{generate_artboard_id, next_artboard_name, Artboard};
+    use crate::document::artboard::{
+        generate_artboard_id, mint_unique_ids, next_artboard_name, Artboard,
+    };
     use crate::geometry::element::{Element, LayerElem};
     use std::rc::Rc;
 
@@ -3597,20 +3599,15 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
         .collect();
     new_doc.layers = new_layers;
 
-    // Mint the duplicate artboard (collision-retry id).
-    let existing_ids: std::collections::HashSet<String> =
+    // Mint the duplicate artboard's id through THE ONE MINT LOOP.
+    let mut existing_ids: std::collections::HashSet<String> =
         new_doc.artboards.iter().map(|a| a.id.clone()).collect();
-    let mut new_id = String::new();
-    for _ in 0..100 {
-        let candidate = generate_artboard_id(None);
-        if !existing_ids.contains(&candidate) {
-            new_id = candidate;
-            break;
-        }
-    }
-    if new_id.is_empty() {
+    let Some(ids) = mint_unique_ids(1, &mut existing_ids, &mut || {
+        generate_artboard_id(None)
+    }) else {
         return;
-    }
+    };
+    let new_id = ids[0].clone();
 
     let dup = Artboard {
         id: new_id.clone(),
@@ -3932,7 +3929,9 @@ fn artboard_resize_commit(model: &mut Model, store: &mut StateStore) {
 /// each dimension to >= 1 pt, mints a fresh id, picks the next
 /// "Artboard N" name, and appends to document.artboards.
 fn artboard_create_commit(model: &mut Model, x1: f64, y1: f64, x2: f64, y2: f64) {
-    use crate::document::artboard::{generate_artboard_id, next_artboard_name, Artboard};
+    use crate::document::artboard::{
+        generate_artboard_id, mint_unique_ids, next_artboard_name, Artboard,
+    };
 
     // Build rect; integer-pt round at commit per §Common rules.
     let raw_x = x1.min(x2).round();
@@ -3942,23 +3941,17 @@ fn artboard_create_commit(model: &mut Model, x1: f64, y1: f64, x2: f64, y2: f64)
 
     let mut new_doc = model.document().clone();
 
-    // Collision-retry id mint (matches the doc.create_artboard pattern
-    // in renderer.rs).
-    let existing_ids: std::collections::HashSet<String> =
+    // Collision-retry id mint through THE ONE MINT LOOP (matches the
+    // doc.create_artboard pattern in renderer.rs).
+    let mut existing_ids: std::collections::HashSet<String> =
         new_doc.artboards.iter().map(|a| a.id.clone()).collect();
-    let mut id = String::new();
-    for _ in 0..100 {
-        let candidate = generate_artboard_id(None);
-        if !existing_ids.contains(&candidate) {
-            id = candidate;
-            break;
-        }
-    }
-    if id.is_empty() {
+    let Some(ids) = mint_unique_ids(1, &mut existing_ids, &mut || {
+        generate_artboard_id(None)
+    }) else {
         return;
-    }
+    };
 
-    let mut ab = Artboard::default_with_id(id);
+    let mut ab = Artboard::default_with_id(ids[0].clone());
     ab.name = next_artboard_name(&new_doc.artboards);
     ab.x = raw_x;
     ab.y = raw_y;

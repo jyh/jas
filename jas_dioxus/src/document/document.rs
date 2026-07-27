@@ -277,6 +277,35 @@ impl Document {
         self.selection.iter().map(|es| es.path.clone()).collect()
     }
 
+    /// Every `common.id` present in this document: the whole layer forest
+    /// (recursing into groups and nested layers) plus the off-canvas symbol
+    /// masters. Id-less elements contribute nothing.
+    ///
+    /// This is the avoid-set for [`crate::document::artboard::mint_unique_ids`]
+    /// at every element-id mint. Masters ARE included: a master's id is a real
+    /// element id that instances target by name, so a canvas element must not
+    /// be minted onto it. Swift's `Document.elementIds` is the twin.
+    pub fn element_ids(&self) -> HashSet<String> {
+        fn walk(elem: &Element, out: &mut HashSet<String>) {
+            if let Some(id) = elem.common().id.as_deref() {
+                out.insert(id.to_string());
+            }
+            if let Some(children) = elem.children() {
+                for c in children {
+                    walk(c, out);
+                }
+            }
+        }
+        let mut out = HashSet::new();
+        for layer in &self.layers {
+            walk(layer, &mut out);
+        }
+        for master in &self.symbols {
+            walk(master, &mut out);
+        }
+        out
+    }
+
     /// Return the bounding box of all layers combined.
     pub fn bounds(&self) -> (f64, f64, f64, f64) {
         if self.layers.is_empty() {
@@ -691,6 +720,35 @@ mod tests {
         assert!(k.is_all(4));
         assert!(!k.is_all(5));
         assert_eq!(k.count(99), 4);
+    }
+
+    /// `element_ids` is the avoid-set every id mint is checked against, so it
+    /// must see NESTED elements and the off-canvas symbol masters, not just
+    /// top-level layer children. Swift's `Document.elementIds` is the twin.
+    #[test]
+    fn element_ids_walks_nesting_and_symbol_masters() {
+        let with_id = |elem: Element, id: &str| -> Element {
+            let mut e = elem;
+            e.common_mut().id = Some(id.to_string());
+            e
+        };
+        let inner = with_id(make_rect(0.0, 0.0, 1.0, 1.0), "inner");
+        let group = with_id(make_group(vec![inner]), "grp");
+        let layer = with_id(make_layer("L", vec![group]), "lyr");
+        let mut doc = Document {
+            layers: vec![layer],
+            ..Document::default()
+        };
+        doc.symbols
+            .push(with_id(make_rect(0.0, 0.0, 2.0, 2.0), "master"));
+        // An id-less sibling contributes nothing (and must not panic).
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(make_line(0.0, 0.0, 1.0, 1.0)));
+        }
+        let ids = doc.element_ids();
+        let mut sorted: Vec<&str> = ids.iter().map(|s| s.as_str()).collect();
+        sorted.sort();
+        assert_eq!(sorted, vec!["grp", "inner", "lyr", "master"]);
     }
 
     #[test]

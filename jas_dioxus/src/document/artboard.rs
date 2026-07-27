@@ -191,6 +191,52 @@ pub fn generate_element_id(rng: Option<&mut dyn FnMut() -> u32>) -> String {
     mint_id(rng)
 }
 
+/// How many draws one collision-free id gets before the mint is reported
+/// failed. 100 — the value every open-coded copy of this loop used before
+/// [`mint_unique_ids`] absorbed them; Swift's `idMintRetryBudget` holds the
+/// same number so the ports cannot drift on give-up behaviour.
+pub const ID_MINT_RETRY_BUDGET: usize = 100;
+
+/// THE ONE MINT LOOP: mint `count` ids that collide neither with `existing`
+/// nor with each other.
+///
+/// `mint` is the id source (`generate_element_id(None)` or
+/// `generate_artboard_id(None)` at every production caller, so the
+/// thread-local test override in this module is what makes a corpus run
+/// deterministic). Every accepted id is inserted into `existing`, which is
+/// what keeps one batch internally distinct — the caller may keep using the
+/// set for later batches.
+///
+/// Returns `None` — and the caller must then mint NOTHING and abort — as soon
+/// as one id exhausts [`ID_MINT_RETRY_BUDGET`] consecutive collisions. That is
+/// exactly what each open-coded copy did.
+///
+/// Swift's `mintUniqueIds` in `Sources/Document/Artboard.swift` is the twin,
+/// and both ports' tests drive the same per-char counter and assert the same
+/// literal ids, so neither the draw count per batch nor the collision
+/// behaviour can drift between them.
+pub fn mint_unique_ids(
+    count: usize,
+    existing: &mut std::collections::HashSet<String>,
+    mint: &mut dyn FnMut() -> String,
+) -> Option<Vec<String>> {
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        let mut chosen: Option<String> = None;
+        for _ in 0..ID_MINT_RETRY_BUDGET {
+            let candidate = mint();
+            if !existing.contains(&candidate) {
+                chosen = Some(candidate);
+                break;
+            }
+        }
+        let id = chosen?;
+        existing.insert(id.clone());
+        out.push(id);
+    }
+    Some(out)
+}
+
 /// Match a name against the default `Artboard N` pattern and return
 /// N on success. Case-sensitive, exactly one space between `Artboard`
 /// and the digits (ARTBOARDS.md §Numbering and naming).
@@ -343,6 +389,79 @@ mod tests {
         let id_b = generate_element_id(Some(&mut id_gen_b));
 
         assert_eq!(id_a, id_b);
+    }
+
+    // ── mint_unique_ids: THE ONE MINT LOOP ──
+    //
+    // A per-char counter starting at 0 makes `mint_id` yield the alphabet in
+    // order, 8 chars at a time: draw k gives alphabet[k % 36], so the first
+    // two ids are "01234567" and "89abcdef". Swift's `mintUniqueIds` tests
+    // assert the SAME literals from the same counter, so the two ports cannot
+    // drift on how many draws a batch consumes or in what order.
+
+    /// The per-char counter both corpus runners install, as a local closure.
+    fn counter_from(start: u32) -> impl FnMut() -> String {
+        let mut n = start;
+        move || {
+            let mut seq = n;
+            n = n.wrapping_add(ARTBOARD_ID_LENGTH as u32);
+            generate_element_id(Some(&mut || {
+                let v = seq;
+                seq = seq.wrapping_add(1);
+                v
+            }))
+        }
+    }
+
+    #[test]
+    fn mint_unique_ids_batch_is_sequential_and_distinct() {
+        let mut existing = std::collections::HashSet::new();
+        let mut mint = counter_from(0);
+        let ids = mint_unique_ids(3, &mut existing, &mut mint)
+            .expect("a fresh counter never collides");
+        assert_eq!(ids, vec!["01234567", "89abcdef", "ghijklmn"]);
+        // Every accepted id is folded back into `existing`, which is what
+        // keeps a batch internally distinct.
+        assert_eq!(existing.len(), 3);
+        for id in &ids {
+            assert!(existing.contains(id), "{id} was not recorded in existing");
+        }
+    }
+
+    #[test]
+    fn mint_unique_ids_skips_a_taken_id() {
+        let mut existing: std::collections::HashSet<String> =
+            ["01234567".to_string()].into_iter().collect();
+        let mut mint = counter_from(0);
+        let ids = mint_unique_ids(1, &mut existing, &mut mint)
+            .expect("the second draw is free");
+        // The FIRST draw collides with the taken id, so the loop redraws.
+        assert_eq!(ids, vec!["89abcdef"]);
+    }
+
+    #[test]
+    fn mint_unique_ids_gives_up_after_the_retry_budget() {
+        let mut existing: std::collections::HashSet<String> =
+            ["aaaaaaaa".to_string()].into_iter().collect();
+        let mut draws = 0usize;
+        // A CONSTANT minter: every draw collides, so the budget is the only
+        // exit. `None` means the caller mints nothing and aborts.
+        let mut mint = || {
+            draws += 1;
+            "aaaaaaaa".to_string()
+        };
+        assert_eq!(mint_unique_ids(1, &mut existing, &mut mint), None);
+        assert_eq!(draws, ID_MINT_RETRY_BUDGET);
+    }
+
+    #[test]
+    fn mint_unique_ids_zero_count_is_an_empty_batch() {
+        let mut existing = std::collections::HashSet::new();
+        let mut mint = || panic!("count 0 must not draw");
+        assert_eq!(
+            mint_unique_ids(0, &mut existing, &mut mint),
+            Some(Vec::new())
+        );
     }
 
     #[test]

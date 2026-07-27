@@ -78,32 +78,13 @@ public enum SymbolsPanel {
         model.panelStateVersion &+= 1
     }
 
-    /// Gather every existing element id (layers + master store) so a
-    /// freshly minted id avoids collisions. Mirrors the `makeInstance`
-    /// gather + the Rust `existing_ids` walk (operands stay opaque:
-    /// only Group/Layer children are recursed).
-    private static func existingIds(_ doc: Document) -> Set<String> {
-        var set: Set<String> = []
-        func gather(_ elem: Element) {
-            if let id = elem.id { set.insert(id) }
-            switch elem {
-            case .group(let g): for c in g.children { gather(c) }
-            case .layer(let l): for c in l.children { gather(c) }
-            default: break
-            }
-        }
-        for layer in doc.layers { gather(.layer(layer)) }
-        for master in doc.symbols { gather(master) }
-        return set
-    }
-
-    /// Mint a collision-free id (retry up to 100x), or nil.
-    private static func mint(_ existing: Set<String>) -> String? {
-        for _ in 0..<100 {
-            let c = generateElementId()
-            if !existing.contains(c) { return c }
-        }
-        return nil
+    /// Mint `count` collision-free element ids against every id already in
+    /// `doc` (layer forest plus master store — `Document.elementIds`) through
+    /// THE ONE MINT LOOP. nil means the caller mints nothing and aborts.
+    private static func mint(_ doc: Document, _ count: Int) -> [String]? {
+        var existing = doc.elementIds
+        return mintUniqueIds(count, existing: &existing,
+                             mint: { generateElementId() })
     }
 
     /// Native intercept for the Symbols panel ops. Each takes a single
@@ -134,10 +115,8 @@ public enum SymbolsPanel {
             guard sorted.count == 1, let es = sorted.first else { return }
             guard es.kind == .all else { return }
             let path = es.path
-            var existing = existingIds(doc)
-            guard let masterId = mint(existing) else { return }
-            existing.insert(masterId)
-            guard let refId = mint(existing) else { return }
+            guard let ids = mint(doc, 2) else { return }
+            let (masterId, refId) = (ids[0], ids[1])
             // The Controller mutator self-brackets one undo step via editDocument.
             let controller = Controller(model: model)
             controller.makeSymbol(path, masterId: masterId, refId: refId)
@@ -153,8 +132,7 @@ public enum SymbolsPanel {
 
         case "place_instance":
             guard let masterId = selectedSymbol(model) else { return }
-            let existing = existingIds(model.document)
-            guard let refId = mint(existing) else { return }
+            guard let refId = mint(model.document, 1)?[0] else { return }
             // The Controller mutator self-brackets one undo step via editDocument.
             let controller = Controller(model: model)
             controller.placeInstance(masterId: masterId, refId: refId)

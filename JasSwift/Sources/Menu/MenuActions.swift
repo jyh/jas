@@ -123,30 +123,13 @@ enum MenuActions {
         guard sorted.count == 1, let es = sorted.first else { return }
         guard es.kind == .all else { return }
         let targetPath = es.path
-        // Gather every existing element id so the freshly minted
-        // targetId / refId can avoid collisions.
-        var existing: Set<String> = []
-        func gatherIds(_ elem: Element) {
-            if let id = elem.id { existing.insert(id) }
-            switch elem {
-            case .group(let g): for c in g.children { gatherIds(c) }
-            case .layer(let l): for c in l.children { gatherIds(c) }
-            default: break
-            }
-        }
-        for layer in doc.layers { gatherIds(.layer(layer)) }
-        // Mint two distinct, collision-free ids (mirrors the artboard
-        // mint loop in LayersPanel).
-        func mint() -> String? {
-            for _ in 0..<100 {
-                let c = generateElementId()
-                if !existing.contains(c) { return c }
-            }
-            return nil
-        }
-        guard let targetId = mint() else { return }
-        existing.insert(targetId)
-        guard let refId = mint() else { return }
+        // Mint two distinct, collision-free ids against every id already in the
+        // document (see `Document.elementIds`), through THE ONE MINT LOOP.
+        var existing = doc.elementIds
+        guard let ids = mintUniqueIds(2, existing: &existing,
+                                      mint: { generateElementId() })
+        else { return }
+        let (targetId, refId) = (ids[0], ids[1])
         // createReference + offset-move under ONE snapshot = a single
         // undo step (offset rides on the new reference's transform via
         // moveSelection).

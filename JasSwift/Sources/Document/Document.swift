@@ -319,6 +319,29 @@ public struct Document: Equatable {
         Set(selection.map(\.path))
     }
 
+    /// Every element `id` present in this document: the whole layer forest
+    /// (recursing into groups and nested layers) plus the off-canvas symbol
+    /// masters. Id-less elements contribute nothing.
+    ///
+    /// This is the avoid-set for `mintUniqueIds` at every element-id mint.
+    /// Masters ARE included: a master's id is a real element id that instances
+    /// target by name, so a canvas element must not be minted onto it. Rust's
+    /// `Document::element_ids` is the twin.
+    public var elementIds: Set<String> {
+        var out: Set<String> = []
+        func walk(_ elem: Element) {
+            if let id = elem.id { out.insert(id) }
+            switch elem {
+            case .group(let g): for c in g.children { walk(c) }
+            case .layer(let l): for c in l.children { walk(c) }
+            default: break
+            }
+        }
+        for layer in layers { walk(.layer(layer)) }
+        for master in symbols { walk(master) }
+        return out
+    }
+
     public var bounds: BBox {
         guard !layers.isEmpty else { return (0, 0, 0, 0) }
         let all = layers.map(\.bounds)

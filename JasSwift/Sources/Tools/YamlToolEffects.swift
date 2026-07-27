@@ -1342,13 +1342,12 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let rawH = max(abs(y1 - y2).rounded(), 1.0)
 
         let doc = model.document
-        let existing: Set<String> = Set(doc.artboards.map { $0.id })
-        var newId = ""
-        for _ in 0..<100 {
-            let candidate = generateArtboardId()
-            if !existing.contains(candidate) { newId = candidate; break }
-        }
-        guard !newId.isEmpty else { return nil }
+        // Collision-retry id mint through THE ONE MINT LOOP.
+        var existing: Set<String> = Set(doc.artboards.map { $0.id })
+        guard let minted = mintUniqueIds(1, existing: &existing,
+                                         mint: { generateArtboardId() })
+        else { return nil }
+        let newId = minted[0]
         let newName = nextArtboardName(doc.artboards)
         let ab = Artboard(
             id: newId, name: newName,
@@ -4196,14 +4195,12 @@ private func artboardDuplicateInit(model: Model, store: StateStore) {
             locked: layer.locked))
     }
 
-    // Mint duplicate artboard (collision-retry id).
-    let existing: Set<String> = Set(doc.artboards.map { $0.id })
-    var newId = ""
-    for _ in 0..<100 {
-        let candidate = generateArtboardId()
-        if !existing.contains(candidate) { newId = candidate; break }
-    }
-    guard !newId.isEmpty else { return }
+    // Mint the duplicate artboard's id through THE ONE MINT LOOP.
+    var existing: Set<String> = Set(doc.artboards.map { $0.id })
+    guard let minted = mintUniqueIds(1, existing: &existing,
+                                     mint: { generateArtboardId() })
+    else { return }
+    let newId = minted[0]
     let dup = Artboard(
         id: newId,
         name: nextArtboardName(doc.artboards),

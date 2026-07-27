@@ -678,46 +678,18 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
         || action == "apply_concept_operation"
         || action == "promote_to_concept"
     {
-        use crate::document::artboard::generate_element_id;
+        use crate::document::artboard::{generate_element_id, mint_unique_ids};
         use crate::document::controller::Controller;
 
-        // Gather every existing element id (layers + master store) so the
-        // freshly minted ids avoid collisions, then mint a collision-free
-        // id. Mirrors the make_instance mint loop.
-        fn gather_ids(
-            elem: &crate::geometry::element::Element,
-            out: &mut std::collections::HashSet<String>,
-        ) {
-            if let Some(id) = elem.common().id.as_deref() {
-                out.insert(id.to_string());
-            }
-            if let Some(children) = elem.children() {
-                for c in children {
-                    gather_ids(c, out);
-                }
-            }
-        }
-        fn existing_ids(
+        // Mint `count` collision-free element ids against every id already in
+        // the document — layer forest plus master store, see
+        // `Document::element_ids` — through THE ONE MINT LOOP.
+        fn mint(
             model: &crate::document::model::Model,
-        ) -> std::collections::HashSet<String> {
-            let mut set = std::collections::HashSet::new();
-            let doc = model.document();
-            for layer in &doc.layers {
-                gather_ids(layer, &mut set);
-            }
-            for master in &doc.symbols {
-                gather_ids(master, &mut set);
-            }
-            set
-        }
-        fn mint(existing: &std::collections::HashSet<String>) -> Option<String> {
-            for _ in 0..100 {
-                let c = generate_element_id(None);
-                if !existing.contains(&c) {
-                    return Some(c);
-                }
-            }
-            None
+            count: usize,
+        ) -> Option<Vec<String>> {
+            let mut existing = model.document().element_ids();
+            mint_unique_ids(count, &mut existing, &mut || generate_element_id(None))
         }
 
         match action {
@@ -733,10 +705,8 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                         return Vec::new();
                     }
                     let path = es.path.clone();
-                    let mut existing = existing_ids(&tab.model);
-                    let Some(master_id) = mint(&existing) else { return Vec::new(); };
-                    existing.insert(master_id.clone());
-                    let Some(ref_id) = mint(&existing) else { return Vec::new(); };
+                    let Some(ids) = mint(&tab.model, 2) else { return Vec::new(); };
+                    let (master_id, ref_id) = (ids[0].clone(), ids[1].clone());
                     tab.model.with_txn(|m| Controller::make_symbol(m, &path, &master_id, &ref_id));
                     // Keep the new master panel-selected so Place/Delete
                     // target it immediately. make_symbol keeps an existing
@@ -763,8 +733,8 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                     return Vec::new();
                 };
                 if let Some(tab) = st.tab_mut() {
-                    let existing = existing_ids(&tab.model);
-                    let Some(ref_id) = mint(&existing) else { return Vec::new(); };
+                    let Some(ids) = mint(&tab.model, 1) else { return Vec::new(); };
+                    let ref_id = ids[0].clone();
                     tab.model.with_txn(|m| Controller::place_instance(m, &master_id, &ref_id));
                 }
                 return Vec::new();
@@ -796,8 +766,8 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                     })
                     .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
                 if let Some(tab) = st.tab_mut() {
-                    let existing = existing_ids(&tab.model);
-                    let Some(elem_id) = mint(&existing) else { return Vec::new(); };
+                    let Some(ids) = mint(&tab.model, 1) else { return Vec::new(); };
+                    let elem_id = ids[0].clone();
                     // Route through op_apply so the placement JOURNALS as a real
                     // `place_concept_instance` op (value-in-op: concept id +
                     // resolved default params + minted id), replayable like the
@@ -3204,19 +3174,22 @@ fn run_yaml_effect(
     // journal replays deterministically (checkpoint_equivalence). targets carry the
     // new artboard id.
     if let Some(spec) = eff.get("doc.create_artboard").and_then(|v| v.as_object()) {
-        use crate::document::artboard::{generate_artboard_id, next_artboard_name};
+        use crate::document::artboard::{
+            generate_artboard_id, mint_unique_ids, next_artboard_name,
+        };
         let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
         let doc = tab.model.document();
-        // Collision-retry id mint (production entropy). This is the ONLY mint;
-        // op_apply replays the recorded literal and never mints.
-        let existing_ids: std::collections::HashSet<String> =
+        // Collision-retry id mint through THE ONE MINT LOOP (production
+        // entropy). This is the ONLY mint; op_apply replays the recorded
+        // literal and never mints.
+        let mut existing_ids: std::collections::HashSet<String> =
             doc.artboards.iter().map(|a| a.id.clone()).collect();
-        let mut id = String::new();
-        for _ in 0..100 {
-            let c = generate_artboard_id(None);
-            if !existing_ids.contains(&c) { id = c; break; }
-        }
-        if id.is_empty() { return deferred; }
+        let Some(ids) = mint_unique_ids(1, &mut existing_ids, &mut || {
+            generate_artboard_id(None)
+        }) else {
+            return deferred;
+        };
+        let id = ids[0].clone();
         // Derive the default name HERE (a function of the live doc); a `name`
         // override in `spec` replaces it below. Build a RESOLVED flat `fields`
         // object: each YAML expr is evaluated to a literal before journaling
@@ -3280,7 +3253,9 @@ fn run_yaml_effect(
     // re-derives the name / NEVER taps entropy (checkpoint_equivalence). A missing
     // source is a no-op that journals nothing. targets carry the new id.
     if let Some(eff_val) = eff.get("doc.duplicate_artboard") {
-        use crate::document::artboard::{generate_artboard_id, next_artboard_name};
+        use crate::document::artboard::{
+            generate_artboard_id, mint_unique_ids, next_artboard_name,
+        };
         let (id_expr, ox_expr, oy_expr) = match eff_val {
             serde_json::Value::String(s) => (s.clone(), None, None),
             serde_json::Value::Object(m) => (
@@ -3312,15 +3287,16 @@ fn run_yaml_effect(
         if !doc.artboards.iter().any(|a| a.id == target) {
             return deferred;
         }
-        // Collision-retry id mint (production entropy) — the ONLY mint.
-        let existing_ids: std::collections::HashSet<String> =
+        // Collision-retry id mint through THE ONE MINT LOOP (production
+        // entropy) — the ONLY mint.
+        let mut existing_ids: std::collections::HashSet<String> =
             doc.artboards.iter().map(|a| a.id.clone()).collect();
-        let mut new_id = String::new();
-        for _ in 0..100 {
-            let c = generate_artboard_id(None);
-            if !existing_ids.contains(&c) { new_id = c; break; }
-        }
-        if new_id.is_empty() { return deferred; }
+        let Some(ids) = mint_unique_ids(1, &mut existing_ids, &mut || {
+            generate_artboard_id(None)
+        }) else {
+            return deferred;
+        };
+        let new_id = ids[0].clone();
         // Derive the new name HERE (a function of the live doc); journaled as a
         // literal so replay never re-derives it.
         let new_name = next_artboard_name(&doc.artboards);
