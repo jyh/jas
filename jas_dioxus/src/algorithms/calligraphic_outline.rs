@@ -209,6 +209,20 @@ mod tests {
         assert!(calligraphic_outline(&cmds, &brush).is_empty());
     }
 
+    /// `if len == 0.0` is FALSE for a NaN length, so a NaN coordinate reaches
+    /// the sample-count cast. `(nan / SAMPLE_INTERVAL_PT).ceil() as u32` is 0
+    /// and `.max(1)` lifts it to one interval: two samples, a four-point
+    /// polygon. The coordinates themselves are NaN, so the COUNT is what the
+    /// two ports agree on and all this asserts. JasSwift's twin is
+    /// `R9CallSitePinTests.calligraphicOutlineSurvivesANaNCoordinate`, where
+    /// the same expression was a precondition failure before risk R9.
+    #[test]
+    fn nan_coordinate_yields_two_samples() {
+        let brush = CalligraphicBrush { angle: 0.0, roundness: 100.0, size: 4.0 };
+        let cmds = vec![move_to(0.0, 0.0), line_to(f64::NAN, 0.0)];
+        assert_eq!(calligraphic_outline(&cmds, &brush).len(), 4);
+    }
+
     #[test]
     fn horizontal_line_with_circular_brush() {
         // Half-width perpendicular to a horizontal line with a circular

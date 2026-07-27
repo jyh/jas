@@ -102,4 +102,90 @@ struct R9CallSitePinTests {
                                  rawParams: ["probe": "4"], liveState: [:])
         #expect(dlg?.params["probe"] as? Int == 4)
     }
+
+    // MARK: - Calligraphic outline sample count
+
+    /// `sampleLine`'s `if len == 0.0` bail is false for a NaN length, so a NaN
+    /// coordinate reaches the sample-count conversion. jas_dioxus's
+    /// `(len / SAMPLE_INTERVAL_PT).ceil() as u32` is 0 for NaN and `.max(1)`
+    /// lifts it to one interval, i.e. two samples and a four-point polygon;
+    /// this port trapped. The point VALUES are NaN in both ports — the count is
+    /// the whole of what agrees, so the count is all this checks.
+    ///
+    /// Mirrored in jas_dioxus by
+    /// `algorithms::calligraphic_outline::tests::nan_coordinate_yields_two_samples`.
+    /// There is no corpus family for this algorithm (it has no entry in
+    /// cross_language_algorithms.py's ALGORITHMS dict and no roundtrip arm in
+    /// either port's CLI), so the gate is a matched pair of unit tests.
+    @Test func calligraphicOutlineSurvivesANaNCoordinate() {
+        let brush = CalligraphicBrush(angle: 0, roundness: 100, size: 4)
+        let pts = calligraphicOutline([.moveTo(0, 0), .lineTo(.nan, 0)], brush)
+        #expect(pts.count == 4)
+    }
+
+    /// A finite length still gets one sample per SAMPLE_INTERVAL_PT: 10pt is 10
+    /// intervals, 11 samples, 22 polygon points. Pins the same expression's
+    /// ordinary arm so a "fix" cannot collapse every stroke to one interval.
+    @Test func calligraphicOutlineStillSamplesAFiniteLine() {
+        let brush = CalligraphicBrush(angle: 0, roundness: 100, size: 4)
+        let pts = calligraphicOutline([.moveTo(0, 0), .lineTo(10, 0)], brush)
+        #expect(pts.count == 22)
+    }
+
+    // MARK: - Paragraph hyphenation fields
+
+    /// The four hyphenation call sites in `buildParagraphSegments`, all in one
+    /// segment. Two of the four are pinned by a VALUE and two by the trap:
+    ///
+    ///   jas:hyphenate-min-word   = nan  -> Rust `nan as usize` is 0; `Int(nan)` trapped
+    ///   jas:hyphenate-min-before = -1   -> Rust `-1.0 as usize` is 0; `Int(-1.0)` was -1
+    ///   jas:hyphenate-min-after  = nan  -> as min-word
+    ///   jas:hyphenate-bias       = 300  -> Rust `300.0 as u8` is 255; this stored 300
+    ///
+    /// The Rust expressions are text_layout_paragraph.rs's
+    /// `t.jas_hyphenate_min_word.unwrap_or(6.0) as usize` and
+    /// `t.jas_hyphenate_bias.unwrap_or(0.0) as u8`. The values reach a document
+    /// through the SVG attribute readers, which are `Double(string) ?? default`
+    /// here and `parse::<f64>()` there and accept "nan".
+    ///
+    /// The `text_layout_paragraph` corpus family cannot host this: its vectors
+    /// supply already-built `paragraphs` segments, so it never runs the
+    /// Tspan-to-Int conversion these four sites are.
+    @Test func paragraphHyphenationFieldsSaturateLikeRust() {
+        let segs = buildParagraphSegments(
+            tspans: [
+                Tspan(id: 0, content: "", jasRole: "paragraph",
+                      jasHyphenateMinWord: .nan,
+                      jasHyphenateMinBefore: -1,
+                      jasHyphenateMinAfter: .nan,
+                      jasHyphenateBias: 300),
+                Tspan(id: 1, content: "hello"),
+            ],
+            content: "hello", isArea: true)
+        #expect(segs.count == 1)
+        #expect(segs[0].hyphenateMinWord == 0)
+        #expect(segs[0].hyphenateMinBefore == 0)
+        #expect(segs[0].hyphenateMinAfter == 0)
+        #expect(segs[0].hyphenateBias == 255)
+    }
+
+    /// The ordinary arm of the same four sites: an in-range value passes
+    /// through, so a "fix" cannot zero the fields it was meant to protect.
+    @Test func paragraphHyphenationFieldsPassInRangeValues() {
+        let segs = buildParagraphSegments(
+            tspans: [
+                Tspan(id: 0, content: "", jasRole: "paragraph",
+                      jasHyphenateMinWord: 7,
+                      jasHyphenateMinBefore: 3,
+                      jasHyphenateMinAfter: 4,
+                      jasHyphenateBias: 42),
+                Tspan(id: 1, content: "hello"),
+            ],
+            content: "hello", isArea: true)
+        #expect(segs.count == 1)
+        #expect(segs[0].hyphenateMinWord == 7)
+        #expect(segs[0].hyphenateMinBefore == 3)
+        #expect(segs[0].hyphenateMinAfter == 4)
+        #expect(segs[0].hyphenateBias == 42)
+    }
 }
