@@ -1376,7 +1376,11 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         guard case .number(let dx) = vx, case .number(let dy) = vy else {
             return .null
         }
-        return .number((dx * dx + dy * dy).squareRoot())
+        // Foundation's hypot, not `(dx*dx + dy*dy).squareRoot()`: the naive
+        // form overflows to +inf and underflows to 0 on the intermediate
+        // square. Matches Rust `dx.hypot(dy)` and the reference's
+        // `math.hypot` (workspace_interpreter/expr_eval.py).
+        return .number(hypot(dx, dy))
 
     // ── Geometry generators (trig in DEGREES, pow, range, fold) ──
 
@@ -1560,7 +1564,8 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         guard let first = anchorBuffersFirst(name) else { return .bool(false) }
         let dx = x - first.x
         let dy = y - first.y
-        return .bool((dx * dx + dy * dy).squareRoot() <= r)
+        // hypot, not the naive squares — see the `hypot` case above.
+        return .bool(hypot(dx, dy) <= r)
 
     // Unknown function
     default:

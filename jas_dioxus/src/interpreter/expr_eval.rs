@@ -880,9 +880,11 @@ fn eval_func(
             }
         }
 
-        // hypot(dx, dy) -> sqrt(dx*dx + dy*dy). Used by tools that
-        // test a 2D distance threshold (Line's "ignore too-short
-        // drags", Pen's click-vs-drag disambiguation).
+        // hypot(dx, dy) -> the euclidean length of (dx, dy), via
+        // `f64::hypot` — NOT `(dx*dx + dy*dy).sqrt()`, which overflows
+        // to +inf and underflows to 0 on the intermediate square. Used
+        // by tools that test a 2D distance threshold (Line's "ignore
+        // too-short drags", Pen's click-vs-drag disambiguation).
         "hypot" => {
             if args.len() != 2 {
                 return Value::Null;
@@ -1400,6 +1402,27 @@ mod tests {
     #[test]
     fn literal_number() {
         assert_eq!(eval("42", &json!({})), Value::Number(42.0));
+    }
+
+    /// The close-hit distance comes from `f64::hypot`, which does not overflow
+    /// on the intermediate square. First anchor at the origin, cursor at
+    /// (1e200, 1e200): the true distance is 1.414e200, inside a radius of
+    /// 2e200 — but `(dx*dx + dy*dy).sqrt()` would square to 1e400, saturate to
+    /// +inf, and report a miss. Pins the behaviour JasSwift and the Python
+    /// reference are held to. `pow(10, 200)` stands in for a `1e200` literal
+    /// because the expression lexer accepts no exponent notation.
+    #[test]
+    fn anchor_buffer_close_hit_uses_hypot_not_naive_squares() {
+        use crate::interpreter::anchor_buffers;
+        anchor_buffers::clear("test_anc_hypot");
+        anchor_buffers::push("test_anc_hypot", 0.0, 0.0);
+        anchor_buffers::push("test_anc_hypot", 100.0, 0.0);
+        let v = eval(
+            "anchor_buffer_close_hit(\"test_anc_hypot\", pow(10, 200), pow(10, 200), 2 * pow(10, 200))",
+            &json!({}),
+        );
+        assert_eq!(v, Value::Bool(true));
+        anchor_buffers::clear("test_anc_hypot");
     }
 
     #[test]

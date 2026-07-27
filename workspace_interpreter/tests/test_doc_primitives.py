@@ -163,6 +163,26 @@ class TestAnchorBuffers:
         assert v2.value is False
         anchor_buffers.clear("test_anc_d")
 
+    def test_close_hit_uses_hypot_not_naive_squares(self):
+        # The reference computes the close-hit distance with math.hypot, which
+        # does not overflow on the intermediate square. First anchor at the
+        # origin, cursor at (1e200, 1e200): the true distance is 1.414e200,
+        # inside a radius of 2e200 — a naive sqrt(dx*dx + dy*dy) would square
+        # to 1e400, saturate to +inf, and report a miss. This is the behaviour
+        # jas_dioxus and JasSwift are held to. pow(10, 200) stands in for a
+        # 1e200 literal because the expression lexer accepts no exponent
+        # notation.
+        anchor_buffers.clear("test_anc_f")
+        anchor_buffers.push("test_anc_f", 0.0, 0.0)
+        anchor_buffers.push("test_anc_f", 100.0, 0.0)
+        v = evaluate(
+            "anchor_buffer_close_hit('test_anc_f', pow(10, 200), "
+            "pow(10, 200), 2 * pow(10, 200))",
+            {},
+        )
+        assert v.value is True
+        anchor_buffers.clear("test_anc_f")
+
     def test_close_hit_rejects_short_buffer(self):
         anchor_buffers.clear("test_anc_e")
         anchor_buffers.push("test_anc_e", 0.0, 0.0)
