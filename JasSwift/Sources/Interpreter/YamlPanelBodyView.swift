@@ -1466,9 +1466,10 @@ struct YamlElementView: View {
         // this, typing 500 into an R-channel field (max=255) committed
         // 500 verbatim — the resulting color went past 0xff and produced
         // a 7-character hex like "1f4ff3b" instead of clamping to 255.
-        // saturatingInt: a YAML `max:` is a plain integer everywhere in the
-        // current bundle, but Rust reads it as an f64 and never converts, so a
-        // non-finite one trapped only here (risk R9).
+        // saturatingInt: every `max:` on a number_input in the current bundle
+        // is a plain integer (I walked all 121 of them in workspace.json), but
+        // Rust reads it as an f64 and never converts, so a non-finite one
+        // trapped only here (risk R9).
         let maxVal: Int? = (element["max"] as? Int)
             ?? (element["max"] as? Double).map { saturatingInt($0) }
         // Bind may be a bare string ("dialog.h") or an object form

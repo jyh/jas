@@ -17,7 +17,10 @@ import Foundation
 ///
 /// Rust holds these three fields as `usize` and converts with `as usize`, which
 /// saturates a negative or NaN to 0; this port's `Int(_:)` was a precondition
-/// failure on NaN. The values arrive from SVG attributes through `attrF`, which
+/// failure on NaN. (For a huge value the two saturate to different SENTINELS —
+/// `Int.max` here, `usize::MAX` there — because the field types differ; both are
+/// larger than any word, and every consumer is a comparison.) The values arrive
+/// from SVG attributes through `attrF`, which
 /// is `Double(string) ?? default` and accepts "nan" / "1e400" — as does Rust's
 /// `get_f` — so a hand-edited document crashed this port on OPEN where Rust
 /// loaded it. Risk R9, transcripts/CORPUS_CENSUS.md §7.

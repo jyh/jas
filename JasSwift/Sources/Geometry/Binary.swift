@@ -470,9 +470,11 @@ private func unpackTspan(_ v: MsgValue) -> Tspan {
 
 private func asInt(_ v: MsgValue) -> Int {
     guard case .int(let n) = v else {
-        // saturatingInt so a corrupted blob cannot take the process down
-        // (risk R9). Rust's as_i64 REJECTS a float outright and returns Err,
-        // which is a wider contract gap banked in §7.1.
+        // saturatingInt so a non-finite float in this slot cannot take the
+        // process down (risk R9). It does NOT make the decoder panic-free —
+        // every other type mismatch here is still a fatalError, where Rust's
+        // as_i64 returns Err and REJECTS a float outright. That wider contract
+        // gap is banked in transcripts/CORPUS_CENSUS.md §7.1.
         if case .float64(let f) = v { return saturatingInt(f) }
         fatalError("expected int, got \(v)")
     }

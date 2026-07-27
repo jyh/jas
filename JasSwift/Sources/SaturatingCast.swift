@@ -19,7 +19,7 @@ import Foundation
 
 /// Rust's `v as i64`: truncate toward zero, saturate at both bounds, NaN to 0.
 ///
-/// `Int` is 64-bit on every platform this app targets, so `Int` and `i64` have
+/// `Int` is 64-bit on the platforms this app targets, so `Int` and `i64` have
 /// the same bounds. Note `Double` cannot represent `i64::MAX` exactly — the
 /// nearest Double is 2^63, which is OUT of range — so the comparison below is
 /// against 2^63 and 2^63 saturates to `Int.max`, which is what Rust does too.
@@ -53,10 +53,13 @@ func intIfIntegral(_ v: Double) -> Int? {
 /// and other `u32` document fields go through in jas_dioxus.
 ///
 /// The result is returned as `Int` because this port declares those fields
-/// `Int`; the u32 ceiling is what keeps the stored value equal across the ports
-/// (`copies = 1e10` stored 10000000000 here and 4294967295 there).
+/// `Int`. Note the second cast TRUNCATES rather than saturating: Rust's `as`
+/// only saturates FLOAT-to-integer, and `i64 as u32` keeps the low 32 bits. I
+/// ran it — `(1e10 as i64).max(0) as u32` is 1410065408, not u32::MAX — so
+/// clamping to 4294967295 here would have been a NEW divergence rather than a
+/// mirror. `+inf` does reach u32::MAX, because the low 32 bits of i64::MAX are
+/// all ones.
 func saturatingUInt32AsInt(_ v: Double) -> Int {
-    let i = saturatingInt(v)
-    if i < 0 { return 0 }
-    return min(i, 4_294_967_295)  // u32::MAX
+    let i = max(0, saturatingInt(v))
+    return Int(UInt32(truncatingIfNeeded: i))
 }

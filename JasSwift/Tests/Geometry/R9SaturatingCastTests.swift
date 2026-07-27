@@ -157,13 +157,27 @@ struct R9SaturatingConversionTests {
         }
     }
 
+    /// Rust: `(n as i64).max(0) as u32`. The second cast TRUNCATES — `as` only
+    /// saturates FLOAT-to-integer — so the 1e10 row is 1410065408 and not
+    /// u32::MAX. Every value below was produced by running the Rust cast.
     @Test func saturatingUInt32MatchesRustCopiesCast() {
-        // Rust: `(n as i64).max(0) as u32`.
         #expect(saturatingUInt32AsInt(.nan) == 0)             // Rust: 0
         #expect(saturatingUInt32AsInt(.infinity) == 4_294_967_295)
-        #expect(saturatingUInt32AsInt(1e10) == 4_294_967_295)
+        #expect(saturatingUInt32AsInt(1e30) == 4_294_967_295)
+        #expect(saturatingUInt32AsInt(1e10) == 1_410_065_408)
         #expect(saturatingUInt32AsInt(-5.0) == 0)
         #expect(saturatingUInt32AsInt(3.0) == 3)
+    }
+
+    /// Rust reads a Test-JSON tspan id with `as_u64().unwrap_or(0) as u32`,
+    /// which yields 0 for a negative OR fractional number.
+    @Test func tspanIdFromJsonMatchesRustAsU64() {
+        #expect(tspanIdFromJson(NSNumber(value: 7)) == 7)
+        #expect(tspanIdFromJson(NSNumber(value: -1)) == 0)
+        #expect(tspanIdFromJson(NSNumber(value: 3.7)) == 0)
+        #expect(tspanIdFromJson(NSNumber(value: Double.nan)) == 0)
+        #expect(tspanIdFromJson(NSNumber(value: 1e30)) == 0)
+        #expect(tspanIdFromJson(nil) == 0)
     }
 
     // MARK: - Print preferences
@@ -179,9 +193,10 @@ struct R9SaturatingConversionTests {
         #expect(applyPrintPrefField(p, field: "copies", val: .number(.nan))?.copies == 0)
         #expect(applyPrintPrefField(p, field: "copies", val: .number(.infinity))?.copies
                     == 4_294_967_295)
-        // The u32 ceiling is the parity point: this stored 10000000000 here.
+        // The u32 TRUNCATION is the parity point: this stored 10000000000 here
+        // and 1410065408 in Rust (observed by running `(1e10 as i64) as u32`).
         #expect(applyPrintPrefField(p, field: "copies", val: .number(1e10))?.copies
-                    == 4_294_967_295)
+                    == 1_410_065_408)
         #expect(applyPrintPrefField(p, field: "copies", val: .number(-5))?.copies == 0)
         #expect(applyPrintPrefField(p, field: "copies", val: .number(3))?.copies == 3)
     }
