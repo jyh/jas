@@ -1,0 +1,99 @@
+[
+  {
+    "name": "move_nested_rect_is_1to1",
+    "doc": "T1/§3.1 Theseus. Move one rect nested two levels deep. Speaks to the rect's own geometry only; every id in the document survives, and both containers (lyr_main, grp_inner) are bystanders that must come back byte-identical.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": ["r_front"],
+    "speaks_to": ["x", "y"],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "move front rect",
+        "ops": [
+          { "op": "select_by_ids", "ids": ["r_front"] },
+          { "op": "move_selection", "dx": 10.0, "dy": 0.0 }
+        ]
+      }
+    ],
+    "expected_violations": { "rust": [], "swift": [] }
+  },
+  {
+    "name": "delete_bystander_leaf_keeps_containers",
+    "doc": "§3.7 / T4. Deleting one leaf ends exactly one identity. The two containers are rebuilt to reach the target — the bystander clause says they must survive the rebuild unchanged.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "delete",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": ["r_bystander"],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "delete the bystander rect",
+        "ops": [
+          { "op": "delete_at", "path": [0, 1] }
+        ]
+      }
+    ],
+    "expected_violations": { "rust": [], "swift": [] }
+  },
+  {
+    "name": "boolean_union_merges_two_rects",
+    "doc": "§3.3 / §3.6 UNION row. N→1: both operand identities die and the result mints a fresh id. Neither operand's id may ride out on the result — 'the frontmost source keeps the id' is the rejected rule, and over-preservation is as much a violation as under-preservation.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "merge",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": ["r_back", "r_front"],
+    "expected_fresh_ids": 1,
+    "txns": [
+      {
+        "name": "union the two nested rects",
+        "ops": [
+          { "op": "select_by_ids", "ids": ["r_back", "r_front"] },
+          { "op": "boolean_union" }
+        ]
+      }
+    ],
+    "expected_violations": { "rust": [], "swift": [] }
+  },
+  {
+    "name": "wrap_two_rects_in_group",
+    "doc": "§3.4 WRAP / T5. The arrow counts material at stake: 0→1 for the new container, 1→1 for each child. Every child id survives; the wrapper's id is the one supplied by the op, and must not duplicate an existing one.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "wrap",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": [],
+    "expected_fresh_ids": 1,
+    "txns": [
+      {
+        "name": "wrap the two nested rects",
+        "ops": [
+          { "op": "wrap_in_group", "paths": [[0, 0, 0], [0, 0, 1]], "id": "grp_wrap" }
+        ]
+      }
+    ],
+    "expected_violations": { "rust": [], "swift": [] }
+  },
+  {
+    "name": "unpack_inner_group",
+    "doc": "§3.4 UNWRAP / T5. The container's identity ends; the children keep theirs (both ports' apply_unpack_group_at already say 'children keep their ids — NO minting'). The outer layer is a bystander it must rebuild to reach the group.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "unwrap",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": ["grp_inner"],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "unpack the inner group",
+        "ops": [
+          { "op": "unpack_group_at", "path": [0, 0] }
+        ]
+      }
+    ],
+    "expected_violations": { "rust": [], "swift": [] }
+  }
+]

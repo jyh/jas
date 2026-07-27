@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Attribute-rich setup for the PRESERVATION corpus (EDIT_SEMANTICS_FREEZE.md
+     §4.1). Every element that can carry one carries an `id`, an
+     `inkscape:label` (common.name) and a non-default `opacity`, so a document-
+     level invariant gate can SEE identity and container attributes survive (or
+     not) an edit. The pre-existing operations setups (overlapping_rects.svg and
+     friends) carry none of these, which is exactly why the ratification
+     condition records ZERO corpus coverage of the identity law today.
+
+     Structure:
+       lyr_main  (Layer, id + name + opacity)
+         grp_inner  (Group, id + name + opacity)
+           r_back   (Rect, id + name)
+           r_front  (Rect, id + name + opacity)
+         r_bystander (Rect, id + name)   <- names no edit; the T4 witness
+
+     Deliberately NOT set: mask, blendMode, visibility. The SVG reader
+     populates none of them (visibility is runtime-only by DOCUMENT.md; mask
+     and blend mode have no reader), so writing them here would produce a
+     fixture that silently asserts nothing. See PRESERVATION.md. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 200 200" width="200" height="200">
+  <g inkscape:groupmode="layer" inkscape:label="Main Layer" id="lyr_main" opacity="0.9">
+    <g inkscape:label="Inner Group" id="grp_inner" opacity="0.8">
+      <rect id="r_back" inkscape:label="Back Rect" x="0" y="0" width="100" height="100" fill="rgb(255,0,0)" stroke="none"/>
+      <rect id="r_front" inkscape:label="Front Rect" x="50" y="50" width="100" height="100" fill="rgb(0,0,255)" stroke="none" opacity="0.5"/>
+    </g>
+    <rect id="r_bystander" inkscape:label="Bystander Rect" x="160" y="160" width="20" height="20" fill="rgb(0,255,0)" stroke="none"/>
+  </g>
+</svg>
