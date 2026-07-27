@@ -765,6 +765,53 @@ private func childrenGeometricBounds(_ children: [Element]) -> BBox {
     return (minX, minY, maxX - minX, maxY - minY)
 }
 
+/// Translate the selected anchors of a command list by (dx, dy).
+///
+/// Anchor `i` is the i'th non-`closePath` command. Moving an anchor drags the
+/// handles that belong to it: a `moveTo` also carries the FOLLOWING curve's
+/// outgoing handle, and a `curveTo` carries its own incoming handle plus the
+/// next curve's outgoing one. Mirrors Rust `move_path_command_points`
+/// (`jas_dioxus/src/geometry/element.rs`).
+///
+/// Factored out of `moveControlPoints`: the `.path` and `.textPath` arms held
+/// two byte-identical copies of this walk, which is the shape that lets two
+/// arms of one switch drift apart.
+fileprivate func movePathCommandPoints(_ d: [PathCommand], _ kind: SelectionKind,
+                                       dx: Double, dy: Double) -> [PathCommand] {
+    var cmds = d
+    var anchorIdx = 0
+    for ci in 0..<cmds.count {
+        switch cmds[ci] {
+        case .closePath:
+            continue
+        default:
+            break
+        }
+        if kind.contains(anchorIdx) {
+            switch cmds[ci] {
+            case .moveTo(let x, let y):
+                cmds[ci] = .moveTo(x + dx, y + dy)
+                if ci + 1 < cmds.count,
+                   case .curveTo(let x1, let y1, let x2, let y2, let ex, let ey) = cmds[ci + 1] {
+                    cmds[ci + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: ex, y: ey)
+                }
+            case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+                cmds[ci] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x + dx, y: y + dy)
+                if ci + 1 < cmds.count,
+                   case .curveTo(let nx1, let ny1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
+                    cmds[ci + 1] = .curveTo(x1: nx1 + dx, y1: ny1 + dy, x2: nx2, y2: ny2, x: nx, y: ny)
+                }
+            case .lineTo(let x, let y):
+                cmds[ci] = .lineTo(x + dx, y + dy)
+            default:
+                break
+            }
+        }
+        anchorIdx += 1
+    }
+    return cmds
+}
+
 /// An SVG document element. All elements are immutable value types.
 public enum Element: Equatable {
     /// SVG \<line\>
@@ -883,35 +930,43 @@ public enum Element: Equatable {
             return self
         }
         switch self {
-        // Every shape reconstruction below preserves ALL common props
-        // (name / id / visibility / blendMode / mask / gradients), mirroring
-        // Rust `move_control_points` which clones the element / `common`. A move
-        // must keep the element's stable identity (OP_LOG.md §9 / Fork 4: a
-        // journaled `move_selection` resolves `targets` from the moved element's
-        // `common.id`) — dropping the id here silently broke the second drag
-        // frame's targets and the document's id.
-        case .line(let v):
-            return .line(Line(
-                x1: v.x1 + (kind.contains(0) ? dx : 0),
-                y1: v.y1 + (kind.contains(0) ? dy : 0),
-                x2: v.x2 + (kind.contains(1) ? dx : 0),
-                y2: v.y2 + (kind.contains(1) ? dy : 0),
-                stroke: v.stroke, widthPoints: v.widthPoints,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked,
-                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                strokeGradient: v.strokeGradient, name: v.name, id: v.id))
+        // PRESERVATION (EDIT_SEMANTICS_FREEZE.md §3.1): a control-point drag
+        // speaks to POSITION only, so every same-kind arm below is
+        // clone-then-mutate — the Swift counterpart of Rust
+        // `move_control_points`' `..e.clone()` / `let mut new = e.clone()`.
+        // Field omission is not expressible in that form, which is the point:
+        // this switch previously restated each field by hand and the `.path`
+        // and `.textPath` arms stopped short of ten and twenty fields
+        // respectively while five conforming siblings sat around them.
+        // A move must keep the element's stable identity (OP_LOG.md §9 /
+        // Fork 4: a journaled `move_selection` resolves `targets` from the
+        // moved element's `common.id`) — dropping the id here silently broke
+        // the second drag frame's targets and the document's id.
+        //
+        // The ONE arm that is not clone-then-mutate is Rect's partial-corner
+        // case, which changes the element's REPRESENTATION to Polygon (T1's
+        // representation term). It forwards every field with a counterpart on
+        // Polygon, and its two source-only fields — `rx`/`ry` — have none; see
+        // the note there.
+        case .line(var v):
+            if kind.contains(0) { v.x1 += dx; v.y1 += dy }
+            if kind.contains(1) { v.x2 += dx; v.y2 += dy }
+            return .line(v)
         case .rect(let v):
             if kind.isAll(total: 4) {
-                return .rect(Rect(x: v.x + dx, y: v.y + dy, width: v.width, height: v.height,
-                                     rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                                     opacity: v.opacity, transform: v.transform,
-                                     locked: v.locked,
-                                     visibility: v.visibility, blendMode: v.blendMode,
-                                     mask: v.mask, fillGradient: v.fillGradient,
-                                     strokeGradient: v.strokeGradient,
-                                     name: v.name, id: v.id))
+                var n = v
+                n.x += dx; n.y += dy
+                return .rect(n)
             }
+            // Rect -> Polygon. `rx`/`ry` have no counterpart on Polygon and
+            // are DISCARDED here: a rounded rect's corners come out square.
+            // Rust flattens the rounding into the emitted points instead
+            // (`rounded_rect_corner_runs`, ratified answer (3) of
+            // EDIT_SEMANTICS_FREEZE.md §8), so the two ports diverge on a
+            // ROUNDED rect's corner drag. Closing that needs the corner-run
+            // flattener AND the control-point remap that follows it
+            // (`remap_cp_selection_after_move`, which the drag pipeline must
+            // call between samples) — it is not a change to this arm alone.
             var pts = [(v.x, v.y), (v.x + v.width, v.y),
                        (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
             for i in 0..<4 where kind.contains(i) {
@@ -927,14 +982,9 @@ public enum Element: Equatable {
                                        name: v.name, id: v.id))
         case .circle(let v):
             if kind.isAll(total: 4) {
-                return .circle(Circle(cx: v.cx + dx, cy: v.cy + dy, r: v.r,
-                                         fill: v.fill, stroke: v.stroke,
-                                         opacity: v.opacity, transform: v.transform,
-                                         locked: v.locked,
-                                         visibility: v.visibility, blendMode: v.blendMode,
-                                         mask: v.mask, fillGradient: v.fillGradient,
-                                         strokeGradient: v.strokeGradient,
-                                         name: v.name, id: v.id))
+                var n = v
+                n.cx += dx; n.cy += dy
+                return .circle(n)
             }
             var cps = [(v.cx, v.cy - v.r), (v.cx + v.r, v.cy),
                        (v.cx, v.cy + v.r), (v.cx - v.r, v.cy)]
@@ -943,25 +993,16 @@ public enum Element: Equatable {
             }
             let ncx = (cps[1].0 + cps[3].0) / 2
             let ncy = (cps[0].1 + cps[2].1) / 2
-            let nr = max(abs(cps[1].0 - ncx), abs(cps[0].1 - ncy))
-            return .circle(Circle(cx: ncx, cy: ncy, r: nr,
-                                     fill: v.fill, stroke: v.stroke,
-                                     opacity: v.opacity, transform: v.transform,
-                                     locked: v.locked,
-                                     visibility: v.visibility, blendMode: v.blendMode,
-                                     mask: v.mask, fillGradient: v.fillGradient,
-                                     strokeGradient: v.strokeGradient,
-                                     name: v.name, id: v.id))
+            var nc = v
+            nc.cx = ncx
+            nc.cy = ncy
+            nc.r = max(abs(cps[1].0 - ncx), abs(cps[0].1 - ncy))
+            return .circle(nc)
         case .ellipse(let v):
             if kind.isAll(total: 4) {
-                return .ellipse(Ellipse(cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
-                                           fill: v.fill, stroke: v.stroke,
-                                           opacity: v.opacity, transform: v.transform,
-                                           locked: v.locked,
-                                           visibility: v.visibility, blendMode: v.blendMode,
-                                           mask: v.mask, fillGradient: v.fillGradient,
-                                           strokeGradient: v.strokeGradient,
-                                           name: v.name, id: v.id))
+                var n = v
+                n.cx += dx; n.cy += dy
+                return .ellipse(n)
             }
             var cps = [(v.cx, v.cy - v.ry), (v.cx + v.rx, v.cy),
                        (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
@@ -970,101 +1011,23 @@ public enum Element: Equatable {
             }
             let ncx = (cps[1].0 + cps[3].0) / 2
             let ncy = (cps[0].1 + cps[2].1) / 2
-            return .ellipse(Ellipse(cx: ncx, cy: ncy,
-                                       rx: abs(cps[1].0 - ncx), ry: abs(cps[0].1 - ncy),
-                                       fill: v.fill, stroke: v.stroke,
-                                       opacity: v.opacity, transform: v.transform,
-                                       locked: v.locked,
-                                       visibility: v.visibility, blendMode: v.blendMode,
-                                       mask: v.mask, fillGradient: v.fillGradient,
-                                       strokeGradient: v.strokeGradient,
-                                       name: v.name, id: v.id))
-        case .polygon(let v):
-            let newPoints = v.points.enumerated().map { (i, pt) in
+            var ne = v
+            ne.cx = ncx
+            ne.cy = ncy
+            ne.rx = abs(cps[1].0 - ncx)
+            ne.ry = abs(cps[0].1 - ncy)
+            return .ellipse(ne)
+        case .polygon(var v):
+            v.points = v.points.enumerated().map { (i, pt) in
                 kind.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
             }
-            return .polygon(Polygon(points: newPoints,
-                                       fill: v.fill, stroke: v.stroke,
-                                       opacity: v.opacity, transform: v.transform,
-                                       locked: v.locked,
-                                       visibility: v.visibility, blendMode: v.blendMode,
-                                       mask: v.mask, fillGradient: v.fillGradient,
-                                       strokeGradient: v.strokeGradient,
-                                       name: v.name, id: v.id))
-        case .path(let v):
-            var cmds = v.d
-            var anchorIdx = 0
-            for ci in 0..<cmds.count {
-                switch cmds[ci] {
-                case .closePath:
-                    continue
-                default:
-                    break
-                }
-                if kind.contains(anchorIdx) {
-                    switch cmds[ci] {
-                    case .moveTo(let x, let y):
-                        cmds[ci] = .moveTo(x + dx, y + dy)
-                        if ci + 1 < cmds.count,
-                           case .curveTo(let x1, let y1, let x2, let y2, let ex, let ey) = cmds[ci + 1] {
-                            cmds[ci + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: ex, y: ey)
-                        }
-                    case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
-                        cmds[ci] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x + dx, y: y + dy)
-                        if ci + 1 < cmds.count,
-                           case .curveTo(let nx1, let ny1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
-                            cmds[ci + 1] = .curveTo(x1: nx1 + dx, y1: ny1 + dy, x2: nx2, y2: ny2, x: nx, y: ny)
-                        }
-                    case .lineTo(let x, let y):
-                        cmds[ci] = .lineTo(x + dx, y + dy)
-                    default:
-                        break
-                    }
-                }
-                anchorIdx += 1
-            }
-            return .path(Path(d: cmds, fill: v.fill, stroke: v.stroke,
-                                 widthPoints: v.widthPoints,
-                                 opacity: v.opacity, transform: v.transform,
-                                 locked: v.locked, fillRule: v.fillRule))
-        case .textPath(let v):
-            var cmds = v.d
-            var anchorIdx = 0
-            for ci in 0..<cmds.count {
-                switch cmds[ci] {
-                case .closePath:
-                    continue
-                default:
-                    break
-                }
-                if kind.contains(anchorIdx) {
-                    switch cmds[ci] {
-                    case .moveTo(let x, let y):
-                        cmds[ci] = .moveTo(x + dx, y + dy)
-                        if ci + 1 < cmds.count,
-                           case .curveTo(let x1, let y1, let x2, let y2, let ex, let ey) = cmds[ci + 1] {
-                            cmds[ci + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: ex, y: ey)
-                        }
-                    case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
-                        cmds[ci] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x + dx, y: y + dy)
-                        if ci + 1 < cmds.count,
-                           case .curveTo(let nx1, let ny1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
-                            cmds[ci + 1] = .curveTo(x1: nx1 + dx, y1: ny1 + dy, x2: nx2, y2: ny2, x: nx, y: ny)
-                        }
-                    case .lineTo(let x, let y):
-                        cmds[ci] = .lineTo(x + dx, y + dy)
-                    default:
-                        break
-                    }
-                }
-                anchorIdx += 1
-            }
-            return .textPath(TextPath(d: cmds, content: v.content,
-                                          startOffset: v.startOffset,
-                                          fontFamily: v.fontFamily, fontSize: v.fontSize,
-                                          fill: v.fill, stroke: v.stroke,
-                                          opacity: v.opacity, transform: v.transform,
-                                          locked: v.locked))
+            return .polygon(v)
+        case .path(var v):
+            v.d = movePathCommandPoints(v.d, kind, dx: dx, dy: dy)
+            return .path(v)
+        case .textPath(var v):
+            v.d = movePathCommandPoints(v.d, kind, dx: dx, dy: dy)
+            return .textPath(v)
         case .text:
             // Text resize/move via corner handles. When the whole
             // element is selected (kind=.all, e.g. clicking the
@@ -1093,25 +1056,13 @@ public enum Element: Equatable {
             let newDiag = sqrt((new.0 - opp.0) * (new.0 - opp.0)
                               + (new.1 - opp.1) * (new.1 - opp.1))
             let scale = max(0.1, min(50.0, newDiag / oldDiag))
-            let nx = opp.0 + (v.x - opp.0) * scale
-            let ny = opp.1 + (v.y - opp.1) * scale
-            return .text(Text(
-                x: nx, y: ny, tspans: v.tspans,
-                fontFamily: v.fontFamily, fontSize: v.fontSize * scale,
-                fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                textDecoration: v.textDecoration,
-                textTransform: v.textTransform, fontVariant: v.fontVariant,
-                baselineShift: v.baselineShift, lineHeight: v.lineHeight,
-                letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
-                aaMode: v.aaMode, rotate: v.rotate,
-                horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
-                kerning: v.kerning,
-                width: v.width * scale, height: v.height * scale,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked,
-                visibility: v.visibility, blendMode: v.blendMode,
-                mask: v.mask, name: v.name, id: v.id))
+            var nt = v
+            nt.x = opp.0 + (v.x - opp.0) * scale
+            nt.y = opp.1 + (v.y - opp.1) * scale
+            nt.fontSize = v.fontSize * scale
+            nt.width = v.width * scale
+            nt.height = v.height * scale
+            return .text(nt)
         case .live(.reference(let r)) where kind.isAll(total: 0):
             // A reference has no geometry of its own, so a whole-element
             // move (kind=.all) rides on its transform — the only thing
@@ -1502,116 +1453,50 @@ public enum Element: Equatable {
     /// semantics, mirrored from `translate_element` in
     /// `jas_dioxus/src/geometry/element.rs`).
     public func translated(dx: Double, dy: Double) -> Element {
+        // PRESERVATION (EDIT_SEMANTICS_FREEZE.md §3.1): a translation speaks
+        // to POSITION only, so every arm is clone-then-mutate — the Swift
+        // counterpart of Rust `translate_element`'s `..e.clone()`. These arms
+        // were open-coded rebuilds and three of them stopped short: `.path`
+        // dropped `strokeBrush` / `strokeBrushOverrides` / `toolOrigin`, so
+        // an Align-panel nudge stripped a brushed stroke; `.text` and
+        // `.textPath` each dropped all ELEVEN character-panel fields
+        // (letterSpacing, lineHeight, kerning, …), so nudging styled type
+        // reset its typography.
         switch self {
-        case .line(let v):
-            return .line(Line(
-                x1: v.x1 + dx, y1: v.y1 + dy,
-                x2: v.x2 + dx, y2: v.y2 + dy,
-                stroke: v.stroke, widthPoints: v.widthPoints,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                strokeGradient: v.strokeGradient, name: v.name, id: v.id))
-        case .rect(let v):
-            return .rect(Rect(
-                x: v.x + dx, y: v.y + dy,
-                width: v.width, height: v.height,
-                rx: v.rx, ry: v.ry,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
-        case .circle(let v):
-            return .circle(Circle(
-                cx: v.cx + dx, cy: v.cy + dy, r: v.r,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
-        case .ellipse(let v):
-            return .ellipse(Ellipse(
-                cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
-        case .polyline(let v):
-            let pts = v.points.map { ($0.0 + dx, $0.1 + dy) }
-            return .polyline(Polyline(
-                points: pts, fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
-        case .polygon(let v):
-            let pts = v.points.map { ($0.0 + dx, $0.1 + dy) }
-            return .polygon(Polygon(
-                points: pts, fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
-        case .path(let v):
-            return .path(Path(
-                d: translatePathCommands(v.d, dx: dx, dy: dy),
-                fill: v.fill, stroke: v.stroke,
-                widthPoints: v.widthPoints,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id, fillRule: v.fillRule))
-        case .text(let v):
-            return .text(Text(
-                x: v.x + dx, y: v.y + dy, tspans: v.tspans,
-                fontFamily: v.fontFamily, fontSize: v.fontSize,
-                fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                textDecoration: v.textDecoration,
-                width: v.width, height: v.height,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                name: v.name, id: v.id))
-        case .textPath(let v):
-            return .textPath(TextPath(
-                d: translatePathCommands(v.d, dx: dx, dy: dy),
-                tspans: v.tspans, startOffset: v.startOffset,
-                fontFamily: v.fontFamily, fontSize: v.fontSize,
-                fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                textDecoration: v.textDecoration,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                name: v.name, id: v.id))
-        case .group(let v):
-            let kids = v.children.map { $0.translated(dx: dx, dy: dy) }
-            return .group(Group(
-                children: kids, opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode,
-                isolatedBlending: v.isolatedBlending,
-                knockoutGroup: v.knockoutGroup,
-                mask: v.mask, name: v.name, id: v.id))
-        case .layer(let v):
-            let kids = v.children.map { $0.translated(dx: dx, dy: dy) }
-            return .layer(Layer(
-                name: v.name, children: kids,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode,
-                isolatedBlending: v.isolatedBlending,
-                knockoutGroup: v.knockoutGroup,
-                mask: v.mask, id: v.id))
+        case .line(var v):
+            v.x1 += dx; v.y1 += dy
+            v.x2 += dx; v.y2 += dy
+            return .line(v)
+        case .rect(var v):
+            v.x += dx; v.y += dy
+            return .rect(v)
+        case .circle(var v):
+            v.cx += dx; v.cy += dy
+            return .circle(v)
+        case .ellipse(var v):
+            v.cx += dx; v.cy += dy
+            return .ellipse(v)
+        case .polyline(var v):
+            v.points = v.points.map { ($0.0 + dx, $0.1 + dy) }
+            return .polyline(v)
+        case .polygon(var v):
+            v.points = v.points.map { ($0.0 + dx, $0.1 + dy) }
+            return .polygon(v)
+        case .path(var v):
+            v.d = translatePathCommands(v.d, dx: dx, dy: dy)
+            return .path(v)
+        case .text(var v):
+            v.x += dx; v.y += dy
+            return .text(v)
+        case .textPath(var v):
+            v.d = translatePathCommands(v.d, dx: dx, dy: dy)
+            return .textPath(v)
+        case .group(var v):
+            v.children = v.children.map { $0.translated(dx: dx, dy: dy) }
+            return .group(v)
+        case .layer(var v):
+            v.children = v.children.map { $0.translated(dx: dx, dy: dy) }
+            return .layer(v)
         case .live(.reference(let r)):
             // A reference has no geometry of its own to translate; its
             // move rides on its transform (the live render seam applies
@@ -3498,9 +3383,11 @@ public struct Layer: Equatable {
 
 // MARK: - Stable-identity helpers
 
-// Per-struct `withId(_:)` reconstructs the value through its full
-// memberwise initializer, preserving EVERY field (name, blendMode, mask,
-// gradients, brush, …) while replacing only `id`. Used by
+// Per-struct `withId(_:)` is clone-then-mutate (`var v = self; v.id = id`),
+// so it replaces only `id` and preservation of every other field is
+// structural rather than a list anyone has to maintain. (The comment here
+// used to describe a full memberwise-initializer rebuild; that stopped being
+// the implementation and the description was left behind.) Used by
 // `Element.clearingIds()` so a duplicated element is born id-less without
 // dropping any other attribute. See the stable-identity initiative.
 
