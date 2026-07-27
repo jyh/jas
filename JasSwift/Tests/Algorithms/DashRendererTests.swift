@@ -98,6 +98,45 @@ private func endpoints(_ cmd: PathCommand) -> (Double, Double)? {
     }
 }
 
+// MARK: - S-4: a leading ClosePath is a no-op
+//
+// Ruled by JYH at the fleet council, 2026-07-27. A subpath that is
+// nothing but Z establishes no anchor and produces no dash. Swift
+// already behaved this way when these were written -- expandPreserve and
+// expandAlign both guard the cyclic wrap on `anchors.first`, and
+// expandAlign guards `nSegs` on `anchorsWalk.count > 0` -- so these are
+// regression pins, not a fix. The live reference raised IndexError on
+// the same inputs; these are its counterparts, and mirror the
+// `leading_close_*` tests in jas_dioxus/src/algorithms/dash_renderer.rs.
+
+@Test func dashLeadingCloseBareProducesNoDashPreserve() {
+    #expect(DashRenderer.expandDashedStroke(
+        path: [.closePath], dashArray: [4, 2], alignAnchors: false).isEmpty)
+}
+
+@Test func dashLeadingCloseBareProducesNoDashAlign() {
+    #expect(DashRenderer.expandDashedStroke(
+        path: [.closePath], dashArray: [4, 2], alignAnchors: true).isEmpty)
+}
+
+/// A leading Z is a no-op, not a poison pill: the subpath after it still
+/// dashes. Asserted as equality against the same path WITHOUT the leading
+/// Z, so an implementation that bailed out early and returned nothing
+/// would fail rather than pass vacuously. The companion count assertion
+/// keeps the equality non-vacuous.
+@Test func dashLeadingCloseDoesNotSuppressTheRealSubpath() {
+    let real: [PathCommand] = [.moveTo(0, 0), .lineTo(20, 0)]
+    let withZ: [PathCommand] = [.closePath] + real
+    for align in [false, true] {
+        let a = DashRenderer.expandDashedStroke(
+            path: withZ, dashArray: [4, 2], alignAnchors: align)
+        let b = DashRenderer.expandDashedStroke(
+            path: real, dashArray: [4, 2], alignAnchors: align)
+        #expect(a == b, "align=\(align)")
+        #expect(a.count == 4, "align=\(align)")
+    }
+}
+
 @Test func dashDeterminism() {
     let path: [PathCommand] = [
         .moveTo(0, 0), .lineTo(100, 0), .lineTo(100, 60),

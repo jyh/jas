@@ -281,3 +281,55 @@ class TestDeterminism:
         result1 = expand_dashed_stroke(path, dash_array=(12.0, 6.0), align_anchors=align)
         result2 = expand_dashed_stroke(path, dash_array=(12.0, 6.0), align_anchors=align)
         assert result1 == result2
+
+
+# ── S-4: a leading ClosePath is a no-op ──────────────────────────
+#
+# Ruled by JYH at the fleet council, 2026-07-27: a ClosePath appearing
+# before any point has been established contributes nothing. A subpath
+# that is nothing but Z therefore establishes no anchor and produces no
+# dash. BOTH active ports already behave that way -- Rust's
+# expand_preserve/expand_align guard the cyclic wrap on
+# `!anchors.is_empty()` and Rust's expand_align guards n_segs with
+# `saturating_sub`, while Swift's guard on `anchors.first` and on
+# `anchorsWalk.count > 0`. The reference guarded neither, and raised
+# IndexError on `anchors[0]`.
+
+
+class TestLeadingClose:
+
+    @pytest.mark.parametrize("align", [False, True])
+    def test_bare_close_produces_no_dash(self, align):
+        """A path that is nothing but Z has no anchors, so no dash.
+
+        Before the guard this raised IndexError from
+        ``anchors + [anchors[0]]`` -- in _expand_preserve when align is
+        False, in _expand_align when it is True."""
+        assert expand_dashed_stroke((Z(),), dash_array=(4.0, 2.0),
+                                    align_anchors=align) == ()
+
+    @pytest.mark.parametrize("align", [False, True])
+    def test_leading_close_does_not_suppress_the_real_subpath(self, align):
+        """A leading Z is a no-op, not a poison pill: the subpath that
+        follows it still dashes normally.
+
+        _split_at_moveto puts the bare Z in its own anchor-less subpath
+        ahead of the real one, so before the guard this raised IndexError
+        and the real subpath's dashes were never reached. The assertion is
+        deliberately equality against the same path WITHOUT the leading Z:
+        an implementation that merely swallowed the exception and returned
+        () would still fail here."""
+        real = (M(0, 0), L(20, 0))
+        assert expand_dashed_stroke((Z(),) + real, dash_array=(4.0, 2.0),
+                                    align_anchors=align) \
+            == expand_dashed_stroke(real, dash_array=(4.0, 2.0),
+                                    align_anchors=align)
+
+    @pytest.mark.parametrize("align", [False, True])
+    def test_leading_close_real_subpath_is_non_empty(self, align):
+        """Guards the previous test against the vacuous pass where both
+        sides are (). Measured on the fixed reference: 4 dashes in
+        preserve mode and 4 in align mode for M(0,0) L(20,0) at 4/2."""
+        out = expand_dashed_stroke((Z(), M(0, 0), L(20, 0)),
+                                   dash_array=(4.0, 2.0), align_anchors=align)
+        assert len(out) == 4
