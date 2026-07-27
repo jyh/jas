@@ -623,11 +623,18 @@ have to re-derive it.
    float→int, and neither port is CORRECT: mirroring the wrap would trade a crash for a silently
    wrong selection, which is a product decision and not a cast fix. Needs ≥65536 control points on
    one path (a machine-traced SVG, not hand drawing).
-2. **`YamlPanelBodyView.swift:1481` (`renderNumberInput`) and `:3041` (`renderComboBox`)** — the TRAP
-   is fixed (both route through `saturatingInt`), but a DIFFERENT_VALUE remains: Rust keeps the bound
-   value an `f64` and renders `12.5`, where this port renders the truncated `12`. Closing it means
-   changing what the widgets DISPLAY, which the panel widget-tree goldens cover and no unit test
-   reaches, so it wants its own pass with a golden refresh.
+2. **`YamlPanelBodyView.swift` `renderComboBox`** — the TRAP is fixed (it routes through
+   `saturatingInt`), but a DIFFERENT_VALUE remains: Rust keeps the bound value an `f64` and renders
+   `12.5`, where this port renders the truncated `12`. Closing it means changing what the widget
+   DISPLAYS, which no unit test reaches.
+   **`renderNumberInput` was the other half of this row and is CLOSED** (NUMBERINPUT, 2026-07-26):
+   its bound value is a `Double` rendered with `numberToCanonicalString`, the same rule the
+   expression corpus already gates. Two corrections to what this row used to say — the panel
+   widget-tree goldens do **not** cover a widget's displayed value (`WidgetTree.swift` records the
+   sorted `bind` / `style` KEY SETS, not values, and `scripts/check_panel_goldens.sh` still passed
+   unchanged after the display change), and the number field's COMMIT was a second, larger
+   divergence in the same function: `Int(newVal)` dropped every non-integer entry silently. Both
+   ports now share one commit rule, pinned by `test_fixtures/algorithms/number_commit.json`.
 3. **`Geometry/Binary.swift:468-481` (`asInt` / `asF64`)** — the trap is fixed, but the decoder's
    CONTRACT still differs: Rust's `as_i64` REJECTS a float outright and returns `Err` so a corrupted
    blob cannot abort the module (its comment at `binary.rs:551-559` says why, and
