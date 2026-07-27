@@ -3248,10 +3248,11 @@ mod tests {
 
     #[test]
     fn destructive_remove_redundant_points_collapses_collinear() {
-        // Two overlapping rects. After UNION, the resulting ring has
-        // some collinear points along the shared vertical edges (the
-        // boolean algorithm retains intersection points). With the
-        // flag on, collinear points within Precision are collapsed.
+        // Two rects overlapping in x with the same y-extent. Their UNION
+        // is one rectangle, but the sweep inserts a vertex on the top and
+        // bottom edges wherever an operand's vertical edge meets them, so
+        // the ring carries four collinear points. With the flag on they
+        // are collapsed; the flag defaults to OFF (workspace/state.yaml).
         let mut model = two_overlapping_rects();
         let off = BooleanOptions::default();
         Controller::apply_destructive_boolean(&mut model, "union", &off);
@@ -3268,9 +3269,15 @@ mod tests {
             Element::Polygon(p) => p.points.len(),
             _ => panic!("expected polygon"),
         };
-        // The collapse removes at least the collinear pair on the
-        // shared vertical seam; point count should not increase.
-        assert!(pts_on <= pts_off, "collapse should not add points");
+        // Exact counts, not an inequality. `pts_on <= pts_off` was the
+        // original assertion and it is satisfied by a collapse that does
+        // NOTHING — the same blindness the operations corpus had. The
+        // union of these two rects is one 15x10 rectangle whose ring
+        // carries the four vertices the sweep inserted where each
+        // operand's vertical edges cross the shared horizontal ones;
+        // collapse deletes exactly those.
+        assert_eq!(pts_off, 8, "the flag OFF keeps the four seam vertices");
+        assert_eq!(pts_on, 4, "the flag ON leaves the rectangle's corners");
     }
 
     #[test]

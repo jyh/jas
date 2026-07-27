@@ -258,6 +258,29 @@ private func firstChildCompoundOp(_ m: Model) -> CompoundOperation? {
     #expect(collapsed.count == 3)
 }
 
+/// Twin of Rust's `destructive_remove_redundant_points_collapses_collinear`,
+/// with the same exact counts. `twoOverlapping()` is two rects overlapping in
+/// x with the same y-extent, so their UNION is one rectangle whose ring
+/// carries four vertices the sweep inserted where each operand's vertical
+/// edges meet the shared horizontal ones. The flag defaults to OFF
+/// (`workspace/state.yaml`), so the default arm keeps all 8.
+@Test func removeRedundantPointsCollapsesTheSeamVerticesOnlyWhenOn() {
+    let off = twoOverlapping()
+    Controller(model: off).applyDestructiveBoolean("union")
+    guard case .polygon(let pOff) = off.document.layers[0].children[0] else {
+        Issue.record("expected a polygon"); return
+    }
+    #expect(pOff.points.count == 8)
+
+    let on = twoOverlapping()
+    Controller(model: on).applyDestructiveBoolean(
+        "union", options: BooleanOptions(removeRedundantPoints: true))
+    guard case .polygon(let pOn) = on.document.layers[0].children[0] else {
+        Issue.record("expected a polygon"); return
+    }
+    #expect(pOn.points.count == 4)
+}
+
 @Test func divideRemoveUnpaintedDropsUnfilled() {
     let m = twoOverlapping()
     let opts = BooleanOptions(divideRemoveUnpainted: true)
