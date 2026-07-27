@@ -13,55 +13,14 @@ import Testing
 
 private let EPS: Double = 1e-9
 
-private func ringSignedAreaT(_ ring: BoolRing) -> Double {
-    if ring.count < 3 { return 0.0 }
-    var sum = 0.0
-    let n = ring.count
-    for i in 0..<n {
-        let (x1, y1) = ring[i]
-        let (x2, y2) = ring[(i + 1) % n]
-        sum += x1 * y2 - x2 * y1
-    }
-    return sum / 2.0
-}
-
-private func pointInRingT(_ ring: BoolRing, _ pt: (Double, Double)) -> Bool {
-    let (px, py) = pt
-    let n = ring.count
-    if n < 3 { return false }
-    var inside = false
-    var j = n - 1
-    for i in 0..<n {
-        let (xi, yi) = ring[i]
-        let (xj, yj) = ring[j]
-        let intersects = (yi > py) != (yj > py)
-            && px < (xj - xi) * (py - yi) / (yj - yi) + xi
-        if intersects { inside.toggle() }
-        j = i
-    }
-    return inside
-}
-
-private func polygonSetAreaT(_ ps: BoolPolygonSet) -> Double {
-    var total = 0.0
-    for (i, ring) in ps.enumerated() {
-        let a = abs(ringSignedAreaT(ring))
-        var depth = 0
-        if let pt = ring.first {
-            for (j, other) in ps.enumerated() where i != j {
-                if pointInRingT(other, pt) { depth += 1 }
-            }
-        }
-        if depth % 2 == 0 { total += a } else { total -= a }
-    }
-    return total
-}
-
-private func pointInPolygonSetT(_ ps: BoolPolygonSet, _ pt: (Double, Double)) -> Bool {
-    var n = 0
-    for ring in ps where pointInRingT(ring, pt) { n += 1 }
-    return n % 2 == 1
-}
+// The three region metrics live in one place,
+// Sources/Algorithms/PolygonMetrics.swift, and are gated by the
+// `polygon_metrics` corpus family. This file used to carry a private
+// copy and ToolsAlgorithm/AlgorithmRoundtrip.swift a second one, with
+// nothing comparing them.
+private let ringSignedAreaT = ringSignedArea
+private let polygonSetAreaT = polygonSetArea
+private let pointInPolygonSetT = pointInPolygonSet
 
 private func polygonSetBboxT(_ ps: BoolPolygonSet) -> (Double, Double, Double, Double)? {
     var minX = Double.infinity, minY = Double.infinity

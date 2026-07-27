@@ -2012,112 +2012,15 @@ mod tests {
     // case we care about, without being brittle to representation.
     // -------------------------------------------------------------------
 
-    /// Shoelace area of a single ring. Sign reflects winding
-    /// direction; we use the absolute value when comparing regions.
-    fn ring_signed_area(ring: &Ring) -> f64 {
-        if ring.len() < 3 {
-            return 0.0;
-        }
-        let mut sum = 0.0;
-        let n = ring.len();
-        for i in 0..n {
-            let (x1, y1) = ring[i];
-            let (x2, y2) = ring[(i + 1) % n];
-            sum += x1 * y2 - x2 * y1;
-        }
-        sum / 2.0
-    }
-
-    /// Even-odd area of a region. Holes (rings with opposite winding
-    /// or rings whose interior is "subtracted" by overlap parity)
-    /// are handled by summing absolute areas of outer rings minus
-    /// holes; in practice the implementation is free to use either
-    /// winding-rule or even-odd output as long as the *net* covered
-    /// area matches what we expect.
-    ///
-    /// We compute "net area" as the integral of the indicator
-    /// function over the bounding box, which we approximate by
-    /// summing absolute signed-areas with alternating signs based
-    /// on a containment count at a sample inside each ring. That's
-    /// overkill for the small test cases here, so we use a simpler
-    /// rule: net_area = sum(|signed_area(ring)|) for outer rings
-    /// minus sum(|signed_area(ring)|) for hole rings, where a hole
-    /// is detected by being contained in another ring with the
-    /// opposite winding sign.
-    ///
-    /// For all the test polygons in this file the simpler rule
-    /// suffices because every test fixture has a known structure.
-    /// We expose `polygon_set_area` only for asserting against a
-    /// pre-computed expected value, so even a slightly liberal
-    /// interpretation is fine for our purposes.
-    fn polygon_set_area(ps: &PolygonSet) -> f64 {
-        // Sum |signed_area| of every ring, with the sign of the
-        // *outer* ring chosen as positive and contained rings
-        // contributing with the opposite sign of their parent.
-        // Implementation note: nearly every test below uses
-        // pairwise-disjoint outer rings, so the simple sum of
-        // absolute signed areas is correct in those cases. Only the
-        // "with hole" tests need the containment correction.
-        let mut total = 0.0;
-        for (i, ring) in ps.iter().enumerate() {
-            let a = ring_signed_area(ring).abs();
-            // Count containments — a ring contained in an odd number
-            // of other rings is a hole and contributes negatively.
-            let mut depth = 0;
-            if let Some(&pt) = ring.first() {
-                for (j, other) in ps.iter().enumerate() {
-                    if i == j {
-                        continue;
-                    }
-                    if point_in_ring(other, pt) {
-                        depth += 1;
-                    }
-                }
-            }
-            if depth % 2 == 0 {
-                total += a;
-            } else {
-                total -= a;
-            }
-        }
-        total
-    }
-
-    /// Standard ray-casting point-in-ring test. The ring is treated
-    /// as a closed polygon (last vertex implicitly connects to the
-    /// first).
-    fn point_in_ring(ring: &Ring, pt: (f64, f64)) -> bool {
-        let (px, py) = pt;
-        let n = ring.len();
-        if n < 3 {
-            return false;
-        }
-        let mut inside = false;
-        let mut j = n - 1;
-        for i in 0..n {
-            let (xi, yi) = ring[i];
-            let (xj, yj) = ring[j];
-            let intersects = ((yi > py) != (yj > py))
-                && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
-            if intersects {
-                inside = !inside;
-            }
-            j = i;
-        }
-        inside
-    }
-
-    /// Even-odd "is point inside this region" — true iff `pt` lies
-    /// inside an odd number of rings.
-    fn point_in_polygon_set(ps: &PolygonSet, pt: (f64, f64)) -> bool {
-        let mut inside_count = 0;
-        for ring in ps {
-            if point_in_ring(ring, pt) {
-                inside_count += 1;
-            }
-        }
-        inside_count % 2 == 1
-    }
+    // The three region metrics -- ring_signed_area, polygon_set_area
+    // (even-odd net area) and point_in_polygon_set -- live in one place,
+    // crate::algorithms::polygon_metrics, and are gated by the
+    // `polygon_metrics` corpus family. They used to be a private copy
+    // here and a second private copy in the roundtrip binary, with
+    // nothing comparing them.
+    use crate::algorithms::polygon_metrics::{
+        point_in_polygon_set, polygon_set_area, ring_signed_area,
+    };
 
     /// Axis-aligned bounding box of a `PolygonSet`. Returns
     /// `None` if the set has no vertices.

@@ -672,16 +672,9 @@ fn sample_inside_simple_ring(ring: &Ring) -> (f64, f64) {
 mod tests {
     use super::*;
 
-    fn ring_signed_area(ring: &Ring) -> f64 {
-        let mut sum = 0.0;
-        let n = ring.len();
-        for i in 0..n {
-            let (x1, y1) = ring[i];
-            let (x2, y2) = ring[(i + 1) % n];
-            sum += x1 * y2 - x2 * y1;
-        }
-        sum / 2.0
-    }
+    // One copy of the shoelace metric, gated by the `polygon_metrics`
+    // corpus family; this module used to carry a private duplicate.
+    use crate::algorithms::polygon_metrics::ring_signed_area;
 
     fn total_area(ps: &PolygonSet) -> f64 {
         ps.iter().map(|r| ring_signed_area(r).abs()).sum()

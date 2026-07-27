@@ -13,7 +13,7 @@ use jas_dioxus::document::evaluated_bounds::element_evaluated_bbox;
 use jas_dioxus::geometry::element::{CommonProps, LayerElem};
 use jas_dioxus::algorithms::boolean::{
     boolean_exclude_ruled, boolean_intersect_ruled, boolean_subtract_ruled,
-    boolean_union_ruled, PolyFillRule, PolygonSet, Ring, RuledPolygonSet,
+    boolean_union_ruled, PolyFillRule, PolygonSet, RuledPolygonSet,
 };
 use jas_dioxus::algorithms::boolean_normalize::normalize;
 use jas_dioxus::algorithms::corpus_text_measure::fixed_char_width_measure;
@@ -987,122 +987,16 @@ fn parse_path_commands(v: &Value) -> Vec<PathCommand> {
 }
 
 // ---------------------------------------------------------------
-// Geometry helpers (duplicated from test modules since they're
-// not part of the public API)
+// Geometry helpers
 // ---------------------------------------------------------------
+//
+// The region metrics every boolean golden is expressed in live in
+// jas_dioxus::algorithms::polygon_metrics — one copy, gated by the
+// `polygon_metrics` corpus family. They used to be hand-pasted here.
 
-fn ring_signed_area(ring: &Ring) -> f64 {
-    if ring.len() < 3 {
-        return 0.0;
-    }
-    let mut sum = 0.0;
-    let n = ring.len();
-    for i in 0..n {
-        let (x1, y1) = ring[i];
-        let (x2, y2) = ring[(i + 1) % n];
-        sum += x1 * y2 - x2 * y1;
-    }
-    sum * 0.5
-}
-
-fn point_in_ring(ring: &Ring, pt: (f64, f64)) -> bool {
-    let (px, py) = pt;
-    let n = ring.len();
-    if n < 3 {
-        return false;
-    }
-    let mut inside = false;
-    let mut j = n - 1;
-    for i in 0..n {
-        let (xi, yi) = ring[i];
-        let (xj, yj) = ring[j];
-        let intersects =
-            ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
-        if intersects {
-            inside = !inside;
-        }
-        j = i;
-    }
-    inside
-}
-
-fn point_in_polygon_set(ps: &PolygonSet, pt: (f64, f64)) -> bool {
-    let mut count = 0;
-    for ring in ps {
-        if point_in_ring(ring, pt) {
-            count += 1;
-        }
-    }
-    count % 2 == 1
-}
-
-fn polygon_set_area(ps: &PolygonSet) -> f64 {
-    let mut total = 0.0;
-    for (i, ring) in ps.iter().enumerate() {
-        let a = ring_signed_area(ring).abs();
-        let mut depth = 0;
-        if let Some(&pt) = ring.first() {
-            for (j, other) in ps.iter().enumerate() {
-                if i == j {
-                    continue;
-                }
-                if point_in_ring(other, pt) {
-                    depth += 1;
-                }
-            }
-        }
-        if depth % 2 == 0 {
-            total += a;
-        } else {
-            total -= a;
-        }
-    }
-    total
-}
-
-/// Check that a ring is simple: no two of its edges meet except where
-/// consecutive edges share their one common vertex.
-///
-/// This deliberately uses the full arrangement predicate rather than a
-/// proper-crossing test. A proper-crossing test reports `true` for a
-/// ring carrying a T-junction (a vertex sitting in another edge's
-/// interior) or a collinear self-overlap (an edge doubling back along
-/// itself), because neither is a strict interior crossing — so the
-/// corpus's `all_rings_simple` flag used to stay green on exactly the
-/// degeneracies the normalizer exists to remove. Mirrors
-/// `isRingSimple` in JasSwift/ToolsAlgorithm/AlgorithmRoundtrip.swift.
-fn is_ring_simple(ring: &Ring) -> bool {
-    use jas_dioxus::algorithms::arrangement::split_points;
-    let n = ring.len();
-    if n < 3 {
-        return true;
-    }
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let adjacent = j == i + 1 || (i == 0 && j == n - 1);
-            let pts = split_points(
-                ring[i],
-                ring[(i + 1) % n],
-                ring[j],
-                ring[(j + 1) % n],
-            );
-            if adjacent {
-                // Consecutive edges legitimately meet at exactly their
-                // shared vertex, and nowhere else.
-                if pts.len() != 1 {
-                    return false;
-                }
-            } else if !pts.is_empty() {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn all_rings_simple(ps: &PolygonSet) -> bool {
-    ps.iter().all(|ring| is_ring_simple(ring))
-}
+use jas_dioxus::algorithms::polygon_metrics::{
+    all_rings_simple, point_in_polygon_set, polygon_set_area,
+};
 
 // ── align ────────────────────────────────────────────────────
 //

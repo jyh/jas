@@ -385,12 +385,12 @@ func runBoolean(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let samplePts = (expected["sample_points"] as? [[String: Any]]) ?? []
         let samples: [[String: Any]] = samplePts.map { sp in
             let pt = parsePoint(sp["point"]!)
-            let inside = pointInPolygonSetHelper(res, pt)
+            let inside = pointInPolygonSet(res, pt)
             return ["point": [pt.0, pt.1], "inside": inside] as [String: Any]
         }
         let rings: [[[Double]]] = res.map { ring in ring.map { [$0.0, $0.1] } }
         return ["name": name, "result": [
-            "area": polygonSetAreaHelper(res),
+            "area": polygonSetArea(res),
             "ring_count": res.count,
             "sample_points": samples,
             "rings": rings
@@ -407,7 +407,7 @@ func runBooleanNormalize(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let res = normalize(input, parseFillRule(tc["fill_rule"]))
         let rings: [[[Double]]] = res.map { ring in ring.map { [$0.0, $0.1] } }
         return ["name": name, "result": [
-            "area": polygonSetAreaHelper(res),
+            "area": polygonSetArea(res),
             "ring_count": res.count,
             "all_rings_simple": allRingsSimple(res),
             "rings": rings
@@ -663,95 +663,10 @@ func parsePathCommands(_ v: Any) -> [PathCommand] {
 }
 
 // MARK: - Geometry Helpers
-
-func ringSignedArea(_ ring: BoolRing) -> Double {
-    guard ring.count >= 3 else { return 0 }
-    var sum = 0.0
-    let n = ring.count
-    for i in 0..<n {
-        let (x1, y1) = ring[i]
-        let (x2, y2) = ring[(i + 1) % n]
-        sum += x1 * y2 - x2 * y1
-    }
-    return sum * 0.5
-}
-
-func pointInRingHelper(_ ring: BoolRing, _ pt: (Double, Double)) -> Bool {
-    let (px, py) = pt
-    let n = ring.count
-    guard n >= 3 else { return false }
-    var inside = false
-    var j = n - 1
-    for i in 0..<n {
-        let (xi, yi) = ring[i]
-        let (xj, yj) = ring[j]
-        if ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
-            inside = !inside
-        }
-        j = i
-    }
-    return inside
-}
-
-func pointInPolygonSetHelper(_ ps: BoolPolygonSet, _ pt: (Double, Double)) -> Bool {
-    var count = 0
-    for ring in ps {
-        if pointInRingHelper(ring, pt) { count += 1 }
-    }
-    return count % 2 == 1
-}
-
-func polygonSetAreaHelper(_ ps: BoolPolygonSet) -> Double {
-    var total = 0.0
-    for (i, ring) in ps.enumerated() {
-        let a = abs(ringSignedArea(ring))
-        var depth = 0
-        if let pt = ring.first {
-            for (j, other) in ps.enumerated() {
-                if i == j { continue }
-                if pointInRingHelper(other, pt) { depth += 1 }
-            }
-        }
-        total += depth % 2 == 0 ? a : -a
-    }
-    return total
-}
-
-func allRingsSimple(_ ps: BoolPolygonSet) -> Bool {
-    ps.allSatisfy { isRingSimple($0) }
-}
-
-/// Check that a ring is simple: no two of its edges meet except where
-/// consecutive edges share their one common vertex.
-///
-/// Deliberately the full arrangement predicate rather than a
-/// proper-crossing test. A proper-crossing test reports true for a ring
-/// carrying a T-junction (a vertex sitting in another edge's interior) or
-/// a collinear self-overlap (an edge doubling back along itself), because
-/// neither is a strict interior crossing — so the corpus's
-/// all_rings_simple flag used to stay green on exactly the degeneracies
-/// the normalizer exists to remove. Mirrors `is_ring_simple` in
-/// jas_dioxus/src/bin/algorithm_roundtrip.rs.
-func isRingSimple(_ ring: BoolRing) -> Bool {
-    let n = ring.count
-    guard n >= 3 else { return true }
-    for i in 0..<n {
-        for j in (i + 1)..<n {
-            let adjacent = j == i + 1 || (i == 0 && j == n - 1)
-            let pts = arrangementSplitPoints(
-                ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])
-            if adjacent {
-                // Consecutive edges legitimately meet at exactly their
-                // shared vertex, and nowhere else.
-                if pts.count != 1 { return false }
-            } else if !pts.isEmpty {
-                return false
-            }
-        }
-    }
-    return true
-}
-
+//
+// The region metrics every boolean golden is expressed in live in
+// Sources/Algorithms/PolygonMetrics.swift -- one copy, gated by the
+// `polygon_metrics` corpus family. They used to be hand-pasted here.
 
 func crossProduct(_ ux: Double, _ uy: Double, _ vx: Double, _ vy: Double) -> Double {
     ux * vy - uy * vx
