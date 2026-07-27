@@ -132,15 +132,7 @@
 
   "port_overrides": {
     "_doc": "A cell where the two ports MEASURABLY DISAGREE today. The `survival` value above is what both ports must reach; a port listed here is asserted to produce the stated OTHER value, so closing the divergence turns this gate red until the entry is deleted. Empty is the goal state.",
-    "entries": [
-      {
-        "codec": "svg",
-        "field": "common.tool_origin",
-        "port": "rust",
-        "value": "DROPPED",
-        "note": "LIVE ONE-PORT DIVERGENCE, measured by this fixture's own gate in both ports. JasSwift's <path> writer emits jas:tool-origin (JasSwift/Sources/Geometry/Svg.swift, `toolOriginAttr`) and reads it back; Rust's `parse_common` (jas_dioxus/src/geometry/svg.rs) READS jas:tool-origin for every element but Rust's writer emits it nowhere. Consequence: blob-brush art saved to SVG and reopened keeps its merge identity in Swift and loses it in Rust, so the next sweep merges into the existing element in one port and starts a new element in the other."
-      }
-    ]
+    "entries": []
   },
 
   "classification": {

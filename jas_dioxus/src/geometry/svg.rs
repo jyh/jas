@@ -135,6 +135,22 @@ fn name_attr(name: &Option<String>) -> String {
     }
 }
 
+/// The `jas:tool-origin` attribute identifying the tool that produced this
+/// element (BLOB_BRUSH_TOOL.md §Fill and stroke). `parse_common` has always
+/// READ this attribute for every element; until CODECSAT nothing wrote it, so
+/// Rust dropped it at the SVG boundary while JasSwift's `<path>` writer
+/// carried it. Written for `<path>` only, which is where Blob Brush commits
+/// and where JasSwift both writes and reads it — widening the attribute to
+/// every element kind would put Rust ahead of the other port's reader and is a
+/// design question, not a repair.
+fn tool_origin_attr(origin: &Option<String>) -> String {
+    match origin {
+        None => String::new(),
+        Some(s) if s.is_empty() => String::new(),
+        Some(s) => format!(" jas:tool-origin=\"{}\"", escape_xml(s)),
+    }
+}
+
 /// Standard SVG `id` attribute for an element's stable identity.
 /// Emitted ONLY when the id is set (Some/non-empty) so id-less
 /// elements serialize byte-identically to before — keeping the SVG
@@ -319,11 +335,12 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 crate::geometry::element::FillRule::NonZero => "",
             };
             format!(
-                "{}<path d=\"{}\"{}{}{}{}{}{}{}/>\n",
+                "{}<path d=\"{}\"{}{}{}{}{}{}{}{}/>\n",
                 indent,
                 path_data(&e.d),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke), fr_attr,
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                tool_origin_attr(&e.common.tool_origin),
                 id_attr(&e.common.id),
                 name_attr(&e.common.name),
             )
