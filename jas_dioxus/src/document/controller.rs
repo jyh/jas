@@ -1669,9 +1669,13 @@ impl Controller {
     }
 
     /// `apply_destructive_boolean` with the identity source supplied by the
-    /// caller. The UNION / INTERSECTION / EXCLUDE arm is N -> 1: identity is
-    /// preservable exactly when the edit is one-to-one (the cardinality law),
-    /// so the product's id is MINTED, never inherited.
+    /// caller. Identity is preservable exactly when the edit is one-to-one
+    /// (the cardinality law), so the arms that are NOT one-to-one MINT rather
+    /// than inherit: the UNION / INTERSECTION / EXCLUDE product (N -> 1), and
+    /// every fragment of a DIVIDE operand the partition actually split
+    /// (1 -> N). The survivor arms — SUBTRACT_FRONT / SUBTRACT_BACK / CROP,
+    /// every TRIM operand, and a DIVIDE operand that yielded a single region —
+    /// are one-to-one and keep their own identities.
     pub fn apply_destructive_boolean_minting(
         model: &mut Model,
         op_name: &str,
@@ -1847,13 +1851,70 @@ impl Controller {
                     }
                     accumulator = new_acc;
                 }
+                // §3.6's DIVIDE row / §3.2 (splits). This loop used to hand
+                // EVERY output region `src.common().clone()` — the designated
+                // operand's whole `common`, ID INCLUDED. An operand that
+                // covers two regions therefore left TWO live elements wearing
+                // one id, which breaks the uniqueness invariant the
+                // cardinality law leans on (REFERENCE_GRAPH.md §2.5) and is
+                // strictly worse than a loud break: a reference to that id
+                // silently REBINDS to whichever element the index walk reaches
+                // first (§3.7).
+                //
+                // The arrow is counted PER DESIGNATED OPERAND (T5: the
+                // elements whose material is at stake), so it is read off the
+                // partition rather than assumed:
+                //   one region  -> 1 -> 1. Identity is preservable, so it is
+                //                  preserved. Over-preservation is a guess,
+                //                  but so is killing an identity that the
+                //                  edit could have kept — the two disjoint
+                //                  rects case, where DIVIDE changes nothing.
+                //                  This is `path_erase_at_rect`'s branch, in
+                //                  its own words: "ERASE DOES NOT REMOVE
+                //                  IDENTITY ... branch on the surviving-
+                //                  fragment count". NAMED DELTA from §3.6,
+                //                  whose DIVIDE row writes "fresh mint" flat:
+                //                  the row describes its 1 -> N heading, and
+                //                  the degenerate 1 -> 1 falls to §3.1.
+                //   two or more -> 1 -> N. Identity dies; a FRESH id per
+                //                  fragment, minted through the shared loop.
+                //                  Appearance, `transform` AND `name` copy to
+                //                  every fragment (§3.2) — that is the
+                //                  `..clone()` that stays.
+                //
+                // The split arm mints UNCONDITIONALLY, including for an
+                // id-less operand, because that is what the landed split
+                // (`path_erase_at_rect`) does. The N -> 1 arm above mints only
+                // when an identity is at stake; that difference is the NAMED
+                // DELTA its own comment records, one ruling for both ports —
+                // not something to settle silently here.
+                let mut region_counts = vec![0usize; elements.len()];
+                for (_, idx) in &accumulator {
+                    region_counts[*idx] += 1;
+                }
+                // Built ONCE from the pre-edit document so fragments of
+                // different operands cannot collide with each other either.
+                // It still holds the operand ids that are about to vanish —
+                // avoiding them is merely conservative, never wrong.
+                let mut existing_ids = doc.element_ids();
                 for (region, paint_idx) in accumulator {
                     let src = &elements[paint_idx];
+                    let mut common = src.common().clone();
+                    if region_counts[paint_idx] > 1 {
+                        match crate::document::artboard::mint_unique_ids(
+                            1, &mut existing_ids, mint,
+                        ) {
+                            Some(ids) => common.id = Some(ids[0].clone()),
+                            // A failed mint aborts the whole edit — never a
+                            // half-identified split.
+                            None => return,
+                        }
+                    }
                     outputs.push((
                         region,
                         src.fill().copied(),
                         src.stroke().copied(),
-                        src.common().clone(),
+                        common,
                     ));
                 }
             }
@@ -5300,6 +5361,55 @@ mod preservation_law_tests {
         children[0].clone()
     }
 
+    /// The layer's children sorted by their leftmost point. DIVIDE emits its
+    /// regions in the accumulator's internal order, which is neither z-order
+    /// nor left-to-right; sorting keeps the assertions about WHICH region got
+    /// WHICH identity independent of that implementation detail.
+    fn children_by_left_edge(model: &Model) -> Vec<Rc<Element>> {
+        let mut kids: Vec<Rc<Element>> =
+            model.document().layers[0].children().unwrap().to_vec();
+        kids.sort_by(|a, b| {
+            polygon_point_bbox(a)
+                .0
+                .partial_cmp(&polygon_point_bbox(b).0)
+                .expect("finite coordinates")
+        });
+        kids
+    }
+
+    /// Every id in the document, WITH repeats — `Document::element_ids`
+    /// returns a `HashSet`, which silently dedupes exactly the duplicate this
+    /// gate exists to catch.
+    fn all_ids_with_repeats(model: &Model) -> Vec<String> {
+        fn walk(e: &Element, out: &mut Vec<String>) {
+            if let Some(id) = e.common().id.as_ref() {
+                out.push(id.clone());
+            }
+            if let Some(children) = e.children() {
+                for c in children {
+                    walk(c, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        for layer in &model.document().layers {
+            walk(layer, &mut out);
+        }
+        out
+    }
+
+    fn assert_ids_unique(model: &Model, what: &str) {
+        let seen = all_ids_with_repeats(model);
+        let mut sorted = seen.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            seen.len(),
+            "{what} left a duplicate id in the document: {seen:?}"
+        );
+    }
+
     // ── §3.3 / cardinality law: the N -> 1 boolean arm ────────────────────
 
     /// THE REJECTED RULE IN DISGUISE. `front.common().clone()` carries the
@@ -5439,6 +5549,99 @@ mod preservation_law_tests {
         assert_eq!(out.common().name.as_deref(), Some("hull"),
                    "a 1->1 survivor keeps its name");
         assert_eq!(out.common().opacity, 0.25, "and its own paint");
+    }
+
+    // ── §3.2 / §3.6 DIVIDE row: the 1 -> N arm ────────────────────────────
+    //
+    // `rich_pair` is back [0..10] over front [5..15]. DIVIDE partitions their
+    // union into three regions and labels each with its FRONTMOST covering
+    // operand:
+    //   [0..5]   <- back  (the back operand's only region: 1 -> 1)
+    //   [5..10]  <- front (the overlap)
+    //   [10..15] <- front (front-only)
+    // So the FRONT operand is split 1 -> 2 and the BACK operand is not split
+    // at all — one fixture exercising both sides of the cardinality law.
+
+    /// The violation, stated as a document invariant. The arm handed EVERY
+    /// output region the designated operand's whole `common`, id included, so
+    /// the front operand's two fragments both wore `id-front` — two live
+    /// elements sharing one identity, which is the silent-rebinding hazard
+    /// §3.7 exists to prevent and strictly worse than a loud break.
+    #[test]
+    fn boolean_divide_leaves_no_duplicate_id_in_the_document() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        Controller::apply_destructive_boolean(
+            &mut model, "divide", &BooleanOptions::default());
+        // MANDATORY GEOMETRY PAIRING: the partition really is the three bars.
+        let kids = children_by_left_edge(&model);
+        assert_eq!(kids.len(), 3, "divide of two overlapping rects -> 3 regions");
+        for (i, want) in [(0usize, (0.0, 5.0)), (1, (5.0, 5.0)), (2, (10.0, 5.0))] {
+            let (bx, _, bw, _) = polygon_point_bbox(&kids[i]);
+            assert!((bx - want.0).abs() < 1e-9 && (bw - want.1).abs() < 1e-9,
+                    "region {i} should be x={} w={}, got x={bx} w={bw}",
+                    want.0, want.1);
+        }
+        assert_ids_unique(&model, "divide");
+    }
+
+    /// §3.2 / the cardinality law: the operand that was SPLIT is 1 -> N, so
+    /// its identity dies and every fragment wears a FRESH id — fresh meaning
+    /// "not in the pre-edit id set", and distinct from its siblings'.
+    #[test]
+    fn boolean_divide_split_operand_s_fragments_wear_fresh_distinct_ids() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        let before: std::collections::HashSet<String> =
+            model.document().element_ids();
+        Controller::apply_destructive_boolean(
+            &mut model, "divide", &BooleanOptions::default());
+        let kids = children_by_left_edge(&model);
+        // kids[1] = [5..10] and kids[2] = [10..15] both came from the FRONT
+        // operand, which is therefore 1 -> 2.
+        let a = kids[1].common().id.clone().expect("a split fragment is identified");
+        let b = kids[2].common().id.clone().expect("a split fragment is identified");
+        assert_ne!(a, b, "two fragments of one operand may not share an id");
+        for id in [&a, &b] {
+            assert!(!before.contains(id),
+                    "fragment id {id:?} was already in the document before the \
+                     split — the designated operand's identity rode out on a \
+                     1 -> N edit");
+        }
+    }
+
+    /// §3.2: identity is the ONLY thing a split takes. Appearance, the
+    /// unspoken-to fields and `name` copy to every fragment.
+    #[test]
+    fn boolean_divide_fragments_copy_name_and_unspoken_fields() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        Controller::apply_destructive_boolean(
+            &mut model, "divide", &BooleanOptions::default());
+        let kids = children_by_left_edge(&model);
+        for i in [1usize, 2] {
+            let c = kids[i].common();
+            assert_eq!(c.name.as_deref(), Some("keel"),
+                       "a split copies the source's name to every fragment");
+            assert_eq!(c.opacity, 0.75, "and its paint");
+            assert_eq!(c.mode, BlendMode::Multiply);
+            assert_eq!(c.visibility, Visibility::Outline);
+            assert_eq!(c.mask, Some(Box::new(a_mask())));
+            assert_eq!(c.tool_origin.as_deref(), Some("blob_brush"));
+        }
+    }
+
+    /// The other side of the same law, and the guard that the fix does not
+    /// over-reach: the BACK operand contributes exactly ONE region, so that
+    /// region is 1 -> 1 and its identity is preservable — killing it would be
+    /// as much a violation as carrying it through the split.
+    #[test]
+    fn boolean_divide_unsplit_operand_keeps_its_identity() {
+        let mut model = rich_pair(Some("hull"), Some("keel"), 0.25, 0.75);
+        Controller::apply_destructive_boolean(
+            &mut model, "divide", &BooleanOptions::default());
+        let kids = children_by_left_edge(&model);
+        assert_eq!(kids[0].common().id.as_deref(), Some("id-back"),
+                   "the operand divide did not split is 1 -> 1: its id lives");
+        assert_eq!(kids[0].common().name.as_deref(), Some("hull"));
+        assert_eq!(kids[0].common().opacity, 0.25);
     }
 
     // ── §3.4 WRAP: Make Compound Shape ────────────────────────────────────
