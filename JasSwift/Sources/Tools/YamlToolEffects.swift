@@ -1590,11 +1590,51 @@ private func anchorIndexNear(
     return nil
 }
 
-/// Reconstruct a Path element with replaced command list, carrying
-/// over fill/stroke/opacity/transform/lock state. Shared by all
-/// doc.path.* effects that rewrite a path's d.
-private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand]) -> Path {
+/// Which element the rebuilt Path *is*, relative to its source. There is no
+/// default, deliberately: the compiler, not a reviewer, then enumerates the
+/// call sites whenever this distinction changes — the same reason
+/// `Path.init` requires `fillRule`.
+private enum PathEditIdentity {
+    /// The edit yielded ONE element: it is the same object, so `id` travels
+    /// with everything else.
+    case sameElement
+    /// The edit SEVERED the source into several elements. Phase 1 carries
+    /// appearance, transform and `name` but withholds `id` — see
+    /// `pathWithCommands`.
+    case splitFragment
+}
+
+/// Reconstruct a Path element with a replaced command list.
+///
+/// THE SHIP OF THESEUS LAW (JYH, ratified 2026-07-26): a path edit preserves
+/// everything except `d`. Stated as a law, not a field list, so it cannot rot
+/// as properties are added to `Path` — an earlier enumeration omitted
+/// `transform`, and dropping `transform` RELOCATES the artwork.
+///
+/// Rust's twin sites are `PathElem { d: new, ..pe.clone() }` and so cannot
+/// drop a property. Swift has no struct-update syntax, so this function is
+/// the ONE place that forwards them by hand, and
+/// `Tests/Tools/PathEditTheseusTests.swift` pins it with a Mirror-driven
+/// battery that compares every reflected property except `d` — a property
+/// added to `Path` later is checked without editing the test.
+///
+/// `identity: .splitFragment` withholds `id` only. Nothing on the erase path
+/// can mint a fresh one (`Controller.assignId` never mints — the initiator
+/// carries the id in the operation payload — and `dedupeElementIds` only
+/// CLEARS duplicates, and only in document readers), so copying it would
+/// leave N live elements sharing one id and break the unique-id invariant of
+/// REFERENCE_GRAPH.md §2.5. PHASE 2 OWES the severing case fresh
+/// deterministic cross-port ids per fragment and a linear-gradient stop remap
+/// (a gradient carries no position — linear resolves angle + stops against
+/// the element's OWN bbox centre and half-diagonal — so each fragment
+/// currently re-fits the whole ramp instead of showing its slice; the fix is
+/// an affine remap of stop locations with clipping and interpolated endpoint
+/// colours). Radial cannot be preserved without a model change; the recentre
+/// is accepted. The severing case is NOT finished.
+private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand],
+                              identity: PathEditIdentity) -> Path {
     return Path(d: cmds, fill: pe.fill, stroke: pe.stroke,
+                widthPoints: pe.widthPoints,
                 opacity: pe.opacity, transform: pe.transform,
                 locked: pe.locked,
                 visibility: pe.visibility,
@@ -1602,6 +1642,11 @@ private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand]) -> Path {
                 mask: pe.mask,
                 fillGradient: pe.fillGradient,
                 strokeGradient: pe.strokeGradient,
+                strokeBrush: pe.strokeBrush,
+                strokeBrushOverrides: pe.strokeBrushOverrides,
+                toolOrigin: pe.toolOrigin,
+                name: pe.name,
+                id: identity == .sameElement ? pe.id : nil,
                 fillRule: pe.fillRule)
 }
 
@@ -1617,7 +1662,7 @@ private func pathDeleteAnchorNear(
     // runEffects owner txn when one is open). Mirrors Rust's doc.snapshot ->
     // begin_txn pattern; replaces the legacy snapshot() + bare write.
     if let newCmds = deleteAnchorFromPath(pe.d, anchorIdx) {
-        let newPe = pathWithCommands(pe, newCmds)
+        let newPe = pathWithCommands(pe, newCmds, identity: .sameElement)
         var doc = model.document.replaceElement(path, with: .path(newPe))
         // Keep the path in the selection (matches native Delete-anchor).
         var sel = doc.selection
@@ -1662,7 +1707,7 @@ private func pathInsertAnchorOnSegmentNear(
     guard let hit = best, hit.3 <= radius else { return }
     guard case .path(let pe) = model.document.getElement(hit.0) else { return }
     let ins = insertPointInPath(pe.d, hit.1, hit.2)
-    let newPe = pathWithCommands(pe, ins.commands)
+    let newPe = pathWithCommands(pe, ins.commands, identity: .sameElement)
     // Undoable edit (editDocument self-brackets; joins the owner txn if open).
     model.editDocument(model.document.replaceElement(hit.0, with: .path(newPe)))
 }
@@ -1734,9 +1779,18 @@ private func pathEraseAtRect(
             }
             let isClosed = pe.d.contains { if case .closePath = $0 { return true }; return false }
             let results = splitPathAtEraser(pe.d, hit, isClosed)
-            for cmds in results where cmds.count >= 2 {
+                .filter { $0.count >= 2 }
+            // ERASE DOES NOT REMOVE IDENTITY — "it is still the same object."
+            // Branch on the surviving-fragment count; Rust's path_erase_at_rect
+            // branches identically so the two ports agree in BOTH arms. One
+            // fragment is the one-element case and keeps everything including
+            // `id`; a severing erase withholds `id` (see pathWithCommands).
+            let identity: PathEditIdentity =
+                results.count > 1 ? .splitFragment : .sameElement
+            for cmds in results {
                 let open = cmds.filter { if case .closePath = $0 { return false }; return true }
-                newChildren.append(.path(pathWithCommands(pe, open)))
+                newChildren.append(.path(
+                    pathWithCommands(pe, open, identity: identity)))
             }
             layerChanged = true
         }
@@ -1910,14 +1964,14 @@ private func pathCommitAnchorEdit(
     case "pressed_smooth":
         let newCmds = convertSmoothToCorner(pe.d, anchorIdx: anchorIdx)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
     case "pressed_corner":
         let moved = hypot(targetX - originX, targetY - originY)
         if moved <= 1.0 { return }
         let newCmds = convertCornerToSmooth(
             pe.d, anchorIdx: anchorIdx, hx: targetX, hy: targetY)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
     case "pressed_handle":
         let handleType = (store.getTool("anchor_point", "handle_type") as? String) ?? ""
         let dx = targetX - originX, dy = targetY - originY
@@ -1926,7 +1980,7 @@ private func pathCommitAnchorEdit(
             pe.d, anchorIdx: anchorIdx,
             handleType: handleType, dx: dx, dy: dy)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
     default: break
     }
 }
@@ -2142,7 +2196,7 @@ private func paintbrushEditCommit(
     newCmds.append(contentsOf: targetPe.d[(c1 + 1)...])
 
     let newDoc = model.document.replaceElement(
-        targetPath, with: .path(pathWithCommands(targetPe, newCmds)))
+        targetPath, with: .path(pathWithCommands(targetPe, newCmds, identity: .sameElement)))
     model.editDocument(newDoc)
 }
 
@@ -2190,7 +2244,8 @@ private func pathSmoothAtCursor(
         }
         newCmds.append(contentsOf: pe.d[(lastCmd + 1)...])
         guard newCmds.count < pe.d.count else { continue }
-        newDoc = newDoc.replaceElement(path, with: .path(pathWithCommands(pe, newCmds)))
+        newDoc = newDoc.replaceElement(
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement)))
         changed = true
     }
     if changed {
