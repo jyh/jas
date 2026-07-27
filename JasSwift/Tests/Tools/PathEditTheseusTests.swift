@@ -381,6 +381,11 @@ private func seedBlobBrushMergeState(_ store: StateStore, _ src: Path) {
 
 /// A 6-point horizontal sweep along `y` from `x0` to `x1`, in a test-private
 /// buffer (the point buffers are process-global and tests run in parallel).
+///
+/// The coordinates are DOCUMENT space, as the point buffer's are on the live
+/// canvas. For a source carrying a `transform` that is not the element's own
+/// `d` space, so a sweep meant to land ON such a source must be given the
+/// coordinates where the source is DRAWN.
 private func seedBlobBrushSweepIn(_ buffer: String, _ x0: Double,
                                   _ x1: Double, _ y: Double) {
     pointBuffersClear(buffer)
@@ -417,7 +422,12 @@ private let theseusSquare: [PathCommand] = [
     let store = StateStore()
     seedBlobBrushMergeState(store, src)
     let buffer = "theseus_blob_merge_one_swift"
-    seedBlobBrushSweepIn(buffer, 50, 150, 50)
+    // The theseus fixture carries transform translate(40,70), so its local
+    // square 0..100 is DRAWN at doc x 40..140, y 70..170. The sweep is aimed
+    // there. (It used to run at doc y=50, which is where the square is STORED
+    // and 20 units above where it appears; the merge matched anyway, which was
+    // the transform-blind bug.)
+    seedBlobBrushSweepIn(buffer, 90, 190, 120)
     runBlobBrushCommitPainting(model, store, buffer: buffer)
     #expect(model.document.layers[0].children.count == 1,
             "the sweep overlapped the one existing blob, so it merged")
@@ -464,6 +474,52 @@ private let theseusSquare: [PathCommand] = [
             "the merged blob stays a blob-brush element")
 }
 
+/// A SINGULAR `transform` disqualifies a source from the merge.
+///
+/// `scale(1, 0)` flattens the element onto a horizontal line: it has no area
+/// on screen, so there is nothing to paint into, and it has no inverse, so the
+/// unified document-space region could not be written back into its space even
+/// if it did match. The sweep must therefore commit a SECOND element and leave
+/// the degenerate one untouched.
+///
+/// HONEST SCOPE, matching Rust's twin: this vector does NOT separate the
+/// singular-matrix guard in the match loop. `transformPolygonSet` collapses the
+/// source to a zero-area figure and `booleanIntersect` reports empty for that,
+/// so deleting the guard leaves this assertion green. What it pins is the
+/// OUTCOME — a degenerate source is left alone and the sweep commits beside it,
+/// with no crash — which is the corner case a user can actually reach by
+/// scaling a blob to zero height.
+@Test func blobMergeSkipsASourceWhoseTransformIsSingular() throws {
+    let red = Fill(color: Color.fromHex("#ff0000")!)
+    let model = Model(document: Document(
+        layers: [Layer(children: [
+            .path(Path(d: [.moveTo(0, 40), .lineTo(100, 40),
+                           .lineTo(100, 60), .lineTo(0, 60), .closePath],
+                       fill: red,
+                       // det == 0: everything lands on the line y = 50.
+                       transform: Transform(a: 1, b: 0, c: 0, d: 0, e: 0, f: 50),
+                       toolOrigin: "blob_brush",
+                       fillRule: .nonzero)),
+        ])],
+        selectedLayer: 0, selection: []))
+    let store = StateStore()
+    store.set("fill_color", red.color.toHex())
+    store.set("blob_brush_size", 10.0)
+    store.set("blob_brush_angle", 0.0)
+    store.set("blob_brush_roundness", 100.0)
+    let buffer = "blob_singular_transform_swift"
+    // Straight along the collapsed line, so the degenerate source is as
+    // reachable as it can be.
+    seedBlobBrushSweepIn(buffer, 10, 90, 50)
+    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    #expect(model.document.layers[0].children.count == 2,
+            "the degenerate source is skipped, so the sweep commits beside it")
+    let untouched = try #require(pathAt(model, [0, 0]))
+    #expect(untouched.d.count == 5, "the degenerate source keeps its `d`")
+    let fresh = try #require(pathAt(model, [0, 1]))
+    #expect(fresh.transform == nil, "the new blob is the transform-less one")
+}
+
 /// The erase arm PRESERVES `toolOrigin` where the initializer defaults used to
 /// clear it, so an erased fragment is now a blob-merge candidate it previously
 /// was not. A closed path erased once yields ONE fragment (the 1 -> 1 arm),
@@ -483,7 +539,12 @@ private let theseusSquare: [PathCommand] = [
     let store = StateStore()
     seedBlobBrushMergeState(store, src)
     let buffer = "theseus_blob_merge_after_erase_swift"
-    seedBlobBrushSweepIn(buffer, 50, 150, 50)
+    // The theseus fixture carries transform translate(40,70), so its local
+    // square 0..100 is DRAWN at doc x 40..140, y 70..170. The sweep is aimed
+    // there. (It used to run at doc y=50, which is where the square is STORED
+    // and 20 units above where it appears; the merge matched anyway, which was
+    // the transform-blind bug.)
+    seedBlobBrushSweepIn(buffer, 90, 190, 120)
     runBlobBrushCommitPainting(model, store, buffer: buffer)
     #expect(model.document.layers[0].children.count == 1,
             "the erased fragment was merged into, not left beside a new blob")
@@ -522,8 +583,12 @@ private struct BlobAttrs {
 /// ONE sweep, so the commit takes the N = 2 merge arm. Returns the merged
 /// element. `buffer` must be unique per test — the point buffers are
 /// process-global and tests run in parallel. Mirrors Rust `merge_two_blobs`.
+/// The sources' local `d` spans x 0..40 and 60..100 at y 40..60; `sweep` is
+/// `(x0, x1, y)` in DOCUMENT space, so a caller that gives its sources a
+/// `transform` must offset the sweep by it to land on them.
 private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
-                           buffer: String) -> Path? {
+                           buffer: String,
+                           sweep: (Double, Double, Double)) -> Path? {
     let red = Fill(color: Color.fromHex("#ff0000")!)
     func blob(_ x0: Double, _ x1: Double, _ a: BlobAttrs) -> Element {
         .path(Path(d: [.moveTo(x0, 40), .lineTo(x1, 40),
@@ -543,7 +608,7 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
     store.set("blob_brush_size", 10.0)
     store.set("blob_brush_angle", 0.0)
     store.set("blob_brush_roundness", 100.0)
-    seedBlobBrushSweepIn(buffer, 10, 90, 50)
+    seedBlobBrushSweepIn(buffer, sweep.0, sweep.1, sweep.2)
     runBlobBrushCommitPainting(model, store, buffer: buffer)
     #expect(model.document.layers[0].children.count == 1,
             "the sweep bridged both blobs, so both were merged away")
@@ -559,7 +624,8 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
 @Test func blobMergeCarriesUnanimousAttributes() throws {
     let agreed = BlobAttrs(opacity: 0.5, locked: true, visibility: .outline,
                            blendMode: .multiply, mask: unanimityMask())
-    let out = try #require(mergeTwoBlobs(agreed, agreed, buffer: "unanimity_agree_swift"))
+    let out = try #require(mergeTwoBlobs(agreed, agreed, buffer: "unanimity_agree_swift",
+                                        sweep: (10, 90, 50)))
     #expect(out.opacity == 0.5)
     #expect(out.blendMode == .multiply)
     #expect(out.visibility == .outline)
@@ -578,7 +644,8 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
                          blendMode: .multiply, mask: unanimityMask())
     let right = BlobAttrs(opacity: 0.25, locked: false, visibility: .preview,
                           blendMode: .screen, mask: nil)
-    let out = try #require(mergeTwoBlobs(left, right, buffer: "unanimity_disagree_swift"))
+    let out = try #require(mergeTwoBlobs(left, right, buffer: "unanimity_disagree_swift",
+                                        sweep: (10, 90, 50)))
     #expect(out.opacity == 1.0)
     #expect(out.blendMode == .normal)
     #expect(out.visibility == .preview)
@@ -596,8 +663,13 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
 @Test func blobMergeNeverCarriesTransformEvenWhenUnanimous() throws {
     let withTransform = BlobAttrs(
         transform: Transform(a: 1, b: 0, c: 0, d: 1, e: 40, f: 70))
+    // Both sources carry translate(40,70), so their local x 0..40 / 60..100 at
+    // y 40..60 are DRAWN at doc x 40..80 / 100..140, y 110..130. The sweep is
+    // aimed there — at the old doc y=50 the fixture no longer merges at all,
+    // and the assertion below would be vacuous.
     let out = try #require(mergeTwoBlobs(withTransform, withTransform,
-                                         buffer: "unanimity_transform_swift"))
+                                         buffer: "unanimity_transform_swift",
+                                         sweep: (50, 130, 120)))
     #expect(out.transform == nil,
             "a unanimous transform must NOT ride onto the merge")
 }

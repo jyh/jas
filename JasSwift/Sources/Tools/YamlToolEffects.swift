@@ -2581,7 +2581,35 @@ private func blobBrushCommitPainting(
             if mergeOnlyWithSelection && !selectedPaths.contains(path) {
                 continue
             }
-            let existing = pathToPolygonSet(pe.d)
+            // BOTH SIDES IN DOCUMENT SPACE (BLOB_BRUSH_TOOL.md §Transform).
+            // `swept` came from the point buffer in document coordinates;
+            // `pe.d` is in the element's own space, which `transform` maps to
+            // the document. Testing them against each other without the matrix
+            // matches on where the artwork is STORED, not where it is DRAWN: a
+            // scaled blob 300 units away used to union with a sweep that never
+            // came near it.
+            //
+            // A SINGULAR matrix disqualifies the element rather than matching
+            // it. Such an element collapses to a line or a point on screen, so
+            // there is nothing to paint into, and the n == 1 arm below could
+            // not write the result back into its space anyway — the inverse
+            // that maps the unified doc-space region into local coordinates
+            // does not exist. Skipping is the only answer that leaves the
+            // document unchanged instead of guessing at one.
+            //
+            // NO FIXTURE SEPARATES THIS GUARD, matching Rust's note at the
+            // twin site: `transformPolygonSet` maps a singular source onto a
+            // zero-area figure and `booleanIntersect` reports empty for that,
+            // so the loop `continue`s one line later anyway. The guard makes
+            // the skip a stated RULE rather than a consequence of the boolean
+            // layer's treatment of degenerate input.
+            let existing: BoolPolygonSet
+            if let t = pe.transform {
+                if t.inverse() == nil { continue }
+                existing = transformPolygonSet(pathToPolygonSet(pe.d), t)
+            } else {
+                existing = pathToPolygonSet(pe.d)
+            }
             // Cheap reject: skip if no spatial overlap.
             if booleanIntersect(unified, existing).isEmpty { continue }
             unified = booleanUnion(unified, existing)
@@ -2601,8 +2629,13 @@ private func blobBrushCommitPainting(
         insertIdx = lowest[1]
     }
 
-    let newD = polygonSetToPath(unified)
-    if newD.isEmpty { return }
+    // `unified` is in DOCUMENT space. Where it is written back depends on the
+    // arm below: the n == 1 arm keeps the source element, hence the source's
+    // `transform`, so its `d` must be expressed in the source's LOCAL space;
+    // the n == 0 and n >= 2 arms build a transform-less element, whose local
+    // space IS the document. The emptiness guard reads the document-space set,
+    // which is the one that decides whether anything was painted at all.
+    if polygonSetToPath(unified).isEmpty { return }
     // THE CARDINALITY LAW (JYH, ratified 2026-07-26): "Identity survives a
     // one-to-one edit. It does not survive a change in cardinality." The arm
     // is chosen by the MATCH COUNT, and Rust's blob_brush_commit_painting
@@ -2637,7 +2670,22 @@ private func blobBrushCommitPainting(
         // from the fills being identical. Consequence: painting into a
         // translucent or CMYK blob preserves its colour rather than
         // overwriting it with the tool's.
-        newElem = pathWithCommands(src, newD, identity: .sameElement)
+        //
+        // The survivor keeps its `transform`, so its `d` is read through that
+        // matrix — write the unified region back in the element's OWN space.
+        // The nil arm of `inverse()` is not reachable (the match loop
+        // `continue`d past every singular source), and is written as an abort
+        // rather than a force-unwrap so that a future change to that loop
+        // degrades into a no-op edit instead of a crash in the tool.
+        let local: BoolPolygonSet
+        if let t = src.transform {
+            guard let inv = t.inverse() else { return }
+            local = transformPolygonSet(unified, inv)
+        } else {
+            local = unified
+        }
+        newElem = pathWithCommands(src, polygonSetToPath(local),
+                                   identity: .sameElement)
     } else {
         // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both build
         // a fresh element carrying the tool's own attributes. For the merge
@@ -2681,11 +2729,16 @@ private func blobBrushCommitPainting(
             // nothing about opacity, so merging two 50%-opaque blobs must not
             // yield a fully opaque one.
             //
-            // `transform` is EXCLUDED regardless of agreement. This merge
-            // matches RAW geometry against a DOCUMENT-space sweep, so it is
-            // already transform-blind (transcripts/BLOB_BRUSH_TOOL.md);
-            // carrying a unanimous transform would COMPOUND that bug by
-            // relocating the merged artwork. `toolOrigin` is set by the tool
+            // `transform` is EXCLUDED regardless of agreement. The reason has
+            // changed and the exclusion has not: it was excluded because the
+            // merge matched RAW geometry against a DOCUMENT-space sweep, so
+            // carrying a matrix would have compounded that. That blindness is
+            // now fixed — `unified` is document-space and this arm's element
+            // is transform-less, which is CONSISTENT on its own terms. So the
+            // exclusion is no longer forced by a bug; whether a unanimous
+            // transform should now carry (and `d` be expressed in its space)
+            // is JYH's to rule. Until then this stays as ruled.
+            // `toolOrigin` is set by the tool
             // below, `id` is minted fresh, and the paint attributes are what
             // the stroke DOES speak to — so these five compositing fields are
             // the whole list. Rust's twin carries the same five.
@@ -2703,8 +2756,12 @@ private func blobBrushCommitPainting(
             if let v = unanimous({ $0.locked }) { locked = v }
             if let v = unanimous({ $0.mask }) { mask = v }
         }
+        // `transform` is left nil on this arm — for n == 0 because a fresh
+        // blob has no matrix, for n >= 2 because the unanimity carry excludes
+        // `transform`. Either way the element's local space IS the document,
+        // so the document-space union is written straight in.
         newElem = Path(
-            d: newD,
+            d: polygonSetToPath(unified),
             fill: newFill, stroke: nil,
             widthPoints: [],
             opacity: opacity,
