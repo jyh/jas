@@ -4425,6 +4425,11 @@ fn path_erase_at_rect(
             let results: Vec<Vec<PathCommand>> =
                 split_path_at_eraser(&path_elem.d, &hit, is_closed)
                     .into_iter()
+                    // Redundant by construction, kept only as a guard:
+                    // `split_path_at_eraser` already gates EVERY fragment it
+                    // emits at len >= 2 (both branches, every push), so this
+                    // filter provably never removes anything. Do not cite it
+                    // as the reason a short fragment disappears.
                     .filter(|cmds| cmds.len() >= 2)
                     .collect();
             // ERASE DOES NOT REMOVE IDENTITY — "it is still the same object".

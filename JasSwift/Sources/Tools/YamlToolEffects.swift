@@ -1613,7 +1613,8 @@ private enum PathEditIdentity {
 ///
 /// Rust's twin sites are `PathElem { d: new, ..pe.clone() }` and so cannot
 /// drop a property. Swift has no struct-update syntax, so this function is
-/// the ONE place that forwards them by hand, and
+/// one of two places in this file that forward them by hand (the other is
+/// `blobBrushCommitErasing`), and
 /// `Tests/Tools/PathEditTheseusTests.swift` pins it with a Mirror-driven
 /// battery that compares every reflected property except `d` — a property
 /// added to `Path` later is checked without editing the test.

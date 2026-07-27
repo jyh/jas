@@ -62,8 +62,10 @@ fields are added to the Path element:
 - **Exactly one surviving fragment** — always the case for a
   closed path (`split_path_at_eraser`'s closed branch returns a
   single unwrapped path), and also reachable on an open path
-  erased near either end, where the short side has too few
-  commands to survive the `≥ 2` filter. The fragment is the
+  erased near either end, where the short side is dropped by
+  `split_path_at_eraser` itself — every fragment it emits is
+  already gated at `len >= 2`, so the caller's filter is a
+  redundant guard, not the mechanism. The fragment is the
   SAME element: everything except `d`
   carries across, including `transform`, the element id, the
   name, fill and stroke, both gradients, the variable-width

@@ -144,10 +144,15 @@ element.
 **The Ship of Theseus law (JYH, ratified 2026-07-26):** an edit
 commit rewrites `d` and **preserves everything else**. Stated as
 a law, not a field list, so it cannot rot as fields are added to
-the Path element: the brush reference and overrides, fill and
-stroke, both gradients, the variable-width profile, `transform`,
-the element id, the name, opacity, visibility, blend mode, mask
-and tool origin all carry across unchanged.
+the Path element. Deliberately NOT enumerated here: an earlier
+draft of this paragraph listed 15 of Path's 18 stored properties
+and silently omitted `locked` and `fill_rule` — the very field the
+ruling exists to protect. A list in prose rots the moment a field
+is added, which is the whole reason the law is phrased as
+"everything except `d`". What holds it honest is the pinning test,
+`JasSwift/Tests/Tools/PathEditTheseusTests.swift`, which compares
+every stored property by Mirror reflection rather than by name, so
+a new field is covered without editing anything.
 
 | Attribute                        | On edit commit                                 |
 |----------------------------------|------------------------------------------------|
