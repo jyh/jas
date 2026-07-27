@@ -1563,7 +1563,34 @@ impl Controller {
     /// elements derived from its evaluated geometry. The expanded
     /// polygons carry the compound shape's own paint. Operand tree
     /// is discarded.
+    ///
+    /// `generate_element_id`'s contract keeps minting OUT of Controller
+    /// methods so they stay deterministic, so the id source is a parameter of
+    /// `expand_compound_shape_minting` and this wrapper names it — exactly as
+    /// `apply_destructive_boolean` and `path_erase_at_rect` do.
     pub fn expand_compound_shape(model: &mut Model) {
+        Self::expand_compound_shape_minting(model, &mut || {
+            crate::document::artboard::generate_element_id(None)
+        })
+    }
+
+    /// `expand_compound_shape` with the id source supplied by the caller.
+    ///
+    /// The cardinality law lands here, at the layer that holds the document:
+    /// `CompoundShape::expand` is pure, so it can only KILL the identity of a
+    /// compound the expansion split (transcripts/EDIT_SEMANTICS_FREEZE.md
+    /// §3.6's "Compound Shape EXPAND" row); the fresh ids the law owes those
+    /// fragments (§3.2) must come from an avoid-set, which exists only here.
+    /// A compound that expanded to a SINGLE ring is 1 -> 1 and arrives with
+    /// its own id intact — nothing to mint.
+    ///
+    /// The avoid-set is built ONCE from the pre-edit document (so fragments
+    /// of two different compounds cannot collide with each other either), and
+    /// a failed mint aborts the WHOLE edit — never a half-identified split.
+    pub fn expand_compound_shape_minting(
+        model: &mut Model,
+        mint: &mut dyn FnMut() -> String,
+    ) {
         use crate::geometry::live::{DEFAULT_PRECISION, LiveElement, LiveVariant};
         let doc = model.document();
         if doc.selection.is_empty() {
@@ -1585,6 +1612,12 @@ impl Controller {
         let orig_doc = doc.clone();
         let mut new_doc = doc.clone();
         let mut expanded_counts: Vec<usize> = Vec::with_capacity(cs_paths.len());
+        // Built ONCE from the pre-edit document, so fragments of two
+        // different compounds in one selection cannot collide with each
+        // other either. It still holds the compounds' own (and their
+        // operands') ids, which are about to vanish — avoiding them is
+        // merely conservative, never wrong.
+        let mut existing_ids = orig_doc.element_ids();
 
         for cs_path in cs_paths.iter().rev() {
             let cs_elem = match new_doc.get_element(cs_path).cloned() {
@@ -1600,6 +1633,38 @@ impl Controller {
                     expanded_counts.push(0);
                     continue;
                 }
+            };
+            // §3.2, at the layer that holds the document. `CompoundShape::
+            // expand` already cleared `id` on every fragment of a compound
+            // the expansion SPLIT — it is pure and cannot mint — so the fresh
+            // ids the law owes those fragments are minted here. A single-ring
+            // expansion is 1 -> 1 and arrives with its own id intact, so
+            // there is nothing to mint and nothing to guess.
+            //
+            // The split arm mints UNCONDITIONALLY, including for an id-less
+            // compound, because that is what the landed splits
+            // (`path_erase_at_rect`, the DIVIDE arm) do.
+            let expanded: Vec<Rc<Element>> = if expanded.len() > 1 {
+                let ids = match crate::document::artboard::mint_unique_ids(
+                    expanded.len(), &mut existing_ids, mint,
+                ) {
+                    Some(ids) => ids,
+                    // A failed mint aborts the WHOLE edit: never a
+                    // half-identified split, and never a selection expanded
+                    // only as far as the budget held.
+                    None => return,
+                };
+                expanded
+                    .into_iter()
+                    .zip(ids)
+                    .map(|(frag, id)| {
+                        let mut e = (*frag).clone();
+                        e.common_mut().id = Some(id);
+                        Rc::new(e)
+                    })
+                    .collect()
+            } else {
+                expanded
             };
             expanded_counts.push(expanded.len());
             new_doc = new_doc.delete_element(cs_path);
@@ -6053,5 +6118,142 @@ mod preservation_law_tests {
             assert!((got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9,
                     "corner-0 point {i} moved: want {:?}, got {got:?}", want);
         }
+    }
+
+    // ── §3.6's "Compound Shape EXPAND" row: 1 -> N, at the DOCUMENT ───────
+    //
+    // `CompoundShape::expand` handed every emitted ring the compound's whole
+    // `common`, ID INCLUDED — the same 1 -> N defect the DIVIDE arm carried.
+    // Driven end-to-end here, through the controller, because the unit-level
+    // battery in `geometry::live` can only see that the ids are no longer
+    // REPLICATED: minting needs the document's id space, which exists only
+    // at this layer.
+
+    /// The compound's own `common` is rich in every legislated field, so the
+    /// batteries below cannot pass on nothing (§3.1 ANTI-VACUITY). Its two
+    /// operands are `rich_rect`s carrying ids of their own, which is what
+    /// makes the FRESHNESS assertion bite: a mint that landed on an operand
+    /// id would be as wrong as inheriting the compound's.
+    fn rich_compound(op: crate::geometry::live::CompoundOperation) -> Model {
+        let back = rich_rect(0.0, 10.0, "op-back", Some("port"), 0.5);
+        let front = rich_rect(5.0, 10.0, "op-front", Some("starboard"), 0.5);
+        let cs = Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation: op,
+            operands: vec![Rc::new(back), Rc::new(front)],
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: Some(Stroke::new(Color::BLACK, 2.0)),
+            common: CommonProps {
+                opacity: 0.25,
+                mode: BlendMode::Multiply,
+                transform: None,
+                locked: false,
+                visibility: Visibility::Outline,
+                mask: Some(Box::new(a_mask())),
+                tool_origin: Some("blob_brush".to_string()),
+                name: Some("hull".to_string()),
+                id: Some("cs-1".to_string()),
+            },
+        }));
+        assert_fixture_is_rich(&cs);
+        assert_eq!(cs.common().name.as_deref(), Some("hull"),
+                   "the compound must ASSERT a name for the carry to be visible");
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(cs)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L0".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    /// THE VIOLATION, as a document invariant. Expanding an EXCLUDE compound
+    /// emits two rings, and every ring wore `cs-1` — two live elements
+    /// sharing one identity, breaching REFERENCE_GRAPH.md §2.5's uniqueness
+    /// invariant and opening the silent-rebinding hazard of §3.7.
+    #[test]
+    fn expand_compound_shape_leaves_no_duplicate_id_in_the_document() {
+        let mut model = rich_compound(crate::geometry::live::CompoundOperation::Exclude);
+        Controller::expand_compound_shape(&mut model);
+        // MANDATORY GEOMETRY PAIRING: XOR really is the two outer bars.
+        let kids = children_by_left_edge(&model);
+        assert_eq!(kids.len(), 2, "XOR of two overlapping rects -> 2 rings");
+        for (i, want) in [(0usize, (0.0, 5.0)), (1, (10.0, 5.0))] {
+            let (bx, _, bw, _) = polygon_point_bbox(&kids[i]);
+            assert!((bx - want.0).abs() < 1e-9 && (bw - want.1).abs() < 1e-9,
+                    "ring {i} should be x={} w={}, got x={bx} w={bw}",
+                    want.0, want.1);
+        }
+        assert_ids_unique(&model, "expand compound shape");
+    }
+
+    /// §3.2 / the cardinality law: a 1 -> N expansion kills the compound's
+    /// identity and every fragment wears a FRESH id — "fresh" meaning not in
+    /// the PRE-EDIT id set (which holds the operands' ids too), and distinct
+    /// from its siblings'.
+    #[test]
+    fn expand_compound_shape_fragments_wear_fresh_distinct_ids() {
+        let mut model = rich_compound(crate::geometry::live::CompoundOperation::Exclude);
+        let before: std::collections::HashSet<String> =
+            model.document().element_ids();
+        assert!(before.contains("cs-1") && before.contains("op-back")
+                && before.contains("op-front"),
+                "the avoid-set must see the compound AND its operands: {before:?}");
+        Controller::expand_compound_shape(&mut model);
+        let kids = children_by_left_edge(&model);
+        assert_eq!(kids.len(), 2);
+        let a = kids[0].common().id.clone().expect("a fragment is identified");
+        let b = kids[1].common().id.clone().expect("a fragment is identified");
+        assert_ne!(a, b, "two fragments of one expansion may not share an id");
+        for id in [&a, &b] {
+            assert!(!before.contains(id),
+                    "fragment id {id:?} was already in the document before the \
+                     expansion — an identity rode out on a 1 -> N edit");
+        }
+    }
+
+    /// §3.2: identity is the ONLY thing the split takes. Appearance, the
+    /// unspoken-to fields and `name` copy to every fragment.
+    #[test]
+    fn expand_compound_shape_fragments_copy_name_and_unspoken_fields() {
+        let mut model = rich_compound(crate::geometry::live::CompoundOperation::Exclude);
+        Controller::expand_compound_shape(&mut model);
+        for kid in children_by_left_edge(&model) {
+            let c = kid.common();
+            assert_eq!(c.name.as_deref(), Some("hull"),
+                       "a split copies the source's name to every fragment");
+            assert_eq!(c.opacity, 0.25, "and its paint");
+            assert_eq!(c.mode, BlendMode::Multiply);
+            assert_eq!(c.visibility, Visibility::Outline);
+            assert_eq!(c.mask, Some(Box::new(a_mask())));
+            assert_eq!(c.tool_origin.as_deref(), Some("blob_brush"));
+            // The compound's OWN paint, per the EXPAND row — not an operand's.
+            assert!(kid.fill().is_some() && kid.stroke().is_some());
+        }
+    }
+
+    /// The guard against over-reach: a compound that evaluates to ONE ring is
+    /// 1 -> 1, so its identity is preservable and killing it would be as much
+    /// a guess as carrying one that is not. Same branch DIVIDE and
+    /// `path_erase_at_rect` take.
+    #[test]
+    fn expand_compound_shape_single_ring_keeps_its_identity() {
+        let mut model = rich_compound(crate::geometry::live::CompoundOperation::Union);
+        Controller::expand_compound_shape(&mut model);
+        let out = only_child(&model);
+        // MANDATORY GEOMETRY PAIRING: the union really is the merged bar.
+        let (bx, by, bw, bh) = polygon_point_bbox(&out);
+        assert!((bx - 0.0).abs() < 1e-9 && (by - 0.0).abs() < 1e-9
+                && (bw - 15.0).abs() < 1e-9 && (bh - 10.0).abs() < 1e-9,
+                "union bbox should be [0..15]x[0..10], got {bx},{by},{bw},{bh}");
+        assert_eq!(out.common().id.as_deref(), Some("cs-1"),
+                   "a 1 -> 1 expansion preserves the identity it could keep");
+        assert_eq!(out.common().name.as_deref(), Some("hull"));
+        assert_ids_unique(&model, "expand compound shape (single ring)");
     }
 }

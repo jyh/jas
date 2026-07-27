@@ -415,21 +415,56 @@ impl LiveElement for CompoundShape {
 
     /// Expand a compound shape to one `Polygon` element per ring of
     /// the evaluated geometry. Each produced element inherits the
-    /// compound shape's own fill / stroke / common; the operand tree
-    /// is dropped. Phase 2's polygon output is already a set of
-    /// closed rings, so no Bézier refit is performed; refitting via
-    /// `algorithms::fit_curve` lands in a later pass.
+    /// compound shape's own fill / stroke and every `common` field the
+    /// PRESERVATION LAW makes it keep; the operand tree is dropped.
+    /// Phase 2's polygon output is already a set of closed rings, so no
+    /// Bézier refit is performed; refitting via `algorithms::fit_curve`
+    /// lands in a later pass.
+    ///
+    /// IDENTITY is the exception, and the arrow is counted off the ring
+    /// count (T5, transcripts/EDIT_SEMANTICS_FREEZE.md §3.6's "Compound
+    /// Shape EXPAND" row):
+    ///
+    ///   one ring    -> 1 -> 1. The identity is preservable, so it is
+    ///                  preserved. Killing it would be as much a guess as
+    ///                  carrying one that is not — the branch `path_erase_
+    ///                  at_rect` and the DIVIDE arm already take.
+    ///   two or more -> 1 -> N. The identity DIES (the cardinality law).
+    ///                  This function is pure and has no document, so it
+    ///                  cannot mint the replacements: it clears `id` and
+    ///                  the effect that owns the document — `Controller::
+    ///                  expand_compound_shape_minting` — mints a fresh id
+    ///                  per fragment against an avoid-set, all-or-nothing.
+    ///
+    /// It used to hand EVERY ring `self.common.clone()`, id included, so an
+    /// expansion of a two-ring compound put two live elements wearing one id
+    /// into the caller's hands. That breaks REFERENCE_GRAPH.md §2.5's
+    /// uniqueness invariant and is strictly worse than a loud break: a
+    /// reference to that id silently REBINDS to whichever element the index
+    /// walk reaches first (§3.7).
+    ///
+    /// Everything else — appearance, `transform`, `mask`, `visibility`,
+    /// `tool_origin` AND `name` — copies to every fragment (§3.2).
     fn expand(&self, precision: f64) -> Vec<Rc<Element>> {
-        let ps = self.evaluate(precision);
-        ps.into_iter()
+        let rings: Vec<_> = self
+            .evaluate(precision)
+            .into_iter()
             .filter(|ring| ring.len() >= 3)
+            .collect();
+        let identity_dies = rings.len() > 1;
+        rings
+            .into_iter()
             .map(|ring| {
+                let mut common = self.common.clone();
+                if identity_dies {
+                    common.id = None;
+                }
                 Rc::new(Element::Polygon(super::element::PolygonElem {
                     points: ring,
                     fill: self.fill.clone(),
                     stroke: self.stroke.clone(),
-                    common: self.common.clone(),
-                                    fill_gradient: None,
+                    common,
+                    fill_gradient: None,
                     stroke_gradient: None,
                 }))
             })
@@ -1596,6 +1631,153 @@ mod tests {
                 other => panic!("expected Polygon, got {other:?}"),
             }
         }
+    }
+
+    // ── THE PRESERVATION LAW at `CompoundShape::expand` ───────────────────
+    //
+    // EDIT_SEMANTICS_FREEZE.md §3.6's "Compound Shape EXPAND" row, §3.2
+    // (splits) and the cardinality law's identity projection. `expand` is a
+    // PURE function with no document in hand, so it cannot mint; what it owes
+    // the law is that a 1 -> N expansion does not REPLICATE the compound's
+    // identity onto every ring. The fresh ids are minted one layer up, in
+    // `Controller::expand_compound_shape_minting`, where the avoid-set exists.
+
+    /// A rich `common` — differs from `CommonProps::default()` in every field
+    /// the law legislates, so the batteries below cannot pass on nothing
+    /// (§3.1 ANTI-VACUITY, mandatory).
+    fn rich_common(id: &str) -> CommonProps {
+        use crate::geometry::element::{BlendMode, Color, Fill, Mask, Visibility};
+        CommonProps {
+            opacity: 0.25,
+            mode: BlendMode::Multiply,
+            transform: None,
+            locked: false,
+            visibility: Visibility::Outline,
+            mask: Some(Box::new(Mask {
+                subtree: Box::new(Element::Rect(RectElem {
+                    x: 0.0, y: 0.0, width: 4.0, height: 4.0, rx: 0.0, ry: 0.0,
+                    fill: Some(Fill::new(Color::BLACK)), stroke: None,
+                    common: CommonProps::default(),
+                    fill_gradient: None, stroke_gradient: None,
+                })),
+                clip: false,
+                invert: false,
+                disabled: false,
+                linked: true,
+                unlink_transform: None,
+            })),
+            tool_origin: Some("blob_brush".to_string()),
+            name: Some("hull".to_string()),
+            id: Some(id.to_string()),
+        }
+    }
+
+    fn assert_common_is_rich(c: &CommonProps) {
+        let d = CommonProps::default();
+        assert_ne!(c.opacity, d.opacity, "fixture opacity decayed to default");
+        assert_ne!(c.mode, d.mode, "fixture blend mode decayed to default");
+        assert_ne!(c.visibility, d.visibility, "fixture visibility decayed");
+        assert_ne!(c.mask, d.mask, "fixture mask decayed to default");
+        assert_ne!(c.tool_origin, d.tool_origin, "fixture tool_origin decayed");
+        assert_ne!(c.name, d.name, "fixture name decayed to default");
+        assert!(c.id.is_some(), "fixture must carry an id");
+    }
+
+    /// `common: self.common.clone()` handed EVERY emitted ring the compound's
+    /// whole `common`, ID INCLUDED. Excluding two overlapping rects yields two
+    /// rings, so expanding put TWO live elements wearing `cs-1` into the
+    /// caller's hands — the silent-rebinding hazard §3.7 exists to prevent and
+    /// a direct breach of REFERENCE_GRAPH.md §2.5's uniqueness invariant.
+    #[test]
+    fn expand_of_a_split_compound_does_not_replicate_its_id() {
+        let common = rich_common("cs-1");
+        assert_common_is_rich(&common);
+        let cs = CompoundShape {
+            operation: CompoundOperation::Exclude,
+            operands: vec![rc_rect(0.0, 0.0, 10.0, 10.0), rc_rect(5.0, 0.0, 10.0, 10.0)],
+            fill: None,
+            stroke: None,
+            common,
+        };
+        let expanded = cs.expand(DEFAULT_PRECISION);
+        // MANDATORY GEOMETRY PAIRING: XOR really is the two outer bars.
+        assert_eq!(expanded.len(), 2, "XOR of two overlapping rects -> 2 rings");
+        let mut boxes: Vec<(f64, f64)> = expanded
+            .iter()
+            .map(|rc| match rc.as_ref() {
+                Element::Polygon(p) => {
+                    // `bbox_of_ring` is (min_x, min_y, max_x, max_y).
+                    let b = bbox_of_ring(&p.points);
+                    (b.0, b.2)
+                }
+                other => panic!("expected Polygon, got {other:?}"),
+            })
+            .collect();
+        boxes.sort_by(|a, b| a.0.partial_cmp(&b.0).expect("finite coordinates"));
+        assert!((boxes[0].0 - 0.0).abs() < 1e-9 && (boxes[0].1 - 5.0).abs() < 1e-9,
+                "left bar should span x 0..5, got {:?}", boxes[0]);
+        assert!((boxes[1].0 - 10.0).abs() < 1e-9 && (boxes[1].1 - 15.0).abs() < 1e-9,
+                "right bar should span x 10..15, got {:?}", boxes[1]);
+        let ids: Vec<Option<String>> =
+            expanded.iter().map(|rc| rc.common().id.clone()).collect();
+        assert_eq!(ids, vec![None, None],
+                   "a 1 -> N expansion may not hand its identity to any ring; \
+                    the effect layer mints instead");
+    }
+
+    /// The other half of §3.2: identity is the ONLY thing the split takes.
+    #[test]
+    fn expand_of_a_split_compound_copies_every_other_field_to_every_ring() {
+        let cs = CompoundShape {
+            operation: CompoundOperation::Exclude,
+            operands: vec![rc_rect(0.0, 0.0, 10.0, 10.0), rc_rect(5.0, 0.0, 10.0, 10.0)],
+            fill: None,
+            stroke: None,
+            common: rich_common("cs-1"),
+        };
+        let want = rich_common("cs-1");
+        let expanded = cs.expand(DEFAULT_PRECISION);
+        assert_eq!(expanded.len(), 2);
+        for rc in &expanded {
+            let c = rc.common();
+            assert_eq!(c.name, want.name, "a split copies `name` to every fragment");
+            assert_eq!(c.opacity, want.opacity);
+            assert_eq!(c.mode, want.mode);
+            assert_eq!(c.visibility, want.visibility);
+            assert_eq!(c.mask, want.mask);
+            assert_eq!(c.tool_origin, want.tool_origin);
+            assert_eq!(c.transform, want.transform);
+        }
+    }
+
+    /// The guard against over-reach, and the cardinality law's own boundary:
+    /// a compound that evaluates to ONE ring is 1 -> 1, so its identity is
+    /// preservable — and killing a preservable identity is as much a guess as
+    /// carrying one that is not. Same branch `path_erase_at_rect` and the
+    /// DIVIDE arm take.
+    #[test]
+    fn expand_of_a_single_ring_compound_keeps_its_identity() {
+        let cs = CompoundShape {
+            operation: CompoundOperation::Union,
+            operands: vec![rc_rect(0.0, 0.0, 10.0, 10.0), rc_rect(5.0, 0.0, 10.0, 10.0)],
+            fill: None,
+            stroke: None,
+            common: rich_common("cs-1"),
+        };
+        let expanded = cs.expand(DEFAULT_PRECISION);
+        assert_eq!(expanded.len(), 1, "union of two overlapping rects -> 1 ring");
+        // MANDATORY GEOMETRY PAIRING: the ring is the merged bar [0..15].
+        match expanded[0].as_ref() {
+            Element::Polygon(p) => {
+                let (min_x, _, max_x, _) = bbox_of_ring(&p.points);
+                assert!((min_x - 0.0).abs() < 1e-9 && (max_x - 15.0).abs() < 1e-9,
+                        "union should span x 0..15, got {min_x}..{max_x}");
+            }
+            other => panic!("expected Polygon, got {other:?}"),
+        }
+        assert_eq!(expanded[0].common().id.as_deref(), Some("cs-1"),
+                   "a 1 -> 1 expansion preserves the identity it could keep");
+        assert_eq!(expanded[0].common().name.as_deref(), Some("hull"));
     }
 
     #[test]
