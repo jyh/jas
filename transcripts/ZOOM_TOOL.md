@@ -403,3 +403,26 @@ inference; the intuition behind it was right.
 **ZOOM-134's parenthetical must be rewritten to state the requirement** rather than
 a false consequence of a different one — left as-is, the next reader re-derives the
 same error.
+
+## RULED 2026-07-27 (JYH): the DEFAULT ZOOM ANCHOR is the viewport centre
+
+`zoom_in` / `zoom_out` invoked with **no anchor parameters** anchor at the
+**viewport centre**, as the spec already says and as Rust already does. **Swift
+changes**, and BOTH causes must land together:
+
+1. Swift's generic action dispatcher never merges an action's **declared param
+   defaults**, so `param.anchor_x` arrives null -> 0 instead of the declared `-1`.
+2. Swift's `anchorXRaw < 0 ? px : anchorXRaw` has **no viewport-centre branch at
+   all** — it carries `viewportW` and never reads it.
+
+Fixing only (1) moves Swift from (-120,-60) to (-100,-50) and still misses the
+spec's (-200,-120), so a half-fix leaves the vector red and unpinnable — an earlier
+writer correctly declined to land it. Measured with seed {zoom 2.0, offset
+(-100,-50), viewport 800x600}, `zoom_in` with params {}.
+
+**Side effect worth watching:** only 3 of 236 actions declare param defaults, but
+one is `artboards_panel_select`, which no fixture covers — so fixing (1) silently
+corrects a third verb nobody is watching. Gate it while you are there.
+
+This ruling and the `zoom_to_actual_size` ruling above are the same principle in two
+verbs: **the zoom family keeps the artist's view.**
