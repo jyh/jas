@@ -1355,12 +1355,7 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let newAbs = doc.artboards + [ab]
         // Undoable create: editDocument self-brackets (joins the owner txn if
         // open). Mirrors Rust artboard_create_commit's edit_document.
-        model.editDocument(Document(
-            layers: doc.layers,
-            selectedLayer: doc.selectedLayer,
-            selection: doc.selection,
-            artboards: newAbs,
-            artboardOptions: doc.artboardOptions))
+        model.editDocument(doc.replacing(artboards: newAbs))
         return nil
     }
 
@@ -1730,10 +1725,7 @@ private func pathDeleteAnchorNear(
         var sel = doc.selection
         sel = sel.filter { $0.path != path }
         sel.insert(ElementSelection.all(path))
-        doc = Document(layers: doc.layers, selectedLayer: doc.selectedLayer,
-                       selection: sel,
-                       artboards: doc.artboards,
-                       artboardOptions: doc.artboardOptions)
+        doc = doc.replacing(selection: sel)
         model.editDocument(doc)
     } else {
         // Path too small — remove the element entirely.
@@ -1906,27 +1898,25 @@ private func pathEraseAtRect(
             layerChanged = true
         }
         if layerChanged {
-            newLayers[li] = Layer(name: layer.name, children: newChildren,
-                                   opacity: layer.opacity, transform: layer.transform,
-                                   locked: layer.locked,
-                                   visibility: layer.visibility,
-                                   blendMode: layer.blendMode,
-                                   isolatedBlending: layer.isolatedBlending,
-                                   knockoutGroup: layer.knockoutGroup,
-                                   mask: layer.mask)
+            // T4, THE BYSTANDER CLAUSE: the layer is a container this edit
+            // rebuilt only to reach the paths inside it, so it must come back
+            // unchanged. This was a ten-field hand list that forwarded
+            // everything EXCEPT `id` — nine right and the tenth is identity.
+            // `Layer.withChildren` is the whole-struct copy that cannot drop
+            // one; Rust's twin never rebuilds the layer at all
+            // (`children_mut()` writes the slot in place).
+            newLayers[li] = layer.withChildren(newChildren)
             changed = true
         }
     }
     if changed {
         let doc = model.document
         // Undoable erase. editDocument joins the open drag txn (doc.snapshot at
-        // mousedown) or self-brackets standalone. Mirrors Rust path_erase_at_rect.
-        model.editDocument(Document(
-            layers: newLayers, selectedLayer: doc.selectedLayer,
-            selection: [],
-            artboards: doc.artboards,
-            artboardOptions: doc.artboardOptions
-        ))
+        // mousedown) or self-brackets standalone. Mirrors Rust path_erase_at_rect,
+        // which clones the whole document and mutates it — so `replacing` (not a
+        // five-of-eight hand list, which dropped `symbols`, `documentSetup` and
+        // `printPreferences`) is what makes the two ports agree.
+        model.editDocument(doc.replacing(layers: newLayers, selection: []))
     }
 }
 
@@ -2987,20 +2977,12 @@ private func blobBrushInsertAt(
     // `id_survival VIOLATED: ["lyr_blob"]` in the Swift lane while Rust's twin
     // held.
     layers[layerIdx] = layer.withChildren(children)
-    // The Document rebuild is still a hand list, because `Document`'s stored
-    // properties are `let` and the only whole-document copy helper in the port
-    // (`withLayers`) is private to OpApply.swift. It forwards all EIGHT
-    // fields; the four it used to omit — `symbols`, `documentSetup`,
-    // `printPreferences` (and the layer id above) — are exactly the T4 class.
-    // The durable fix is an internal `Document.withLayers`, which belongs in
-    // the Document file rather than here.
-    return Document(
-        layers: layers, symbols: doc.symbols,
-        selectedLayer: doc.selectedLayer,
-        selection: doc.selection, artboards: doc.artboards,
-        artboardOptions: doc.artboardOptions,
-        documentSetup: doc.documentSetup,
-        printPreferences: doc.printPreferences)
+    // The document is a container too, and this rebuild reaches through it. The
+    // hand list that stood here forwarded all eight fields CORRECTLY — and that
+    // is the pathology, not the cure: a hand list is right until someone adds a
+    // ninth field. `Document.replacing` (Document.swift) is the port's
+    // preserving whole-document copy; there is no reason for a second body.
+    return doc.replacing(layers: layers)
 }
 
 // MARK: - Path validity
@@ -4062,11 +4044,14 @@ private func artboardTranslateElement(
     if dx == 0 && dy == 0 { return elem }
     switch elem {
     case .group(let g):
-        return .group(Group(
-            children: g.children.map {
-                artboardTranslateElement($0, dx: dx, dy: dy)
-            },
-            opacity: g.opacity, transform: g.transform, locked: g.locked))
+        // T4: translating a group speaks to its children's geometry and to
+        // nothing of the group's own. The four-field literals that stood here
+        // dropped `id`, `name`, `mask`, `blendMode`, `visibility`,
+        // `isolatedBlending` and `knockoutGroup` — so dragging an artboard
+        // un-hid every hidden group inside it and orphaned every reference to
+        // one. Rust's `translate_element` spreads `..e.clone()` on both arms.
+        return .group(g.withChildren(
+            g.children.map { artboardTranslateElement($0, dx: dx, dy: dy) }))
     case .layer(let l):
         return .layer(Layer(
             name: l.name,
@@ -4125,10 +4110,8 @@ private func artboardTranslateFromPreview(
                 }
                 return child
             }
-            return Layer(
-                name: layer.name, children: newChildren,
-                opacity: layer.opacity, transform: layer.transform,
-                locked: layer.locked)
+            // T4: the layer is a bystander this rebuild only passes through.
+            return layer.withChildren(newChildren)
         }
     }
 
@@ -4184,12 +4167,8 @@ private func artboardTranslateFromPreview(
 
     // PREVIEW (live-drag) re-apply off the restored snapshot: non-undoable.
     // Mirrors Rust artboard_translate_from_preview's set_document_unbracketed.
-    model.setDocumentUnbracketed(Document(
-        layers: newLayers,
-        selectedLayer: doc.selectedLayer,
-        selection: doc.selection,
-        artboards: newAbs,
-        artboardOptions: doc.artboardOptions), intent: .liveDrag)
+    model.setDocumentUnbracketed(
+        doc.replacing(layers: newLayers, artboards: newAbs), intent: .liveDrag)
 }
 
 /// doc.artboard.move_apply implementation per ARTBOARD_TOOL.md
@@ -4477,6 +4456,8 @@ private func artboardDuplicateInit(model: Model, store: StateStore) {
                 appended += 1
             }
         }
+        // T4: the layer is a bystander of the duplicate — it gains a child and
+        // keeps everything else, `id` included.
         newLayers.append(Layer(
             name: layer.name, children: newChildren,
             opacity: layer.opacity, transform: layer.transform,

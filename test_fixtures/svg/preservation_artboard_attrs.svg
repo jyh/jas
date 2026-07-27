@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Attribute-rich ARTBOARD-TOOL setup for the PRESERVATION corpus.
+     Prose lives in each vector's doc field in preservation_invariants.json;
+     KEEP THIS COMMENT SHORT AND PLAIN. Both hand-rolled SVG readers mis-parse
+     a long top-level comment and silently return an EMPTY document, which
+     would make every vector below vacuous instead of red. Measured triggers:
+     Rust drops the document on an equals sign anywhere in this comment; Swift
+     drops it on a double quote.
+     lyr_ab holds grp_ab (which holds r_in) and r_solo. Every element the
+     artboard tool translates sits inside the single page, so the containment
+     rule moves them all; the GROUP is the container the translate helper
+     rebuilds on its way to the rect, which is what makes it a T4 witness.
+     sym_ab sits in defs, so it lands in doc.symbols rather than a layer: it is
+     the bystander that catches a whole-document rebuild dropping the symbol
+     store, which no layer-resident element can see. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" viewBox="0 0 816 1056" width="816" height="1056">
+  <sodipodi:namedview id="namedview1">
+    <inkscape:page x="0" y="0" width="816" height="1056" id="pabprs" inkscape:label="Artboard 1"/>
+  </sodipodi:namedview>
+  <defs>
+    <rect id="sym_ab" inkscape:label="Master Rect" x="0" y="0" width="8" height="8" fill="rgb(0,0,255)" stroke="none"/>
+  </defs>
+  <g inkscape:groupmode="layer" inkscape:label="Artboard Layer" id="lyr_ab" opacity="0.9">
+    <g inkscape:label="Inner Group" id="grp_ab" opacity="0.8">
+      <rect id="r_in" inkscape:label="Inner Rect" x="40" y="40" width="40" height="40" fill="rgb(255,0,0)" stroke="none"/>
+    </g>
+    <rect id="r_solo" inkscape:label="Solo Rect" x="160" y="160" width="20" height="20" fill="rgb(0,255,0)" stroke="none"/>
+  </g>
+</svg>
