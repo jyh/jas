@@ -29,17 +29,57 @@ pub fn build_gesture_tool(tool_id: &str) -> crate::tools::yaml_tool::YamlTool {
         .unwrap_or_else(|| panic!("tool spec '{}' failed to parse", tool_id))
 }
 
+/// Seed the per-tab VIEW STATE from a corpus case's optional `view`
+/// block: `{zoom_level, view_offset_x, view_offset_y, viewport_w,
+/// viewport_h}`, any subset, each key defaulting to whatever
+/// `Model::new` produced (the identity view at the layout's default
+/// viewport).
+///
+/// Why this exists (VIEWSEED, CORPUS_CENSUS.md §5.7): every corpus
+/// runner in both ports built its Model at the IDENTITY view, and at
+/// the identity view screen↔document conversion is algebraically the
+/// identity — `(x - 0) / 1 == x`. So the multiply/divide-by-zoom half
+/// of every tool, and every `doc.zoom.*` effect that reads the live
+/// view, was untestable *by construction*, which is how three
+/// coordinate-space bugs (path eraser, type-on-path, paintbrush) all
+/// reached the live app before anyone saw them. A case that names a
+/// `view` block runs off the identity and the conversion has to be
+/// right.
+///
+/// Cases without the block are unaffected, so the seed is additive to
+/// every existing fixture. Mirrors Swift's `seedCaseView`.
+fn seed_case_view(model: &mut Model, tc: &Value) {
+    let Some(view) = tc.get("view").and_then(|v| v.as_object()) else { return };
+    let num = |k: &str| view.get(k).and_then(|v| v.as_f64());
+    if let Some(v) = num("zoom_level") { model.zoom_level = v; }
+    if let Some(v) = num("view_offset_x") { model.view_offset_x = v; }
+    if let Some(v) = num("view_offset_y") { model.view_offset_y = v; }
+    if let Some(v) = num("viewport_w") { model.viewport_w = v; }
+    if let Some(v) = num("viewport_h") { model.viewport_h = v; }
+}
+
+/// The view triple a case's `expected_view` block is compared against:
+/// `(zoom_level, view_offset_x, view_offset_y)`. Read back off the
+/// Model the run produced — view state is NOT part of the document, so
+/// no document golden can see it.
+pub fn model_view_triple(model: &Model) -> (f64, f64, f64) {
+    (model.zoom_level, model.view_offset_x, model.view_offset_y)
+}
+
 /// Run a gesture case against `setup_svg` CONTENT and return the
-/// resulting Model. Loads the setup into a Model under the default
-/// identity view, builds the tool from the workspace spec, activates
-/// it, then dispatches each event through the CanvasTool seam — the
-/// corpus gesture runner, verbatim (`cross_language_test.rs` calls
-/// this after resolving the fixture's `setup_svg` file reference).
+/// resulting Model. Loads the setup into a Model (identity view unless
+/// the case names a `view` block — see [`seed_case_view`]), builds the
+/// tool from the workspace spec, activates it, then dispatches each
+/// event through the CanvasTool seam — the corpus gesture runner,
+/// verbatim (`cross_language_test.rs` calls this after resolving the
+/// fixture's `setup_svg` file reference).
 pub fn run_gesture_case(tc: &Value, setup_svg: &str) -> Model {
     use crate::tools::tool::CanvasTool;
 
     let doc = svg_to_document(setup_svg);
     let mut model = Model::new(doc, None);
+    // Before `activate`: a tool's on_enter may snapshot the view.
+    seed_case_view(&mut model, tc);
 
     let tool_id = tc["tool"].as_str().unwrap();
     let mut tool = build_gesture_tool(tool_id);
@@ -102,6 +142,9 @@ pub(crate) fn run_action_case(
     // inherits state from a previous document (the test runner's
     // `set_document_for_test` is `#[cfg(test)]`-only by design).
     st.tabs[st.active_tab] = TabState::with_model(Model::new(doc, None));
+    // Optional non-identity view seed (VIEWSEED) — must precede the
+    // dispatch loop, since a view action reads the live zoom/pan.
+    seed_case_view(&mut st.tabs[st.active_tab].model, tc);
 
     // Install a deterministic id source so creation verbs (new_artboard,
     // new_symbol, …) mint a FIXED id ("01234567" for the first 8 draws),

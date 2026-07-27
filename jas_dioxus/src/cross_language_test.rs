@@ -1362,10 +1362,57 @@ mod tests {
         }
     }
 
+    /// OPTIONAL third assertion: `expected_view`.
+    ///
+    /// View state — `zoom_level`, `view_offset_x`, `view_offset_y` — is
+    /// NOT document content, so `document_to_test_json` cannot see it and
+    /// no golden in this corpus constrained it before VIEWSEED. Combined
+    /// with the case's `view` seed this is the whole point of the
+    /// view-state family: run the action off the identity view and pin
+    /// the triple the view effects produce.
+    ///
+    /// The comparison is EXACT (`==` on f64). Both ports evaluate the same
+    /// IEEE-754 double operations on the same inputs, and the fixture
+    /// literals are shortest-round-trip forms, so any difference is a real
+    /// divergence and not a formatting artifact. Cases without the block
+    /// are unaffected. Mirrors Swift's `assertActionView`.
+    fn assert_action_view(
+        tc: &serde_json::Value, st: &crate::workspace::app_state::AppState,
+    ) {
+        let Some(expected) = tc.get("expected_view").and_then(|v| v.as_object())
+        else { return };
+        let name = tc["name"].as_str().unwrap();
+        let model = &st.tabs[st.active_tab].model;
+        let (zoom, offx, offy) = crate::recorder::replay::model_view_triple(model);
+        for (key, want) in expected {
+            let want = want.as_f64().unwrap_or_else(|| {
+                panic!("Action test '{}': expected_view.{} is not a number", name, key)
+            });
+            let got = match key.as_str() {
+                "zoom_level" => zoom,
+                "view_offset_x" => offx,
+                "view_offset_y" => offy,
+                other => panic!(
+                    "Action test '{}': expected_view names {:?}, which is not part \
+                     of the view triple (zoom_level / view_offset_x / view_offset_y)",
+                    name, other,
+                ),
+            };
+            assert_eq!(
+                got, want,
+                "Action test '{}': view state {} is {} but the corpus pins {}. \
+                 The view transform decides which region of the document the \
+                 user is looking at and how every screen coordinate converts, \
+                 so a wrong value here is a canvas that shows the wrong thing.",
+                name, key, got, want,
+            );
+        }
+    }
+
     /// Mirror of `assert_gesture_test`: replay the action sequence and
     /// compare the canonical document JSON against the pinned golden,
     /// dumping EXPECTED/ACTUAL on mismatch. Then apply the case's optional
-    /// `expected_panel_state` block.
+    /// `expected_panel_state` and `expected_view` blocks.
     fn assert_action_test(tc: &serde_json::Value) {
         let name = tc["name"].as_str().unwrap();
         let expected_file = tc["expected_json"].as_str().unwrap();
@@ -1382,6 +1429,7 @@ mod tests {
             panic!("Action test '{}' failed: canonical JSON mismatch", name);
         }
         assert_action_panel_state(tc, &st);
+        assert_action_view(tc, &st);
     }
 
     #[test]

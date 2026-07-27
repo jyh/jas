@@ -3253,6 +3253,78 @@ private func actionModelFromSvg(_ setupSvg: String) -> Model {
     return Model(document: svgToDocument(svg))
 }
 
+/// Seed the per-tab VIEW STATE from a corpus case's optional `view` block:
+/// `{zoom_level, view_offset_x, view_offset_y, viewport_w, viewport_h}`, any
+/// subset, each key defaulting to whatever `Model.init` produced (the identity
+/// view at the layout's default viewport).
+///
+/// Why this exists (VIEWSEED, CORPUS_CENSUS.md §5.7): every corpus runner in
+/// both ports built its Model at the IDENTITY view, and at the identity view
+/// screen<->document conversion is algebraically the identity — `(x - 0) / 1 ==
+/// x`. So the multiply/divide-by-zoom half of every tool, and every
+/// `doc.zoom.*` effect that reads the live view, was untestable *by
+/// construction*, which is how three coordinate-space bugs (path eraser,
+/// type-on-path, paintbrush) all reached the live app before anyone saw them. A
+/// case that names a `view` block runs off the identity and the conversion has
+/// to be right.
+///
+/// Cases without the block are unaffected, so the seed is additive to every
+/// existing fixture. Mirrors Rust's `seed_case_view`.
+private func seedCaseView(_ model: Model, _ tc: [String: Any]) {
+    guard let view = tc["view"] as? [String: Any] else { return }
+    func num(_ key: String) -> Double? { (view[key] as? NSNumber)?.doubleValue }
+    if let v = num("zoom_level") { model.zoomLevel = v }
+    if let v = num("view_offset_x") { model.viewOffsetX = v }
+    if let v = num("view_offset_y") { model.viewOffsetY = v }
+    if let v = num("viewport_w") { model.viewportW = v }
+    if let v = num("viewport_h") { model.viewportH = v }
+}
+
+/// OPTIONAL third assertion: `expected_view`.
+///
+/// View state — `zoomLevel`, `viewOffsetX`, `viewOffsetY` — is NOT document
+/// content, so `documentToTestJson` cannot see it and no golden in this corpus
+/// constrained it before VIEWSEED. Combined with the case's `view` seed this is
+/// the whole point of the view-state family: run the action off the identity
+/// view and pin the triple the view effects produce.
+///
+/// The comparison is EXACT (`==` on Double). Both ports evaluate the same
+/// IEEE-754 double operations on the same inputs, and the fixture literals are
+/// shortest-round-trip forms, so any difference is a real divergence and not a
+/// formatting artifact. Cases without the block are unaffected. Mirrors Rust's
+/// `assert_action_view`.
+private func assertActionView(_ tc: [String: Any], _ model: Model) {
+    guard let expected = tc["expected_view"] as? [String: Any] else { return }
+    let name = tc["name"] as! String
+    for (key, wantRaw) in expected {
+        guard let want = (wantRaw as? NSNumber)?.doubleValue else {
+            Issue.record("Action test '\(name)': expected_view.\(key) is not a number")
+            continue
+        }
+        let got: Double
+        switch key {
+        case "zoom_level": got = model.zoomLevel
+        case "view_offset_x": got = model.viewOffsetX
+        case "view_offset_y": got = model.viewOffsetY
+        default:
+            Issue.record("""
+                Action test '\(name)': expected_view names '\(key)', which is not \
+                part of the view triple (zoom_level / view_offset_x / view_offset_y)
+                """)
+            continue
+        }
+        #expect(
+            got == want,
+            """
+            Action test '\(name)': view state \(key) is \(got) but the corpus \
+            pins \(want). The view transform decides which region of the \
+            document the user is looking at and how every screen coordinate \
+            converts, so a wrong value here is a canvas that shows the wrong thing.
+            """
+        )
+    }
+}
+
 /// Run an action fixture and return the resulting Model. Loads the setup SVG,
 /// then dispatches each `actions[i]` through the REAL
 /// `LayersPanel.dispatchYamlAction` (the same generic dispatcher the UI menu
@@ -3261,6 +3333,9 @@ private func actionModelFromSvg(_ setupSvg: String) -> Model {
 private func runActionModel(_ tc: [String: Any]) -> Model {
     let setupSvg = tc["setup_svg"] as! String
     let model = actionModelFromSvg(setupSvg)
+    // Optional non-identity view seed (VIEWSEED) — must precede the dispatch
+    // loop, since a view action reads the live zoom/pan.
+    seedCaseView(model, tc)
 
     // Install the deterministic id source for the dispatch below: a per-char
     // counter (0,1,2,…) so the FIRST minted id is "01234567" (each char =
@@ -3382,6 +3457,7 @@ private func assertActionTest(_ tc: [String: Any]) {
     }
     #expect(actual == expected, "Action test '\(name)' failed: canonical JSON mismatch")
     assertActionPanelState(tc, model)
+    assertActionView(tc, model)
 }
 
 /// Inc-2 of the shared action-fixture corpus: replay each fixture's action
