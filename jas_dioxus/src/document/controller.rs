@@ -821,15 +821,29 @@ impl Controller {
     }
 
     /// Move all selected control points by (dx, dy).
+    ///
+    /// A corner drag arrives here once per mousemove sample with an
+    /// INCREMENTAL delta (workspace/tools/partial_selection.yaml), so a
+    /// sample that PROMOTES the element — Rect -> Polygon — must carry the
+    /// control-point selection across the promotion, or the next sample
+    /// would address indices that no longer mean what they did. See
+    /// `remap_cp_selection_after_move`.
     pub fn move_selection(model: &mut Model, dx: f64, dy: f64) {
+        use crate::geometry::element::remap_cp_selection_after_move;
         let doc = model.document().clone();
         let mut new_doc = doc.clone();
+        let mut new_selection: Selection = Vec::new();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
                 let new_elem = move_control_points(elem, &es.kind, dx, dy);
+                let kind = remap_cp_selection_after_move(elem, &new_elem, &es.kind);
                 new_doc = new_doc.replace_element(&es.path, new_elem);
+                new_selection.push(ElementSelection { path: es.path.clone(), kind });
+            } else {
+                new_selection.push(es.clone());
             }
         }
+        new_doc.selection = new_selection;
         model.edit_document(new_doc);
     }
 

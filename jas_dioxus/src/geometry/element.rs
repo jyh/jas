@@ -2177,6 +2177,44 @@ pub fn rounded_rect_corner_runs(
     })
 }
 
+/// Remap a control-point selection across a `move_control_points` call that
+/// changed the element's REPRESENTATION.
+///
+/// A corner drag is a MULTI-SAMPLE gesture: `doc.translate_selection` feeds an
+/// incremental delta per mousemove against the LIVE document
+/// (workspace/tools/partial_selection.yaml), so the promotion happens on the
+/// first sample and every later sample lands on the promoted element. Rect ->
+/// Polygon used to emit four points, so a corner index survived by accident.
+/// Once the rounding flattens into arc runs it does not: corner `i` becomes a
+/// RUN of indices, and without this remap the second sample would drag a
+/// single arc point and shred the corner.
+///
+/// Returns `kind` unchanged for every other transition — this is a remap for
+/// the one promotion that changes the control-point count, not a general
+/// inference from geometry.
+pub fn remap_cp_selection_after_move(
+    before: &Element,
+    after: &Element,
+    kind: &SelectionKind,
+) -> SelectionKind {
+    let (Element::Rect(r), Element::Polygon(_)) = (before, after) else {
+        return kind.clone();
+    };
+    let SelectionKind::Partial(_) = kind else {
+        return kind.clone();
+    };
+    let runs = rounded_rect_corner_runs(r.x, r.y, r.width, r.height, r.rx, r.ry);
+    let mut out: Vec<usize> = Vec::new();
+    let mut base = 0usize;
+    for (i, run) in runs.iter().enumerate() {
+        if kind.contains(i) {
+            out.extend(base..base + run.len());
+        }
+        base += run.len();
+    }
+    SelectionKind::Partial(crate::document::document::SortedCps::from_iter(out))
+}
+
 /// Return a new element with the specified control points moved by (dx, dy).
 ///
 /// `kind == SelectionKind::All` translates the whole element in-place
@@ -2234,26 +2272,40 @@ pub fn move_control_points(
                 new.y += dy;
                 Element::Rect(new)
             } else {
-                // Convert to polygon when individual corners are moved
-                let mut pts = vec![
-                    (e.x, e.y),
-                    (e.x + e.width, e.y),
-                    (e.x + e.width, e.y + e.height),
-                    (e.x, e.y + e.height),
-                ];
-                for i in 0..4 {
-                    if kind.contains(i) {
-                        pts[i].0 += dx;
-                        pts[i].1 += dy;
+                // Convert to polygon when individual corners are moved.
+                //
+                // RATIFIED ANSWER (3) of the preservation-law freeze
+                // (transcripts/EDIT_SEMANTICS_FREEZE.md §8, JYH 2026-07-27):
+                // `rx`/`ry` have NO counterpart on Polygon (T2 shape 4), and
+                // the ruling is to FLATTEN the rounding into the emitted
+                // points — WYSIWYG at promotion, rather than the rounding
+                // silently evaporating. `rounded_rect_corner_runs` returns
+                // one point run per corner in control-point order, so a
+                // dragged corner translates its WHOLE arc; a square rect
+                // yields four one-point runs, i.e. exactly the four corners
+                // this arm has always emitted.
+                let runs = rounded_rect_corner_runs(
+                    e.x, e.y, e.width, e.height, e.rx, e.ry,
+                );
+                let mut pts: Vec<(f64, f64)> = Vec::new();
+                for (i, run) in runs.iter().enumerate() {
+                    let moved = kind.contains(i);
+                    for &(px, py) in run {
+                        pts.push(if moved { (px + dx, py + dy) } else { (px, py) });
                     }
                 }
+                // §3.1 under T1's REPRESENTATION term: every field with a
+                // counterpart in the output kind is preserved. Both gradients
+                // have one, and hard-coding `None` here was the Rust-ward
+                // divergence the freeze names — a gradient-filled rounded
+                // rect lost both on a corner drag.
                 Element::Polygon(PolygonElem {
                     points: pts,
                     fill: e.fill,
                     stroke: e.stroke,
                     common: e.common.clone(),
-                                    fill_gradient: None,
-                    stroke_gradient: None,
+                    fill_gradient: e.fill_gradient.clone(),
+                    stroke_gradient: e.stroke_gradient.clone(),
                 })
             }
         }
@@ -4922,20 +4974,24 @@ mod rect_promotion_preservation_tests {
         assert!(p.points.len() > 4,
                 "the rounding must survive as points, not evaporate; got {} \
                  points", p.points.len());
-        // No emitted point may sit in a corner square the rounding cut away.
-        // Top-left corner box is [0,20]x[0,10]; the arc runs strictly inside
-        // its quarter-ellipse, so (1.0, 1.0) — deep in the cut corner — must
-        // be outside the emitted outline's point cloud by a wide margin.
-        let in_tl_notch = p.points.iter().any(|&(x, y)| {
-            x < 20.0 && y < 10.0 && {
-                let nx = (x - 20.0) / 20.0;
-                let ny = (y - 10.0) / 10.0;
-                nx * nx + ny * ny > 1.02
-            }
-        });
-        assert!(!in_tl_notch,
-                "an emitted point fell OUTSIDE the rounded corner's arc — the \
-                 promotion is drawing a square corner the artist did not see");
+        // The square corner is GONE and the arc's feet — where the rounding
+        // meets the edges — are present, at every corner.
+        for sharp in [(0.0, 0.0), (100.0, 0.0), (100.0, 60.0), (0.0, 60.0)] {
+            assert!(!p.points.contains(&sharp),
+                    "the square corner {sharp:?} was emitted — the promotion \
+                     is drawing a corner the artist did not see");
+        }
+        for foot in [(0.0, 10.0), (20.0, 0.0), (80.0, 0.0), (100.0, 10.0),
+                     (100.0, 50.0), (80.0, 60.0), (20.0, 60.0), (0.0, 50.0)] {
+            assert!(p.points.contains(&foot),
+                    "the rounding's foot at {foot:?} is missing from the \
+                     emitted outline");
+        }
+        // Every emitted point stays inside the rect the artist drew.
+        assert!(p.points.iter().all(|&(x, y)|
+                    (-1e-9..=100.0 + 1e-9).contains(&x)
+                    && (-1e-9..=60.0 + 1e-9).contains(&y)),
+                "the flatten pushed a point outside the rect");
         // The flattened outline still spans the full rect.
         let min_x = p.points.iter().map(|q| q.0).fold(f64::MAX, f64::min);
         let max_x = p.points.iter().map(|q| q.0).fold(f64::MIN, f64::max);
