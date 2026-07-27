@@ -1,4 +1,48 @@
 [
+  {"name": "leading_close_alone", "function": "flatten",
+   "_comment": "S-4, the bare case: a path that is nothing but Z. A ClosePath with no established point is a NO-OP (JYH, fleet council 2026-07-27: the artist never means a close-before-anything), so the flattener emits NOTHING. Discriminates: an unguarded close arm emits the uninitialised subpath start (0,0) and returns 1 point.",
+   "element": {"type": "path", "d": [
+     {"cmd": "Z"}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": []},
+
+  {"name": "leading_close_then_lineto", "function": "flatten",
+   "_comment": "S-4 with a following segment, the probe that first exposed the divergence. The leading Z contributes nothing, so the L is the only point. Discriminates: an unguarded close arm returns [[0,0],[5,5]] -- a phantom leading vertex at the origin, which is a visible extra stroke segment, not a rounding difference.",
+   "element": {"type": "path", "d": [
+     {"cmd": "Z"}, {"cmd": "L", "x": 5.0, "y": 5.0}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [[5,5]]},
+
+  {"name": "leading_close_then_closed_subpath", "function": "flatten",
+   "_comment": "S-4 followed by a REAL subpath that closes normally: the leading Z is a no-op, the trailing Z still closes to the MoveTo (4,1). The MoveTo is deliberately NOT the origin so the phantom point is distinguishable by value as well as by count. Discriminates: an unguarded close arm returns 5 points led by [0,0].",
+   "element": {"type": "path", "d": [
+     {"cmd": "Z"}, {"cmd": "M", "x": 4.0, "y": 1.0}, {"cmd": "L", "x": 14.0, "y": 1.0},
+     {"cmd": "L", "x": 14.0, "y": 11.0}, {"cmd": "Z"}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [[4,1],[14,1],[14,11],[4,1]]},
+
+  {"name": "leading_close_multi_subpath", "function": "flatten",
+   "_comment": "S-4 in front of a TWO-subpath path: the leading Z is a no-op and each real Z still closes to its OWN subpath start (3,2) then (23,2), so this vector also re-pins two_disjoint_squares' subpath-start bookkeeping under a leading close. Discriminates: an unguarded close arm returns 7 points led by [0,0].",
+   "element": {"type": "path", "d": [
+     {"cmd": "Z"}, {"cmd": "M", "x": 3.0, "y": 2.0}, {"cmd": "L", "x": 13.0, "y": 2.0}, {"cmd": "Z"},
+     {"cmd": "M", "x": 23.0, "y": 2.0}, {"cmd": "L", "x": 33.0, "y": 2.0}, {"cmd": "Z"}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [[3,2],[13,2],[3,2],[23,2],[33,2],[23,2]]},
+
+  {"name": "redundant_trailing_close", "function": "flatten",
+   "_comment": "The SCOPE BOUNDARY of S-4, and this vector is NOT a discriminator for the leading-Z bug -- both ports already return these 4 points. The ruling is worded on a close appearing BEFORE any point is established; after M,L a point IS established, so the second Z is NOT a no-op and still emits the subpath start. Nothing else decides it: the reference interpreter implements no path flattener, so hierarchy tier 2 has no opinion. What this vector DOES discriminate is an over-wide fix -- guarding the close on last-point-inequality instead of on emptiness drops the 4th point and returns 3.",
+   "element": {"type": "path", "d": [
+     {"cmd": "M", "x": 2.0, "y": 3.0}, {"cmd": "L", "x": 12.0, "y": 3.0}, {"cmd": "Z"}, {"cmd": "Z"}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [[2,3],[12,3],[2,3],[2,3]]},
+
+  {"name": "moveto_then_close", "function": "flatten",
+   "_comment": "The other side of the guard's boundary, and likewise NOT a discriminator for the leading-Z bug -- both ports already return these 2 points. One MoveTo HAS established a point, so the following Z is not a leading close and does emit. It pins that the guard is emptiness-based: a fix that instead required two points before closing would return 1.",
+   "element": {"type": "path", "d": [
+     {"cmd": "M", "x": 6.0, "y": 7.0}, {"cmd": "Z"}
+   ], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "expected": [[6,7],[6,7]]},
+
   {"name": "single_square_close", "function": "flatten",
    "_comment": "one subpath: Z closes back to the MoveTo. All apps always agreed here.",
    "element": {"type": "path", "d": [
