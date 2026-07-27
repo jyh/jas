@@ -1,0 +1,186 @@
+{
+  "_doc": [
+    "number_input COMMIT rule: the text a user typed into a `number_input`",
+    "widget -> the value written to state, or null to leave state UNCHANGED.",
+    "",
+    "Two halves, with two different sources of truth:",
+    "",
+    "1. ACCEPTANCE + parse. A string is a number iff it matches the live",
+    "   reference's numeric-string grammar, `^-?\\d+(\\.\\d+)?$`",
+    "   (workspace_interpreter/schema.py:22, `_NUMBER_STR_RE`, applied by",
+    "   `coerce_value` for a `type: number` field). Every `expected` below that",
+    "   is null, and every accepted parse, was derived by RUNNING that",
+    "   reference coercion on the `text` field -- not by hand. A rejected",
+    "   string writes NOTHING: the reference appends a `type_mismatch`",
+    "   diagnostic and `continue`s past the write (effects.py:198-201).",
+    "2. CLAMPING. An accepted value is clamped to the bounds the widget's YAML",
+    "   DECLARES. An UNDECLARED bound does not clamp -- Character's Tracking",
+    "   field is signed and declares neither. This half has no reference",
+    "   implementation (the reference has no widget commit path); it is the",
+    "   rule both active ports already carried, see the commit `R9: clamp a",
+    "   dialog number_input's commit to its declared bounds`.",
+    "",
+    "Vectors omit `min` / `max` to mean UNDECLARED. Rust's",
+    "`number_input_commit` (interpreter/widget_commit.rs) and Swift's",
+    "`numberInputCommit` (Interpreter/WidgetCommit.swift) are the two",
+    "implementations; run port-against-port by",
+    "`scripts/cross_language_algorithms.py --algo number_commit`."
+  ],
+  "vectors": [
+    {
+      "name": "integer_within_declared_bounds",
+      "text": "12",
+      "min": 0,
+      "max": 100,
+      "expected": 12
+    },
+    {
+      "name": "decimal_commits_verbatim",
+      "text": "12.5",
+      "min": 0,
+      "max": 100,
+      "expected": 12.5
+    },
+    {
+      "name": "decimal_trailing_zero",
+      "text": "12.50",
+      "min": 0,
+      "max": 100,
+      "expected": 12.5
+    },
+    {
+      "name": "small_fraction_undeclared_bounds",
+      "text": "0.0001",
+      "expected": 0.0001
+    },
+    {
+      "name": "negative_with_undeclared_min",
+      "text": "-50",
+      "expected": -50
+    },
+    {
+      "name": "negative_clamped_to_declared_min",
+      "text": "-50",
+      "min": 0,
+      "max": 100,
+      "expected": 0
+    },
+    {
+      "name": "above_declared_max",
+      "text": "150",
+      "min": 0,
+      "max": 100,
+      "expected": 100
+    },
+    {
+      "name": "decimal_clamped_to_declared_max",
+      "text": "100.5",
+      "min": 0,
+      "max": 100,
+      "expected": 100
+    },
+    {
+      "name": "negative_decimal_within_signed_bounds",
+      "text": "-2.25",
+      "min": -10,
+      "max": 10,
+      "expected": -2.25
+    },
+    {
+      "name": "large_integer_undeclared_max",
+      "text": "100000",
+      "expected": 100000
+    },
+    {
+      "name": "zero",
+      "text": "0",
+      "min": 0,
+      "max": 100,
+      "expected": 0
+    },
+    {
+      "name": "letters_rejected",
+      "text": "abc",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "empty_rejected",
+      "text": "",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "exponent_rejected",
+      "text": "1e10",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "leading_plus_rejected",
+      "text": "+5",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "trailing_dot_rejected",
+      "text": "12.",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "leading_dot_rejected",
+      "text": ".5",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "surrounding_space_rejected",
+      "text": " 12 ",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "nan_spelling_rejected",
+      "text": "NaN",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "inf_spelling_rejected",
+      "text": "inf",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "hex_float_spelling_rejected",
+      "text": "0x1p3",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "thousands_separator_rejected",
+      "text": "1,5",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    },
+    {
+      "name": "double_minus_rejected",
+      "text": "--5",
+      "min": 0,
+      "max": 100,
+      "expected": null
+    }
+  ]
+}

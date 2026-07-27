@@ -10,6 +10,7 @@ anchor position.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 
@@ -86,4 +87,8 @@ def close_hit(name: str, x: float, y: float, radius: float) -> bool:
     first_a = lst[0]
     dx = x - first_a.x
     dy = y - first_a.y
-    return (dx * dx + dy * dy) ** 0.5 <= radius
+    # math.hypot, not (dx*dx + dy*dy) ** 0.5: the naive form overflows to
+    # +inf on the intermediate square and would report a miss for a point
+    # that IS within radius. Matches the `hypot` expression builtin in
+    # expr_eval.py and Rust `dx.hypot(dy)`.
+    return math.hypot(dx, dy) <= radius

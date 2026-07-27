@@ -368,6 +368,14 @@ package func elementJson(_ elem: Element) -> String {
         let cmds = e.d.map { pathCommandJson($0) }
         o.raw("d", jsonArray(cmds))
         o.raw("fill", fillJson(e.fill))
+        // The carried rule is part of what a path MEANS, so a golden
+        // that omits it cannot see a port filling a hole
+        // (transcripts/BOOLEAN.md). Emitted only when it is not the
+        // `nonzero` default, per this file's identity-omission
+        // convention. Mirrors the Rust serializer key for key.
+        if e.fillRule != .nonzero {
+            o.str("fill_rule", "evenodd")
+        }
         o.raw("stroke", strokeJson(e.stroke))
     case .text(let e):
         o.str("type", "text")
@@ -783,6 +791,17 @@ private func parseTransform(_ v: Any?) -> Transform? {
                      d: parseF(d["d"]), e: parseF(d["e"]), f: parseF(d["f"]))
 }
 
+/// The test-JSON transform parser, reachable from the AlgorithmRoundtrip
+/// target so a fixture's `layer_transform` (the element_evaluated_bounds
+/// family's ancestor leg) goes through the SAME parser the element's own
+/// `transform` does. Distinctly named because widening this one to `package`
+/// made the call in OpApply.swift ambiguous: the module holds three other
+/// `parseTransform` declarations (private free functions in OpApply.swift and
+/// Svg.swift, and a private static one in WorkspaceIcon.swift).
+package func parseTestJsonTransform(_ v: Any?) -> Transform? {
+    parseTransform(v)
+}
+
 private func parseVisibility(_ v: Any?) -> Visibility {
     switch v as? String ?? "preview" {
     case "invisible": return .invisible
@@ -831,6 +850,32 @@ private func parsePoints(_ v: Any?) -> [(Double, Double)] {
     }
 }
 
+/// A Test-JSON tspan `id`: the number's value when that value is an id in the
+/// declared domain, else 0.
+///
+/// CROSS_LANGUAGE_TESTING.md's Tspan notes declare `id` a monotonic `u32`.
+/// Nothing in that file gives a meaning to a value outside the domain, so each
+/// one reads as 0 — the answer both ports already gave for a negative, missing
+/// or non-numeric id. Before risk R9 this port's `NSNumber.intValue` truncated a
+/// fraction to 3 and `UInt32(_:)` of a negative was a precondition failure.
+///
+/// jas_dioxus read this slot with `as_u64().unwrap_or(0) as u32` until the same
+/// corpus was written; that form parted the ports twice (`3.0` → 0 there and 3
+/// here, `4294967297` → 1 there and 0 here) and now spells the rule below. See
+/// `parse_tspan_id` in jas_dioxus/src/geometry/test_json.rs for why neither of
+/// those two answers survived, and
+/// `test_fixtures/algorithms/tspan_id_from_json.json` for the shared gate.
+func tspanIdFromJson(_ any: Any?) -> UInt32 {
+    // A JSON `true` is boxed as an NSNumber whose doubleValue is 1, so without
+    // `isBool` this read `"id": true` as the id 1 while jas_dioxus's `as_f64()`
+    // on a JSON bool is None and read 0. A boolean is not a number; it takes the
+    // same road as a string or a null.
+    guard let n = any as? NSNumber, !n.isBool else { return 0 }
+    let d = n.doubleValue
+    guard d >= 0, d <= 4_294_967_295, d == d.rounded(.towardZero) else { return 0 }
+    return UInt32(d)
+}
+
 /// Parse the canonical-JSON `tspans` array, or fall back to the
 /// legacy `content: String` shape and wrap it in a single default
 /// tspan. Keeps older fixtures readable during the migration.
@@ -851,7 +896,10 @@ private func parseTspan(_ d: [String: Any]) -> Tspan {
         decor = nil
     }
     return Tspan(
-        id: UInt32((d["id"] as? NSNumber)?.intValue ?? 0),
+        // tspanIdFromJson, not a bare cast: `UInt32(_:)` of a negative Int is a
+        // precondition failure here and the domain rule is shared with
+        // jas_dioxus's parse_tspan_id (risk R9).
+        id: tspanIdFromJson(d["id"]),
         content: d["content"] as? String ?? "",
         baselineShift: (d["baseline_shift"] as? NSNumber)?.doubleValue,
         dx: (d["dx"] as? NSNumber)?.doubleValue,
@@ -967,10 +1015,15 @@ package func parseElement(_ v: Any?) -> Element {
                                 opacity: opacity, transform: transform, locked: locked,
                                 visibility: visibility, name: name, id: id))
     case "path":
+        // Absent `fill_rule` means the `nonzero` default, matching the
+        // serializer's identity-omission convention.
+        let pathFillRule: FillRule =
+            (d["fill_rule"] as? String) == "evenodd" ? .evenodd : .nonzero
         return .path(Path(d: parsePathCommands(d["d"]),
                           fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                           opacity: opacity, transform: transform, locked: locked,
-                          visibility: visibility, name: name, id: id))
+                          visibility: visibility, name: name, id: id,
+                          fillRule: pathFillRule))
     case "text":
         let tspans = parseTspansOrLegacy(d)
         return .text(Text(x: parseF(d["x"]), y: parseF(d["y"]),

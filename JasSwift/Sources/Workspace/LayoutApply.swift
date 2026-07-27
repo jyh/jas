@@ -210,7 +210,11 @@ public func opTilePanes(setCanvasMaximized: Bool?,
 private func intOf(_ op: [String: Any], _ key: String) -> Int {
     if let n = op[key] as? Int { return n }
     if let n = op[key] as? NSNumber { return n.intValue }
-    if let d = op[key] as? Double { return Int(d) }
+    // saturatingInt (risk R9). Rust's twin is `as_u64().unwrap_or(0) as usize`,
+    // which yields 0 for a FRACTIONAL JSON number where this truncates; on
+    // Darwin the NSNumber branch above wins for every Double, so the difference
+    // is latent. Banked in transcripts/CORPUS_CENSUS.md §7.1.
+    if let d = op[key] as? Double { return saturatingInt(d) }
     return 0
 }
 

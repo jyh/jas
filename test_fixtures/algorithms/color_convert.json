@@ -1,0 +1,953 @@
+{
+  "_doc": "Colour-conversion conformance corpus: the four primitives every port's Color panel is built out of. rgb_to_hsb / hsb_to_rgb / rgb_to_cmyk pin the conversions themselves; panel_channels pins the ORDER the Color-panel overlay applies them in \u2014 quantise the float colour to three u8s FIRST, then derive hue / saturation / brightness / CMYK / hex from those integers. The order is the whole point: a reader that asks a float colour for its own h/s/b instead answers up to a whole unit differently, and since the panel's WRITE path recomputes the unedited channels from this same map, the divergence reaches the COMMITTED colour (COLORTIERS, 2026-07-26: Swift committed 664040 where Rust committed 664141).\nGoldens are derived from the spec formulas by scripts/derive_color_convert_goldens.py, not captured from a port -- run it to re-derive this file. Every rounding is half AWAY from zero, which is what Rust's f64::round and Swift's Double.rounded() do; the two half-boundary vectors (torgb_half_boundary_*) land on x.5 and both conventions agree there, so no golden encodes a rounding the ports do not share.",
+  "vectors": [
+    {
+      "name": "hsb_black",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "expected": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "hsb_white",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "expected": [
+        0,
+        0,
+        100
+      ]
+    },
+    {
+      "name": "hsb_red",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        255,
+        0,
+        0
+      ],
+      "expected": [
+        0,
+        100,
+        100
+      ]
+    },
+    {
+      "name": "hsb_green",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        0,
+        255,
+        0
+      ],
+      "expected": [
+        120,
+        100,
+        100
+      ]
+    },
+    {
+      "name": "hsb_blue",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        0,
+        0,
+        255
+      ],
+      "expected": [
+        240,
+        100,
+        100
+      ]
+    },
+    {
+      "name": "hsb_cyan",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        0,
+        255,
+        255
+      ],
+      "expected": [
+        180,
+        100,
+        100
+      ]
+    },
+    {
+      "name": "hsb_magenta",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        255,
+        0,
+        255
+      ],
+      "expected": [
+        300,
+        100,
+        100
+      ]
+    },
+    {
+      "name": "hsb_yellow",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        255,
+        255,
+        0
+      ],
+      "expected": [
+        60,
+        100,
+        100
+      ]
+    },
+    {
+      "name": "hsb_mid_gray",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        128,
+        128,
+        128
+      ],
+      "expected": [
+        0,
+        0,
+        50
+      ]
+    },
+    {
+      "name": "hsb_hue_wraps_to_zero",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        255,
+        0,
+        1
+      ],
+      "expected": [
+        0,
+        100,
+        100
+      ]
+    },
+    {
+      "name": "hsb_max_is_green_arm",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        64,
+        192,
+        128
+      ],
+      "expected": [
+        150,
+        67,
+        75
+      ]
+    },
+    {
+      "name": "hsb_max_is_blue_arm",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        64,
+        128,
+        192
+      ],
+      "expected": [
+        210,
+        67,
+        75
+      ]
+    },
+    {
+      "name": "hsb_near_black",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        7,
+        7,
+        9
+      ],
+      "expected": [
+        240,
+        22,
+        4
+      ]
+    },
+    {
+      "name": "hsb_one_count_red",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        1,
+        0,
+        0
+      ],
+      "expected": [
+        0,
+        100,
+        0
+      ]
+    },
+    {
+      "name": "hsb_divergence_664040",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        102,
+        64,
+        64
+      ],
+      "expected": [
+        0,
+        37,
+        40
+      ]
+    },
+    {
+      "name": "hsb_divergence_664141",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        102,
+        65,
+        65
+      ],
+      "expected": [
+        0,
+        36,
+        40
+      ]
+    },
+    {
+      "name": "hsb_divergence_cc9266",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        204,
+        146,
+        102
+      ],
+      "expected": [
+        26,
+        50,
+        80
+      ]
+    },
+    {
+      "name": "hsb_divergence_cc9166",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        204,
+        145,
+        102
+      ],
+      "expected": [
+        25,
+        50,
+        80
+      ]
+    },
+    {
+      "name": "hsb_roundtrip_probe",
+      "function": "rgb_to_hsb",
+      "rgb": [
+        128,
+        64,
+        192
+      ],
+      "expected": [
+        270,
+        67,
+        75
+      ]
+    },
+    {
+      "name": "torgb_red",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        0.0,
+        100.0,
+        100.0
+      ],
+      "expected": [
+        255,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "torgb_hue_360_is_red",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        360.0,
+        100.0,
+        100.0
+      ],
+      "expected": [
+        255,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "torgb_yellow_at_60",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        60.0,
+        100.0,
+        100.0
+      ],
+      "expected": [
+        255,
+        255,
+        0
+      ]
+    },
+    {
+      "name": "torgb_green_at_120",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        120.0,
+        100.0,
+        100.0
+      ],
+      "expected": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "name": "torgb_cyan_at_180",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        180.0,
+        100.0,
+        100.0
+      ],
+      "expected": [
+        0,
+        255,
+        255
+      ]
+    },
+    {
+      "name": "torgb_blue_at_240",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        240.0,
+        100.0,
+        100.0
+      ],
+      "expected": [
+        0,
+        0,
+        255
+      ]
+    },
+    {
+      "name": "torgb_magenta_at_300",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        300.0,
+        100.0,
+        100.0
+      ],
+      "expected": [
+        255,
+        0,
+        255
+      ]
+    },
+    {
+      "name": "torgb_black",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "expected": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "torgb_white",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        0.0,
+        0.0,
+        100.0
+      ],
+      "expected": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "name": "torgb_half_boundary_sat_50",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        0.0,
+        50.0,
+        100.0
+      ],
+      "expected": [
+        255,
+        128,
+        128
+      ]
+    },
+    {
+      "name": "torgb_half_boundary_bright_50",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        0.0,
+        0.0,
+        50.0
+      ],
+      "expected": [
+        128,
+        128,
+        128
+      ]
+    },
+    {
+      "name": "torgb_just_under_60",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        59.9,
+        100.0,
+        100.0
+      ],
+      "expected": [
+        255,
+        255,
+        0
+      ]
+    },
+    {
+      "name": "torgb_mid_hsb",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        200.0,
+        50.0,
+        80.0
+      ],
+      "expected": [
+        102,
+        170,
+        204
+      ]
+    },
+    {
+      "name": "torgb_low_bright",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        20.0,
+        75.0,
+        12.0
+      ],
+      "expected": [
+        31,
+        15,
+        8
+      ]
+    },
+    {
+      "name": "torgb_fractional_hue",
+      "function": "hsb_to_rgb",
+      "hsb": [
+        217.5,
+        37.0,
+        93.0
+      ],
+      "expected": [
+        149,
+        182,
+        237
+      ]
+    },
+    {
+      "name": "cmyk_black_special_case",
+      "function": "rgb_to_cmyk",
+      "rgb": [
+        0,
+        0,
+        0
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        100
+      ]
+    },
+    {
+      "name": "cmyk_white",
+      "function": "rgb_to_cmyk",
+      "rgb": [
+        255,
+        255,
+        255
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "cmyk_red",
+      "function": "rgb_to_cmyk",
+      "rgb": [
+        255,
+        0,
+        0
+      ],
+      "expected": [
+        0,
+        100,
+        100,
+        0
+      ]
+    },
+    {
+      "name": "cmyk_mid_gray",
+      "function": "rgb_to_cmyk",
+      "rgb": [
+        128,
+        128,
+        128
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        50
+      ]
+    },
+    {
+      "name": "cmyk_near_black",
+      "function": "rgb_to_cmyk",
+      "rgb": [
+        1,
+        1,
+        1
+      ],
+      "expected": [
+        0,
+        0,
+        0,
+        100
+      ]
+    },
+    {
+      "name": "cmyk_blue_only",
+      "function": "rgb_to_cmyk",
+      "rgb": [
+        0,
+        0,
+        1
+      ],
+      "expected": [
+        100,
+        100,
+        0,
+        100
+      ]
+    },
+    {
+      "name": "cmyk_664040",
+      "function": "rgb_to_cmyk",
+      "rgb": [
+        102,
+        64,
+        64
+      ],
+      "expected": [
+        0,
+        37,
+        37,
+        60
+      ]
+    },
+    {
+      "name": "cmyk_cc9266",
+      "function": "rgb_to_cmyk",
+      "rgb": [
+        204,
+        146,
+        102
+      ],
+      "expected": [
+        0,
+        28,
+        50,
+        20
+      ]
+    },
+    {
+      "name": "panel_exact_eighth_bit_values",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.4,
+        0.25,
+        0.25
+      ],
+      "expected": {
+        "r": 102,
+        "g": 64,
+        "bl": 64,
+        "h": 0,
+        "s": 37,
+        "b": 40,
+        "c": 0,
+        "m": 37,
+        "y": 37,
+        "k": 60,
+        "hex": "664040"
+      }
+    },
+    {
+      "name": "panel_float_sat_rounds_down",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.4013,
+        0.2504,
+        0.2504
+      ],
+      "expected": {
+        "r": 102,
+        "g": 64,
+        "bl": 64,
+        "h": 0,
+        "s": 37,
+        "b": 40,
+        "c": 0,
+        "m": 37,
+        "y": 37,
+        "k": 60,
+        "hex": "664040"
+      }
+    },
+    {
+      "name": "panel_float_sat_rounds_up",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.8,
+        0.5725,
+        0.4
+      ],
+      "expected": {
+        "r": 204,
+        "g": 146,
+        "bl": 102,
+        "h": 26,
+        "s": 50,
+        "b": 80,
+        "c": 0,
+        "m": 28,
+        "y": 50,
+        "k": 20,
+        "hex": "cc9266"
+      }
+    },
+    {
+      "name": "panel_colorbar_click_mid",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.2039215686,
+        0.6,
+        0.7529411765
+      ],
+      "expected": {
+        "r": 52,
+        "g": 153,
+        "bl": 192,
+        "h": 197,
+        "s": 73,
+        "b": 75,
+        "c": 73,
+        "m": 20,
+        "y": 0,
+        "k": 25,
+        "hex": "3499c0"
+      }
+    },
+    {
+      "name": "panel_colorbar_hue_fraction",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.7529411765,
+        0.5647058824,
+        0.4
+      ],
+      "expected": {
+        "r": 192,
+        "g": 144,
+        "bl": 102,
+        "h": 28,
+        "s": 47,
+        "b": 75,
+        "c": 0,
+        "m": 25,
+        "y": 47,
+        "k": 25,
+        "hex": "c09066"
+      }
+    },
+    {
+      "name": "panel_complement_of_0477cc",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.8,
+        0.568627451,
+        0.4
+      ],
+      "expected": {
+        "r": 204,
+        "g": 145,
+        "bl": 102,
+        "h": 25,
+        "s": 50,
+        "b": 80,
+        "c": 0,
+        "m": 29,
+        "y": 50,
+        "k": 20,
+        "hex": "cc9166"
+      }
+    },
+    {
+      "name": "panel_white",
+      "function": "panel_channels",
+      "float_rgb": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "expected": {
+        "r": 255,
+        "g": 255,
+        "bl": 255,
+        "h": 0,
+        "s": 0,
+        "b": 100,
+        "c": 0,
+        "m": 0,
+        "y": 0,
+        "k": 0,
+        "hex": "ffffff"
+      }
+    },
+    {
+      "name": "panel_black",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "expected": {
+        "r": 0,
+        "g": 0,
+        "bl": 0,
+        "h": 0,
+        "s": 0,
+        "b": 0,
+        "c": 0,
+        "m": 0,
+        "y": 0,
+        "k": 100,
+        "hex": "000000"
+      }
+    },
+    {
+      "name": "panel_saturating_over_one",
+      "function": "panel_channels",
+      "float_rgb": [
+        1.4,
+        -0.4,
+        0.5
+      ],
+      "expected": {
+        "r": 255,
+        "g": 0,
+        "bl": 128,
+        "h": 330,
+        "s": 100,
+        "b": 100,
+        "c": 0,
+        "m": 100,
+        "y": 50,
+        "k": 0,
+        "hex": "ff0080"
+      }
+    },
+    {
+      "name": "panel_half_pixel_up",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.5019607843,
+        0.2509803922,
+        0.7529411765
+      ],
+      "expected": {
+        "r": 128,
+        "g": 64,
+        "bl": 192,
+        "h": 270,
+        "s": 67,
+        "b": 75,
+        "c": 33,
+        "m": 67,
+        "y": 0,
+        "k": 25,
+        "hex": "8040c0"
+      }
+    },
+    {
+      "name": "panel_tiny_nonzero",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.001,
+        0.0,
+        0.0
+      ],
+      "expected": {
+        "r": 0,
+        "g": 0,
+        "bl": 0,
+        "h": 0,
+        "s": 0,
+        "b": 0,
+        "c": 0,
+        "m": 0,
+        "y": 0,
+        "k": 100,
+        "hex": "000000"
+      }
+    },
+    {
+      "name": "panel_grey_from_float",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.5,
+        0.5,
+        0.5
+      ],
+      "expected": {
+        "r": 128,
+        "g": 128,
+        "bl": 128,
+        "h": 0,
+        "s": 0,
+        "b": 50,
+        "c": 0,
+        "m": 0,
+        "y": 0,
+        "k": 50,
+        "hex": "808080"
+      }
+    },
+    {
+      "name": "panel_bar_px_1_1_hue_misses",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.99375,
+        0.963626953125,
+        0.9626953125000001
+      ],
+      "expected": {
+        "r": 253,
+        "g": 246,
+        "bl": 245,
+        "h": 7,
+        "s": 3,
+        "b": 99,
+        "c": 0,
+        "m": 3,
+        "y": 3,
+        "k": 1,
+        "hex": "fdf6f5"
+      }
+    },
+    {
+      "name": "panel_bar_px_0_4_sat_misses",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.975,
+        0.853125,
+        0.853125
+      ],
+      "expected": {
+        "r": 249,
+        "g": 218,
+        "bl": 218,
+        "h": 0,
+        "s": 12,
+        "b": 98,
+        "c": 0,
+        "m": 12,
+        "y": 12,
+        "k": 2,
+        "hex": "f9dada"
+      }
+    },
+    {
+      "name": "panel_bar_px_0_9_bright_misses",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.94375,
+        0.6783203125,
+        0.6783203125
+      ],
+      "expected": {
+        "r": 241,
+        "g": 173,
+        "bl": 173,
+        "h": 0,
+        "s": 28,
+        "b": 95,
+        "c": 0,
+        "m": 28,
+        "y": 28,
+        "k": 5,
+        "hex": "f1adad"
+      }
+    },
+    {
+      "name": "panel_bar_px_0_20_sat_and_bright_miss",
+      "function": "panel_channels",
+      "float_rgb": [
+        0.875,
+        0.328125,
+        0.328125
+      ],
+      "expected": {
+        "r": 223,
+        "g": 84,
+        "bl": 84,
+        "h": 0,
+        "s": 62,
+        "b": 87,
+        "c": 0,
+        "m": 62,
+        "y": 62,
+        "k": 13,
+        "hex": "df5454"
+      }
+    }
+  ]
+}

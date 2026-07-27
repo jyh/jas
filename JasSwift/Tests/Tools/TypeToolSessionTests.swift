@@ -121,7 +121,7 @@ private func makeCtx(_ model: Model = Model(),
 @Test func typeOnPathToolClickOnExistingPathStartsSession() {
     // Existing Path element that the curve hit-test resolves to.
     let p = Path(d: [.moveTo(0, 0), .lineTo(100, 0)],
-                 stroke: Stroke(color: Color(r: 0, g: 0, b: 0)))
+                 stroke: Stroke(color: Color(r: 0, g: 0, b: 0)), fillRule: .nonzero)
     let layer = Layer(name: "L", children: [.path(p)])
     let model = Model()
     model.setDocumentForTest(Document(layers: [layer]))

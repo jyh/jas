@@ -633,6 +633,18 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("boolean_ops.json")
 }
 
+/// `state.boolean_remove_redundant_points` defaults to FALSE
+/// (`workspace/state.yaml`), so the collinear-collapse pass does NOT run on a
+/// default boolean. Two rects overlapping in x with the same y-extent: the
+/// union's top and bottom edges each carry two vertices the sweep inserted at
+/// the operands' vertical edges, and the collapse pass would delete all four.
+/// The golden pins them PRESENT, so this fixture discriminates the default
+/// rather than being blind to it. It also pins BOOLEAN.md's UNION paint rule:
+/// the result carries the frontmost operand's fill and opacity (blue, 0.5).
+@Test func operationBooleanCollapseDefault() throws {
+    try runOperationFixture("boolean_collapse_default.json")
+}
+
 // MARK: - OP_LOG.md §9 verb33 unification fixtures (P1–P7)
 //
 // The shared test_fixtures/operations/* fixtures the Rust P1–P7 phases added are
@@ -1779,6 +1791,102 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Panel bind-VALUE (resolved snapshot) algorithm vectors
+
+@Test func testAlgorithmBindValues() throws {
+    let json = readFixture("algorithms/panel_bind_values.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    // Source of truth is the compiled bundle (workspace/workspace.json), which
+    // sits beside test_fixtures at the repo root. Mirror the widget-tree gate.
+    let bundlePath = (fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json")
+    let standardized = (bundlePath as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: standardized) else {
+        Issue.record("Failed to read workspace bundle: \(standardized)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let panels = bundle["panels"] as! [String: Any]
+
+    for tc in tests {
+        let name = tc["name"] as! String
+        let function = tc["function"] as! String
+        #expect(function == "bind_values", "Unknown function: \(function)")
+        let args = tc["args"] as! [String: Any]
+        let panelId = args["panel"] as! String
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
+        let expected = tc["expected"] as! [[String: Any]]
+
+        let panel = panels[panelId] as! [String: Any]
+        let actual = BindValues.bindValues(panel, ctx: ctx)
+
+        // Compare STRUCTURALLY: canonicalize both sides via JSONSerialization
+        // with sorted keys and compare bytes. Every field is a string or an
+        // int array, so there is no float formatting in the comparison.
+        let actualBytes = try JSONSerialization.data(
+            withJSONObject: actual, options: [.sortedKeys])
+        let expectedBytes = try JSONSerialization.data(
+            withJSONObject: expected, options: [.sortedKeys])
+        let expStr = String(data: expectedBytes, encoding: .utf8)!
+        let actStr = String(data: actualBytes, encoding: .utf8)!
+        #expect(actualBytes == expectedBytes,
+            "Bind values '\(name)' mismatch:\nexpected: \(expStr)\nactual:   \(actStr)")
+    }
+}
+
+/// The census 5.8 claim, in this port: two data scopes differing only in
+/// `panel.hex` — "664040" vs "664141", the colour divergence's byte pattern —
+/// are INDISTINGUISHABLE to `widgetTree` (key names only) and to `layoutPanel`
+/// (scalar count times a constant), and differ in exactly one `bindValues` row.
+/// That difference is the reason this family exists, so it is asserted here
+/// rather than only in the shared corpus.
+@Test func bindValuesSeparatesEqualLengthHexWhereTheOlderGatesCannot() throws {
+    let bundlePath = (fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json")
+    let standardized = (bundlePath as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: standardized) else {
+        Issue.record("Failed to read workspace bundle: \(standardized)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let panels = bundle["panels"] as! [String: Any]
+    let panel = panels["color_panel_content"] as! [String: Any]
+
+    func ctxOf(_ hex: String) -> [String: Any] {
+        ["state": ["fill_color": "#664040", "fill_on_top": true],
+         "panel": ["mode": "hsb", "hex": hex]]
+    }
+    func bytes(_ o: Any) throws -> Data {
+        try JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])
+    }
+    let a = ctxOf("664040")
+    let b = ctxOf("664141")
+
+    #expect(try bytes(WidgetTree.widgetTree(panel, ctx: a))
+            == bytes(WidgetTree.widgetTree(panel, ctx: b)),
+            "widgetTree is expected to be blind to bind VALUES")
+    #expect(try bytes(PanelLayout.layoutPanel(panel, availW: 228, availH: 600, ctx: a))
+            == bytes(PanelLayout.layoutPanel(panel, availW: 228, availH: 600, ctx: b)),
+            "layoutPanel is expected to be blind to equal-length text")
+
+    let rowsA = BindValues.bindValues(panel, ctx: a)
+    let rowsB = BindValues.bindValues(panel, ctx: b)
+    #expect(rowsA.count == rowsB.count)
+    var diff: [([String: Any], [String: Any])] = []
+    for (x, y) in zip(rowsA, rowsB) {
+        if try bytes(x) != bytes(y) { diff.append((x, y)) }
+    }
+    #expect(diff.count == 1, "expected exactly one differing row, got \(diff.count)")
+    if let (x, y) = diff.first {
+        #expect(x["id"] as? String == "cp_hex")
+        #expect(x["key"] as? String == "bind.value")
+        #expect(x["value"] as? String == "664040")
+        #expect(y["value"] as? String == "664141")
+    }
+}
+
 // MARK: - Menu enabled/checked state (chrome seam) algorithm vectors
 
 @Test func testAlgorithmMenuState() throws {
@@ -1857,12 +1965,191 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
             let polyRaw = tc["polygon"] as! [[Double]]
             let poly = polyRaw.map { ($0[0], $0[1]) }
             actual = pointInPolygon(args[0], args[1], poly)
+        // Element-level marquee / lasso: `element` is a test-JSON element,
+        // `args` the marquee rect x/y/w/h, `polygon` the lasso outline.
+        case "element_intersects_rect":
+            let elem = parseElement(tc["element"]!)
+            actual = elementIntersectsRect(elem, args[0], args[1], args[2], args[3])
+        case "element_intersects_polygon":
+            let elem = parseElement(tc["element"]!)
+            let polyRaw = tc["polygon"] as! [[Double]]
+            actual = elementIntersectsPolygon(elem, polyRaw.map { ($0[0], $0[1]) })
         default:
             Issue.record("Unknown function: \(function)")
             continue
         }
         #expect(actual == expected, "Hit test '\(name)' failed: expected \(expected), got \(actual)")
     }
+}
+
+// MARK: - number_input commit vectors
+
+/// The `number_input` COMMIT corpus: typed text → the value written to state,
+/// or nothing at all. Acceptance goldens are derived from the live reference's
+/// numeric-string coercion (see the fixture's `_doc`); the clamp goldens are the
+/// widget's declared-bounds rule. Mirror of Rust's
+/// `algorithm_number_commit_vectors`; run port-against-port by
+/// `scripts/cross_language_algorithms.py --algo number_commit`.
+@Test func algorithmNumberCommitVectors() throws {
+    let json = readFixture("algorithms/number_commit.json")
+    let doc = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    let vectors = doc["vectors"] as! [[String: Any]]
+    #expect(!vectors.isEmpty, "number_commit.json is empty")
+
+    for tc in vectors {
+        let name = tc["name"] as! String
+        let text = tc["text"] as! String
+        let minVal = (tc["min"] as? NSNumber)?.doubleValue
+        let maxVal = (tc["max"] as? NSNumber)?.doubleValue
+        let expected = (tc["expected"] as? NSNumber)?.doubleValue
+        let got = numberInputCommit(text: text, min: minVal, max: maxVal)
+        #expect(got == expected,
+                "number_commit '\(name)': text \(text.debugDescription) with min \(String(describing: minVal)) max \(String(describing: maxVal)) gave \(String(describing: got)), corpus pins \(String(describing: expected))")
+    }
+}
+
+// MARK: - Colour conversion algorithm vectors
+
+/// The colour-conversion corpus: the four primitives every port's Color panel is
+/// built out of, goldens derived from the spec formulas rather than captured
+/// from a port.
+///
+/// The `panel_channels` family is the one that matters most. It pins the ORDER
+/// the panel's channel derivation applies the conversions in — quantise the
+/// float colour to three 8-bit values FIRST, then convert those — which is the
+/// contract this port's overlay broke by asking the float colour for its own
+/// h/s/b instead (COLORTIERS, 2026-07-26). Mirror of Rust's
+/// `algorithm_color_convert_vectors`; run port-against-port by
+/// `scripts/cross_language_algorithms.py --algo color_convert`.
+@Test func algorithmColorConvertVectors() throws {
+    let json = readFixture("algorithms/color_convert.json")
+    let doc = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    let vectors = doc["vectors"] as! [[String: Any]]
+    #expect(!vectors.isEmpty, "color_convert.json is empty")
+
+    for tc in vectors {
+        let name = tc["name"] as! String
+        switch tc["function"] as! String {
+        case "rgb_to_hsb":
+            let a = (tc["rgb"] as! [NSNumber]).map { $0.intValue }
+            let (h, s, b) = rgbToHsb(UInt8(a[0]), UInt8(a[1]), UInt8(a[2]))
+            #expect([h, s, b] == (tc["expected"] as! [NSNumber]).map { $0.intValue },
+                    "color_convert '\(name)': rgb_to_hsb gave \([h, s, b])")
+        case "hsb_to_rgb":
+            let a = (tc["hsb"] as! [NSNumber]).map { $0.doubleValue }
+            let (r, g, b) = hsbToRgb(a[0], a[1], a[2])
+            #expect([Int(r), Int(g), Int(b)]
+                        == (tc["expected"] as! [NSNumber]).map { $0.intValue },
+                    "color_convert '\(name)': hsb_to_rgb gave \([r, g, b])")
+        case "rgb_to_cmyk":
+            let a = (tc["rgb"] as! [NSNumber]).map { $0.intValue }
+            let (c, m, y, k) = rgbToCmyk(UInt8(a[0]), UInt8(a[1]), UInt8(a[2]))
+            #expect([c, m, y, k] == (tc["expected"] as! [NSNumber]).map { $0.intValue },
+                    "color_convert '\(name)': rgb_to_cmyk gave \([c, m, y, k])")
+        case "panel_channels":
+            let a = (tc["float_rgb"] as! [NSNumber]).map { $0.doubleValue }
+            let ch = panelChannels(rf: a[0], gf: a[1], bf: a[2])
+            let want = tc["expected"] as! [String: Any]
+            let got: [String: Int] = [
+                "r": ch.r, "g": ch.g, "bl": ch.bl, "h": ch.h, "s": ch.s, "b": ch.b,
+                "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
+            ]
+            for (key, value) in got {
+                let pinned = (want[key] as! NSNumber).intValue
+                #expect(value == pinned,
+                        "color_convert '\(name)': panel_channels.\(key) is \(value), corpus pins \(pinned)")
+            }
+            #expect(ch.hex == want["hex"] as! String,
+                    "color_convert '\(name)': panel_channels.hex is \(ch.hex)")
+        default:
+            Issue.record("Unknown color_convert function: \(tc["function"]!)")
+        }
+    }
+}
+
+/// The `.hsb`-represented colour is the case the shared corpus CANNOT reach: a
+/// fixture vector is a float RGB triple, while `Color.toHsba()` on a `.hsb`
+/// short-circuits and hands back the h/s/b it was constructed with, never
+/// touching RGB at all. That short-circuit is exactly what the overlay used to
+/// read, so it needs its own pin here.
+///
+/// The two colours are the two reachable `.hsb` producers: a colour-bar click
+/// (`ColorBarView.colorAt`, before it was converged onto `hsbToRgb`) and
+/// Complement (`ColorPanel.dispatch`, `.hsb` in BOTH ports). The expected values
+/// are `rgbToHsb` of the quantised triple, which is what Rust's
+/// `build_live_panel_overrides` answers for the same colour.
+@Test func panelChannelsQuantisesBeforeConvertingAnHsbColor() {
+    // A colour-bar pixel (x=1, y=1 of a 200x64 bar): hue 1.8°, s 3.125%,
+    // b 99.375% as the bar's own parameterisation produces it. The stored
+    // triple reads hue 2; the 8-bit grid the panel displays on reads 7.
+    let barPixel = Color.hsb(h: 1.8, s: 0.03125, b: 0.99375, a: 1.0)
+    let bar = panelChannels(for: barPixel)
+    #expect((bar.r, bar.g, bar.bl) == (253, 246, 245))
+    #expect((bar.h, bar.s, bar.b) == (7, 3, 99))
+    #expect(bar.hex == "fdf6f5")
+
+    // Complement of #0477cc: hue rotated 180°, kept as `.hsb` by BOTH ports, so
+    // this one diverged on the derivation alone. The stored triple reads hue 26;
+    // the quantised triple (204, 89, 4) reads 25.
+    let complement = Color.hsb(h: 25.5, s: 0.9803921568627452, b: 0.8, a: 1.0)
+    let comp = panelChannels(for: complement)
+    #expect((comp.r, comp.g, comp.bl) == (204, 89, 4))
+    #expect((comp.h, comp.s, comp.b) == (25, 98, 80))
+    #expect(comp.hex == "cc5904")
+
+    // And the derivation is the corpus's derivation, not a second copy of it:
+    // the `Color` entry point must agree with the float-triple entry point on
+    // every channel, for a `.hsb` colour too.
+    let (rf, gf, bf, _) = barPixel.toRgba()
+    #expect(bar == panelChannels(rf: rf, gf: gf, bf: bf))
+}
+
+/// The colour bar must produce the same COLOUR VALUE in both ports, not merely
+/// the same channel readings once the panel has re-derived them.
+///
+/// Rust's `render_color_bar` maps the pointer through `hsb_to_rgb` and stores
+/// `Color::rgb` of the quantised triple. This port stored `Color.hsb` of the
+/// float h/s/b instead, so the two ports' documents held different colours for
+/// the same click — and the float path that closes the gap is not even the same
+/// float path (`hsbToRgbComponents`' hi/f/p/q/t form vs `hsbToRgb`'s c/x/m
+/// form), so "they agree after rounding" was never something to rely on.
+///
+/// Also pins the CLAMPING, which differed in kind: Rust clamps the derived hue
+/// to 0...360 and the vertical parameter to 0...1, while this port clamped the
+/// pixel coordinates to width-1 / height-1 first. A drag that leaves the bar
+/// below its bottom edge is the visible case — Rust answers black, and this port
+/// used to answer 2% brightness.
+@Test func colorBarProducesTheQuantisedRgbBothPortsStore() {
+    // Bar geometry as Rust hardcodes it: 200 wide, 64 tall.
+    let w: CGFloat = 200, h: CGFloat = 64
+
+    // x=1, y=1: hue 1.8°, sat 3.125%, brightness 99.375%. hsbToRgb of that
+    // triple is (253, 246, 245) — the same three bytes Rust stores.
+    let (r, g, b, a) = ColorBarView.colorAt(x: 1, y: 1, width: w, height: h).toRgba()
+    #expect((quantise8(r), quantise8(g), quantise8(b)) == (253, 246, 245))
+    #expect(a == 1.0)
+    // And it is stored AS rgb, so nothing downstream can re-read a float h/s/b.
+    #expect(ColorBarView.colorAt(x: 1, y: 1, width: w, height: h)
+                == Color.rgb(r: 253.0 / 255.0, g: 246.0 / 255.0, b: 245.0 / 255.0, a: 1.0))
+
+    // Bottom edge and below: brightness clamps to 0, i.e. black — not the 2%
+    // that clamping the coordinate to height-1 used to leave behind.
+    for y in [h, h + 40] {
+        let c = ColorBarView.colorAt(x: 30, y: y, width: w, height: h)
+        #expect(c == Color.rgb(r: 0, g: 0, b: 0, a: 1.0), "y=\(y) should be black")
+    }
+    // Right edge: hue clamps to 360, which hsbToRgb's last arm reads as red —
+    // at the bar's waist, where saturation is full and brightness is 80%.
+    #expect(ColorBarView.colorAt(x: w, y: h / 2, width: w, height: h)
+                == Color.rgb(r: 204.0 / 255.0, g: 0, b: 0, a: 1.0))
+    #expect(ColorBarView.colorAt(x: w + 10, y: h, width: w, height: h)
+                == Color.rgb(r: 0, g: 0, b: 0, a: 1.0))
+    // Top-left is white (saturation 0, brightness 100).
+    #expect(ColorBarView.colorAt(x: 0, y: 0, width: w, height: h)
+                == Color.rgb(r: 1.0, g: 1.0, b: 1.0, a: 1.0))
+    // A zero-width bar must not divide by zero (Rust's `width.max(1.0)`).
+    #expect(ColorBarView.colorAt(x: 0, y: 0, width: 0, height: h)
+                == Color.rgb(r: 1.0, g: 1.0, b: 1.0, a: 1.0))
 }
 
 // MARK: - Expression-language conformance (shared corpus)
@@ -2679,6 +2966,13 @@ private let actionFixtures = [
     // never republished, so the Color panel's guards kept reading the old
     // colour). See ``assertActionPanelState``.
     "fill_stroke_none.json",
+    // COLORTIERS: the action-dispatch `state` scope is SELECTION-AWARE.
+    // `set_fill_type_solid` on a stroke-only SELECTION must read that
+    // selection's None and paint it; Rust's `build_appstate_ctx` used to read
+    // the app default alone, so the click was a silent no-op there and painted
+    // here. The second case pins the Mixed outcome (the declared default
+    // stands — absent is not null).
+    "fill_stroke_action_scope.json",
 ]
 
 /// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml

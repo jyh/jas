@@ -250,6 +250,51 @@ public func generateElementId() -> String {
     return generateElementId(using: &rng)
 }
 
+// MARK: - The one mint loop
+
+/// How many draws one collision-free id gets before the mint is reported
+/// failed. 100 — the value every open-coded copy of this loop used before
+/// `mintUniqueIds` absorbed them; Rust's `ID_MINT_RETRY_BUDGET` holds the same
+/// number so the ports cannot drift on give-up behaviour.
+public let idMintRetryBudget = 100
+
+/// THE ONE MINT LOOP: mint `count` ids that collide neither with `existing`
+/// nor with each other.
+///
+/// `mint` is the id source (`generateElementId()` or `generateArtboardId()` at
+/// every production caller, so the thread-local test override above is what
+/// makes a corpus run deterministic). Every accepted id is inserted into
+/// `existing`, which is what keeps one batch internally distinct — the caller
+/// may keep using the set for later batches.
+///
+/// Returns nil — and the caller must then mint NOTHING and abort — as soon as
+/// one id exhausts `idMintRetryBudget` consecutive collisions. That is exactly
+/// what each open-coded copy did.
+///
+/// Rust's `mint_unique_ids` in `src/document/artboard.rs` is the twin, and both
+/// ports' tests drive the same per-char counter and assert the same literal
+/// ids, so neither the draw count per batch nor the collision behaviour can
+/// drift between them.
+public func mintUniqueIds(_ count: Int, existing: inout Set<String>,
+                          mint: () -> String) -> [String]? {
+    var out: [String] = []
+    out.reserveCapacity(count)
+    for _ in 0..<count {
+        var chosen: String? = nil
+        for _ in 0..<idMintRetryBudget {
+            let candidate = mint()
+            if !existing.contains(candidate) {
+                chosen = candidate
+                break
+            }
+        }
+        guard let id = chosen else { return nil }
+        existing.insert(id)
+        out.append(id)
+    }
+    return out
+}
+
 // MARK: - Default-name rule
 
 /// Match a name against the default `Artboard N` pattern and return

@@ -230,13 +230,106 @@ wrong once (CPTRIAGE); it is now pinned cross-language by the
 `fill_stroke_none` action-corpus case's `expected_panel_state` block, and
 the per-widget triage record is in COLOR_TESTS.md.
 
-What is pinned is the SCOPE, not yet the swatch. With the scope agreed the
-two active ports still DRAW a none differently: Rust marks the fill /
-stroke swatch with the red-diagonal no-paint indicator, deciding
-none-from-empty-slot by the bind's own declaration, while Swift's swatch
-renders an explicit none as a plain transparent square — indistinguishable
-from an empty recent-colour slot. That half is unfixed and banked by name
-in COLOR_TESTS.md.
+The SWATCH follows the same rule. Both active ports mark a none with the
+red-diagonal no-paint indicator over a white face, and both decide
+none-from-an-empty-slot by the BIND's own declaration rather than by the
+value: a null from a bind naming a nullable `state` colour means "no
+paint", while a null from `panel.recent_colors.3` means "that slot is
+empty" and draws a hollow placeholder. An empty string carries the "no
+paint" meaning too (a dialog's hex field cleared). Swift used to render
+every non-colour as a transparent square, making an explicit none and an
+empty slot identical; closed by COLORTIERS. An explicit none takes the
+same SOLID border a painted swatch does — it is a real answer about the
+paint — while an empty slot keeps the dashed placeholder border; Rust
+derived that from "has no colour" alone and so wore the dashed border for
+a none, converged in the COLORTIERS repair. The hollow ring's width still
+differs (6px Rust, 3px Swift) and is banked in COLOR_TESTS.md.
+
+Where the DEFAULT colours live is settled too: fill and stroke defaults
+are WORKSPACE state, not document state, so File > New carries the
+colour the user is mid-flow with rather than reseeding.
+
+The tiers are selection → document default → app default. Which readers
+resolve all three is listed below rather than counted: four rounds of this
+wave shipped a count, and each one was wrong in a different way (a "six"
+whose sixth item was called "a seventh", a "seven" in the report, a "nine"
+implied by the sibling file, and a "two do not follow the rule" that was
+missing at least four). **No total is claimed here, and none should be
+added without the census that produces it.** The list is maintained by
+hand; re-derive the candidate set with
+
+    grep -rn 'defaultFill\|defaultStroke\|appDefaultFill\|appDefaultStroke' JasSwift/Sources/
+    grep -rn 'default_fill\|default_stroke\|app_default_fill\|app_default_stroke' jas_dioxus/src/
+
+and classify each surviving read by which tiers its enclosing function
+consults. It is not certified exhaustive.
+
+**Resolve all three tiers, and are converged across the ports:** the
+panel-render `state` scope; the action-dispatch scope; the three
+dialog-seeding sites, all of which now bottom out in `liveFillStrokeValues`
+(`openToolbarColorPicker` and `openYamlDialogFromMenu` through
+`dialogStateScope`; the `fill_stroke_widget` double-click →
+`open_color_picker` through `colorPickerSeedContext`, which layers on
+`dialogStateScope`); the toolbar
+squares; the Color panel's SLIDERS; the Color panel's channel WRITE path,
+which is not the same code as the sliders that display it; and the Color
+panel's mode-switch SEED. Every one after the first two was caught
+answering the question its own way; the record of which, and of what each
+answered instead, is in COLOR_TESTS.md.
+
+**Stop at the two DEFAULT tiers on purpose, identically in both ports:**
+the panel menu's **Invert** and **Complement**, and their enabled state,
+operate on the default paint and do not consult the selection. Whether
+they SHOULD is an open question, banked in COLOR_TESTS.md.
+
+Resolving the same tiers is only half of "one fact, one answer": the
+readers have to DERIVE the same numbers from the colour they resolve, and
+the law there is **quantise first, convert second**. Round the float colour
+to three 8-bit values, then read hue / saturation / brightness, CMYK and
+hex off those integers — never off the float colour, and never off a
+`Color`'s stored h/s/b, which for an HSB-constructed colour is a triple the
+8-bit grid was never applied to. The two derivations differ by up to a
+whole unit in each channel, and because the panel's write path recomputes
+the channels the user did NOT edit from this same derivation, the
+difference reaches the committed colour and not just the display. One
+function per port owns it (`color_util::panel_channels`,
+`panelChannels(rf:gf:bf:)`), gated by
+`test_fixtures/algorithms/color_convert.json`.
+
+**Read ONE tier, and are not converged — each banked in COLOR_TESTS.md
+rather than fixed:** Swift's NATIVE toolbar "C" / "/" mode buttons, which
+predate the ruling and write the tab tier by hand (which is why no
+user-level check can confirm the action-scope half in Swift yet); both
+ports' NATIVE None buttons, which clear the document tier only and so
+produce a "none" that every three-tier reader still sees as the app tier's
+colour; and Rust's `get_app_state_field`, which serves the YAML `swap:`
+effect from the APP tier while the other path to the same swap
+(`AppState::swap_fill_stroke`, the X key) reads the DOCUMENT tier.
+
+**Read ONE tier in BOTH ports, symmetrically, so they are not parity
+breaks — but they are single-tier readers and the wave's premise says to
+say so:** newly drawn elements take their paint from the document tier
+alone (`buildElement` / `makePathFromCommands` in Swift, the same
+`model.default_*` reads in `yaml_tool.rs`), with no app fallback, so after
+File > New the panel shows a colour while a new rect draws with no fill;
+the fill/stroke swap (`Controller.swapFillStrokeColors`,
+`AppState::swap_fill_stroke`); the defaults RESET
+(`reset_fill_stroke_defaults` and its `CanvasSubwindow` / `ContentView`
+twins). All banked in COLOR_TESTS.md.
+
+`AppState::active_color()` used to belong to that last group and no longer
+does: it carries `.or_else(app_default_*)`, so Invert and Complement stay
+available after File > New. Gated by
+`colortiers_invert_stays_available_after_a_new_document` and Swift's
+`colorPanelInvertStaysAvailableAfterFileNew` — both green. It is named here
+because round 4's brief still listed it as an open single-tier reader; it
+is not one.
+
+And an ACTION's `state.fill_color` is read with the SELECTION in view —
+clicking Solid with a shape selected asks whether THAT shape's fill is
+none, not whether the app default is. Both that and the tier order are
+pinned cross-language by
+`test_fixtures/actions/fill_stroke_action_scope.json`.
 
 ## Color bar
 

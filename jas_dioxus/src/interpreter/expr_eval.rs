@@ -581,10 +581,13 @@ fn eval_func(
                 .iter()
                 .map(|a| eval_inner(a, ctx, scope, store_cb))
                 .collect();
-            let c = val_to_f64(&vals[0]) / 100.0;
-            let m = val_to_f64(&vals[1]) / 100.0;
-            let y = val_to_f64(&vals[2]) / 100.0;
-            let k = val_to_f64(&vals[3]) / 100.0;
+            // Each channel is clamped to its documented 0-100 range BEFORE the
+            // arithmetic — see color_util::clamp_channel for why input-clamping
+            // and not output-saturation (risk R9).
+            let c = color_util::clamp_channel(val_to_f64(&vals[0]), 0.0, 100.0) / 100.0;
+            let m = color_util::clamp_channel(val_to_f64(&vals[1]), 0.0, 100.0) / 100.0;
+            let y = color_util::clamp_channel(val_to_f64(&vals[2]), 0.0, 100.0) / 100.0;
+            let k = color_util::clamp_channel(val_to_f64(&vals[3]), 0.0, 100.0) / 100.0;
             let r = ((1.0 - c) * (1.0 - k) * 255.0).round() as u8;
             let g = ((1.0 - m) * (1.0 - k) * 255.0).round() as u8;
             let b = ((1.0 - y) * (1.0 - k) * 255.0).round() as u8;
@@ -596,7 +599,11 @@ fn eval_func(
             if args.len() != 1 {
                 return Value::Null;
             }
-            let k = val_to_f64(&eval_inner(&args[0], ctx, scope, store_cb));
+            let k = color_util::clamp_channel(
+                val_to_f64(&eval_inner(&args[0], ctx, scope, store_cb)),
+                0.0,
+                100.0,
+            );
             let v = ((1.0 - k / 100.0) * 255.0).round() as u8;
             Value::color(&color_util::rgb_to_hex(v, v, v))
         }
@@ -873,9 +880,11 @@ fn eval_func(
             }
         }
 
-        // hypot(dx, dy) -> sqrt(dx*dx + dy*dy). Used by tools that
-        // test a 2D distance threshold (Line's "ignore too-short
-        // drags", Pen's click-vs-drag disambiguation).
+        // hypot(dx, dy) -> the euclidean length of (dx, dy), via
+        // `f64::hypot` — NOT `(dx*dx + dy*dy).sqrt()`, which overflows
+        // to +inf and underflows to 0 on the intermediate square. Used
+        // by tools that test a 2D distance threshold (Line's "ignore
+        // too-short drags", Pen's click-vs-drag disambiguation).
         "hypot" => {
             if args.len() != 2 {
                 return Value::Null;
@@ -1393,6 +1402,27 @@ mod tests {
     #[test]
     fn literal_number() {
         assert_eq!(eval("42", &json!({})), Value::Number(42.0));
+    }
+
+    /// The close-hit distance comes from `f64::hypot`, which does not overflow
+    /// on the intermediate square. First anchor at the origin, cursor at
+    /// (1e200, 1e200): the true distance is 1.414e200, inside a radius of
+    /// 2e200 — but `(dx*dx + dy*dy).sqrt()` would square to 1e400, saturate to
+    /// +inf, and report a miss. Pins the behaviour JasSwift and the Python
+    /// reference are held to. `pow(10, 200)` stands in for a `1e200` literal
+    /// because the expression lexer accepts no exponent notation.
+    #[test]
+    fn anchor_buffer_close_hit_uses_hypot_not_naive_squares() {
+        use crate::interpreter::anchor_buffers;
+        anchor_buffers::clear("test_anc_hypot");
+        anchor_buffers::push("test_anc_hypot", 0.0, 0.0);
+        anchor_buffers::push("test_anc_hypot", 100.0, 0.0);
+        let v = eval(
+            "anchor_buffer_close_hit(\"test_anc_hypot\", pow(10, 200), pow(10, 200), 2 * pow(10, 200))",
+            &json!({}),
+        );
+        assert_eq!(v, Value::Bool(true));
+        anchor_buffers::clear("test_anc_hypot");
     }
 
     #[test]

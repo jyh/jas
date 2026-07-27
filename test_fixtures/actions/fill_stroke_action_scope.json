@@ -1,0 +1,28 @@
+[
+  {
+    "name": "solid_on_a_stroke_only_selection_asks_the_selection_not_the_app_default",
+    "setup_svg": "rect_stroke_only.svg",
+    "actions": [
+      {"action": "select_all", "params": {}},
+      {"action": "set_fill_type_solid", "params": {}}
+    ],
+    "expected_json": "fill_stroke_action_scope_solid_expected.json",
+    "expected_panel_state": {
+      "fill_color": "#000000",
+      "stroke_color": "#000000"
+    }
+  },
+  {
+    "name": "solid_leaves_a_mixed_selection_alone",
+    "setup_svg": "two_rects.svg",
+    "actions": [
+      {"action": "select_all", "params": {}},
+      {"action": "set_fill_type_solid", "params": {}}
+    ],
+    "expected_json": "fill_stroke_action_scope_mixed_expected.json",
+    "expected_panel_state": {
+      "fill_color": "#ffffff",
+      "stroke_color": null
+    }
+  }
+]

@@ -406,7 +406,7 @@ private func addAnchorPointTool() -> CanvasTool {
 private let aapCurvePathElem: Element = .path(Path(
     d: [.moveTo(0, 0), .curveTo(x1: 33, y1: 0, x2: 67, y2: 0, x: 100, y: 0)],
     stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-))
+, fillRule: .nonzero))
 
 @Test func addAnchorPointClickOnPathAddsPoint() {
     let tool = addAnchorPointTool()
@@ -492,7 +492,7 @@ private let aapCurvePathElem: Element = .path(Path(
     let pathElem: Element = .path(Path(
         d: [.moveTo(0, 0), .lineTo(100, 0)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
+    , fillRule: .nonzero))
     let layer = Layer(name: "L", children: [pathElem])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
@@ -603,19 +603,19 @@ private func pencilTool() -> CanvasTool {
 
 private func makeLinePath(_ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) -> Element {
     .path(Path(d: [.moveTo(x1, y1), .lineTo(x2, y2)],
-               stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+               stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1), fillRule: .nonzero))
 }
 
 private func makeLongPath() -> Element {
     .path(Path(d: [.moveTo(0, 0), .lineTo(50, 0), .lineTo(100, 0), .lineTo(150, 0)],
-               stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+               stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1), fillRule: .nonzero))
 }
 
 private func makeClosedPath() -> Element {
     .path(Path(d: [.moveTo(0, 0), .lineTo(100, 0), .lineTo(100, 100),
                    .lineTo(0, 100), .closePath],
                fill: Fill(color: Color(r: 0, g: 0, b: 0)),
-               stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+               stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1), fillRule: .nonzero))
 }
 
 private func pathEraserTool() -> CanvasTool {
@@ -712,7 +712,7 @@ private func pathEraserTool() -> CanvasTool {
         d: [.moveTo(0, 0), .lineTo(1, 1)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1),
         locked: true
-    ))
+    , fillRule: .nonzero))
     let layer = Layer(name: "L", children: [small])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
@@ -729,7 +729,7 @@ private func pathEraserTool() -> CanvasTool {
     let path: Element = .path(Path(
         d: [.moveTo(0, 0), .lineTo(100, 0), .lineTo(200, 0)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
+    , fillRule: .nonzero))
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
@@ -759,7 +759,7 @@ private func pathEraserTool() -> CanvasTool {
     let path: Element = .path(Path(
         d: [.moveTo(0, 0), .curveTo(x1: 50, y1: -100, x2: 150, y2: -100, x: 200, y: 0)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)
-    ))
+    , fillRule: .nonzero))
     let layer = Layer(name: "L", children: [path])
     let doc = Document(layers: [layer])
     let model = Model(document: doc)
@@ -943,7 +943,7 @@ private func pathEraserTool() -> CanvasTool {
     let pathElem = Path(
         d: [.moveTo(0, 0), .lineTo(100, 0)],
         stroke: Stroke(color: Color(r: 0, g: 0, b: 0))
-    )
+    , fillRule: .nonzero)
     let layer = Layer(name: "L", children: [.path(pathElem)])
     let model = Model()
     model.setDocumentForTest(Document(layers: [layer]))

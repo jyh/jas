@@ -108,7 +108,7 @@ import Testing
 @Test func svgPath() {
     let doc = Document(layers: [Layer(children: [
         .path(Path(d: [.moveTo(0, 0), .lineTo(72, 72), .closePath],
-                      stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
+                      stroke: Stroke(color: Color(r: 0, g: 0, b: 0)), fillRule: .nonzero))
     ])])
     let svg = documentToSvg(doc)
     #expect(svg.contains("<path"))
@@ -126,7 +126,7 @@ import Testing
             .quadTo(x1: 36, y1: 36, x: 72, y: 0),
             .smoothQuadTo(144, 0),
             .arcTo(rx: 36, ry: 36, rotation: 0, largeArc: true, sweep: false, x: 72, y: 72),
-        ], stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
+        ], stroke: Stroke(color: Color(r: 0, g: 0, b: 0)), fillRule: .nonzero))
     ])])
     let svg = documentToSvg(doc)
     #expect(svg.contains("C0,48 48,96 96,96"))
@@ -326,7 +326,7 @@ private func roundtrip(_ doc: Document) -> Document {
 @Test func svgImportPath() {
     let doc = Document(layers: [Layer(children: [
         .path(Path(d: [.moveTo(0, 0), .lineTo(72, 72), .closePath],
-                      stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
+                      stroke: Stroke(color: Color(r: 0, g: 0, b: 0)), fillRule: .nonzero))
     ])])
     let doc2 = roundtrip(doc)
     if case .path(let v) = doc2.layers[0].children[0] {
@@ -738,7 +738,7 @@ private func pt(_ px: Double) -> Double { px * 72.0 / 96.0 }
 @Test func svgRoundtripArcLargeSweep() {
     let layer = Layer(children: [
         .path(Path(d: [.moveTo(0, 0), .arcTo(rx: 36, ry: 36, rotation: 0, largeArc: true, sweep: true, x: 72, y: 0)],
-                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
+                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0)), fillRule: .nonzero))
     ])
     let doc = Document(layers: [layer])
     let svg = documentToSvg(doc)
@@ -756,7 +756,7 @@ private func pt(_ px: Double) -> Double { px * 72.0 / 96.0 }
 @Test func svgRoundtripArcSmallNoSweep() {
     let layer = Layer(children: [
         .path(Path(d: [.moveTo(0, 0), .arcTo(rx: 36, ry: 18, rotation: 30, largeArc: false, sweep: false, x: 72, y: 36)],
-                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
+                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0)), fillRule: .nonzero))
     ])
     let doc = Document(layers: [layer])
     let svg = documentToSvg(doc)
@@ -1334,7 +1334,7 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
                         endArrow: .stealthArrow)
     let doc = Document(layers: [Layer(children: [
         .path(Path(d: [.moveTo(0, 0), .curveTo(x1: 0, y1: 40, x2: 40, y2: 40, x: 40, y: 0)],
-                   stroke: stroke))
+                   stroke: stroke, fillRule: .nonzero))
     ])])
     let svg = documentToSvg(doc)
     #expect(svg.contains("jas:end-arrow=\"stealth_arrow\""), "\(svg)")

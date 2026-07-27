@@ -38,5 +38,81 @@
   {"name": "point_in_polygon_inside_triangle", "function": "point_in_polygon", "args": [5.0, 2.0], "polygon": [[0.0, 0.0], [10.0, 0.0], [5.0, 10.0]], "expected": true},
   {"name": "point_in_polygon_outside_triangle", "function": "point_in_polygon", "args": [0.0, 10.0], "polygon": [[0.0, 0.0], [10.0, 0.0], [5.0, 10.0]], "expected": false},
   {"name": "point_in_polygon_inside_square", "function": "point_in_polygon", "args": [5.0, 5.0], "polygon": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], "expected": true},
-  {"name": "point_in_polygon_outside_square", "function": "point_in_polygon", "args": [15.0, 5.0], "polygon": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], "expected": false}
+  {"name": "point_in_polygon_outside_square", "function": "point_in_polygon", "args": [15.0, 5.0], "polygon": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], "expected": false},
+
+  {"name": "live_compound_donut_marquee_in_hole", "function": "element_intersects_rect",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front",
+    "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview",
+    "children": [
+     {"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+     {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}]},
+   "args": [40.0, 40.0, 20.0, 20.0], "expected": false},
+
+  {"name": "live_compound_donut_marquee_crosses_hole_ring", "function": "element_intersects_rect",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front",
+    "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview",
+    "children": [
+     {"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+     {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}]},
+   "args": [25.0, 45.0, 10.0, 10.0], "expected": true},
+
+  {"name": "live_compound_donut_marquee_crosses_outer_ring", "function": "element_intersects_rect",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front",
+    "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview",
+    "children": [
+     {"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+     {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}]},
+   "args": [-5.0, 45.0, 10.0, 10.0], "expected": true},
+
+  {"name": "live_compound_donut_marquee_outside", "function": "element_intersects_rect",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front",
+    "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview",
+    "children": [
+     {"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+     {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}]},
+   "args": [200.0, 200.0, 10.0, 10.0], "expected": false},
+
+  {"name": "live_compound_donut_lasso_in_hole", "function": "element_intersects_polygon",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front",
+    "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview",
+    "children": [
+     {"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+     {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}]},
+   "args": [], "polygon": [[40.0, 40.0], [60.0, 40.0], [60.0, 60.0], [40.0, 60.0]], "expected": false},
+
+  {"name": "live_compound_donut_lasso_crosses_hole_ring", "function": "element_intersects_polygon",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front",
+    "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview",
+    "children": [
+     {"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+     {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}]},
+   "args": [], "polygon": [[25.0, 45.0], [35.0, 45.0], [35.0, 55.0], [25.0, 55.0]], "expected": true},
+
+  {"name": "polyline_filled_marquee_inside_implicit_close", "function": "element_intersects_rect",
+   "element": {"type": "polyline",
+    "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]],
+    "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0},
+    "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [40.0, 20.0, 20.0, 20.0], "expected": true},
+
+  {"name": "polyline_unfilled_marquee_inside_implicit_close", "function": "element_intersects_rect",
+   "element": {"type": "polyline",
+    "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]],
+    "fill": null,
+    "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [40.0, 20.0, 20.0, 20.0], "expected": false},
+
+  {"name": "polyline_filled_marquee_outside_bounds", "function": "element_intersects_rect",
+   "element": {"type": "polyline",
+    "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]],
+    "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0},
+    "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [200.0, 200.0, 10.0, 10.0], "expected": false},
+
+  {"name": "polyline_filled_marquee_in_bbox_outside_closed_fill", "function": "element_intersects_rect",
+   "element": {"type": "polyline",
+    "points": [[0.0, 0.0], [100.0, 0.0], [100.0, 100.0]],
+    "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0},
+    "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [5.0, 60.0, 10.0, 10.0], "expected": true}
 ]

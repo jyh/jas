@@ -1,6 +1,7 @@
 //! Ring normalizer: turn an arbitrary (possibly self-intersecting)
-//! polygon set into an equivalent set of **simple** rings under the
-//! **non-zero winding** fill rule.
+//! polygon set into the **canonical** set of simple rings that bounds
+//! the same region — reading the input under the fill rule it
+//! **carries**.
 //!
 //! # What this is for
 //!
@@ -12,38 +13,58 @@
 //! takes such input and returns an equivalent simple-ring
 //! representation, so the boolean code can stay single-purpose.
 //!
-//! # Scope: one ring at a time
+//! # Input contract: THE CARRIED RULE (JYH-ratified 2026-07-26)
 //!
-//! Normalization is **per ring**. Each ring of the input is replaced
-//! by the simple rings that bound the same filled region *considered
-//! alone*, under the **non-zero winding rule** — which is what a
-//! single self-intersecting subpath means (SVG `fill-rule="nonzero"`).
-//! How the resulting rings then combine with each other is *not* this
-//! module's business: [`crate::algorithms::boolean`] defines a
-//! `PolygonSet` as a flat list of rings under the **even-odd** rule,
-//! with orientation explicitly outside the contract, and its sweep is
-//! what resolves nesting and overlap. A ring-with-hole therefore
-//! passes through as two rings whatever their orientations, and two
-//! overlapping rings pass through as two rings; anything else would
-//! silently re-interpret the operand.
+//! [`normalize`] takes rings **and the [`PolyFillRule`] that reads
+//! them**. It does not assume one, and there is no rule-less entry
+//! point, because the two rules denote genuinely different regions and
+//! only the caller — who knows whether these rings came from a
+//! `fill-rule="nonzero"` path, a `fill-rule="evenodd"` path or a
+//! machine-made boolean result — can say which was meant. See
+//! [`crate::algorithms::boolean`]'s module docs for the full law and
+//! the reasoning behind it; this module states only the half it
+//! implements.
 //!
-//! SPEC NOTE for the council. The two rules meeting here — non-zero
-//! within a ring, even-odd between rings — disagree on exactly the
-//! cases one would call "inter-ring winding cancellation". Two nested
-//! same-orientation rings are a hole under even-odd but a solid under
-//! non-zero; two overlapping same-orientation rings are a symmetric
-//! difference under even-odd but a union under non-zero. This module
-//! follows `boolean.rs`'s ratified even-odd contract for the between-
-//! rings question and does not touch it. If the intent is that a
-//! `PolygonSet` carry the document's `fill-rule` instead of a fixed
-//! one, that is a schema decision, not a normalizer decision.
+//! The rule applies to the **whole set at once**, exactly as SVG and
+//! PDF define it: insideness is decided from the crossings/windings of
+//! every ring together, not ring by ring. Concretely:
 //!
-//! That question is now recorded as an open ruling in
-//! `transcripts/BOOLEAN.md`, under "Fill rule: an open ruling", with
-//! the measured evidence for the current reading (a set-wide non-zero
-//! reading deletes the inner ring of every donut and turns 7 unit
-//! tests red). The spec section is the record; this comment only
-//! points at it.
+//! - **`NonZero`** — a point is filled iff the winding summed over all
+//!   rings is non-zero. Two nested same-orientation rings are a
+//!   *solid*; two overlapping same-orientation rings are their
+//!   *union*; a counter-wound inner ring is a hole. This is
+//!   inter-ring winding cancellation, and it is now implemented rather
+//!   than deferred — with the rule carried it is no longer us choosing
+//!   a semantics, it is doing what the artist's path says.
+//! - **`EvenOdd`** — a point is filled iff a ray crosses the rings an
+//!   odd number of times. Two nested rings are a *hole* whatever their
+//!   orientations; two overlapping rings are their *symmetric
+//!   difference*. Because even-odd parity is additive across rings
+//!   (the parity of the whole is the XOR of the parts), resolving each
+//!   ring alone and concatenating is *exactly* the set-wide answer —
+//!   which is why the even-odd path here is still a per-ring loop, and
+//!   why simple rings pass through untouched however they nest.
+//!
+//! # Output contract: canonical means EVEN-ODD-correct
+//!
+//! The returned rings are simple, and they denote the input's region
+//! **read under the even-odd rule** — whatever rule the input carried.
+//! That is the canonical form: the carried rule has been consumed, and
+//! the sweep, the renderer and the corpus can all read the output as
+//! even-odd without lying about the input. It is also what
+//! `apply_destructive_boolean` relies on when it stamps
+//! `FillRule::EvenOdd` on a multi-ring result.
+//!
+//! Two shades of it, worth stating exactly because the difference is
+//! observable:
+//!
+//! - Input `NonZero` — the whole set is rebuilt, so the output is
+//!   additionally *pairwise non-overlapping*, and its even-odd and
+//!   non-zero readings coincide.
+//! - Input `EvenOdd` — rings that are already even-odd-correct are
+//!   returned as given, so two of them may still overlap (their
+//!   even-odd reading, the symmetric difference, is the point). Do not
+//!   re-read such an output as non-zero.
 //!
 //! The output rings of a rebuilt ring are simple and pairwise
 //! non-overlapping, oriented so the filled side is on the left: outer
@@ -55,15 +76,20 @@
 //!
 //! # Two paths
 //!
-//! **Fast path.** If the ring is already simple — no two of its edges
-//! meet except where consecutive edges share their one vertex — and it
-//! encloses a non-zero area, it is returned unchanged, orientation
-//! included. This is the common case, and keeping it a literal
-//! pass-through is what lets [`crate::algorithms::boolean`] call the
-//! normalizer on every operand without perturbing non-degenerate
-//! results.
+//! **Fast path.** If the input is already canonical *under its carried
+//! rule* — no two edges meet except where consecutive edges of one
+//! ring share their vertex, and every ring really bounds a filled/
+//! unfilled transition when read under that rule — it is returned
+//! unchanged, orientation included. This is the common case, and
+//! keeping it a literal pass-through is what lets
+//! [`crate::algorithms::boolean`] call the normalizer on every operand
+//! without perturbing non-degenerate results. Note the rule enters
+//! even here: two nested same-orientation rings are canonical under
+//! even-odd (a hole) and are *not* canonical under non-zero (a solid),
+//! and [`is_already_normalized`] separates the two cases by asking
+//! whether removing the ring's own contribution changes filled-ness.
 //!
-//! **Arrangement path.** Otherwise the ring's region boundary is
+//! **Arrangement path.** Otherwise the region's boundary is
 //! rebuilt from scratch:
 //!
 //!   1. Split every edge at every meeting with every other edge —
@@ -72,13 +98,14 @@
 //!      result is a *conforming* arrangement: no edge interior holds
 //!      another edge's vertex, and no two edges overlap over a span.
 //!   2. Reduce to the set of undirected **atomic spans**. Direction
-//!      and multiplicity are deliberately discarded here: under the
-//!      non-zero rule a doubly-wound square fills exactly the same
-//!      region as a singly-wound one, so what matters is not how many
-//!      times a span was traced but whether the region differs across
-//!      it.
-//!   3. Classify each span by the winding of the ORIGINAL ring just
-//!      to its left and just to its right. A span is part of the
+//!      and multiplicity are deliberately discarded here: what matters
+//!      is not how many times a span was traced but whether the region
+//!      differs across it, and that is decided in step 3 from the
+//!      windings on either side.
+//!   3. Classify each span by the winding of the ORIGINAL rings just
+//!      to its left and just to its right, **read under the carried
+//!      rule** (`w != 0` for non-zero, `w` odd for even-odd — the one
+//!      place the two paths differ). A span is part of the
 //!      output boundary iff exactly one side is filled; it is then
 //!      oriented with the filled side on its left. Spans with the
 //!      same filled-ness on both sides are interior to the region or
@@ -113,9 +140,13 @@
 //!     counter-wound loop spliced into the outer boundary by a slit.
 //!     The slit is dropped by step 3; the counter-wound loop survives
 //!     as a hole (or vanishes) exactly as its winding dictates.
-//!   - **Inter-ring relations** — deliberately NOT resolved here; see
-//!     the scope section above. Pinned by pass-through tests so that
-//!     the even-odd contract cannot be broken by accident.
+//!   - **Inter-ring winding cancellation** — resolved here, and by
+//!     the carried rule alone. Under `NonZero` a nested or overlapping
+//!     same-orientation ring cancels or merges exactly as its winding
+//!     dictates (step 3 sees no filled-ness change across the inner
+//!     boundary and drops it); under `EvenOdd` the very same input
+//!     passes through as a hole. The pinning tests come in pairs, one
+//!     per rule on one input, so the difference is the assertion.
 //!
 //! # Complexity
 //!
@@ -143,24 +174,62 @@
 use crate::algorithms::arrangement::{
     add_or_find_vertex, dist, split_points, VERT_EPS,
 };
-use crate::algorithms::boolean::{PolygonSet, Ring};
+use crate::algorithms::boolean::{PolyFillRule, PolygonSet, Ring};
 use std::collections::BTreeSet;
 
-/// Normalize a polygon set: replace each ring by the simple rings that
-/// bound the same region *considered alone*, under the non-zero winding
-/// rule. Ring-to-ring relations are left to
-/// [`crate::algorithms::boolean`]'s even-odd sweep. See the
-/// module-level docs for semantics and scope.
-pub fn normalize(input: &PolygonSet) -> PolygonSet {
-    let mut out: PolygonSet = Vec::new();
-    for ring in input {
-        out.extend(normalize_ring(ring));
+/// Is a point with winding number `w` inside the region, under `rule`?
+/// The whole difference between the two rules, in one function.
+fn filled(w: i32, rule: PolyFillRule) -> bool {
+    match rule {
+        PolyFillRule::NonZero => w != 0,
+        PolyFillRule::EvenOdd => w % 2 != 0,
     }
-    out
+}
+
+/// Normalize a polygon set read under `rule`: return the canonical
+/// simple, pairwise non-overlapping rings bounding the same region.
+///
+/// `rule` is mandatory by design — see the module docs' carried-rule
+/// contract. Callers that hold a document element pass its
+/// `fill_rule`; callers holding a set this crate produced pass
+/// [`PolyFillRule::EvenOdd`].
+pub fn normalize(input: &PolygonSet, rule: PolyFillRule) -> PolygonSet {
+    match rule {
+        // Even-odd parity is additive across rings — the parity of the
+        // whole set is the XOR of the per-ring parities — so resolving
+        // each ring alone and concatenating IS the set-wide answer,
+        // at a fraction of the cost (the arrangement is O(E^2) in the
+        // edges handed to it, so n small sets beat one big one).
+        PolyFillRule::EvenOdd => {
+            let mut out: PolygonSet = Vec::new();
+            for ring in input {
+                out.extend(normalize_ring(ring, rule));
+            }
+            out
+        }
+        // Non-zero winding does NOT decompose: the winding at a point
+        // is the sum over every ring, so nesting and overlap between
+        // rings change the answer and the whole set must be resolved
+        // together. This is inter-ring winding cancellation.
+        PolyFillRule::NonZero => {
+            let cleaned: PolygonSet = input
+                .iter()
+                .map(dedup_consecutive)
+                .filter(|r| r.len() >= 3)
+                .collect();
+            if cleaned.is_empty() {
+                return Vec::new();
+            }
+            if is_already_normalized(&cleaned, rule) {
+                return cleaned;
+            }
+            rebuild_from_arrangement(&cleaned, rule)
+        }
+    }
 }
 
 /// Normalize a single ring. Returns 0, 1, or more simple rings.
-fn normalize_ring(ring: &Ring) -> Vec<Ring> {
+fn normalize_ring(ring: &Ring, rule: PolyFillRule) -> Vec<Ring> {
     let cleaned = dedup_consecutive(ring);
     if cleaned.len() < 3 {
         return Vec::new();
@@ -168,10 +237,10 @@ fn normalize_ring(ring: &Ring) -> Vec<Ring> {
     // The two workers take a whole set so their geometry reads
     // naturally; here the set is always this one ring.
     let one: PolygonSet = vec![cleaned];
-    if is_already_normalized(&one) {
+    if is_already_normalized(&one, rule) {
         return one;
     }
-    rebuild_from_arrangement(&one)
+    rebuild_from_arrangement(&one, rule)
 }
 
 // ---------------------------------------------------------------------------
@@ -234,12 +303,25 @@ fn tagged_edges(rings: &PolygonSet) -> Vec<TaggedEdge> {
 ///      the same ring share their one common vertex. Any other reported
 ///      meeting is a crossing, a T-junction, a pinch, or a collinear
 ///      overlap — all of which need the arrangement.
-///   2. **The boundary really is a boundary.** Immediately inside the
-///      ring and immediately outside it, the winding must differ in
-///      *filled-ness* — exactly one of the two must be zero. True for
-///      any simple ring of either orientation; false for a degenerate
-///      zero-area ring, whose "inside" is not filled either.
-fn is_already_normalized(rings: &PolygonSet) -> bool {
+///   2. **Every ring really is a boundary, under `rule`.** At a point
+///      just inside the ring, the filled-ness of the whole set must
+///      differ from what it would be with this ring's own winding
+///      removed — i.e. the ring changes the answer where it claims to
+///      be a boundary. False for a degenerate zero-area ring, whose
+///      "inside" is not filled either.
+///
+///      This is the check that carries the rule between rings, and it
+///      is why the fast path is not merely "all rings simple". Two
+///      nested counter-wound rings (the SVG way to draw a donut) pass
+///      under *both* rules. Two nested same-orientation rings pass
+///      under `EvenOdd` — inside the inner ring the total winding is
+///      2 (even, unfilled) against 1 (odd, filled) without it, so the
+///      inner ring is a real boundary and the hole is genuine — and
+///      FAIL under `NonZero`, where 2 and 1 are both non-zero so the
+///      inner ring bounds nothing and the arrangement must dissolve
+///      it. Same geometry, different rule, different canonical form:
+///      exactly the carried-rule law doing its job.
+fn is_already_normalized(rings: &PolygonSet, rule: PolyFillRule) -> bool {
     let edges = tagged_edges(rings);
     for e in &edges {
         // A degenerate edge survived dedup only if two vertices differ
@@ -278,7 +360,7 @@ fn is_already_normalized(rings: &PolygonSet) -> bool {
         let w_all = winding_of_set(rings, inside);
         let w_self = winding_number(ring, inside);
         let w_without = w_all - w_self;
-        if (w_all != 0) == (w_without != 0) {
+        if filled(w_all, rule) == filled(w_without, rule) {
             return false;
         }
     }
@@ -289,10 +371,11 @@ fn is_already_normalized(rings: &PolygonSet) -> bool {
 // Arrangement path
 // ---------------------------------------------------------------------------
 
-/// Rebuild the boundary of the non-zero-winding region of `rings` from
-/// a conforming arrangement of their edges. Called with a one-ring set;
-/// see the module docs for the four steps.
-fn rebuild_from_arrangement(rings: &PolygonSet) -> PolygonSet {
+/// Rebuild the boundary of the region `rings` denotes **under `rule`**
+/// from a conforming arrangement of their edges. Called with a one-ring
+/// set on the even-odd path and with the whole set on the non-zero
+/// path; see the module docs for the four steps.
+fn rebuild_from_arrangement(rings: &PolygonSet, rule: PolyFillRule) -> PolygonSet {
     // ----- 1. Conforming arrangement -----
     let mut segments: Vec<((f64, f64), (f64, f64))> = Vec::new();
     for ring in rings {
@@ -395,8 +478,8 @@ fn rebuild_from_arrangement(rings: &PolygonSet) -> PolygonSet {
         let ny = dx / len;
         let w_left = winding_of_set(rings, (mx + nx * offset, my + ny * offset));
         let w_right = winding_of_set(rings, (mx - nx * offset, my - ny * offset));
-        let left_filled = w_left != 0;
-        let right_filled = w_right != 0;
+        let left_filled = filled(w_left, rule);
+        let right_filled = filled(w_right, rule);
         if left_filled == right_filled {
             continue; // interior to the region, or exterior to it
         }
@@ -589,16 +672,9 @@ fn sample_inside_simple_ring(ring: &Ring) -> (f64, f64) {
 mod tests {
     use super::*;
 
-    fn ring_signed_area(ring: &Ring) -> f64 {
-        let mut sum = 0.0;
-        let n = ring.len();
-        for i in 0..n {
-            let (x1, y1) = ring[i];
-            let (x2, y2) = ring[(i + 1) % n];
-            sum += x1 * y2 - x2 * y1;
-        }
-        sum / 2.0
-    }
+    // One copy of the shoelace metric, gated by the `polygon_metrics`
+    // corpus family; this module used to carry a private duplicate.
+    use crate::algorithms::polygon_metrics::ring_signed_area;
 
     fn total_area(ps: &PolygonSet) -> f64 {
         ps.iter().map(|r| ring_signed_area(r).abs()).sum()
@@ -662,7 +738,7 @@ mod tests {
     #[test]
     fn simple_square_passes_through() {
         let input: PolygonSet = vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert_eq!(out.len(), 1);
         assert!((total_area(&out) - 100.0).abs() < 1e-9);
     }
@@ -670,7 +746,7 @@ mod tests {
     #[test]
     fn simple_triangle_passes_through() {
         let input: PolygonSet = vec![vec![(0.0, 0.0), (10.0, 0.0), (5.0, 10.0)]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert_eq!(out.len(), 1);
         assert!((total_area(&out) - 50.0).abs() < 1e-9);
     }
@@ -683,7 +759,7 @@ mod tests {
         // region — and so it takes the fast path and comes back
         // untouched, sign included.
         let input: PolygonSet = vec![vec![(0.0, 0.0), (0.0, 10.0), (10.0, 10.0), (10.0, 0.0)]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0], input[0]);
         assert!((signed_areas(&out)[0] + 100.0).abs() < 1e-9);
@@ -695,14 +771,14 @@ mod tests {
     #[test]
     fn empty_input_yields_empty_output() {
         let input: PolygonSet = vec![];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert!(out.is_empty());
     }
 
     #[test]
     fn ring_with_fewer_than_three_vertices_is_dropped() {
         let input: PolygonSet = vec![vec![(0.0, 0.0), (10.0, 0.0)]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert!(out.is_empty());
     }
 
@@ -716,7 +792,7 @@ mod tests {
             (10.0, 10.0),
             (0.0, 10.0),
         ]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].len(), 4);
         assert!((total_area(&out) - 100.0).abs() < 1e-9);
@@ -725,7 +801,7 @@ mod tests {
     #[test]
     fn ring_collapsing_to_single_point_is_dropped() {
         let input: PolygonSet = vec![vec![(5.0, 5.0), (5.0, 5.0), (5.0, 5.0), (5.0, 5.0)]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert!(out.is_empty());
     }
 
@@ -738,7 +814,7 @@ mod tests {
         // Edges (0,0)-(10,10) and (10,0)-(0,10) cross at (5,5).
         let input: PolygonSet =
             vec![vec![(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert_eq!(out.len(), 2, "figure-8 should split into two triangles: {:?}", out);
         // Both triangles have area 25.
         let total = total_area(&out);
@@ -783,7 +859,7 @@ mod tests {
             (10.0, 0.0),
             (0.0, 10.0),
         ]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert_eq!(out.len(), 2, "expected two lobes, got {:?}", out);
         let areas = signed_areas(&out);
         assert!((areas[0] - 25.0).abs() < 1e-9, "areas: {:?}", areas);
@@ -823,7 +899,7 @@ mod tests {
             (5.0, 5.0),
             (0.0, 10.0),
         ]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert_eq!(out.len(), 2, "expected two lobes, got {:?}", out);
         assert!((total_area(&out) - 50.0).abs() < 1e-9);
         for r in &out {
@@ -863,7 +939,7 @@ mod tests {
             (5.0, 10.0),
             (0.0, 10.0),
         ]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert_eq!(out.len(), 1, "expected one ring, got {:?}", out);
         assert_eq!(
             canonical(&out[0]),
@@ -917,7 +993,7 @@ mod tests {
             (10.0, 10.0),
             (0.0, 10.0),
         ]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert_eq!(out.len(), 2, "expected square + hole, got {:?}", out);
         let areas = signed_areas(&out);
         assert!((areas[0] + 4.0).abs() < 1e-9, "areas: {:?}", areas);
@@ -963,7 +1039,7 @@ mod tests {
             (10.0, 10.0),
             (0.0, 10.0),
         ]];
-        let out = normalize(&input);
+        let out = normalize(&input, PolyFillRule::NonZero);
         assert_eq!(out.len(), 1, "expected one ring, got {:?}", out);
         assert_eq!(
             canonical(&out[0]),
@@ -972,102 +1048,287 @@ mod tests {
         assert!((signed_areas(&out)[0] - 100.0).abs() < 1e-9);
     }
 
-    // ----------- Inter-ring relations: NOT this module's call -----------
+    // ---------- Inter-ring winding cancellation: THE CARRIED RULE ----------
     //
-    // `boolean::PolygonSet` is contractually a flat list of rings under
-    // the EVEN-ODD rule, with orientation explicitly outside the
-    // contract. So the normalizer must not read a set's rings as one
-    // non-zero-wound region: doing so re-interprets the operand. The
-    // tests below pin that, ring relation by ring relation, so a
-    // later widening of the scope cannot happen silently. The
-    // disagreement between the two rules is written up in the module
-    // docs as a spec question for the council.
+    // These tests come in PAIRS: one input, both rules, two answers.
+    // That pairing is the point — it is what makes the carried rule
+    // observable rather than a comment. Each pair's expectation is
+    // derived from first principles (winding counts and shoelace sums
+    // written out below), never read back from the implementation,
+    // because these are SHARED limitations across the two ports: the
+    // differential referee compares wrong-with-wrong as equal, so
+    // correctness has to be argued here and the corpus only gates that
+    // Rust and Swift agree.
 
     #[test]
-    fn nested_co_oriented_rings_keep_the_hole() {
-        // Two CCW rings of one set, one nested inside the other. Under
-        // even-odd (the ratified PolygonSet contract) the inner ring is
-        // a HOLE: a ray from a point inside it crosses two ring edges.
-        // Under non-zero it would instead be solid, winding 1 + 1 = 2.
+    fn nested_co_oriented_rings_are_a_hole_under_even_odd() {
+        // Two CCW rings, one nested in the other: [0,20]^2 and
+        // [5,15]^2.
         //
-        // Both rings are individually simple, so both pass through
-        // untouched and the even-odd reading is preserved for the sweep
-        // to act on. Had the normalizer taken the non-zero reading of
-        // the whole set it would have deleted the inner ring here — and
-        // with it every donut expressed the natural way, which is what
-        // `boolean::tests::intersect_with_holed_polygon_preserves_hole`
-        // exercises end to end.
+        // Derivation, even-odd. A ray from a point inside the inner
+        // ring crosses two ring edges — even — so that region is NOT
+        // filled: the inner ring is a genuine hole boundary. Between
+        // the rings a ray crosses once — odd — filled. Both rings are
+        // simple and neither crosses the other, and each is a real
+        // filled/unfilled transition, so the fast path returns them
+        // bit-identically, orientation included. Net filled area
+        // 400 - 100 = 300 over 2 rings.
         let outer = vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)];
         let inner = vec![(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)];
-        let out = normalize(&vec![outer.clone(), inner.clone()]);
+        let out = normalize(
+            &vec![outer.clone(), inner.clone()],
+            PolyFillRule::EvenOdd,
+        );
         assert_eq!(out, vec![outer, inner]);
     }
 
     #[test]
-    fn nested_opposed_rings_keep_the_hole() {
-        // The same nesting with the inner ring wound the other way.
-        // Even-odd does not care about orientation, so the answer must
-        // be identical to the co-oriented case above: both rings
-        // through untouched, the hole intact.
+    fn nested_co_oriented_rings_fill_solid_under_non_zero() {
+        // THE SAME INPUT, read as the artist's `fill-rule="nonzero"`
+        // path says to read it. This is inter-ring winding
+        // cancellation: the 4th degenerate class, unblocked by the
+        // carried-rule ruling.
+        //
+        // Derivation, non-zero. Inside the inner ring the winding is
+        // +1 (outer, CCW) + 1 (inner, CCW) = 2, non-zero, so that
+        // region IS filled. Between the rings the winding is +1, also
+        // filled. Filled-ness is therefore the same on both sides of
+        // the inner ring's boundary, so that boundary is not a
+        // boundary at all and every one of its spans is dropped. What
+        // survives is the outer square alone: one CCW ring, shoelace
+        // 2A = 20*20*2 = 800 -> area 400.
+        //
+        // Under the OLD fixed even-odd reading this input was
+        // unrepresentable: a nonzero document was silently turned into
+        // a donut. That is the boundary lie the ruling closed.
+        let outer = vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)];
+        let inner = vec![(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)];
+        let out = normalize(&vec![outer, inner], PolyFillRule::NonZero);
+        assert_eq!(out.len(), 1, "expected one solid ring, got {:?}", out);
+        assert_eq!(
+            canonical(&out[0]),
+            vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)]
+        );
+        assert!((signed_areas(&out)[0] - 400.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn nested_opposed_rings_are_a_hole_under_both_rules() {
+        // The same nesting with the inner ring wound the other way —
+        // the way SVG's own examples draw a donut.
+        //
+        // Derivation. Even-odd ignores orientation, so the answer is
+        // the co-oriented even-odd answer: a hole. Non-zero agrees for
+        // once, because inside the inner ring the winding is
+        // +1 + (-1) = 0. The two rules AGREE here, which is precisely
+        // why this shape is canonical: canonical output is rings whose
+        // two readings coincide, and this input already is one. Both
+        // rules therefore take the fast path and return it untouched:
+        // 2 rings, net 400 - 100 = 300.
         let outer = vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)];
         let inner = vec![(5.0, 5.0), (5.0, 15.0), (15.0, 15.0), (15.0, 5.0)];
-        let out = normalize(&vec![outer.clone(), inner.clone()]);
-        assert_eq!(out, vec![outer, inner]);
+        for rule in [PolyFillRule::EvenOdd, PolyFillRule::NonZero] {
+            let out = normalize(&vec![outer.clone(), inner.clone()], rule);
+            assert_eq!(
+                out,
+                vec![outer.clone(), inner.clone()],
+                "rule {:?} disturbed a canonical donut",
+                rule
+            );
+        }
     }
 
     #[test]
-    fn overlapping_rings_are_left_for_the_sweep() {
-        // Two CCW squares of one set that genuinely overlap: [0,10]^2
-        // and [5,15]^2. Their boundaries CROSS, at (10,5) and (5,10) —
-        // so this is the case where a set-wide reading is most
-        // tempting. Under even-odd the overlap [5,10]^2 is outside the
-        // region (two crossings), making the set a symmetric
-        // difference; under non-zero it would be the union. Each ring
-        // is simple on its own, so both pass through and the sweep
-        // decides.
+    fn overlapping_rings_are_a_symmetric_difference_under_even_odd() {
+        // Two CCW squares that genuinely overlap: [0,10]^2 and
+        // [5,15]^2, boundaries crossing at (10,5) and (5,10).
+        //
+        // Derivation, even-odd. A ray from inside the overlap
+        // [5,10]^2 crosses two edges — even — so the overlap is NOT
+        // filled and the set means the symmetric difference. Each ring
+        // is simple by itself and each is a real transition (crossing
+        // into either square from outside flips parity), so the fast
+        // path returns both untouched and the sweep sees the even-odd
+        // set it was handed. Net filled area 100 + 100 - 2*25 = 150.
         let a = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         let b = vec![(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)];
-        let out = normalize(&vec![a.clone(), b.clone()]);
+        let out =
+            normalize(&vec![a.clone(), b.clone()], PolyFillRule::EvenOdd);
         assert_eq!(out, vec![a, b]);
     }
 
     #[test]
-    fn rings_sharing_a_collinear_edge_pass_through() {
-        // Two CCW squares of one set sharing a full edge: [0,10]x[0,10]
-        // and [10,20]x[0,10]. The shared span x=10 is traced upward by
-        // the first ring and downward by the second — an INTER-ring
-        // collinear overlap. Each ring is still simple by itself, so
-        // both pass through; fusing them across the shared span would
-        // be the non-zero reading of the set.
+    fn overlapping_rings_are_a_union_under_non_zero() {
+        // The same two squares under the rule a freehand scribble
+        // carries. Inter-ring cancellation again, the overlap case.
+        //
+        // Derivation, non-zero. Inside the overlap the winding is
+        // 1 + 1 = 2, non-zero, so the overlap IS filled and the set
+        // means the union — one L-shaped octagon. The two crossings
+        // become vertices, and the arcs of each square's boundary that
+        // run through the other square have winding 2 on one side and
+        // 1 on the other: filled both ways, so they are dropped.
+        // Survivors, chained CCW:
+        //   (0,0) (10,0) (10,5) (15,5) (15,15) (5,15) (5,10) (0,10)
+        // Shoelace 2A = (0*0-10*0) + (10*5-10*0) + (10*5-15*5)
+        //             + (15*15-15*5) + (15*15-5*15) + (5*10-5*15)
+        //             + (5*10-0*10) + (0*0-0*10)
+        //             = 0 + 50 - 25 + 150 + 150 - 25 + 50 + 0 = 350
+        // -> area 175, which is also 100 + 100 - 25 as it must be.
+        let a = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let b = vec![(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)];
+        let out = normalize(&vec![a, b], PolyFillRule::NonZero);
+        assert_eq!(out.len(), 1, "expected one union ring, got {:?}", out);
+        assert_eq!(
+            canonical(&out[0]),
+            vec![
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (10.0, 5.0),
+                (15.0, 5.0),
+                (15.0, 15.0),
+                (5.0, 15.0),
+                (5.0, 10.0),
+                (0.0, 10.0),
+            ]
+        );
+        assert!((signed_areas(&out)[0] - 175.0).abs() < 1e-9);
+        assert!(is_simple(&out[0]));
+    }
+
+    #[test]
+    fn rings_sharing_a_collinear_edge_stay_two_under_even_odd() {
+        // Two CCW squares sharing a full edge: [0,10]x[0,10] and
+        // [10,20]x[0,10] — an INTER-ring collinear overlap.
+        //
+        // Derivation, even-odd. The shared span x=10 has one square on
+        // each side, each crossed once, so parity is odd on both sides
+        // — both filled — but even-odd's per-ring decomposition means
+        // each ring is judged alone, and alone each is a simple ring
+        // that is a real transition. Fast path, both untouched:
+        // 2 rings, 100 + 100 = 200.
         let a = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         let b = vec![(10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)];
-        let out = normalize(&vec![a.clone(), b.clone()]);
+        let out =
+            normalize(&vec![a.clone(), b.clone()], PolyFillRule::EvenOdd);
         assert_eq!(out, vec![a, b]);
     }
 
     #[test]
-    fn disjoint_rings_take_the_fast_path_untouched() {
-        // Two CCW squares that share nothing. Pins that widening the
-        // intersection predicate did not drag the ordinary case onto
-        // the arrangement path — the rings come back bit-identical, in
-        // input order.
+    fn rings_sharing_a_collinear_edge_fuse_under_non_zero() {
+        // The same pair read set-wide. Derivation, non-zero: to the
+        // left of the shared span x=10 the winding is +1 (first square
+        // only); to its right it is +1 (second square only). Filled on
+        // both sides, so the span is interior and is dropped, and the
+        // two squares fuse into the single rectangle [0,20]x[0,10].
+        // The collinear vertices (10,0) and (10,10) are RETAINED —
+        // collapsing them is the Boolean panel's separate opt-in — so
+        // the ring has six vertices.
+        //
+        // Shoelace on (0,0) (10,0) (20,0) (20,10) (10,10) (0,10),
+        // one term x_i*y_{i+1} - x_{i+1}*y_i per edge, wrapping:
+        //   (0,0)  ->(10,0) :  0*0  - 10*0  =   0
+        //   (10,0) ->(20,0) : 10*0  - 20*0  =   0
+        //   (20,0) ->(20,10): 20*10 - 20*0  = 200
+        //   (20,10)->(10,10): 20*10 - 10*10 = 100
+        //   (10,10)->(0,10) : 10*10 -  0*10 = 100
+        //   (0,10) ->(0,0)  :  0*0  -  0*10 =   0
+        // sum 400, area = 400/2 = 200 = 100 + 100, as
+        // region-preservation demands.
+        let a = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
+        let b = vec![(10.0, 0.0), (20.0, 0.0), (20.0, 10.0), (10.0, 10.0)];
+        let out = normalize(&vec![a, b], PolyFillRule::NonZero);
+        assert_eq!(out.len(), 1, "expected one fused ring, got {:?}", out);
+        assert_eq!(
+            canonical(&out[0]),
+            vec![
+                (0.0, 0.0),
+                (10.0, 0.0),
+                (20.0, 0.0),
+                (20.0, 10.0),
+                (10.0, 10.0),
+                (0.0, 10.0),
+            ]
+        );
+        assert!((signed_areas(&out)[0] - 200.0).abs() < 1e-9);
+        assert!(is_simple(&out[0]));
+    }
+
+    #[test]
+    fn disjoint_rings_take_the_fast_path_untouched_under_both_rules() {
+        // Two CCW squares that share nothing. Disjointness is the case
+        // where the two rules cannot disagree — no point is enclosed
+        // twice — so this pins that carrying the rule did not drag the
+        // ordinary case onto the arrangement path under either
+        // reading. The rings come back bit-identical, in input order.
         let a = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         let b = vec![(20.0, 0.0), (30.0, 0.0), (30.0, 10.0), (20.0, 10.0)];
-        let out = normalize(&vec![a.clone(), b.clone()]);
-        assert_eq!(out, vec![a, b]);
+        for rule in [PolyFillRule::EvenOdd, PolyFillRule::NonZero] {
+            let out = normalize(&vec![a.clone(), b.clone()], rule);
+            assert_eq!(out, vec![a.clone(), b.clone()], "rule {:?}", rule);
+        }
     }
 
     #[test]
     fn a_degenerate_ring_does_not_take_its_siblings_with_it() {
-        // One good ring plus one zero-area collinear ring. Per-ring
-        // scope means the collinear one is dropped (it encloses
-        // nothing) and the good one survives verbatim — a set-wide
-        // rebuild would have had to decide what the degenerate ring
-        // "meant" for its sibling.
+        // One good ring plus one zero-area collinear ring, under both
+        // rules. The flat ring encloses nothing under either reading —
+        // its winding is 0 everywhere — so it is dropped and the
+        // square survives with its region intact (area 100, simple).
+        //
+        // The two rules reach that answer by different routes, which
+        // is worth stating: even-odd decomposes per ring, so the flat
+        // ring is resolved alone and vanishes while the square never
+        // leaves the fast path and comes back BIT-IDENTICAL. Non-zero
+        // must read the set together, so the flat ring's self-overlap
+        // drags the whole set onto the arrangement path; the square is
+        // rebuilt vertex for vertex from its own spans, so its region
+        // and vertex sequence are preserved but its traversal may
+        // start anywhere — hence the canonical() comparison.
         let a = vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)];
         let flat = vec![(20.0, 0.0), (25.0, 0.0), (30.0, 0.0)];
-        let out = normalize(&vec![a.clone(), flat]);
-        assert_eq!(out, vec![a]);
+
+        let eo = normalize(
+            &vec![a.clone(), flat.clone()],
+            PolyFillRule::EvenOdd,
+        );
+        assert_eq!(eo, vec![a.clone()]);
+
+        let nz = normalize(&vec![a.clone(), flat], PolyFillRule::NonZero);
+        assert_eq!(nz.len(), 1, "expected the square alone, got {:?}", nz);
+        assert_eq!(canonical(&nz[0]), canonical(&a));
+        assert!((signed_areas(&nz)[0] - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_multiply_wound_ring_is_a_rule_disagreement_too() {
+        // The carried rule is not only about ring-to-ring relations:
+        // a SINGLE ring traced twice around the same square winds to 2
+        // everywhere inside it.
+        //
+        // Derivation. Non-zero: 2 != 0, so the square is filled —
+        // one ring, area 100. Even-odd: 2 is even, so the interior is
+        // NOT filled and the region is empty — zero rings. Same
+        // vertices, opposite answers, and no amount of orientation
+        // convention can paper over it. This is why the normalizer
+        // cannot pick a rule on the caller's behalf.
+        let twice: PolygonSet = vec![vec![
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+        ]];
+
+        let nz = normalize(&twice, PolyFillRule::NonZero);
+        assert_eq!(nz.len(), 1, "non-zero should fill it: {:?}", nz);
+        assert!((total_area(&nz) - 100.0).abs() < 1e-9);
+
+        let eo = normalize(&twice, PolyFillRule::EvenOdd);
+        assert!(eo.is_empty(), "even-odd should empty it: {:?}", eo);
     }
 
     #[test]
@@ -1075,6 +1336,6 @@ mod tests {
         // Three collinear vertices enclose nothing, so the non-zero
         // region is empty and the output must be empty too.
         let input: PolygonSet = vec![vec![(0.0, 0.0), (5.0, 0.0), (10.0, 0.0)]];
-        assert!(normalize(&input).is_empty());
+        assert!(normalize(&input, PolyFillRule::NonZero).is_empty());
     }
 }

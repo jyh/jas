@@ -100,7 +100,7 @@ fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_js
 }
 
 pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
-    use crate::interpreter::color_util::{rgb_to_hsb, rgb_to_cmyk};
+    use crate::interpreter::color_util::panel_channels;
     use serde_json::Value as J;
 
     let mode_str = match st.color_panel_mode {
@@ -146,33 +146,27 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
         })
     };
 
-    // Compute slider values from the resolved active color
+    // Compute slider values from the resolved active color. The derivation —
+    // quantise the float colour to three 8-bit values, THEN convert those to
+    // hue / saturation / brightness / CMYK / hex — lives in `panel_channels` so
+    // that the other port and the shared corpus
+    // (test_fixtures/algorithms/color_convert.json) can hold the same function
+    // to the same order rather than each rewriting the arithmetic.
     if let Some(color) = panel_color {
         let (rf, gf, bf, _) = color.to_rgba();
-        let r = (rf * 255.0).round() as u8;
-        let g = (gf * 255.0).round() as u8;
-        let b = (bf * 255.0).round() as u8;
-
-        // RGB
-        m.insert("r".into(), J::Number(serde_json::Number::from(r as i64)));
-        m.insert("g".into(), J::Number(serde_json::Number::from(g as i64)));
-        m.insert("bl".into(), J::Number(serde_json::Number::from(b as i64)));
-
-        // HSB
-        let (h, s, br) = rgb_to_hsb(r, g, b);
-        m.insert("h".into(), J::Number(serde_json::Number::from(h as i64)));
-        m.insert("s".into(), J::Number(serde_json::Number::from(s as i64)));
-        m.insert("b".into(), J::Number(serde_json::Number::from(br as i64)));
-
-        // CMYK
-        let (c, mk, y, k) = rgb_to_cmyk(r, g, b);
-        m.insert("c".into(), J::Number(serde_json::Number::from(c as i64)));
-        m.insert("m".into(), J::Number(serde_json::Number::from(mk as i64)));
-        m.insert("y".into(), J::Number(serde_json::Number::from(y as i64)));
-        m.insert("k".into(), J::Number(serde_json::Number::from(k as i64)));
-
-        // Hex
-        m.insert("hex".into(), J::String(format!("{:02x}{:02x}{:02x}", r, g, b)));
+        let ch = panel_channels(rf, gf, bf);
+        let num = |v: i64| J::Number(serde_json::Number::from(v));
+        m.insert("r".into(), num(ch.r as i64));
+        m.insert("g".into(), num(ch.g as i64));
+        m.insert("bl".into(), num(ch.bl as i64));
+        m.insert("h".into(), num(ch.h as i64));
+        m.insert("s".into(), num(ch.s as i64));
+        m.insert("b".into(), num(ch.b as i64));
+        m.insert("c".into(), num(ch.c as i64));
+        m.insert("m".into(), num(ch.m as i64));
+        m.insert("y".into(), num(ch.y as i64));
+        m.insert("k".into(), num(ch.k as i64));
+        m.insert("hex".into(), J::String(ch.hex));
     }
 
     // ── Stroke panel overrides ──────────────────────────────
@@ -867,6 +861,35 @@ pub(crate) fn live_fill_stroke_values(
             .map_or(none, |s| { let (r, g, b, _) = s.color.to_rgba(); hex(r, g, b) })),
     };
     (fill_value, stroke_value)
+}
+
+/// The `state.fill_color` / `state.stroke_color` pair as a scope that has no
+/// map to overlay onto sees them: `live_fill_stroke_values` composed with the
+/// workspace `state.yaml` defaults, so the Mixed outcome (`None`) leaves the
+/// DECLARED default standing instead of inventing a null.
+///
+/// That composition is exactly what `build_live_state_map` performs — it starts
+/// from `state_defaults()` and overlays — so a caller that builds its `state`
+/// namespace key-by-key (the action-dispatch ctx, `build_appstate_ctx`) gets the
+/// same three outcomes from the same source rather than answering one fact its
+/// own way. It used to answer from `st.app_default_fill` ALONE: with a
+/// stroke-only shape SELECTED, `set_fill_type_solid`'s
+/// `state.fill_color == null` guard read the app default's white and the click
+/// silently did nothing, while JasSwift — whose action ctx has always been the
+/// selection-aware map — painted the selection (COLORTIERS).
+pub(crate) fn action_fill_stroke_values(
+    st: &AppState,
+) -> (serde_json::Value, serde_json::Value) {
+    let (fill_value, stroke_value) = live_fill_stroke_values(st);
+    let default_for = |key: &str| -> serde_json::Value {
+        Workspace::load()
+            .and_then(|w| w.state_defaults().get(key).cloned())
+            .unwrap_or(serde_json::Value::Null)
+    };
+    (
+        fill_value.unwrap_or_else(|| default_for("fill_color")),
+        stroke_value.unwrap_or_else(|| default_for("stroke_color")),
+    )
 }
 
 /// Lean app-state map for the per-tool bridge (`CanvasTool::sync_global_state`).

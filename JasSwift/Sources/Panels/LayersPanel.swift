@@ -421,7 +421,8 @@ public enum LayersPanel {
             var index = 0
             if let s = spec["index"] as? String {
                 if case .number(let n) = evaluate(s, context: callCtx) {
-                    index = Int(n)
+                    // saturatingInt mirrors Rust's `n as usize` (risk R9).
+                    index = saturatingInt(n)
                 }
             } else if let n = spec["index"] as? Int {
                 index = n
@@ -548,15 +549,13 @@ public enum LayersPanel {
         let docCreateArtboardHandler: PlatformEffect = { value, callCtx, _ in
             let spec = (value as? [String: Any]) ?? [:]
             let doc = model.document
-            // Collision-retry id mint (production entropy) — the ONLY mint;
-            // opApply replays the recorded literal and never mints.
-            let existing = Set(doc.artboards.map(\.id))
-            var id = ""
-            for _ in 0..<100 {
-                let c = generateArtboardId()
-                if !existing.contains(c) { id = c; break }
-            }
-            guard !id.isEmpty else { return nil }
+            // Collision-retry id mint through THE ONE MINT LOOP (production
+            // entropy) — the ONLY mint; opApply replays the recorded literal
+            // and never mints.
+            var existing = Set(doc.artboards.map(\.id))
+            guard let id = mintUniqueIds(1, existing: &existing,
+                                         mint: { generateArtboardId() })?[0]
+            else { return nil }
             // Build a RESOLVED flat `fields` object: the default name (derived
             // from the live doc) plus each YAML expr evaluated to a literal
             // (replay has no eval context). A `name` override in `spec` replaces
@@ -613,13 +612,10 @@ public enum LayersPanel {
             // the opApply arm). VALUE-IN-OP: mint new_id + derive name HERE
             // (the ONLY mint / derive) and journal both as literals.
             guard doc.artboards.contains(where: { $0.id == target }) else { return nil }
-            let existing = Set(doc.artboards.map(\.id))
-            var newId = ""
-            for _ in 0..<100 {
-                let c = generateArtboardId()
-                if !existing.contains(c) { newId = c; break }
-            }
-            guard !newId.isEmpty else { return nil }
+            var existing = Set(doc.artboards.map(\.id))
+            guard let newId = mintUniqueIds(1, existing: &existing,
+                                            mint: { generateArtboardId() })?[0]
+            else { return nil }
             opApply(model, controller, [
                 "op": "duplicate_artboard", "id": target, "new_id": newId,
                 "name": nextArtboardName(doc.artboards),

@@ -11,12 +11,44 @@ class WorkspaceData {
         self.data = data
     }
 
-    /// Load the workspace from a JSON file or embedded fallback.
+    /// The workspace bundle, read and parsed ONCE.
     ///
-    /// Tries to read from the development file path first
-    /// (../../workspace/workspace.json relative to JasSwift),
-    /// then falls back to an embedded empty workspace.
+    /// Mirrors Rust's `Workspace::load`, which hands out a reference to a
+    /// `OnceLock`-cached parse (jas_dioxus/src/interpreter/workspace.rs). A
+    /// `static let` is Swift's equivalent: lazily initialised, exactly once,
+    /// thread-safely.
+    ///
+    /// This has to be cached, not "should be": the bundle is 1.4 MB of JSON,
+    /// this call has ~40 sites, and some of them are inside SwiftUI bodies —
+    /// ``liveSwatchPaint`` reaches it for ONE key while a mixed selection is
+    /// live, which is twice per toolbar redraw. Uncached, each of those was a
+    /// full re-read and re-parse (~100 ms measured in
+    /// `workspaceBundleIsParsedOnceNotPerCall`).
+    ///
+    /// Sharing one instance is safe because ``WorkspaceData`` is immutable: its
+    /// `data` is a `let` and nothing mutates the parsed tree. There is no
+    /// reload path — the bundle is a build product, regenerated from
+    /// `workspace/*.yaml` before a run, never during one.
+    private static let cached: WorkspaceData? = parse()
+
+    /// The parsed workspace bundle, or `nil` if it could not be found or parsed.
+    ///
+    /// There is no embedded fallback: ``parse()`` tries two development file
+    /// paths, then `Bundle.main`, then `return nil`. So the `nil` is real and
+    /// every caller has to handle it — no source-tree call site force-unwraps
+    /// this today.
+    ///
+    /// The result is CACHED, `nil` included, so a failure is permanent for the
+    /// process where it used to be retried on every call. That is correct for
+    /// the one thing that can change it — the bundle is a build product,
+    /// regenerated from `workspace/*.yaml` before a run, never during one — but
+    /// it means a run that starts without a readable bundle stays that way.
     static func load() -> WorkspaceData? {
+        cached
+    }
+
+    /// The uncached read + parse behind ``cached``. Runs at most once.
+    private static func parse() -> WorkspaceData? {
         // Try file-based loading for development
         let filePaths = [
             // Relative to JasSwift directory

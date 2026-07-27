@@ -278,7 +278,8 @@ private func rebuildWithOpacityAndBlend(
             opacity: newOpacity ?? v.opacity, transform: v.transform,
             locked: v.locked, visibility: v.visibility,
             blendMode: newBlendMode ?? v.blendMode, mask: v.mask,
-            strokeGradient: v.strokeGradient
+            strokeGradient: v.strokeGradient,
+            name: v.name, id: v.id
         ))
     case .rect(let v):
         return .rect(Rect(
@@ -287,7 +288,8 @@ private func rebuildWithOpacityAndBlend(
             opacity: newOpacity ?? v.opacity, transform: v.transform,
             locked: v.locked, visibility: v.visibility,
             blendMode: newBlendMode ?? v.blendMode, mask: v.mask,
-            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient
+            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+            name: v.name, id: v.id
         ))
     case .circle(let v):
         return .circle(Circle(
@@ -296,7 +298,8 @@ private func rebuildWithOpacityAndBlend(
             opacity: newOpacity ?? v.opacity, transform: v.transform,
             locked: v.locked, visibility: v.visibility,
             blendMode: newBlendMode ?? v.blendMode, mask: v.mask,
-            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient
+            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+            name: v.name, id: v.id
         ))
     case .ellipse(let v):
         return .ellipse(Ellipse(
@@ -305,7 +308,8 @@ private func rebuildWithOpacityAndBlend(
             opacity: newOpacity ?? v.opacity, transform: v.transform,
             locked: v.locked, visibility: v.visibility,
             blendMode: newBlendMode ?? v.blendMode, mask: v.mask,
-            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient
+            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+            name: v.name, id: v.id
         ))
     case .polyline(let v):
         return .polyline(Polyline(
@@ -313,7 +317,8 @@ private func rebuildWithOpacityAndBlend(
             opacity: newOpacity ?? v.opacity, transform: v.transform,
             locked: v.locked, visibility: v.visibility,
             blendMode: newBlendMode ?? v.blendMode, mask: v.mask,
-            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient
+            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+            name: v.name, id: v.id
         ))
     case .polygon(let v):
         return .polygon(Polygon(
@@ -321,7 +326,8 @@ private func rebuildWithOpacityAndBlend(
             opacity: newOpacity ?? v.opacity, transform: v.transform,
             locked: v.locked, visibility: v.visibility,
             blendMode: newBlendMode ?? v.blendMode, mask: v.mask,
-            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient
+            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
+            name: v.name, id: v.id
         ))
     case .path(let v):
         return .path(Path(
@@ -332,7 +338,10 @@ private func rebuildWithOpacityAndBlend(
             blendMode: newBlendMode ?? v.blendMode, mask: v.mask,
             fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
             strokeBrush: v.strokeBrush,
-            strokeBrushOverrides: v.strokeBrushOverrides
+            strokeBrushOverrides: v.strokeBrushOverrides,
+            toolOrigin: v.toolOrigin,
+            name: v.name, id: v.id,
+            fillRule: v.fillRule
         ))
     case .text, .textPath, .group, .layer, .live:
         // Phase 1: text / paragraph rebuilds + container / live

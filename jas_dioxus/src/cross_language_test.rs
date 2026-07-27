@@ -453,11 +453,122 @@ mod tests {
                                                       args[4], args[5], args[6], args[7], filled),
                 "point_in_polygon" =>
                     hit_test::point_in_polygon(args[0], args[1], &polygon),
+                // Element-level marquee / lasso: `element` is a test-JSON
+                // element, `args` the marquee rect x/y/w/h, `polygon` the
+                // lasso outline.
+                "element_intersects_rect" => {
+                    let elem = crate::geometry::test_json::parse_element(&tc["element"]);
+                    hit_test::element_intersects_rect(&elem, args[0], args[1], args[2], args[3])
+                }
+                "element_intersects_polygon" => {
+                    let elem = crate::geometry::test_json::parse_element(&tc["element"]);
+                    hit_test::element_intersects_polygon(&elem, &polygon)
+                }
                 _ => panic!("Unknown function: {}", func),
             };
 
             assert_eq!(actual, expected,
                 "Hit test '{}' failed: expected {}, got {}", name, expected, actual);
+        }
+    }
+
+    /// The `number_input` COMMIT corpus: typed text → the value written to
+    /// state, or nothing at all. Acceptance goldens are derived from the live
+    /// reference's numeric-string coercion (see the fixture's `_doc`); the
+    /// clamp goldens are the widget's declared-bounds rule. Mirrored by Swift's
+    /// `algorithmNumberCommitVectors`, and run port-against-port by
+    /// `scripts/cross_language_algorithms.py --algo number_commit`.
+    #[test]
+    fn algorithm_number_commit_vectors() {
+        use crate::interpreter::widget_commit::number_input_commit;
+        let json_str = read_fixture("algorithms/number_commit.json");
+        let doc: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Failed to parse number_commit.json");
+        let vectors = doc["vectors"].as_array().expect("number_commit.json has no vectors");
+        assert!(!vectors.is_empty(), "number_commit.json is empty");
+
+        for tc in vectors {
+            let name = tc["name"].as_str().unwrap();
+            let text = tc["text"].as_str().unwrap();
+            let min = tc.get("min").and_then(|v| v.as_f64());
+            let max = tc.get("max").and_then(|v| v.as_f64());
+            let expected = tc["expected"].as_f64();
+            assert_eq!(
+                number_input_commit(text, min, max),
+                expected,
+                "number_commit '{}': text {:?} with min {:?} max {:?}",
+                name, text, min, max,
+            );
+        }
+    }
+
+    /// The colour-conversion corpus: the four primitives every port's Color
+    /// panel is built out of, goldens derived from the spec formulas rather than
+    /// captured from a port.
+    ///
+    /// The `panel_channels` family is the one that matters most. It pins the
+    /// ORDER the panel's channel derivation applies the conversions in —
+    /// quantise the float colour to three 8-bit values FIRST, then convert
+    /// those — which is the contract Swift's overlay broke by asking the float
+    /// colour for its own h/s/b instead (COLORTIERS, 2026-07-26). Mirrored by
+    /// Swift's `algorithmColorConvertVectors`, and run port-against-port by
+    /// `scripts/cross_language_algorithms.py --algo color_convert`.
+    #[test]
+    fn algorithm_color_convert_vectors() {
+        use crate::interpreter::color_util as cu;
+        let json_str = read_fixture("algorithms/color_convert.json");
+        let doc: serde_json::Value = serde_json::from_str(&json_str)
+            .expect("Failed to parse color_convert.json");
+        let vectors = doc["vectors"].as_array().expect("color_convert.json has no vectors");
+        assert!(!vectors.is_empty(), "color_convert.json is empty");
+
+        let ints = |v: &serde_json::Value| -> Vec<i64> {
+            v.as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).collect()
+        };
+        let floats = |v: &serde_json::Value| -> Vec<f64> {
+            v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect()
+        };
+
+        for tc in vectors {
+            let name = tc["name"].as_str().unwrap();
+            match tc["function"].as_str().unwrap() {
+                "rgb_to_hsb" => {
+                    let a = ints(&tc["rgb"]);
+                    let (h, s, b) = cu::rgb_to_hsb(a[0] as u8, a[1] as u8, a[2] as u8);
+                    assert_eq!(vec![h as i64, s as i64, b as i64], ints(&tc["expected"]),
+                        "color_convert '{}': rgb_to_hsb", name);
+                }
+                "hsb_to_rgb" => {
+                    let a = floats(&tc["hsb"]);
+                    let (r, g, b) = cu::hsb_to_rgb(a[0], a[1], a[2]);
+                    assert_eq!(vec![r as i64, g as i64, b as i64], ints(&tc["expected"]),
+                        "color_convert '{}': hsb_to_rgb", name);
+                }
+                "rgb_to_cmyk" => {
+                    let a = ints(&tc["rgb"]);
+                    let (c, m, y, k) = cu::rgb_to_cmyk(a[0] as u8, a[1] as u8, a[2] as u8);
+                    assert_eq!(vec![c as i64, m as i64, y as i64, k as i64],
+                        ints(&tc["expected"]), "color_convert '{}': rgb_to_cmyk", name);
+                }
+                "panel_channels" => {
+                    let a = floats(&tc["float_rgb"]);
+                    let got = cu::panel_channels(a[0], a[1], a[2]);
+                    let want = tc["expected"].as_object().unwrap();
+                    let pairs: [(&str, i64); 10] = [
+                        ("r", got.r as i64), ("g", got.g as i64), ("bl", got.bl as i64),
+                        ("h", got.h as i64), ("s", got.s as i64), ("b", got.b as i64),
+                        ("c", got.c as i64), ("m", got.m as i64), ("y", got.y as i64),
+                        ("k", got.k as i64),
+                    ];
+                    for (key, value) in pairs {
+                        assert_eq!(value, want[key].as_i64().unwrap(),
+                            "color_convert '{}': panel_channels.{}", name, key);
+                    }
+                    assert_eq!(got.hex, want["hex"].as_str().unwrap(),
+                        "color_convert '{}': panel_channels.hex", name);
+                }
+                other => panic!("Unknown color_convert function: {}", other),
+            }
         }
     }
 
@@ -747,7 +858,8 @@ mod tests {
                          "operations/transform_shear.json",
                          "operations/transform_copy.json",
                          "operations/id_primary_move.json",
-                         "operations/id_primary_copy.json"] {
+                         "operations/id_primary_copy.json",
+                         "operations/boolean_collapse_default.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -1116,6 +1228,13 @@ mod tests {
         // state reader never republished, so the Color panel's guards kept
         // reading the old colour). See `assert_action_panel_state`.
         "fill_stroke_none.json",
+        // COLORTIERS: the action-dispatch `state` scope is SELECTION-AWARE.
+        // `set_fill_type_solid` on a stroke-only SELECTION must read that
+        // selection's None and paint it; Rust's `build_appstate_ctx` used to
+        // read the app default alone, so the click was a silent no-op there
+        // and painted in Swift. The second case pins the Mixed outcome (the
+        // declared default stands — absent is not null).
+        "fill_stroke_action_scope.json",
     ];
 
     /// Run an action fixture and return the resulting `AppState`.
@@ -2677,6 +2796,23 @@ mod tests {
         run_operation_fixture("operations/boolean_ops.json");
     }
 
+    /// `state.boolean_remove_redundant_points` defaults to FALSE
+    /// (`workspace/state.yaml`), so the collinear-collapse pass does NOT
+    /// run on a default boolean. The setup is two rects overlapping in x
+    /// with the same y-extent, so the union's top and bottom edges each
+    /// carry two vertices the sweep inserted at the operands' vertical
+    /// edges — vertices the collapse pass would delete. The golden pins
+    /// them present, which is what makes this fixture DISCRIMINATE the
+    /// default instead of being blind to it (Swift defaulted the flag to
+    /// true, so the pass ran in exactly one port). The same golden pins
+    /// BOOLEAN.md's paint rule for UNION: the result carries the
+    /// frontmost operand's fill and opacity (blue, 0.5), not the
+    /// backmost's (red, 0.8) and not a reset 1.0.
+    #[test]
+    fn operation_boolean_collapse_default() {
+        run_operation_fixture("operations/boolean_collapse_default.json");
+    }
+
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*
     /// print-config verbs journal real ops through `op_apply`. The fixtures span
     /// all four target structs (document_setup, print_preferences root,
@@ -4177,6 +4313,83 @@ mod tests {
             let actual = widget_tree(&panels[panel_id], ctx);
             assert_eq!(&actual, expected, "Panel widget tree '{}' mismatch", name);
         }
+    }
+
+    // ---------------------------------------------------------------
+    // Panel bind-VALUE (resolved snapshot) algorithm test vectors
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn algorithm_bind_values_vectors() {
+        use crate::interpreter::bind_values::bind_values;
+
+        let json_str = read_fixture("algorithms/panel_bind_values.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let panels = &bundle["panels"];
+
+        for tc in tests.as_array().unwrap() {
+            let name = tc["name"].as_str().unwrap();
+            let func = tc["function"].as_str().unwrap();
+            assert_eq!(func, "bind_values", "Unknown function: {}", func);
+            let panel_id = tc["args"]["panel"].as_str().unwrap();
+            // ctx is a JSON object data scope (state / panel / data namespaces);
+            // it passes straight to the expr evaluator, as in the two sibling
+            // panel passes. Default to empty (everything resolves to null).
+            let empty = serde_json::json!({});
+            let ctx = tc["args"].get("ctx").unwrap_or(&empty);
+            let expected = &tc["expected"];
+
+            let actual = bind_values(&panels[panel_id], ctx);
+            assert_eq!(&actual, expected, "Panel bind values '{}' mismatch", name);
+        }
+    }
+
+    /// The census 5.8 claim, in this port: two data scopes differing only in
+    /// `panel.hex` — "664040" vs "664141", the colour divergence's byte pattern
+    /// — are INDISTINGUISHABLE to `widget_tree` (key names only) and to
+    /// `layout_panel` (scalar count times a constant), and differ in exactly one
+    /// `bind_values` row. That difference is the reason this family exists, so
+    /// it is asserted here rather than only in the shared corpus.
+    #[test]
+    fn bind_values_separates_equal_length_hex_where_the_older_gates_cannot() {
+        use crate::interpreter::bind_values::bind_values;
+        use crate::interpreter::panel_layout::layout_panel;
+        use crate::interpreter::widget_tree::widget_tree;
+
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let panel = &bundle["panels"]["color_panel_content"];
+
+        let ctx_of = |hex: &str| {
+            serde_json::json!({
+                "state": {"fill_color": "#664040", "fill_on_top": true},
+                "panel": {"mode": "hsb", "hex": hex},
+            })
+        };
+        let (a, b) = (ctx_of("664040"), ctx_of("664141"));
+
+        assert_eq!(widget_tree(panel, &a), widget_tree(panel, &b),
+            "widget_tree is expected to be blind to bind VALUES");
+        assert_eq!(layout_panel(panel, 228, 600, &a), layout_panel(panel, 228, 600, &b),
+            "layout_panel is expected to be blind to equal-length text");
+
+        let rows_a = bind_values(panel, &a);
+        let rows_b = bind_values(panel, &b);
+        let ra = rows_a.as_array().unwrap();
+        let rb = rows_b.as_array().unwrap();
+        assert_eq!(ra.len(), rb.len());
+        let diff: Vec<_> = ra.iter().zip(rb.iter()).filter(|(x, y)| x != y).collect();
+        assert_eq!(diff.len(), 1, "expected exactly one differing row, got {:?}", diff);
+        let (x, y) = diff[0];
+        assert_eq!(x["id"], "cp_hex");
+        assert_eq!(x["key"], "bind.value");
+        assert_eq!(x["value"], "664040");
+        assert_eq!(y["value"], "664141");
     }
 
     // ---------------------------------------------------------------

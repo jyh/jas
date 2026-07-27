@@ -1720,15 +1720,17 @@ impl Controller {
 
         // Flatten (PolygonSet, paint) outputs into elements.
         //
-        // Per algorithms/boolean.rs's PolygonSet doc: rings are read
-        // under the even-odd fill rule. A result like XOR of two
-        // overlapping rects is one outer ring plus an inner ring that
-        // cuts out the overlap — emitting each ring as a separate
-        // PolygonElem (which fills its own area independently) leaves
-        // the overlap doubly-filled. Single-ring results stay as
-        // PolygonElems; multi-ring results emit one PathElem with all
-        // rings as subpaths and fill_rule=EvenOdd so the renderer
-        // honours the boolean semantics.
+        // The sweep emits CANONICAL rings, which are read under the
+        // even-odd rule (see algorithms/boolean.rs's carried-rule law).
+        // A result like XOR of two overlapping rects is one outer ring
+        // plus an inner ring that cuts out the overlap — emitting each
+        // ring as a separate PolygonElem (which fills its own area
+        // independently) leaves the overlap doubly-filled. Single-ring
+        // results stay as PolygonElems; multi-ring results emit one
+        // PathElem with all rings as subpaths, declaring
+        // boolean::RESULT_FILL_RULE so the renderer honours the boolean
+        // semantics. JasSwift's applyDestructiveBoolean does the same,
+        // element for element.
         //
         // Curve recovery (Schneider refit) is NOT done here; it's a
         // post-op step driven by boolean_panel.apply_simplify_after_op
@@ -1788,7 +1790,12 @@ impl Controller {
                         stroke_gradient: None,
                         stroke_brush: None,
                         stroke_brush_overrides: None,
-                        fill_rule: FillRule::EvenOdd,
+                        // Clause 4 of the carried-rule law: a generated
+                        // result DECLARES even-odd, from the one named
+                        // constant rather than a literal here.
+                        fill_rule: FillRule::from(
+                            crate::algorithms::boolean::RESULT_FILL_RULE,
+                        ),
                     })));
                 }
             }
@@ -2968,6 +2975,65 @@ mod tests {
         }
     }
 
+    /// The Path arm of `simplify_selection` is the one place in this
+    /// function that spells `fill_rule` out by hand rather than
+    /// inheriting it from a `..clone()`, so it is the one place a future
+    /// edit could drop it. JasSwift carries the same pin
+    /// (Tests/Geometry/FillRulePreservationTests.swift
+    /// §fillRuleSurvivesSimplifySelection).
+    #[test]
+    fn simplify_selection_preserves_even_odd_fill_rule() {
+        use crate::geometry::element::{
+            Color as ColorE, CommonProps, Fill, FillRule, PathCommand, PathElem,
+        };
+        // Two concentric squares: a donut under EvenOdd.
+        let d = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 100.0 },
+            PathCommand::LineTo { x: 0.0, y: 100.0 },
+            PathCommand::ClosePath,
+            PathCommand::MoveTo { x: 25.0, y: 25.0 },
+            PathCommand::LineTo { x: 75.0, y: 25.0 },
+            PathCommand::LineTo { x: 75.0, y: 75.0 },
+            PathCommand::LineTo { x: 25.0, y: 75.0 },
+            PathCommand::ClosePath,
+        ];
+        let path = Element::Path(PathElem {
+            d,
+            fill: Some(Fill::new(ColorE::BLACK)),
+            stroke: None,
+            width_points: Vec::new(),
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+            fill_rule: FillRule::EvenOdd,
+        });
+        let layer = Element::Layer(crate::geometry::element::LayerElem {
+            children: vec![Rc::new(path)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let mut doc = Document {
+            layers: vec![layer], selected_layer: 0, selection: vec![],
+            ..Document::default()
+        };
+        doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        let mut model = Model::new(doc, None);
+        Controller::simplify_selection(&mut model, 1.0);
+        let child = &model.document().layers[0].children().unwrap()[0];
+        match &**child {
+            Element::Path(p) => assert_eq!(
+                p.fill_rule, FillRule::EvenOdd,
+                "simplify refilled the donut's hole"
+            ),
+            other => panic!("expected Path after simplify, got {other:?}"),
+        }
+    }
+
     #[test]
     fn boolean_then_simplify_emits_path_with_curveto() {
         use crate::geometry::element::PathCommand;
@@ -3182,10 +3248,11 @@ mod tests {
 
     #[test]
     fn destructive_remove_redundant_points_collapses_collinear() {
-        // Two overlapping rects. After UNION, the resulting ring has
-        // some collinear points along the shared vertical edges (the
-        // boolean algorithm retains intersection points). With the
-        // flag on, collinear points within Precision are collapsed.
+        // Two rects overlapping in x with the same y-extent. Their UNION
+        // is one rectangle, but the sweep inserts a vertex on the top and
+        // bottom edges wherever an operand's vertical edge meets them, so
+        // the ring carries four collinear points. With the flag on they
+        // are collapsed; the flag defaults to OFF (workspace/state.yaml).
         let mut model = two_overlapping_rects();
         let off = BooleanOptions::default();
         Controller::apply_destructive_boolean(&mut model, "union", &off);
@@ -3202,9 +3269,15 @@ mod tests {
             Element::Polygon(p) => p.points.len(),
             _ => panic!("expected polygon"),
         };
-        // The collapse removes at least the collinear pair on the
-        // shared vertical seam; point count should not increase.
-        assert!(pts_on <= pts_off, "collapse should not add points");
+        // Exact counts, not an inequality. `pts_on <= pts_off` was the
+        // original assertion and it is satisfied by a collapse that does
+        // NOTHING — the same blindness the operations corpus had. The
+        // union of these two rects is one 15x10 rectangle whose ring
+        // carries the four vertices the sweep inserted where each
+        // operand's vertical edges cross the shared horizontal ones;
+        // collapse deletes exactly those.
+        assert_eq!(pts_off, 8, "the flag OFF keeps the four seam vertices");
+        assert_eq!(pts_on, 4, "the flag ON leaves the rectangle's corners");
     }
 
     #[test]
@@ -3213,6 +3286,91 @@ mod tests {
         let before = top_children_count(&model);
         Controller::apply_destructive_boolean(&mut model, "nonexistent", &BooleanOptions::default());
         assert_eq!(top_children_count(&model), before);
+    }
+
+    // BOOLEAN.md "Operand and paint rules" names FOUR properties as the
+    // paint a boolean result carries: "fill, stroke, opacity, blend
+    // mode". This port carried all four already (the rebuild clones the
+    // paint source's CommonProps) but nothing asserted it: rewriting the
+    // rebuild to `CommonProps::default()` was green before these tests.
+    // Swift wrote `opacity: 1.0` and left blend at Normal; these are the
+    // twins of the Swift tests in CompoundShapeControllerTests.swift.
+    // `opacity` is also pinned cross-language by
+    // test_fixtures/operations/boolean_collapse_default.json; blend mode
+    // is not in the corpus JSON, hence the per-port pair.
+
+    /// Two overlapping rects with DIFFERENT opacity and blend mode, so
+    /// front (index 1, the topmost) is distinguishable from back.
+    fn two_overlapping_painted_rects() -> Model {
+        let paint = |x: f64, opacity: f64, mode: crate::geometry::element::BlendMode| {
+            let mut e = make_rect(x, 0.0, 10.0, 10.0);
+            let c = match &mut e {
+                Element::Rect(r) => &mut r.common,
+                _ => unreachable!("make_rect builds a Rect"),
+            };
+            c.opacity = opacity;
+            c.mode = mode;
+            e
+        };
+        use crate::geometry::element::BlendMode;
+        let back = paint(0.0, 0.25, BlendMode::Screen);
+        let front = paint(5.0, 0.5, BlendMode::Multiply);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(back), Rc::new(front)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+            ],
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    #[test]
+    fn union_carries_frontmost_opacity_and_blend_mode() {
+        use crate::geometry::element::BlendMode;
+        let mut model = two_overlapping_painted_rects();
+        Controller::apply_destructive_boolean(&mut model, "union", &BooleanOptions::default());
+        let child = model.document().layers[0].children().unwrap()[0].clone();
+        let common = child.common();
+        assert_eq!(common.opacity, 0.5, "frontmost operand's opacity");
+        assert_eq!(common.mode, BlendMode::Multiply, "frontmost operand's blend mode");
+    }
+
+    #[test]
+    fn exclude_path_arm_carries_frontmost_opacity_and_blend_mode() {
+        // The multi-ring arm builds a Path — a SECOND construction site
+        // that has to carry the same four properties as the Polygon arm.
+        use crate::geometry::element::BlendMode;
+        let mut model = two_overlapping_painted_rects();
+        Controller::apply_destructive_boolean(&mut model, "exclude", &BooleanOptions::default());
+        let child = model.document().layers[0].children().unwrap()[0].clone();
+        assert!(matches!(&*child, Element::Path(_)), "exclude emits one multi-ring Path");
+        let common = child.common();
+        assert_eq!(common.opacity, 0.5);
+        assert_eq!(common.mode, BlendMode::Multiply);
+    }
+
+    #[test]
+    fn subtract_front_survivor_keeps_its_own_opacity_and_blend_mode() {
+        // "Each remaining element has the frontmost subtracted from it
+        // and keeps its own paint" — the survivor is the BACK rect, so
+        // the result carries 0.25 / Screen, not the cutter's.
+        use crate::geometry::element::BlendMode;
+        let mut model = two_overlapping_painted_rects();
+        Controller::apply_destructive_boolean(
+            &mut model, "subtract_front", &BooleanOptions::default());
+        let child = model.document().layers[0].children().unwrap()[0].clone();
+        let common = child.common();
+        assert_eq!(common.opacity, 0.25);
+        assert_eq!(common.mode, BlendMode::Screen);
     }
 
     #[test]
@@ -4658,5 +4816,160 @@ mod tests {
         assert!(first_mask(model.document()).is_none());
         assert!(!selection_has_mask(model.document()),
                 "mixed selection counts as no-mask");
+    }
+
+    // ------------------------------------------------------------------
+    // fill_rule preservation across the id-stamping / duplicate family
+    //
+    // The PRIME DIRECTIVE twin of JasSwift's
+    // Tests/Geometry/FillRulePreservationTests.swift. Rust reaches these
+    // paths by MUTATING `common` in place (`clear_ids`, `common_mut().id
+    // = ...`), so no field can be dropped by construction — unlike
+    // Swift, whose value-type copies must re-list every field. These
+    // tests exist so that the two ports assert the same invariant and a
+    // future refactor to a rebuild-style copy in Rust cannot regress it
+    // silently.
+    // ------------------------------------------------------------------
+
+    /// A two-ring even-odd path: outer 100x100 square, concentric inner
+    /// square. Under EvenOdd the inner ring is a HOLE; under NonZero
+    /// (both rings wound alike) it fills solid, so the rule is
+    /// observable in the artwork, not just a tag.
+    fn even_odd_donut(id: Option<&str>) -> Element {
+        use crate::geometry::element::PathCommand as C;
+        Element::Path(PathElem {
+            d: vec![
+                C::MoveTo { x: 0.0, y: 0.0 }, C::LineTo { x: 100.0, y: 0.0 },
+                C::LineTo { x: 100.0, y: 100.0 }, C::LineTo { x: 0.0, y: 100.0 },
+                C::ClosePath,
+                C::MoveTo { x: 25.0, y: 25.0 }, C::LineTo { x: 75.0, y: 25.0 },
+                C::LineTo { x: 75.0, y: 75.0 }, C::LineTo { x: 25.0, y: 75.0 },
+                C::ClosePath,
+            ],
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            width_points: vec![],
+            common: CommonProps {
+                id: id.map(|s| s.to_string()),
+                name: Some("donut".to_string()),
+                ..CommonProps::default()
+            },
+            fill_gradient: None,
+            stroke_gradient: None,
+            fill_rule: FillRule::EvenOdd,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+        })
+    }
+
+    /// The fill rule of `elem`, or None when it is not a Path.
+    fn rule_of(elem: &Element) -> Option<FillRule> {
+        match elem {
+            Element::Path(p) => Some(p.fill_rule),
+            _ => None,
+        }
+    }
+
+    fn model_with_donut(id: Option<&str>, select_first: bool) -> Model {
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(even_odd_donut(id))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let selection: Selection = if select_first {
+            vec![ElementSelection::all(vec![0, 0])]
+        } else {
+            vec![]
+        };
+        Model::new(
+            Document { layers: vec![layer], selected_layer: 0, selection, ..Document::default() },
+            None,
+        )
+    }
+
+    fn top_child(model: &Model, i: usize) -> Element {
+        (*model.document().layers[0].children().unwrap()[i]).clone()
+    }
+
+    #[test]
+    fn fill_rule_survives_clear_ids() {
+        let mut e = even_odd_donut(Some("src"));
+        crate::geometry::element::clear_ids(&mut e);
+        assert!(e.common().id.is_none());
+        assert_eq!(rule_of(&e), Some(FillRule::EvenOdd), "clear_ids refilled the hole");
+    }
+
+    #[test]
+    fn fill_rule_survives_assign_id() {
+        let mut model = model_with_donut(None, false);
+        Controller::assign_id(&mut model, &vec![0, 0], "e1");
+        let out = top_child(&model, 0);
+        assert_eq!(out.common().id.as_deref(), Some("e1"));
+        assert_eq!(rule_of(&out), Some(FillRule::EvenOdd), "assign_id refilled the hole");
+    }
+
+    #[test]
+    fn fill_rule_survives_create_reference_stamp() {
+        let mut model = model_with_donut(None, false);
+        Controller::create_reference(&mut model, &vec![0, 0], "t1", "r1");
+        let target = top_child(&model, 0);
+        assert_eq!(target.common().id.as_deref(), Some("t1"));
+        assert_eq!(rule_of(&target), Some(FillRule::EvenOdd),
+                   "create_reference refilled the hole");
+    }
+
+    #[test]
+    fn fill_rule_survives_make_symbol_master() {
+        let mut model = model_with_donut(None, false);
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "r1");
+        assert_eq!(model.document().symbols.len(), 1);
+        let master = model.document().symbols[0].clone();
+        assert_eq!(master.common().id.as_deref(), Some("m1"));
+        assert_eq!(rule_of(&master), Some(FillRule::EvenOdd),
+                   "make_symbol refilled the master's hole");
+    }
+
+    #[test]
+    fn fill_rule_survives_detach() {
+        let mut model = model_with_donut(None, false);
+        Controller::make_symbol(&mut model, &vec![0, 0], "m1", "r1");
+        Controller::detach(&mut model, &vec![0, 0]);
+        let out = top_child(&model, 0);
+        assert_eq!(rule_of(&out), Some(FillRule::EvenOdd), "detach refilled the hole");
+    }
+
+    #[test]
+    fn fill_rule_survives_duplicate() {
+        let mut model = model_with_donut(Some("src"), true);
+        Controller::copy_selection(&mut model, 10.0, 0.0);
+        let children = model.document().layers[0].children().unwrap().len();
+        assert_eq!(children, 2);
+        for i in 0..2 {
+            assert_eq!(rule_of(&top_child(&model, i)), Some(FillRule::EvenOdd),
+                       "duplicate refilled the hole at index {i}");
+        }
+    }
+
+    #[test]
+    fn fill_rule_survives_id_dedupe() {
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(even_odd_donut(Some("dup"))),
+                           Rc::new(even_odd_donut(Some("dup")))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document { layers: vec![layer], selected_layer: 0, ..Document::default() };
+        let out = crate::geometry::normalize::dedupe_element_ids(&doc);
+        let children = out.layers[0].children().unwrap();
+        assert_eq!(children.len(), 2);
+        assert_eq!(children[0].common().id.as_deref(), Some("dup"));
+        assert!(children[1].common().id.is_none(),
+                "dedupe should have cleared the second id");
+        for (i, c) in children.iter().enumerate() {
+            assert_eq!(rule_of(c), Some(FillRule::EvenOdd),
+                       "id-dedupe refilled the hole at index {i}");
+        }
     }
 }

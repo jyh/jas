@@ -45,10 +45,20 @@ _Last synced: 2026-04-19_
   handler updates mode, `is_checked` predicate matches active mode. View
   rendering and widget wiring not covered.
 
-**Swift — no dedicated Color panel auto-tests.**
-ColorPanel scaffolding present in `JasSwift/Sources/Panels/ColorPanel.swift`
-but no tests exercise it. State management covered transitively in
-`StateStoreTests.swift`.
+**Swift — `JasSwift/Tests/Interpreter/ColorPanelSyncTests.swift`.**
+The tier resolution, the channel write path, the commit-vs-live arm, the
+HSB/RGB/CMYK/grayscale arms of `colorFromColorPanelScope` and the
+mode-switch seed. (This entry read "no dedicated Color panel auto-tests"
+until the COLORTIERS wave; the count is deliberately not restated, per the
+counting rule at the head of the reader register in COLOR.md.)
+
+**Cross-language — `test_fixtures/algorithms/color_convert.json`.**
+rgb→hsb, hsb→rgb, rgb→cmyk and the Color panel's quantise-first channel
+derivation, run against both active ports by
+`scripts/cross_language_algorithms.py --algo color_convert` and against the
+pinned goldens in-port by Rust's `algorithm_color_convert_vectors` and
+Swift's `algorithmColorConvertVectors`. Added by COLORTIERS repair 4; before
+it, no fixture family in the corpus touched colour at all.
 
 **OCaml — no dedicated Color panel auto-tests.**
 Color conversion utilities defined (`lib/interpreter/color_util.ml`/`.mli`)
@@ -101,30 +111,362 @@ dispatcher's missing `apply_active_color` hook, its missing `state`
 namespace, and the hook applying `fill_on_top`'s attribute instead of the
 key the effect wrote. All fixed; see the CPTRIAGE commits.
 
-### Banked, NOT fixed: the render halves still differ
+### CLOSED by COLORTIERS: the render halves agree too
 
-The SCOPE halves now agree: both ports publish a colour, an explicit
-null, or nothing at all. The RENDER halves do not, and the fix above did
-not touch them.
+Banked by this census as "the SCOPE halves agree, the RENDER halves do
+not". They now agree.
 
-Rust decides none-vs-placeholder from the BIND DECLARATION.
-`null_color_means_none` (`jas_dioxus/src/interpreter/renderer.rs:7495`)
-asks the `state.yaml` schema whether the bound key is a NULLABLE COLOUR,
-so a null from `state.fill_color` draws the red-diagonal "no paint"
-indicator while a null from `panel.recent_colors.3` draws a hollow
-placeholder — the value alone cannot tell those apart. Swift's
-`renderColorSwatch` has no analogue: its `bind.color` switch
-(`JasSwift/Sources/Interpreter/YamlPanelBodyView.swift:2106-2114`) sends
-every non-colour result to `.clear` and nothing reads the schema, so an
-explicit None and an empty recent-colour slot render IDENTICALLY, a
-transparent square with no indicator. A Swift user who clicks None now
-gets correct guards and a correctly-null scope, and still no visible
-"none" mark on the swatch itself.
+Rust decides none-vs-placeholder from the BIND DECLARATION:
+`null_color_means_none` asks the `state.yaml` schema whether the bound
+key is a NULLABLE COLOUR, so a null from `state.fill_color` draws the
+red-diagonal "no paint" indicator while a null from
+`panel.recent_colors.3` draws a hollow placeholder — the value alone
+cannot tell those apart. Swift's `renderColorSwatch` sent every
+non-colour result to `.clear`, so an explicit None and an empty
+recent-colour slot rendered IDENTICALLY, and a CLEARED hex field (the
+empty-string encoding Rust also reads as none) rendered as BLACK.
 
-Pre-existing — it predates this wave, which changed only the readers —
-and left for whoever owns the swatch renderer. So neither COLOR.md's
-none-state paragraph nor `LiveStateMap`'s "three outcomes" comment claims
-the whole contract is at parity; both say scope-only, and point here.
+Swift now carries the same `nullColorMeansNone` — reading the same
+schema table — plus the empty-string arm, the white face and the red
+diagonal.
+
+That claim was made while only the PREDICATE had a test
+(`nullMeansNoneOnlyForNullableStateColours` and Rust's
+`cptriage_null_means_none_only_for_nullable_state_colours`). The white
+face, the diagonal and the empty-string arm had no vector in either port:
+`color_panel_content` is Path-B-excluded so no widget_tree golden sees the
+widget, and gui_drive had no none-indicator check — reverting the whole
+`explicit_none` plumbing left every unit test, every golden and 8/8
+gui_drive checks GREEN. The adversarial lens proved exactly that.
+
+The render half is now pinned by vectors of its own, in both ports, over
+pure functions lifted out of the views (`swatch_color_bind` /
+`swatch_face_color` / `swatch_border` / `swatch_style` / `NONE_DIAG_SVG`;
+`swatchColorBind` / `swatchFaceColor` / `swatchBorder` /
+`swatchNoneDiagonalPath`):
+
+* Rust `colortiers_*` in `jas_dioxus/src/interpreter/renderer.rs` (10),
+  including the style STRING a tile carries and the diagonal's geometry.
+* Swift `JasSwift/Tests/Interpreter/ColorSwatchFaceTests.swift` (8),
+  ending in `swatchFaceTableMatchesRust`, which states the whole table.
+* The user-level fact: `none_indicator_visible` in `scripts/gui_checks.py`
+  — paint the fill black, click None, assert the red diagonal, its
+  corner-to-corner geometry, the white face, and a >= 10 pixel-mean move.
+  Fault mode `none_indicator_flat` owns it (`TEETH ok` verified live).
+
+Each was verified RED by reverting the plumbing, the same way the lens
+found the gap.
+
+### Banked, NOT fixed: the hollow ring's width
+
+The two ports draw the same no-paint indicator over the same white face
+with the same border now, but the HOLLOW ("stroke") swatch's ring is
+**6px in Rust and 3px in Swift**. Pre-existing, cosmetic, and not part of
+the none contract: the ring width is how each port renders a hollow
+swatch at all, painted or not, so converging it is a swatch-geometry
+question rather than a colour one. Rust insets its 6px with
+`box-sizing: border-box`; SwiftUI's `.stroke` centres on the path edge,
+so the same number is not the same drawing and a change needs an eye on
+it. Whoever converges swatch geometry owns this.
+
+### CLOSED by COLORTIERS: the two architectural asymmetries
+
+The census banked two items as design questions rather than defects,
+because each port was self-consistent and they disagreed. JYH ruled
+2026-07-26: **each port was right about one thing, adopt both.**
+
+1. **Where do default colours live?** Fill/stroke defaults are WORKSPACE
+   state, not document state — they belong with brush size and the
+   active tool. Set a red, hit File > New, and you are mid-flow and
+   expect red. Rust's app-global tier was right; Swift's tier moved off
+   `Model` (one per canvas) onto `WorkspaceState`, above the canvases,
+   which installs it into every canvas it adopts. Cold launch is
+   unchanged: white fill, black stroke. Gated by
+   `appDefaultsSurviveFileNew` / `appDefaultsAreOneTierNotACopyPerCanvas`
+   / `coldLaunchStillOpensBlackAndWhite`, mirrored by Rust's
+   `colortiers_app_default_survives_a_new_document`.
+2. **Should the ACTION-dispatch scope be selection-aware?** Yes —
+   clicking Solid with a shape selected asks "is THE SELECTION's fill
+   none?". Swift's ctx already was; Rust's `build_appstate_ctx` read
+   `st.app_default_fill` alone, so clicking Solid on a stroke-only shape
+   was a silent no-op there and painted here. Rust now sources both
+   colour keys from `action_fill_stroke_values` — the panel reader's
+   `live_fill_stroke_values` composed with the workspace defaults — so
+   all three outcomes (colour / explicit null / the default standing for
+   Mixed) agree across the two scopes and the two ports. Gated
+   cross-language by `test_fixtures/actions/fill_stroke_action_scope.json`.
+
+The readers below were each hand-rolling the same fact from
+`model.defaultFill` and were routed through the one reader. They are listed,
+not counted: the count in this file and the one in COLOR.md disagreed with
+each other and with the wave report through four rounds. COLOR.md now
+carries the classified list of every three-tier reader, every deliberate
+two-tier reader and every remaining single-tier one, along with the grep
+that re-derives the candidate set — read that as the register and this as
+the case history. The first four landed in the wave and its first repair;
+the rest in repair 2 and repair 3, after the lens found that the first
+repair had converged the panel's DISPLAY and left its WRITE path behind —
+which for one scenario was worse than before it, because the two halves of
+one panel then disagreed with each other instead of agreeing on the same
+wrong answer:
+
+* the two Swift dialog-seeding sites (`openToolbarColorPicker`,
+  `openYamlDialogFromMenu` → `dialogStateScope`), which opened the picker
+  on WHITE where Rust opened it on the selection's colour;
+* the native `FillStrokeWidget` squares, which skipped the app tier
+  entirely and so drew the NO-PAINT indicator on a cold launch while the
+  Color panel one reader away showed white;
+* the `fill_stroke_widget` double-click → `open_color_picker` path — the
+  THIRD dialog site, missed by the first sweep. It overlaid its own
+  `selection ?? defaultFill` answer onto the widget's (already correct)
+  panel ctx, so a MIXED selection with a non-empty tab default opened the
+  picker on the tab colour where Rust opens it on the declared default —
+  the one Mixed rule the corpus case pins. Now
+  `colorPickerSeedContext`, pinned by four tests in
+  `LiveStateMapTests.swift`;
+* the Color panel's own SLIDERS (`colorPanelLiveOverrides`), which had NO
+  app tier. Unreachable until the tier moved above the canvases, and
+  reachable the moment it did: set a red with nothing selected, File >
+  New, and Rust's sliders / hex read `#ff0000` while Swift's fell back to
+  `color.yaml`'s stored 255/255/255 — beside the same panel's fill swatch
+  painting red. A divergence the COLORTIERS wave created. Pinned by six
+  tests in `JasSwift/Tests/Interpreter/ColorPanelSyncTests.swift` and
+  Rust's
+  `colortiers_panel_sliders_read_the_app_tier_after_a_new_document`;
+* the Color panel's channel WRITE path, a reader distinct from the sliders
+  that display it. Swift seeded the sibling channels from
+  `selection ?? model.defaultFill` and computed from the raw panel store
+  with `?? 0` fallbacks; Rust passes `ctx.get("panel")` — the panel
+  defaults ALREADY overlaid by `build_live_panel_overrides` — into
+  `compute_color_from_panel`. Observed in the very scenario the previous
+  repair's own test builds: red set with nothing selected, File > New,
+  drag Brightness to 50, and Swift committed **808080** (mid grey, the
+  drag mixed with `color.yaml`'s stored white) where Rust commits
+  **800000**. The mode-switch seed (`ColorPanel.dispatch`) had the same
+  gap and mixed with white too. Now `colorPanelWriteScope` +
+  `colorFromColorPanelScope` (a mirror of `compute_color_from_panel`),
+  applied in one place — `notifyPanelStateChanged`'s Color branch, whose
+  `terminal` flag picks commit over live. The store-only
+  `ColorPanel.colorFromPanelState` is deleted rather than left standing as
+  a second answer. Pinned by four tests in `ColorPanelSyncTests.swift`
+  and Rust's
+  `colortiers_channel_drag_reads_the_app_tier_after_a_new_document`.
+
+  Repair 3 said of this that the HSB arm goes "through `hsbToRgb` so both
+  ports store the same 8-bit RGB". The arm did; the sentence did not
+  follow, and was false as shipped. Wiring the write path onto the panel's
+  display OVERLAY made that overlay a write, and the overlay derived
+  hue / saturation / brightness from the FLOAT colour where Rust derives
+  them from the quantised 8-bit triple — so the same drag committed
+  `664040` here against `664141` there, and a colour-bar click then
+  Brightness→40 committed `665959` against `665a5a`. Converged in repair 4
+  (`panelChannels`, the twin of `color_util::panel_channels`) and gated
+  where it should have been from the start: `test_fixtures/algorithms/`
+  had 25 families and none for colour, so nothing held either port's
+  conversions to anything. `color_convert.json` now does, with a
+  `panel_channels` family whose whole subject is the ORDER — quantise
+  first, convert second — and six of whose sixteen vectors are chosen so a
+  float-first reader answers differently.
+
+  The `.hsb`-represented colour is the one case that family cannot reach
+  (a fixture vector is a float RGB triple; `toHsba()` on a `.hsb`
+  short-circuits and never touches RGB), so the two reachable `.hsb`
+  producers are pinned in-port instead:
+  `panelChannelsQuantisesBeforeConvertingAnHsbColor` for Complement, which
+  is `.hsb` in both ports, and
+  `colorBarProducesTheQuantisedRgbBothPortsStore` for the colour bar,
+  which Rust always stored as quantised RGB and this port now does too;
+* the app-tier WRITE on a channel commit. Rust's `set_active_color`
+  updates the app tier first and the tab tier second; Swift's
+  `ColorPanel.setActiveColor` wrote only the tab tier, so a colour dragged
+  on a slider was lost at the next File > New while the same colour
+  clicked on a swatch (which goes through `applyActiveColorWrite`)
+  survived. The LIVE arm still writes only the document tier in both
+  ports, matching `set_active_color_live`, so a mid-drag tick cannot leak
+  forward. Pinned by
+  `colorPanelCommitWritesBothTiersAndLiveWritesOnlyTheDocumentTier`;
+* the panel menu's **Invert** / **Complement** and their enabled state.
+  Rust's `active_color()` reached the app tier only in its no-document
+  branch and Swift's reader did not reach it at all, so after File > New
+  both items greyed out in BOTH ports while the panel beside them
+  displayed the colour. Symmetric and pre-existing, so it was fixed in
+  the two ports together rather than banked again:
+  `activeDefaultPaintColor` and the `.or_else` in `active_color()`, pinned
+  by `colorPanelInvertStaysAvailableAfterFileNew` /
+  `colortiers_invert_stays_available_after_a_new_document`, with the
+  explicit-none arm held by
+  `colorPanelInvertStaysDisabledForAnExplicitNone` /
+  `colortiers_invert_is_still_disabled_for_an_explicit_none`.
+
+### Banked, NOT fixed: Invert / Complement do not read the selection
+
+`activeDefaultPaintColor` and Rust's `active_color()` resolve the document
+default then the app default and stop — the SELECTION is not consulted. So
+with a blue rectangle selected, the panel's sliders and swatch show blue
+while Invert operates on the default paint instead. Both ports do this
+identically, and repair 2 kept it that way rather than widen a reader while
+converging one; whoever answers "what should Invert inverting a selection
+mean" owns it. The two readers are deliberately separate functions
+(`resolveActivePaintColor` for the three-tier readers,
+`activeDefaultPaintColor` for these two menu items) with the difference
+stated in both docstrings, so the split is visible rather than accidental.
+
+### Banked, NOT fixed: the native None buttons clear only the document tier
+
+`set_active_to_none` (Rust: the `fill_stroke_widget` and
+`color_panel_view` None buttons) and the Swift toolbar's "/" button clear
+the document tier and leave the app tier standing. Every three-tier reader
+then falls through to the app tier, so the click produces a HALF none: no
+`state.fill_color == null`, no red diagonal on the panel swatch, sliders
+still live. Pre-existing and symmetric across the ports. Repair 2 makes
+one more reader agree with the rest in that state — Invert / Complement now
+read the app tier there too, where they used to read `None` and grey out —
+so the state has one answer instead of two, but it is still the WRONG
+answer for a button labelled None. The fix belongs with the
+native-widget retirement, alongside the "C" / "/" mode buttons below; the
+YAML None route (`set_active_color_none` / the `fill_color` null arm)
+already clears both tiers and is gated.
+
+### Banked, NOT fixed: the empty-slot border's colour and dash period
+
+`swatchBorderOverlay` converged the STRUCTURE of the three swatch borders
+across the ports — selected (2px accent), empty placeholder (1px dashed),
+painted or explicit-none (1px solid) — and that structure is what
+COLOR.md rules. Two properties of the placeholder are NOT converged and
+were not verified by eye:
+
+* the colour: Swift draws BOTH the placeholder and the solid arm in
+  SwiftUI `Color.gray`, while Rust distinguishes them —
+  `var(--jas-border,#555)` for the placeholder and
+  `var(--jas-border,#666)` for the solid one (`SwatchBorder::css`);
+* the dash period: Swift declares `dash: [2, 2]`; Rust declares `1px
+  dashed` and the period is whatever the browser picks for it.
+
+Swift's empty recent-colour slots therefore changed from a solid gray
+border to a dashed one in the COLORTIERS repair — the right direction per
+the ruling above (an empty slot keeps the dashed placeholder border, an
+explicit none takes the solid one), but a new drawing all the same. No eye
+was put on it here: the Swift lane of the GUI harness has no read-back
+(GUI_EYES.md §Swift), so no widget id can be resolved to a screen rect and
+a recent-swatch slot cannot be located for a pixel measurement, and the
+capture path additionally needs an unlocked, awake display. Whoever
+converges swatch geometry — the same owner as the hollow ring's width
+above — should read these two properties off both apps at once and pick
+one pair of numbers. Until then the shared function is border STRUCTURE
+parity, not border parity.
+
+### Banked, NOT fixed: the toolbar's native mode buttons contradict the ruling
+
+`JasSwift/Sources/Canvas/ContentView.swift`'s toolbar "C" (Color) and "/"
+(None) buttons are NATIVE AppKit-era code that writes the tab tier by
+hand, and they do not follow ruling 2 above:
+
+* "C" restores **white** where the spec and Rust restore `#000000` via
+  `set_fill_type_solid`;
+* neither button consults the SELECTION, so clicking Solid on a
+  stroke-only shape paints nothing in Swift while Rust now paints it
+  black.
+
+Scope-not-defect: it is pre-existing, justified in-code, and the ACTION
+SEAM the ruling is about (`set_fill_type_solid` through dispatch) agrees
+in both ports and is gated by
+`test_fixtures/actions/fill_stroke_action_scope.json`. It is recorded here
+because it is WHY no user-level check can confirm ruling 2 in Swift: the
+widget a user would click to test it does not go through the seam. The
+fix is to route these buttons through the YAML actions — the same
+native-widget retirement `fill_stroke_widget` is waiting on — not to
+patch their hand-rolled tiers.
+
+### Banked, NOT fixed (repair 4): the overlay merges where Rust guards
+
+Swift's `colorPanelWriteScope` merges every override key unconditionally;
+Rust's write path is handed `ctx.get("panel")`, whose overlay only
+overwrites keys the panel map already declares (`panel_map.contains_key`).
+Benign today because `color.yaml` declares all eleven channels plus `hex`,
+so the two maps have identical key sets — but the guard is exactly what
+keeps them identical, and there is nothing on either side that would notice
+a twelfth channel added to one port. **Ruling needed:** mirror the guard in
+Swift, or pin the key-set equality with a test that fails when either
+port's channel list moves.
+
+Beside it: `"mode"` has two homes across the ports (the layout in Swift,
+`AppState::color_panel_mode` in Rust) and `ColorPanel.dispatch` hand-syncs
+them into panel state. **Ruling needed:** whether that hand-sync should
+become one owner, as the other panel-state facts are.
+
+### Banked, NOT fixed (repair 4): the mode-switch seed is a fourth derivation
+
+`ColorPanel.seedSliders` computes the same channels a fourth time, in
+floats, with its own CMYK arm and no rounding — and Rust has no
+mode-switch seed at all, because its overlay recomputes every channel on
+every render. It cannot be observed today: the overlay overwrites all
+eleven channels on render and all but the `edited` one on write, and the
+`edited` one is by definition the value the user just typed. **Ruling
+needed:** delete the seed and let the overlay carry it (matching Rust), or
+route it through `panelChannels` so the fourth copy is at least the same
+arithmetic. Repair 4 did neither, on the charter's fix-only-what-is-listed
+rule.
+
+### Banked, NOT fixed (repair 4): new elements take paint from one tier
+
+A newly drawn element reads `model.defaultFill` / `defaultStroke` alone,
+with no app fallback — `buildElement` and `makePathFromCommands` in Swift,
+the same reads in Rust's `interpreter/effects.rs` (`model.default_fill` at 977, 1036, 1157, into `build_element_from_spec`/`resolve_fill_field` at 2623-2722; `tools/yaml_tool.rs` carries only a historical comment). So after File > New the Color
+panel shows the colour held above the canvases while a new rect draws with
+NO fill. **Both ports do this identically**, so it is not a parity break
+and repair 4 left it alone. But it is the largest remaining single-tier
+reader of the active paint, and the wave's own premise — one fact, one
+answer — implies it should be counted. **Ruling needed:** does "the active
+paint" govern what a new element is drawn with, or is the document tier
+deliberately the only seed for new geometry?
+
+### Banked, NOT fixed (repair 4): two swap paths, two tiers, inside Rust
+
+`AppState::swap_fill_stroke` (the X key, and Swift's
+`Controller.swapFillStrokeColors`) reads the DOCUMENT tier. The YAML
+`swap:` effect reads and writes the APP tier, through
+`get_app_state_field` / `set_app_state_field`. Both are "swap fill and
+stroke". **Ruling needed:** which tier a swap operates on, so the two paths
+can be made one.
+
+### Banked, NOT fixed (repair 4): the reference rounds halves the other way
+
+Found while choosing the corpus's grid, and it is not a Rust-vs-Swift
+matter: the LIVE reference interpreter rounds halves to EVEN (Python's
+builtin `round`) where both active ports round halves AWAY FROM ZERO
+(`f64::round`, `Double.rounded()`). So for any colour whose derived channel
+lands exactly on x.5 the spec's executable meaning and the two apps
+disagree by one:
+
+    workspace_interpreter.color_util.rgb_to_hsb(7, 7, 8) -> (240, 12, 3)
+    both active ports                                    -> (240, 13, 3)
+
+(`(8/255 - 7/255) / (8/255) * 100` is exactly 12.5.) The same fault line
+runs through `hsb_to_rgb` and `rgb_to_cmyk`, and through every other
+reference conversion that rounds.
+
+`color_convert.json` does NOT encode this: the derivation script reports
+every golden that lands on a half boundary, and the vector that would have
+carried it was moved to (7, 7, 9). So the corpus is honest about the
+convention it pins rather than picking a side silently — but the
+disagreement is still there, one `round()` away from any colour a user
+happens to land on. **Ruling needed:** does the reference adopt
+half-away-from-zero (it is the spec's executable meaning, so the ports
+would be conforming to it rather than the reverse), or is the reference's
+convention the correct one and both active ports need a rounding helper? The
+answer decides whether `color_convert.json` can ever be run with
+`--lang python` as a third comparison, which today it cannot.
+
+### CORRECTION (repair 4): `active_color()` is no longer single-tier
+
+Round 4's brief listed `AppState::active_color()` as reaching the app tier
+only when there is no tab, with Invert / Complement greying out after
+File > New in both ports. That is stale. `active_color()` carries
+`.or_else(app_default_*)`, `ColorPanel.activeDefaultPaintColor` mirrors it,
+and both are green under
+`colortiers_invert_stays_available_after_a_new_document` and
+`colorPanelInvertStaysAvailableAfterFileNew`. Nothing to rule on; recorded
+so the item is not banked a second time.
 
 ### The 13 proven identity operations (correct DEAD)
 

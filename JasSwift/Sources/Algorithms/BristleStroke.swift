@@ -23,7 +23,10 @@ public struct BristleBrush: Equatable {
     }
 
     /// Bristle count (2...12), from density.
-    public func count() -> Int { min(max(Int((density / 12.5).rounded()), 2), 12) }
+    /// saturatingInt mirrors Rust's `as i64`: the outer clamp here was right,
+    /// the inner conversion trapped on a NaN or huge `density` (which comes from
+    /// brush-library JSON, with no widget bounding it). Risk R9.
+    public func count() -> Int { min(max(saturatingInt((density / 12.5).rounded()), 2), 12) }
     /// Per-bristle line width (min 0.5), from thickness and spacing.
     public func lineWidth() -> Double {
         let bw = size * strokeWeight

@@ -324,6 +324,24 @@ fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: 
         Element::Ellipse(e) => {
             ellipse_intersects_rect(e.cx, e.cy, e.rx, e.ry, rx, ry, rw, rh, e.fill.is_some())
         }
+        // A filled polyline paints as though its last point were joined back
+        // to its first, so its painted area is not the open run the segments
+        // describe: [[0,0],[0,100],[100,100],[100,0]] strokes as a U but fills
+        // as the whole 100x100 square. The bounding box is the arm the
+        // reference (jas/algorithms/hit_test.py, `case Polyline()`) and
+        // JasSwift's `.polyline` case both use; without this Rust fell into
+        // the segments-based catch-all and missed a marquee lying wholly
+        // inside the fill. Unfilled polylines keep the segments test.
+        Element::Polyline(e) => {
+            if e.fill.is_some() {
+                let b = elem.bounds();
+                rects_intersect(b.0, b.1, b.2, b.3, rx, ry, rw, rh)
+            } else {
+                segments_of_element(elem)
+                    .iter()
+                    .any(|&(x1, y1, x2, y2)| segment_intersects_rect(x1, y1, x2, y2, rx, ry, rw, rh))
+            }
+        }
         Element::Text(_) | Element::TextPath(_) => {
             let b = elem.bounds();
             rects_intersect(b.0, b.1, b.2, b.3, rx, ry, rw, rh)
@@ -543,6 +561,79 @@ mod tests {
             stroke_gradient: None,
         });
         assert!(!element_intersects_rect(&rect, 0.0, 0.0, 10.0, 10.0));
+    }
+
+    // ---- filled polyline: the fill closes the point list implicitly ----
+    //
+    // A `<polyline>` with a fill paints as though the last point were joined
+    // back to the first — filling an open subpath closes it implicitly (SVG /
+    // canvas fill semantics), and `painter::element_render` does emit a fill
+    // over an UNCLOSED path for this element (`polyline_painter_inputs` →
+    // `poly_path(&e.points, false)` plus `conv_fill`). So the filled region is
+    // NOT the stroked open run. `[[0,0],[0,100],[100,100],[100,0]]`
+    // strokes as a U but FILLS as the full 100x100 square, and a marquee
+    // dropped in the U's opening lands inside that fill. The reference
+    // (jas/algorithms/hit_test.py, `case Polyline()`) and JasSwift both answer
+    // this with the bounding box; these tests pin Rust to the same arm.
+    //
+    // The last test is the one that distinguishes bbox from fill: an OPEN
+    // triangle's bbox corner is outside its closed fill, and the reference
+    // still says true there. That is the arm's semantics, recorded so a later
+    // change to a true point-in-fill test is a deliberate ruling, not a drift.
+
+    use crate::geometry::element::PolylineElem;
+
+    fn red_fill() -> Option<Fill> {
+        Some(Fill {
+            color: Color::Rgb { r: 255.0, g: 0.0, b: 0.0, a: 1.0 },
+            opacity: 1.0,
+        })
+    }
+
+    fn polyline(points: Vec<(f64, f64)>, fill: Option<Fill>) -> Element {
+        Element::Polyline(PolylineElem {
+            common: CommonProps::default(),
+            points,
+            fill,
+            stroke: None,
+            fill_gradient: None,
+            stroke_gradient: None,
+        })
+    }
+
+    #[test]
+    fn filled_polyline_marquee_inside_implicit_close() {
+        let u = polyline(
+            vec![(0.0, 0.0), (0.0, 100.0), (100.0, 100.0), (100.0, 0.0)],
+            red_fill(),
+        );
+        assert!(element_intersects_rect(&u, 40.0, 20.0, 20.0, 20.0));
+    }
+
+    #[test]
+    fn unfilled_polyline_marquee_inside_open_run() {
+        // Same point list with no fill: nothing is painted in the opening, so
+        // only the segments can be hit — and none reach (40,20)-(60,40).
+        let u = polyline(
+            vec![(0.0, 0.0), (0.0, 100.0), (100.0, 100.0), (100.0, 0.0)],
+            None,
+        );
+        assert!(!element_intersects_rect(&u, 40.0, 20.0, 20.0, 20.0));
+    }
+
+    #[test]
+    fn filled_polyline_marquee_outside_bounds() {
+        let u = polyline(
+            vec![(0.0, 0.0), (0.0, 100.0), (100.0, 100.0), (100.0, 0.0)],
+            red_fill(),
+        );
+        assert!(!element_intersects_rect(&u, 200.0, 200.0, 10.0, 10.0));
+    }
+
+    #[test]
+    fn filled_polyline_marquee_in_bbox_outside_closed_fill() {
+        let tri = polyline(vec![(0.0, 0.0), (100.0, 0.0), (100.0, 100.0)], red_fill());
+        assert!(element_intersects_rect(&tri, 5.0, 60.0, 10.0, 10.0));
     }
 
     // ---- point_in_polygon ----

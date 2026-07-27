@@ -836,7 +836,8 @@ private func drawPolygonOverlay(
     let y1 = evalOverlayNumber(spec["y1"], ctx)
     let x2 = evalOverlayNumber(spec["x2"], ctx)
     let y2 = evalOverlayNumber(spec["y2"], ctx)
-    let sidesRaw = Int(evalOverlayNumber(spec["sides"], ctx))
+    // saturatingInt mirrors Rust's `as usize` (risk R9).
+    let sidesRaw = saturatingInt(evalOverlayNumber(spec["sides"], ctx))
     let sides = sidesRaw <= 0 ? 5 : sidesRaw
     let pts = regularPolygonPoints(x1, y1, x2, y2, sides)
     let style = parseOverlayStyle((spec["style"] as? String) ?? "")
@@ -850,7 +851,8 @@ private func drawStarOverlay(
     let y1 = evalOverlayNumber(spec["y1"], ctx)
     let x2 = evalOverlayNumber(spec["x2"], ctx)
     let y2 = evalOverlayNumber(spec["y2"], ctx)
-    let raw = Int(evalOverlayNumber(spec["points"], ctx))
+    // saturatingInt mirrors Rust's `as usize` (risk R9).
+    let raw = saturatingInt(evalOverlayNumber(spec["points"], ctx))
     let n = raw <= 0 ? 5 : raw
     let pts = starPoints(x1, y1, x2, y2, n)
     let style = parseOverlayStyle((spec["style"] as? String) ?? "")

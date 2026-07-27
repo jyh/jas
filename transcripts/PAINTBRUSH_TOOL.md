@@ -141,12 +141,23 @@ element.
 
 ### Preservation rules
 
+**The Ship of Theseus law (JYH, ratified 2026-07-26):** an edit
+commit rewrites `d` and **preserves everything else**. Stated as
+a law, not a field list, so it cannot rot as fields are added to
+the Path element. Deliberately NOT enumerated here: an earlier
+draft of this paragraph listed 15 of Path's 18 stored properties
+and silently omitted `locked` and `fill_rule` — the very field the
+ruling exists to protect. A list in prose rots the moment a field
+is added, which is the whole reason the law is phrased as
+"everything except `d`". What holds it honest is the pinning test,
+`JasSwift/Tests/Tools/PathEditTheseusTests.swift`, which compares
+every stored property by Mirror reflection rather than by name, so
+a new field is covered without editing anything.
+
 | Attribute                        | On edit commit                                 |
 |----------------------------------|------------------------------------------------|
-| `jas:stroke-brush`               | preserved                                      |
-| `jas:stroke-brush-overrides`     | preserved                                      |
-| `stroke`, `stroke-width`, `fill` | preserved                                      |
 | `d`                              | `[c0..c1]` replaced; outside verbatim          |
+| everything else                  | preserved (the law above)                      |
 | Selection                        | target stays selected (independent of `paintbrush_keep_selected`, which governs new-path commits) |
 
 Tool-state values (`state.stroke_brush`, `state.stroke_color`,

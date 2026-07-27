@@ -6,9 +6,12 @@ answers one question, verbatim from the ratified verdict line:
 > Does the wgpu/Vello path hold **60fps at 100k jas-shaped elements** with a
 > **graceful (non-cliff) degradation curve to 1M**?
 
-First verdict is on real Apple-Silicon Metal (this Mac). The offscreen mode is
-built for the later WARP / Parallels-VM API-truth pass (the VM exposes no
-hardware GPU).
+Answered twice on real hardware: Apple-Silicon **Metal** (this Mac, 2026-07-23)
+and **D3D12** on a discrete NVIDIA GPU (kenai, 2026-07-26). Both pass the 100k
+line and degrade gracefully; both wall out at the same 807k spec ceiling. The
+offscreen mode — originally built for a WARP / Parallels API-truth pass, since
+superseded by real Windows silicon — is the serialized floor and the curve of
+record on both platforms.
 
 This is a standalone crate under `prototypes/`. It does not touch any port
 (`jas_dioxus/`, `JasSwift/`, `workspace_interpreter/`, the frozen trees) and is
@@ -55,8 +58,11 @@ not part of any workspace.
      `frame_ms` = fully serialized CPU+GPU time — a conservative floor, no
      pipelining.
 
-4. **Metrics** per sweep point: avg + p95 frame time (ms), CPU encode time
-   (the `Scene::append` cost) separated from total frame time, and fps. 2s warmup
+4. **Metrics** per sweep point: avg + p95 frame time (ms), and three nested spans
+   of the same frame — `encode` (the `Scene::append` cost), `cpu` (encode **plus**
+   `render_to_texture`, i.e. all CPU work before the hand-off), and total
+   `frame` — plus fps and `cpu_fraction` = cpu/frame. Use `cpu`, not `encode`, as
+   "the CPU cost": `encode` under-reports it by 6.8–11.4× (finding #3). 2s warmup
    discarded, 8s measured. Sweep: 10k, 50k, 100k, 250k, 500k, 800k.
 
 ---
@@ -101,8 +107,12 @@ Files: `results/2026-07-23-m-series-metal.json` (windowed),
 
 - **Pipelining ≈ 2× at scale.** Windowed (pipelined) roughly doubles offscreen
   (serialized) throughput past 250k (250k: 56.7 vs 32.0 fps; 500k: 30.4 vs 17.8),
-  because the CPU `append` overlaps GPU work and there is no `poll(Wait)`
-  barrier. Offscreen is therefore a conservative *floor*.
+  because the CPU work overlaps GPU work and there is no `poll(Wait)` barrier.
+  Offscreen is therefore a conservative *floor*. Finding #3 explains the size of
+  that gain in hindsight: the achievable speedup is `(cpu+gpu)/max(cpu,gpu)`, so a
+  2× gain means the Mac's frame is close to an even CPU/GPU split — which a later
+  spot check confirmed (`cpu_fraction` ≈ 0.50, though on a busy machine). The same
+  arithmetic predicts kenai's much smaller 1.2×, because kenai's frame is ~80% CPU.
 - **Windowed fast-end is noisy.** At ≤100k the windowed distribution is bimodal
   (`frame_avg` ~7–10 ms but `frame_p95` ~17 ms, the ~60 Hz compositor beat);
   macOS partially throttles even under `AutoNoVsync`, so windowed fps below 100k
@@ -112,31 +122,160 @@ Files: `results/2026-07-23-m-series-metal.json` (windowed),
 
 ---
 
-## Verdict — against the ratified line
+## Results — 2026-07-26, kenai (Ryzen 7 8700F + RTX 5060 Ti), Windows 11, D3D12
 
-**PASS_WITH_CAVEATS.**
+`KENAI` | AMD Ryzen 7 8700F 8-Core | Windows 11 Home 25H2 (build 26200) |
+adapter **NVIDIA GeForce RTX 5060 Ti (DiscreteGpu)** — real hardware, not WARP.
+Offscreen at **3200×2000**, the Mac's exact resolution, so the two curves are
+directly comparable. Both modes are measured; the windowed run needed a
+scheduled task inside the logged-on desktop session, because a plain ssh run has
+no desktop and fails with `Invalid surface`.
 
-- **60fps @ 100k — PASS.** 79 fps in the serialized offscreen floor and 115 fps
-  (avg) on the real windowed present path, both at full retina 3200×2000. The bar
-  is cleared with headroom even in the conservative measurement.
-- **Graceful (non-cliff) degradation — PASS within the reachable range.**
-  Offscreen frame time grows smoothly and roughly linearly with element count
-  (12.6 → 31 → 56 → 87 ms across 100k → 250k → 500k → 800k); no discontinuous
-  collapse. Windowed `frame_avg` is likewise monotone from 50k up.
-- **…to 1M — FAIL (hard ceiling, not a curve).** A single retained `vello::Scene`
-  cannot reach 1M elements at all on Vello 0.9 — see finding #2 below. The natural
-  architecture walls out at **~807k** with a `Validation Error`, well short of 1M.
-  Reaching 1M needs the document split into multiple scene batches (a distinct
-  multi-pass / compositing architecture the conductor should weigh).
+| elements | frame avg (ms) | frame p95 (ms) | encode avg (ms) | **cpu avg (ms)** | fps | **cpu fraction** |
+|---------:|---------------:|---------------:|----------------:|-----------------:|----:|-----------------:|
+| 10,000   | 2.93   | 3.30   | 0.13  | 1.48   | 341.8 | 0.50 |
+| 50,000   | 7.55   | 8.21   | 0.84  | 5.97   | 132.4 | 0.79 |
+| 100,000  | 14.28  | 14.72  | 1.65  | 11.14  | **70.0** | 0.78 |
+| 250,000  | 46.66  | 47.70  | 3.92  | 37.34  | 21.4  | 0.80 |
+| 500,000  | 88.26  | 90.32  | 7.79  | 70.58  | 11.3  | 0.80 |
+| 800,000  | 141.25 | 144.49 | 12.87 | 112.95 | 7.1   | 0.80 |
 
-Net: the wgpu/Vello path is comfortably fast enough at 100k and degrades
-gracefully, but "one retained scene to 1M" is blocked by a hard device/spec
-ceiling around 807k. The 1M target is an architecture question, not a
-frame-time question.
+File: `results/2026-07-26-rtx5060ti-dx12-offscreen.json`. Re-run four times; frame
+times reproduce within 0.3% (800k within 2%).
+
+`cpu avg` is encode **plus** `render_to_texture` — everything the CPU does before
+it hands off and waits — and `cpu fraction` is its share of the frame. Read the
+gap between the `encode` and `cpu` columns: at 800k the encode metric reports
+12.87 ms while the CPU actually spends 112.95 ms, so **`encode` alone
+under-reports CPU by 6.8–11.4× across the ladder.** Everything in that gap is
+inside Vello's resolve and buffer upload. And `cpu fraction` settling at
+**0.78–0.80** from 50k up is the rig measuring, by itself, the same quantity that
+external process-CPU sampling put at 0.82 and that the pipelining ceiling implies
+independently — see finding #3.
+
+### Windowed — AutoNoVsync, GPU-pipelined (the real present path)
+
+Physical window **2400×1500**. Driven from the interactive desktop via a
+`LogonType Interactive` scheduled task — see "Windows invocation" below, since a
+plain ssh run cannot do this.
+
+| elements | frame avg (ms) | frame p95 (ms) | encode avg (ms) | cpu avg (ms) | fps | **cpu fraction** | pipelining gain |
+|---------:|---------------:|---------------:|----------------:|-------------:|----:|-----------------:|----------------:|
+| 10,000   | 1.91   | 2.14   | 0.14  | 1.67   | 523.3 | 0.87 | 1.53× |
+| 50,000   | 7.25   | 8.44   | 0.90  | 6.91   | 137.9 | 0.95 | 1.04× |
+| 100,000  | 11.97  | 12.62  | 1.71  | 11.53  | **83.5** | 0.96 | 1.19× |
+| 250,000  | 37.03  | 42.08  | 4.49  | 36.56  | 27.0  | 0.99 | 1.26× |
+| 500,000  | 77.49  | 79.14  | 8.45  | 76.98  | 12.9  | 0.99 | 1.14× |
+| 800,000  | 123.53 | 125.61 | 13.12 | 123.00 | 8.1   | 1.00 | 1.14× |
+
+File: `results/2026-07-26-rtx5060ti-dx12-windowed.json`. `pipelining gain` is this
+table's frame time against the offscreen table's, both from the runs published here.
+
+Three things to read here.
+
+**`cpu fraction` reaches 1.00. This is the finding at its sharpest.** In the
+pipelined present path the CPU work occupies essentially the *entire* frame period
+— 0.95 at 50k rising to 1.00 at 800k. The GPU is completely hidden behind CPU
+work; there is nothing left to overlap. So on this path **the renderer's
+throughput simply _is_ the throughput of one CPU thread encoding and resolving
+scenes.** Every frame-rate number in this document above 50k is a measurement of
+single-thread CPU speed wearing a graphics costume.
+
+That also closes the loop arithmetically. Offscreen runs at `cpu fraction` 0.80,
+i.e. frame = cpu + 20% GPU wait; windowed hides the wait entirely, so the
+predicted gain is `1/0.80` = **1.25×**. Measured 1.14–1.26× from 100k up. The
+prediction and the measurement were produced by different code paths on different
+runs and agree to within noise.
+
+**Windows measures the present path more cleanly than macOS does.** kenai's
+windowed curve is strictly monotone and its p95 tracks its average closely
+(1.91/2.14, 11.97/12.62). The Mac's windowed run is bimodal at the fast end —
+`frame_p95` pinned near 17 ms, the ~60 Hz compositor beat — and *non-monotone*
+(its 10k reads slower than its 50k), because macOS partially throttles even under
+`AutoNoVsync`. kenai's 523 fps at 10k shows no refresh cap whatsoever. So *within*
+a run, the windowed shape is trustworthy at every point on the ladder on Windows
+and only above 100k on the Mac.
+
+**Windowed still varies run to run, though — more than offscreen does.** Two kenai
+windowed sweeps differed by up to 12% at a single point (50k: 6.48 vs 7.25 ms),
+against offscreen's 0.3%. That noise is what makes the 50k pipelining gain read
+1.04× here. Treat the gain column as approximate and the `cpu fraction` column —
+stable across both runs — as the load-bearing one.
+
+**The pipelining gain independently confirms finding #3.** Overlapping CPU and
+GPU can only hide the GPU portion of a frame, so the achievable speedup is
+`(cpu+gpu)/max(cpu,gpu)`. kenai gains just **1.14–1.26×** where the Mac gains up
+to 2×. Solving that back: kenai's frame is ~80% unhideable CPU — which is the
+*same fraction* the process-CPU measurement found independently (0.82 of 16 cores
+busy). Two unrelated instruments agreeing on one number is the strongest evidence
+in this document that the workload is CPU bound. The Mac's larger gain is
+consistent too: its encode is ~2× faster and its window is 1.8× the pixels, so a
+proportionally larger share of its frame is GPU work available to hide.
+
+A note on the resolution mismatch: kenai's window is 2400×1500 against the Mac's
+3200×2000, so the windowed tables are not pixel-matched the way the offscreen ones
+are. Per finding #3 this is worth ~2%, well below the gaps being discussed — but
+the offscreen tables remain the comparison of record.
+
+### kenai vs the Mac — the crossover
+
+| elements | kenai ms | Mac ms | kenai/Mac | encode ratio | ns/element (kenai, Mac) |
+|---------:|---------:|-------:|----------:|-------------:|------------------------:|
+| 10,000   | 2.90   | 4.47  | **0.65×** | 1.33× | 290, 447 |
+| 50,000   | 7.52   | 10.16 | **0.74×** | 1.80× | 150, 203 |
+| 100,000  | 14.34  | 12.65 | 1.13×     | 1.97× | 143, 126 |
+| 250,000  | 46.09  | 31.25 | 1.47×     | 1.87× | 184, 125 |
+| 500,000  | 87.72  | 56.13 | 1.56×     | 1.84× | 175, 112 |
+| 800,000  | 139.56 | 87.41 | 1.60×     | 1.89× | 174, 109 |
+
+**kenai is ~1.4× faster below the crossover (somewhere in 50k–100k) and ~1.6×
+slower above it.** Two costs pulling in opposite directions: kenai's fixed
+per-frame overhead is lower (D3D12 submit is cheaper here than Metal at retina),
+while its per-element cost is ~1.6× higher. The encode column isolates the
+second cleanly — `Scene::append` is pure single-thread CPU, no GPU involved, and
+the Mac wins it by a near-constant **1.8–2.0×** from 50k up. That is an M5 Pro
+memory-bandwidth win on what is essentially a large copy (unified LPDDR5X vs
+dual-channel DDR5), and it sets the shape of the whole high end.
 
 ---
 
-## Two load-bearing findings (why the rig exists — "expect API iteration")
+## Verdict — against the ratified line
+
+**PASS_WITH_CAVEATS, now on both platforms.**
+
+- **60fps @ 100k — PASS on Metal and on D3D12, in both modes.** Mac: 79 fps
+  serialized offscreen, 115 fps windowed. kenai: **69.7 fps** serialized offscreen
+  at retina 3200×2000, and **83.5 fps** on the real windowed present path. All four
+  numbers clear the bar; the Mac clears it with more room. Both platforms are
+  measured on real hardware (`device_type` = IntegratedGpu / DiscreteGpu), not a
+  software rasterizer.
+- **Graceful (non-cliff) degradation — PASS within the reachable range, on both.**
+  Offscreen frame time grows smoothly and roughly linearly with element count —
+  Mac 12.6 → 31 → 56 → 87 ms and kenai 14.3 → 46 → 88 → 140 ms across
+  100k → 250k → 500k → 800k; no discontinuous collapse on either. Per-element cost
+  is flat to within a quarter across the top 16× of the ladder (kenai 143–184
+  ns/element from 100k up, Mac 109–126). Windowed `frame_avg` is likewise monotone
+  from 50k up on the Mac.
+- **…to 1M — FAIL (hard ceiling, not a curve), and the ceiling is portable.**
+  A single retained `vello::Scene` cannot reach 1M elements at all on Vello 0.9 —
+  see finding #2 below. The natural architecture walls out at **~807k** with a
+  `Validation Error`, well short of 1M. Verified on kenai 2026-07-26 to land on the
+  *identical* boundary as the Mac: **807k renders (140.84 ms), 808k panics** — a
+  different vendor, backend and OS hitting the same element count, which confirms
+  this is the WebGPU spec limit rather than a device quirk. Reaching 1M needs the
+  document split into multiple scene batches (a distinct multi-pass / compositing
+  architecture the conductor should weigh).
+
+Net: the wgpu/Vello path is comfortably fast enough at 100k on both Metal and
+D3D12 and degrades gracefully on both, but "one retained scene to 1M" is blocked
+by a hard spec ceiling at 807k that no hardware will lift. The 1M target is an
+architecture question, not a frame-time question. And per finding #3, the frame
+times here are a measure of single-thread CPU encoding, not of either GPU — so
+the performance lever, when we need one, is on the CPU side.
+
+---
+
+## Three load-bearing findings (why the rig exists — "expect API iteration")
 
 1. **Vello's `util::RenderContext` caps scenes at ~250–500k** by requesting
    `Limits::default()`, whose `max_storage_buffer_binding_size` is 128 MiB.
@@ -153,6 +292,49 @@ frame-time question.
    = 65535 (empirically: 807k renders, 808k crashes). This is why the default
    ladder tops out at 800k, and why literal 1M in a single scene is impossible on
    Vello 0.9 without chunking.
+
+3. **This rig is single-thread CPU bound, not GPU bound — it is not really a GPU
+   benchmark.** Discovered on kenai 2026-07-26, where the GPU could be
+   instrumented directly (`nvidia-smi` sampled during runs). Four independent
+   measurements agree:
+
+   - **GPU utilization 21–46%**, and the driver *downclocks* under load —
+     ~1400–1700 MHz of a 3090 MHz maximum, drawing 24–30 W of a 180 W budget.
+     A GPU-bound workload pegs utilization and boosts clocks; this does neither.
+   - **0.82 of 16 cores busy** (process CPU time / wall time), identical at 100k
+     and 800k. Effectively one thread doing all the work with fifteen cores idle;
+     the missing 18% is the `poll(Wait)` fence block.
+   - **4× the pixels costs 1.4–3.5%.** Going from 1600×1000 to 3200×2000 (1.6 →
+     6.4 Mpx) changed frame time by +3.5% at 100k and +1.4% at 800k. Cost tracks
+     element count, not pixels, so rasterization is not the limiter either.
+   - **The pipelining gain agrees, from the opposite direction.** Overlapping CPU
+     and GPU can only hide the GPU portion, so the ceiling is
+     `(cpu+gpu)/max(cpu,gpu)`. kenai's windowed mode gains only 1.14–1.26× over
+     serialized offscreen, which solves back to a frame that is ~80% unhideable
+     CPU — the *same 82%* the process-CPU measurement found by a completely
+     different route. Two unrelated instruments landing on one number is the
+     strongest single piece of evidence here.
+
+   Two consequences. First, **the Mac-vs-kenai gap above is a CPU comparison**,
+   not a verdict on either GPU — the RTX 5060 Ti and the M5 Pro GPU are both
+   loafing, and neither result is evidence about GPU capability. Second, **the
+   optimization lever at scale is the CPU encode path, not the GPU**: retain or
+   incrementally update the scene instead of re-appending it every frame, and use
+   the idle cores. GPU headroom is abundant on both platforms.
+
+   **The rig now measures this itself.** Originally only `encode` (the
+   `Scene::append` slice) was timed, and it **under-reports CPU by 6.8–11.4×** —
+   at 800k it reads 12.87 ms against 112.95 ms actually spent. So a `cpu_ms` span
+   (encode + `render_to_texture`, stopping before any wait) and a derived
+   `cpu_fraction` were added, identical in both modes. kenai self-reports
+   `cpu_fraction` **0.78–0.80** from 50k up, converging with the external 0.82
+   from two other directions. Anyone reading these numbers should use the `cpu`
+   column, not `encode`, as "the CPU cost".
+
+   *Not yet measured cleanly:* the Mac's `cpu_fraction`. A spot check read ~0.50,
+   consistent with its ~2× pipelining gain, but it was taken while the machine was
+   compiling two worktrees, so it is contaminated and is deliberately not tabled.
+   The Mac tables above predate the metric and need one quiet re-run.
 
 ---
 
@@ -171,22 +353,53 @@ cargo run --release -- --backend metal --mode offscreen --width 3200 --height 20
 cargo run --release -- --backend metal --mode offscreen --elements 100000
 cargo run --release -- --backend metal --mode offscreen --points 10000,100000,500000
 
-# Tests (scene determinism, mix ratios, stats)
+# Tests (scene determinism, mix ratios, stats, host provenance)
 cargo test
 ```
 
-### Future VM / WARP invocation — and the backend trap
+### Windows invocation — and the backend trap
 
-The Parallels VM has **no hardware GPU**; it will run the **offscreen** mode
-against a software backend for API-truth. **Always name `--backend` explicitly.**
-There is deliberately no "all backends" option: an all-backends probe attempts
-GL, which **segfaults under Parallels**. Pick the one backend you mean.
+**Always name `--backend` explicitly.** There is deliberately no "all backends"
+option: an all-backends probe attempts GL, which **segfaults under Parallels**.
+Pick the one backend you mean.
 
-```bash
-# In the VM (software rendering) — pick the backend explicitly, offscreen only
-cargo run --release -- --backend vulkan --mode offscreen --elements 100000
-# or --backend dx12 on WARP. Never omit --backend; never probe all.
+```powershell
+# kenai — the curve of record, matching the Mac's resolution exactly
+cargo run --release -- --backend dx12 --mode offscreen --width 3200 --height 2000
+
+# Windowed on Windows needs an INTERACTIVE DESKTOP. Straight over ssh this fails
+# with `Invalid surface` — an ssh session has no desktop to present into.
+cargo run --release -- --backend dx12 --mode windowed
 ```
+
+**Driving a windowed run remotely anyway.** If a desktop session is logged on
+(check `Get-Process explorer | Select SessionId`), a scheduled task with
+`LogonType Interactive` runs *in* that session and can create a surface, which is
+how the windowed table above was measured over ssh. Redirect stdout, because you
+cannot see the task's console:
+
+```powershell
+$rig = "C:\Users\jyh\projects\claude\jas\prototypes\scaling_rig"
+$cmd = "/c cd /d `"$rig`" && target\release\scaling_rig.exe --backend dx12 " +
+       "--mode windowed --out win.json > `"$rig\win_log.txt`" 2>&1"
+$a = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $cmd
+$p = New-ScheduledTaskPrincipal -UserId "jyh" -LogonType Interactive -RunLevel Highest
+Register-ScheduledTask -TaskName RigWindowed -Action $a -Principal $p
+Start-ScheduledTask -TaskName RigWindowed     # then poll .State until Ready
+Unregister-ScheduledTask -TaskName RigWindowed -Confirm:$false
+```
+
+**PowerShell traps that will cost you a run.** `Select-Object -First N` on a
+long-running command *terminates the upstream pipeline* — it kills the benchmark
+mid-sweep, and you will fetch a stale JSON without noticing. And `a,b,c` is an
+array literal, so `--points 10000,50000` arrives as separate arguments and clap
+rejects it; quote it as `"10000,50000"`.
+
+Every results file records `machine`, `chip`, `os`, `adapter` and `device_type`,
+so a record proves which box and which GPU produced it — and in particular proves
+it was `DiscreteGpu`/`IntegratedGpu` rather than a software rasterizer (`Cpu`).
+Check that field before trusting any number: the Parallels runs were WARP, and
+nothing in the older JSON said so.
 
 The chosen backend is forced via `WGPU_BACKEND` before any wgpu init, set from
 `--backend` in `main()`.

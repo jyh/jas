@@ -259,6 +259,79 @@ tests:
     expected: "#00ff00"
     type: color
 
+  # ── Colour-channel range discipline (risk R9, saturating cast) ──
+  # Each of cmyk/grayscale/hsb documents its channels as 0-100 (hue 0-359).
+  # An out-of-range channel is CLAMPED to that documented range BEFORE any
+  # arithmetic, in every port. Clamping the input rather than saturating the
+  # output is what keeps the ports equal by construction: two channels can
+  # overflow with signs that multiply back positive, and a saturated output
+  # would then be a plausible-looking colour rather than the range's edge.
+  # See transcripts/CORPUS_CENSUS.md §7 (R9).
+  - expr: "cmyk(150, 0, 0, 150)"
+    expected: "#000000"
+    type: color
+    note: "double overflow: unclamped this is (1-1.5)*(1-1.5)*255 = +63.75, a bogus mid-grey #400000"
+
+  - expr: "cmyk(200, 0, 0, 200)"
+    expected: "#000000"
+    type: color
+    note: "double overflow whose product is exactly 255: unclamped #ff0000, a bogus saturated red"
+
+  - expr: "cmyk(150, 150, 150, 150)"
+    expected: "#000000"
+    type: color
+    note: "all four overflow: unclamped #404040"
+
+  - expr: "cmyk(1000000, 0, 0, 1000000)"
+    expected: "#000000"
+    type: color
+    note: "product 2.5e10 is outside u8 AND outside a Swift UInt8 conversion's range"
+
+  - expr: "cmyk(150, 0, 0, 0)"
+    expected: "#00ffff"
+    type: color
+    note: "single overflow: clamped input and saturated output agree; pinned so they stay agreed"
+
+  - expr: "cmyk(-50, 0, 0, 0)"
+    expected: "#ffffff"
+    type: color
+
+  - expr: "grayscale(150)"
+    expected: "#000000"
+    type: color
+
+  - expr: "grayscale(-50)"
+    expected: "#ffffff"
+    type: color
+
+  - expr: "hsb(0, 200, 200)"
+    expected: "#ff0000"
+    type: color
+
+  - expr: "hsb(0, -10, 100)"
+    expected: "#ffffff"
+    type: color
+
+  - expr: "hsb(360, 100, 100)"
+    expected: "#ff0000"
+    type: color
+    note: "360 is hue's wrap point and the clamp's upper bound; test_fixtures/algorithms/color_convert.json pins it too"
+
+  - expr: "hsb(400, 100, 100)"
+    expected: "#ff0000"
+    type: color
+    note: "hue clamps to 360 (=red), it does not wrap to 40 (which would be orange)"
+
+  - expr: "hsb(-10, 100, 100)"
+    expected: "#ff0000"
+    type: color
+    note: "hue clamps to 0; unclamped, Rust's truncated % and Python's floored % disagree here"
+
+  - expr: "rgb(10000000000000000000, 0, 0)"
+    expected: "#ff0000"
+    type: color
+    note: "1e19 exceeds i64, so rgb()'s channel conversion must saturate, not convert via an integer"
+
   # Hue wrapping — 360 is out of range, should clamp or wrap to 0
   - expr: "hsb_h(hsb(0, 100, 100))"
     expected: 0
@@ -535,6 +608,31 @@ tests:
     expected: 5
     type: number
     note: "euclidean distance sqrt(3^2 + 4^2)"
+
+  # hypot must be computed by a scaled algorithm (libm hypot / math.hypot),
+  # NOT by the naive sqrt(dx*dx + dy*dy): the naive form overflows to +inf
+  # when the intermediate square exceeds the double range, and underflows to
+  # 0 when it falls below it. The three cases below are scale-normalized
+  # (result divided/multiplied back to order 1) so the 1e-9 tolerance the
+  # harnesses use still forgives a last-bit difference between libm
+  # implementations, while the naive form fails outright.
+  #
+  # `pow(10, 200)` is written out rather than a `1e200` literal because the
+  # expression lexer accepts no exponent notation.
+  - expr: "hypot(pow(10, 200), pow(10, 200)) / pow(10, 200)"
+    expected: 1.4142135623730951
+    type: number
+    note: "overflow: the naive intermediate 1e400 is +inf, so the ratio is +inf"
+
+  - expr: "hypot(pow(10, 200), 0) / pow(10, 200)"
+    expected: 1
+    type: number
+    note: "overflow with a zero leg: hypot(x, 0) is |x|; naive gives +inf"
+
+  - expr: "hypot(3 * pow(10, -200), 4 * pow(10, -200)) * pow(10, 200)"
+    expected: 5
+    type: number
+    note: "underflow: the naive intermediates 9e-400/16e-400 are 0, so the result is 0"
 
   - expr: "sqrt(16)"
     expected: 4

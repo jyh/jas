@@ -49,8 +49,35 @@ pub fn rgb_to_hsb(r: u8, g: u8, b: u8) -> (i32, i32, i32) {
     (hue, (s * 100.0).round() as i32, (v * 100.0).round() as i32)
 }
 
-/// Convert HSB (h:0-359, s:0-100, b:0-100) to RGB (0-255).
+/// Clamp one colour channel into `lo..=hi`, mapping NaN to `lo`.
+///
+/// The colour primitives document their channels' ranges (`hsb` 0-360 / 0-100,
+/// `cmyk` and `grayscale` 0-100) and this is how they enforce them: clamp the
+/// INPUT, before any arithmetic. Clamping the input rather than saturating the
+/// output is what makes the ports equal by construction. The formulas are
+/// monotonic per channel, so for ONE out-of-range channel the two approaches
+/// agree; they diverge when two channels overflow with signs that multiply back
+/// positive — unclamped, `cmyk(150, 0, 0, 150)` computes
+/// `(1-1.5)*(1-1.5)*255 = +63.75`, a bogus mid-grey that looks like a real
+/// colour, where clamping gives black. NaN maps to `lo` for the same reason:
+/// it is the one answer both ports can spell identically, where a cast would
+/// saturate NaN to 0 in Rust and trap in Swift. Risk R9, transcripts/CORPUS_CENSUS.md §7.
+pub fn clamp_channel(v: f64, lo: f64, hi: f64) -> f64 {
+    if v.is_nan() {
+        return lo;
+    }
+    v.clamp(lo, hi)
+}
+
+/// Convert HSB (h:0-360, s:0-100, b:0-100) to RGB (0-255).
+///
+/// Channels outside those ranges are clamped (see [`clamp_channel`]). Hue's
+/// upper bound is 360, not 359: 360 is the wrap point that the colour corpus
+/// pins as identical to 0 (`torgb_hue_360_is_red`).
 pub fn hsb_to_rgb(h: f64, s: f64, b: f64) -> (u8, u8, u8) {
+    let h = clamp_channel(h, 0.0, 360.0);
+    let s = clamp_channel(s, 0.0, 100.0);
+    let b = clamp_channel(b, 0.0, 100.0);
     let s1 = s / 100.0;
     let b1 = b / 100.0;
     let c = b1 * s1;
@@ -91,6 +118,76 @@ pub fn rgb_to_cmyk(r: u8, g: u8, b: u8) -> (i32, i32, i32, i32) {
         ((y1 - k1) / (1.0 - k1) * 100.0).round() as i32,
         (k1 * 100.0).round() as i32,
     )
+}
+
+/// Quantise a float colour component in 0..=1 to 8 bits.
+///
+/// Half rounds AWAY from zero and the result saturates, which is exactly what
+/// `(v * 255.0).round() as u8` does in Rust — spelled out as a function so the
+/// other port can mirror the saturation deliberately instead of trapping on an
+/// out-of-range component (Swift's `UInt8(_:)` is a precondition failure there).
+pub fn quantise8(v: f64) -> u8 {
+    let x = (v * 255.0).round();
+    if x.is_nan() {
+        return 0;
+    }
+    x.clamp(0.0, 255.0) as u8
+}
+
+/// The Color panel's eleven channel values for one colour.
+///
+/// `bl` is the blue channel's YAML name (`b` is brightness in `color.yaml`), and
+/// the fields here carry the YAML's units: `r`/`g`/`bl` 0–255, `h` 0–359,
+/// everything else 0–100.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PanelChannels {
+    pub r: u8,
+    pub g: u8,
+    pub bl: u8,
+    pub h: i32,
+    pub s: i32,
+    pub b: i32,
+    pub c: i32,
+    pub m: i32,
+    pub y: i32,
+    pub k: i32,
+    pub hex: String,
+}
+
+/// Derive every Color-panel channel from a float colour — QUANTISING TO 8 BITS
+/// FIRST, then converting those three integers.
+///
+/// The ORDER is the contract, and it is the whole reason this is one function
+/// rather than a line of arithmetic in each caller. A reader that instead asks
+/// the float colour for its own hue / saturation / brightness answers up to a
+/// whole unit differently, because the 8-bit grid the panel displays on is
+/// coarser than the float colour it came from. That used to be a cosmetic
+/// display difference; once the panel's WRITE path started recomputing the
+/// unedited channels from this same map, it reached the COMMITTED colour —
+/// Swift committed `664040` where this port committed `664141` for the same
+/// drag (COLORTIERS, 2026-07-26).
+///
+/// Gated across the ports by `test_fixtures/algorithms/color_convert.json`'s
+/// `panel_channels` vectors.
+pub fn panel_channels(rf: f64, gf: f64, bf: f64) -> PanelChannels {
+    let r = quantise8(rf);
+    let g = quantise8(gf);
+    let bl = quantise8(bf);
+    let (h, s, b) = rgb_to_hsb(r, g, bl);
+    let (c, m, y, k) = rgb_to_cmyk(r, g, bl);
+    PanelChannels {
+        r,
+        g,
+        bl,
+        h,
+        s,
+        b,
+        c,
+        m,
+        y,
+        k,
+        hex: format!("{:02x}{:02x}{:02x}", r, g, bl),
+    }
 }
 
 #[cfg(test)]

@@ -5,9 +5,23 @@ import Foundation
 // Mirrors `text_layout.rs` / `text_layout.ml` / `text_layout.py`. Given a
 // string, an optional max width, a font size, and a measurer closure, lay
 // out glyphs into lines and expose cursor/hit-test queries. The layout is
-// driven entirely from char indices (Swift `Character` count) and the
-// caller-supplied measurer — there is no AppKit dependency, so the same
-// code is exercised by host-side tests with a deterministic stub measurer.
+// driven entirely from char indices and the caller-supplied measurer —
+// there is no AppKit dependency, so the same code is exercised by
+// host-side tests with a deterministic stub measurer.
+//
+// The "mirrors" claim holds for ASCII only, and the unit is why: a char
+// index here is a Swift `Character` (a grapheme cluster), whereas
+// `text_layout.rs` indexes a Rust `char` and `text_layout.py` indexes a
+// Python `str` element — both of which are Unicode SCALARS. Measured with
+// char_width 10 via the roundtrip harness: "ae\u{301}b" gives charCount 3
+// here against 4 in Rust and in the reference, and the ZWJ family emoji
+// U+1F468 U+200D U+1F469 U+200D U+1F467 gives 1 against 5. Total line
+// advance agrees (40 and 50) because the injected measurer counts scalars
+// — see CorpusTextMeasure.swift — so it is the per-glyph subdivision and
+// every index derived from it that diverge. Recorded as a coverage gap in
+// scripts/corpus_manifest.json (text-index-unit); closing it means moving
+// TextEditSession/TypeTool/TypeOnPathTool onto scalar indices in the same
+// sweep, since they do their cursor arithmetic in `Character` counts too.
 
 public struct TextGlyph {
     public let idx: Int

@@ -2095,22 +2095,49 @@ impl AppState {
         }
     }
 
-    /// Get the active color (fill or stroke, per fill_on_top).
-    /// Falls back to app-level defaults when no document is open.
+    /// Get the active color (fill or stroke, per fill_on_top): the
+    /// per-document default, else the app default.
+    ///
+    /// Read by the Color panel menu's Invert / Complement and by their
+    /// `is_enabled` (panels/color_panel.rs), and by the native
+    /// `color_panel_view`. It used to reach the app tier only in the `else` of
+    /// `if let Some(tab)` — i.e. only with NO document open — so after
+    /// File > New, whose fresh tab starts with an empty per-document tier, both
+    /// menu items greyed out while the panel beside them displayed the colour
+    /// held above the tabs. `.or_else` is the same chain the display reader
+    /// (`build_live_state_map`) and the slider reader
+    /// (`build_live_panel_overrides`) already use, so all three now answer the
+    /// same tiers. JasSwift's `ColorPanel.dispatch` / `isEnabled` had the same
+    /// gap and are fixed with it (COLORTIERS repair 2).
+    ///
+    /// The SELECTION is deliberately not consulted — these two menu items
+    /// invert the DEFAULT paint even with a shape selected, in both ports. That
+    /// question is banked in COLOR_TESTS.md, not answered here.
+    ///
+    /// A None still reaches here through the YAML None route, which clears BOTH
+    /// tiers (`set_app_state_field`'s `fill_color` null arm), so an explicit
+    /// none resolves to None and the two menu items stay disabled. The NATIVE
+    /// None buttons (`fill_stroke_widget`, `color_panel_view`) call
+    /// `set_active_to_none`, which clears only the tab tier, so after one of
+    /// those this answers the app tier — the same answer
+    /// `build_live_state_map` has always given for that state. Those buttons'
+    /// half-none is banked in COLOR_TESTS.md.
     pub(crate) fn active_color(&self) -> Option<Color> {
-        if let Some(tab) = self.tab() {
-            if self.fill_on_top {
-                tab.model.default_fill.map(|f| f.color)
-            } else {
-                tab.model.default_stroke.map(|s| s.color)
-            }
-        } else {
-            if self.fill_on_top {
-                self.app_default_fill.map(|f| f.color)
-            } else {
-                self.app_default_stroke.map(|s| s.color)
-            }
-        }
+        self.tab()
+            .and_then(|tab| {
+                if self.fill_on_top {
+                    tab.model.default_fill.map(|f| f.color)
+                } else {
+                    tab.model.default_stroke.map(|s| s.color)
+                }
+            })
+            .or_else(|| {
+                if self.fill_on_top {
+                    self.app_default_fill.map(|f| f.color)
+                } else {
+                    self.app_default_stroke.map(|s| s.color)
+                }
+            })
     }
 
     /// Get recent colors for the active tab.

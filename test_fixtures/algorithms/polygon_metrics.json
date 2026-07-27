@@ -1,0 +1,230 @@
+{
+  "algorithm": "polygon_metrics",
+  "comparison": "tolerance",
+  "tolerance": 1e-9,
+  "description": "Gates the harness's OWN region-measuring instruments -- the six helpers in jas_dioxus/src/algorithms/polygon_metrics.rs and JasSwift/Sources/Algorithms/PolygonMetrics.swift (ring_signed_area, point_in_ring, point_in_polygon_set, polygon_set_area, is_ring_simple, all_rings_simple) that every boolean and boolean_normalize golden is expressed in. Those helpers used to be hand-copied into each roundtrip binary with nothing comparing the copies, so a drift in a measuring instrument could silently rewrite what the boolean families appear to prove. Ring sets here are inputs to the metrics directly: no boolean operation runs, so a red vector accuses the instrument and nothing else. Every expected number is derived independently (shoelace per ring, exact rectilinear cell decomposition, and a dense grid Riemann sum, cross-checked against the hand derivation in each vector's `derivation` field) -- never read back from either port. Areas are EVEN-ODD net areas: transcripts/BOOLEAN.md clause 1 makes a bare ring list mean even-odd-already-canonical, and clause 4 makes every generated boolean result declare even-odd.",
+  "vectors": [
+    {
+      "name": "single_square",
+      "derivation": "One 10x10 square: shoelace 100, no overlap of any kind.",
+      "rings": [[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]]],
+      "sample_points": [[5.0,5.0], [12.5,5.0]],
+      "expected": {
+        "ring_count": 1,
+        "ring_signed_areas": [100.0],
+        "ring_simple": [true],
+        "all_rings_simple": true,
+        "area": 100.0,
+        "sample_points": [
+          {"point": [5.0,5.0], "inside": true},
+          {"point": [12.5,5.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "empty_set",
+      "derivation": "No rings: every metric is the empty-sum identity.",
+      "rings": [],
+      "sample_points": [[0.0,0.0]],
+      "expected": {
+        "ring_count": 0,
+        "ring_signed_areas": [],
+        "ring_simple": [],
+        "all_rings_simple": true,
+        "area": 0.0,
+        "sample_points": [
+          {"point": [0.0,0.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "two_point_ring_no_area",
+      "derivation": "A 2-vertex ring bounds no region; shoelace is 0 and the scanline finds no band with a crossing.",
+      "rings": [[[0.0,0.0],[10.0,0.0]]],
+      "sample_points": [[5.0,1.0]],
+      "expected": {
+        "ring_count": 1,
+        "ring_signed_areas": [0.0],
+        "ring_simple": [true],
+        "all_rings_simple": true,
+        "area": 0.0,
+        "sample_points": [
+          {"point": [5.0,1.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "donut_nested_square",
+      "derivation": "Even-odd donut: 10x10 outer minus 4x4 inner = 100 - 16 = 84.",
+      "rings": [[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]], [[3.0,3.0],[7.0,3.0],[7.0,7.0],[3.0,7.0]]],
+      "sample_points": [[1.5,5.0], [5.0,5.0], [12.0,5.0]],
+      "expected": {
+        "ring_count": 2,
+        "ring_signed_areas": [100.0, 16.0],
+        "ring_simple": [true, true],
+        "all_rings_simple": true,
+        "area": 84.0,
+        "sample_points": [
+          {"point": [1.5,5.0], "inside": true},
+          {"point": [5.0,5.0], "inside": false},
+          {"point": [12.0,5.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "nested_triple",
+      "derivation": "Three nested squares, even-odd alternating: 144 - 64 + 16 = 96.",
+      "rings": [[[0.0,0.0],[12.0,0.0],[12.0,12.0],[0.0,12.0]], [[2.0,2.0],[10.0,2.0],[10.0,10.0],[2.0,10.0]], [[4.0,4.0],[8.0,4.0],[8.0,8.0],[4.0,8.0]]],
+      "sample_points": [[1.0,6.0], [3.0,6.0], [6.0,6.0], [13.0,6.0]],
+      "expected": {
+        "ring_count": 3,
+        "ring_signed_areas": [144.0, 64.0, 16.0],
+        "ring_simple": [true, true, true],
+        "all_rings_simple": true,
+        "area": 96.0,
+        "sample_points": [
+          {"point": [1.0,6.0], "inside": true},
+          {"point": [3.0,6.0], "inside": false},
+          {"point": [6.0,6.0], "inside": true},
+          {"point": [13.0,6.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "edge_sharing_squares",
+      "derivation": "Two 5x10 squares meeting along x=5. The shared edge has zero area, so the total is 50 + 50 = 100 -- touching is not overlap.",
+      "rings": [[[0.0,0.0],[5.0,0.0],[5.0,10.0],[0.0,10.0]], [[10.0,0.0],[10.0,10.0],[5.0,10.0],[5.0,0.0]]],
+      "sample_points": [[2.5,5.0], [7.5,5.0], [11.0,5.0]],
+      "expected": {
+        "ring_count": 2,
+        "ring_signed_areas": [50.0, 50.0],
+        "ring_simple": [true, true],
+        "all_rings_simple": true,
+        "area": 100.0,
+        "sample_points": [
+          {"point": [2.5,5.0], "inside": true},
+          {"point": [7.5,5.0], "inside": true},
+          {"point": [11.0,5.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "half_overlapping_squares",
+      "derivation": "Two 10x10 squares overlapping in a 5x10 band: 100 + 100 - 2*50 = 100 (the symmetric difference is two 5x10 strips).",
+      "rings": [[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]], [[5.0,0.0],[15.0,0.0],[15.0,10.0],[5.0,10.0]]],
+      "sample_points": [[2.5,5.0], [7.5,5.0], [12.5,5.0]],
+      "expected": {
+        "ring_count": 2,
+        "ring_signed_areas": [100.0, 100.0],
+        "ring_simple": [true, true],
+        "all_rings_simple": true,
+        "area": 100.0,
+        "sample_points": [
+          {"point": [2.5,5.0], "inside": true},
+          {"point": [7.5,5.0], "inside": false},
+          {"point": [12.5,5.0], "inside": true}
+        ]
+      }
+    },
+    {
+      "name": "corner_overlap_inner_first_vertex",
+      "derivation": "Two 10x10 squares overlapping in a 4x4 corner: 100 + 100 - 2*16 = 168. The second ring is listed from (6,6), which lies INSIDE the first.",
+      "rings": [[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]], [[6.0,6.0],[16.0,6.0],[16.0,16.0],[6.0,16.0]]],
+      "sample_points": [[3.0,3.0], [8.0,8.0], [13.0,13.0], [13.0,3.0]],
+      "expected": {
+        "ring_count": 2,
+        "ring_signed_areas": [100.0, 100.0],
+        "ring_simple": [true, true],
+        "all_rings_simple": true,
+        "area": 168.0,
+        "sample_points": [
+          {"point": [3.0,3.0], "inside": true},
+          {"point": [8.0,8.0], "inside": false},
+          {"point": [13.0,13.0], "inside": true},
+          {"point": [13.0,3.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "corner_overlap_outer_first_vertex",
+      "derivation": "Same two squares and the same cyclic vertex order as corner_overlap_inner_first_vertex, rotated to start at (16,6), which lies OUTSIDE the first ring. Area must be identical (168): the metric may not depend on which vertex a ring is listed from.",
+      "rings": [[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]], [[16.0,6.0],[16.0,16.0],[6.0,16.0],[6.0,6.0]]],
+      "sample_points": [[3.0,3.0], [8.0,8.0], [13.0,13.0], [13.0,3.0]],
+      "expected": {
+        "ring_count": 2,
+        "ring_signed_areas": [100.0, 100.0],
+        "ring_simple": [true, true],
+        "all_rings_simple": true,
+        "area": 168.0,
+        "sample_points": [
+          {"point": [3.0,3.0], "inside": true},
+          {"point": [8.0,8.0], "inside": false},
+          {"point": [13.0,13.0], "inside": true},
+          {"point": [13.0,3.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "triple_overlap",
+      "derivation": "Three 6x6 squares on a 3-unit grid. Coverage per 3x3 cell, reading the 3x3 block of cells with corners at multiples of 3: 1,2,1 / 1,3,2 / 0,1,1 (row order bottom to top). Six cells have ODD coverage, so the even-odd area is 6*9 = 54. Pins triple overlap, which pairwise subtraction alone would get wrong.",
+      "rings": [[[0.0,0.0],[6.0,0.0],[6.0,6.0],[0.0,6.0]], [[9.0,9.0],[3.0,9.0],[3.0,3.0],[9.0,3.0]], [[9.0,0.0],[9.0,6.0],[3.0,6.0],[3.0,0.0]]],
+      "sample_points": [[1.5,1.5], [4.5,1.5], [7.5,1.5], [1.5,4.5], [4.5,4.5], [7.5,4.5], [1.5,7.5], [4.5,7.5], [7.5,7.5]],
+      "expected": {
+        "ring_count": 3,
+        "ring_signed_areas": [36.0, 36.0, 36.0],
+        "ring_simple": [true, true, true],
+        "all_rings_simple": true,
+        "area": 54.0,
+        "sample_points": [
+          {"point": [1.5,1.5], "inside": true},
+          {"point": [4.5,1.5], "inside": false},
+          {"point": [7.5,1.5], "inside": true},
+          {"point": [1.5,4.5], "inside": true},
+          {"point": [4.5,4.5], "inside": true},
+          {"point": [7.5,4.5], "inside": false},
+          {"point": [1.5,7.5], "inside": false},
+          {"point": [4.5,7.5], "inside": true},
+          {"point": [7.5,7.5], "inside": true}
+        ]
+      }
+    },
+    {
+      "name": "self_crossing_bowtie",
+      "derivation": "One ring crossing itself at (5,5): two triangles of base 10 and height 5, so 25 + 25 = 50. Its shoelace sum is exactly 0, so signed area alone reports nothing.",
+      "rings": [[[0.0,0.0],[10.0,0.0],[0.0,10.0],[10.0,10.0]]],
+      "sample_points": [[5.0,1.5], [5.0,8.5], [1.5,5.0], [8.5,5.0]],
+      "expected": {
+        "ring_count": 1,
+        "ring_signed_areas": [0.0],
+        "ring_simple": [false],
+        "all_rings_simple": false,
+        "area": 50.0,
+        "sample_points": [
+          {"point": [5.0,1.5], "inside": true},
+          {"point": [5.0,8.5], "inside": true},
+          {"point": [1.5,5.0], "inside": false},
+          {"point": [8.5,5.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "square_triangle_overlap",
+      "derivation": "A 10x10 square and a right triangle with legs 10 at (5,5). The triangle is x>=5, y>=5, x+y<=20; intersected with the square that is exactly the 5x5 block [5,10]x[5,10] (its far corner (10,10) sits on x+y=20). So 100 + 50 - 2*25 = 100. Non-axis-aligned: exercises the sloped-edge arm of the scanline.",
+      "rings": [[[0.0,0.0],[10.0,0.0],[10.0,10.0],[0.0,10.0]], [[5.0,5.0],[15.0,5.0],[5.0,15.0]]],
+      "sample_points": [[2.5,2.5], [7.5,7.5], [6.0,12.0], [12.5,2.5]],
+      "expected": {
+        "ring_count": 2,
+        "ring_signed_areas": [100.0, 50.0],
+        "ring_simple": [true, true],
+        "all_rings_simple": true,
+        "area": 100.0,
+        "sample_points": [
+          {"point": [2.5,2.5], "inside": true},
+          {"point": [7.5,7.5], "inside": false},
+          {"point": [6.0,12.0], "inside": true},
+          {"point": [12.5,2.5], "inside": false}
+        ]
+      }
+    }
+  ]
+}

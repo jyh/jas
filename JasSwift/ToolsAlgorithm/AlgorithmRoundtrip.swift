@@ -45,12 +45,17 @@ let results: [[String: Any]]
 switch algo {
 case "measure":           results = runMeasure(activeVectors)
 case "element_bounds":    results = runElementBounds(activeVectors)
+case "element_evaluated_bounds": results = runElementEvaluatedBounds(activeVectors)
 case "flatten":           results = runFlatten(activeVectors)
 case "arrow_trim":        results = runArrowTrim(activeVectors)
 case "length":            results = runLength(activeVectors)
+case "color_convert":     results = runColorConvert(activeVectors)
+case "number_commit":     results = runNumberCommit(activeVectors)
 case "hit_test":          results = runHitTest(activeVectors)
+case "path_project":      results = runPathProject(activeVectors)
 case "boolean":           results = runBoolean(activeVectors)
 case "boolean_normalize": results = runBooleanNormalize(activeVectors)
+case "polygon_metrics":   results = runPolygonMetrics(activeVectors)
 case "fit_curve":         results = runFitCurve(activeVectors)
 case "shape_recognize":   results = runShapeRecognize(activeVectors)
 case "planar":            results = runPlanar(activeVectors)
@@ -75,6 +80,27 @@ func runElementBounds(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let elemJson = tc["element"]!
         let elem = parseElement(elemJson)
         let b = elem.bounds
+        return ["name": name, "result": [b.x, b.y, b.width, b.height]]
+    }
+}
+
+// MARK: - Element Evaluated Bounds (transform-aware bbox, DOCUMENT space)
+
+/// Each vector is one element placed as the single child of one layer, so the
+/// gated path is `[0, 0]`: the element's own `transform` is folded first, then
+/// the layer's `layer_transform` as the sole ancestor. Building the document
+/// here (rather than shipping a whole document per vector) keeps the fixture
+/// readable; the geometry under test is entirely inside the port function.
+func runElementEvaluatedBounds(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        let layerTransform = parseTestJsonTransform(tc["layer_transform"])
+        let doc = Document(layers: [Layer(name: "Layer", children: [elem],
+                                         transform: layerTransform)])
+        guard let b = elementEvaluatedBBox(doc, [0, 0]) else {
+            return ["name": name, "result": NSNull()]
+        }
         return ["name": name, "result": [b.x, b.y, b.width, b.height]]
     }
 }
@@ -154,6 +180,103 @@ func runLength(_ vectors: [[String: Any]]) -> [[String: Any]] {
     }
 }
 
+// MARK: - number_input commit rule
+
+func runNumberCommit(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let text = tc["text"] as? String ?? ""
+        let minVal = (tc["min"] as? NSNumber)?.doubleValue
+        let maxVal = (tc["max"] as? NSNumber)?.doubleValue
+        let committed = numberInputCommit(text: text, min: minVal, max: maxVal)
+        return ["name": name, "result": committed ?? NSNull()]
+    }
+}
+
+// MARK: - path_project (closest-point projection onto a segment / cubic)
+//
+// The distance is reported DIVIDED BY the vector's `scale`. The family exists
+// for coordinates above ~1e154 — the magnitudes at which a naive
+// `(dx*dx + dy*dy).squareRoot()` saturates to +inf while `hypot` does not —
+// and an absolute tolerance against a raw 1e200 distance is meaningless (one
+// ulp there is ~1.6e184), so the comparison happens on the ratio. `scale` is
+// 1.0 for the ordinary-magnitude vectors. Mirrors `run_path_project` in
+// jas_dioxus/src/bin/algorithm_roundtrip.rs.
+
+func runPathProject(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let fn = tc["function"] as? String ?? ""
+        let a = (tc["args"] as? [NSNumber])?.map { $0.doubleValue } ?? []
+        let scale = (tc["scale"] as? NSNumber)?.doubleValue ?? 1.0
+        let out: (Double, Double)
+        switch fn {
+        case "closest_on_line":
+            out = closestOnLine(a[0], a[1], a[2], a[3], a[4], a[5])
+        case "closest_on_cubic":
+            out = closestOnCubic(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9])
+        default:
+            fputs("Unknown path_project function: \(fn)\n", stderr)
+            exit(1)
+        }
+        return ["name": name,
+                "result": ["distance_over_scale": jsonNumber(out.0 / scale),
+                           "t": jsonNumber(out.1)]]
+    }
+}
+
+/// JSON has no infinity or NaN. serde_json emits `null` for a non-finite
+/// f64, while `JSONSerialization` throws — which would abort this whole
+/// binary and report the family as one opaque ERROR instead of naming the
+/// vector that overflowed. Emitting `null` here keeps the two ports'
+/// serialization agreeing, so a saturating distance shows up as a localized
+/// `distance_over_scale: null` mismatch in both.
+private func jsonNumber(_ v: Double) -> Any {
+    v.isFinite ? v : NSNull()
+}
+
+// MARK: - Color conversion (the Color panel's four primitives)
+
+func runColorConvert(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let ints: ([String: Any], String) -> [Int] = { tc, key in
+            (tc[key] as? [NSNumber])?.map { $0.intValue } ?? []
+        }
+        let floats: ([String: Any], String) -> [Double] = { tc, key in
+            (tc[key] as? [NSNumber])?.map { $0.doubleValue } ?? []
+        }
+        let result: Any
+        switch tc["function"] as? String ?? "" {
+        case "rgb_to_hsb":
+            let a = ints(tc, "rgb")
+            let (h, s, b) = rgbToHsb(UInt8(a[0]), UInt8(a[1]), UInt8(a[2]))
+            result = [h, s, b]
+        case "hsb_to_rgb":
+            let a = floats(tc, "hsb")
+            let (r, g, b) = hsbToRgb(a[0], a[1], a[2])
+            result = [Int(r), Int(g), Int(b)]
+        case "rgb_to_cmyk":
+            let a = ints(tc, "rgb")
+            let (c, m, y, k) = rgbToCmyk(UInt8(a[0]), UInt8(a[1]), UInt8(a[2]))
+            result = [c, m, y, k]
+        case "panel_channels":
+            let a = floats(tc, "float_rgb")
+            let ch = panelChannels(rf: a[0], gf: a[1], bf: a[2])
+            result = [
+                "r": ch.r, "g": ch.g, "bl": ch.bl,
+                "h": ch.h, "s": ch.s, "b": ch.b,
+                "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
+                "hex": ch.hex,
+            ] as [String: Any]
+        default:
+            fputs("Unknown color_convert function: \(tc["function"] ?? "")\n", stderr)
+            exit(1)
+        }
+        return ["name": name, "result": result]
+    }
+}
+
 // MARK: - Measure
 
 func parseUnit(_ s: String) -> JasLib.Unit {
@@ -202,6 +325,17 @@ func runHitTest(_ vectors: [[String: Any]]) -> [[String: Any]] {
         case "point_in_polygon":
             let poly = parsePolygon(tc["polygon"]!)
             result = pointInPolygon(a[0], a[1], poly)
+        // Element-level marquee / lasso. `element` is a test-JSON element
+        // (parseElement handles every type, including live compound
+        // shapes); `args` is the marquee rect x, y, w, h; `polygon` is the
+        // lasso outline.
+        case "element_intersects_rect":
+            let elem = parseElement(tc["element"]!)
+            result = elementIntersectsRect(elem, a[0], a[1], a[2], a[3])
+        case "element_intersects_polygon":
+            let elem = parseElement(tc["element"]!)
+            let poly = parsePolygon(tc["polygon"]!)
+            result = elementIntersectsPolygon(elem, poly)
         default:
             fputs("Unknown hit_test function: \(fn)\n", stderr)
             exit(1)
@@ -212,18 +346,38 @@ func runHitTest(_ vectors: [[String: Any]]) -> [[String: Any]] {
 
 // MARK: - Boolean
 
+/// Read a corpus vector's declared fill rule. Absent means EVEN-ODD —
+/// the algorithm layer's default for a bare ring list. Mirrors
+/// `parse_fill_rule` in the Rust runner. See transcripts/BOOLEAN.md
+/// "Fill rule: the polygon set carries it".
+func parseFillRule(_ v: Any?) -> BoolFillRule {
+    switch v as? String {
+    case "nonzero": return .nonzero
+    case "evenodd", nil: return .evenodd
+    case let other?:
+        fputs("Unknown fill_rule: \(other)\n", stderr)
+        exit(1)
+    }
+}
+
 func runBoolean(_ vectors: [[String: Any]]) -> [[String: Any]] {
     vectors.map { tc in
         let name = tc["name"] as! String
         let fn = tc["function"] as! String
-        let a = parsePolygonSet(tc["a"]!)
-        let b = parsePolygonSet(tc["b"]!)
+        // Each operand DECLARES its fill rule (the carried-rule law,
+        // transcripts/BOOLEAN.md). Absent, it is even-odd: the standing
+        // convention for a bare ring list, and what booleanUnion and
+        // friends read.
+        let a = BoolRuledPolygonSet(parsePolygonSet(tc["a"]!),
+                                    rule: parseFillRule(tc["a_fill_rule"]))
+        let b = BoolRuledPolygonSet(parsePolygonSet(tc["b"]!),
+                                    rule: parseFillRule(tc["b_fill_rule"]))
         let res: BoolPolygonSet
         switch fn {
-        case "union":     res = booleanUnion(a, b)
-        case "intersect": res = booleanIntersect(a, b)
-        case "subtract":  res = booleanSubtract(a, b)
-        case "exclude":   res = booleanExclude(a, b)
+        case "union":     res = booleanUnionRuled(a, b)
+        case "intersect": res = booleanIntersectRuled(a, b)
+        case "subtract":  res = booleanSubtractRuled(a, b)
+        case "exclude":   res = booleanExcludeRuled(a, b)
         default:
             fputs("Unknown boolean function: \(fn)\n", stderr)
             exit(1)
@@ -232,12 +386,12 @@ func runBoolean(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let samplePts = (expected["sample_points"] as? [[String: Any]]) ?? []
         let samples: [[String: Any]] = samplePts.map { sp in
             let pt = parsePoint(sp["point"]!)
-            let inside = pointInPolygonSetHelper(res, pt)
+            let inside = pointInPolygonSet(res, pt)
             return ["point": [pt.0, pt.1], "inside": inside] as [String: Any]
         }
         let rings: [[[Double]]] = res.map { ring in ring.map { [$0.0, $0.1] } }
         return ["name": name, "result": [
-            "area": polygonSetAreaHelper(res),
+            "area": polygonSetArea(res),
             "ring_count": res.count,
             "sample_points": samples,
             "rings": rings
@@ -251,13 +405,41 @@ func runBooleanNormalize(_ vectors: [[String: Any]]) -> [[String: Any]] {
     vectors.map { tc in
         let name = tc["name"] as! String
         let input = parsePolygonSet(tc["input"]!)
-        let res = normalize(input)
+        let res = normalize(input, parseFillRule(tc["fill_rule"]))
         let rings: [[[Double]]] = res.map { ring in ring.map { [$0.0, $0.1] } }
         return ["name": name, "result": [
-            "area": polygonSetAreaHelper(res),
+            "area": polygonSetArea(res),
             "ring_count": res.count,
             "all_rings_simple": allRingsSimple(res),
             "rings": rings
+        ] as [String: Any]] as [String: Any]
+    }
+}
+
+// MARK: - Polygon Metrics
+//
+// Gates the harness's OWN instruments. No boolean operation runs here:
+// the fixture's ring sets go straight into
+// Sources/Algorithms/PolygonMetrics.swift, so a red vector accuses a
+// measuring instrument and nothing else. Fixture shape:
+//   { name, rings: [[[x,y]...]...], sample_points: [[x,y]...] }
+
+func runPolygonMetrics(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as! String
+        let rings = parsePolygonSet(tc["rings"]!)
+        let raw = (tc["sample_points"] as? [Any]) ?? []
+        let samples: [[String: Any]] = raw.map { p in
+            let pt = parsePoint(p)
+            return ["point": [pt.0, pt.1], "inside": pointInPolygonSet(rings, pt)]
+        }
+        return ["name": name, "result": [
+            "ring_count": rings.count,
+            "ring_signed_areas": rings.map { ringSignedArea($0) },
+            "ring_simple": rings.map { isRingSimple($0) },
+            "all_rings_simple": allRingsSimple(rings),
+            "area": polygonSetArea(rings),
+            "sample_points": samples
         ] as [String: Any]] as [String: Any]
     }
 }
@@ -364,7 +546,7 @@ func runTextLayout(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let maxWidth = tc["max_width"] as! Double
         let fontSize = tc["font_size"] as! Double
         let charWidth = tc["char_width"] as! Double
-        let measure: (String) -> Double = { s in Double(s.count) * charWidth }
+        let measure = fixedCharWidthMeasure(charWidth)
         let layout = layoutText(content, maxWidth: maxWidth, fontSize: fontSize,
                                 measure: measure)
         let glyphs: [[String: Any]] = layout.glyphs.map { g in
@@ -428,7 +610,7 @@ func runTextLayoutParagraph(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let charWidth = tc["char_width"] as! Double
         let segs: [ParagraphSegment] = (tc["paragraphs"] as? [[String: Any]] ?? [])
             .map(parseSeg)
-        let measure: (String) -> Double = { s in Double(s.count) * charWidth }
+        let measure = fixedCharWidthMeasure(charWidth)
         let layout = layoutTextWithParagraphs(content, maxWidth: maxWidth,
                                                 fontSize: fontSize,
                                                 paragraphs: segs,
@@ -455,7 +637,7 @@ func runPathTextLayout(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let startOffset = tc["start_offset"] as! Double
         let fontSize = tc["font_size"] as! Double
         let charWidth = tc["char_width"] as! Double
-        let measure: (String) -> Double = { s in Double(s.count) * charWidth }
+        let measure = fixedCharWidthMeasure(charWidth)
         let layout = layoutPathText(pathCmds, content: content,
                                     startOffset: startOffset, fontSize: fontSize,
                                     measure: measure)
@@ -510,95 +692,10 @@ func parsePathCommands(_ v: Any) -> [PathCommand] {
 }
 
 // MARK: - Geometry Helpers
-
-func ringSignedArea(_ ring: BoolRing) -> Double {
-    guard ring.count >= 3 else { return 0 }
-    var sum = 0.0
-    let n = ring.count
-    for i in 0..<n {
-        let (x1, y1) = ring[i]
-        let (x2, y2) = ring[(i + 1) % n]
-        sum += x1 * y2 - x2 * y1
-    }
-    return sum * 0.5
-}
-
-func pointInRingHelper(_ ring: BoolRing, _ pt: (Double, Double)) -> Bool {
-    let (px, py) = pt
-    let n = ring.count
-    guard n >= 3 else { return false }
-    var inside = false
-    var j = n - 1
-    for i in 0..<n {
-        let (xi, yi) = ring[i]
-        let (xj, yj) = ring[j]
-        if ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi) {
-            inside = !inside
-        }
-        j = i
-    }
-    return inside
-}
-
-func pointInPolygonSetHelper(_ ps: BoolPolygonSet, _ pt: (Double, Double)) -> Bool {
-    var count = 0
-    for ring in ps {
-        if pointInRingHelper(ring, pt) { count += 1 }
-    }
-    return count % 2 == 1
-}
-
-func polygonSetAreaHelper(_ ps: BoolPolygonSet) -> Double {
-    var total = 0.0
-    for (i, ring) in ps.enumerated() {
-        let a = abs(ringSignedArea(ring))
-        var depth = 0
-        if let pt = ring.first {
-            for (j, other) in ps.enumerated() {
-                if i == j { continue }
-                if pointInRingHelper(other, pt) { depth += 1 }
-            }
-        }
-        total += depth % 2 == 0 ? a : -a
-    }
-    return total
-}
-
-func allRingsSimple(_ ps: BoolPolygonSet) -> Bool {
-    ps.allSatisfy { isRingSimple($0) }
-}
-
-/// Check that a ring is simple: no two of its edges meet except where
-/// consecutive edges share their one common vertex.
-///
-/// Deliberately the full arrangement predicate rather than a
-/// proper-crossing test. A proper-crossing test reports true for a ring
-/// carrying a T-junction (a vertex sitting in another edge's interior) or
-/// a collinear self-overlap (an edge doubling back along itself), because
-/// neither is a strict interior crossing — so the corpus's
-/// all_rings_simple flag used to stay green on exactly the degeneracies
-/// the normalizer exists to remove. Mirrors `is_ring_simple` in
-/// jas_dioxus/src/bin/algorithm_roundtrip.rs.
-func isRingSimple(_ ring: BoolRing) -> Bool {
-    let n = ring.count
-    guard n >= 3 else { return true }
-    for i in 0..<n {
-        for j in (i + 1)..<n {
-            let adjacent = j == i + 1 || (i == 0 && j == n - 1)
-            let pts = arrangementSplitPoints(
-                ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n])
-            if adjacent {
-                // Consecutive edges legitimately meet at exactly their
-                // shared vertex, and nowhere else.
-                if pts.count != 1 { return false }
-            } else if !pts.isEmpty {
-                return false
-            }
-        }
-    }
-    return true
-}
-
+//
+// The region metrics every boolean golden is expressed in live in
+// Sources/Algorithms/PolygonMetrics.swift -- one copy, gated by the
+// `polygon_metrics` corpus family. They used to be hand-pasted here.
 
 func crossProduct(_ ux: Double, _ uy: Double, _ vx: Double, _ vy: Double) -> Double {
     ux * vy - uy * vx

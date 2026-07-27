@@ -49,6 +49,30 @@ import Testing
     #expect(err == nil)
 }
 
+/// The strings a number-typed field REFUSES: the live reference accepts a string
+/// for `type: number` only if it matches `_NUMBER_STR_RE` (`^-?\d+(\.\d+)?$`,
+/// `workspace_interpreter/schema.py`). This port has always applied that
+/// grammar; the pair that applies it moved to `WidgetCommit.swift` as
+/// `numericStringValue` so the `number_input` widget could share it, and this
+/// pins that the move did not widen it. jas_dioxus used a bare
+/// `str::parse::<f64>` here and now calls the same rule.
+@Test func coerceNumberRejectsStringsTheReferenceRejects() {
+    let entry = getSchemaEntry("stroke_width")!
+    for s in ["1e10", "+5", ".5", "12.", " 12 ", "inf", "NaN", "0x1p3", "1,5", "--5", ""] {
+        let (_, err) = coerceValue(s, entry: entry)
+        #expect(err == "type_mismatch", "coerceValue should reject \(s.debugDescription)")
+    }
+}
+
+@Test func coerceNumberAcceptsTheReferenceGrammar() {
+    let entry = getSchemaEntry("stroke_width")!
+    for (s, want) in [("12", 12.0), ("12.50", 12.5), ("-2.25", -2.25), ("0", 0.0)] {
+        let (val, err) = coerceValue(s, entry: entry)
+        #expect(err == nil, "coerceValue should accept \(s.debugDescription)")
+        #expect(val as? Double == want, "coerceValue(\(s.debugDescription))")
+    }
+}
+
 @Test func coerceNumberRejectsBool() {
     let entry = getSchemaEntry("stroke_width")!
     let (_, err) = coerceValue(true, entry: entry)

@@ -597,10 +597,29 @@ public class Controller {
         let elem = doc.getElement(path)
         if case .path(let v) = elem {
             let newD = JasLib.movePathHandle(v.d, anchorIdx: anchorIdx, handleType: handleType, dx: dx, dy: dy)
+            // Rust's twin is `PathElem { d: new_cmds, ..elem.clone() }`
+            // (geometry/element.rs, move_path_handle) and so preserves
+            // every field structurally. Swift has no `..clone()`, so this
+            // rebuild must restate all 17 non-`d` fields by hand; the
+            // earlier version forwarded only eight and silently promoted
+            // outline/invisible paths to `.preview` and erased name/id.
+            // Pinned by Tests/Document/MovePathHandleFieldsTests.swift,
+            // whose Mirror walk covers fields added to Path later.
             let newElem = Element.path(Path(d: newD, fill: v.fill, stroke: v.stroke,
                                                widthPoints: v.widthPoints,
                                                opacity: v.opacity, transform: v.transform,
-                                               locked: v.locked))
+                                               locked: v.locked,
+                                               visibility: v.visibility,
+                                               blendMode: v.blendMode,
+                                               mask: v.mask,
+                                               fillGradient: v.fillGradient,
+                                               strokeGradient: v.strokeGradient,
+                                               strokeBrush: v.strokeBrush,
+                                               strokeBrushOverrides: v.strokeBrushOverrides,
+                                               toolOrigin: v.toolOrigin,
+                                               name: v.name,
+                                               id: v.id,
+                                               fillRule: v.fillRule))
             doc = doc.replaceElement(path, with: newElem)
             model.editDocument(doc)
         }
@@ -653,7 +672,10 @@ public class Controller {
                     fillGradient: p.fillGradient,
                     strokeGradient: p.strokeGradient,
                     name: p.name,
-                    id: p.id
+                    id: p.id,
+                    // A Polygon carries no fill rule, so the refit Path is
+                    // a fresh nonzero one. Matches Rust's Polygon arm.
+                    fillRule: .nonzero
                 ))
                 newDoc = newDoc.replaceElement(es.path, with: newPath)
             case .path(let p):
@@ -709,7 +731,8 @@ public class Controller {
                     strokeBrushOverrides: p.strokeBrushOverrides,
                     toolOrigin: p.toolOrigin,
                     name: p.name,
-                    id: p.id
+                    id: p.id,
+                    fillRule: p.fillRule
                 ))
                 newDoc = newDoc.replaceElement(es.path, with: newPath)
             default:
@@ -1234,29 +1257,81 @@ public class Controller {
             return
         }
 
-        // Flatten to Polygon elements; drop rings with < 3 points.
-        // Optional per BooleanOptions:
+        // Flatten (rings, paint) outputs into elements; drop rings with
+        // < 3 points. Optional per BooleanOptions:
         // - divide_remove_unpainted: drop unpainted DIVIDE fragments
         // - remove_redundant_points: collapse near-collinear points
+        //
+        // The sweep emits CANONICAL rings, which are read under the
+        // even-odd rule (see Boolean.swift's carried-rule law). A result
+        // like XOR of two overlapping rects is one outer ring plus an
+        // inner ring cutting out the overlap — emitting each ring as its
+        // own Polygon (which fills its own area independently) FILLS THE
+        // HOLE. That was a live user-facing bug: Rust drew the donut and
+        // Swift drew the disc. Single-ring results stay Polygons;
+        // multi-ring results emit ONE Path with all rings as subpaths,
+        // declaring boolResultFillRule, matching Rust's
+        // apply_destructive_boolean ring for ring.
+        //
+        // PAINT. BOOLEAN.md §Operand and paint rules names four
+        // properties as the paint the result carries — "fill, stroke,
+        // opacity, blend mode" — from whichever operand that op's rule
+        // designates (`paintSrc`). All four are passed below. `opacity`
+        // used to be written as a literal 1.0 and `blendMode` was left
+        // at its `.normal` default, so a half-transparent multiply
+        // operand came out opaque and normal; Rust never had that gap
+        // (its rebuild clones the paint source's CommonProps).
+        //
+        // NOT paint, and still divergent from Rust: `locked` (written
+        // false here, cloned there) and the identity trio
+        // `name`/`id`/`toolOrigin` plus `mask` (dropped here, cloned
+        // there). BOOLEAN.md's paint rule does not reach them and the
+        // cardinality law (PATH_ERASER_TOOL.md §cardinality law) cuts
+        // both ways across these ops — UNION is N->1 and DIVIDE is
+        // 1->N, where identity dies, while a SUBTRACT_FRONT survivor is
+        // 1->1, where it lives. Banked for a ruling; do not guess it
+        // here. `fillGradient`/`strokeGradient` are dropped by BOTH
+        // ports.
         var newElements: [Element] = []
         for (ps, paintSrc) in outputs {
             if opName == "divide" && options.divideRemoveUnpainted
                && paintSrc.fill == nil && paintSrc.stroke == nil {
                 continue
             }
-            for ring in ps {
-                let r = options.removeRedundantPoints
+            let kept: [BoolRing] = ps.map { ring in
+                options.removeRedundantPoints
                     ? collapseCollinearPoints(ring, tolerance: options.precision)
                     : ring
-                guard r.count >= 3 else { continue }
+            }.filter { $0.count >= 3 }
+            if kept.isEmpty { continue }
+            if kept.count == 1 {
                 newElements.append(.polygon(Polygon(
-                    points: r,
+                    points: kept[0],
                     fill: paintSrc.fill,
                     stroke: paintSrc.stroke,
-                    opacity: 1.0,
+                    opacity: paintSrc.opacity,
                     transform: paintSrc.transform,
                     locked: false,
-                    visibility: paintSrc.visibility
+                    visibility: paintSrc.visibility,
+                    blendMode: paintSrc.blendMode
+                )))
+            } else {
+                var d: [PathCommand] = []
+                for ring in kept {
+                    d.append(.moveTo(ring[0].0, ring[0].1))
+                    for p in ring[1...] { d.append(.lineTo(p.0, p.1)) }
+                    d.append(.closePath)
+                }
+                newElements.append(.path(Path(
+                    d: d,
+                    fill: paintSrc.fill,
+                    stroke: paintSrc.stroke,
+                    opacity: paintSrc.opacity,
+                    transform: paintSrc.transform,
+                    locked: false,
+                    visibility: paintSrc.visibility,
+                    blendMode: paintSrc.blendMode,
+                    fillRule: FillRule(boolResultFillRule)
                 )))
             }
         }

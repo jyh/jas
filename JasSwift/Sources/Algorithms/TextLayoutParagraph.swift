@@ -13,6 +13,28 @@
 
 import Foundation
 
+/// A hyphenation count field's stored Double as the Int the layout wants.
+///
+/// Rust holds these three fields as `usize` and converts with `as usize`, which
+/// saturates a negative or NaN to 0; this port's `Int(_:)` was a precondition
+/// failure on NaN. (For a huge value the two saturate to different SENTINELS —
+/// `Int.max` here, `usize::MAX` there — because the field types differ; both are
+/// larger than any word, and every consumer is a comparison.) The values arrive
+/// from SVG attributes through `attrF`, which
+/// is `Double(string) ?? default` and accepts "nan" / "1e400" — as does Rust's
+/// `get_f` — so a hand-edited document crashed this port on OPEN where Rust
+/// loaded it. Risk R9, transcripts/CORPUS_CENSUS.md §7.
+func hyphenationFieldInt(_ v: Double) -> Int {
+    max(0, saturatingInt(v))
+}
+
+/// The hyphenation bias field, whose Rust field is `u8` and whose cast is
+/// therefore `as u8` — a 0...255 ceiling this port did not have (`bias = 300`
+/// stored 300 here and 255 there).
+func hyphenationBiasInt(_ v: Double) -> Int {
+    min(max(0, saturatingInt(v)), 255)
+}
+
 /// Build a list of paragraph segments from `tspans`. Returns an
 /// empty array when no wrapper tspan is present (caller falls back
 /// to the default-paragraph layout).
@@ -62,10 +84,10 @@ public func buildParagraphSegments(
                 // 6 / 2 / 2. The previous 3 / 1 / 1 was loose
                 // enough that the sample pattern set produced "T-rump"
                 // (matching ".un1" / "1ru" patterns at min_before=1).
-                hyphenateMinWord: Int(t.jasHyphenateMinWord ?? 6),
-                hyphenateMinBefore: Int(t.jasHyphenateMinBefore ?? 2),
-                hyphenateMinAfter: Int(t.jasHyphenateMinAfter ?? 2),
-                hyphenateBias: Int(t.jasHyphenateBias ?? 0),
+                hyphenateMinWord: hyphenationFieldInt(t.jasHyphenateMinWord ?? 6),
+                hyphenateMinBefore: hyphenationFieldInt(t.jasHyphenateMinBefore ?? 2),
+                hyphenateMinAfter: hyphenationFieldInt(t.jasHyphenateMinAfter ?? 2),
+                hyphenateBias: hyphenationBiasInt(t.jasHyphenateBias ?? 0),
                 // Capitalized words (proper nouns: "Trump", "London")
                 // are excluded from hyphenation by default, mirroring
                 // professional illustration, page-layout and word

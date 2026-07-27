@@ -148,7 +148,8 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         guard let args = spec as? [String: Any],
               let path = args["path"] as? String, !path.isEmpty
         else { return nil }
-        let index = Int(evalNumber(args["index"], store: store, ctx: ctx))
+        // saturatingInt mirrors Rust's `as usize` (risk R9).
+        let index = saturatingInt(evalNumber(args["index"], store: store, ctx: ctx))
         guard var arr = store.getDataPath(path) as? [Any] else { return nil }
         if index >= 0 && index < arr.count {
             arr.remove(at: index)
@@ -162,7 +163,8 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
               let path = args["path"] as? String, !path.isEmpty
         else { return nil }
         let value = resolveValueOrExpr(args["value"], store: store, ctx: ctx)
-        let index = Int(evalNumber(args["index"], store: store, ctx: ctx))
+        // saturatingInt mirrors Rust's `as usize` (risk R9).
+        let index = saturatingInt(evalNumber(args["index"], store: store, ctx: ctx))
         var arr = (store.getDataPath(path) as? [Any]) ?? []
         let i = max(0, min(index, arr.count))
         arr.insert(value ?? NSNull(), at: i)
@@ -1340,13 +1342,12 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let rawH = max(abs(y1 - y2).rounded(), 1.0)
 
         let doc = model.document
-        let existing: Set<String> = Set(doc.artboards.map { $0.id })
-        var newId = ""
-        for _ in 0..<100 {
-            let candidate = generateArtboardId()
-            if !existing.contains(candidate) { newId = candidate; break }
-        }
-        guard !newId.isEmpty else { return nil }
+        // Collision-retry id mint through THE ONE MINT LOOP.
+        var existing: Set<String> = Set(doc.artboards.map { $0.id })
+        guard let minted = mintUniqueIds(1, existing: &existing,
+                                         mint: { generateArtboardId() })
+        else { return nil }
+        let newId = minted[0]
         let newName = nextArtboardName(doc.artboards)
         let ab = Artboard(
             id: newId, name: newName,
@@ -1439,7 +1440,10 @@ private func makePathFromCommands(
 
     return Path(d: cmds, fill: fill, stroke: stroke,
                 strokeBrush: strokeBrush,
-                strokeBrushOverrides: strokeBrushOverrides)
+                strokeBrushOverrides: strokeBrushOverrides,
+                // A tool-drawn path is fresh geometry, not a boolean
+                // result. Matches Rust's commit sites in effects.rs.
+                fillRule: .nonzero)
 }
 
 /// Paintbrush-tool stroke-width commit rule per PAINTBRUSH_TOOL.md
@@ -1585,18 +1589,68 @@ private func anchorIndexNear(
     return nil
 }
 
-/// Reconstruct a Path element with replaced command list, carrying
-/// over fill/stroke/opacity/transform/lock state. Shared by all
-/// doc.path.* effects that rewrite a path's d.
-private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand]) -> Path {
+/// Which element the rebuilt Path *is*, relative to its source. There is no
+/// default, deliberately: the compiler, not a reviewer, then enumerates the
+/// call sites whenever this distinction changes — the same reason
+/// `Path.init` requires `fillRule`.
+private enum PathEditIdentity {
+    /// The edit yielded ONE element: it is the same object, so `id` travels
+    /// with everything else.
+    case sameElement
+    /// The edit SEVERED the source into several elements. Each fragment
+    /// carries appearance, transform and `name` from the source but is a NEW
+    /// element, so it wears the FRESH id the caller minted for it — never the
+    /// source's. See `pathWithCommands`.
+    case splitFragment(id: String)
+}
+
+/// Reconstruct a Path element with a replaced command list.
+///
+/// THE SHIP OF THESEUS LAW (JYH, ratified 2026-07-26): a path edit preserves
+/// everything except `d`. Stated as a law, not a field list, so it cannot rot
+/// as properties are added to `Path` — an earlier enumeration omitted
+/// `transform`, and dropping `transform` RELOCATES the artwork.
+///
+/// Rust's twin sites are `PathElem { d: new, ..pe.clone() }` and so cannot
+/// drop a property. Swift has no struct-update syntax, so this function is
+/// one of two places in this file that forward them by hand (the other is
+/// `blobBrushCommitErasing`), and
+/// `Tests/Tools/PathEditTheseusTests.swift` pins it with a Mirror-driven
+/// battery that compares every reflected property except `d` — a property
+/// added to `Path` later is checked without editing the test.
+///
+/// `identity: .splitFragment(id:)` swaps in the caller's freshly minted id and
+/// carries everything else: copying the source's id onto every fragment would
+/// leave N live elements sharing one id and break the unique-id invariant of
+/// REFERENCE_GRAPH.md §2.5. STILL OWED for the severing case: a
+/// linear-gradient stop remap (a gradient carries no position — linear
+/// resolves angle + stops against the element's OWN bbox centre and
+/// half-diagonal — so each fragment re-fits the whole ramp instead of showing
+/// its slice; the fix is an affine remap of stop locations with clipping and
+/// interpolated endpoint colours). Radial cannot be preserved without a model
+/// change; the recentre is accepted.
+private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand],
+                              identity: PathEditIdentity) -> Path {
+    let newId: String?
+    switch identity {
+    case .sameElement: newId = pe.id
+    case .splitFragment(let id): newId = id
+    }
     return Path(d: cmds, fill: pe.fill, stroke: pe.stroke,
+                widthPoints: pe.widthPoints,
                 opacity: pe.opacity, transform: pe.transform,
                 locked: pe.locked,
                 visibility: pe.visibility,
                 blendMode: pe.blendMode,
                 mask: pe.mask,
                 fillGradient: pe.fillGradient,
-                strokeGradient: pe.strokeGradient)
+                strokeGradient: pe.strokeGradient,
+                strokeBrush: pe.strokeBrush,
+                strokeBrushOverrides: pe.strokeBrushOverrides,
+                toolOrigin: pe.toolOrigin,
+                name: pe.name,
+                id: newId,
+                fillRule: pe.fillRule)
 }
 
 /// Implementation of doc.path.delete_anchor_near.
@@ -1611,7 +1665,7 @@ private func pathDeleteAnchorNear(
     // runEffects owner txn when one is open). Mirrors Rust's doc.snapshot ->
     // begin_txn pattern; replaces the legacy snapshot() + bare write.
     if let newCmds = deleteAnchorFromPath(pe.d, anchorIdx) {
-        let newPe = pathWithCommands(pe, newCmds)
+        let newPe = pathWithCommands(pe, newCmds, identity: .sameElement)
         var doc = model.document.replaceElement(path, with: .path(newPe))
         // Keep the path in the selection (matches native Delete-anchor).
         var sel = doc.selection
@@ -1656,7 +1710,7 @@ private func pathInsertAnchorOnSegmentNear(
     guard let hit = best, hit.3 <= radius else { return }
     guard case .path(let pe) = model.document.getElement(hit.0) else { return }
     let ins = insertPointInPath(pe.d, hit.1, hit.2)
-    let newPe = pathWithCommands(pe, ins.commands)
+    let newPe = pathWithCommands(pe, ins.commands, identity: .sameElement)
     // Undoable edit (editDocument self-brackets; joins the owner txn if open).
     model.editDocument(model.document.replaceElement(hit.0, with: .path(newPe)))
 }
@@ -1689,6 +1743,16 @@ private func projectionDistance(
 }
 
 /// Implementation of doc.path.erase_at_rect.
+///
+/// MINTS IDS. A severing erase replaces one identified element with several,
+/// so each fragment needs a fresh id — and the fragment count is not knowable
+/// until the geometry is split, so the initiator cannot carry the ids in an
+/// operation payload the way creation verbs do. The mint happens here, where
+/// the document is in hand for the collision check, through the shared
+/// `mintUniqueIds` loop; determinism across ports comes from seeding both
+/// ports' id source identically (`setTestIdRng`), exactly as the creation
+/// verbs are already gated. See OP_LOG.md §9 for what the 33-verb unification
+/// owes this verb. Mirrors Rust `path_erase_at_rect`.
 private func pathEraseAtRect(
     model: Model, lastX: Double, lastY: Double,
     x: Double, y: Double, eraserSize: Double
@@ -1697,6 +1761,13 @@ private func pathEraseAtRect(
     let minY = min(lastY, y) - eraserSize
     let maxX = max(lastX, x) + eraserSize
     let maxY = max(lastY, y) + eraserSize
+
+    // The avoid-set for the fragment ids minted below. Built ONCE from the
+    // pre-edit document and carried across the whole call, so fragments of
+    // different paths cannot collide with each other either. It still holds
+    // the ids of the sources being replaced — those are about to vanish, so
+    // avoiding them is merely conservative, never wrong.
+    var existingIds = model.document.elementIds
 
     var newLayers = model.document.layers
     var changed = false
@@ -1728,9 +1799,28 @@ private func pathEraseAtRect(
             }
             let isClosed = pe.d.contains { if case .closePath = $0 { return true }; return false }
             let results = splitPathAtEraser(pe.d, hit, isClosed)
-            for cmds in results where cmds.count >= 2 {
+                .filter { $0.count >= 2 }
+            // ERASE DOES NOT REMOVE IDENTITY — "it is still the same object."
+            // Branch on the surviving-fragment count; Rust's path_erase_at_rect
+            // branches identically so the two ports agree in BOTH arms. One
+            // fragment is the one-element case and keeps everything including
+            // `id`; a severing erase gives each fragment a FRESH id (see
+            // pathWithCommands). A failed mint aborts the whole erase — never
+            // a half-identified split. The child list is rebuilt FRONT-TO-BACK
+            // and Rust rebuilds it the same way, so fragment ids are handed
+            // out in document order in both ports.
+            var identities: [PathEditIdentity] = [.sameElement]
+            if results.count > 1 {
+                guard let minted = mintUniqueIds(
+                    results.count, existing: &existingIds,
+                    mint: { generateElementId() })
+                else { return }
+                identities = minted.map { .splitFragment(id: $0) }
+            }
+            for (cmds, identity) in zip(results, identities) {
                 let open = cmds.filter { if case .closePath = $0 { return false }; return true }
-                newChildren.append(.path(pathWithCommands(pe, open)))
+                newChildren.append(.path(
+                    pathWithCommands(pe, open, identity: identity)))
             }
             layerChanged = true
         }
@@ -1904,14 +1994,14 @@ private func pathCommitAnchorEdit(
     case "pressed_smooth":
         let newCmds = convertSmoothToCorner(pe.d, anchorIdx: anchorIdx)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
     case "pressed_corner":
         let moved = hypot(targetX - originX, targetY - originY)
         if moved <= 1.0 { return }
         let newCmds = convertCornerToSmooth(
             pe.d, anchorIdx: anchorIdx, hx: targetX, hy: targetY)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
     case "pressed_handle":
         let handleType = (store.getTool("anchor_point", "handle_type") as? String) ?? ""
         let dx = targetX - originX, dy = targetY - originY
@@ -1920,7 +2010,7 @@ private func pathCommitAnchorEdit(
             pe.d, anchorIdx: anchorIdx,
             handleType: handleType, dx: dx, dy: dy)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
     default: break
     }
 }
@@ -2136,7 +2226,7 @@ private func paintbrushEditCommit(
     newCmds.append(contentsOf: targetPe.d[(c1 + 1)...])
 
     let newDoc = model.document.replaceElement(
-        targetPath, with: .path(pathWithCommands(targetPe, newCmds)))
+        targetPath, with: .path(pathWithCommands(targetPe, newCmds, identity: .sameElement)))
     model.editDocument(newDoc)
 }
 
@@ -2184,7 +2274,8 @@ private func pathSmoothAtCursor(
         }
         newCmds.append(contentsOf: pe.d[(lastCmd + 1)...])
         guard newCmds.count < pe.d.count else { continue }
-        newDoc = newDoc.replaceElement(path, with: .path(pathWithCommands(pe, newCmds)))
+        newDoc = newDoc.replaceElement(
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement)))
         changed = true
     }
     if changed {
@@ -2230,7 +2321,8 @@ private func buildElement(
         let y1 = evalNumber(spec["y1"], store: store, ctx: ctx)
         let x2 = evalNumber(spec["x2"], store: store, ctx: ctx)
         let y2 = evalNumber(spec["y2"], store: store, ctx: ctx)
-        let sidesRaw = Int(evalNumber(spec["sides"], store: store, ctx: ctx))
+        // saturatingInt mirrors Rust's `as usize` (risk R9).
+        let sidesRaw = saturatingInt(evalNumber(spec["sides"], store: store, ctx: ctx))
         let sides = sidesRaw <= 0 ? 5 : sidesRaw
         let pts = regularPolygonPoints(x1, y1, x2, y2, sides)
         return .polygon(Polygon(points: pts, fill: fill, stroke: stroke))
@@ -2239,7 +2331,8 @@ private func buildElement(
         let y1 = evalNumber(spec["y1"], store: store, ctx: ctx)
         let x2 = evalNumber(spec["x2"], store: store, ctx: ctx)
         let y2 = evalNumber(spec["y2"], store: store, ctx: ctx)
-        let raw = Int(evalNumber(spec["points"], store: store, ctx: ctx))
+        // saturatingInt mirrors Rust's `as usize` (risk R9).
+        let raw = saturatingInt(evalNumber(spec["points"], store: store, ctx: ctx))
         let n = raw <= 0 ? 5 : raw
         let pts = starPoints(x1, y1, x2, y2, n)
         return .polygon(Polygon(points: pts, fill: fill, stroke: stroke))
@@ -2439,6 +2532,15 @@ private func blobBrushFillMatches(_ a: Fill?, _ b: Fill?) -> Bool {
 
 /// Implementation of doc.blob_brush.commit_painting.
 /// See BLOB_BRUSH_TOOL.md §Commit pipeline + §Multi-element merge.
+///
+/// MINTS AN ID in the N -> 1 merge arm (N >= 2 matches). A merge consumes
+/// identified elements and produces one, so the result needs a fresh id — and
+/// the initiator cannot carry it in an operation payload, because whether a
+/// merge happens at all falls out of the geometry (the overlap test below).
+/// The mint happens here, where the document is in hand for the collision
+/// check; determinism across ports comes from seeding both ports' id source
+/// identically (`setTestIdRng`). See OP_LOG.md §9 for what the 33-verb
+/// unification owes this verb.
 private func blobBrushCommitPainting(
     model: Model, store: StateStore, ctx: [String: Any],
     buffer: String,
@@ -2501,12 +2603,122 @@ private func blobBrushCommitPainting(
 
     let newD = polygonSetToPath(unified)
     if newD.isEmpty { return }
-    let newElem = Path(
-        d: newD,
-        fill: newFill, stroke: nil,
-        widthPoints: [],
-        toolOrigin: "blob_brush"
-    )
+    // THE CARDINALITY LAW (JYH, ratified 2026-07-26): "Identity survives a
+    // one-to-one edit. It does not survive a change in cardinality." The arm
+    // is chosen by the MATCH COUNT, and Rust's blob_brush_commit_painting
+    // branches on the same predicate so the two cannot drift.
+    let mergedSource: Path? = {
+        guard matches.count == 1 else { return nil }
+        guard case .path(let pe) = doc.getElement(matches[0]) else { return nil }
+        return pe
+    }()
+    // Unreachable: matches[0] was collected from this same `doc` above. Rust
+    // ABORTS the effect here rather than continuing (`_ => return`), so abort
+    // too — otherwise a nil source would fall through to the n >= 2 arm and
+    // COMMIT a fresh element, which is a different document than Rust produces
+    // from the same input. Agreeing on unreachable paths costs one line and
+    // stops a future refactor turning it into a silent divergence.
+    if matches.count == 1 && mergedSource == nil { return }
+    let newElem: Path
+    if let src = mergedSource {
+        // 1 -> 1: one existing path in, one out with a rewritten `d`. It is the
+        // same object, so everything but `d` travels — pathWithCommands, never
+        // a field list here (an earlier enumeration of this law omitted
+        // `transform`, which RELOCATES the artwork).
+        //
+        // `fill` deliberately keeps the SOURCE's value rather than `newFill`:
+        // the match loop above ran blobBrushFillMatches, so the source's fill
+        // already equals the stroke's under that comparison (lowercased hex
+        // plus opacity within 1e-9) — a MATCH criterion, NOT an equality
+        // guarantee: `Color.toHex()` discards alpha and flattens the Color
+        // case, so a translucent, a CMYK, or a near-rounding colour all
+        // hex-compare equal. Keeping the source's fill follows from the
+        // cardinality law (a surviving element keeps its own attributes), not
+        // from the fills being identical. Consequence: painting into a
+        // translucent or CMYK blob preserves its colour rather than
+        // overwriting it with the tool's.
+        newElem = pathWithCommands(src, newD, identity: .sameElement)
+    } else {
+        // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both build
+        // a fresh element carrying the tool's own attributes. For the merge
+        // that is the law's verdict on identity: no source's id may travel
+        // ("the largest source keeps the id" was explicitly rejected in both
+        // directions), so the result wears a FRESH id, minted HERE through the
+        // shared `mintUniqueIds` loop — the effect is where the document is in
+        // hand for the collision check, and the initiator cannot know that a
+        // merge is happening at all until the match loop above has run.
+        //
+        // The 0 -> 1 arm deliberately does NOT mint: a brand-new blob is a
+        // creation, and no creation tool in this app mints an element id (a
+        // drawn rect, ellipse or pen path all commit id-less). Giving one to
+        // the blob brush alone would single it out; when creation-time ids
+        // land, they land for every tool at once.
+        //
+        // This branch is `matches.count != 1`, so a non-empty `matches` here
+        // is exactly the N >= 2 merge.
+        var freshId: String? = nil
+        // The tool's own defaults, matching `Path.init`'s and Rust's
+        // `CommonProps::default()`. Overwritten below only where the sources
+        // are UNANIMOUS.
+        var opacity = 1.0
+        var locked = false
+        var visibility: Visibility = .preview
+        var blendMode: BlendMode = .normal
+        var mask: Mask? = nil
+        if matches.count >= 2 {
+            var existingIds = doc.elementIds
+            guard let minted = mintUniqueIds(1, existing: &existingIds,
+                                             mint: { generateElementId() })
+            else { return }
+            freshId = minted[0]
+
+            // UNANIMITY CARRY (JYH, ratified 2026-07-26): if EVERY source
+            // agrees on a non-paint attribute, the merged element carries it;
+            // if they disagree, the default above stands. No winner is ever
+            // picked — "the largest source keeps it" was rejected in both
+            // directions. The rationale is the Theseus principle: an edit
+            // preserves what it does not speak to, and painting a stroke says
+            // nothing about opacity, so merging two 50%-opaque blobs must not
+            // yield a fully opaque one.
+            //
+            // `transform` is EXCLUDED regardless of agreement. This merge
+            // matches RAW geometry against a DOCUMENT-space sweep, so it is
+            // already transform-blind (transcripts/BLOB_BRUSH_TOOL.md);
+            // carrying a unanimous transform would COMPOUND that bug by
+            // relocating the merged artwork. `toolOrigin` is set by the tool
+            // below, `id` is minted fresh, and the paint attributes are what
+            // the stroke DOES speak to — so these five compositing fields are
+            // the whole list. Rust's twin carries the same five.
+            let sources: [Path] = matches.compactMap {
+                if case .path(let pe) = doc.getElement($0) { return pe }
+                return nil
+            }
+            func unanimous<T: Equatable>(_ get: (Path) -> T) -> T? {
+                guard let first = sources.first.map(get) else { return nil }
+                return sources.allSatisfy { get($0) == first } ? first : nil
+            }
+            if let v = unanimous({ $0.opacity }) { opacity = v }
+            if let v = unanimous({ $0.blendMode }) { blendMode = v }
+            if let v = unanimous({ $0.visibility }) { visibility = v }
+            if let v = unanimous({ $0.locked }) { locked = v }
+            if let v = unanimous({ $0.mask }) { mask = v }
+        }
+        newElem = Path(
+            d: newD,
+            fill: newFill, stroke: nil,
+            widthPoints: [],
+            opacity: opacity,
+            locked: locked,
+            visibility: visibility,
+            blendMode: blendMode,
+            mask: mask,
+            toolOrigin: "blob_brush",
+            id: freshId,
+            // Rust's blob_brush_commit_painting stamps NonZero on the
+            // unified region; parity, not preference.
+            fillRule: .nonzero
+        )
+    }
 
     // Build new document: remove matches in reverse (so earlier
     // indices stay valid), then insert the unified element.
@@ -2571,7 +2783,9 @@ private func blobBrushCommitErasing(
                     strokeGradient: pe.strokeGradient,
                     strokeBrush: pe.strokeBrush,
                     strokeBrushOverrides: pe.strokeBrushOverrides,
-                    toolOrigin: pe.toolOrigin)
+                    toolOrigin: pe.toolOrigin,
+                    name: pe.name, id: pe.id,
+                    fillRule: pe.fillRule)
                 newDoc = newDoc.replaceElement(path, with: .path(newPe))
             }
         }
@@ -3068,8 +3282,8 @@ private func extractPath(
                     out.append(n.intValue)
                 } else if let i = item.value as? Int {
                     out.append(i)
-                } else if let d = item.value as? Double, d == Double(Int(d)) {
-                    out.append(Int(d))
+                } else if let d = item.value as? Double, let i = intIfIntegral(d) {
+                    out.append(i)
                 } else {
                     return nil
                 }
@@ -3748,7 +3962,7 @@ private func artboardTranslateFromPreview(
             var path: [Int] = []
             for v in inner {
                 if let i = v as? Int { path.append(i) }
-                else if let d = v as? Double { path.append(Int(d)) }
+                else if let d = v as? Double { path.append(saturatingInt(d)) }
             }
             if path.count == 2 { dupPaths.append(path) }
         }
@@ -4080,14 +4294,12 @@ private func artboardDuplicateInit(model: Model, store: StateStore) {
             locked: layer.locked))
     }
 
-    // Mint duplicate artboard (collision-retry id).
-    let existing: Set<String> = Set(doc.artboards.map { $0.id })
-    var newId = ""
-    for _ in 0..<100 {
-        let candidate = generateArtboardId()
-        if !existing.contains(candidate) { newId = candidate; break }
-    }
-    guard !newId.isEmpty else { return }
+    // Mint the duplicate artboard's id through THE ONE MINT LOOP.
+    var existing: Set<String> = Set(doc.artboards.map { $0.id })
+    guard let minted = mintUniqueIds(1, existing: &existing,
+                                     mint: { generateArtboardId() })
+    else { return }
+    let newId = minted[0]
     let dup = Artboard(
         id: newId,
         name: nextArtboardName(doc.artboards),

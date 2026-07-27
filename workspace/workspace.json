@@ -629,7 +629,7 @@
       ]
     },
     "set_fill_type_solid": {
-      "description": "Sets the active attribute (fill or stroke, per fill_on_top) to solid color mode. If the active color is currently null, restores it to black (#000000). If it already has a solid color this is a no-op \u2014 the fill type is already solid.\n",
+      "description": "Sets the active attribute (fill or stroke, per fill_on_top) to solid color mode. If the active color is currently null, restores it to black (#000000). If it already has a solid color this is a no-op \u2014 the fill type is already solid. \"The active color\" is the one state.fill_color / state.stroke_color names, so with a shape selected this asks about THAT SHAPE's fill: clicking Solid on a stroke-only shape paints its fill black. With nothing selected it asks about the default fill, and with a mixed selection the guard sees the default standing in scope and the click is a no-op.\n",
       "category": "fill_stroke",
       "effects": [
         {
@@ -9272,13 +9272,13 @@
       "type": "color",
       "default": "#ffffff",
       "nullable": true,
-      "description": "Active fill color (null = no fill)"
+      "description": "Active fill color (null = no fill). \"Active\" means the fill the next edit would change: with a selection it is the SELECTION's fill, and with nothing selected it is the default fill \u2014 the per-document default, falling back to the app-global one. Three outcomes, and all three must be expressible wherever this key is published: a color, an explicit null for \"none\", and ABSENT for a mixed selection, where absent means \"leave the value already in scope alone\" (the default above stands, and controls stay live because an edit applies to the whole selection). Every reader answers the same way \u2014 the panel render scope, the action-dispatch scope, the per-tool bridge, and a dialog's seed. The app-global tier is WORKSPACE state, not document state: it survives File > New, so a user mid-flow keeps the color they just picked.\n"
     },
     "stroke_color": {
       "type": "color",
       "default": "#000000",
       "nullable": true,
-      "description": "Active stroke color (null = no stroke)"
+      "description": "Active stroke color (null = no stroke). Resolved exactly as fill_color is \u2014 selection first, then the per-document default, then the app-global default that survives File > New \u2014 with the same three outcomes (a color / an explicit null / absent for a mixed selection).\n"
     },
     "stroke_width": {
       "type": "number",

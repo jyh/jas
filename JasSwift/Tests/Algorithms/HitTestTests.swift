@@ -121,6 +121,41 @@ import Foundation
     #expect(!elementIntersectsRect(rect, 0, 0, 10, 10))
 }
 
+// MARK: - Filled polyline: the fill closes the point list implicitly
+//
+// A `<polyline>` with a fill paints as though the last point were joined back
+// to the first, so `[[0,0],[0,100],[100,100],[100,0]]` strokes as a U but FILLS
+// as the full 100x100 square. Mirrors the four
+// `filled_polyline_*` / `unfilled_polyline_*` tests in
+// jas_dioxus/src/algorithms/hit_test.rs, and the four `polyline_*_marquee_*`
+// vectors in test_fixtures/algorithms/hit_test.json.
+
+private func redFilledPolyline(_ pts: [(Double, Double)]) -> Element {
+    .polyline(Polyline(points: pts, fill: Fill(color: .init(r: 255, g: 0, b: 0))))
+}
+
+@Test func filledPolylineMarqueeInsideImplicitClose() {
+    let u = redFilledPolyline([(0, 0), (0, 100), (100, 100), (100, 0)])
+    #expect(elementIntersectsRect(u, 40, 20, 20, 20))
+}
+
+@Test func unfilledPolylineMarqueeInsideOpenRun() {
+    let u = Element.polyline(Polyline(points: [(0, 0), (0, 100), (100, 100), (100, 0)]))
+    #expect(!elementIntersectsRect(u, 40, 20, 20, 20))
+}
+
+@Test func filledPolylineMarqueeOutsideBounds() {
+    let u = redFilledPolyline([(0, 0), (0, 100), (100, 100), (100, 0)])
+    #expect(!elementIntersectsRect(u, 200, 200, 10, 10))
+}
+
+@Test func filledPolylineMarqueeInBboxOutsideClosedFill() {
+    // The arm is the bounding box, not a point-in-fill test: an open
+    // triangle's empty bbox corner still answers true.
+    let tri = redFilledPolyline([(0, 0), (100, 0), (100, 100)])
+    #expect(elementIntersectsRect(tri, 5, 60, 10, 10))
+}
+
 // MARK: - Transform-aware hit-testing
 
 @Test func translatedLineIntersectsRect() {

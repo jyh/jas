@@ -1,0 +1,25 @@
+[
+  {
+    "name": "boolean_union_keeps_collinear_seam_points_by_default",
+    "setup_svg": "boolean_collinear_union.svg",
+    "txns": [
+      {
+        "name": "boolean_union",
+        "ops": [
+          {
+            "op": "select_rect",
+            "x": -5,
+            "y": -5,
+            "width": 200,
+            "height": 200,
+            "extend": false
+          },
+          {
+            "op": "boolean_union"
+          }
+        ]
+      }
+    ],
+    "expected_json": "boolean_collapse_default_expected.json"
+  }
+]

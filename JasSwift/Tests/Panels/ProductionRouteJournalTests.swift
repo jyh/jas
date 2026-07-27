@@ -534,7 +534,7 @@ private func makeModelWithTwoArtboards() -> Model {
     // invisible, so the no-op rule falls back to the structural element compare
     // to keep the txn.
     let path = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)],
-                                 stroke: Stroke(color: .black)))
+                                 stroke: Stroke(color: .black), fillRule: .nonzero))
     let model = Model(document: Document(
         layers: [Layer(name: "L", children: [path])],
         selectedLayer: 0,
@@ -588,7 +588,7 @@ private func makeModelWithTwoArtboards() -> Model {
     // literal-{{}} template (the pre-fix actions.yaml bug) would leave the
     // un-expanded string on the element.
     let path = Element.path(Path(d: [.moveTo(10, 10), .lineTo(100, 60)],
-                                 stroke: Stroke(color: .black)))
+                                 stroke: Stroke(color: .black), fillRule: .nonzero))
     let model = Model(document: Document(
         layers: [Layer(name: "L", children: [path])],
         selectedLayer: 0,
@@ -625,7 +625,7 @@ private func makeModelWithTwoArtboards() -> Model {
     // the opApply arm reads a present-but-empty `value` as a CLEAR (nil).
     let path = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)],
                                  stroke: Stroke(color: .black),
-                                 strokeBrush: "lib/calligraphic"))
+                                 strokeBrush: "lib/calligraphic", fillRule: .nonzero))
     let model = Model(document: Document(
         layers: [Layer(name: "L", children: [path])],
         selectedLayer: 0,

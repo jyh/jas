@@ -58,7 +58,7 @@ private func firstPath(_ model: Model) -> Path? {
 // black 1pt stroke, inside one layer named "L". No selection.
 private func modelWithLongLinePath() -> Model {
     let path = Path(d: [.moveTo(0, 0), .lineTo(100, 0)],
-                    fill: nil, stroke: Stroke(color: .black, width: 1.0))
+                    fill: nil, stroke: Stroke(color: .black, width: 1.0), fillRule: .nonzero)
     let layer = Layer(name: "L", children: [.path(path)])
     return Model(document: Document(
         layers: [layer], selectedLayer: 0, selection: []
@@ -109,7 +109,7 @@ private func zigzagCommands() -> [PathCommand] {
 
 private func zigzagLayer() -> Layer {
     let path = Path(d: zigzagCommands(),
-                    fill: nil, stroke: Stroke(color: .black, width: 1.0))
+                    fill: nil, stroke: Stroke(color: .black, width: 1.0), fillRule: .nonzero)
     return Layer(name: "L", children: [.path(path)])
 }
 

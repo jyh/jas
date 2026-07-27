@@ -361,7 +361,7 @@ private func emptyLayerModel() -> Model {
 
 private func modelWithPath(_ cmds: [PathCommand]) -> Model {
     Model(document: Document(
-        layers: [Layer(children: [.path(Path(d: cmds))])],
+        layers: [Layer(children: [.path(Path(d: cmds, fillRule: .nonzero))])],
         selectedLayer: 0, selection: []
     ))
 }
@@ -479,7 +479,7 @@ private func modelWithPath(_ cmds: [PathCommand]) -> Model {
 @Test func docPathEraseAtRectClearsSelection() {
     let cmds: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
     var doc = Document(
-        layers: [Layer(children: [.path(Path(d: cmds))])],
+        layers: [Layer(children: [.path(Path(d: cmds, fillRule: .nonzero))])],
         selectedLayer: 0, selection: []
     )
     doc = Document(layers: doc.layers, selectedLayer: 0,
@@ -507,7 +507,7 @@ private func modelWithPath(_ cmds: [PathCommand]) -> Model {
         .lineTo(30, 0),
     ]
     var doc = Document(
-        layers: [Layer(children: [.path(Path(d: cmds))])],
+        layers: [Layer(children: [.path(Path(d: cmds, fillRule: .nonzero))])],
         selectedLayer: 0,
         selection: [ElementSelection.all([0, 0])]
     )
@@ -793,7 +793,7 @@ private func blobBrushStateDefaults(_ store: StateStore) {
             .closePath,
         ],
         fill: Fill(color: Color.fromHex("#ff0000")!),
-        toolOrigin: "blob_brush"))
+        toolOrigin: "blob_brush", fillRule: .nonzero))
     let model = Model(document: Document(
         layers: [Layer(children: [target])],
         selectedLayer: 0, selection: []))
@@ -811,6 +811,54 @@ private func blobBrushStateDefaults(_ store: StateStore) {
             "erasing should delete fully-covered element")
 }
 
+/// blobBrushCommitErasing rebuilds the surviving Path field by field
+/// where Rust writes `PathElem { d: new_d, ..pe.clone() }`
+/// (effects.rs §blob_brush_commit_erasing), so every field Swift does not
+/// restate is silently reset to its initializer default. The remainder is
+/// `booleanSubtract` output — the very producer this wave taught to emit
+/// EvenOdd — so a dropped rule refills the hole the subtraction cut.
+@Test func blobBrushCommitErasingPreservesEveryPathField() {
+    let store = StateStore()
+    blobBrushStateDefaults(store)
+    // The sweep is 50pt horizontal along y=0 with a 10pt tip, so it
+    // covers y in [-5, 5]. A tall square straddling that band is partly
+    // erased, leaving a remainder rather than deleting the element.
+    let target: Element = .path(Path(
+        d: [
+            .moveTo(10, -20),
+            .lineTo(40, -20),
+            .lineTo(40, 20),
+            .lineTo(10, 20),
+            .closePath,
+        ],
+        fill: Fill(color: Color.fromHex("#ff0000")!),
+        toolOrigin: "blob_brush",
+        name: "blob-1", id: "blob-id-1",
+        fillRule: .evenodd))
+    let model = Model(document: Document(
+        layers: [Layer(children: [target])],
+        selectedLayer: 0, selection: []))
+    seedBlobBrushSweep()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects(
+        [["doc.blob_brush.commit_erasing": [
+            "buffer": "blob_brush",
+            "fidelity_epsilon": "5.0",
+        ]]],
+        ctx: [:], store: store, platformEffects: effects
+    )
+    let children = model.document.layers[0].children
+    #expect(children.count == 1, "a remainder should survive the erase")
+    guard case .path(let out) = children[0] else {
+        Issue.record("expected .path"); return
+    }
+    #expect(out.fillRule == .evenodd, "erase reset the fill rule")
+    #expect(out.name == "blob-1", "erase wiped the element name")
+    #expect(out.id == "blob-id-1", "erase wiped the element id")
+    #expect(out.toolOrigin == "blob_brush",
+            "erase wiped the tool origin, orphaning the element from later sweeps")
+}
+
 @Test func blobBrushCommitErasingIgnoresNonBlobBrushElements() {
     let store = StateStore()
     blobBrushStateDefaults(store)
@@ -823,7 +871,7 @@ private func blobBrushStateDefaults(_ store: StateStore) {
             .lineTo(20, 2),
             .closePath,
         ],
-        fill: Fill(color: Color.fromHex("#ff0000")!)))
+        fill: Fill(color: Color.fromHex("#ff0000")!), fillRule: .nonzero))
     let model = Model(document: Document(
         layers: [Layer(children: [target])],
         selectedLayer: 0, selection: []))
@@ -1394,7 +1442,7 @@ private func artboardModel(_ artboards: [Artboard]) -> Model {
 private func trianglePathModel() -> Model {
     let tri: Element = .path(Path(
         d: [.moveTo(0, 0), .lineTo(100, 0), .lineTo(50, 100), .closePath],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1), fillRule: .nonzero))
     return Model(document: Document(
         layers: [Layer(children: [tri])], selectedLayer: 0, selection: []))
 }
@@ -1509,7 +1557,7 @@ private func smoothCurvePathModel() -> Model {
             .curveTo(x1: 20, y1: 100, x2: 80, y2: 100, x: 100, y: 100),
             .curveTo(x1: 120, y1: 100, x2: 180, y2: 100, x: 200, y: 100),
         ],
-        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
+        stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1), fillRule: .nonzero))
     return Model(document: Document(
         layers: [Layer(children: [curve])], selectedLayer: 0, selection: []))
 }

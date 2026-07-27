@@ -3,7 +3,7 @@
 import Foundation
 
 /// Parse a hex color string to (r, g, b). Returns (0, 0, 0) for invalid input.
-func parseHex(_ c: String) -> (UInt8, UInt8, UInt8) {
+public func parseHex(_ c: String) -> (UInt8, UInt8, UInt8) {
     var h = c
     if h.hasPrefix("#") {
         h = String(h.dropFirst())
@@ -24,12 +24,12 @@ func parseHex(_ c: String) -> (UInt8, UInt8, UInt8) {
 }
 
 /// Convert RGB to 6-digit hex with # prefix.
-func rgbToHex(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> String {
+public func rgbToHex(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> String {
     String(format: "#%02x%02x%02x", r, g, b)
 }
 
 /// Convert RGB (0-255) to HSB (h: 0-359, s: 0-100, b: 0-100).
-func rgbToHsb(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> (Int, Int, Int) {
+public func rgbToHsb(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> (Int, Int, Int) {
     let r1 = Double(r) / 255.0
     let g1 = Double(g) / 255.0
     let b1 = Double(b) / 255.0
@@ -52,8 +52,50 @@ func rgbToHsb(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> (Int, Int, Int) {
     return (hue, Int((s * 100.0).rounded()), Int((v * 100.0).rounded()))
 }
 
-/// Convert HSB (h: 0-359, s: 0-100, b: 0-100) to RGB (0-255).
-func hsbToRgb(_ h: Double, _ s: Double, _ b: Double) -> (UInt8, UInt8, UInt8) {
+/// Clamp one colour channel into `lo...hi`, mapping NaN to `lo`.
+///
+/// The colour primitives document their channels' ranges (`hsb` 0-360 / 0-100,
+/// `cmyk` and `grayscale` 0-100) and this is how they enforce them: clamp the
+/// INPUT, before any arithmetic. Clamping the input rather than saturating the
+/// output is what makes the ports equal by construction. The formulas are
+/// monotonic per channel, so for ONE out-of-range channel the two approaches
+/// agree; they diverge when two channels overflow with signs that multiply back
+/// positive — unclamped, `cmyk(150, 0, 0, 150)` computes
+/// `(1-1.5)*(1-1.5)*255 = +63.75`, a bogus mid-grey that looks like a real
+/// colour, where clamping gives black. NaN maps to `lo` for the same reason: it
+/// is the one answer both ports can spell identically, where a cast would
+/// saturate NaN to 0 in Rust and TRAP here. Rust twin is
+/// `color_util::clamp_channel`. Risk R9, transcripts/CORPUS_CENSUS.md §7.
+public func clampChannel(_ v: Double, _ lo: Double, _ hi: Double) -> Double {
+    if v.isNaN { return lo }
+    return min(max(v, lo), hi)
+}
+
+/// Convert a Double to 0...255 the way Rust's `v as u8` does: truncate toward
+/// zero, saturate at both bounds, NaN to 0.
+///
+/// Swift's own `UInt8(_:)` and `Int(_:)` are precondition failures outside
+/// range, so anywhere Rust writes `as u8` this port must write this instead —
+/// otherwise the same arithmetic is a clamped byte there and a crash here.
+/// Note `quantise8` above is the sibling for a 0...1 FLOAT component (it
+/// multiplies by 255 and rounds); this one takes a value already in 0...255
+/// units and truncates, which is what `as u8` does.
+public func saturatingUInt8(_ v: Double) -> UInt8 {
+    if v.isNaN { return 0 }
+    if v <= 0.0 { return 0 }
+    if v >= 255.0 { return 255 }
+    return UInt8(v)
+}
+
+/// Convert HSB (h: 0-360, s: 0-100, b: 0-100) to RGB (0-255).
+///
+/// Channels outside those ranges are clamped (see ``clampChannel``). Hue's
+/// upper bound is 360, not 359: 360 is the wrap point that the colour corpus
+/// pins as identical to 0 (`torgb_hue_360_is_red`).
+public func hsbToRgb(_ h: Double, _ s: Double, _ b: Double) -> (UInt8, UInt8, UInt8) {
+    let h = clampChannel(h, 0.0, 360.0)
+    let s = clampChannel(s, 0.0, 100.0)
+    let b = clampChannel(b, 0.0, 100.0)
     let s1 = s / 100.0
     let b1 = b / 100.0
     let c = b1 * s1
@@ -80,8 +122,72 @@ func hsbToRgb(_ h: Double, _ s: Double, _ b: Double) -> (UInt8, UInt8, UInt8) {
     )
 }
 
+/// The Color panel's eleven channel values for one colour.
+///
+/// `bl` is the blue channel's YAML name (`b` is brightness in `color.yaml`), and
+/// the fields carry the YAML's units: `r`/`g`/`bl` 0–255, `h` 0–359, everything
+/// else 0–100. Swift twin of Rust's `color_util::PanelChannels`.
+public struct PanelChannels: Equatable {
+    public var r: Int, g: Int, bl: Int
+    public var h: Int, s: Int, b: Int
+    public var c: Int, m: Int, y: Int, k: Int
+    public var hex: String
+}
+
+/// Quantise a float colour component in 0...1 to 8 bits.
+///
+/// Half rounds AWAY from zero and the result SATURATES. Both halves are
+/// deliberate: `Double.rounded()` matches Rust's `f64::round`, and the clamp
+/// matches what `as u8` does to an out-of-range float in Rust — where
+/// `UInt8(_:)` in Swift would instead be a precondition failure, i.e. a crash
+/// on a colour the other port renders.
+public func quantise8(_ v: Double) -> Int {
+    let x = (v * 255.0).rounded()
+    if x.isNaN { return 0 }
+    return Int(max(0.0, min(255.0, x)))
+}
+
+/// Derive every Color-panel channel from a float colour — QUANTISING TO 8 BITS
+/// FIRST, then converting those three integers.
+///
+/// The ORDER is the contract, and it is the whole reason this is one function
+/// rather than a line of arithmetic in each caller. A reader that instead asks
+/// the float colour for its own hue / saturation / brightness answers up to a
+/// whole unit differently, because the 8-bit grid the panel displays on is
+/// coarser than the float colour it came from. That used to be a cosmetic
+/// display difference; once the panel's WRITE path started recomputing the
+/// unedited channels from this same map, it reached the COMMITTED colour — this
+/// port committed `664040` where Rust committed `664141` for the same drag
+/// (COLORTIERS, 2026-07-26). The hand-rolled float CMYK it replaces was worse
+/// than off-by-one: it published 129% and -40% for colours the shared corpus
+/// pins at 100 and 0.
+///
+/// Gated across the ports by `test_fixtures/algorithms/color_convert.json`'s
+/// `panel_channels` vectors; Rust twin is `color_util::panel_channels`.
+public func panelChannels(rf: Double, gf: Double, bf: Double) -> PanelChannels {
+    let r = quantise8(rf), g = quantise8(gf), bl = quantise8(bf)
+    let (h, s, br) = rgbToHsb(UInt8(r), UInt8(g), UInt8(bl))
+    let (c, m, y, k) = rgbToCmyk(UInt8(r), UInt8(g), UInt8(bl))
+    return PanelChannels(
+        r: r, g: g, bl: bl, h: h, s: s, b: br, c: c, m: m, y: y, k: k,
+        hex: String(format: "%02x%02x%02x", r, g, bl))
+}
+
+/// The overlay's entry point: the panel channels for a `Color`.
+///
+/// It goes through `toRgba()` and NOT `toHsba()`, deliberately. `toHsba()` on a
+/// `.hsb` colour short-circuits and hands back the exact triple the colour was
+/// constructed with — bypassing the 8-bit grid entirely — and the two reachable
+/// `.hsb` producers (a colour-bar click, and Complement, which is `.hsb` in both
+/// ports) are precisely where the ports disagreed. Rust has no such
+/// short-circuit to take: `build_live_panel_overrides` starts from `to_rgba()`.
+public func panelChannels(for color: Color) -> PanelChannels {
+    let (rf, gf, bf, _) = color.toRgba()
+    return panelChannels(rf: rf, gf: gf, bf: bf)
+}
+
 /// Convert RGB (0-255) to CMYK (0-100 each).
-func rgbToCmyk(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> (Int, Int, Int, Int) {
+public func rgbToCmyk(_ r: UInt8, _ g: UInt8, _ b: UInt8) -> (Int, Int, Int, Int) {
     if r == 0 && g == 0 && b == 0 {
         return (0, 0, 0, 100)
     }

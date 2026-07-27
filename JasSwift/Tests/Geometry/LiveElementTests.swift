@@ -115,7 +115,7 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
         .lineTo(10, 10),
         .lineTo(0, 10),
         .closePath,
-    ]))
+    ], fillRule: .nonzero))
     let ps = elementToPolygonSet(path, precision: DEFAULT_PRECISION)
     #expect(ps.count == 1)
 }
@@ -770,4 +770,137 @@ private func recordedOp(_ op: String, _ params: [String: Any]) -> PrimitiveOp {
     #expect(recipe[0].op == "translate")
     #expect(recordedStrIds(recipe[0].params, "ids") == ["eye"],
             "a bare id-primary move translates the named input directly")
+}
+
+
+// MARK: - The carried rule at the document boundary (BOOLEAN.md)
+//
+// Twins of `path_operand_honours_its_declared_fill_rule` and
+// `svg_round_trip_keeps_a_declared_rule_through_a_boolean` in
+// jas_dioxus/src/geometry/live.rs.
+
+/// Two nested CCW subpaths in one path: [0,20]^2 and [5,15]^2, carrying
+/// `rule`. This is the shape whose meaning the two fill rules disagree
+/// about - donut under even-odd, solid under non-zero - so it is the
+/// operand that proves the rule crossed the boundary.
+private func nestedSubpathPath(_ rule: FillRule) -> Element {
+    func ring(_ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double) -> [PathCommand] {
+        [.moveTo(x0, y0), .lineTo(x1, y0), .lineTo(x1, y1), .lineTo(x0, y1), .closePath]
+    }
+    var d = ring(0, 0, 20, 20)
+    d.append(contentsOf: ring(5, 5, 15, 15))
+    return .path(Path(d: d, fillRule: rule))
+}
+
+private func ringAreaAbs(_ ring: BoolRing) -> Double {
+    if ring.count < 3 { return 0 }
+    var sum = 0.0
+    let n = ring.count
+    for i in 0..<n {
+        let (x1, y1) = ring[i]
+        let (x2, y2) = ring[(i + 1) % n]
+        sum += x1 * y2 - x2 * y1
+    }
+    return abs(sum / 2.0)
+}
+
+@Test func pathOperandHonoursItsDeclaredFillRule() {
+    // Even-odd: a ray from inside the inner subpath crosses two edges,
+    // so the middle is a HOLE. Both rings survive; net filled area
+    // 400 - 100 = 300.
+    let eo = elementToPolygonSet(nestedSubpathPath(.evenodd), precision: DEFAULT_PRECISION)
+    #expect(eo.count == 2)
+    #expect(abs(ringAreaAbs(eo[0]) - 400.0) < 1e-9)
+    #expect(abs(ringAreaAbs(eo[1]) - 100.0) < 1e-9)
+
+    // Non-zero (the SVG default, so what most imported artwork carries):
+    // inside the inner subpath the winding is 1 + 1 = 2, so the middle
+    // is FILLED and the operand is a solid square of 400. Before the
+    // carried-rule ruling this document was silently reinterpreted as
+    // the donut above.
+    let nz = elementToPolygonSet(nestedSubpathPath(.nonzero), precision: DEFAULT_PRECISION)
+    #expect(nz.count == 1)
+    #expect(abs(ringAreaAbs(nz[0]) - 400.0) < 1e-9)
+}
+
+@Test func svgRoundTripKeepsADeclaredRuleThroughABoolean() {
+    // THE CORRECTNESS ARGUMENT THAT DECIDED THE RULING, gated end to
+    // end: a path that declares its fill rule in SVG must come back out
+    // of a boolean operation with that rule respected.
+    //
+    // SVG user units are px and the document works in points, so the
+    // importer scales everything by 72/96 = 0.75: the outer subpath
+    // lands as [0,15]^2 and the inner as [3.75,11.25]^2. Every number
+    // below is in POINTS for that reason, written as (px value) * S.
+    let S = 0.75
+    func docSvg(_ rule: String) -> String {
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 40 40">
+        <path d="M0 0 L20 0 L20 20 L0 20 Z M5 5 L15 5 L15 15 L5 15 Z" fill-rule="\(rule)"/>
+        </svg>
+        """
+    }
+
+    // Areas, derived in px then converted (area scales by S^2):
+    //   nonzero: solid 400 px^2 minus the 20x3 strip (60) = 340 px^2,
+    //            one ring.
+    //   evenodd: donut 400 - 100 = 300 px^2; the strip sits below the
+    //            hole so it cuts only the outer ring, leaving
+    //            340 - 100 = 240 px^2 net over two rings.
+    let cases: [(String, FillRule, Int, Double)] = [
+        ("nonzero", .nonzero, 1, 340.0 * S * S),
+        ("evenodd", .evenodd, 2, 240.0 * S * S),
+    ]
+    for (attr, wantRule, wantRings, wantArea) in cases {
+        let doc = svgToDocument(docSvg(attr))
+        let elem = doc.layers[0].children[0]
+        guard case .path(let p) = elem else {
+            Issue.record("expected a Path, got \(elem)")
+            return
+        }
+        #expect(p.fillRule == wantRule, "import lost fill-rule=\(attr)")
+
+        // The operand the boolean layer sees must mean what the document
+        // said. Subtract the strip [0,20]x[0,3] px, which sits below the
+        // hole (which starts at y=5 px) and inside the outer subpath.
+        let operand = elementToPolygonSet(elem, precision: DEFAULT_PRECISION)
+        let strip: BoolPolygonSet = [[
+            (0.0, 0.0), (20.0 * S, 0.0), (20.0 * S, 3.0 * S), (0.0, 3.0 * S),
+        ]]
+        let cut = booleanSubtract(operand, strip)
+        #expect(cut.count == wantRings, "fill-rule=\(attr) produced \(cut.count) rings")
+        let net: Double
+        if wantRings == 1 {
+            net = ringAreaAbs(cut[0])
+        } else {
+            let areas = cut.map { ringAreaAbs($0) }.sorted()
+            net = areas[1] - areas[0]
+        }
+        #expect(abs(net - wantArea) < 1e-9, "fill-rule=\(attr) net area \(net) != \(wantArea)")
+
+        // And the rule survives export, so the round trip is closed.
+        // `nonzero` is the SVG default and is written by omission;
+        // `evenodd` must appear explicitly.
+        let out = documentToSvg(doc)
+        if wantRule == .evenodd {
+            #expect(out.contains("fill-rule=\"evenodd\""), "export dropped evenodd")
+        } else {
+            #expect(!out.contains("fill-rule="), "export wrote a redundant default")
+        }
+        guard case .path(let reimported) = svgToDocument(out).layers[0].children[0] else {
+            Issue.record("re-import lost the path")
+            return
+        }
+        #expect(reimported.fillRule == wantRule, "re-import lost the rule")
+        #expect(reimported.d == p.d, "re-import changed the geometry")
+    }
+}
+
+@Test func documentAndAlgorithmFillRulesBridgeLosslessly() {
+    // Twin of Rust's `generated_results_declare_even_odd` bridge half.
+    #expect(FillRule(boolResultFillRule) == .evenodd)
+    #expect(BoolFillRule(FillRule.nonzero) == .nonzero)
+    #expect(BoolFillRule(FillRule.evenodd) == .evenodd)
+    #expect(FillRule(BoolFillRule.nonzero) == .nonzero)
+    #expect(FillRule(BoolFillRule.evenodd) == .evenodd)
 }

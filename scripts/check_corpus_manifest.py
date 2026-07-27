@@ -54,6 +54,23 @@ the host languages), so a fixture referenced only in prose could in
 principle hide as a false non-orphan; the corpus's comments name only
 fixtures their own file registers, which keeps this honest in practice.
 
+WHAT THIS GATE DOES NOT CHECK, and how it says so. Everything above is
+about whether fixtures are CONSUMED; nothing here can tell whether a
+consumed fixture reaches the interesting branch. That is why the manifest
+carries two gap lists, of opposite shapes:
+
+  * ``known_gaps`` SUPPRESSES: each row names one check on one
+    family/file and downgrades its failure to a warning. A row that
+    suppresses nothing on a run is reported as ``stale-known-gap`` — it
+    has outlived its defect and is quietly narrowing the gate.
+  * ``coverage_gaps`` DECLARES: rows describing what the corpus cannot
+    currently reach at all. They suppress nothing and are printed on
+    every run, green or not, so a passing gate stops implying a
+    completeness it never checked. Each row must carry a non-empty id,
+    title, evidence, blocks and unblock; an unknown key or a duplicate id
+    is an error, and an ABSENT ``coverage_gaps`` key is an error too
+    (silence and an explicit ``[]`` are different claims).
+
 Usage:
     python scripts/check_corpus_manifest.py              # the real gate
     python scripts/check_corpus_manifest.py --self-test  # checker self-test
@@ -75,6 +92,73 @@ MANIFEST_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "corpus_manifest.json")
 
 CONSUMERS = ("rust", "swift", "reference", "scripts")
+
+# ---------------------------------------------------------------------------
+# Declared coverage gaps
+# ---------------------------------------------------------------------------
+#
+# The manifest has always had `known_gaps`, but that list is a SUPPRESSOR:
+# each row names one mechanical check on one family/file and downgrades its
+# failure to a warning. It can only ever speak about a check this script
+# already runs. The gaps that matter most are the opposite shape — a family
+# whose fixtures never reach the interesting branch, a field no fixture
+# sets, a divergence no port-vs-port comparison can see. Nothing here could
+# express those, so `known_gaps` sat at `[]` while the census documented
+# eight of them, and the gate's summary line read "0 known-gap warning(s)":
+# vacuously true, and read by everyone as "no gaps".
+#
+# `coverage_gaps` is that second list. It suppresses nothing; every row is
+# PRINTED on every run, green or not, so the gate stops implying a
+# completeness it never checked. Rows are validated for shape (below) and
+# each must state its own evidence, because a gap you cannot state
+# precisely is not ready to record.
+COVERAGE_GAP_REQUIRED_KEYS = ("id", "title", "evidence", "blocks", "unblock")
+COVERAGE_GAP_ALLOWED_KEYS = COVERAGE_GAP_REQUIRED_KEYS + ("census",)
+
+
+def check_coverage_gaps(manifest: dict) -> tuple[list[str], list[str]]:
+    """Validate the shape of `coverage_gaps`. Returns (errors, lines)."""
+    errors: list[str] = []
+    lines: list[str] = []
+    gaps = manifest.get("coverage_gaps")
+    if gaps is None:
+        errors.append("coverage-gaps: manifest has no `coverage_gaps` key — "
+                      "an absent list is not the same claim as an empty one; "
+                      "add the key (`[]` only if you mean it)")
+        return errors, lines
+    if not isinstance(gaps, list):
+        errors.append("coverage-gaps: `coverage_gaps` must be a list, "
+                      f"got {type(gaps).__name__}")
+        return errors, lines
+    seen: set[str] = set()
+    for i, gap in enumerate(gaps):
+        where = f"coverage_gaps[{i}]"
+        if not isinstance(gap, dict):
+            errors.append(f"coverage-gaps: {where} must be an object")
+            continue
+        gid = gap.get("id")
+        if isinstance(gid, str) and gid:
+            where = f"coverage_gaps[{gid}]"
+            if gid in seen:
+                errors.append(f"coverage-gaps: duplicate id {gid!r}")
+            seen.add(gid)
+        for key in COVERAGE_GAP_REQUIRED_KEYS:
+            val = gap.get(key)
+            if not isinstance(val, str) or not val.strip():
+                errors.append(f"coverage-gaps: {where} is missing a "
+                              f"non-empty {key!r}")
+        for key in gap:
+            if key not in COVERAGE_GAP_ALLOWED_KEYS:
+                errors.append(f"coverage-gaps: {where} has unknown key "
+                              f"{key!r} (allowed: "
+                              f"{', '.join(COVERAGE_GAP_ALLOWED_KEYS)})")
+        if isinstance(gid, str) and gid:
+            lines.append(f"COVERAGE GAP {gid}: {gap.get('title', '?')}")
+            for key in ("evidence", "blocks", "unblock"):
+                val = gap.get(key)
+                if isinstance(val, str) and val.strip():
+                    lines.append(f"    {key}: {val}")
+    return errors, lines
 
 # Data-reference fields the transitive pass chases, with the family the
 # bare-name form resolves into ("SELF" = the referencing file's family).
@@ -476,6 +560,12 @@ def run_checks(
     warnings: list[str] = []
     rows = manifest.get("families", {})
     known_gaps = manifest.get("known_gaps", [])
+    # A suppression row is only honest while the failure it suppresses is
+    # still happening. One that never fires has outlived the defect and is
+    # silently narrowing the gate, so record which rows fired and error on
+    # the rest — the same self-policing the `_known_gap` holdout in
+    # cross_language_algorithms.py applies to a closed oracle gap.
+    fired_gaps: set[int] = set()
 
     def gap_matches(family: str, file: str | None, check: str) -> dict | None:
         for gap in known_gaps:
@@ -485,6 +575,7 @@ def run_checks(
                 continue
             if gap.get("file") not in (None, file):
                 continue
+            fired_gaps.add(id(gap))
             return gap
         return None
 
@@ -574,6 +665,16 @@ def run_checks(
                        f"{family}/{name} is claimed by no consumer "
                        f"(transitively)")
 
+    # (e) stale suppression rows — see `fired_gaps` above.
+    for gap in known_gaps:
+        if id(gap) not in fired_gaps:
+            errors.append(
+                "stale-known-gap: known_gaps row "
+                f"{gap.get('family')!r}/{gap.get('file')!r} "
+                f"check={gap.get('check')!r} suppressed nothing on this run — "
+                "the failure it excuses no longer happens, so delete the row "
+                "rather than leave the gate quietly narrowed")
+
     return errors, warnings
 
 
@@ -594,6 +695,15 @@ def run_real() -> int:
         family_dirs)
     errors, warnings = run_checks(
         REPO_ROOT, manifest, families, claims, DIRECTORY_GLOB_RULES)
+    gap_errors, gap_lines = check_coverage_gaps(manifest)
+    errors = errors + gap_errors
+
+    # Printed unconditionally, and BEFORE the verdict: these are the things
+    # the gate does not check, and a green run that hid them would be the
+    # blind spot this list exists to remove.
+    n_gaps = len(manifest.get("coverage_gaps") or [])
+    for line in gap_lines:
+        print(line)
 
     for w in warnings:
         print(f"WARN: {w}")
@@ -605,7 +715,8 @@ def run_real() -> int:
     n_files = sum(len(v) for v in families.values())
     print(f"corpus-completeness gate: OK "
           f"({len(families)} families, {n_files} files, "
-          f"{len(warnings)} known-gap warning(s))")
+          f"{len(warnings)} known-gap warning(s), "
+          f"{n_gaps} declared coverage gap(s) printed above)")
     return 0
 
 
@@ -810,6 +921,79 @@ def self_test() -> int:
               and not any("rust_only.json" in e for e in errors5)
               and any("rust_only.json" in w for w in warnings5),
               "known_gaps downgrades the named failure to a warning")
+
+        # 9. A known_gaps row that suppresses nothing is STALE, not silent.
+        # `errors4` above shows the port-symmetry failure exists only while
+        # rust_only.json is unbalanced, so a row naming a DIFFERENT family
+        # cannot fire.
+        manifest_stale = dict(manifest)
+        manifest_stale["known_gaps"] = [{
+            "family": "test_fixtures/svg",
+            "file": "circle.svg",
+            "check": "orphan",
+            "reason": "self-test synthetic row that cannot fire",
+        }]
+        errors6, _ = run_checks(
+            root, manifest_stale, families2, claims, glob_rules)
+        check(any(e.startswith("stale-known-gap:") and "circle.svg" in e
+                  for e in errors6),
+              "a known_gaps row that suppressed nothing is flagged stale")
+        # And the row that DID fire is not called stale.
+        check(not any(e.startswith("stale-known-gap:") for e in errors5),
+              "a known_gaps row that fired is not flagged stale")
+
+        # 10. coverage_gaps: shape is enforced, and every row is printed.
+        errs, lines = check_coverage_gaps({"coverage_gaps": [{
+            "id": "demo", "title": "t", "evidence": "e",
+            "blocks": "b", "unblock": "u"}]})
+        check(errs == [] and any("COVERAGE GAP demo" in l for l in lines)
+              and any("evidence: e" in l for l in lines),
+              "a well-formed coverage_gaps row validates and is printed")
+        errs, _ = check_coverage_gaps({"coverage_gaps": [
+            {"id": "no_evidence", "title": "t", "blocks": "b",
+             "unblock": "u"}]})
+        check(any("missing a non-empty 'evidence'" in e for e in errs),
+              "a coverage_gaps row without evidence is flagged")
+        errs, _ = check_coverage_gaps({"coverage_gaps": [
+            {"id": "x", "title": "t", "evidence": "e", "blocks": "b",
+             "unblock": "u", "notes": "typo'd key"}]})
+        check(any("unknown key 'notes'" in e for e in errs),
+              "an unknown coverage_gaps key is flagged (no silent typos)")
+        errs, _ = check_coverage_gaps({"coverage_gaps": [
+            {"id": "dup", "title": "t", "evidence": "e", "blocks": "b",
+             "unblock": "u"},
+            {"id": "dup", "title": "t2", "evidence": "e2", "blocks": "b2",
+             "unblock": "u2"}]})
+        check(any("duplicate id 'dup'" in e for e in errs),
+              "a duplicate coverage_gaps id is flagged")
+        errs, _ = check_coverage_gaps({})
+        check(any(e.startswith("coverage-gaps: manifest has no") for e in errs),
+              "an absent coverage_gaps key is flagged (not treated as empty)")
+        # The real manifest must itself satisfy the shape rules.
+        with open(MANIFEST_PATH, encoding="utf-8") as fh:
+            real_errs, real_lines = check_coverage_gaps(json.load(fh))
+        check(real_errs == [],
+              f"the shipped manifest's coverage_gaps validate ({real_errs})")
+        check(len(real_lines) > 0,
+              "the shipped manifest declares at least one coverage gap")
+
+        # 11. RECORDED IS NOT THE SAME AS SURFACED. Checks 10's assertions
+        # all call check_coverage_gaps directly, so deleting the print loop
+        # in run_real would leave them green while the gate went silent
+        # again — the exact hole ("0 known-gap warning(s)", vacuously true)
+        # this list exists to close, reproduced one level up. So run the
+        # real gate as a subprocess and require every declared id in its
+        # stdout.
+        with open(MANIFEST_PATH, encoding="utf-8") as fh:
+            declared_ids = [g["id"] for g in json.load(fh)["coverage_gaps"]]
+        import subprocess
+        proc = subprocess.run(
+            [sys.executable, os.path.abspath(__file__)],
+            capture_output=True, text=True, cwd=REPO_ROOT)
+        unsurfaced = [i for i in declared_ids if i not in proc.stdout]
+        check(proc.returncode == 0 and declared_ids and not unsurfaced,
+              f"the real gate SURFACES every declared coverage gap "
+              f"(rc={proc.returncode}, unsurfaced={unsurfaced})")
 
     if failures:
         print(f"self-test: {len(failures)} FAILURE(S)")

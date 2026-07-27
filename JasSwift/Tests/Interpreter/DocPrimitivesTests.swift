@@ -167,6 +167,26 @@ private func docWithRect() -> Document {
     anchorBuffersClear("test_anc_d")
 }
 
+// The close-hit distance must come from a real hypot, not from
+// `(dx*dx + dy*dy).squareRoot()`. With the first anchor at the origin, a
+// cursor at (1e200, 1e200) is 1.414e200 away — inside a radius of 2e200 — but
+// the naive form squares to 1e400, overflows to +inf, and reports a miss.
+// Rust (`dx.hypot(dy)`) and the reference (`math.hypot`) report the hit; this
+// pins Swift to them. It cannot be a corpus fixture: the shared expression
+// corpus can seed `state`/`data` but has no vocabulary for anchor-buffer
+// contents, which this primitive reads. `pow(10, 200)` stands in for a
+// `1e200` literal because the expression lexer accepts no exponent notation.
+@Test func anchorBufferCloseHitUsesHypotNotNaiveSquares() {
+    anchorBuffersClear("test_anc_f")
+    anchorBuffersPush("test_anc_f", 0, 0)
+    anchorBuffersPush("test_anc_f", 100, 0)
+    let v = evaluate(
+        "anchor_buffer_close_hit(\"test_anc_f\", pow(10, 200), pow(10, 200), 2 * pow(10, 200))",
+        context: [:])
+    #expect(v == .bool(true))
+    anchorBuffersClear("test_anc_f")
+}
+
 @Test func anchorBufferCloseHitRejectsShortBuffer() {
     anchorBuffersClear("test_anc_e")
     anchorBuffersPush("test_anc_e", 0, 0)

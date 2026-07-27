@@ -976,12 +976,12 @@ fn cmd_for(action: &str, params: &serde_json::Map<String, serde_json::Value>) ->
 /// enablement uses).
 ///
 /// The two element ids are minted HERE in the UI layer (NOT inside a
-/// `Controller` method — see `generate_element_id`'s contract) via a
-/// collision-avoidance loop against the existing ids, then passed in to
-/// `create_reference`. Under the action corpus's deterministic id source the
-/// loop yields the golden-pinned `"01234567"` / `"89abcdef"`.
+/// `Controller` method — see `generate_element_id`'s contract) through the
+/// shared `mint_unique_ids` loop, then passed in to `create_reference`. Under
+/// the action corpus's deterministic id source that yields the golden-pinned
+/// `"01234567"` / `"89abcdef"`.
 pub(crate) fn make_instance_on_model(model: &mut crate::document::model::Model) {
-    use crate::document::artboard::generate_element_id;
+    use crate::document::artboard::{generate_element_id, mint_unique_ids};
     use crate::document::document::SelectionKind;
     // Enabled only when exactly ONE whole element is selected (kind = All; not
     // a control-point sub-selection). Otherwise no-op, like group's guard.
@@ -991,32 +991,15 @@ pub(crate) fn make_instance_on_model(model: &mut crate::document::model::Model) 
         if es.kind != SelectionKind::All { return; }
         es.path.clone()
     };
-    // Gather every existing element id so the freshly minted target_id /
-    // ref_id can avoid collisions.
-    let mut existing: std::collections::HashSet<String> = std::collections::HashSet::new();
-    fn gather_ids(elem: &GeoElement, out: &mut std::collections::HashSet<String>) {
-        if let Some(id) = elem.common().id.as_deref() {
-            out.insert(id.to_string());
-        }
-        if let Some(children) = elem.children() {
-            for c in children { gather_ids(c, out); }
-        }
-    }
-    for layer in &model.document().layers {
-        gather_ids(layer, &mut existing);
-    }
-    // Mint two distinct, collision-free ids (mirrors the artboard mint loop in
-    // effects.rs).
-    let mut mint = |existing: &std::collections::HashSet<String>| -> Option<String> {
-        for _ in 0..100 {
-            let c = generate_element_id(None);
-            if !existing.contains(&c) { return Some(c); }
-        }
-        None
+    // Mint two distinct, collision-free ids against every id already in the
+    // document (see `Document::element_ids`), through the shared mint loop.
+    let mut existing = model.document().element_ids();
+    let Some(ids) =
+        mint_unique_ids(2, &mut existing, &mut || generate_element_id(None))
+    else {
+        return;
     };
-    let Some(target_id) = mint(&existing) else { return; };
-    existing.insert(target_id.clone());
-    let Some(ref_id) = mint(&existing) else { return; };
+    let (target_id, ref_id) = (&ids[0], &ids[1]);
     // create_reference + offset-move under ONE snapshot = a single undo step
     // (offset rides on the new reference's common.transform via move_selection).
     model.with_txn(|m| {

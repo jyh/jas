@@ -13,55 +13,14 @@ import Testing
 
 private let EPS: Double = 1e-9
 
-private func ringSignedAreaT(_ ring: BoolRing) -> Double {
-    if ring.count < 3 { return 0.0 }
-    var sum = 0.0
-    let n = ring.count
-    for i in 0..<n {
-        let (x1, y1) = ring[i]
-        let (x2, y2) = ring[(i + 1) % n]
-        sum += x1 * y2 - x2 * y1
-    }
-    return sum / 2.0
-}
-
-private func pointInRingT(_ ring: BoolRing, _ pt: (Double, Double)) -> Bool {
-    let (px, py) = pt
-    let n = ring.count
-    if n < 3 { return false }
-    var inside = false
-    var j = n - 1
-    for i in 0..<n {
-        let (xi, yi) = ring[i]
-        let (xj, yj) = ring[j]
-        let intersects = (yi > py) != (yj > py)
-            && px < (xj - xi) * (py - yi) / (yj - yi) + xi
-        if intersects { inside.toggle() }
-        j = i
-    }
-    return inside
-}
-
-private func polygonSetAreaT(_ ps: BoolPolygonSet) -> Double {
-    var total = 0.0
-    for (i, ring) in ps.enumerated() {
-        let a = abs(ringSignedAreaT(ring))
-        var depth = 0
-        if let pt = ring.first {
-            for (j, other) in ps.enumerated() where i != j {
-                if pointInRingT(other, pt) { depth += 1 }
-            }
-        }
-        if depth % 2 == 0 { total += a } else { total -= a }
-    }
-    return total
-}
-
-private func pointInPolygonSetT(_ ps: BoolPolygonSet, _ pt: (Double, Double)) -> Bool {
-    var n = 0
-    for ring in ps where pointInRingT(ring, pt) { n += 1 }
-    return n % 2 == 1
-}
+// The three region metrics live in one place,
+// Sources/Algorithms/PolygonMetrics.swift, and are gated by the
+// `polygon_metrics` corpus family. This file used to carry a private
+// copy and ToolsAlgorithm/AlgorithmRoundtrip.swift a second one, with
+// nothing comparing them.
+private let ringSignedAreaT = ringSignedArea
+private let polygonSetAreaT = polygonSetArea
+private let pointInPolygonSetT = pointInPolygonSet
 
 private func polygonSetBboxT(_ ps: BoolPolygonSet) -> (Double, Double, Double, Double)? {
     var minX = Double.infinity, minY = Double.infinity
@@ -529,24 +488,24 @@ private func totalArea(_ ps: BoolPolygonSet) -> Double {
 
 @Test func normSimpleSquarePassesThrough() {
     let input: BoolPolygonSet = [[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]]
-    let out = normalize(input)
+    let out = normalize(input, .nonzero)
     #expect(out.count == 1)
     #expect(approxEqT(totalArea(out), 100.0))
 }
 
 @Test func normSimpleTrianglePassesThrough() {
     let input: BoolPolygonSet = [[(0.0, 0.0), (10.0, 0.0), (5.0, 10.0)]]
-    let out = normalize(input)
+    let out = normalize(input, .nonzero)
     #expect(out.count == 1)
     #expect(approxEqT(totalArea(out), 50.0))
 }
 
 @Test func normEmptyInputYieldsEmpty() {
-    #expect(normalize([]).isEmpty)
+    #expect(normalize([], .nonzero).isEmpty)
 }
 
 @Test func normRingFewerThanThreeDropped() {
-    #expect(normalize([[(0.0, 0.0), (10.0, 0.0)]]).isEmpty)
+    #expect(normalize([[(0.0, 0.0), (10.0, 0.0)]], .nonzero).isEmpty)
 }
 
 @Test func normConsecutiveDuplicatesDeduped() {
@@ -554,7 +513,7 @@ private func totalArea(_ ps: BoolPolygonSet) -> Double {
         (0.0, 0.0), (0.0, 0.0), (10.0, 0.0), (10.0, 10.0),
         (10.0, 10.0), (0.0, 10.0)
     ]]
-    let out = normalize(input)
+    let out = normalize(input, .nonzero)
     #expect(out.count == 1)
     #expect(out[0].count == 4)
     #expect(approxEqT(totalArea(out), 100.0))
@@ -562,8 +521,166 @@ private func totalArea(_ ps: BoolPolygonSet) -> Double {
 
 @Test func normFigureEightBecomesTwoTriangles() {
     let input: BoolPolygonSet = [[(0.0, 0.0), (10.0, 10.0), (10.0, 0.0), (0.0, 10.0)]]
-    let out = normalize(input)
+    let out = normalize(input, .nonzero)
     #expect(out.count == 2)
     #expect(approxEqT(totalArea(out), 50.0))
     for r in out { #expect(r.count == 3) }
+}
+
+// MARK: - The carried-rule law, clauses 1 and 4
+//
+// Twins of `a_bare_polygon_set_reads_as_even_odd` and
+// `generated_results_declare_even_odd` in
+// jas_dioxus/src/algorithms/boolean.rs.
+
+@Test func boolBarePolygonSetReadsAsEvenOdd() {
+    // Clause 1's standing convention, pinned so the four bare entry
+    // points cannot quietly change which rule they assume.
+    #expect(BoolRuledPolygonSet([]).rule == .evenodd)
+
+    // The bare booleanSubtract must therefore agree with the ruled call
+    // that spells even-odd out. Operand a is a donut drawn the natural
+    // way (two CCW rings); under even-odd its middle is a hole, so
+    // subtracting a strip below the hole leaves 20*17 - 100 = 240 over
+    // two rings.
+    let a: BoolPolygonSet = [
+        [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)],
+        [(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)],
+    ]
+    let b: BoolPolygonSet = [
+        [(0.0, 0.0), (20.0, 0.0), (20.0, 3.0), (0.0, 3.0)]
+    ]
+    let bare = booleanSubtract(a, b)
+    let ruled = booleanSubtractRuled(.evenOdd(a), .evenOdd(b))
+    #expect(bare.count == ruled.count)
+    #expect(approxEqT(totalArea(bare), totalArea(ruled)))
+    #expect(bare.count == 2)
+    // totalArea sums ABSOLUTE ring areas, so the donut-with-strip-cut
+    // reads 340 (outer) + 100 (hole) = 440; the net filled region is
+    // 340 - 100 = 240.
+    #expect(approxEqT(totalArea(bare), 440.0))
+
+    // And the non-zero reading of the SAME rings is genuinely
+    // different — otherwise carrying the rule would be theatre.
+    let nz = booleanSubtractRuled(.nonZero(a), .evenOdd(b))
+    #expect(nz.count == 1)
+    #expect(approxEqT(totalArea(nz), 340.0))
+}
+
+@Test func boolGeneratedResultsDeclareEvenOdd() {
+    // Clause 4: what applyDestructiveBoolean stamps on a multi-ring
+    // result, named in one place rather than left as a literal.
+    #expect(boolResultFillRule == .evenodd)
+}
+
+
+// MARK: - The pinch split (BOOLEAN.md multi-ring section)
+//
+// Twins of `exclude_of_corner_overlapping_squares_gives_two_simple_lobes`
+// and `splitting_a_pinched_ring_preserves_the_region` in
+// jas_dioxus/src/algorithms/boolean.rs, derivations included.
+
+private func shoelaceT(_ ring: BoolRing) -> Double {
+    if ring.count < 3 { return 0 }
+    var sum = 0.0
+    let n = ring.count
+    for i in 0..<n {
+        let (x1, y1) = ring[i]
+        let (x2, y2) = ring[(i + 1) % n]
+        sum += x1 * y2 - x2 * y1
+    }
+    return sum / 2.0
+}
+
+/// Rotate a ring so its lexicographically smallest vertex is first, so a
+/// test can pin a vertex sequence without pinning where the walk started.
+private func rotatedT(_ ring: BoolRing) -> BoolRing {
+    let n = ring.count
+    var best = 0
+    for i in 1..<n {
+        let b = ring[best]
+        let q = ring[i]
+        if q.0 < b.0 || (q.0 == b.0 && q.1 < b.1) { best = i }
+    }
+    return (0..<n).map { ring[(best + $0) % n] }
+}
+
+private func hasRepeatT(_ ring: BoolRing) -> Bool {
+    for j in 1..<max(ring.count, 1) {
+        for i in 0..<j where ring[i] == ring[j] { return true }
+    }
+    return false
+}
+
+private func ringsEqualT(_ a: BoolRing, _ b: BoolRing) -> Bool {
+    a.count == b.count && zip(a, b).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
+}
+
+@Test func excludeOfCornerOverlappingSquaresGivesTwoSimpleLobes() {
+    // The case that used to be a corpus known-gap. EXCLUDE of [0,10]^2
+    // and [5,15]^2: the overlap [5,10]^2 drops out, leaving two L-shapes
+    // that touch ONLY at the isolated points (10,5) and (5,10).
+    //
+    // Derivation, from first principles rather than from the
+    // implementation:
+    //   lower-left L = [0,10]^2 minus [5,10]^2, boundary
+    //     (0,0) (10,0) (10,5) (5,5) (5,10) (0,10)
+    //     shoelace 0 + 50 + 25 + 25 + 50 + 0 = 150 -> area 75
+    //   upper-right L = [5,15]^2 minus [5,10]^2, boundary
+    //     (10,5) (15,5) (15,15) (5,15) (5,10) (10,10)
+    //     shoelace -25 + 150 + 150 - 25 - 50 - 50 = 150 -> area 75
+    // 75 + 75 = 150 = 100 + 100 - 2*25, as XOR demands. Two rings, both
+    // simple. The sweep alone returns ONE twelve-vertex ring visiting
+    // each pinch twice - same region, wrong topology - because
+    // connectEdges cannot tell which lobe it is on at a pinch.
+    let a: BoolPolygonSet = [[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]]
+    let b: BoolPolygonSet = [[(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)]]
+    let out = booleanExclude(a, b)
+    #expect(out.count == 2)
+    let got = out.map { rotatedT($0) }.sorted { x, y in
+        if x[0].0 != y[0].0 { return x[0].0 < y[0].0 }
+        return x[0].1 < y[0].1
+    }
+    #expect(ringsEqualT(got[0], [
+        (0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (5.0, 5.0), (5.0, 10.0), (0.0, 10.0),
+    ]))
+    #expect(ringsEqualT(got[1], [
+        (5.0, 10.0), (10.0, 10.0), (10.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0),
+    ]))
+    for r in out {
+        #expect(abs(abs(shoelaceT(r)) - 75.0) < EPS)
+        #expect(!hasRepeatT(r))
+    }
+}
+
+@Test func splittingAPinchedRingPreservesTheRegion() {
+    // The post-pass in isolation, on a hand-built pinch: two unit
+    // squares joined at (1,1), traced as ONE ring visiting (1,1) twice.
+    //   (0,0) (1,0) (1,1) (2,1) (2,2) (1,2) (1,1) (0,1)
+    //
+    // Derivation. Cutting at the repeat gives the span between the two
+    // occurrences - (1,1) (2,1) (2,2) (1,2), the upper-right unit
+    // square, shoelace -1 + 2 + 2 - 1 = 2 -> area 1 - and the remainder
+    // with the duplicate kept once - (0,0) (1,0) (1,1) (0,1), the
+    // lower-left unit square, area 1. Two rings of 1, total 2, exactly
+    // the original's total: the cut invents no geometry.
+    let pinched: BoolRing = [
+        (0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (2.0, 1.0),
+        (2.0, 2.0), (1.0, 2.0), (1.0, 1.0), (0.0, 1.0),
+    ]
+    let before = abs(shoelaceT(pinched))
+    let out = splitPinchedRings([pinched])
+    #expect(out.count == 2)
+    let after = out.map { abs(shoelaceT($0)) }.reduce(0, +)
+    #expect(abs(after - before) < EPS)
+    #expect(abs(after - 2.0) < EPS)
+    for r in out {
+        #expect(abs(abs(shoelaceT(r)) - 1.0) < EPS)
+        #expect(!hasRepeatT(r))
+    }
+    // A ring with no repeat is returned untouched, in place.
+    let clean: BoolRing = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+    let kept = splitPinchedRings([clean])
+    #expect(kept.count == 1)
+    #expect(ringsEqualT(kept[0], clean))
 }

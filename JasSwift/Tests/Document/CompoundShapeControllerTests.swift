@@ -92,10 +92,28 @@ private func twoOverlapping() -> Model {
     #expect(topChildrenCount(m) == 1)
 }
 
-@Test func destructiveExcludeProducesTwoPolygons() {
+@Test func destructiveExcludeProducesSingleEvenOddPath() {
+    // Twin of Rust's `destructive_exclude_produces_single_evenodd_path`.
+    //
+    // THE MULTI-RING HOLE BUG, pinned. A symmetric difference is one
+    // outer ring plus an inner ring cutting out the overlap. Swift used
+    // to emit each ring as its own Polygon, and a Polygon fills its own
+    // area on its own — so the hole was PAINTED OVER and the app drew a
+    // disc where Rust drew a donut. It is now one Path carrying every
+    // ring as a subpath, declaring even-odd (boolResultFillRule), which
+    // is what makes the hole survive both in the model and on canvas.
     let m = twoOverlapping()
     Controller(model: m).applyDestructiveBoolean("exclude")
-    #expect(topChildrenCount(m) == 2)
+    #expect(topChildrenCount(m) == 1)
+    #expect(m.document.selection.count == 1)
+    guard case .path(let p) = m.document.layers[0].children[0] else {
+        Issue.record("expected a Path, got \(m.document.layers[0].children[0])")
+        return
+    }
+    #expect(p.fillRule == .evenodd)
+    var moveCount = 0
+    for c in p.d { if case .moveTo = c { moveCount += 1 } }
+    #expect(moveCount >= 2)
 }
 
 @Test func destructiveSubtractFrontConsumesFront() {
@@ -240,6 +258,29 @@ private func firstChildCompoundOp(_ m: Model) -> CompoundOperation? {
     #expect(collapsed.count == 3)
 }
 
+/// Twin of Rust's `destructive_remove_redundant_points_collapses_collinear`,
+/// with the same exact counts. `twoOverlapping()` is two rects overlapping in
+/// x with the same y-extent, so their UNION is one rectangle whose ring
+/// carries four vertices the sweep inserted where each operand's vertical
+/// edges meet the shared horizontal ones. The flag defaults to OFF
+/// (`workspace/state.yaml`), so the default arm keeps all 8.
+@Test func removeRedundantPointsCollapsesTheSeamVerticesOnlyWhenOn() {
+    let off = twoOverlapping()
+    Controller(model: off).applyDestructiveBoolean("union")
+    guard case .polygon(let pOff) = off.document.layers[0].children[0] else {
+        Issue.record("expected a polygon"); return
+    }
+    #expect(pOff.points.count == 8)
+
+    let on = twoOverlapping()
+    Controller(model: on).applyDestructiveBoolean(
+        "union", options: BooleanOptions(removeRedundantPoints: true))
+    guard case .polygon(let pOn) = on.document.layers[0].children[0] else {
+        Issue.record("expected a polygon"); return
+    }
+    #expect(pOn.points.count == 4)
+}
+
 @Test func divideRemoveUnpaintedDropsUnfilled() {
     let m = twoOverlapping()
     let opts = BooleanOptions(divideRemoveUnpainted: true)
@@ -269,4 +310,63 @@ private func firstChildCompoundOp(_ m: Model) -> CompoundOperation? {
     let m = twoOverlapping()
     Controller(model: m).applyRepeatBooleanOperation("")
     #expect(topChildrenCount(m) == 2)
+}
+
+// MARK: - BOOLEAN.md "Operand and paint rules": opacity and blend mode
+//
+// The rule names FOUR properties as the paint the result carries: "fill,
+// stroke, opacity, blend mode". Swift's output rebuild passed fill and
+// stroke but wrote `opacity: 1.0` and left `blendMode` at its `.normal`
+// default, so a half-transparent multiply operand came out opaque and
+// normal. Rust carries all four (its rebuild clones the operand's
+// CommonProps). The shared operations corpus pins `opacity` (it is in
+// documentToTestJson); `blendMode` is NOT serialized there, which is why
+// these live as per-port unit tests with Rust twins in controller.rs.
+
+/// Two overlapping rects with DIFFERENT opacity and blend mode, front
+/// (index 1, the last child = topmost) distinguishable from back.
+private func twoOverlappingPainted() -> Model {
+    let back = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                 opacity: 0.25, blendMode: .screen))
+    let front = Element.rect(Rect(x: 5, y: 0, width: 10, height: 10,
+                                  opacity: 0.5, blendMode: .multiply))
+    return modelWithRects([back, front], selected: [[0, 0], [0, 1]])
+}
+
+@Test func unionCarriesFrontmostOpacityAndBlendMode() {
+    let m = twoOverlappingPainted()
+    Controller(model: m).applyDestructiveBoolean("union")
+    guard case .polygon(let p) = m.document.layers[0].children[0] else {
+        Issue.record("expected a polygon, got \(m.document.layers[0].children[0])")
+        return
+    }
+    #expect(p.opacity == 0.5)
+    #expect(p.blendMode == .multiply)
+}
+
+@Test func excludePathArmCarriesFrontmostOpacityAndBlendMode() {
+    // The multi-ring arm builds a Path, a SECOND construction site that
+    // has to carry the same four properties as the single-ring Polygon.
+    let m = twoOverlappingPainted()
+    Controller(model: m).applyDestructiveBoolean("exclude")
+    guard case .path(let p) = m.document.layers[0].children[0] else {
+        Issue.record("expected a path, got \(m.document.layers[0].children[0])")
+        return
+    }
+    #expect(p.opacity == 0.5)
+    #expect(p.blendMode == .multiply)
+}
+
+@Test func subtractFrontSurvivorKeepsItsOwnOpacityAndBlendMode() {
+    // "Each remaining element has the frontmost subtracted from it and
+    // keeps its own paint" — so the survivor is the BACK rect and the
+    // result must carry 0.25 / .screen, not the consumed cutter's.
+    let m = twoOverlappingPainted()
+    Controller(model: m).applyDestructiveBoolean("subtract_front")
+    guard case .polygon(let p) = m.document.layers[0].children[0] else {
+        Issue.record("expected a polygon, got \(m.document.layers[0].children[0])")
+        return
+    }
+    #expect(p.opacity == 0.25)
+    #expect(p.blendMode == .screen)
 }

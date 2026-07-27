@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
-"""Generate the Path B panel-layout golden corpus.
+"""Generate the Path B panel golden corpora (rects, structure, and values).
 
-Runs the canonical ``layout_panel`` (workspace_interpreter/panel_layout.py) over a set
-of seed panels from the compiled workspace bundle and writes the pinned
-golden to test_fixtures/algorithms/panel_layout.json.  Every app's
-cross_language_test asserts its own layout_panel against this file (Template
-A — pinned vectors, in-suite, byte-exact integer math).
+Runs the three canonical panel passes over seed panels from the compiled
+workspace bundle and writes their pinned goldens:
 
-Regenerate after changing the algorithm, the seed list, or the bundle:
+  * ``layout_panel``  -> test_fixtures/algorithms/panel_layout.json
+  * ``widget_tree``   -> test_fixtures/algorithms/panel_widget_tree.json
+  * ``bind_values``   -> test_fixtures/algorithms/panel_bind_values.json
+
+Every app's cross_language_test asserts its own implementation against these
+files (Template A — pinned vectors, in-suite, byte-exact).
+
+The first two share one seed list over all 16 panels.  ``bind_values`` has its
+OWN, deliberately short seed list (``BIND_SEED``): it pins resolved VALUES, so
+its vectors need a rich data scope, and a value snapshot of every panel would be
+mostly repetition that churns on unrelated edits.  See the module docstring of
+``workspace_interpreter/bind_values.py``.
+
+Regenerate after changing an algorithm, a seed list, or the bundle:
 
     python -m workspace_interpreter.compile workspace/ workspace/workspace.json
     python scripts/gen_panel_layout_fixture.py
@@ -21,6 +31,7 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from workspace_interpreter.bind_values import bind_values  # noqa: E402
 from workspace_interpreter.panel_layout import layout_panel  # noqa: E402
 from workspace_interpreter.widget_tree import widget_tree  # noqa: E402
 
@@ -126,6 +137,126 @@ SEED = [
     for name in _PANELS
 ]
 
+# ---------------------------------------------------------------------------
+# bind_values seeds — four vectors over three panels, one per expression shape
+# ---------------------------------------------------------------------------
+#
+# Chosen to cover the shapes the value surface can take, not to cover panels:
+#   * a colour swatch                 -> color/swatches `bind.color`
+#   * a numeric field (weight, dashes) -> stroke `bind.value` on length_input
+#   * a conditional `visible`          -> color `bind.visible` on the five
+#     per-mode slider containers (exactly one true per vector)
+#   * a `foreach`                      -> swatches, two NESTED foreach levels,
+#     including the `{{ }}` disclosure label panel_layout reduces to a count
+# Plus the arms that only a value snapshot can tell apart: a null colour vs a
+# present one, an empty string vs null, and non-integral numbers.
+
+# The colour bug's own panel, with a selection: `panel.hex` is the six-character
+# field whose divergence started the census ("664040" vs "664141").
+_BV_COLOR_SELECTED = {
+    "state": {
+        "fill_color": "#664040",
+        "stroke_color": "#112233",
+        "fill_on_top": True,
+    },
+    "panel": {
+        "mode": "hsb",
+        "hex": "664040",
+        # HSB of #664040 as the panel shows it (h=0 because r>g==b).
+        "h": 0, "s": 37.254902, "b": 40,
+        "r": 102, "g": 64, "bl": 64,
+        "c": 0, "m": 37.254902, "y": 37.254902, "k": 60,
+        # Three filled recent slots; slots 3..9 resolve to null, so the same
+        # widget kind is pinned in both its present and its empty state.
+        "recent_colors": ["#664040", "#112233", "#ffffff"],
+    },
+}
+
+# No active colour: every `bind.disabled` flips true, every `bind.color` that
+# reads the active attribute goes null, and a different slider container is
+# visible. `hex: ""` is the empty STRING, which canonicalizes to the same
+# characters as null and is distinguished only by the record's `type`.
+_BV_COLOR_NONE = {
+    "state": {
+        "fill_color": None,
+        "stroke_color": "#112233",
+        "fill_on_top": True,
+    },
+    "panel": {
+        "mode": "cmyk",
+        "hex": "",
+        "h": 0, "s": 0, "b": 0,
+        "r": 0, "g": 0, "bl": 0,
+        "c": 0, "m": 0, "y": 0, "k": 0,
+        "recent_colors": [],
+    },
+}
+
+# Two libraries, one expanded and one collapsed: the outer foreach expands per
+# library and the inner one per swatch, so tile colours resolve from the foreach
+# item and the disclosure label from a bundle lookup keyed by it.
+_BV_SWATCHES = {
+    "state": {
+        "fill_color": "#ff0000",
+        "stroke_color": None,
+        "fill_on_top": False,
+    },
+    "panel": {
+        "open_libraries": [
+            {"id": "lib1", "collapsed": False},
+            {"id": "lib2", "collapsed": True},
+        ],
+        "selected_swatches": ["lib1:0"],
+        "recent_colors": ["#ff0000"],
+        "thumbnail_size": 16,
+    },
+    "data": {
+        "swatch_libraries": {
+            "lib1": {"name": "Default", "swatches": [
+                {"color": "#ff0000"}, {"color": "#00ff00"},
+            ]},
+            "lib2": {"name": "Grays", "swatches": [
+                {"color": "#808080"},
+            ]},
+        },
+    },
+}
+
+# Dash + arrowhead state, for the numeric-field shape: `weight` and the dash /
+# gap lengths are length_input bindings, and 2.5 / 0.5 / 1.25 are the
+# non-integral values that separate a real value pin from a length pin.
+_BV_STROKE = {
+    "state": {"stroke_brush": None},
+    "panel": {
+        "weight": 2.5,
+        "cap": "round",
+        "join": "bevel",
+        "miter_limit": 4,
+        "align_stroke": "inside",
+        "dashed": True,
+        "dash_align_anchors": False,
+        "dash_1": 6, "gap_1": 3,
+        "dash_2": 0.5, "gap_2": 1.25,
+        "dash_3": 0, "gap_3": 0,
+        "start_arrowhead": "none",
+        "end_arrowhead": "Arrow 5",
+        "start_arrowhead_scale": 100,
+        "end_arrowhead_scale": 200,
+        "link_arrowhead_scale": True,
+        "arrow_align": "tip_at_end",
+        "profile": "Width Profile 1",
+        "profile_flipped": False,
+    },
+}
+
+# (case name, compiled panel id, ctx)
+BIND_SEED = [
+    ("color@hsb_selected", "color_panel_content", _BV_COLOR_SELECTED),
+    ("color@cmyk_no_active_color", "color_panel_content", _BV_COLOR_NONE),
+    ("swatches@two_libraries", "swatches_panel_content", _BV_SWATCHES),
+    ("stroke@dashed_bevel", "stroke_panel_content", _BV_STROKE),
+]
+
 
 def main() -> int:
     bundle = json.load(open(os.path.join(ROOT, "workspace", "workspace.json")))
@@ -163,6 +294,22 @@ def main() -> int:
         json.dump(wt_cases, f, indent=2)
         f.write("\n")
     print(f"wrote {len(wt_cases)} cases -> {wt_path}")
+
+    # Bind-VALUE golden, from BIND_SEED (its own seeds — see the module docs).
+    bv_cases = []
+    for name, panel_id, ctx in BIND_SEED:
+        bv_cases.append({
+            "name": name,
+            "function": "bind_values",
+            "args": {"panel": panel_id, "ctx": ctx},
+            "expected": bind_values(panels[panel_id], ctx),
+        })
+    bv_path = os.path.join(ROOT, "test_fixtures", "algorithms", "panel_bind_values.json")
+    with open(bv_path, "w") as f:
+        json.dump(bv_cases, f, indent=2)
+        f.write("\n")
+    rows = sum(len(c["expected"]) for c in bv_cases)
+    print(f"wrote {len(bv_cases)} cases ({rows} rows) -> {bv_path}")
     return 0
 
 

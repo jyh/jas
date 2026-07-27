@@ -178,7 +178,9 @@ public enum PanelLayout {
     /// truncate toward zero; `"N%"` is `(avail*N)/100` (ignored when avail <= 0,
     /// e.g. heights); a bare numeric string is that int; anything else
     /// (`"auto"`, junk) is ignored.
-    private static func resolveDim(_ v: Any?, _ avail: Int) -> Int? {
+    /// Internal rather than private so `R9GuardedCastTests` can hold its two
+    /// float branches to Rust's `f as i64` (interpreter/panel_layout.rs).
+    static func resolveDim(_ v: Any?, _ avail: Int) -> Int? {
         guard let v = v, !(v is NSNull) else { return nil }
         if let n = v as? NSNumber { return n.intValue }
         if let s = v as? String {
@@ -189,14 +191,17 @@ public enum PanelLayout {
                 if let i = Int(num) {
                     p = i
                 } else if let f = Double(num) {
-                    p = Int(f)
+                    // saturatingInt mirrors Rust's `f as i64`. `Double("nan")`
+                    // and `Double("1e400")` both succeed, so a hand-authored
+                    // `width: "nan%"` trapped here (risk R9).
+                    p = saturatingInt(f)
                 } else {
                     return nil
                 }
                 return avail > 0 ? (avail * p) / 100 : nil
             }
             if let i = Int(s) { return i }
-            if let f = Double(s) { return Int(f) }
+            if let f = Double(s) { return saturatingInt(f) }
             return nil
         }
         return nil

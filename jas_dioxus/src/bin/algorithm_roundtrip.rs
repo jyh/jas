@@ -7,11 +7,16 @@
 /// algorithm, and outputs a JSON array of results to stdout.
 
 use jas_dioxus::geometry::measure::{Measure, parse_unit};
-use jas_dioxus::geometry::test_json::parse_element;
+use jas_dioxus::geometry::test_json::{parse_element, parse_transform};
+use jas_dioxus::document::document::Document;
+use jas_dioxus::document::evaluated_bounds::element_evaluated_bbox;
+use jas_dioxus::geometry::element::{CommonProps, LayerElem};
 use jas_dioxus::algorithms::boolean::{
-    boolean_exclude, boolean_intersect, boolean_subtract, boolean_union, PolygonSet, Ring,
+    boolean_exclude_ruled, boolean_intersect_ruled, boolean_subtract_ruled,
+    boolean_union_ruled, PolyFillRule, PolygonSet, RuledPolygonSet,
 };
 use jas_dioxus::algorithms::boolean_normalize::normalize;
+use jas_dioxus::algorithms::corpus_text_measure::fixed_char_width_measure;
 use jas_dioxus::algorithms::fit_curve::fit_curve;
 use jas_dioxus::algorithms::hit_test;
 use jas_dioxus::algorithms::path_text_layout::layout_path_text;
@@ -65,12 +70,17 @@ fn main() {
     let results: Vec<Value> = match algo.as_str() {
         "measure" => run_measure(&vectors),
         "element_bounds" => run_element_bounds(&vectors),
+        "element_evaluated_bounds" => run_element_evaluated_bounds(&vectors),
         "flatten" => run_flatten(&vectors),
         "arrow_trim" => run_arrow_trim(&vectors),
         "length" => run_length(&vectors),
+        "color_convert" => run_color_convert(&vectors),
+        "number_commit" => run_number_commit(&vectors),
         "hit_test" => run_hit_test(&vectors),
+        "path_project" => run_path_project(&vectors),
         "boolean" => run_boolean(&vectors),
         "boolean_normalize" => run_boolean_normalize(&vectors),
+        "polygon_metrics" => run_polygon_metrics(&vectors),
         "fit_curve" => run_fit_curve(&vectors),
         "shape_recognize" => run_shape_recognize(&vectors),
         "planar" => run_planar(&vectors),
@@ -88,6 +98,66 @@ fn main() {
         "{}",
         serde_json::to_string(&results).expect("Failed to serialize results")
     );
+}
+
+// ---------------------------------------------------------------
+// path_project (closest-point projection onto a segment / cubic)
+// ---------------------------------------------------------------
+//
+// The distance is reported DIVIDED BY the vector's `scale`, because the
+// family's reason to exist is coordinates above ~1e154 — the magnitudes at
+// which the naive `(dx*dx + dy*dy).sqrt()` saturates to +inf while `hypot`
+// does not. An absolute tolerance is meaningless against a raw 1e200
+// distance (one ulp there is ~1.6e184), so every vector declares the scale
+// its distance is measured in and the comparison happens on the ratio.
+// `scale` is 1.0 for the ordinary-magnitude vectors.
+
+fn run_path_project(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::geometry::path_ops::{closest_on_cubic, closest_on_line};
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let func = tc["function"].as_str().unwrap_or("");
+            let a: Vec<f64> = tc["args"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_f64().unwrap())
+                .collect();
+            let scale = tc["scale"].as_f64().unwrap_or(1.0);
+            let (dist, t) = match func {
+                "closest_on_line" => closest_on_line(a[0], a[1], a[2], a[3], a[4], a[5]),
+                "closest_on_cubic" => closest_on_cubic(
+                    a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[8], a[9],
+                ),
+                _ => {
+                    eprintln!("Unknown path_project function: {}", func);
+                    std::process::exit(1);
+                }
+            };
+            json!({"name": name,
+                   "result": {"distance_over_scale": dist / scale, "t": t}})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// number_commit (the number_input widget's commit rule)
+// ---------------------------------------------------------------
+
+fn run_number_commit(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::interpreter::widget_commit::number_input_commit;
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let text = tc["text"].as_str().unwrap_or("");
+            let min = tc.get("min").and_then(|v| v.as_f64());
+            let max = tc.get("max").and_then(|v| v.as_f64());
+            json!({"name": name, "result": number_input_commit(text, min, max)})
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------
@@ -125,6 +195,41 @@ fn run_element_bounds(vectors: &[Value]) -> Vec<Value> {
             let elem = parse_element(elem_json);
             let (x, y, w, h) = elem.bounds();
             json!({"name": name, "result": [x, y, w, h]})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// element_evaluated_bounds (transform-aware bbox, DOCUMENT space)
+// ---------------------------------------------------------------
+
+/// Each vector is one element placed as the single child of one layer, so the
+/// gated path is `[0, 0]`: the element's own `transform` is folded first, then
+/// the layer's `layer_transform` as the sole ancestor. Building the document
+/// here (rather than shipping a whole document per vector) keeps the fixture
+/// readable; the geometry under test is entirely inside the port function.
+fn run_element_evaluated_bounds(vectors: &[Value]) -> Vec<Value> {
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem = parse_element(&tc["element"]);
+            let layer_transform = parse_transform(&tc["layer_transform"]);
+            let mut doc = Document::default();
+            doc.layers = vec![Element::Layer(LayerElem {
+                children: vec![std::rc::Rc::new(elem)],
+                common: CommonProps {
+                    transform: layer_transform,
+                    ..Default::default()
+                },
+                isolated_blending: false,
+                knockout_group: false,
+            })];
+            let result = match element_evaluated_bbox(&doc, &[0, 0]) {
+                Some((x, y, w, h)) => json!([x, y, w, h]),
+                None => Value::Null,
+            };
+            json!({"name": name, "result": result})
         })
         .collect()
 }
@@ -226,6 +331,58 @@ fn run_length(vectors: &[Value]) -> Vec<Value> {
 }
 
 // ---------------------------------------------------------------
+// color_convert (the Color panel's four conversion primitives)
+// ---------------------------------------------------------------
+
+fn run_color_convert(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::interpreter::color_util as cu;
+    let ints = |v: &Value| -> Vec<i64> {
+        v.as_array().unwrap().iter().map(|x| x.as_i64().unwrap()).collect()
+    };
+    let floats = |v: &Value| -> Vec<f64> {
+        v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect()
+    };
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let result: Value = match tc["function"].as_str().unwrap_or("") {
+                "rgb_to_hsb" => {
+                    let a = ints(&tc["rgb"]);
+                    let (h, s, b) = cu::rgb_to_hsb(a[0] as u8, a[1] as u8, a[2] as u8);
+                    json!([h, s, b])
+                }
+                "hsb_to_rgb" => {
+                    let a = floats(&tc["hsb"]);
+                    let (r, g, b) = cu::hsb_to_rgb(a[0], a[1], a[2]);
+                    json!([r as i64, g as i64, b as i64])
+                }
+                "rgb_to_cmyk" => {
+                    let a = ints(&tc["rgb"]);
+                    let (c, m, y, k) = cu::rgb_to_cmyk(a[0] as u8, a[1] as u8, a[2] as u8);
+                    json!([c, m, y, k])
+                }
+                "panel_channels" => {
+                    let a = floats(&tc["float_rgb"]);
+                    let ch = cu::panel_channels(a[0], a[1], a[2]);
+                    json!({
+                        "r": ch.r, "g": ch.g, "bl": ch.bl,
+                        "h": ch.h, "s": ch.s, "b": ch.b,
+                        "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
+                        "hex": ch.hex,
+                    })
+                }
+                other => {
+                    eprintln!("Unknown color_convert function: {}", other);
+                    std::process::exit(1);
+                }
+            };
+            json!({"name": name, "result": result})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
 // hit_test
 // ---------------------------------------------------------------
 
@@ -272,6 +429,21 @@ fn run_hit_test(vectors: &[Value]) -> Vec<Value> {
                     let poly = parse_polygon(&tc["polygon"]);
                     hit_test::point_in_polygon(args[0], args[1], &poly)
                 }
+                // Element-level marquee / lasso. `element` is a test-JSON
+                // element (parse_element handles every type, including
+                // live compound shapes); `args` is the marquee rect
+                // x, y, w, h; `polygon` is the lasso outline.
+                "element_intersects_rect" => {
+                    let elem = parse_element(&tc["element"]);
+                    hit_test::element_intersects_rect(
+                        &elem, args[0], args[1], args[2], args[3],
+                    )
+                }
+                "element_intersects_polygon" => {
+                    let elem = parse_element(&tc["element"]);
+                    let poly = parse_polygon(&tc["polygon"]);
+                    hit_test::element_intersects_polygon(&elem, &poly)
+                }
                 _ => {
                     eprintln!("Unknown hit_test function: {}", func);
                     std::process::exit(1);
@@ -292,14 +464,24 @@ fn run_boolean(vectors: &[Value]) -> Vec<Value> {
         .map(|tc| {
             let name = tc["name"].as_str().unwrap();
             let func = tc["function"].as_str().unwrap();
-            let a = parse_polygon_set(&tc["a"]);
-            let b = parse_polygon_set(&tc["b"]);
+            // Each operand DECLARES its fill rule (the carried-rule
+            // law, transcripts/BOOLEAN.md). Absent, it is even-odd:
+            // the standing convention for a bare ring list, and what
+            // `boolean_union` and friends read.
+            let a = RuledPolygonSet::new(
+                parse_polygon_set(&tc["a"]),
+                parse_fill_rule(&tc["a_fill_rule"]),
+            );
+            let b = RuledPolygonSet::new(
+                parse_polygon_set(&tc["b"]),
+                parse_fill_rule(&tc["b_fill_rule"]),
+            );
 
             let result = match func {
-                "union" => boolean_union(&a, &b),
-                "intersect" => boolean_intersect(&a, &b),
-                "subtract" => boolean_subtract(&a, &b),
-                "exclude" => boolean_exclude(&a, &b),
+                "union" => boolean_union_ruled(&a, &b),
+                "intersect" => boolean_intersect_ruled(&a, &b),
+                "subtract" => boolean_subtract_ruled(&a, &b),
+                "exclude" => boolean_exclude_ruled(&a, &b),
                 _ => {
                     eprintln!("Unknown boolean function: {}", func);
                     std::process::exit(1);
@@ -349,7 +531,7 @@ fn run_boolean_normalize(vectors: &[Value]) -> Vec<Value> {
         .map(|tc| {
             let name = tc["name"].as_str().unwrap();
             let input = parse_polygon_set(&tc["input"]);
-            let result = normalize(&input);
+            let result = normalize(&input, parse_fill_rule(&tc["fill_rule"]));
 
             let rings: Vec<Value> = result
                 .iter()
@@ -365,6 +547,54 @@ fn run_boolean_normalize(vectors: &[Value]) -> Vec<Value> {
                     "ring_count": result.len(),
                     "all_rings_simple": all_rings_simple(&result),
                     "rings": rings
+                }
+            })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// polygon_metrics
+// ---------------------------------------------------------------
+//
+// Gates the harness's OWN instruments. No boolean operation runs here:
+// the fixture's ring sets go straight into
+// `jas_dioxus::algorithms::polygon_metrics`, so a red vector accuses a
+// measuring instrument and nothing else. Fixture shape:
+//   { name, rings: [[[x,y]...]...], sample_points: [[x,y]...] }
+
+fn run_polygon_metrics(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::polygon_metrics::{is_ring_simple, ring_signed_area};
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap();
+            let rings = parse_polygon_set(&tc["rings"]);
+            let sample_points: Vec<Value> = tc["sample_points"]
+                .as_array()
+                .map(|pts| {
+                    pts.iter()
+                        .map(|p| {
+                            let pt = parse_point(p);
+                            json!({
+                                "point": [pt.0, pt.1],
+                                "inside": point_in_polygon_set(&rings, pt)
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            json!({
+                "name": name,
+                "result": {
+                    "ring_count": rings.len(),
+                    "ring_signed_areas": rings.iter().map(ring_signed_area)
+                        .collect::<Vec<f64>>(),
+                    "ring_simple": rings.iter().map(is_ring_simple)
+                        .collect::<Vec<bool>>(),
+                    "all_rings_simple": all_rings_simple(&rings),
+                    "area": polygon_set_area(&rings),
+                    "sample_points": sample_points,
                 }
             })
         })
@@ -561,7 +791,7 @@ fn run_text_layout(vectors: &[Value]) -> Vec<Value> {
             let font_size = tc["font_size"].as_f64().unwrap();
             let char_width = tc["char_width"].as_f64().unwrap();
 
-            let measure = |s: &str| s.chars().count() as f64 * char_width;
+            let measure = fixed_char_width_measure(char_width);
             let layout = text_layout::layout(content, max_width, font_size, &measure);
 
             let glyphs: Vec<Value> = layout
@@ -653,7 +883,7 @@ fn run_text_layout_paragraph(vectors: &[Value]) -> Vec<Value> {
                 .map(|a| a.iter().map(parse_seg).collect())
                 .unwrap_or_default();
 
-            let measure = |s: &str| s.chars().count() as f64 * char_width;
+            let measure = fixed_char_width_measure(char_width);
             let layout = layout_with_paragraphs(content, max_width, font_size, &segs, &measure);
 
             let glyphs: Vec<Value> = layout.glyphs.iter().map(|g| {
@@ -692,7 +922,7 @@ fn run_path_text_layout(vectors: &[Value]) -> Vec<Value> {
             let font_size = tc["font_size"].as_f64().unwrap();
             let char_width = tc["char_width"].as_f64().unwrap();
 
-            let measure = |s: &str| s.chars().count() as f64 * char_width;
+            let measure = fixed_char_width_measure(char_width);
             let layout =
                 layout_path_text(&path_cmds, content, start_offset, font_size, &measure);
 
@@ -743,6 +973,21 @@ fn parse_polygon(v: &Value) -> Vec<(f64, f64)> {
     parse_points(v)
 }
 
+/// Read a corpus vector's declared fill rule. Absent means EVEN-ODD —
+/// the algorithm layer's default for a bare ring list, matching
+/// `PolyFillRule::default()`. See transcripts/BOOLEAN.md
+/// "Fill rule: the polygon set carries it".
+fn parse_fill_rule(v: &Value) -> PolyFillRule {
+    match v.as_str() {
+        Some("nonzero") => PolyFillRule::NonZero,
+        Some("evenodd") | None => PolyFillRule::EvenOdd,
+        Some(other) => {
+            eprintln!("Unknown fill_rule: {}", other);
+            std::process::exit(1);
+        }
+    }
+}
+
 fn parse_polygon_set(v: &Value) -> PolygonSet {
     v.as_array()
         .unwrap()
@@ -791,122 +1036,16 @@ fn parse_path_commands(v: &Value) -> Vec<PathCommand> {
 }
 
 // ---------------------------------------------------------------
-// Geometry helpers (duplicated from test modules since they're
-// not part of the public API)
+// Geometry helpers
 // ---------------------------------------------------------------
+//
+// The region metrics every boolean golden is expressed in live in
+// jas_dioxus::algorithms::polygon_metrics — one copy, gated by the
+// `polygon_metrics` corpus family. They used to be hand-pasted here.
 
-fn ring_signed_area(ring: &Ring) -> f64 {
-    if ring.len() < 3 {
-        return 0.0;
-    }
-    let mut sum = 0.0;
-    let n = ring.len();
-    for i in 0..n {
-        let (x1, y1) = ring[i];
-        let (x2, y2) = ring[(i + 1) % n];
-        sum += x1 * y2 - x2 * y1;
-    }
-    sum * 0.5
-}
-
-fn point_in_ring(ring: &Ring, pt: (f64, f64)) -> bool {
-    let (px, py) = pt;
-    let n = ring.len();
-    if n < 3 {
-        return false;
-    }
-    let mut inside = false;
-    let mut j = n - 1;
-    for i in 0..n {
-        let (xi, yi) = ring[i];
-        let (xj, yj) = ring[j];
-        let intersects =
-            ((yi > py) != (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
-        if intersects {
-            inside = !inside;
-        }
-        j = i;
-    }
-    inside
-}
-
-fn point_in_polygon_set(ps: &PolygonSet, pt: (f64, f64)) -> bool {
-    let mut count = 0;
-    for ring in ps {
-        if point_in_ring(ring, pt) {
-            count += 1;
-        }
-    }
-    count % 2 == 1
-}
-
-fn polygon_set_area(ps: &PolygonSet) -> f64 {
-    let mut total = 0.0;
-    for (i, ring) in ps.iter().enumerate() {
-        let a = ring_signed_area(ring).abs();
-        let mut depth = 0;
-        if let Some(&pt) = ring.first() {
-            for (j, other) in ps.iter().enumerate() {
-                if i == j {
-                    continue;
-                }
-                if point_in_ring(other, pt) {
-                    depth += 1;
-                }
-            }
-        }
-        if depth % 2 == 0 {
-            total += a;
-        } else {
-            total -= a;
-        }
-    }
-    total
-}
-
-/// Check that a ring is simple: no two of its edges meet except where
-/// consecutive edges share their one common vertex.
-///
-/// This deliberately uses the full arrangement predicate rather than a
-/// proper-crossing test. A proper-crossing test reports `true` for a
-/// ring carrying a T-junction (a vertex sitting in another edge's
-/// interior) or a collinear self-overlap (an edge doubling back along
-/// itself), because neither is a strict interior crossing — so the
-/// corpus's `all_rings_simple` flag used to stay green on exactly the
-/// degeneracies the normalizer exists to remove. Mirrors
-/// `isRingSimple` in JasSwift/ToolsAlgorithm/AlgorithmRoundtrip.swift.
-fn is_ring_simple(ring: &Ring) -> bool {
-    use jas_dioxus::algorithms::arrangement::split_points;
-    let n = ring.len();
-    if n < 3 {
-        return true;
-    }
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let adjacent = j == i + 1 || (i == 0 && j == n - 1);
-            let pts = split_points(
-                ring[i],
-                ring[(i + 1) % n],
-                ring[j],
-                ring[(j + 1) % n],
-            );
-            if adjacent {
-                // Consecutive edges legitimately meet at exactly their
-                // shared vertex, and nowhere else.
-                if pts.len() != 1 {
-                    return false;
-                }
-            } else if !pts.is_empty() {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn all_rings_simple(ps: &PolygonSet) -> bool {
-    ps.iter().all(|ring| is_ring_simple(ring))
-}
+use jas_dioxus::algorithms::polygon_metrics::{
+    all_rings_simple, point_in_polygon_set, polygon_set_area,
+};
 
 // ── align ────────────────────────────────────────────────────
 //

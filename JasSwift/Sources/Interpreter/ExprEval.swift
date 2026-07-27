@@ -641,7 +641,10 @@ private class Parser {
                 case .number(let n):
                     // Integer index after dot (e.g. list.0)
                     pos += 1
-                    let seg = "\(Int(n))"
+                    // saturatingInt mirrors Rust's `format!("{}", n as i64)`, so a
+                    // huge or non-finite literal after a dot yields the same
+                    // segment name in both ports instead of trapping (risk R9).
+                    let seg = "\(saturatingInt(n))"
                     node = extendOrDot(node, seg)
                 default:
                     break  // unexpected token after dot
@@ -1013,8 +1016,13 @@ private func colorArg(_ val: Value) -> String {
     }
 }
 
+/// The `rgb()` builtin's channel conversion — Rust's `val_to_u8` is `*n as u8`.
+///
+/// The outer clamp of the previous `UInt8(clamping: Int(n))` was fine; the INNER
+/// `Int(n)` was the defect, trapping on NaN, ±infinity, and any |n| >= 2^63
+/// (e.g. `rgb(10000000000000000000, 0, 0)`) where Rust saturates. Risk R9.
 private func valToUInt8(_ v: Value) -> UInt8 {
-    if case .number(let n) = v { return UInt8(clamping: Int(n)) }
+    if case .number(let n) = v { return saturatingUInt8(n) }
     return 0
 }
 
@@ -1132,10 +1140,14 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
     case "cmyk":
         guard args.count == 4 else { return .null }
         let vals = args.map { evalNode($0, ctx) }
-        let c = valToDouble(vals[0]) / 100.0
-        let m = valToDouble(vals[1]) / 100.0
-        let y = valToDouble(vals[2]) / 100.0
-        let k = valToDouble(vals[3]) / 100.0
+        // Each channel is clamped to its documented 0-100 range BEFORE the
+        // arithmetic — see clampChannel for why input-clamping and not
+        // output-saturation (risk R9). With the inputs in 0...1 each product is
+        // in 0...255, so the conversions below cannot be out of range.
+        let c = clampChannel(valToDouble(vals[0]), 0.0, 100.0) / 100.0
+        let m = clampChannel(valToDouble(vals[1]), 0.0, 100.0) / 100.0
+        let y = clampChannel(valToDouble(vals[2]), 0.0, 100.0) / 100.0
+        let k = clampChannel(valToDouble(vals[3]), 0.0, 100.0) / 100.0
         let r = UInt8(((1.0 - c) * (1.0 - k) * 255.0).rounded())
         let g = UInt8(((1.0 - m) * (1.0 - k) * 255.0).rounded())
         let b = UInt8(((1.0 - y) * (1.0 - k) * 255.0).rounded())
@@ -1144,7 +1156,7 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
     // grayscale: (k) -> color  (k is 0-100, 0=white, 100=black)
     case "grayscale":
         guard args.count == 1 else { return .null }
-        let k = valToDouble(evalNode(args[0], ctx))
+        let k = clampChannel(valToDouble(evalNode(args[0], ctx)), 0.0, 100.0)
         let v = UInt8(((1.0 - k / 100.0) * 255.0).rounded())
         return Value.colorValue(rgbToHex(v, v, v))
 
@@ -1221,8 +1233,13 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         var indices: [Int] = []
         for a in args {
             let v = evalNode(a, ctx)
+            // The `n >= 0` guard rejects NaN in both ports but ADMITS
+            // +infinity, where Rust pushes `n as usize` = usize::MAX and this
+            // port trapped (risk R9). The saturated sentinels differ in
+            // magnitude because the index types do, but both exceed any
+            // container length.
             guard case .number(let n) = v, n >= 0 else { return .null }
-            indices.append(Int(n))
+            indices.append(saturatingInt(n))
         }
         return .path(indices)
 
@@ -1230,10 +1247,11 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         guard args.count == 2 else { return .null }
         let p = evalNode(args[0], ctx)
         let i = evalNode(args[1], ctx)
+        // Same guard, same leak as `path` above (risk R9).
         guard case .path(var indices) = p, case .number(let n) = i, n >= 0 else {
             return .null
         }
-        indices.append(Int(n))
+        indices.append(saturatingInt(n))
         return .path(indices)
 
     case "path_from_id":
@@ -1358,7 +1376,11 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         guard case .number(let dx) = vx, case .number(let dy) = vy else {
             return .null
         }
-        return .number((dx * dx + dy * dy).squareRoot())
+        // Foundation's hypot, not `(dx*dx + dy*dy).squareRoot()`: the naive
+        // form overflows to +inf and underflows to 0 on the intermediate
+        // square. Matches Rust `dx.hypot(dy)` and the reference's
+        // `math.hypot` (workspace_interpreter/expr_eval.py).
+        return .number(hypot(dx, dy))
 
     // ── Geometry generators (trig in DEGREES, pow, range, fold) ──
 
@@ -1542,7 +1564,8 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         guard let first = anchorBuffersFirst(name) else { return .bool(false) }
         let dx = x - first.x
         let dy = y - first.y
-        return .bool((dx * dx + dy * dy).squareRoot() <= r)
+        // hypot, not the naive squares — see the `hypot` case above.
+        return .bool(hypot(dx, dy) <= r)
 
     // Unknown function
     default:

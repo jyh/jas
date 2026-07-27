@@ -77,7 +77,10 @@ enum Value: Equatable {
                     if let i = n as? Int {
                         idx.append(i)
                     } else if let d = n as? Double {
-                        idx.append(Int(d))
+                        // saturatingInt (risk R9). Rust requires `as_u64()` here
+                        // and falls back to a STRING when it fails, so this
+                        // branch is laxer than Rust's — banked in §7.1.
+                        idx.append(saturatingInt(d))
                     } else if let num = n as? NSNumber {
                         idx.append(num.intValue)
                     } else {
@@ -142,7 +145,10 @@ enum Value: Equatable {
         case .null: return nil
         case .bool(let b): return b
         case .number(let n):
-            if n == Double(Int(n)) { return Int(n) }
+            // intIfIntegral, not `if n == Double(Int(n))`: that guard evaluated the
+            // trapping cast inside its own predicate (risk R9). Rust's
+            // value_to_json performs no integer conversion at all.
+            if let i = intIfIntegral(n) { return i }
             return n
         case .string(let s): return s
         case .color(let c): return c

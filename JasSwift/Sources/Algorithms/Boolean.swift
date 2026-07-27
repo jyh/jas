@@ -6,21 +6,120 @@ import Foundation
 //
 // Data model: a `BoolPolygonSet` is a flat list of rings; a ring is a
 // closed polygon expressed as a list of (x, y) vertices without the
-// implicit closing vertex. Multiple rings represent a region under the
-// even-odd fill rule.
+// implicit closing vertex.
 //
-// Inputs may be self-intersecting; they are normalized as a pre-pass
-// under the non-zero winding fill rule. See BooleanNormalize.swift.
+// THE CARRIED-RULE LAW (JYH-ratified 2026-07-26). A polygon set does
+// NOT have a fill rule of its own — it carries the one its source
+// declared. Rings alone are geometry, not a region: it takes a fill
+// rule to say which points they enclose, and the two rules disagree on
+// exactly the inter-ring cases (nested same-orientation rings are a
+// hole under even-odd and a solid under non-zero; two overlapping
+// same-orientation rings are a symmetric difference under even-odd and
+// a union under non-zero). Neither rule is universally more natural for
+// an artist — even-odd matches deliberate holes, non-zero matches
+// self-crossing freehand drawing — which is why SVG and PDF put
+// fill-rule ON THE PATH. jas imports and exports SVG and Path carries
+// fillRule, so a rule fixed in this layer would make the boundary LIE:
+// a document declaring fill-rule="nonzero" would be silently
+// reinterpreted by a boolean op. Hence BoolRuledPolygonSet, which pairs
+// rings with the rule that reads them, and boolCanonicalize, which
+// resolves that pair into rings the rest of this file can read without
+// asking. See transcripts/BOOLEAN.md, "Fill rule: the polygon set
+// carries it", and the Rust twin's module docs for the full reasoning.
+//
+// Two corollaries, both load-bearing:
+//   1. CANONICAL FORM. boolCanonicalize returns simple rings denoting
+//      the same region READ UNDER EVEN-ODD, whatever rule came in — so
+//      the rule is fully consumed and nothing downstream needs it. The
+//      sweep takes canonical rings and emits canonical rings.
+//   2. RESULTS DECLARE EVEN-ODD. Every set this file emits is declared
+//      even-odd (BoolFillRule's default, and the .evenodd Path stamped
+//      by Controller.applyDestructiveBoolean on multi-ring results).
+//      That is deliberate for machine-made compound shapes: even-odd
+//      does not depend on the sweep emitting consistent winding. A bare
+//      BoolPolygonSet crossing a function boundary here therefore means
+//      "even-odd, already canonical".
+//
+// Inputs may be self-intersecting; they are resolved as a pre-pass by
+// BooleanNormalize.swift, which is where the carried rule is consumed.
 
 // MARK: - Public types
 
 /// A single closed ring as an array of (x, y) vertices.
 public typealias BoolRing = [(Double, Double)]
 
-/// A flat list of rings under the even-odd fill rule.
+/// A flat list of rings. Rings alone are geometry, not a region: which
+/// points they enclose is decided by a `BoolFillRule`, which this type
+/// deliberately does not fix. See the carried-rule law above.
 public typealias BoolPolygonSet = [BoolRing]
 
+/// Which fill rule reads a `BoolPolygonSet`'s rings — the thing the
+/// algorithm layer must carry rather than assume. Mirrors SVG/PDF
+/// `fill-rule` and the document-side `FillRule`.
+public enum BoolFillRule: Equatable {
+    /// SVG `fill-rule="nonzero"`. Inside iff the winding summed over
+    /// ALL rings is non-zero. What a self-crossing freehand stroke
+    /// means, and the SVG document default.
+    case nonzero
+    /// SVG `fill-rule="evenodd"`. Inside iff a ray crosses the rings an
+    /// odd number of times. The DEFAULT here, because this file's own
+    /// emissions are even-odd (corollary 2). That is a statement about
+    /// machine-made results, never about what artwork means.
+    case evenodd
+}
+
+/// The fill rule a boolean RESULT declares. Clause 4 of the
+/// carried-rule law, named rather than left incidental: every emitter
+/// of a multi-ring boolean result stamps THIS constant, so the choice
+/// is stated in one place.
+///
+/// Why even-odd for machine-made compound shapes: it does not depend on
+/// the sweep emitting consistent winding. A hole stays a hole even if a
+/// future connection step hands its ring back wound the other way,
+/// whereas a non-zero declaration would silently fill it. Artwork the
+/// artist drew keeps whatever rule the artist declared — this governs
+/// only what jas itself generates. Twin of Rust's RESULT_FILL_RULE.
+public let boolResultFillRule: BoolFillRule = .evenodd
+
+/// A polygon set that carries the fill rule reading it: the operand
+/// type the carried-rule law calls for. Build it where the rule is
+/// still known (an element's `fillRule`, an SVG attribute, a corpus
+/// vector's `fill_rule`) and resolve it with `boolCanonicalize` before
+/// handing rings to anything that does not take a rule.
+public struct BoolRuledPolygonSet {
+    public var rings: BoolPolygonSet
+    public var rule: BoolFillRule
+
+    public init(_ rings: BoolPolygonSet, rule: BoolFillRule = .evenodd) {
+        self.rings = rings
+        self.rule = rule
+    }
+
+    public static func evenOdd(_ rings: BoolPolygonSet) -> BoolRuledPolygonSet {
+        BoolRuledPolygonSet(rings, rule: .evenodd)
+    }
+
+    public static func nonZero(_ rings: BoolPolygonSet) -> BoolRuledPolygonSet {
+        BoolRuledPolygonSet(rings, rule: .nonzero)
+    }
+
+    /// This set's `boolCanonicalize`d rings.
+    public var canonical: BoolPolygonSet { boolCanonicalize(self) }
+}
+
+/// Consume the carried rule: the simple rings bounding exactly the
+/// region `set` denotes, read under even-odd. The ONE place a declared
+/// rule is interpreted; every other function here takes canonical rings.
+public func boolCanonicalize(_ set: BoolRuledPolygonSet) -> BoolPolygonSet {
+    normalize(set.rings, set.rule)
+}
+
 // MARK: - Public API
+//
+// The four bare-BoolPolygonSet entry points read BOTH operands as
+// EVEN-ODD, per the standing convention for a bare ring list. Use the
+// Ruled twins whenever the operands came from a document, where the
+// declared rule is known and must be honoured.
 
 public func booleanUnion(_ a: BoolPolygonSet, _ b: BoolPolygonSet) -> BoolPolygonSet {
     runBoolean(a, b, .union)
@@ -36,6 +135,30 @@ public func booleanSubtract(_ a: BoolPolygonSet, _ b: BoolPolygonSet) -> BoolPol
 
 public func booleanExclude(_ a: BoolPolygonSet, _ b: BoolPolygonSet) -> BoolPolygonSet {
     runBoolean(a, b, .xor)
+}
+
+/// `a union b`, honouring each operand's declared fill rule.
+public func booleanUnionRuled(_ a: BoolRuledPolygonSet,
+                              _ b: BoolRuledPolygonSet) -> BoolPolygonSet {
+    runBooleanRuled(a, b, .union)
+}
+
+/// `a intersect b`, honouring each operand's declared fill rule.
+public func booleanIntersectRuled(_ a: BoolRuledPolygonSet,
+                                  _ b: BoolRuledPolygonSet) -> BoolPolygonSet {
+    runBooleanRuled(a, b, .intersection)
+}
+
+/// `a minus b`, honouring each operand's declared fill rule.
+public func booleanSubtractRuled(_ a: BoolRuledPolygonSet,
+                                 _ b: BoolRuledPolygonSet) -> BoolPolygonSet {
+    runBooleanRuled(a, b, .difference)
+}
+
+/// `a xor b`, honouring each operand's declared fill rule.
+public func booleanExcludeRuled(_ a: BoolRuledPolygonSet,
+                                _ b: BoolRuledPolygonSet) -> BoolPolygonSet {
+    runBooleanRuled(a, b, .xor)
 }
 
 // MARK: - Internal types
@@ -265,22 +388,30 @@ struct BoolSweep {
 // MARK: - Top-level dispatch
 
 func runBoolean(_ a: BoolPolygonSet, _ b: BoolPolygonSet, _ op: BoolOperation) -> BoolPolygonSet {
+    runBooleanRuled(.evenOdd(a), .evenOdd(b), op)
+}
+
+func runBooleanRuled(_ a: BoolRuledPolygonSet,
+                     _ b: BoolRuledPolygonSet,
+                     _ op: BoolOperation) -> BoolPolygonSet {
     // Snap-round inputs onto a grid sized as a fixed fraction of the
     // combined bounding-box diagonal.
     let aSnap: BoolPolygonSet
     let bSnap: BoolPolygonSet
-    if let grid = snapGrid(a, b) {
-        aSnap = snapRound(a, grid: grid)
-        bSnap = snapRound(b, grid: grid)
+    if let grid = snapGrid(a.rings, b.rings) {
+        aSnap = snapRound(a.rings, grid: grid)
+        bSnap = snapRound(b.rings, grid: grid)
     } else {
-        aSnap = cloneNondegenerate(a)
-        bSnap = cloneNondegenerate(b)
+        aSnap = cloneNondegenerate(a.rings)
+        bSnap = cloneNondegenerate(b.rings)
     }
 
-    // Resolve self-intersections under non-zero winding so the sweep
-    // can keep assuming simple input rings. No-op for already-simple input.
-    let aNorm = normalize(aSnap)
-    let bNorm = normalize(bSnap)
+    // Consume each operand's DECLARED fill rule (the carried-rule law):
+    // resolve self-intersections and inter-ring relations into canonical
+    // rings, so the sweep can keep assuming simple input rings read
+    // under one rule. No-op for input that is already canonical.
+    let aNorm = normalize(aSnap, a.rule)
+    let bNorm = normalize(bSnap, b.rule)
 
     // Re-snap: normalize() may introduce off-grid intersection points.
     let aFinal: BoolPolygonSet
@@ -699,5 +830,229 @@ func connectEdges(_ events: [BoolSweepEvent], _ order: [Int]) -> BoolPolygonSet 
         }
     }
 
-    return result
+    // Split any ring that revisits a vertex. See splitPinchedRings: the
+    // walk above cannot tell which of two regions touching at a pinch
+    // vertex it is on, so it produces one self-touching ring where the
+    // answer is two simple ones.
+    return splitPinchedRings(result)
+}
+
+/// Cut every ring that visits the same vertex twice into the separate
+/// loops it really is. Port of Rust `split_pinched_rings`.
+///
+/// WHY THE SWEEP NEEDS THIS. connectEdges walks the result boundary
+/// edge by edge, and at a vertex where two output regions touch at a
+/// single point it cannot tell which region it is on: both regions'
+/// edges are incident to that one vertex. So it walks into one lobe,
+/// back out through the pinch, and on into the other, returning ONE
+/// ring that visits the pinch twice. The region is right - area and
+/// every sample point are correct - but the ring is not simple, and
+/// EVERY BoolPolygonSet consumer assumes simple rings (the normalizer's
+/// fast path, the even-odd renderer, the refit). EXCLUDE of two squares
+/// overlapping at a corner is the canonical case: twelve vertices
+/// visiting (10,5) and (5,10) twice, where the answer is two L-shapes
+/// of 75 touching only at those two isolated points.
+///
+/// WHY IT IS EXACT. Cutting at the repeat is region-preserving by
+/// construction. If a ring reads `... a, X, b ... c, X, d ...` then the
+/// span from the first X up to (not including) the second is a closed
+/// loop on its own - it starts and ends at X - and the remainder, with
+/// the duplicate X kept once, is another. No vertex is invented, none
+/// is moved, and the two loops' signed areas sum to the original's.
+/// The recursion handles a ring with several pinches (EXCLUDE has two).
+///
+/// Order is fixed - lobe before remainder, first repeat by (j, i) - so
+/// Rust and Swift emit the same rings in the same sequence, which the
+/// exact-comparison corpus requires.
+///
+/// COST. firstRepeatedVertex is O(n) expected on a ring of at least
+/// `pinchMapThreshold` vertices and O(n^2) worst case below it, and each
+/// cut removes one duplicate vertex, so a ring with p pinches costs
+/// O(p * n) expected for a long ring and at most O(p * threshold^2) for a
+/// short one - the latter bounded by 8001 comparisons per call (the n=127
+/// worst case; see `pinchMapThreshold`), measured at 2.23 us. The
+/// pathological limit is O(n^2) either way, where a
+/// constant fraction of vertices is a pinch. The overwhelmingly common
+/// p = 0 (one pass, no split) and the EXCLUDE-corner p = 2 are linear on
+/// long rings. Worth stating because this runs on EVERY boolean result,
+/// including curve-flattened ones with thousands of vertices; the same
+/// bound is documented on the normalizer's O(E^2) arrangement.
+func splitPinchedRings(_ rings: BoolPolygonSet) -> BoolPolygonSet {
+    var out: BoolPolygonSet = []
+    for ring in rings {
+        splitPinchedRing(ring, &out)
+    }
+    return out
+}
+
+private func splitPinchedRing(_ ring: BoolRing, _ out: inout BoolPolygonSet) {
+    if ring.count < 3 { return }
+    guard let (i, j) = firstRepeatedVertex(ring) else {
+        out.append(ring)
+        return
+    }
+    // ring[i] == ring[j], i < j.
+    let lobe: BoolRing = Array(ring[i..<j])
+    var rest: BoolRing = Array(ring[0..<i])
+    rest.append(contentsOf: ring[j...])
+    splitPinchedRing(lobe, &out)
+    splitPinchedRing(rest, &out)
+}
+
+/// The hash key of a vertex. Nil-able at the call site: a NaN
+/// coordinate has no key, because it can never equal anything.
+///
+/// The key must reproduce Double == EXACTLY, and a raw bitPattern does
+/// not:
+///
+///  * -0.0 == 0.0 is true while the bit patterns differ, so a raw key
+///    would MISS a pinch. `x + 0.0` maps -0.0 to +0.0 and is the
+///    identity on every other value (no rounding), which fixes it.
+///  * NaN != NaN, yet two NaNs of the same payload have equal bits, so
+///    a raw key would INVENT a pinch. Keeping a NaN-bearing vertex out
+///    of the map entirely makes it match nothing - exactly what == does.
+///
+/// firstRepeatedVertexMatchesTheQuadraticScan pins both cases against
+/// the pairwise scan.
+struct BoolVertexKey: Hashable {
+    let x: UInt64
+    let y: UInt64
+
+    init?(_ v: (Double, Double)) {
+        if v.0.isNaN || v.1.isNaN { return nil }
+        x = (v.0 + 0.0).bitPattern
+        y = (v.1 + 0.0).bitPattern
+    }
+}
+
+/// Ring length at which firstRepeatedVertex switches from the pairwise
+/// scan to the index map.
+///
+/// MEASURED, not assumed, and the measurement is CHECKABLE: the harness
+/// lives at scripts/benchmarks/pinch_dispatcher/ (PinchBench.swift and
+/// pinch_bench.rs), standalone and outside every build, so a reader can
+/// re-derive this table rather than trust it. Method: the two bodies over
+/// pinch-free rings (the case both must scan to the end), `swiftc -O` and
+/// `rustc -O` on an Apple-silicon laptop, iteration counts calibrated per
+/// case to at least 100 ms of work, best-of-5 timed repeats, and an opaque
+/// barrier on BOTH the argument and the result. Swift has no
+/// `std::hint::black_box`, so the harness feeds the result into a global
+/// accumulator and passes the ring through an `@inline(never)` identity.
+/// Both halves of that barrier are load-bearing: without them `swiftc -O`
+/// deletes the timed loop outright and the scan appears to cost 0.0 ns at
+/// every n.
+///
+///     n     | Swift scan | Swift map | Rust scan | Rust map
+///     ------|------------|-----------|-----------|---------
+///     4     | 9.3 ns     | 183 ns    | 3.6 ns    | 77 ns
+///     64    | 0.56 us    | 2.20 us   | 0.58 us   | 1.12 us
+///     127   | 2.23 us    | 4.21 us   | 2.55 us   | 2.41 us
+///     128   | 2.27 us    | 4.25 us   | 2.48 us   | 2.32 us
+///     256   | 9.05 us    | 8.36 us   | 9.15 us   | 4.58 us
+///     4096  | 1886 us    | 139 us    | 1897 us   | 71.7 us
+///
+/// The n=4 row carries a caveat two earlier versions of this table did
+/// not. The scan at n=4 performs three comparisons, which costs at or
+/// below the harness floor: an empty-bodied call through the same barriers
+/// measures 7.7-8.8 ns in Swift and 0.6-0.7 ns in Rust, so nearly all of
+/// the Swift 9.3 ns and about a fifth of the Rust 3.6 ns is harness rather
+/// than algorithm. The RATIO at n=4 is therefore not a reproducible
+/// quantity. This harness reads 20-21x in both languages; an earlier
+/// version of this doc asserted 77x and 28x; a third, independent harness
+/// read 10.5x in Rust. Do not cite a ratio here. What all of them agree on
+/// is the figure that is actually load-bearing: the map's ABSOLUTE cost on
+/// a short ring, 183-196 ns in Swift and 73-84 ns in Rust across every run
+/// any of the three harnesses has recorded. That fixed cost - not any
+/// ratio - is what the map-only version this replaces paid on every short
+/// ring, and it is the whole reason the dispatcher exists.
+///
+/// The remaining rows do reproduce, within about 10% run to run. The map
+/// overtakes the scan near n=230 in Swift and near n=125 in Rust, and by
+/// n=4096 it is 14x faster in Swift and 26-27x in Rust.
+///
+/// Which rings are short, computed rather than assumed. Rect and Polygon
+/// operands contribute a handful of vertices. An Ellipse is flattened by
+/// ellipseToRing to ceil(pi * sqrt(r / 2p)) vertices (min 8) for major
+/// radius r at the boolean precision, whose default is 0.0283 - so 30
+/// vertices at r=5, 42 at r=10, 94 at r=50, 133 at r=100, 296 at r=500.
+/// Ellipse-driven results are therefore NOT all short: the n=128 boundary
+/// falls at r ~ 94 pt, which is ordinary artwork. (An earlier draft of
+/// this doc asserted they all sat far below the crossover. They do not.)
+///
+/// That is what makes 128 a good shared constant rather than merely a
+/// legible one: it puts small shapes and rect/polygon work on the scan and
+/// large ellipse results on the map, each on the side where it wins. It
+/// sits AT Rust's crossover rather than comfortably above it: five repeats
+/// of the search for the smallest n at which the map first wins returned
+/// 120, 120, 120, 124 and 132, and at n=127/128 the two bodies are within
+/// 10% of each other, so the choice costs little in either direction right
+/// at the boundary. (Swift's four repeats returned 224, 228, 228, 232.)
+/// The most Swift can lose by switching at 128 instead of its own ~230 is
+/// the n=128 row: 4.25 us against 2.27 us, about 2 us. In the other
+/// direction the scan's worst case below the threshold is the longest ring
+/// it is ever handed, n=127, at 126*127/2 = 8001 comparisons, measured at
+/// 2.23 us in Swift and 2.55 us in Rust. (An earlier version of this line
+/// wrote 127*128/2 = 8128. That is the count for n=128 - a length this
+/// threshold routes to the map, not to the scan.) Both bounds are small
+/// and explicit.
+///
+/// The threshold cannot change WHAT is returned: both bodies return the
+/// same pair for every ring, which
+/// firstRepeatedVertexMatchesTheQuadraticScan checks directly on each of
+/// them, and firstRepeatedVertexAgreesAcrossTheThreshold checks on rings
+/// straddling this value.
+let pinchMapThreshold = 128
+
+/// The first repeated vertex of `ring` as (i, j) with i < j and
+/// ring[i] == ring[j], scanning j ascending then i ascending so the
+/// choice is total and port-independent. Exact equality is the right
+/// test: the sweep's vertices come from snap-rounded input and
+/// arrangement splits, so a revisited vertex is bit-identical.
+///
+/// COST. O(n^2) worst case below `pinchMapThreshold` and O(n) expected at
+/// or above it - see that constant for the measurements behind the
+/// switch. The post-pass runs on EVERY boolean result, so both regimes
+/// matter: ordinary results are short and the scan wins there, while a
+/// curve-flattened result carries thousands of vertices, where the scan
+/// costs milliseconds.
+///
+/// Both bodies return the SAME pair. The map holds the FIRST index at
+/// which each distinct vertex was seen (insert only when absent) and j
+/// still ascends, so it reports the same (smallest j that repeats,
+/// smallest i equal to it) the scan does. That identity is load-bearing:
+/// splitPinchedRing cuts at this pair, and the exact-comparison corpus
+/// pins the resulting ring order across both ports. jas_dioxus carries
+/// the identical pair of bodies, threshold and key canonicalization
+/// included.
+///
+/// Internal (not private) only so the differential test can drive it.
+func firstRepeatedVertex(_ ring: BoolRing) -> (Int, Int)? {
+    ring.count < pinchMapThreshold
+        ? firstRepeatedVertexScan(ring)
+        : firstRepeatedVertexMap(ring)
+}
+
+/// The pairwise scan. Separately named so the differential test can drive
+/// it on rings of any length, not only the ones the threshold routes here.
+func firstRepeatedVertexScan(_ ring: BoolRing) -> (Int, Int)? {
+    guard ring.count > 1 else { return nil }
+    for j in 1..<ring.count {
+        for i in 0..<j {
+            if ring[i] == ring[j] { return (i, j) }
+        }
+    }
+    return nil
+}
+
+/// The index-map reduction. Separately named for the same reason as
+/// firstRepeatedVertexScan.
+func firstRepeatedVertexMap(_ ring: BoolRing) -> (Int, Int)? {
+    var seen: [BoolVertexKey: Int] = [:]
+    seen.reserveCapacity(ring.count)
+    for (j, v) in ring.enumerated() {
+        guard let key = BoolVertexKey(v) else { continue }
+        if let i = seen[key] { return (i, j) }
+        seen[key] = j
+    }
+    return nil
 }

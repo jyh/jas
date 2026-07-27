@@ -17,6 +17,12 @@ pub mod path_text_layout;
 // cross-language test binary, not the main app lib.
 #[allow(dead_code)]
 pub mod shape_recognize;
+pub mod corpus_text_measure;
+// Region metrics for the boolean conformance harness. Every item is
+// test/harness-only by design — the app never measures a PolygonSet — so
+// the allow is module-wide rather than per item.
+#[allow(dead_code)]
+pub mod polygon_metrics;
 pub mod text_layout;
 pub mod text_layout_paragraph;
 #[cfg(feature = "web")]

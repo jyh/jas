@@ -49,29 +49,13 @@ public enum ConceptsPanel {
         return out
     }
 
-    /// Gather every existing element id (layers + master store) so a freshly
-    /// minted id avoids collisions. Mirrors SymbolsPanel.existingIds.
-    private static func existingIds(_ doc: Document) -> Set<String> {
-        var set: Set<String> = []
-        func gather(_ elem: Element) {
-            if let id = elem.id { set.insert(id) }
-            switch elem {
-            case .group(let g): for c in g.children { gather(c) }
-            case .layer(let l): for c in l.children { gather(c) }
-            default: break
-            }
-        }
-        for layer in doc.layers { gather(.layer(layer)) }
-        for master in doc.symbols { gather(master) }
-        return set
-    }
-
-    private static func mint(_ existing: Set<String>) -> String? {
-        for _ in 0..<100 {
-            let c = generateElementId()
-            if !existing.contains(c) { return c }
-        }
-        return nil
+    /// Mint one collision-free element id against every id already in `doc`
+    /// (layer forest plus master store — `Document.elementIds`) through THE ONE
+    /// MINT LOOP. nil means the caller mints nothing and aborts.
+    private static func mint(_ doc: Document) -> String? {
+        var existing = doc.elementIds
+        return mintUniqueIds(1, existing: &existing,
+                             mint: { generateElementId() })?[0]
     }
 
     /// Native intercept for the Concepts panel ops (the YAML actions are
@@ -85,8 +69,7 @@ public enum ConceptsPanel {
         switch action {
         case "place_concept_instance":
             guard let conceptId = selectedConcept(model) else { return }
-            let existing = existingIds(model.document)
-            guard let elemId = mint(existing) else { return }
+            guard let elemId = mint(model.document) else { return }
             let op: [String: Any] = [
                 "op": "place_concept_instance",
                 "concept_id": conceptId,

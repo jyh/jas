@@ -24,9 +24,14 @@ private func fmt(_ v: Double) -> String {
 
 private func colorStr(_ c: Color) -> String {
     let (cr, cg, cb, ca) = c.toRgba()
-    let r = Int(round(cr * 255))
-    let g = Int(round(cg * 255))
-    let b = Int(round(cb * 255))
+    // quantise8, so the emitted number is always in 0...255 — Rust's
+    // `(rv * 255.0).round() as u8` saturates, and this port's bare `Int(...)`
+    // is 64-bit, so an out-of-range component was written out VERBATIM as
+    // `rgb(510,0,0)`, which is not valid CSS colour syntax. NaN / ±infinity
+    // additionally trapped. Risk R9. Rust twin: geometry/svg.rs color_str.
+    let r = quantise8(cr)
+    let g = quantise8(cg)
+    let b = quantise8(cb)
     if ca < 1.0 { return "rgba(\(r),\(g),\(b),\(fmt(ca)))" }
     return "rgb(\(r),\(g),\(b))"
 }
@@ -324,8 +329,13 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         let toolOriginAttr = v.toolOrigin.map {
             " jas:tool-origin=\"\(escapeXml($0))\""
         } ?? ""
+        // The carried rule leaves the document here. `nonzero` is the
+        // SVG default and is written by omission; `evenodd` must be
+        // stated or a re-import would silently change what the artwork
+        // means. Mirrors Rust `geometry::svg::element_svg`.
+        let fillRuleAttr = v.fillRule == .evenodd ? " fill-rule=\"evenodd\"" : ""
         return "\(indent)<path d=\"\(pathData(v.d))\"" +
-            "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
+            "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))\(fillRuleAttr)" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))" +
             "\(toolOriginAttr)\(idAttr(v.id))\(nameAttr(v.name))/>"
 
@@ -1342,10 +1352,17 @@ private func parseElement(_ node: XMLNode) -> Element? {
     case "path":
         let d = parsePathD(elem.attribute(forName: "d")?.stringValue ?? "")
         let toolOrigin = elem.attribute(forName: "jas:tool-origin")?.stringValue
+        // The carried rule enters the document here. Anything other
+        // than "evenodd" — including the attribute being absent — is
+        // SVG's nonzero default. Mirrors the Rust importer.
+        let fillRule: FillRule =
+            (elem.attribute(forName: "fill-rule")?.stringValue == "evenodd")
+                ? .evenodd : .nonzero
         return .path(Path(d: d, fill: fill, stroke: stroke,
                               opacity: opacity, transform: transform,
                               toolOrigin: toolOrigin,
-                              name: name, id: id))
+                              name: name, id: id,
+                              fillRule: fillRule))
 
     case "title":
         // <title> children of an element are name-bearers (handled
@@ -1429,8 +1446,19 @@ private func parseElement(_ node: XMLNode) -> Element? {
         }
         var th = 0.0
         if tw > 0 {
-            let lines = max(1, Int(Double(content.count) * fs * approxCharWidthFactor / tw) + 1)
-            th = Double(lines) * fs * 1.2
+            // Kept in Double and rounded UP, exactly as Rust's
+            // `.ceil().max(1.0)` does — it performs no integer conversion here
+            // at all. The old `Int(x) + 1` differed from `ceil(x)` at every
+            // exact integer (a whole extra line of height), and trapped
+            // outright on a non-finite `font-size`, which `attrF` accepts
+            // because `Double("nan")` succeeds — as does Rust's
+            // `parse::<f64>()`, so both ports READ such a file. Risk R9.
+            // Argument order matters: Swift's `max(x, y)` is `y >= x ? y : x`,
+            // so the constant must come FIRST for NaN to yield 1.0 the way
+            // Rust's `f64::max` does.
+            let lines = max(1.0, (Double(content.count) * fs * approxCharWidthFactor / tw)
+                                     .rounded(.up))
+            th = lines * fs * 1.2
         }
         // SVG `y` is the baseline of the first line; convert to the
         // layout-box top by subtracting the ascent (0.8 * fs).

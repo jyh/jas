@@ -875,6 +875,34 @@ fn path_evenodd_winding_crosses_the_seam() {
     assert_eq!(sp.fill.expect("fill").winding, FillRule::EvenOdd, "A3 winding rides fill_path");
 }
 
+/// The gradient twin of `path_evenodd_winding_crosses_the_seam`: the
+/// winding rule rides `fill_path` whatever the BRUSH is. `conv_fill`
+/// takes the rule alongside the brush, so a gradient-painted even-odd
+/// path keeps its holes.
+///
+/// This is the parity mirror of JasSwift
+/// Tests/Canvas/GradientFillRuleTests.swift, where the same invariant
+/// had to be repaired: Swift's gradient branches clipped and filled with
+/// the winding rule unconditionally, so a gradient flooded the holes of
+/// an imported even-odd path while Rust kept them.
+#[test]
+fn path_evenodd_winding_survives_a_gradient_fill() {
+    let mut e = plain_path_elem();
+    e.fill_rule = FillRule::EvenOdd;
+    e.fill_gradient = Some(linear_grad(45.0));
+    let sp = path_painter_inputs(&e, elem_bounds_path(&e)).expect("converts");
+    let f = sp.fill.expect("fill");
+    assert_eq!(f.winding, FillRule::EvenOdd,
+               "a gradient brush must not reset the winding rule");
+    // And it really is the gradient, not a solid colour fallback.
+    assert!(matches!(f.brush, crate::painter::Brush::Linear(_)),
+            "expected a linear-gradient brush, got {:?}", f.brush);
+    // A gradient STROKE alongside must not disturb it either.
+    e.stroke_gradient = Some(linear_grad(90.0));
+    let sp = path_painter_inputs(&e, elem_bounds_path(&e)).expect("converts");
+    assert_eq!(sp.fill.expect("fill").winding, FillRule::EvenOdd);
+}
+
 #[test]
 fn path_stroke_brush_not_convertible() {
     // RP2: a set stroke brush renders a filled outline, not a native stroke.

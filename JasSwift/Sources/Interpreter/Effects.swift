@@ -337,7 +337,9 @@ private func valueToAny(_ v: Value) -> Any? {
     case .null: return nil
     case .bool(let b): return b
     case .number(let n):
-        if n == Double(Int(n)) { return Int(n) }
+        // See intIfIntegral: the old `n == Double(Int(n))` guard evaluated the
+        // trapping cast inside its own predicate (risk R9).
+        if let i = intIfIntegral(n) { return i }
         return n
     case .string(let s): return s
     case .color(let c): return c
@@ -2179,8 +2181,15 @@ public func parseNotifyPayload(_ arg: Any?) -> (panel: String, field: String?)? 
 /// apply is field-scoped — it writes only that field's group and preserves
 /// the rest from the element — so callers that know the key must pass it;
 /// see `applyStrokePanelToSelection`.
+///
+/// `terminal` says the write is a finished edit (slider pointer-up, Enter or
+/// blur in a value box) rather than a live drag tick. Only the Color branch
+/// reads it: the two arms are `setActiveColor` (one undo step, pushes to the
+/// recent strip, writes the app tier) and `setActiveColorLive`. Every other
+/// panel's apply is the same either way, so they ignore it.
 public func notifyPanelStateChanged(
-    _ panelId: String, store: StateStore, model: Model, edited: String? = nil
+    _ panelId: String, store: StateStore, model: Model, edited: String? = nil,
+    terminal: Bool = false
 ) {
     switch panelId {
     case "character_panel_content":
@@ -2211,13 +2220,23 @@ public func notifyPanelStateChanged(
                                         edited: edited)
         }
     case "color_panel_content":
-        // Hex / sliders / mode all write to the same panel state;
-        // re-derive the color from the updated state and apply it
-        // live (no push to recent — slider/hex onCommit handles
-        // that on release / Enter so dragging doesn't churn the
-        // recent strip).
-        if let color = ColorPanel.colorFromPanelState(store: store) {
-            ColorPanel.setActiveColorLive(color, model: model)
+        // Hex / sliders / mode all write to the same panel state; re-derive the
+        // colour through ``colorPanelWriteColor`` — the store's channels with
+        // the active paint's own channels overlaid, minus the one just edited —
+        // and apply it. `terminal` picks the arm: a drag tick applies LIVE (no
+        // push to recent, so dragging doesn't churn the strip), a pointer-up /
+        // Enter commits (one undo step, pushes to recent, writes the app tier).
+        //
+        // Rust's twin is `compute_color_from_panel` over `ctx.get("panel")`,
+        // with `set_active_color_live` on `oninput` and `set_active_color` on
+        // `onchange` (renderer.rs render_slider / render_number_input).
+        if let color = colorPanelWriteColor(store: store, model: model,
+                                            edited: edited) {
+            if terminal {
+                ColorPanel.setActiveColor(color, model: model)
+            } else {
+                ColorPanel.setActiveColorLive(color, model: model)
+            }
         }
     default:
         break
@@ -2227,9 +2246,12 @@ public func notifyPanelStateChanged(
 /// Format a number for CSS length / value output: integers have no
 /// decimal, fractions drop trailing zeros. Matches the Rust
 /// `fmt_num` helper.
-private func _fmtNum(_ n: Double) -> String {
+/// Internal rather than private so `R9GuardedCastTests` can hold it to that
+/// mirror. (A verbatim second copy of CharacterPanelSync's `fmtNum`.)
+func _fmtNum(_ n: Double) -> String {
+    // saturatingInt mirrors Rust's `n as i64` — see fmtNum (risk R9).
     if n == n.rounded(.towardZero) {
-        return String(Int(n))
+        return String(saturatingInt(n))
     }
     var s = String(format: "%.4f", n)
     while s.hasSuffix("0") { s.removeLast() }

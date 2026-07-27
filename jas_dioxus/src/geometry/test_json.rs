@@ -490,6 +490,18 @@ fn element_json(elem: &Element) -> String {
             let cmds: Vec<String> = e.d.iter().map(path_command_json).collect();
             o.raw("d", json_array(&cmds));
             o.raw("fill", fill_json(&e.fill));
+            // The carried rule is part of what a path MEANS, so a
+            // golden that omits it cannot see a port filling a hole
+            // (transcripts/BOOLEAN.md). Emitted only when it is not the
+            // `nonzero` default, per this file's identity-omission
+            // convention — so existing goldens are unchanged and only
+            // multi-ring boolean results grow the key.
+            if !matches!(
+                e.fill_rule,
+                crate::geometry::element::FillRule::NonZero
+            ) {
+                o.str_val("fill_rule", "evenodd");
+            }
             o.raw("stroke", stroke_json(&e.stroke));
         }
         Element::Text(e) => {
@@ -912,9 +924,42 @@ fn parse_transform_opt(v: &serde_json::Value) -> Option<Transform> {
     })
 }
 
+/// A Test-JSON tspan `id`: the number's value when that value is an id in the
+/// declared domain, else 0.
+///
+/// `CROSS_LANGUAGE_TESTING.md`'s Tspan notes declare `id` a monotonic `u32`.
+/// Nothing in that file gives a meaning to a value outside the domain, so each
+/// one reads as 0 — the answer both ports already gave for a negative, missing
+/// or non-numeric id. Deliberately NOT the older `as_u64().unwrap_or(0) as u32`:
+///
+///   - `as_u64()` is `None` for ANY serde_json float, whole-valued or not, so
+///     `3.0` read as 0 here and as 3 in JasSwift. The rule that would make a
+///     decimal point meaningful ("Floats … always written with the decimal
+///     point") is one of that file's Normalization rules, which are stated for
+///     `document_to_test_json` — they bind the WRITER, not this reader.
+///   - `as u32` on an in-`u64` value TRUNCATES to the low 32 bits, so
+///     `4294967297` read as 1 — an id the writer could equally have emitted for
+///     a real tspan, which TSPAN.md's Invariants require to be unique within one
+///     `Text`. That truncation is an artifact of `as`, not an authored rule.
+///
+/// Gated in both ports by `test_fixtures/algorithms/tspan_id_from_json.json`.
+fn parse_tspan_id(v: &serde_json::Value) -> u32 {
+    let d = match v.as_f64() {
+        Some(d) => d,
+        None => return 0,
+    };
+    if !(d >= 0.0 && d <= 4_294_967_295.0) {
+        return 0;
+    }
+    if d != d.trunc() {
+        return 0;
+    }
+    d as u32
+}
+
 fn parse_tspan(v: &serde_json::Value) -> crate::geometry::tspan::Tspan {
     crate::geometry::tspan::Tspan {
-        id: v["id"].as_u64().unwrap_or(0) as u32,
+        id: parse_tspan_id(&v["id"]),
         content: v["content"].as_str().unwrap_or("").to_string(),
         baseline_shift: v["baseline_shift"].as_f64(),
         dx: v["dx"].as_f64(),
@@ -1048,7 +1093,10 @@ fn parse_stroke(v: &serde_json::Value) -> Option<Stroke> {
     Some(Stroke { color: parse_color(&v["color"]), width: parse_f(&v["width"]), linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, dash_align_anchors: false, start_arrow: Arrowhead::None, end_arrow: Arrowhead::None, start_arrow_scale: 100.0, end_arrow_scale: 100.0, arrow_align: ArrowAlign::TipAtEnd, opacity: v["opacity"].as_f64().unwrap_or(1.0) })
 }
 
-fn parse_transform(v: &serde_json::Value) -> Option<Transform> {
+/// Public so the `algorithm_roundtrip` harness can read a fixture's
+/// `layer_transform` (the `element_evaluated_bounds` family's ancestor leg)
+/// through the SAME parser the element's own `transform` goes through.
+pub fn parse_transform(v: &serde_json::Value) -> Option<Transform> {
     if v.is_null() { return None; }
     Some(Transform {
         a: parse_f(&v["a"]), b: parse_f(&v["b"]), c: parse_f(&v["c"]),
@@ -1175,7 +1223,13 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
-            fill_rule: crate::geometry::element::FillRule::NonZero,
+            // Absent means the `nonzero` default, matching the
+            // serializer's identity-omission convention.
+            fill_rule: if v["fill_rule"].as_str() == Some("evenodd") {
+                crate::geometry::element::FillRule::EvenOdd
+            } else {
+                crate::geometry::element::FillRule::NonZero
+            },
         }),
         "text" => Element::Text(TextElem {
             x: parse_f(&v["x"]),
@@ -1564,6 +1618,80 @@ mod tests {
         assert!(json.contains("\"type\":\"layer\""));
         assert!(json.contains("\"selected_layer\":0"));
         assert!(json.contains("\"selection\":[]"));
+    }
+
+    /// The corpus JSON boundary must round-trip the fill rule, not just
+    /// emit it. The serializer has written `fill_rule` since the rule
+    /// joined PathElem, but `parse_element` hardcoded NonZero — so a
+    /// corpus vector COULD NOT express an even-odd path: any fixture
+    /// declaring one would fail its own json -> doc -> json round trip.
+    /// Symmetric with Swift (both ports emitted and neither parsed), so
+    /// this was a write-only boundary rather than a parity break, and it
+    /// is fixed in both ports together.
+    ///
+    /// Which corpus fixtures the fix could have moved, stated accurately
+    /// because an earlier commit message got this wrong. THREE fixtures
+    /// mention a fill rule today:
+    ///
+    ///   test_fixtures/actions/boolean_exclude_overlapping_rects_expected.json
+    ///     declares `"fill_rule":"evenodd"` on its Path. Teaching the
+    ///     PARSER to read the key cannot move it: `assert_action_test`
+    ///     (cross_language_test.rs) compares
+    ///     `document_to_test_json(result)` against the golden as TEXT and
+    ///     never parses the golden back, so only the serializer's output
+    ///     is under test and the serializer already emitted the key.
+    ///   test_fixtures/algorithms/boolean.json and boolean_normalize.json
+    ///     carry `a_fill_rule` / `b_fill_rule` (and `fill_rule`) as
+    ///     algorithm-level OPERAND rules. Those are read by the algorithms
+    ///     harness straight into a ruled polygon set, never through this
+    ///     Path parser.
+    ///
+    /// The earlier claim was "no corpus fixture declares fill_rule today
+    /// (grepped test_fixtures/expected/*.json)". The conclusion (no golden
+    /// changes) survives, the evidence did not: `expected/` holds the
+    /// SVG-parse goldens, which is the one family that has no fill_rule in
+    /// it. Grep all of `test_fixtures/`, not one subdirectory.
+    #[test]
+    fn fill_rule_round_trips_through_test_json() {
+        use crate::geometry::element::FillRule;
+        for rule in [FillRule::NonZero, FillRule::EvenOdd] {
+            let path = Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 10.0, y: 0.0 },
+                    PathCommand::LineTo { x: 10.0, y: 10.0 },
+                    PathCommand::ClosePath,
+                ],
+                fill: Some(Fill::new(Color::BLACK)),
+                stroke: None,
+                width_points: vec![],
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+                fill_rule: rule,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+            });
+            let layer = Element::Layer(LayerElem {
+                children: vec![Rc::new(path)],
+                isolated_blending: false,
+                knockout_group: false,
+                common: CommonProps::default(),
+            });
+            let doc = Document {
+                layers: vec![layer], selected_layer: 0, ..Document::default()
+            };
+            let json = document_to_test_json(&doc);
+            let back = test_json_to_document(&json);
+            match &*back.layers[0].children().unwrap()[0] {
+                Element::Path(p) => assert_eq!(p.fill_rule, rule,
+                    "test_json dropped {rule:?}"),
+                other => panic!("expected Path, got {other:?}"),
+            }
+            // Canonicality: the fixture form is a fixed point, which is
+            // what every corpus golden comparison relies on.
+            assert_eq!(document_to_test_json(&back), json);
+        }
     }
 
     #[test]
@@ -2040,5 +2168,39 @@ mod tests {
         let json = document_to_test_json(&d);
         let d2 = test_json_to_document(&json);
         assert_eq!(d2.print_preferences, d.print_preferences);
+    }
+
+    /// The shared `id`-domain corpus, driven through the real element
+    /// decoder. JasSwift runs the same file in
+    /// `R9CallSitePinTests.tspanIdDomainCorpusMatchesAcrossPorts`.
+    #[test]
+    fn tspan_id_domain_corpus() {
+        let full = format!(
+            "{}/../test_fixtures/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            "algorithms/tspan_id_from_json.json"
+        );
+        let raw = std::fs::read_to_string(&full)
+            .unwrap_or_else(|e| panic!("read {}: {}", full, e));
+        let file: serde_json::Value = serde_json::from_str(&raw).expect("parse fixture");
+        let vectors = file["vectors"].as_array().expect("vectors array");
+        assert!(!vectors.is_empty());
+        for v in vectors {
+            let name = v["name"].as_str().unwrap_or("?");
+            let tspans = match parse_element(&v["input"]) {
+                Element::Text(t) => t.tspans,
+                other => panic!("vector {}: expected a text element, got {:?}", name, other),
+            };
+            let expected = v["expected"].as_u64().expect("expected is a number") as u32;
+            assert_eq!(tspans[0].id, expected, "vector {}", name);
+            if let Some(last) = v.get("expected_last").and_then(|n| n.as_u64()) {
+                assert_eq!(
+                    tspans[tspans.len() - 1].id,
+                    last as u32,
+                    "vector {} (last tspan)",
+                    name
+                );
+            }
+        }
     }
 }

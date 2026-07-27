@@ -48,6 +48,16 @@ private let tagGroup: Int = 10
 // LiveElement kind, disambiguated by a kind string at index 7.
 private let tagLive: Int = 11
 
+// Fill-rule tags. TAG_PATH slot 11 (see packElement / unpackElement).
+// Trailing-append, like widthPoints (slot 10) before it: a blob written
+// before this slot existed simply has 11 slots and reads as .nonzero, so
+// nothing on disk is orphaned and the header stays at v2 — a version bump
+// would make the frozen reference reader (which rejects version > 2)
+// unable to read anything we write. jas_dioxus pins the identical slot
+// and tag values so the two ports stay byte-identical.
+private let fillRuleNonZero: Int = 0
+private let fillRuleEvenOdd: Int = 1
+
 // Path command tags.
 private let cmdMoveTo: Int = 0
 private let cmdLineTo: Int = 1
@@ -413,7 +423,10 @@ private func packTspan(_ t: Tspan) -> MsgValue {
 private func unpackTspan(_ v: MsgValue) -> Tspan {
     let arr = asArray(v)
     func get(_ i: Int) -> MsgValue { i < arr.count ? arr[i] : .nil }
-    let id = arr.count > 0 ? UInt32(asInt(arr[0])) : 0
+    // truncatingIfNeeded mirrors Rust's `as u32`, which WRAPS an out-of-range
+    // integer where UInt32(_:) is a precondition failure -- a crafted blob with
+    // a negative tspan id crashed only here (risk R9).
+    let id = arr.count > 0 ? UInt32(truncatingIfNeeded: asInt(arr[0])) : 0
     let content = arr.count > 1 ? asStr(arr[1]) : ""
     let decor: [String]?
     if case .array(let xs) = get(17) {
@@ -457,7 +470,12 @@ private func unpackTspan(_ v: MsgValue) -> Tspan {
 
 private func asInt(_ v: MsgValue) -> Int {
     guard case .int(let n) = v else {
-        if case .float64(let f) = v { return Int(f) }
+        // saturatingInt so a non-finite float in this slot cannot take the
+        // process down (risk R9). It does NOT make the decoder panic-free —
+        // every other type mismatch here is still a fatalError, where Rust's
+        // as_i64 returns Err and REJECTS a float outright. That wider contract
+        // gap is banked in transcripts/CORPUS_CENSUS.md §7.1.
+        if case .float64(let f) = v { return saturatingInt(f) }
         fatalError("expected int, got \(v)")
     }
     return n
@@ -517,6 +535,29 @@ private func packStroke(_ stroke: Stroke?) -> MsgValue {
                    vf64(s.startArrowScale), vf64(s.endArrowScale), vint(arrowAlign),
                    // Element 13: dash_align_anchors (added with DASH_ALIGN.md).
                    vbool(s.dashAlignAnchors)])
+}
+
+/// Pack a fill rule as its wire tag.
+private func packFillRule(_ r: FillRule) -> MsgValue {
+    vint(r == .evenodd ? fillRuleEvenOdd : fillRuleNonZero)
+}
+
+/// Read the fill rule from an optional trailing slot. Only the exact
+/// integer tag `fillRuleEvenOdd` yields `.evenodd`; EVERYTHING else reads
+/// as the app default `.nonzero` — an absent slot (a pre-fillRule blob,
+/// written when nonzero was the only rule), an out-of-range tag, and any
+/// wrong-typed payload a corrupt or hostile blob might carry.
+///
+/// Deliberately does NOT go through `asInt`, which `fatalError`s on
+/// msgpack nil / string / array and truncates a float. Rust's
+/// `unpack_fill_rule` is `as_i64().or_else(as_u64)` with `_ => NonZero`,
+/// so it accepts none of those and traps on none of them; matching it here
+/// keeps the ports equal AND keeps jas_dioxus's standing contract that a
+/// malformed-but-decodable blob does not take the app down
+/// (`malformed_but_decodable_blob_errors_not_panics`).
+private func unpackFillRule(_ v: MsgValue?) -> FillRule {
+    if case .some(.int(let n)) = v, n == fillRuleEvenOdd { return .evenodd }
+    return .nonzero
 }
 
 private func packWidthPoints(_ pts: [StrokeWidthPoint]) -> MsgValue {
@@ -620,9 +661,11 @@ private func packElement(_ elem: Element) -> MsgValue {
         let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
                                 transform: e.transform, name: e.name, id: e.id)
         let cmds: [MsgValue] = e.d.map { packPathCommand($0) }
+        // fillRule rides the trailing slot 11 (always written).
         return .array([vint(tagPath)] + common +
                       [.array(cmds), packFill(e.fill), packStroke(e.stroke),
-                       packWidthPoints(e.widthPoints)])
+                       packWidthPoints(e.widthPoints),
+                       packFillRule(e.fillRule)])
     case .text(let e):
         let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
                                 transform: e.transform, name: e.name, id: e.id)
@@ -886,10 +929,12 @@ private func unpackElement(_ v: MsgValue) -> Element {
     case tagPath:
         let cmds = asArray(arr[7]).map { unpackPathCommand($0) }
         let wp = arr.count > 10 ? unpackWidthPoints(arr[10]) : []
+        // Trailing slot 11; absent in pre-fillRule blobs.
+        let rule = unpackFillRule(arr.count > 11 ? arr[11] : nil)
         return .path(Path(d: cmds, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
                           widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
-                          name: name, id: id))
+                          name: name, id: id, fillRule: rule))
     case tagText:
         // Prefer the trailing tspans field when present; otherwise
         // fall back to the single-default-tspan seeded from content

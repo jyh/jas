@@ -12,6 +12,27 @@ private struct PickerEntry: Identifiable {
     let displayLabel: String
 }
 
+/// Does a NULL from this colour bind mean "explicitly no paint", or "no such
+/// entry"?
+///
+/// The value cannot tell them apart, and they must render differently:
+/// `state.fill_color` is null because the user set the attribute to None (draw
+/// the red-diagonal indicator), while `panel.recent_colors.3` is null because
+/// that slot has never been filled (draw a hollow placeholder). So decide from
+/// the bind's own DECLARATION instead: a global `state.<key>` read whose
+/// `workspace/state.yaml` schema entry is a NULLABLE COLOUR carries the "none"
+/// meaning; every other bind keeps the placeholder.
+///
+/// Mirrors Rust's `null_color_means_none` (jas_dioxus interpreter/renderer.rs)
+/// key-for-key, reading the same schema table.
+func nullColorMeansNone(_ bindExpr: String) -> Bool {
+    let key = bindExpr.hasPrefix("state.")
+        ? String(bindExpr.dropFirst("state.".count))
+        : bindExpr
+    guard let entry = getSchemaEntry(key) else { return false }
+    return entry.nullable && entry.fieldType == .color
+}
+
 /// Lower-right corner triangle marking a toolbar slot that carries
 /// long-press ``alternates`` (so the user knows a long-press reveals more
 /// tools). Mirrors jas_dioxus ``render_icon_button``'s 5x5 SVG
@@ -163,41 +184,11 @@ struct YamlElementView: View {
                     guard let m = model, let store = storeRef else { return }
                     let ws = WorkspaceData.load()
                     let actions = ws?.data["actions"] as? [String: Any]
-                    // Augment the dialog-init context with the live
-                    // selection's fill / stroke (uniform summary →
-                    // tab default → app default) so the YAML init
-                    // expression `if param.target == "fill" then
-                    // state.fill_color else state.stroke_color` reads
-                    // the actual canvas color the user is editing.
-                    // Without this, state.X resolves to the workspace
-                    // YAML default and the picker opens on white.
-                    func liveHex(_ isFill: Bool) -> String? {
-                        let resolved: Color? = {
-                            if isFill {
-                                switch selectionFillSummary(m.document) {
-                                case .uniform(let f?): return f.color
-                                case .uniform(nil): return nil
-                                default: return m.defaultFill?.color
-                                }
-                            } else {
-                                switch selectionStrokeSummary(m.document) {
-                                case .uniform(let s?): return s.color
-                                case .uniform(nil): return nil
-                                default: return m.defaultStroke?.color
-                                }
-                            }
-                        }()
-                        return resolved.map { "#" + $0.toHex() }
-                    }
-                    var ctxAug = context
-                    var stateMap = (ctxAug["state"] as? [String: Any]) ?? [:]
-                    if let h = liveHex(true) { stateMap["fill_color"] = h }
-                    if let h = liveHex(false) { stateMap["stroke_color"] = h }
-                    ctxAug["state"] = stateMap
                     dispatchYamlAction(
                         "open_color_picker",
                         params: ["target": forFill ? "fill" : "stroke"],
-                        actions: actions, ctx: ctxAug,
+                        actions: actions,
+                        ctx: colorPickerSeedContext(context, model: m),
                         store: store, model: m
                     )
                 }
@@ -343,7 +334,12 @@ struct YamlElementView: View {
     /// port never had — which is how the two ports came to disagree about what
     /// the same click meant. The live overrides remain a PULL, merged into the
     /// panel's render scope by `DockPanelView.buildPanelCtx`.
-    private func commitPanelWrite(key: String, value: Any?) {
+    /// `terminal` marks a finished edit (slider pointer-up, Enter / blur in a
+    /// value box) as opposed to a live drag tick; it is passed straight through
+    /// to ``notifyPanelStateChanged``, whose Color branch is the only reader.
+    private func commitPanelWrite(
+        key: String, value: Any?, terminal: Bool = false
+    ) {
         guard let model = model, let pid = panelId else { return }
         // Paragraph panel — Phase 4. Sync the live wrapper attrs
         // first so untouched fields hold the selection's current
@@ -381,7 +377,7 @@ struct YamlElementView: View {
         // field-scoped (it writes only that field's group and preserves
         // the rest from the element). See applyStrokePanelToSelection.
         notifyPanelStateChanged(pid, store: model.stateStore, model: model,
-                                edited: key)
+                                edited: key, terminal: terminal)
     }
 
     /// Dispatch a widget edit to the right state container based on the
@@ -394,52 +390,41 @@ struct YamlElementView: View {
     private func commitWidgetWrite(target: WriteTarget, value: Any?) {
         switch target.scope {
         case .panel:
-            commitPanelWrite(key: target.key, value: value)
-            // Color panel terminal commits push to the recent-colors
-            // strip. notifyPanelStateChanged already updated the
-            // active color via setActiveColorLive (no recent push);
-            // here we re-fire setActiveColor with the post-commit
-            // panel state so the entry lands in recent. Both the hex
-            // text input and the H / S / B / R / G / B / C / M / Y / K
-            // numeric inputs commit on Enter / blur via this path.
-            if panelId == "color_panel_content", let model = model {
-                // Hex commit: parse the typed hex directly so the
-                // committed color reflects what the user typed
-                // (colorFromPanelState reads h/s/b/r/g/bl per the
-                // mode — those are stale after a hex edit since the
-                // hex commit doesn't ripple back to the other
-                // channels). In Web Safe RGB mode, snap each
-                // channel to the nearest multiple of 51 first
-                // (0/51/102/153/204/255).
-                if target.key == "hex" {
-                    if let hexStr = value as? String,
-                       var color = ColorPanel.colorFromHex(hexStr)
-                    {
-                        let mode = model.stateStore.getPanel(
-                            "color_panel_content", "mode") as? String
-                        if mode == "web_safe_rgb" {
-                            let (r, g, b, _) = color.toRgba()
-                            func snap(_ v: Double) -> Double {
-                                let n = (v * 255.0 / 51.0).rounded() * 51.0
-                                return min(max(n, 0), 255) / 255.0
-                            }
-                            color = Color.rgb(
-                                r: snap(r), g: snap(g), b: snap(b), a: 1.0)
-                        }
-                        ColorPanel.setActiveColor(color, model: model)
+            // A Color panel channel box (H / S / B / R / G / Bl / C / M / Y / K)
+            // commits on Enter / blur, which is a TERMINAL write: the store
+            // holds the typed value, and commitPanelWrite's notify hook
+            // recomputes the paint through the one overlaid reader and pushes it
+            // with `setActiveColor` (one undo step, recent strip, app tier).
+            // Mirrors Rust's `PanelKind::Color` arm in render_number_input's
+            // onchange handler, which likewise computes from the overlaid panel
+            // map and calls `set_active_color`.
+            let colorChannelKeys: Set<String> = [
+                "h", "s", "b", "r", "g", "bl", "c", "m", "y", "k",
+            ]
+            let isColorChannel = panelId == "color_panel_content"
+                && colorChannelKeys.contains(target.key)
+            commitPanelWrite(key: target.key, value: value,
+                             terminal: isColorChannel)
+            // The HEX field is not a channel: the typed string is the whole
+            // colour, and a hex edit does not ripple back into h/s/b/r/g/bl, so
+            // the channel reader would answer with the PREVIOUS colour. Parse
+            // the string instead. In Web Safe RGB mode snap each channel to the
+            // nearest multiple of 51 (0/51/102/153/204/255) first.
+            if panelId == "color_panel_content", target.key == "hex",
+               let model = model, let hexStr = value as? String,
+               var color = ColorPanel.colorFromHex(hexStr)
+            {
+                let mode = model.stateStore.getPanel(
+                    "color_panel_content", "mode") as? String
+                if mode == "web_safe_rgb" {
+                    let (r, g, b, _) = color.toRgba()
+                    func snap(_ v: Double) -> Double {
+                        let n = (v * 255.0 / 51.0).rounded() * 51.0
+                        return min(max(n, 0), 255) / 255.0
                     }
-                } else {
-                    let colorChannelKeys: Set<String> = [
-                        "h", "s", "b", "r", "g", "bl",
-                        "c", "m", "y", "k",
-                    ]
-                    if colorChannelKeys.contains(target.key),
-                       let color = ColorPanel.colorFromPanelState(
-                            store: model.stateStore)
-                    {
-                        ColorPanel.setActiveColor(color, model: model)
-                    }
+                    color = Color.rgb(r: snap(r), g: snap(g), b: snap(b), a: 1.0)
                 }
+                ColorPanel.setActiveColor(color, model: model)
             }
         case .dialog:
             onDialogWrite?(target.key, value)
@@ -1449,119 +1434,26 @@ struct YamlElementView: View {
         }
     }
 
-    /// Apply a slider write to the panel state and, when this is a
-    /// Color panel slider (panel.h / .s / .b / .r / .g / .bl /
-    /// .c / .m / .y / .k / .hex), recompute the active color and
-    /// either set it live (drag) or commit it (release).
+    /// Apply a slider write to the panel state. On a Color panel slider the
+    /// stored value IS the colour edit: ``commitPanelWrite`` fires
+    /// ``notifyPanelStateChanged``, whose Color branch recomputes the paint
+    /// through the one overlaid reader and applies it — live on a drag tick,
+    /// committed on release (`commit`). There is no colour arithmetic here; the
+    /// slider knows only which field it writes.
     private func handleSliderWrite(
         target: WriteTarget?, value: Double,
         panelId: String?, model: Model?, commit: Bool
     ) {
-        guard let target = target, let model = model else { return }
+        guard let target = target, model != nil else { return }
         switch target.scope {
         case .panel:
-            // For color panel sliders: the panel store may hold stale
-            // h/s/b/r/g/bl/c/m/y/k from before the live override
-            // refreshed the eval ctx. Seed all the OTHER channels
-            // from the active color first so the new color computed
-            // from panel state mixes the dragged channel with the
-            // current (live) sibling values, instead of the YAML
-            // default zeros.
-            if panelId == "color_panel_content",
-               let active = activeColor(model: model)
-            {
-                let modeStr = (model.stateStore.getPanel(
-                    "color_panel_content", "mode") as? String) ?? "hsb"
-                let mode: ColorPanelMode = {
-                    switch modeStr {
-                    case "grayscale": return .grayscale
-                    case "rgb": return .rgb
-                    case "cmyk": return .cmyk
-                    case "web_safe_rgb": return .webSafeRgb
-                    default: return .hsb
-                    }
-                }()
-                ColorPanel.seedSliders(from: active, mode: mode,
-                                       store: model.stateStore)
-            }
-            // commitPanelWrite stores the value, bumps
-            // panelStateVersion (so SwiftUI re-renders bound
-            // widgets like the matching number_input next to the
-            // slider), and fires the notify hook. Skipping it left
+            // commitPanelWrite stores the value, bumps panelStateVersion (so
+            // SwiftUI re-renders bound widgets like the matching number_input
+            // next to the slider), and fires the notify hook. Skipping it left
             // the slider's value invisible to its sibling input.
-            commitPanelWrite(key: target.key, value: value)
-            if panelId == "color_panel_content" {
-                applyColorPanelStateToActiveColor(model: model, commit: commit)
-            }
+            commitPanelWrite(key: target.key, value: value, terminal: commit)
         case .dialog:
             onDialogWrite?(target.key, value)
-        }
-    }
-
-    private func activeColor(model: Model) -> Color? {
-        if model.fillOnTop {
-            switch selectionFillSummary(model.document) {
-            case .uniform(let f?): return f.color
-            case .uniform(nil): return nil
-            default: return model.defaultFill?.color
-            }
-        } else {
-            switch selectionStrokeSummary(model.document) {
-            case .uniform(let s?): return s.color
-            case .uniform(nil): return nil
-            default: return model.defaultStroke?.color
-            }
-        }
-    }
-
-    /// Read the Color panel's current mode + slider state, derive
-    /// the corresponding RGB color, and push it through ColorPanel
-    /// (live during drag, commit on release).
-    private func applyColorPanelStateToActiveColor(
-        model: Model, commit: Bool
-    ) {
-        let panelState = model.stateStore.getPanelState("color_panel_content")
-        let mode = (panelState["mode"] as? String) ?? "hsb"
-        func num(_ key: String) -> Double {
-            (panelState[key] as? Double)
-                ?? (panelState[key] as? Int).map { Double($0) }
-                ?? 0
-        }
-        // Color enum stores components in [0, 1] for s/b/r/g/b/c/m/y/k
-        // and hue in [0, 360). The YAML sliders run 0..100 (or 0..255
-        // for r/g/b), so divide before constructing.
-        let color: Color = {
-            switch mode {
-            case "grayscale":
-                let k = num("k") / 100.0
-                return Color.rgb(r: 1.0 - k, g: 1.0 - k, b: 1.0 - k, a: 1.0)
-            case "rgb", "web_safe_rgb":
-                return Color.rgb(
-                    r: num("r") / 255.0,
-                    g: num("g") / 255.0,
-                    b: num("bl") / 255.0,
-                    a: 1.0
-                )
-            case "cmyk":
-                let c = num("c") / 100.0, mk = num("m") / 100.0
-                let y = num("y") / 100.0, k = num("k") / 100.0
-                let r = (1.0 - c) * (1.0 - k)
-                let g = (1.0 - mk) * (1.0 - k)
-                let b = (1.0 - y) * (1.0 - k)
-                return Color.rgb(r: r, g: g, b: b, a: 1.0)
-            default:  // hsb
-                return Color.hsb(
-                    h: num("h"),
-                    s: num("s") / 100.0,
-                    b: num("b") / 100.0,
-                    a: 1.0
-                )
-            }
-        }()
-        if commit {
-            ColorPanel.setActiveColor(color, model: model)
-        } else {
-            ColorPanel.setActiveColorLive(color, model: model)
         }
     }
 
@@ -1569,13 +1461,18 @@ struct YamlElementView: View {
 
     @ViewBuilder
     private func renderNumberInput() -> some View {
-        let minVal = element["min"] as? Int ?? 0
-        // YAML may declare max numerically; clamp commits to it. Without
-        // this, typing 500 into an R-channel field (max=255) committed
-        // 500 verbatim — the resulting color went past 0xff and produced
-        // a 7-character hex like "1f4ff3b" instead of clamping to 255.
-        let maxVal: Int? = (element["max"] as? Int)
-            ?? (element["max"] as? Double).map { Int($0) }
+        // Declared bounds drive clamp-on-commit. Without the clamp, typing 500
+        // into an R-channel field (max=255) committed 500 verbatim — the
+        // resulting color went past 0xff and produced a 7-character hex like
+        // "1f4ff3b" instead of clamping to 255. UNDECLARED means no clamp: an
+        // `as? Int ?? 0` min substituted 0 for an absent bound, so a typed -50
+        // committed -50 in jas_dioxus (`min_clamp` stays None there) and 0 here.
+        // Read as Double — YAML gives an integer literal as Int and a
+        // fractional one as Double, and jas_dioxus reads both as f64.
+        let minClamp = (element["min"] as? Double)
+            ?? (element["min"] as? Int).map(Double.init)
+        let maxClamp = (element["max"] as? Double)
+            ?? (element["max"] as? Int).map(Double.init)
         // Bind may be a bare string ("dialog.h") or an object form
         // ({value: "panel.x"}). Color picker fields use the bare-string
         // form via the radio_field_row template; without the fallback
@@ -1583,12 +1480,17 @@ struct YamlElementView: View {
         // no-op (the field accepts typing but Enter resets to 0).
         let valueExpr: String? = (element["bind"] as? String)
             ?? (element["bind"] as? [String: Any])?["value"] as? String
-        let currentValue: Int = {
+        // Kept as a Double, like jas_dioxus's `value: f64`: this used to be
+        // `saturatingInt(n)`, so a bound 12.5 DISPLAYED as 12 here and as 12.5
+        // there (transcripts/CORPUS_CENSUS.md §7.1 item 2). The fallback for a
+        // non-number binding is the declared min, or 0 when none is declared —
+        // jas_dioxus's `min` with its `unwrap_or(0.0)`.
+        let currentValue: Double = {
             if let e = valueExpr {
                 let result = evaluate(e, context: context)
-                if case .number(let n) = result { return Int(n) }
+                if case .number(let n) = result { return n }
             }
-            return minVal
+            return minClamp ?? 0
         }()
         let writeTarget = writeBackTarget(valueExpr)
 
@@ -1607,18 +1509,25 @@ struct YamlElementView: View {
         // user input (Enter / blur after typing).
         BufferedTextField(
             placeholder: "",
-            externalValue: String(currentValue),
+            // Same number → string rule the expression language uses (and so
+            // the same string jas_dioxus's `value: "{value}"` renders from an
+            // f64): 12 shows as "12", 12.5 as "12.5".
+            externalValue: numberToCanonicalString(currentValue),
             commit: { newVal in
-                guard let parsed = Int(newVal) else { return }
-                var clamped = max(parsed, minVal)
-                if let m = maxVal { clamped = min(clamped, m) }
+                // `Int(newVal)` here dropped EVERY non-integer entry silently —
+                // "12.5" wrote nothing at all, where jas_dioxus committed 12.5.
+                // The shared rule accepts what the reference accepts for a
+                // number-typed field, clamps to the declared bounds, and writes
+                // nothing for anything else.
+                guard let clamped = numberInputCommit(
+                    text: newVal, min: minClamp, max: maxClamp) else { return }
                 if let t = writeTarget { commitWidgetWrite(target: t, value: clamped) }
                 // Fields bound to a non-writable expression (e.g. a foreach
                 // `p.value` in the Concepts param editor) drive their effect via
                 // a `behavior: [{event: change, …}]` block instead of a
                 // write-back target. Dispatch it with the committed value as
                 // `event.value`, mirroring the Dioxus widget framework.
-                handleChangeBehavior(value: Double(clamped))
+                handleChangeBehavior(value: clamped)
             }
         )
             .frame(maxWidth: fillsParent ? .infinity : 45)
@@ -2081,28 +1990,54 @@ struct YamlElementView: View {
 
     // MARK: - Color Swatch
 
+    /// The red-diagonal "no paint" indicator, drawn corner-to-corner across a
+    /// swatch. Matches Rust's `NONE_DIAG_SVG` (bottom-left to top-right, red,
+    /// 8% of the swatch) and the native ``FillStrokeWidget`` squares.
+    /// `visible: false` renders nothing, so callers can overlay
+    /// unconditionally.
+    @ViewBuilder
+    private func noneDiagonal(size: CGFloat, visible: Bool) -> some View {
+        if visible {
+            swatchNoneDiagonalPath(size: size)
+                .stroke(SwiftUI.Color.red,
+                        lineWidth: swatchNoneDiagonalLineWidth(size: size))
+                .frame(width: size, height: size)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// The border for a swatch, drawn as an inset stroke so a dashed pattern is
+    /// possible (SwiftUI's `.border` cannot dash). Rust's equivalents:
+    /// `2px solid #007aff` (accentColor is #007aff on macOS in both
+    /// appearances), `1px dashed var(--jas-border,#555)`, and
+    /// `1px solid var(--jas-border,#666)`.
+    @ViewBuilder
+    private func swatchBorderOverlay(_ kind: SwatchBorder) -> some View {
+        switch kind {
+        case .selected:
+            Rectangle().strokeBorder(SwiftUI.Color.accentColor, lineWidth: 2)
+        case .placeholder:
+            Rectangle().strokeBorder(
+                SwiftUI.Color.gray,
+                style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+        case .solid:
+            Rectangle().strokeBorder(SwiftUI.Color.gray, lineWidth: 1)
+        }
+    }
+
     @ViewBuilder
     private func renderColorSwatch() -> some View {
         let size = (element["style"] as? [String: Any])?["size"] as? CGFloat ?? 16
         let hollow = element["hollow"] as? Bool ?? false
 
-        let color: NSColor = {
-            if let bind = element["bind"] as? [String: Any],
-               let colorExpr = bind["color"] as? String {
-                let result = evaluate(colorExpr, context: context)
-                switch result {
-                case .color(let c), .string(let c):
-                    let (r, g, b) = parseHex(c)
-                    return NSColor(
-                        red: CGFloat(r) / 255, green: CGFloat(g) / 255,
-                        blue: CGFloat(b) / 255, alpha: 1
-                    )
-                default:
-                    return .clear
-                }
-            }
-            return .clear
-        }()
+        // The colour and the "is this an explicit none" answer, decided by
+        // ``swatchColorBind`` — a free function so it is testable without a
+        // view, and so it can be read side by side with Rust's
+        // `swatch_color_bind` (this panel is Path-B-excluded, so no widget_tree
+        // golden covers this widget).
+        let (color, explicitNone) = swatchColorBind(
+            (element["bind"] as? [String: Any])?["color"] as? String,
+            context: context)
 
         let selected = isSelectedInList()
         // Honor click / double_click behavior blocks (Color panel's
@@ -2113,22 +2048,34 @@ struct YamlElementView: View {
         let behaviors = element["behavior"] as? [[String: Any]] ?? []
         let hasClick = behaviors.contains { ($0["event"] as? String) == "click" }
         let hasDouble = behaviors.contains { ($0["event"] as? String) == "double_click" }
+        // A no-paint swatch draws WHITE so the red diagonal reads against a
+        // clean background — ``swatchFaceColor``, Rust's `swatch_face_color`.
+        // `nil` means paint nothing (an empty slot's transparent face).
+        let face = SwiftUI.Color(nsColor: swatchFaceColor(color, explicitNone: explicitNone)
+                                    ?? .clear)
+        // Three border kinds, decided by ``swatchBorder``. An EXPLICIT none is a
+        // real swatch and takes the solid border, not the empty slot's dashed
+        // one: Rust keyed that off `color.is_empty()` alone (true for an
+        // explicit none too) and so wore the dashed placeholder border where
+        // this port wore a solid one. Converged both ways in the COLORTIERS
+        // repair — Rust's explicit none went solid, and the dashed PLACEHOLDER,
+        // which this port did not draw at all, is drawn here.
+        let borderKind = swatchBorder(color, explicitNone: explicitNone, selected: selected)
         let swatch: AnyView = {
             if hollow {
                 return AnyView(
                     Rectangle()
-                        .stroke(SwiftUI.Color(nsColor: color), lineWidth: 3)
+                        .stroke(face, lineWidth: 3)
                         .frame(width: size, height: size)
+                        .overlay(noneDiagonal(size: size, visible: explicitNone))
                 )
             } else {
                 return AnyView(
                     Rectangle()
-                        .fill(SwiftUI.Color(nsColor: color))
+                        .fill(face)
                         .frame(width: size, height: size)
-                        .border(
-                            selected ? SwiftUI.Color.accentColor : SwiftUI.Color.gray,
-                            width: selected ? 2 : 1
-                        )
+                        .overlay(noneDiagonal(size: size, visible: explicitNone))
+                        .overlay(swatchBorderOverlay(borderKind))
                 )
             }
         }()
@@ -2442,11 +2389,14 @@ struct YamlElementView: View {
 
         let stopsRaw: [[String: Any]] = (stopsExpr.flatMap { evaluateBindObject($0) } as? [[String: Any]]) ?? []
 
+        // saturatingInt mirrors Rust's `n as i64` (risk R9).
         let selStop: Int = selStopExpr.map {
-            if case .number(let n) = evaluate($0, context: context) { return Int(n) } else { return -1 }
+            if case .number(let n) = evaluate($0, context: context) { return saturatingInt(n) }
+            else { return -1 }
         } ?? -1
         let selMid: Int = selMidExpr.map {
-            if case .number(let n) = evaluate($0, context: context) { return Int(n) } else { return -1 }
+            if case .number(let n) = evaluate($0, context: context) { return saturatingInt(n) }
+            else { return -1 }
         } ?? -1
 
         let stops = extractStops(stopsRaw)
@@ -3108,7 +3058,10 @@ struct YamlElementView: View {
                 let result = evaluate(e, context: context)
                 switch result {
                 case .string(let s): return s
-                case .number(let n): return String(Int(n))
+                // saturatingInt mirrors Rust's `as i64` (risk R9). Rust renders
+                // this value with `n.to_string()`, so a FRACTIONAL bound value
+                // reads differently here — banked in §7.1.
+                case .number(let n): return String(saturatingInt(n))
                 default: return ""
                 }
             }

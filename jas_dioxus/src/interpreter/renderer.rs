@@ -678,46 +678,18 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
         || action == "apply_concept_operation"
         || action == "promote_to_concept"
     {
-        use crate::document::artboard::generate_element_id;
+        use crate::document::artboard::{generate_element_id, mint_unique_ids};
         use crate::document::controller::Controller;
 
-        // Gather every existing element id (layers + master store) so the
-        // freshly minted ids avoid collisions, then mint a collision-free
-        // id. Mirrors the make_instance mint loop.
-        fn gather_ids(
-            elem: &crate::geometry::element::Element,
-            out: &mut std::collections::HashSet<String>,
-        ) {
-            if let Some(id) = elem.common().id.as_deref() {
-                out.insert(id.to_string());
-            }
-            if let Some(children) = elem.children() {
-                for c in children {
-                    gather_ids(c, out);
-                }
-            }
-        }
-        fn existing_ids(
+        // Mint `count` collision-free element ids against every id already in
+        // the document — layer forest plus master store, see
+        // `Document::element_ids` — through THE ONE MINT LOOP.
+        fn mint(
             model: &crate::document::model::Model,
-        ) -> std::collections::HashSet<String> {
-            let mut set = std::collections::HashSet::new();
-            let doc = model.document();
-            for layer in &doc.layers {
-                gather_ids(layer, &mut set);
-            }
-            for master in &doc.symbols {
-                gather_ids(master, &mut set);
-            }
-            set
-        }
-        fn mint(existing: &std::collections::HashSet<String>) -> Option<String> {
-            for _ in 0..100 {
-                let c = generate_element_id(None);
-                if !existing.contains(&c) {
-                    return Some(c);
-                }
-            }
-            None
+            count: usize,
+        ) -> Option<Vec<String>> {
+            let mut existing = model.document().element_ids();
+            mint_unique_ids(count, &mut existing, &mut || generate_element_id(None))
         }
 
         match action {
@@ -733,10 +705,8 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                         return Vec::new();
                     }
                     let path = es.path.clone();
-                    let mut existing = existing_ids(&tab.model);
-                    let Some(master_id) = mint(&existing) else { return Vec::new(); };
-                    existing.insert(master_id.clone());
-                    let Some(ref_id) = mint(&existing) else { return Vec::new(); };
+                    let Some(ids) = mint(&tab.model, 2) else { return Vec::new(); };
+                    let (master_id, ref_id) = (ids[0].clone(), ids[1].clone());
                     tab.model.with_txn(|m| Controller::make_symbol(m, &path, &master_id, &ref_id));
                     // Keep the new master panel-selected so Place/Delete
                     // target it immediately. make_symbol keeps an existing
@@ -763,8 +733,8 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                     return Vec::new();
                 };
                 if let Some(tab) = st.tab_mut() {
-                    let existing = existing_ids(&tab.model);
-                    let Some(ref_id) = mint(&existing) else { return Vec::new(); };
+                    let Some(ids) = mint(&tab.model, 1) else { return Vec::new(); };
+                    let ref_id = ids[0].clone();
                     tab.model.with_txn(|m| Controller::place_instance(m, &master_id, &ref_id));
                 }
                 return Vec::new();
@@ -796,8 +766,8 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                     })
                     .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
                 if let Some(tab) = st.tab_mut() {
-                    let existing = existing_ids(&tab.model);
-                    let Some(elem_id) = mint(&existing) else { return Vec::new(); };
+                    let Some(ids) = mint(&tab.model, 1) else { return Vec::new(); };
+                    let elem_id = ids[0].clone();
                     // Route through op_apply so the placement JOURNALS as a real
                     // `place_concept_instance` op (value-in-op: concept id +
                     // resolved default params + minted id), replayable like the
@@ -2306,14 +2276,21 @@ fn build_appstate_ctx(
     st: &crate::workspace::app_state::AppState,
 ) -> serde_json::Value {
     let tool_name = st.active_tool.panel_state_name();
-    let fill_color = match st.app_default_fill {
-        None => serde_json::Value::Null,
-        Some(f) => serde_json::Value::String(format!("#{}", f.color.to_hex())),
-    };
-    let stroke_color = match st.app_default_stroke {
-        None => serde_json::Value::Null,
-        Some(s) => serde_json::Value::String(format!("#{}", s.color.to_hex())),
-    };
+    // SELECTION-AWARE, and it has to be: an action's `state.fill_color` asks
+    // about the paint the click will CHANGE, and with something selected that
+    // is the SELECTION's paint, not the app default's. Clicking Solid on a
+    // stroke-only shape used to read `st.app_default_fill` alone — white —
+    // so `set_fill_type_solid`'s `state.fill_color == null` guard was false
+    // and the click was a silent no-op, while JasSwift (whose action ctx is
+    // the same selection-aware map its panels render against) painted the
+    // selection black. One fact, two answers; JYH ruled Swift right
+    // (COLORTIERS). `action_fill_stroke_values` is that one source — the
+    // panel-render reader's `live_fill_stroke_values` composed with the
+    // workspace defaults — so all three outcomes agree here and there:
+    // a colour / an explicit null for None / the declared default standing
+    // for Mixed.
+    let (fill_color, stroke_color) =
+        crate::workspace::dock_panel::action_fill_stroke_values(st);
     // Expose every stroke-panel field that appears in YAML state.*
     // expressions (workspace/panels/stroke.yaml's state map at the
     // bottom of the file enumerates them). Without these,
@@ -3197,19 +3174,22 @@ fn run_yaml_effect(
     // journal replays deterministically (checkpoint_equivalence). targets carry the
     // new artboard id.
     if let Some(spec) = eff.get("doc.create_artboard").and_then(|v| v.as_object()) {
-        use crate::document::artboard::{generate_artboard_id, next_artboard_name};
+        use crate::document::artboard::{
+            generate_artboard_id, mint_unique_ids, next_artboard_name,
+        };
         let Some(tab) = st.tabs.get_mut(st.active_tab) else { return deferred; };
         let doc = tab.model.document();
-        // Collision-retry id mint (production entropy). This is the ONLY mint;
-        // op_apply replays the recorded literal and never mints.
-        let existing_ids: std::collections::HashSet<String> =
+        // Collision-retry id mint through THE ONE MINT LOOP (production
+        // entropy). This is the ONLY mint; op_apply replays the recorded
+        // literal and never mints.
+        let mut existing_ids: std::collections::HashSet<String> =
             doc.artboards.iter().map(|a| a.id.clone()).collect();
-        let mut id = String::new();
-        for _ in 0..100 {
-            let c = generate_artboard_id(None);
-            if !existing_ids.contains(&c) { id = c; break; }
-        }
-        if id.is_empty() { return deferred; }
+        let Some(ids) = mint_unique_ids(1, &mut existing_ids, &mut || {
+            generate_artboard_id(None)
+        }) else {
+            return deferred;
+        };
+        let id = ids[0].clone();
         // Derive the default name HERE (a function of the live doc); a `name`
         // override in `spec` replaces it below. Build a RESOLVED flat `fields`
         // object: each YAML expr is evaluated to a literal before journaling
@@ -3273,7 +3253,9 @@ fn run_yaml_effect(
     // re-derives the name / NEVER taps entropy (checkpoint_equivalence). A missing
     // source is a no-op that journals nothing. targets carry the new id.
     if let Some(eff_val) = eff.get("doc.duplicate_artboard") {
-        use crate::document::artboard::{generate_artboard_id, next_artboard_name};
+        use crate::document::artboard::{
+            generate_artboard_id, mint_unique_ids, next_artboard_name,
+        };
         let (id_expr, ox_expr, oy_expr) = match eff_val {
             serde_json::Value::String(s) => (s.clone(), None, None),
             serde_json::Value::Object(m) => (
@@ -3305,15 +3287,16 @@ fn run_yaml_effect(
         if !doc.artboards.iter().any(|a| a.id == target) {
             return deferred;
         }
-        // Collision-retry id mint (production entropy) — the ONLY mint.
-        let existing_ids: std::collections::HashSet<String> =
+        // Collision-retry id mint through THE ONE MINT LOOP (production
+        // entropy) — the ONLY mint.
+        let mut existing_ids: std::collections::HashSet<String> =
             doc.artboards.iter().map(|a| a.id.clone()).collect();
-        let mut new_id = String::new();
-        for _ in 0..100 {
-            let c = generate_artboard_id(None);
-            if !existing_ids.contains(&c) { new_id = c; break; }
-        }
-        if new_id.is_empty() { return deferred; }
+        let Some(ids) = mint_unique_ids(1, &mut existing_ids, &mut || {
+            generate_artboard_id(None)
+        }) else {
+            return deferred;
+        };
+        let new_id = ids[0].clone();
         // Derive the new name HERE (a function of the live doc); journaled as a
         // literal so replay never re-derives it.
         let new_name = next_artboard_name(&doc.artboards);
@@ -6023,6 +6006,12 @@ fn compute_color_from_panel(field: &str, new_val: f64, panel: &serde_json::Value
     Some(color)
 }
 
+// The widget commit rules themselves live in `super::widget_commit`, outside
+// this `feature = "web"` module, so the corpus can run them natively:
+// `clamp_to_declared` (the declared-bounds clamp) and `number_input_commit`
+// (that clamp on top of the reference's numeric-string grammar).
+use super::widget_commit::{clamp_to_declared, number_input_commit};
+
 fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let min = el.get("min").and_then(|m| m.as_f64()).unwrap_or(0.0);
@@ -6071,9 +6060,11 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
         let mut revision = revision;
         let panel_ctx = panel_for_color.clone();
         Some(EventHandler::new(move |evt: Event<FormData>| {
-            let mut new_val: f64 = evt.value().parse().unwrap_or(0.0);
-            if let Some(lo) = min_clamp { if new_val < lo { new_val = lo; } }
-            if let Some(hi) = max_clamp { if new_val > hi { new_val = hi; } }
+            // Text the reference would refuse for a number-typed field writes
+            // NOTHING, rather than the 0.0 an `unwrap_or` used to commit.
+            let Some(new_val) = number_input_commit(&evt.value(), min_clamp, max_clamp) else {
+                return;
+            };
             let f = f.clone();
             let app = app.clone();
             let mut revision = revision;
@@ -6187,7 +6178,14 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 value: "{value}",
                 style: "min-width:0;color:var(--jas-text,#ccc);background:var(--jas-pane-bg-dark,#333);border:1px solid var(--jas-border,#555);{style}",
                 oninput: move |evt: Event<FormData>| {
-                    let new_val: f64 = evt.value().parse().unwrap_or(0.0);
+                    // Same commit rule as the panel branch above and as
+                    // JasSwift's `renderNumberInput`: accepted by the
+                    // reference's numeric-string grammar, then clamped to the
+                    // declared bounds; anything else writes nothing (risk R9).
+                    let Some(new_val) = number_input_commit(&evt.value(), min_clamp, max_clamp)
+                    else {
+                        return;
+                    };
                     if let BindTarget::Dialog(ref field) = bind_target {
                         if let Some(mut ds) = dialog_signal() {
                             ds.set_value(field, serde_json::json!(new_val));
@@ -6318,8 +6316,7 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 revision += 1;
                 return;
             };
-            if let Some(lo) = min_clamp { if new_val < lo { new_val = lo; } }
-            if let Some(hi) = max_clamp { if new_val > hi { new_val = hi; } }
+            let new_val = clamp_to_declared(new_val, min_clamp, max_clamp);
             let f = f.clone();
             let app = app.clone();
             let mut revision = revision;
@@ -7505,6 +7502,130 @@ fn null_color_means_none(bind_expr: &str) -> bool {
     })
 }
 
+/// The colour a swatch's `bind.color` resolves to, and whether "no colour"
+/// means an EXPLICIT none.
+///
+/// Returns `(colour, explicit_none)`. `explicit_none = true` is the
+/// "intentionally no paint" case — the red-diagonal indicator — as distinct
+/// from "missing bind / unset slot", which also has no colour but renders as a
+/// hollow PLACEHOLDER. Two producers encode the intentional case: an empty
+/// string (a dialog's hex field cleared), and a NULL from a bind that declares
+/// a nullable state colour (`null_color_means_none`).
+///
+/// Bare hex strings without a leading '#' (recent_colors stores them that way)
+/// get one prepended. `"#dialog.hex"` means `"#" + eval("dialog.hex")`.
+///
+/// Pulled out of `render_color_swatch` so the decision is reachable without a
+/// DOM: `color_panel_content` is Path-B-excluded, so no widget_tree golden sees
+/// this widget, and the render half of the COLORTIERS work was pinned by
+/// NOTHING — reverting the whole `explicit_none` plumbing left every test, every
+/// golden and every gui_drive check green. Mirrored in JasSwift by
+/// `swatchColorBind`.
+pub(crate) fn swatch_color_bind(
+    el: &serde_json::Value,
+    ctx: &serde_json::Value,
+) -> (String, bool) {
+    let Some(bind_color) = el.get("bind").and_then(|b| b.get("color")).and_then(|v| v.as_str())
+    else { return (String::new(), false) };
+    // Handle "#expr" pattern: "#dialog.hex" means "#" + eval("dialog.hex")
+    let hash_prefixed = bind_color.starts_with('#') && bind_color.contains('.');
+    let inner = if hash_prefixed { &bind_color[1..] } else { bind_color };
+    match expr::eval(inner, ctx) {
+        Value::Color(c) => (c, false),
+        Value::Str(s) if s.starts_with('#') && !hash_prefixed => (s, false),
+        Value::Str(s) if !s.is_empty() => (format!("#{s}"), false),
+        Value::Str(_) => (String::new(), true),
+        Value::Null => (String::new(), null_color_means_none(inner)),
+        _ => (String::new(), false),
+    }
+}
+
+/// The colour a swatch PAINTS, given `swatch_color_bind`'s answer.
+///
+/// An explicit none paints WHITE so the red diagonal reads against a clean
+/// background (the same substitution the native JasSwift squares make); an
+/// unresolved bind paints nothing; anything else paints its colour. The hollow
+/// ("stroke") swatch runs its RING through this same function, which is why a
+/// no-stroke ring is a white ring with a diagonal rather than an invisible one.
+pub(crate) fn swatch_face_color<'a>(color: &'a str, explicit_none: bool) -> &'a str {
+    if explicit_none {
+        "#fff"
+    } else if color.is_empty() {
+        "transparent"
+    } else {
+        color
+    }
+}
+
+/// Which of the three borders a swatch draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SwatchBorder {
+    /// In `bind.selected_in`'s list: a 2px accent outline.
+    Selected,
+    /// No colour and no explicit none — an EMPTY SLOT (an unfilled
+    /// recent-colours tile). Dashed, the standard placeholder affordance.
+    Placeholder,
+    /// A real swatch: a colour, or an explicit none (which is a real answer
+    /// about the paint, drawn as a white face with a red diagonal — not an
+    /// empty slot). JasSwift drew the solid border here while this port drew
+    /// the PLACEHOLDER's dashed one, because it decided from `color.is_empty()`
+    /// alone and an explicit none has no colour string (COLORTIERS repair).
+    Solid,
+}
+
+/// The red-diagonal "no paint" indicator: bottom-left to top-right, red, 8% of
+/// the box (`stroke-width: 8` in a `0 0 100 100` viewBox). JasSwift's
+/// `noneDiagonal` draws the same line at `max(1, size * 0.08)` — pinned on both
+/// sides so the indicator cannot drift apart.
+pub(crate) const NONE_DIAG_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none' style='position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;'><line x1='0' y1='100' x2='100' y2='0' stroke='red' stroke-width='8'/></svg>";
+
+/// The inline style a swatch tile carries, from the decisions above.
+///
+/// Hoisted out of the rsx so the WIRING is testable, not just the decisions: it
+/// is what turns "explicit none" into a white face and a solid border, and what
+/// turns "empty slot" into a transparent face and a dashed one. A hollow
+/// ("stroke") swatch spends its colour on a 6px RING around a transparent
+/// centre instead, which is why a no-stroke ring is a white ring with the
+/// diagonal across it rather than an invisible one.
+pub(crate) fn swatch_style(
+    size: u64, face: &str, border: SwatchBorder, hollow: bool,
+    z_style: &str, extra_style: &str,
+) -> String {
+    if hollow {
+        format!("width:{size}px;height:{size}px;background:transparent;\
+                 border:6px solid {face};cursor:pointer;box-sizing:border-box;\
+                 position:relative;{z_style}{extra_style}")
+    } else {
+        let border = border.css();
+        format!("width:{size}px;height:{size}px;background:{face};\
+                 border:{border};cursor:pointer;box-sizing:border-box;\
+                 position:relative;{z_style}{extra_style}")
+    }
+}
+
+pub(crate) fn swatch_border(color: &str, explicit_none: bool, selected: bool) -> SwatchBorder {
+    if selected {
+        SwatchBorder::Selected
+    } else if color.is_empty() && !explicit_none {
+        SwatchBorder::Placeholder
+    } else {
+        SwatchBorder::Solid
+    }
+}
+
+impl SwatchBorder {
+    pub(crate) fn css(self) -> &'static str {
+        match self {
+            // 2px macOS-system-blue (#007aff), matching JasSwift's
+            // `SwiftUI.Color.accentColor` (#007aff on macOS in both light and
+            // dark mode), so the selection reads the same in both ports.
+            SwatchBorder::Selected => "2px solid #007aff",
+            SwatchBorder::Placeholder => "1px dashed var(--jas-border,#555)",
+            SwatchBorder::Solid => "1px solid var(--jas-border,#666)",
+        }
+    }
+}
+
 fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     // Size resolution: top-level `size: "<small|medium|large>"` (used by
@@ -7532,45 +7653,10 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
             .unwrap_or(16)
     };
 
-    // Returns (color_string, explicit_none). explicit_none=true marks
-    // the "intentionally no fill / no stroke" case, distinct from
-    // "missing bind / unset slot" which also has no colour but renders as
-    // a hollow placeholder rather than the red-diagonal "no fill"
-    // indicator. Two producers encode the intentional case: an empty
-    // string (a dialog's hex field cleared), or NULL from a bind that
-    // declares a nullable state colour (`null_color_means_none` — the
-    // Color panel's fill / stroke swatches once the user clicks None).
-    // Bare hex strings without a leading '#' (recent_colors stores them
-    // that way) are also valid colors and need a '#' prepended.
-    let (color, explicit_none) = if let Some(bind_color) = el.get("bind").and_then(|b| b.get("color")).and_then(|v| v.as_str()) {
-        // Handle "#expr" pattern: "#dialog.hex" means "#" + eval("dialog.hex")
-        if bind_color.starts_with('#') && bind_color.contains('.') {
-            let inner = &bind_color[1..];
-            let result = expr::eval(inner, ctx);
-            match result {
-                Value::Str(s) if !s.is_empty() => (format!("#{s}"), false),
-                Value::Color(c) => (c, false),
-                Value::Str(_) => (String::new(), true),
-                Value::Null => (String::new(), null_color_means_none(inner)),
-                _ => (String::new(), false),
-            }
-        } else {
-            let result = expr::eval(bind_color, ctx);
-            match result {
-                Value::Color(c) => (c, false),
-                Value::Str(s) if s.starts_with('#') => (s, false),
-                Value::Str(s) if !s.is_empty() => (format!("#{s}"), false),
-                Value::Str(_) => (String::new(), true),
-                Value::Null => (String::new(), null_color_means_none(bind_color)),
-                _ => (String::new(), false),
-            }
-        }
-    } else {
-        (String::new(), false)
-    };
-
-    let bg = if color.is_empty() { "transparent".to_string() } else { color.clone() };
-    let border = if color.is_empty() { "1px dashed var(--jas-border,#555)" } else { "1px solid var(--jas-border,#666)" };
+    // The colour and the "is this an explicit none" answer, decided by
+    // `swatch_color_bind` — pulled out so it is testable without a DOM (this
+    // widget's panel is Path-B-excluded, so no widget_tree golden sees it).
+    let (color, explicit_none) = swatch_color_bind(el, ctx);
     // hollow may be a static attribute OR a bind expression. The Color
     // panel's stroke swatch uses bind.hollow = "not state.fill_on_top"
     // so the active swatch renders as a solid filled square (visually
@@ -7606,47 +7692,29 @@ fn render_color_swatch(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
     // Shared with the brush-tile container via `eval_selected_in`.
     let selected = eval_selected_in(el, ctx);
 
-    // Selected: 2px macOS-system-blue (#007aff) outline replacing
-    // the 1px border. Matches JasSwift's renderColorSwatch which
-    // uses SwiftUI.Color.accentColor (defaults to #007aff on macOS
-    // across light/dark mode). Cross-port parity: the same selection
-    // color appears in both ports regardless of theme appearance.
-    let final_border = if selected {
-        "2px solid #007aff"
-    } else {
-        border
-    };
-    let selected_halo = "";
+    // The three border kinds — selected / empty-slot placeholder / real swatch
+    // — decided by `swatch_border`. An EXPLICIT none is a real swatch (a white
+    // face with a red diagonal), not an empty slot, so it takes the solid
+    // border; this used to key off `color.is_empty()` alone, which is true for
+    // an explicit none too, so a no-paint swatch wore the placeholder's dashed
+    // border here and a solid one in JasSwift (COLORTIERS repair).
+    let border = swatch_border(&color, explicit_none, selected);
 
-    // Diagonal "no fill" indicator only when the bind explicitly
-    // resolved to an empty color (FillSummary::Uniform(None) etc.).
-    // Empty / unbound recent slots stay as plain hollow placeholders.
+    // Diagonal "no fill" indicator only when the bind explicitly resolved to
+    // "no paint". Empty / unbound recent slots stay as plain placeholders.
     let is_none = explicit_none;
-    // Make "no fill / no stroke" swatches white so the red diagonal
-    // reads against a clean background (matches Illustrator /
-    // Photoshop / OCaml + Python ports). Without this the swatch was
-    // a transparent rectangle that just inherited the toolbar bg.
-    let none_bg = if is_none { "#fff" } else { bg.as_str() };
-    let style = if hollow {
-        // Hollow ("stroke") swatch: a thick colored border around a
-        // transparent center. When stroke is None, render the border
-        // as white (instead of transparent + invisible) so the user
-        // sees a hollow ring with the red diagonal across it —
-        // matches Illustrator's no-stroke indicator.
-        let hollow_border = if is_none { "#fff" } else { bg.as_str() };
-        format!("width:{size}px;height:{size}px;background:transparent;border:6px solid {hollow_border};cursor:pointer;box-sizing:border-box;position:relative;{z_style}{extra_style}")
-    } else {
-        format!("width:{size}px;height:{size}px;background:{none_bg};border:{final_border};{selected_halo}cursor:pointer;box-sizing:border-box;position:relative;{z_style}{extra_style}")
-    };
+    // A no-paint swatch's FACE is white so the red diagonal reads against a
+    // clean background (the same substitution JasSwift's native FillStroke
+    // squares and the reference ports make). Without it the swatch was a
+    // transparent rectangle that just inherited the toolbar bg.
+    let face = swatch_face_color(&color, explicit_none);
+    let style = swatch_style(size, face, border, hollow, &z_style, &extra_style);
 
     let on_click = build_click_handler(el, ctx, rctx);
     let on_dblclick = build_dblclick_handler(el, ctx, rctx);
 
-    // Diagonal "no fill" indicator — drawn via dangerous_inner_html
-    // since Dioxus rsx! emits SVG tags into the HTML namespace by
-    // default and the browser would ignore them.
-    const NONE_DIAG_SVG: &str = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none' style='position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;'><line x1='0' y1='100' x2='100' y2='0' stroke='red' stroke-width='8'/></svg>";
-
+    // The diagonal goes in via dangerous_inner_html: Dioxus rsx! emits SVG tags
+    // into the HTML namespace by default and the browser would ignore them.
     rsx! {
         div {
             id: "{id}",
@@ -10728,6 +10796,25 @@ mod tests {
         st.app_default_fill = Color::from_hex(fill_hex).map(Fill::new);
         st.app_default_stroke = Color::from_hex(stroke_hex).map(|c| Stroke::new(c, 1.0));
         st
+    }
+
+    /// A number_input's commit is clamped to its DECLARED bounds, on the dialog
+    /// path as well as the panel path.
+    ///
+    /// This was the widget half of risk R9 (transcripts/CORPUS_CENSUS.md §7).
+    /// The panel branch clamped and the dialog branch did not, so typing 150
+    /// into the Color Picker's `c` field — which declares `max: 100` — committed
+    /// 100 in JasSwift (whose `renderNumberInput` clamps on commit) and 150
+    /// here, and the 150 then reached `cmyk()`. An UNDECLARED bound must stay
+    /// unclamped: Tracking is signed and declares neither.
+    #[test]
+    fn declared_bounds_clamp_a_number_commit() {
+        assert_eq!(clamp_to_declared(150.0, Some(0.0), Some(100.0)), 100.0);
+        assert_eq!(clamp_to_declared(-5.0, Some(0.0), Some(100.0)), 0.0);
+        assert_eq!(clamp_to_declared(42.0, Some(0.0), Some(100.0)), 42.0);
+        assert_eq!(clamp_to_declared(-50.0, None, None), -50.0);
+        assert_eq!(clamp_to_declared(1e9, Some(1.0), None), 1e9);
+        assert_eq!(clamp_to_declared(0.0, Some(1.0), None), 1.0);
     }
 
     #[test]
@@ -14384,11 +14471,409 @@ mod tests {
                 "sliders / hex / colour bar disable for a no-fill selection");
     }
 
+    // ── COLORTIERS: each port was right about one thing ───────────────
+    //
+    // JYH ruled 2026-07-26 on the two architectural asymmetries the CPTRIAGE
+    // sweep banked. Half 2 is Rust's to adopt: the ACTION-dispatch `state`
+    // scope must be SELECTION-AWARE. Clicking Solid with a shape selected
+    // asks "is THE SELECTION's fill none?", and `build_appstate_ctx` used to
+    // answer from `st.app_default_fill` alone — so on a stroke-only shape the
+    // guard read white, the click was a silent no-op, and JasSwift (already
+    // selection-aware) painted it. Cross-language pin:
+    // test_fixtures/actions/fill_stroke_action_scope.json.
+
+    /// A one-rect document with the given paint, selected, installed in `st`.
+    fn select_one_rect(st: &mut AppState, fill: Option<Fill>, stroke: Option<Stroke>) {
+        use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
+        use crate::document::document::{Document, ElementSelection};
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill, stroke,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        st.tabs[st.active_tab].model.set_document_for_test(Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![std::rc::Rc::new(rect)],
+                isolated_blending: false,
+                knockout_group: false,
+                common: CommonProps::default(),
+            })],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        });
+    }
+
+    #[test]
+    fn colortiers_action_scope_reads_the_selection_not_the_app_default() {
+        // App default fill: white. Selection: a stroke-only rect. The two
+        // disagree, and the action must believe the selection.
+        let mut st = make_state_with_colors("ffffff", "000000");
+        select_one_rect(&mut st, None, Some(Stroke::new(Color::BLACK, 1.0)));
+        let ctx = build_appstate_ctx(&serde_json::Map::new(), &st);
+        assert!(matches!(expr::eval("state.fill_color", &ctx), Value::Null),
+                "the ACTION scope must report the SELECTION's None, not the \
+                 app default's white — set_fill_type_solid's guard is exactly \
+                 this comparison");
+
+        // And the click therefore lands: Solid restores black on the selection.
+        dispatch_action("set_fill_type_solid", &serde_json::Map::new(), &mut st);
+        let doc = st.tabs[st.active_tab].model.document();
+        let fill = crate::document::controller::selection_fill_summary(doc);
+        assert!(matches!(fill,
+                    crate::document::controller::FillSummary::Uniform(Some(f))
+                        if f.color.to_hex() == "000000"),
+                "clicking Solid on a stroke-only selection paints it black");
+    }
+
+    #[test]
+    fn colortiers_action_scope_leaves_the_default_standing_for_mixed() {
+        // Mixed is the THIRD outcome and it is not None: the reader publishes
+        // nothing, so the declared workspace default stands and Solid is a
+        // no-op (a colour edit would apply to the whole selection).
+        use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
+        use crate::document::document::{Document, ElementSelection};
+        let mut st = make_state_with_colors("ffffff", "000000");
+        st.tabs.push(crate::workspace::app_state::TabState::new());
+        st.active_tab = st.tabs.len() - 1;
+        let rect = |fill: Option<Fill>| Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        st.tabs[st.active_tab].model.set_document_for_test(Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![
+                    std::rc::Rc::new(rect(Some(Fill::new(Color::from_hex("ff0000").unwrap())))),
+                    std::rc::Rc::new(rect(None)),
+                ],
+                isolated_blending: false,
+                knockout_group: false,
+                common: CommonProps::default(),
+            })],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0]),
+                            ElementSelection::all(vec![0, 1])],
+            ..Document::default()
+        });
+        let ctx = build_appstate_ctx(&serde_json::Map::new(), &st);
+        assert_eq!(expr::eval("state.fill_color", &ctx).to_string_coerce(), "#ffffff",
+                   "Mixed publishes nothing, so the workspace default stands — \
+                    absent is not null");
+    }
+
+    // Half 1 is SWIFT's to adopt, and this is the shape it adopts: the app
+    // tier lives ABOVE the tabs, so File > New carries the user's colour
+    // forward. Set a red with nothing selected, hit New, and you are mid-flow
+    // — nobody thinks of "current fill" as a property of the file. Mirrored by
+    // JasSwift's `appDefaultsSurviveFileNew` (JasSwift/Tests/Interpreter/
+    // LiveStateMapTests.swift), which is the arm this pin exists to hold
+    // honest.
+    #[test]
+    fn colortiers_app_default_survives_a_new_document() {
+        use crate::workspace::app_state::TabState;
+        use crate::workspace::dock_panel::build_live_state_map;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        // Nothing selected: the colour lands on the defaults, not a shape.
+        let mut params = serde_json::Map::new();
+        params.insert("color".into(), serde_json::json!("#ff0000"));
+        dispatch_action("set_active_color", &params, &mut st);
+        assert_eq!(build_live_state_map(&st)["fill_color"], serde_json::json!("#ff0000"));
+
+        // File > New (menu_bar.rs's "new" arm, verbatim).
+        st.add_tab(TabState::new());
+        assert_eq!(st.tabs.len(), 2, "the new document is its own tab");
+        assert!(st.tab().unwrap().model.default_fill.is_none(),
+                "the fresh tab's own tier starts empty — the answer below can \
+                 only come from the tier ABOVE the tabs");
+        assert_eq!(build_live_state_map(&st)["fill_color"], serde_json::json!("#ff0000"),
+                   "the fill/stroke defaults are WORKSPACE state: a new document \
+                    inherits the colour the user is mid-flow with");
+    }
+
+    // The Color panel's SLIDERS are a second reader of the same tiers, and
+    // `build_live_panel_overrides` resolves them itself (it needs the channel
+    // decomposition, not the hex). So it gets the same pin: after File > New
+    // the answer can only come from the tier above the tabs. This is the arm
+    // that holds JasSwift's `colorPanelSlidersReadTheAppTierAfterFileNew`
+    // honest — that reader had NO app tier and fell back to color.yaml's
+    // stored 255/255/255 while its own fill swatch painted red (COLORTIERS
+    // repair).
+    #[test]
+    fn colortiers_panel_sliders_read_the_app_tier_after_a_new_document() {
+        use crate::workspace::app_state::TabState;
+        use crate::workspace::dock_panel::build_live_panel_overrides;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let mut params = serde_json::Map::new();
+        params.insert("color".into(), serde_json::json!("#ff0000"));
+        dispatch_action("set_active_color", &params, &mut st);
+        st.add_tab(TabState::new());
+        assert!(st.tab().unwrap().model.default_fill.is_none(),
+                "the fresh tab's own tier is empty — only the tier above answers");
+        let overrides = build_live_panel_overrides(&st);
+        assert_eq!(overrides["hex"], serde_json::json!("ff0000"),
+                   "the sliders read the app tier, exactly as the swatch does");
+        assert_eq!(overrides["r"], serde_json::json!(255));
+        assert_eq!(overrides["g"], serde_json::json!(0));
+        assert_eq!(overrides["bl"], serde_json::json!(0));
+    }
+
+    // The WRITE half of the same reader. A slider's `oninput` / `onchange` and
+    // a value box's `onchange` all hand `compute_color_from_panel` the map
+    // `ctx.get("panel")` holds — the panel defaults ALREADY overlaid by
+    // `build_live_panel_overrides` — so the dragged channel mixes with the
+    // channels of the active PAINT, not with `color.yaml`'s stored ones.
+    //
+    // This arm was already correct; the pin exists to hold JasSwift's
+    // `colorPanelChannelDragReadsTheAppTierAfterFileNew` honest. That port's
+    // write path was a SECOND reader with no app tier, so after File > New its
+    // panel displayed the app tier's red while a Brightness drag on the same
+    // panel computed from the store's white and committed mid GREY (808080)
+    // where this one commits dark red (800000) — COLORTIERS repair 2.
+    #[test]
+    fn colortiers_channel_drag_reads_the_app_tier_after_a_new_document() {
+        use crate::workspace::app_state::TabState;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let mut params = serde_json::Map::new();
+        params.insert("color".into(), serde_json::json!("#ff0000"));
+        dispatch_action("set_active_color", &params, &mut st);
+        st.add_tab(TabState::new());
+
+        let ctx = build_color_render_ctx(&st);
+        let panel = ctx.get("panel").expect("the render ctx carries the panel map");
+        // color.yaml's stored HSB channels are WHITE (h=0 s=0 b=100): a write
+        // path reading them alone mixes the drag with white.
+        assert_eq!(panel["s"], serde_json::json!(100),
+                   "the overlay has already replaced the stored s=0 with the \
+                    app tier's red");
+        let color = compute_color_from_panel("b", 50.0, panel)
+            .expect("hsb is a known mode");
+        assert_eq!(color.to_hex(), "800000",
+                   "Brightness 50 on RED is dark red; on color.yaml's stored \
+                    white it would be mid grey");
+    }
+
+    // Invert / Complement and their enabled state read `active_color()`, which
+    // reached the app tier only when there was NO tab — so after File > New
+    // (fresh tab, empty per-document tier, colour held above the tabs) both
+    // greyed out while the panel beside them displayed the colour. Symmetric
+    // with JasSwift before COLORTIERS repair 2; fixed in both ports together.
+    #[test]
+    fn colortiers_invert_stays_available_after_a_new_document() {
+        use crate::workspace::app_state::TabState;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        let mut params = serde_json::Map::new();
+        params.insert("color".into(), serde_json::json!("#ff0000"));
+        dispatch_action("set_active_color", &params, &mut st);
+        st.add_tab(TabState::new());
+        assert!(st.tab().unwrap().model.default_fill.is_none(),
+                "the fresh tab's own tier is empty");
+        assert_eq!(st.active_color().map(|c| c.to_hex()),
+                   Some("ff0000".to_string()),
+                   "the same tiers the panel displays, so Invert operates on \
+                    the colour the user can SEE");
+    }
+
+    // …and the tier is a seed, not a floor: the YAML None route clears BOTH
+    // tiers, so `active_color()` still answers None there and color.yaml's
+    // menu keeps Invert / Complement disabled (COLOR.md, None state).
+    #[test]
+    fn colortiers_invert_is_still_disabled_for_an_explicit_none() {
+        use crate::workspace::app_state::TabState;
+        let mut st = make_state_with_colors("ffffff", "000000");
+        if st.tabs.is_empty() {
+            st.tabs.push(TabState::new());
+            st.active_tab = 0;
+        }
+        dispatch_action("set_fill_none", &serde_json::Map::new(), &mut st);
+        assert!(st.app_default_fill.is_none(), "the None route clears both tiers");
+        assert!(st.active_color().is_none(),
+                "no tier resolves, so Invert / Complement stay greyed");
+    }
+
     // A null colour has TWO meanings and the value alone cannot tell them
     // apart: `state.fill_color` null means "the user set this attribute to
     // None" (draw the red-diagonal indicator), while
     // `panel.recent_colors.3` null means "that slot is empty" (draw a
     // hollow placeholder). The decision is read off the bind's declaration.
+    // ── COLORTIERS: the RENDER half gets vectors of its own ───────────
+    //
+    // Only the PREDICATE (`null_color_means_none`) had a test. The white face,
+    // the red diagonal and the empty-string arm had none, in either port —
+    // `color_panel_content` is Path-B-excluded so no widget_tree golden sees
+    // this widget, and the harness has no none-indicator check. Reverting the
+    // whole `explicit_none` plumbing left every unit test, every golden and
+    // every gui_drive check GREEN. These are the vectors that red instead.
+    //
+    // Mirrored in JasSwift by ColorSwatchFaceTests.swift, function for function.
+
+    /// A `color_swatch` element with the given `bind.color`, as color.yaml
+    /// declares it.
+    fn swatch_el(bind_color: &str) -> serde_json::Value {
+        serde_json::json!({ "type": "color_swatch", "bind": { "color": bind_color } })
+    }
+
+    /// The Color panel's own render scope, reduced to what a swatch reads: the
+    /// fill is NONE, the stroke is black, and recent slot 3 has never been
+    /// filled.
+    fn swatch_ctx() -> serde_json::Value {
+        serde_json::json!({
+            "state": { "fill_color": serde_json::Value::Null, "stroke_color": "#000000" },
+            "panel": { "recent_colors": ["ff0000", serde_json::Value::Null] },
+            "dialog": { "hex": "" },
+        })
+    }
+
+    #[test]
+    fn colortiers_explicit_none_swatch_paints_white_with_a_diagonal() {
+        let ctx = swatch_ctx();
+        let (color, explicit_none) = super::swatch_color_bind(&swatch_el("state.fill_color"), &ctx);
+        assert!(color.is_empty(), "a None fill resolves to no colour");
+        assert!(explicit_none,
+                "…and the null MEANS none, so the swatch draws the indicator");
+        assert_eq!(super::swatch_face_color(&color, explicit_none), "#fff",
+                   "the face is WHITE so the red diagonal reads against it — a \
+                    transparent face just shows the panel background through");
+        assert_eq!(super::swatch_border(&color, explicit_none, false),
+                   super::SwatchBorder::Solid,
+                   "an explicit none is a real swatch, not an empty slot");
+    }
+
+    #[test]
+    fn colortiers_empty_recent_slot_stays_a_placeholder() {
+        let ctx = swatch_ctx();
+        let (color, explicit_none) =
+            super::swatch_color_bind(&swatch_el("panel.recent_colors.1"), &ctx);
+        assert!(color.is_empty());
+        assert!(!explicit_none,
+                "an unfilled recent slot is a PLACEHOLDER — no diagonal");
+        assert_eq!(super::swatch_face_color(&color, explicit_none), "transparent",
+                   "and no white face either: the slot is empty, not no-paint");
+        assert_eq!(super::swatch_border(&color, explicit_none, false),
+                   super::SwatchBorder::Placeholder);
+    }
+
+    #[test]
+    fn colortiers_cleared_hex_field_is_an_explicit_none() {
+        // The second producer of the intentional case: a dialog's hex field
+        // cleared to "". `#dialog.hex` means "#" + eval("dialog.hex").
+        let ctx = swatch_ctx();
+        let (color, explicit_none) = super::swatch_color_bind(&swatch_el("#dialog.hex"), &ctx);
+        assert!(color.is_empty());
+        assert!(explicit_none, "an empty hex field is no paint, not black");
+        assert_eq!(super::swatch_face_color(&color, explicit_none), "#fff");
+    }
+
+    #[test]
+    fn colortiers_a_real_colour_swatch_is_unaffected() {
+        let ctx = swatch_ctx();
+        let (color, explicit_none) =
+            super::swatch_color_bind(&swatch_el("state.stroke_color"), &ctx);
+        assert_eq!(color, "#000000");
+        assert!(!explicit_none);
+        assert_eq!(super::swatch_face_color(&color, explicit_none), "#000000");
+        assert_eq!(super::swatch_border(&color, explicit_none, false),
+                   super::SwatchBorder::Solid);
+        // A bare hex (how recent_colors stores them) gets its '#'.
+        let (bare, _) = super::swatch_color_bind(&swatch_el("panel.recent_colors.0"), &ctx);
+        assert_eq!(bare, "#ff0000");
+    }
+
+    #[test]
+    fn colortiers_selection_outline_wins_over_both_borders() {
+        let ctx = swatch_ctx();
+        let (color, explicit_none) = super::swatch_color_bind(&swatch_el("state.fill_color"), &ctx);
+        assert_eq!(super::swatch_border(&color, explicit_none, true),
+                   super::SwatchBorder::Selected);
+        assert_eq!(super::swatch_border("", false, true), super::SwatchBorder::Selected);
+    }
+
+    /// An unbound swatch (no `bind.color` at all) is the third no-colour case
+    /// and it is a placeholder: nothing declared it as paint.
+    #[test]
+    fn colortiers_unbound_swatch_is_a_placeholder() {
+        let el = serde_json::json!({ "type": "color_swatch" });
+        let (color, explicit_none) = super::swatch_color_bind(&el, &swatch_ctx());
+        assert!(color.is_empty());
+        assert!(!explicit_none);
+        assert_eq!(super::swatch_border(&color, explicit_none, false),
+                   super::SwatchBorder::Placeholder);
+    }
+
+    // The decisions above are only half the render half: something has to turn
+    // them into markup. These pin THAT — the style string a tile carries, and
+    // the diagonal's own geometry.
+
+    #[test]
+    fn colortiers_explicit_none_style_paints_a_white_face() {
+        let style = super::swatch_style(
+            16, super::swatch_face_color("", true),
+            super::swatch_border("", true, false), false, "", "");
+        assert!(style.contains("background:#fff;"), "white face, got: {style}");
+        assert!(style.contains("border:1px solid var(--jas-border,#666);"),
+                "a real swatch's solid border, got: {style}");
+        assert!(style.contains("width:16px;height:16px;"), "got: {style}");
+    }
+
+    #[test]
+    fn colortiers_placeholder_style_is_transparent_and_dashed() {
+        let style = super::swatch_style(
+            16, super::swatch_face_color("", false),
+            super::swatch_border("", false, false), false, "", "");
+        assert!(style.contains("background:transparent;"), "got: {style}");
+        assert!(style.contains("border:1px dashed var(--jas-border,#555);"),
+                "an empty slot keeps the dashed placeholder border, got: {style}");
+    }
+
+    #[test]
+    fn colortiers_hollow_none_ring_is_white() {
+        // The Color panel's stroke swatch is hollow: the RING carries the
+        // colour, so a no-stroke ring must be white-with-a-diagonal, not
+        // invisible.
+        let style = super::swatch_style(
+            16, super::swatch_face_color("", true),
+            super::swatch_border("", true, false), true, "", "");
+        assert!(style.contains("border:6px solid #fff;"), "got: {style}");
+        assert!(style.contains("background:transparent;"),
+                "the hollow centre stays empty, got: {style}");
+    }
+
+    #[test]
+    fn colortiers_none_diagonal_is_a_red_corner_to_corner_line() {
+        let svg = super::NONE_DIAG_SVG;
+        assert!(svg.contains("viewBox='0 0 100 100'"), "got: {svg}");
+        assert!(svg.contains("x1='0' y1='100' x2='100' y2='0'"),
+                "bottom-left to top-right, got: {svg}");
+        assert!(svg.contains("stroke='red'"), "got: {svg}");
+        // 8 in a 100-unit box is 8%, which is what JasSwift's `noneDiagonal`
+        // draws (`max(1, size * 0.08)`). Pinned on both sides.
+        assert!(svg.contains("stroke-width='8'"), "8% of the box, got: {svg}");
+        assert!(svg.contains("pointer-events:none"),
+                "the indicator must not eat the swatch's own clicks, got: {svg}");
+    }
+
     #[test]
     fn cptriage_null_means_none_only_for_nullable_state_colours() {
         assert!(null_color_means_none("state.fill_color"));

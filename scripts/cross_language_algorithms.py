@@ -26,12 +26,38 @@ FIXTURES_DIR = os.path.join(REPO_ROOT, "test_fixtures", "algorithms")
 ALGORITHMS = {
     "measure":           ("tolerance", 1e-4),
     "element_bounds":    ("tolerance", 1e-4),
+    # The TRANSFORM-AWARE bbox the Properties panel shows: geometric bounds
+    # mapped through the element's own matrix and every ancestor's, then
+    # axis-aligned. A separate family because `element_bounds` gates
+    # `Element::bounds`, which ignores `transform` entirely in both ports
+    # (measured: a rect with translate(100,50) still reports [0,0,10,10]).
+    "element_evaluated_bounds": ("tolerance", 1e-4),
     "flatten":           ("tolerance", 1e-9),
     "arrow_trim":        ("tolerance", 1e-4),
     "length":            ("tolerance", 1e-9),
+    # Colour conversion is integer-valued in every channel (the panel's units),
+    # so the comparison is EXACT: a one-unit miss is exactly the bug this
+    # family exists to catch, and any tolerance would swallow it.
+    "color_convert":     ("exact", None),
     "hit_test":          ("exact", None),
+    # Closest-point projection onto a segment / cubic. Distances are reported
+    # divided by each vector's declared `scale`, so 1e-9 is a tight relative
+    # bound even for the 1e200-magnitude overflow vectors; the discriminating
+    # failures it must catch are 0.02-to-0.48 wide in `t`.
+    "path_project":      ("tolerance", 1e-9),
+    # The number_input commit rule. EXACT: the whole point is which strings are
+    # accepted at all (a null result vs a value) and the clamp landing exactly on
+    # the declared bound, so any tolerance would swallow the divergence.
+    "number_commit":     ("exact", None),
     "boolean":           ("exact_boolean", None),
     "boolean_normalize": ("exact_boolean", None),
+    # The harness's OWN region metrics, which every boolean golden is
+    # expressed in. Whole-object tolerance, so `expected` must pin EVERY
+    # emitted key -- an instrument family that let a key go unpinned would
+    # reproduce the defect it exists to close. 1e-9 because the vectors are
+    # small-integer geometry: the answers are exact, and the discriminating
+    # failures are whole units wide (e.g. 168 vs 0).
+    "polygon_metrics":   ("tolerance", 1e-9),
     "fit_curve":         ("tolerance", 0.5),
     "shape_recognize":   ("shape", 0.5),
     "planar":            ("property_planar", 0.01),
@@ -258,6 +284,62 @@ def compare(strategy, ref_vec, other_vec, tol):
 
 
 # ---------------------------------------------------------------
+# Preflight: the harness must inject the SAME measure unit everywhere
+# ---------------------------------------------------------------
+#
+# The three text families (text_layout, text_layout_paragraph,
+# path_text_layout) do not measure text themselves — each roundtrip binary
+# injects a `measure` closure built from the fixture's `char_width`. That
+# makes the closure part of the harness, not part of either port, and it
+# is the one input this script controls but never checked. It had already
+# drifted: Rust counted Unicode scalars (`chars().count()`) while Swift
+# counted grapheme clusters (`s.count`), which agree on ASCII and on
+# nothing else. A comparison whose two sides were fed different measurers
+# is not a comparison, and the resulting failure would have been read as a
+# layout bug.
+#
+# Each port now has one named helper (`fixed_char_width_measure` /
+# `fixedCharWidthMeasure`, unit-tested against the reference's `len(s)`),
+# and the check below requires all THREE call sites per port to route
+# through it. Three inline copies per port is exactly the shape that
+# drifted once; naming the offending file:line is what stops a single
+# reverted site from slipping through.
+MEASURE_INJECTION_SITES = [
+    # (harness source, how many `measure` bindings it must have,
+    #  the helper each one must call)
+    ("jas_dioxus/src/bin/algorithm_roundtrip.rs", 3, "fixed_char_width_measure"),
+    ("JasSwift/ToolsAlgorithm/AlgorithmRoundtrip.swift", 3, "fixedCharWidthMeasure"),
+]
+
+
+def check_measure_injection():
+    """Returns a list of problem strings (empty when the harness agrees)."""
+    problems = []
+    for rel, want_count, helper in MEASURE_INJECTION_SITES:
+        path = os.path.join(REPO_ROOT, rel)
+        try:
+            with open(path) as fh:
+                lines = fh.readlines()
+        except OSError as e:
+            problems.append(f"{rel}: cannot read harness source ({e})")
+            continue
+        bindings = [(i + 1, ln) for i, ln in enumerate(lines)
+                    if "measure" in ln and ln.lstrip().startswith("let measure")]
+        if len(bindings) != want_count:
+            problems.append(
+                f"{rel}: expected {want_count} `let measure` binding(s), "
+                f"found {len(bindings)} — the text families changed shape, so "
+                f"update MEASURE_INJECTION_SITES deliberately")
+        for lineno, ln in bindings:
+            if helper not in ln:
+                problems.append(
+                    f"{rel}:{lineno}: `measure` does not call {helper}() — "
+                    f"an inline measurer here re-opens the scalar-vs-grapheme "
+                    f"drift for one family only: {ln.strip()}")
+    return problems
+
+
+# ---------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------
 
@@ -287,6 +369,13 @@ def main():
     passed = 0
     failed = 0
     errors = 0
+
+    # Preflight (see check_measure_injection): run before any family, so a
+    # drifted measurer is reported as a HARNESS fault by name rather than
+    # surfacing later as a mysterious text_layout mismatch.
+    for problem in check_measure_injection():
+        print(f"  FAIL: harness/measure-unit {problem}")
+        failed += 1
 
     for algo in algos:
         strategy, tol = ALGORITHMS[algo]

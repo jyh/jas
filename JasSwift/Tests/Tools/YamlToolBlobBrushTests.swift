@@ -116,7 +116,7 @@ private func modelWithSquare(
             .closePath,
         ],
         fill: Fill(color: Color.fromHex("#ff0000")!),
-        toolOrigin: blobOrigin ? "blob_brush" : nil))
+        toolOrigin: blobOrigin ? "blob_brush" : nil, fillRule: .nonzero))
     return Model(document: Document(
         layers: [Layer(name: "L", children: [square])],
         selectedLayer: 0, selection: []))

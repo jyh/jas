@@ -391,6 +391,20 @@ Merged on `oplog-sibling-prod-routing`.
   already exist there).
 - `common.id` is `Option`; `selection_to_ids` drops id-less elements, so a recorded
   source must carry a `common.id` — a documented prerequisite, not a bug.
+- **Two verbs now MINT ids inside the effect, and they are NOT yet unified through
+  `op_apply`** (they are in the deferred `doc.*` set this section covers):
+  `doc.path.erase_at_rect` (a severing erase mints one fresh id per fragment) and
+  `doc.blob_brush.commit_painting` (an N >= 2 merge mints one fresh id for the
+  result). The mint is inside the effect because the count — indeed, whether a mint
+  happens at all — falls out of the geometry, so the initiator cannot carry the ids
+  in a payload the way `create_artboard` / `make_instance` do.
+  **WHEN THESE TWO VERBS ARE UNIFIED THROUGH `op_apply`, THE MINTED IDS MUST BE
+  CARRIED IN THE OP PAYLOAD** (value-in-op, exactly as `create_artboard` journals its
+  minted id as a literal), or replay will mint DIFFERENT ids and
+  `checkpoint_equivalence` will diverge. Undo is unaffected either way — it restores
+  by snapshot, not by replay. Cross-port determinism today comes from seeding both
+  ports' id source identically (`set_test_id_rng` / `setTestIdRng`), which is how the
+  creation verbs are already gated.
 - Control-point granularity for recorded recipes. Flask stays forward-replay-only
   (no live canvas).
 

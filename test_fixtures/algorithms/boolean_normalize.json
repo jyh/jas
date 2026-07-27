@@ -98,8 +98,9 @@
       }
     },
     {
-      "name": "co_rotating_spliced_loop",
-      "_derivation": "The same shape with the spliced loop wound the SAME way as the square. Inside it the winding is +1+1 = 2, non-zero, so the region is filled on both sides of the loop and the loop is not a boundary at all: one CCW ring of area 100. Companion of retrograde_counter_wound_loop \u2014 same slit, same loop, opposite winding, different answer.",
+      "name": "co_rotating_spliced_loop_nonzero",
+      "fill_rule": "nonzero",
+      "_derivation": "The same shape with the spliced loop wound the SAME way as the square, DECLARED nonzero. Inside the loop the winding is +1+1 = 2, non-zero, so the region is filled on both sides of the loop and the loop is not a boundary at all: one CCW ring of area 100. Companion of retrograde_counter_wound_loop \u2014 same slit, same loop, opposite winding, different answer \u2014 and of co_rotating_spliced_loop_evenodd, which is the same input under the other rule.",
       "input": [[[0,0],[5,2],[7,2],[7,4],[5,4],[5,2],[0,0],[10,0],[10,10],[0,10]]],
       "expected": {
         "area": 100.0,
@@ -108,8 +109,9 @@
       }
     },
     {
-      "name": "nested_co_oriented_rings_pass_through",
-      "_derivation": "Two CCW rings of one set, nested. Normalization is PER RING and the set's rings combine under boolean.rs's even-odd contract, so both simple rings pass through untouched and the hole survives: 2 rings, net even-odd area 400 - 100 = 300. A set-wide non-zero reading would instead delete the inner ring, which would break every donut expressed the natural way.",
+      "name": "nested_co_oriented_rings_evenodd_hole",
+      "fill_rule": "evenodd",
+      "_derivation": "Two CCW rings of one set, nested, DECLARED even-odd. A ray from inside the inner ring crosses two edges \u2014 even \u2014 so the inner ring is a genuine hole boundary; even-odd parity is additive across rings, so both simple rings pass through untouched: 2 rings, net even-odd area 400 - 100 = 300. Paired with nested_co_oriented_rings_nonzero_solid, which is the SAME geometry under the other rule and answers 400 over one ring. That pair is the carried-rule law made observable.",
       "input": [
         [[0,0],[20,0],[20,20],[0,20]],
         [[5,5],[15,5],[15,15],[5,15]]
@@ -121,8 +123,9 @@
       }
     },
     {
-      "name": "rings_sharing_a_collinear_edge_pass_through",
-      "_derivation": "Two CCW squares of one set sharing the full edge x=10, traced upward by one and downward by the other \u2014 an INTER-ring collinear overlap. Each ring is simple by itself, so both pass through: 2 rings, absolute areas 100 + 100 = 200.",
+      "name": "rings_sharing_a_collinear_edge_evenodd",
+      "fill_rule": "evenodd",
+      "_derivation": "Two CCW squares of one set sharing the full edge x=10, traced upward by one and downward by the other \u2014 an INTER-ring collinear overlap \u2014 DECLARED even-odd. Even-odd decomposes per ring and each ring is simple by itself, so both pass through: 2 rings, areas 100 + 100 = 200. Paired with rings_sharing_a_collinear_edge_nonzero_fuse, where the shared span is filled on both sides and the squares fuse into one.",
       "input": [
         [[0,0],[10,0],[10,10],[0,10]],
         [[10,0],[20,0],[20,10],[10,10]]
@@ -135,8 +138,83 @@
     },
     {
       "name": "zero_area_collinear_ring_dropped",
-      "_derivation": "Three collinear vertices enclose nothing, so the non-zero region is empty and the output must be empty.",
+      "_derivation": "Three collinear vertices enclose nothing, so the region is empty under either rule and the output must be empty.",
       "input": [[[0,0],[5,0],[10,0]]],
+      "expected": {
+        "area": 0.0,
+        "ring_count": 0,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "nested_co_oriented_rings_nonzero_solid",
+      "fill_rule": "nonzero",
+      "_derivation": "INTER-RING WINDING CANCELLATION, the nesting case. The SAME two CCW nested rings as nested_co_oriented_rings_evenodd_hole, declared nonzero instead. Inside the inner ring the winding is +1 (outer) +1 (inner) = 2, non-zero, so that region IS filled; between the rings it is +1, also filled. Filled-ness is therefore identical on both sides of the inner ring, so the inner ring bounds nothing and every one of its spans is dropped. One CCW ring survives: the outer square, area 400. Under the pre-ruling fixed even-odd reading this input was unrepresentable — a nonzero document was silently turned into a donut.",
+      "input": [
+        [[0,0],[20,0],[20,20],[0,20]],
+        [[5,5],[15,5],[15,15],[5,15]]
+      ],
+      "expected": {
+        "area": 400.0,
+        "ring_count": 1,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "overlapping_rings_nonzero_union",
+      "fill_rule": "nonzero",
+      "_derivation": "INTER-RING WINDING CANCELLATION, the overlap case. Two CCW squares [0,10]^2 and [5,15]^2 whose boundaries cross at (10,5) and (5,10), declared nonzero. Inside the overlap the winding is 1+1 = 2, so the overlap is filled and the set means the UNION: the arcs running through the other square have winding 2 on one side and 1 on the other — filled both ways — and drop out. Survivors chain CCW as (0,0) (10,0) (10,5) (15,5) (15,15) (5,15) (5,10) (0,10); shoelace 0+50-25+150+150-25+50+0 = 350, area 175 = 100 + 100 - 25.",
+      "input": [
+        [[0,0],[10,0],[10,10],[0,10]],
+        [[5,5],[15,5],[15,15],[5,15]]
+      ],
+      "expected": {
+        "area": 175.0,
+        "ring_count": 1,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "rings_sharing_a_collinear_edge_nonzero_fuse",
+      "fill_rule": "nonzero",
+      "_derivation": "INTER-RING WINDING CANCELLATION, the shared-edge case. The same two CCW squares as rings_sharing_a_collinear_edge_evenodd, declared nonzero. To the left of the shared span x=10 the winding is +1 (first square alone); to its right it is +1 (second square alone). Filled on both sides, so the span is interior and drops out, and the squares fuse into the rectangle [0,20]x[0,10]. Collinear vertices are RETAINED (collapsing them is the Boolean panel's separate opt-in), so the ring is (0,0) (10,0) (20,0) (20,10) (10,10) (0,10) — six vertices, area 200 = 100 + 100, region-preserving.",
+      "input": [
+        [[0,0],[10,0],[10,10],[0,10]],
+        [[10,0],[20,0],[20,10],[10,10]]
+      ],
+      "expected": {
+        "area": 200.0,
+        "ring_count": 1,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "co_rotating_spliced_loop_evenodd",
+      "fill_rule": "evenodd",
+      "_derivation": "The carried rule bites WITHIN one ring too, not only between rings. Same input as co_rotating_spliced_loop_nonzero, declared even-odd. Inside the co-wound loop the winding is 2 — EVEN, so under even-odd that region is NOT filled and the loop survives as a hole of signed area -4, where under nonzero it fused away. The slit still has the same filled-ness on both sides and still drops out. Two rings, net even-odd area 100 - 4 = 96.",
+      "input": [[[0,0],[5,2],[7,2],[7,4],[5,4],[5,2],[0,0],[10,0],[10,10],[0,10]]],
+      "expected": {
+        "area": 96.0,
+        "ring_count": 2,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "doubly_wound_square_nonzero_fills",
+      "fill_rule": "nonzero",
+      "_derivation": "One ring that traces the same 10x10 square twice, so the winding is 2 everywhere inside it. Non-zero: 2 != 0, filled — one ring of area 100. Paired with doubly_wound_square_evenodd_empties on identical vertices, which is the cleanest possible demonstration that rings alone do not determine a region.",
+      "input": [[[0,0],[10,0],[10,10],[0,10],[0,0],[10,0],[10,10],[0,10]]],
+      "expected": {
+        "area": 100.0,
+        "ring_count": 1,
+        "all_rings_simple": true
+      }
+    },
+    {
+      "name": "doubly_wound_square_evenodd_empties",
+      "fill_rule": "evenodd",
+      "_derivation": "The same doubly traced square declared even-odd: a ray from inside crosses four edges, and 2 is EVEN, so nothing is filled and the output is empty. Same vertices as doubly_wound_square_nonzero_fills, opposite answer, decided entirely by the carried rule.",
+      "input": [[[0,0],[10,0],[10,10],[0,10],[0,0],[10,0],[10,10],[0,10]]],
       "expected": {
         "area": 0.0,
         "ring_count": 0,

@@ -45,8 +45,7 @@
     },
     {
       "name": "horizontal_line",
-      "points": [[0.0, 5.0], [1.0, 5.0], [2.0, 5.0], [3.0, 5.0], [4.0, 5.0],
-                  [5.0, 5.0], [6.0, 5.0], [7.0, 5.0], [8.0, 5.0], [9.0, 5.0]],
+      "points": [[0.0, 5.0], [1.0, 5.0], [2.0, 5.0], [3.0, 5.0], [4.0, 5.0], [5.0, 5.0], [6.0, 5.0], [7.0, 5.0], [8.0, 5.0], [9.0, 5.0]],
       "error": 1.0,
       "expected": {
         "segment_count": 1,
@@ -57,8 +56,7 @@
     },
     {
       "name": "vertical_line",
-      "points": [[3.0, 0.0], [3.0, 1.0], [3.0, 2.0], [3.0, 3.0], [3.0, 4.0],
-                  [3.0, 5.0], [3.0, 6.0], [3.0, 7.0], [3.0, 8.0], [3.0, 9.0]],
+      "points": [[3.0, 0.0], [3.0, 1.0], [3.0, 2.0], [3.0, 3.0], [3.0, 4.0], [3.0, 5.0], [3.0, 6.0], [3.0, 7.0], [3.0, 8.0], [3.0, 9.0]],
       "error": 1.0,
       "expected": {
         "segment_count": 1,
@@ -75,6 +73,129 @@
         "segment_count": 1,
         "segments": [
           [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0]
+        ]
+      }
+    },
+    {
+      "name": "least_squares_single_fit_asymmetric_alphas",
+      "_comment": "15 uniform-t samples of the cubic (0,0) (5,5) (20,100) (100,100). The first fit is accepted (max squared error 17.069473 < error 20), so this vector gates generate_bezier's least-squares solve on a genuinely non-collinear input: alpha_l = 55.33, alpha_r = 65.76. The alpha < epsilon fallback would put both controls at chord/3 = 47.14 along the tangents, and swapping alpha_l with alpha_r moves each control by 10.4 - both far outside the 0.5 gate tolerance.",
+      "points": [
+        [0.0, 0.0], [1.244534, 2.38156], [2.915452, 7.113703], [5.133017, 13.79191],
+        [8.017493, 22.011662], [11.68914, 31.36844], [16.268222, 41.457726], [21.875, 51.875],
+        [28.629738, 62.215743], [36.652697, 72.075437], [46.06414, 81.049563], [56.984329, 88.733601],
+        [69.533528, 94.723032], [83.831997, 98.613338], [100.0, 100.0]
+      ],
+      "error": 20.0,
+      "expected": {
+        "segment_count": 1,
+        "segments": [
+          [0.0, 0.0, 25.627855867285, 49.041871430825, 34.48512015931, 94.381062750319, 100.0, 100.0]
+        ]
+      }
+    },
+    {
+      "name": "reparameterized_single_fit",
+      "_comment": "error 4.0 puts the initial max squared error (9.50) at/above error and below error*error = 16, which is the only window in which the reparameterize loop runs at all - with error <= 1 that window is empty, which is why every earlier vector in this file skipped it. One Newton-Raphson pass moves the parameters by up to 0.0159 and drops the error to 2.53 < 4, giving ONE segment. A reparameterize (or newton_raphson) that returned u unchanged leaves the error at 9.50, exhausts the 4 iterations and splits into 2 segments.",
+      "points": [
+        [0.0, 0.0], [1.203704, 18.773148], [4.62963, 35.185185], [10.0, 49.375],
+        [17.037037, 61.481481], [25.462963, 71.643519], [35.0, 80.0], [45.37037, 86.689815],
+        [56.296296, 91.851852], [67.5, 95.625], [78.703704, 98.148148], [89.62963, 99.560185],
+        [100.0, 100.0]
+      ],
+      "error": 4.0,
+      "expected": {
+        "segment_count": 1,
+        "segments": [
+          [0.0, 0.0, 4.089261646802, 63.776737558523, 35.969245460228, 97.284408723323, 100.0, 100.0]
+        ]
+      }
+    },
+    {
+      "name": "split_at_max_error_index_not_midpoint",
+      "_comment": "the same 13 points at error 1.0: error*error == error, so the reparameterize window is empty and the fit goes straight to the recursive split. The split lands on index 2 - the max-error point - not on the midpoint index 6, so the junction is (4.62963, 35.185185). Splitting at the midpoint instead, or failing to negate the centre tangent for the right-hand sub-fit, changes the segments well beyond tolerance.",
+      "points": [
+        [0.0, 0.0], [1.203704, 18.773148], [4.62963, 35.185185], [10.0, 49.375],
+        [17.037037, 61.481481], [25.462963, 71.643519], [35.0, 80.0], [45.37037, 86.689815],
+        [56.296296, 91.851852], [67.5, 95.625], [78.703704, 98.148148], [89.62963, 99.560185],
+        [100.0, 100.0]
+      ],
+      "error": 1.0,
+      "expected": {
+        "segment_count": 2,
+        "segments": [
+          [0.0, 0.0, 0.989601603694, 15.433974936687, 0.43189905217, 20.581499403093, 4.62963, 35.185185],
+          [4.62963, 35.185185, 17.259788398285, 79.124843015247, 57.39326795993, 98.193017235431, 100.0, 100.0]
+        ]
+      }
+    },
+    {
+      "name": "asymmetric_s_curve_recursive_splits",
+      "_comment": "an S-curve that recurses to 4 segments. Deliberately ASYMMETRIC: a mirror-symmetric S-curve produces max-error ties whose runner-up gap is about 1e-13, i.e. a few ULP, which Rust's sqrt(dx*dx+dy*dy) and Swift's hypot could resolve differently; here the worst runner-up gap is 13% of the winning distance.",
+      "points": [
+        [0.0, 0.0], [9.0, 16.0], [22.0, 24.0], [36.0, 19.0],
+        [45.0, 4.0], [57.0, -12.0], [72.0, -19.0], [88.0, -21.0]
+      ],
+      "error": 0.5,
+      "expected": {
+        "segment_count": 4,
+        "segments": [
+          [0.0, 0.0, 3.0, 5.333333333333, 4.865114918994, 11.489216275266, 9.0, 16.0],
+          [9.0, 16.0, 17.000096276538, 24.727377756223, 26.187917529048, 27.532245626915, 36.0, 19.0],
+          [36.0, 19.0, 239.309761076103, -157.791096587915, -176.735996535659, 187.108441493339, 57.0, -12.0],
+          [57.0, -12.0, 66.340442015648, -19.956672828145, 76.782560128953, -19.597820016119, 88.0, -21.0]
+        ]
+      }
+    },
+    {
+      "name": "right_angle_corner_collinear_fallback",
+      "_comment": "five collinear points, a right-angle corner, then three collinear. The only vector in this file that reaches generate_bezier's alpha < epsilon fallback: on the [5..7] sub-fit the chord parameters are exactly 0, 0.5, 1, so b1 = b2 = 0.375 at the middle point, the C matrix rows are identical, det_C0_C1 is exactly 0 and both alphas are 0. The fallback then places the controls at chord/3 = 8 along the tangents: (40,20) and (40,28).",
+      "points": [
+        [0.0, 0.0], [10.0, 0.0], [20.0, 0.0], [30.0, 0.0],
+        [40.0, 0.0], [40.0, 12.0], [40.0, 24.0], [40.0, 36.0]
+      ],
+      "error": 0.5,
+      "expected": {
+        "segment_count": 4,
+        "segments": [
+          [0.0, 0.0, 10.0, 0.0, 20.0, 0.0, 30.0, 0.0],
+          [30.0, 0.0, 33.333333333333, 0.0, 37.866052001118, -2.560737598658, 40.0, 0.0],
+          [40.0, 0.0, 42.560737598658, 3.07288511839, 40.0, 8.0, 40.0, 12.0],
+          [40.0, 12.0, 40.0, 20.0, 40.0, 28.0, 40.0, 36.0]
+        ]
+      }
+    },
+    {
+      "name": "reparam_two_iterations_single_fit",
+      "_comment": "converges only on the SECOND Newton pass (max squared error 22.79 then 7.35, against error 15), so it pins a reparameterize loop of at least 2 iterations: a single-iteration loop splits instead of accepting one segment.",
+      "points": [
+        [0.0, 0.0], [1.30102, 23.877551], [4.897959, 44.081633], [10.331633, 60.612245],
+        [17.142857, 73.469388], [24.872449, 82.653061], [33.061224, 88.163265], [41.25, 90.0],
+        [48.979592, 88.163265], [55.790816, 82.653061], [61.22449, 73.469388], [64.821429, 60.612245],
+        [66.122449, 44.081633], [64.668367, 23.877551], [60.0, 0.0]
+      ],
+      "error": 15.0,
+      "expected": {
+        "segment_count": 1,
+        "segments": [
+          [0.0, 0.0, 6.273607779205, 115.139190559689, 84.181191170531, 123.680855728589, 60.0, 0.0]
+        ]
+      }
+    },
+    {
+      "name": "reparam_exhausts_iterations_then_splits",
+      "_comment": "the other side of that loop: all four iterations run (7.98, 6.58, 6.02, 5.73) and none reaches error 4.5, so the fit falls through to the recursive split. NOTE: u is NOT carried forward - after the loop only split_point is read, and each recursive child re-derives u from chord_length_parameterize, so the final `u = u_prime` is a dead store. 2 segments.",
+      "points": [
+        [0.0, 0.0], [1.244534, 2.38156], [2.915452, 7.113703], [5.133017, 13.79191],
+        [8.017493, 22.011662], [11.68914, 31.36844], [16.268222, 41.457726], [21.875, 51.875],
+        [28.629738, 62.215743], [36.652697, 72.075437], [46.06414, 81.049563], [56.984329, 88.733601],
+        [69.533528, 94.723032], [83.831997, 98.613338], [100.0, 100.0]
+      ],
+      "error": 4.5,
+      "expected": {
+        "segment_count": 2,
+        "segments": [
+          [0.0, 0.0, 5.114873390422, 9.787902838888, 7.367587835747, 21.183015176883, 11.68914, 31.36844],
+          [11.68914, 31.36844, 28.663087494307, 71.374173954774, 55.896674806637, 96.217442245695, 100.0, 100.0]
         ]
       }
     }

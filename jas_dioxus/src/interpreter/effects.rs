@@ -1532,8 +1532,12 @@ fn run_doc_effect(
             // stashed by doc.paintbrush.edit_start, computes exit_idx
             // on the target's flat polyline from the final drag point,
             // and replaces the affected command range with a cubic-
-            // Bezier fit of the drag buffer. Preserves all non-`d`
-            // attributes. See PAINTBRUSH_TOOL.md §Edit gesture.
+            // Bezier fit of the drag buffer. The rebuild is a struct
+            // update over the source element, so every field except `d`
+            // is carried (Ship of Theseus law; pinned by
+            // theseus_paintbrush_edit_commit_preserves_everything_but_d,
+            // which asserts whole-struct equality rather than a field
+            // list). See PAINTBRUSH_TOOL.md §Edit gesture.
             if let serde_json::Value::Object(args) = spec {
                 let buffer = args.get("buffer").and_then(|v| v.as_str())
                     .unwrap_or("").to_string();
@@ -3517,7 +3521,9 @@ fn artboard_delete_panel_selected(model: &mut Model, store: &mut StateStore) {
 /// copies (they're contained in BOTH source and duplicate at start
 /// of drag, since the duplicate sits at source's position).
 fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
-    use crate::document::artboard::{generate_artboard_id, next_artboard_name, Artboard};
+    use crate::document::artboard::{
+        generate_artboard_id, mint_unique_ids, next_artboard_name, Artboard,
+    };
     use crate::geometry::element::{Element, LayerElem};
     use std::rc::Rc;
 
@@ -3593,20 +3599,15 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
         .collect();
     new_doc.layers = new_layers;
 
-    // Mint the duplicate artboard (collision-retry id).
-    let existing_ids: std::collections::HashSet<String> =
+    // Mint the duplicate artboard's id through THE ONE MINT LOOP.
+    let mut existing_ids: std::collections::HashSet<String> =
         new_doc.artboards.iter().map(|a| a.id.clone()).collect();
-    let mut new_id = String::new();
-    for _ in 0..100 {
-        let candidate = generate_artboard_id(None);
-        if !existing_ids.contains(&candidate) {
-            new_id = candidate;
-            break;
-        }
-    }
-    if new_id.is_empty() {
+    let Some(ids) = mint_unique_ids(1, &mut existing_ids, &mut || {
+        generate_artboard_id(None)
+    }) else {
         return;
-    }
+    };
+    let new_id = ids[0].clone();
 
     let dup = Artboard {
         id: new_id.clone(),
@@ -3928,7 +3929,9 @@ fn artboard_resize_commit(model: &mut Model, store: &mut StateStore) {
 /// each dimension to >= 1 pt, mints a fresh id, picks the next
 /// "Artboard N" name, and appends to document.artboards.
 fn artboard_create_commit(model: &mut Model, x1: f64, y1: f64, x2: f64, y2: f64) {
-    use crate::document::artboard::{generate_artboard_id, next_artboard_name, Artboard};
+    use crate::document::artboard::{
+        generate_artboard_id, mint_unique_ids, next_artboard_name, Artboard,
+    };
 
     // Build rect; integer-pt round at commit per §Common rules.
     let raw_x = x1.min(x2).round();
@@ -3938,23 +3941,17 @@ fn artboard_create_commit(model: &mut Model, x1: f64, y1: f64, x2: f64, y2: f64)
 
     let mut new_doc = model.document().clone();
 
-    // Collision-retry id mint (matches the doc.create_artboard pattern
-    // in renderer.rs).
-    let existing_ids: std::collections::HashSet<String> =
+    // Collision-retry id mint through THE ONE MINT LOOP (matches the
+    // doc.create_artboard pattern in renderer.rs).
+    let mut existing_ids: std::collections::HashSet<String> =
         new_doc.artboards.iter().map(|a| a.id.clone()).collect();
-    let mut id = String::new();
-    for _ in 0..100 {
-        let candidate = generate_artboard_id(None);
-        if !existing_ids.contains(&candidate) {
-            id = candidate;
-            break;
-        }
-    }
-    if id.is_empty() {
+    let Some(ids) = mint_unique_ids(1, &mut existing_ids, &mut || {
+        generate_artboard_id(None)
+    }) else {
         return;
-    }
+    };
 
-    let mut ab = Artboard::default_with_id(id);
+    let mut ab = Artboard::default_with_id(ids[0].clone());
     ab.name = next_artboard_name(&new_doc.artboards);
     ab.x = raw_x;
     ab.y = raw_y;
@@ -4363,6 +4360,16 @@ fn path_move_latched_handle(
 }
 
 /// Implementation of doc.path.erase_at_rect.
+///
+/// MINTS IDS. A severing erase replaces one identified element with several,
+/// so each fragment needs a fresh id — and the fragment count is not knowable
+/// until the geometry is split, so the initiator cannot carry the ids in an
+/// operation payload the way creation verbs do. The mint happens here, where
+/// the document is in hand for the collision check, through the shared
+/// `mint_unique_ids` loop; determinism across ports comes from seeding both
+/// ports' id source identically (`set_test_id_rng`), exactly as the creation
+/// verbs are already gated. See OP_LOG.md §9 for what the 33-verb unification
+/// owes this verb.
 fn path_erase_at_rect(
     model: &mut Model,
     last_x: f64, last_y: f64,
@@ -4370,6 +4377,7 @@ fn path_erase_at_rect(
     eraser_size: f64,
 ) {
     use std::rc::Rc;
+    use crate::document::artboard::{generate_element_id, mint_unique_ids};
     use crate::geometry::element::{flatten_path_commands, PathCommand, PathElem};
     use crate::geometry::path_ops::{find_eraser_hit, split_path_at_eraser};
 
@@ -4381,63 +4389,114 @@ fn path_erase_at_rect(
     let max_x = last_x.max(x) + half;
     let max_y = last_y.max(y) + half;
 
+    // The avoid-set for the fragment ids minted below. Built ONCE from the
+    // pre-edit document and carried across the whole call, so fragments of
+    // different paths cannot collide with each other either. It still holds
+    // the ids of the sources being replaced — those are about to vanish, so
+    // avoiding them is merely conservative, never wrong.
+    let mut existing_ids = doc.element_ids();
+
     let mut changed = false;
     for (li, layer) in doc.layers.iter().enumerate() {
         let children = match layer.children() {
             Some(c) => c,
             None => continue,
         };
-        for ci in (0..children.len()).rev() {
-            let child = &children[ci];
+        // Rebuild the child list FRONT-TO-BACK rather than editing it in
+        // place back-to-front. Both orders produce the same document, but the
+        // mint order is observable in the ids, and Swift's pathEraseAtRect
+        // rebuilds forward — so document order is the only order the two
+        // ports can agree on. Fragment ids are handed out in document order.
+        let mut new_children: Vec<Rc<Element>> = Vec::with_capacity(children.len());
+        let mut layer_changed = false;
+        for child in children.iter() {
             let path_elem = match child.as_ref() {
                 Element::Path(pe) => pe,
-                _ => continue,
+                _ => {
+                    new_children.push(child.clone());
+                    continue;
+                }
             };
             if child.locked() {
+                new_children.push(child.clone());
                 continue;
             }
             let flat = flatten_path_commands(&path_elem.d);
             if flat.len() < 2 {
+                new_children.push(child.clone());
                 continue;
             }
             let hit = match find_eraser_hit(&flat, min_x, min_y, max_x, max_y) {
                 Some(h) => h,
-                None => continue,
+                None => {
+                    new_children.push(child.clone());
+                    continue;
+                }
             };
             let bounds = child.bounds();
             if bounds.2 <= eraser_size * 2.0 && bounds.3 <= eraser_size * 2.0 {
-                if let Some(layer_children) =
-                    new_doc.layers[li].children_mut()
-                {
-                    layer_children.remove(ci);
-                    changed = true;
-                }
+                // bbox fits inside the eraser — drop entirely.
+                layer_changed = true;
                 continue;
             }
             let is_closed = path_elem
                 .d
                 .iter()
                 .any(|c| matches!(c, PathCommand::ClosePath));
-            let results = split_path_at_eraser(&path_elem.d, &hit, is_closed);
+            let results: Vec<Vec<PathCommand>> =
+                split_path_at_eraser(&path_elem.d, &hit, is_closed)
+                    .into_iter()
+                    // Redundant by construction, kept only as a guard:
+                    // `split_path_at_eraser` already gates EVERY fragment it
+                    // emits at len >= 2 (both branches, every push), so this
+                    // filter provably never removes anything. Do not cite it
+                    // as the reason a short fragment disappears.
+                    .filter(|cmds| cmds.len() >= 2)
+                    .collect();
+            // ERASE DOES NOT REMOVE IDENTITY — "it is still the same object".
+            // Branch on the surviving-fragment count; Swift's pathEraseAtRect
+            // branches identically so the two ports agree in both arms.
+            //
+            // One fragment -> the one-element case: everything but `d`
+            // survives, `id` included. Several fragments -> each gets a FRESH
+            // id, minted HERE (the effect is where the document is in hand for
+            // the collision check; the initiator cannot mint, because the
+            // fragment count falls out of the geometry and is unknown until
+            // now). Copying the source's id instead would leave N live
+            // elements sharing one id and break the unique-id invariant of
+            // REFERENCE_GRAPH.md §2.5. A failed mint aborts the whole erase —
+            // never a half-identified split.
+            //
+            // STILL OWED for the severing case: a linear-gradient stop remap
+            // (a gradient carries no position — linear resolves angle + stops
+            // against the element's OWN bbox centre and half-diagonal — so
+            // each fragment re-fits the whole ramp instead of showing its
+            // slice; the fix is an affine remap of stop locations with
+            // clipping and interpolated endpoint colours). Radial cannot be
+            // preserved without a model change; the recentre is accepted.
+            let severed = results.len() > 1;
+            let fragment_ids: Vec<Option<String>> = if severed {
+                let Some(ids) = mint_unique_ids(
+                    results.len(),
+                    &mut existing_ids,
+                    &mut || generate_element_id(None),
+                ) else {
+                    return;
+                };
+                ids.into_iter().map(Some).collect()
+            } else {
+                vec![path_elem.common.id.clone()]
+            };
+            for (cmds, id) in results.into_iter().zip(fragment_ids) {
+                let mut frag = PathElem { d: cmds, ..path_elem.clone() };
+                frag.common.id = id;
+                new_children.push(Rc::new(Element::Path(frag)));
+            }
+            layer_changed = true;
+        }
+        if layer_changed {
             if let Some(layer_children) = new_doc.layers[li].children_mut() {
-                layer_children.remove(ci);
-                for cmds in results.into_iter().rev() {
-                    if cmds.len() >= 2 {
-                        let new_path = Element::Path(PathElem {
-                            d: cmds,
-                            fill: path_elem.fill,
-                            stroke: path_elem.stroke,
-                            width_points: path_elem.width_points.clone(),
-                            common: crate::geometry::element::CommonProps::default(),
-                            fill_gradient: None,
-                            stroke_gradient: None,
-                            stroke_brush: path_elem.stroke_brush.clone(),
-                            stroke_brush_overrides: path_elem.stroke_brush_overrides.clone(),
-                            fill_rule: crate::geometry::element::FillRule::NonZero,
-                        });
-                        layer_children.insert(ci, Rc::new(new_path));
-                    }
-                }
+                *layer_children = new_children;
                 changed = true;
             }
         }
@@ -4548,9 +4607,11 @@ fn path_paintbrush_edit_start(
 /// Reads `edit_target_path` + `edit_entry_idx` from tool state, finds
 /// the exit_idx on the target's flat polyline closest to the buffer's
 /// last point, and if within range, splices fit_curve output over the
-/// target's command range [c0..c1]. Preserves all non-`d` attributes
-/// (fill, stroke, stroke-width, stroke_brush, stroke_brush_overrides).
-/// No-op when target missing, exit out-of-range, or range degenerate.
+/// target's command range [c0..c1]. The rebuild is `PathElem { d, ..pe }`,
+/// so every field except `d` is carried across — no enumeration, and a
+/// field added to PathElem later is covered by construction (Ship of
+/// Theseus law). No-op when the target is missing, the exit is
+/// out-of-range, or the range is degenerate.
 fn path_paintbrush_edit_commit(
     model: &mut Model,
     store: &StateStore,
@@ -4666,19 +4727,13 @@ fn path_paintbrush_edit_commit(
         new_cmds.push(*cmd);
     }
 
-    // Preserve all non-`d` attributes per §Edit gesture preservation
-    // rules.
+    // Struct update, not a field list: only `d` changes (Ship of Theseus law,
+    // ratified 2026-07-26 — "the ship is the same ship even when planks are
+    // removed, replaced, the anchor is heaved"). Swift's `pathWithCommands`
+    // has to restate each field by hand; this form cannot drop one.
     let new_elem = Element::Path(PathElem {
         d: new_cmds,
-        fill: target_path_elem.fill,
-        stroke: target_path_elem.stroke,
-        width_points: target_path_elem.width_points.clone(),
-        common: target_path_elem.common.clone(),
-        fill_gradient: None,
-        stroke_gradient: None,
-        stroke_brush: target_path_elem.stroke_brush.clone(),
-        stroke_brush_overrides: target_path_elem.stroke_brush_overrides.clone(),
-        fill_rule: crate::geometry::element::FillRule::NonZero,
+        ..target_path_elem.clone()
     });
     let new_doc = doc.replace_element(&target_path, new_elem);
     model.edit_document(new_doc);
@@ -4854,6 +4909,15 @@ fn blob_brush_fill_matches(a: &Option<Fill>, b: &Option<Fill>) -> bool {
 
 /// Implementation of doc.blob_brush.commit_painting.
 /// See BLOB_BRUSH_TOOL.md §Commit pipeline + §Multi-element merge.
+///
+/// MINTS AN ID in the N -> 1 merge arm (N >= 2 matches). A merge consumes
+/// identified elements and produces one, so the result needs a fresh id — and
+/// the initiator cannot carry it in an operation payload, because whether a
+/// merge happens at all falls out of the geometry (the overlap test below).
+/// The mint happens here, where the document is in hand for the collision
+/// check; determinism across ports comes from seeding both ports' id source
+/// identically (`set_test_id_rng`). See OP_LOG.md §9 for what the 33-verb
+/// unification owes this verb.
 fn blob_brush_commit_painting(
     model: &mut Model, store: &StateStore, ctx: &serde_json::Value,
     buffer_name: &str,
@@ -4862,6 +4926,7 @@ fn blob_brush_commit_painting(
     _keep_selected: bool, // Selection update deferred; future follow-up
 ) {
     use crate::algorithms::boolean::boolean_union;
+    use crate::document::artboard::{generate_element_id, mint_unique_ids};
     use crate::geometry::element::{Element, PathElem, CommonProps};
     use crate::geometry::path_ops::{path_to_polygon_set, polygon_set_to_path};
 
@@ -4939,20 +5004,125 @@ fn blob_brush_commit_painting(
     if new_d.is_empty() {
         return;
     }
-    let mut common = CommonProps::default();
-    common.tool_origin = Some("blob_brush".to_string());
-    let new_elem = Element::Path(PathElem {
-        d: new_d,
-        fill: new_fill,
-        stroke: None,
-        width_points: Vec::new(),
-        common,
-        fill_gradient: None,
-        stroke_gradient: None,
-        stroke_brush: None,
-        stroke_brush_overrides: None,
-        fill_rule: crate::geometry::element::FillRule::NonZero,
-    });
+    // THE CARDINALITY LAW (JYH, ratified 2026-07-26): "Identity survives a
+    // one-to-one edit. It does not survive a change in cardinality." The arm
+    // is chosen by the MATCH COUNT, and Swift's blobBrushCommitPainting
+    // branches on the same predicate so the two cannot drift.
+    let new_elem = if matches.len() == 1 {
+        // 1 -> 1: one existing path in, one out with a rewritten `d`. It is
+        // the same object, so everything but `d` travels — a struct update,
+        // never a field list (an earlier enumeration of this law omitted
+        // `transform`, which RELOCATES the artwork).
+        //
+        // `fill` deliberately keeps the SOURCE's value rather than `new_fill`:
+        // the match loop above ran blob_brush_fill_matches, so the source's
+        // fill already equals the stroke's under that comparison (lowercased
+        // hex plus opacity within 1e-9) — which is a MATCH criterion, NOT an
+        // equality guarantee: `Color::to_hex` discards alpha and flattens the
+        // Color variant, so Rgb{a:0.5}, Cmyk, and any RGB within half a 1/255
+        // step all hex-compare equal to the state colour. Keeping the source's
+        // fill therefore follows from the cardinality law (a surviving element
+        // keeps its own attributes), NOT from the fills being identical. Real
+        // consequence: painting into a translucent or CMYK blob now preserves
+        // that blob's colour instead of overwriting it with the tool's.
+        let src = match doc.get_element(&matches[0]) {
+            Some(Element::Path(pe)) => pe.clone(),
+            // Unreachable: the path was collected from this same `doc` above.
+            _ => return,
+        };
+        Element::Path(PathElem { d: new_d, ..src })
+    } else {
+        // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both build
+        // a fresh element carrying the tool's own attributes. For the merge
+        // that is the law's verdict on identity: no source's id may travel
+        // ("the largest source keeps the id" was explicitly rejected in both
+        // directions), so the result wears a FRESH id, minted HERE through the
+        // shared `mint_unique_ids` loop — the effect is where the document is
+        // in hand for the collision check, and the initiator cannot know that
+        // a merge is happening at all until the match loop above has run.
+        //
+        // The 0 -> 1 arm deliberately does NOT mint: a brand-new blob is a
+        // creation, and no creation tool in this app mints an element id (a
+        // drawn rect, ellipse or pen path all commit id-less). Giving one to
+        // the blob brush alone would single it out; when creation-time ids
+        // land, they land for every tool at once.
+        let mut common = CommonProps::default();
+        common.tool_origin = Some("blob_brush".to_string());
+        // This arm is `matches.len() != 1`, so a non-empty `matches` here is
+        // exactly the N >= 2 merge.
+        if matches.len() >= 2 {
+            let mut existing_ids = doc.element_ids();
+            let Some(ids) = mint_unique_ids(1, &mut existing_ids, &mut || {
+                generate_element_id(None)
+            }) else {
+                return;
+            };
+            common.id = Some(ids[0].clone());
+
+            // UNANIMITY CARRY (JYH, ratified 2026-07-26): if EVERY source
+            // agrees on a non-paint attribute, the merged element carries it;
+            // if they disagree, the default above stands. No winner is ever
+            // picked — "the largest source keeps it" was rejected in both
+            // directions. The rationale is the Theseus principle: an edit
+            // preserves what it does not speak to, and painting a stroke says
+            // nothing about opacity, so merging two 50%-opaque blobs must not
+            // yield a fully opaque one.
+            //
+            // `transform` is EXCLUDED regardless of agreement. This merge
+            // matches RAW geometry against a DOCUMENT-space sweep, so it is
+            // already transform-blind (transcripts/BLOB_BRUSH_TOOL.md);
+            // carrying a unanimous transform would COMPOUND that bug by
+            // relocating the merged artwork. `tool_origin` is set by the tool
+            // above, `id` is minted fresh, and the paint attributes are what
+            // the stroke DOES speak to — so `common`'s five compositing
+            // fields below are the whole list. Swift's twin carries the same
+            // five.
+            let sources: Vec<&PathElem> = matches
+                .iter()
+                .filter_map(|p| match doc.get_element(p) {
+                    Some(Element::Path(pe)) => Some(pe),
+                    _ => None,
+                })
+                .collect();
+            fn unanimous<T: PartialEq + Clone>(
+                sources: &[&PathElem],
+                get: impl Fn(&PathElem) -> T,
+            ) -> Option<T> {
+                let first = get(sources.first()?);
+                sources
+                    .iter()
+                    .all(|pe| get(pe) == first)
+                    .then_some(first)
+            }
+            if let Some(v) = unanimous(&sources, |pe| pe.common.opacity) {
+                common.opacity = v;
+            }
+            if let Some(v) = unanimous(&sources, |pe| pe.common.mode) {
+                common.mode = v;
+            }
+            if let Some(v) = unanimous(&sources, |pe| pe.common.visibility) {
+                common.visibility = v;
+            }
+            if let Some(v) = unanimous(&sources, |pe| pe.common.locked) {
+                common.locked = v;
+            }
+            if let Some(v) = unanimous(&sources, |pe| pe.common.mask.clone()) {
+                common.mask = v;
+            }
+        }
+        Element::Path(PathElem {
+            d: new_d,
+            fill: new_fill,
+            stroke: None,
+            width_points: Vec::new(),
+            common,
+            fill_gradient: None,
+            stroke_gradient: None,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
+        })
+    };
 
     // Build a new document: remove matches (in reverse order so
     // earlier indices stay valid), then insert the unified element.
@@ -5456,17 +5626,10 @@ fn path_smooth_at_cursor(
         if new_cmds.len() >= path_elem.d.len() {
             continue;
         }
+        // Struct update, not a field list: only `d` changes (Ship of Theseus law).
         let new_elem = Element::Path(PathElem {
             d: new_cmds,
-            fill: path_elem.fill,
-            stroke: path_elem.stroke,
-            width_points: path_elem.width_points.clone(),
-            common: path_elem.common.clone(),
-            fill_gradient: None,
-            stroke_gradient: None,
-            stroke_brush: path_elem.stroke_brush.clone(),
-            stroke_brush_overrides: path_elem.stroke_brush_overrides.clone(),
-            fill_rule: crate::geometry::element::FillRule::NonZero,
+            ..path_elem.clone()
         });
         new_doc = new_doc.replace_element(path, new_elem);
         changed = true;
@@ -5574,17 +5737,10 @@ fn path_insert_anchor_on_segment_near(
     };
     model.begin_txn();
     let ins = insert_point_in_path(&pe.d, seg_idx, t);
+    // Struct update, not a field list: only `d` changes (Ship of Theseus law).
     let new_pe = crate::geometry::element::PathElem {
         d: ins.commands,
-        fill: pe.fill,
-        stroke: pe.stroke,
-        width_points: pe.width_points.clone(),
-        common: pe.common.clone(),
-        fill_gradient: pe.fill_gradient.clone(),
-        stroke_gradient: pe.stroke_gradient.clone(),
-        stroke_brush: pe.stroke_brush.clone(),
-        stroke_brush_overrides: pe.stroke_brush_overrides.clone(),
-        fill_rule: crate::geometry::element::FillRule::NonZero,
+        ..pe.clone()
     };
     let doc = model.document().replace_element(
         &path, Element::Path(new_pe));
@@ -5598,8 +5754,8 @@ fn path_delete_anchor_near(model: &mut Model, x: f64, y: f64, radius: f64) {
         Some(hit) => hit,
         None => return,
     };
-    // Capture the existing PathElem for its non-command fields (fill,
-    // stroke, width_points, common).
+    // Capture the existing PathElem: the edit rewrites `d` and carries
+    // every other field across (Ship of Theseus law).
     let pe = match model.document().get_element(&path) {
         Some(Element::Path(pe)) => pe.clone(),
         _ => return,
@@ -5607,17 +5763,11 @@ fn path_delete_anchor_near(model: &mut Model, x: f64, y: f64, radius: f64) {
     model.begin_txn();
     match delete_anchor_from_path(&pe.d, anchor_idx) {
         Some(new_cmds) => {
+            // Struct update, not a field list: a field added to PathElem
+            // is carried without editing this site.
             let new_pe = crate::geometry::element::PathElem {
                 d: new_cmds,
-                fill: pe.fill,
-                stroke: pe.stroke,
-                width_points: pe.width_points.clone(),
-                common: pe.common.clone(),
-                fill_gradient: pe.fill_gradient.clone(),
-                stroke_gradient: pe.stroke_gradient.clone(),
-                stroke_brush: pe.stroke_brush.clone(),
-                stroke_brush_overrides: pe.stroke_brush_overrides.clone(),
-                fill_rule: crate::geometry::element::FillRule::NonZero,
+                ..pe.clone()
             };
             let new_elem = Element::Path(new_pe);
             let mut doc = model.document().replace_element(&path, new_elem);
@@ -9783,5 +9933,698 @@ mod tests {
             Some("default_brushes/flat_10".to_string()),
             "the brush id is composed from the params, not the literal {{}} template"
         );
+    }
+
+    // ── The Ship of Theseus law: a path edit preserves everything but `d` ──
+    //
+    // "The ship is the same ship even when planks are removed, replaced, the
+    // anchor is heaved." A path edit that yields ONE element must return an
+    // element identical to its source except for `d`. Stated as a law, not a
+    // field list, so it cannot rot as fields are added to PathElem.
+    //
+    // The assertion below is deliberately field-list-FREE: it grafts the
+    // source's `d` onto the output and demands whole-struct equality. A field
+    // added to PathElem tomorrow is covered without editing this file.
+
+    /// Every non-`d` field of `src` set to a NON-default, distinguishable
+    /// value, so a dropped field is observable. `locked` stays false (a locked
+    /// path is skipped by every edit site) and `visibility` stays renderable.
+    fn theseus_path(d: Vec<PathCommand>) -> PathElem {
+        use crate::geometry::element::{
+            BlendMode, FillRule, Gradient, GradientStop, GradientType, Mask,
+            StrokeWidthPoint, Transform, Visibility,
+        };
+        let ramp = Gradient {
+            gtype: GradientType::Linear,
+            angle: 30.0,
+            stops: vec![
+                GradientStop {
+                    color: Color::rgb(1.0, 0.0, 0.0),
+                    opacity: 100.0,
+                    location: 0.0,
+                    midpoint_to_next: 50.0,
+                },
+                GradientStop {
+                    color: Color::rgb(0.0, 0.0, 1.0),
+                    opacity: 100.0,
+                    location: 100.0,
+                    midpoint_to_next: 50.0,
+                },
+            ],
+            ..Gradient::default()
+        };
+        PathElem {
+            d,
+            fill: Some(Fill::new(Color::rgb(0.2, 0.4, 0.6))),
+            stroke: Some(Stroke::new(Color::rgb(0.1, 0.1, 0.1), 3.0)),
+            width_points: vec![
+                StrokeWidthPoint { t: 0.0, width_left: 1.0, width_right: 1.0 },
+                StrokeWidthPoint { t: 1.0, width_left: 4.0, width_right: 4.0 },
+            ],
+            common: CommonProps {
+                opacity: 0.5,
+                mode: BlendMode::Multiply,
+                transform: Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 40.0, f: 70.0 }),
+                locked: false,
+                visibility: Visibility::Outline,
+                mask: Some(Box::new(Mask {
+                    subtree: Box::new(Element::Rect(RectElem {
+                        x: 0.0, y: 0.0, width: 10.0, height: 10.0,
+                        rx: 0.0, ry: 0.0,
+                        fill: Some(Fill::new(Color::rgb(1.0, 1.0, 1.0))),
+                        stroke: None,
+                        common: CommonProps::default(),
+                        fill_gradient: None,
+                        stroke_gradient: None,
+                    })),
+                    clip: true,
+                    invert: true,
+                    disabled: false,
+                    linked: false,
+                    unlink_transform: Some(Transform::default()),
+                })),
+                tool_origin: Some("blob_brush".to_string()),
+                name: Some("theseus".to_string()),
+                id: Some("keep-me".to_string()),
+            },
+            fill_gradient: Some(Box::new(ramp.clone())),
+            stroke_gradient: Some(Box::new(ramp)),
+            fill_rule: FillRule::EvenOdd,
+            stroke_brush: Some("default_brushes/flat_10".to_string()),
+            stroke_brush_overrides: Some("{\"size\":2}".to_string()),
+        }
+    }
+
+    /// Guard the fixture: if any non-`d` field of `theseus_path` matched the
+    /// default PathElem, the batteries below could pass while dropping it.
+    #[test]
+    fn theseus_fixture_differs_from_default_in_every_non_d_field() {
+        let src = theseus_path(vec![PathCommand::MoveTo { x: 0.0, y: 0.0 }]);
+        let bare = PathElem { d: src.d.clone(), ..PathElem::default() };
+        // Whole-struct inequality is not enough — check each field the law
+        // covers individually so a defaulted one cannot hide.
+        assert_ne!(src.fill, bare.fill);
+        assert_ne!(src.stroke, bare.stroke);
+        assert_ne!(src.width_points, bare.width_points);
+        assert_ne!(src.fill_gradient, bare.fill_gradient);
+        assert_ne!(src.stroke_gradient, bare.stroke_gradient);
+        assert_ne!(src.fill_rule, bare.fill_rule);
+        assert_ne!(src.stroke_brush, bare.stroke_brush);
+        assert_ne!(src.stroke_brush_overrides, bare.stroke_brush_overrides);
+        assert_ne!(src.common.opacity, bare.common.opacity);
+        assert_ne!(src.common.mode, bare.common.mode);
+        assert_ne!(src.common.transform, bare.common.transform);
+        assert_ne!(src.common.visibility, bare.common.visibility);
+        assert_ne!(src.common.mask, bare.common.mask);
+        assert_ne!(src.common.tool_origin, bare.common.tool_origin);
+        assert_ne!(src.common.name, bare.common.name);
+        assert_ne!(src.common.id, bare.common.id);
+        // `locked` is deliberately left at the default: every edit site skips
+        // a locked path, so a locked fixture would make the batteries vacuous.
+        assert!(!src.common.locked);
+    }
+
+    /// The law, as an assertion. Grafts `src.d` onto `out` and demands the
+    /// whole struct match — no field list, so it cannot go stale.
+    fn assert_only_d_changed(src: &PathElem, out: &PathElem, label: &str) {
+        assert_ne!(
+            out.d, src.d,
+            "{label}: `d` is unchanged — the fixture did not exercise an edit"
+        );
+        let grafted = PathElem { d: src.d.clone(), ..out.clone() };
+        assert_eq!(
+            &grafted, src,
+            "{label}: a non-`d` field changed (Ship of Theseus law)"
+        );
+    }
+
+    fn model_with_theseus(d: Vec<PathCommand>) -> (Model, PathElem) {
+        use crate::document::document::Document;
+        use std::rc::Rc;
+        let src = theseus_path(d);
+        let mut doc = Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(Element::Path(src.clone())));
+        }
+        (Model::new(doc, None), src)
+    }
+
+    fn path_at(model: &Model, path: &[usize]) -> PathElem {
+        match model.document().get_element(&path.to_vec()) {
+            Some(Element::Path(p)) => p.clone(),
+            other => panic!("expected a Path at {path:?}, got {other:?}"),
+        }
+    }
+
+    /// Run `body` with the per-char id counter both corpus runners install
+    /// (0,1,2,… so each 8-char draw walks the base-36 alphabet in order:
+    /// "01234567", "89abcdef", "ghijklmn", "opqrstuv"), then clear it. The
+    /// Swift twin `withCorpusIdCounter` installs the identical source, which
+    /// is what lets the two ports pin the SAME literal ids.
+    fn with_corpus_id_counter<T>(body: impl FnOnce() -> T) -> T {
+        use crate::document::artboard::set_test_id_rng;
+        let mut counter: u32 = 0;
+        set_test_id_rng(Some(Box::new(move || {
+            let v = counter;
+            counter = counter.wrapping_add(1);
+            v
+        })));
+        let out = body();
+        set_test_id_rng(None);
+        out
+    }
+
+    #[test]
+    fn theseus_delete_anchor_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 50.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+        ]);
+        path_delete_anchor_near(&mut model, 50.0, 0.0, 8.0);
+        assert_only_d_changed(&src, &path_at(&model, &[0, 0]), "delete_anchor_near");
+    }
+
+    #[test]
+    fn theseus_insert_anchor_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+        ]);
+        path_insert_anchor_on_segment_near(&mut model, 50.0, 0.0, 8.0);
+        assert_only_d_changed(
+            &src, &path_at(&model, &[0, 0]), "insert_anchor_on_segment_near");
+    }
+
+    #[test]
+    fn theseus_smooth_at_cursor_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 10.0, y: 5.0 },
+            PathCommand::LineTo { x: 20.0, y: -5.0 },
+            PathCommand::LineTo { x: 30.0, y: 0.0 },
+        ]);
+        let mut doc = model.document().clone();
+        doc.selection.push(
+            crate::document::document::ElementSelection::all(vec![0, 0]));
+        model.set_document_unbracketed(doc, NonUndoableIntent::Selection);
+        path_smooth_at_cursor(&mut model, 15.0, 0.0, 50.0, 3.0);
+        assert_only_d_changed(&src, &path_at(&model, &[0, 0]), "smooth_at_cursor");
+    }
+
+    #[test]
+    fn theseus_paintbrush_edit_commit_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 50.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 150.0, y: 0.0 },
+        ]);
+        let buffer = "theseus_paintbrush_edit";
+        super::super::point_buffers::clear(buffer);
+        super::super::point_buffers::push(buffer, 50.0, 10.0);
+        super::super::point_buffers::push(buffer, 75.0, 20.0);
+        super::super::point_buffers::push(buffer, 100.0, 0.0);
+        let mut store = StateStore::new();
+        set_tool_path_generic(&mut store, "paintbrush", "edit_target_path", &vec![0, 0]);
+        store.set_tool("paintbrush", "edit_entry_idx", serde_json::json!(1));
+        path_paintbrush_edit_commit(&mut model, &store, buffer, 4.0, 12.0);
+        super::super::point_buffers::clear(buffer);
+        assert_only_d_changed(
+            &src, &path_at(&model, &[0, 0]), "paintbrush.edit_commit");
+    }
+
+    /// A CLOSED path erased at one spot becomes exactly ONE open fragment
+    /// (path_ops::split_path_at_eraser's closed branch returns a single
+    /// fragment). That is the one-element case, so the law applies in full —
+    /// including `id`.
+    #[test]
+    fn theseus_erase_single_fragment_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 100.0 },
+            PathCommand::LineTo { x: 0.0, y: 100.0 },
+            PathCommand::ClosePath,
+        ]);
+        path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0);
+        let children = match model.document().layers[0].children() {
+            Some(c) => c.len(),
+            None => 0,
+        };
+        assert_eq!(children, 1, "a closed path erased once yields one fragment");
+        assert_only_d_changed(
+            &src, &path_at(&model, &[0, 0]), "erase_at_rect (one fragment)");
+    }
+
+    /// A SEVERING erase yields several fragments. Phase 1 preserves their
+    /// appearance and `name` but must NOT propagate `id`: Controller cannot
+    /// mint ids (the initiator carries them in the op payload) and
+    /// dedupe_element_ids runs only in document readers, so duplicated ids
+    /// would persist live and break the unique-id invariant of
+    /// REFERENCE_GRAPH.md §2.5. Each fragment therefore gets a FRESH id,
+    /// minted inside the effect.
+    #[test]
+    fn theseus_erase_split_preserves_appearance_and_name_with_fresh_ids() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+        ]);
+        with_corpus_id_counter(|| {
+            path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0)
+        });
+        let n = model.document().layers[0].children().map_or(0, |c| c.len());
+        assert_eq!(n, 2, "a severing erase of an open path yields two fragments");
+        let mut seen: Vec<String> = Vec::new();
+        for i in 0..n {
+            let frag = path_at(&model, &[0, i]);
+            let label = format!("erase fragment {i}");
+            // Appearance + name + transform survive; only `id` differs.
+            let grafted = PathElem {
+                d: src.d.clone(),
+                common: CommonProps { id: src.common.id.clone(), ..frag.common.clone() },
+                ..frag.clone()
+            };
+            assert_eq!(&grafted, &src, "{label}: a non-`d`, non-`id` field changed");
+            let id = frag.common.id.clone().unwrap_or_else(|| {
+                panic!("{label}: a split fragment must carry a fresh id")
+            });
+            assert_ne!(Some(&id), src.common.id.as_ref(),
+                "{label}: no fragment may wear the severed source's id");
+            assert!(!seen.contains(&id), "{label}: fragments must not share an id");
+            seen.push(id);
+        }
+    }
+
+    /// The minted ids themselves, pinned as literals under the SAME per-char
+    /// counter Swift's twin installs, so the two ports cannot drift on how
+    /// many ids a severing erase draws or in what order it hands them out.
+    /// Document order is mint order: fragment [0,0] takes the first id.
+    ///
+    /// Separation from the pre-fix behaviour: the old code left BOTH fragments
+    /// at `id: None`, which is neither literal here.
+    #[test]
+    fn erase_split_mints_ids_in_document_order() {
+        let (mut model, _src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+        ]);
+        with_corpus_id_counter(|| {
+            path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0)
+        });
+        assert_eq!(path_at(&model, &[0, 0]).common.id.as_deref(), Some("01234567"));
+        assert_eq!(path_at(&model, &[0, 1]).common.id.as_deref(), Some("89abcdef"));
+    }
+
+    /// TWO paths severed by ONE erase call. The mint order is DOCUMENT order
+    /// (the earlier child's fragments draw first), which is the only order
+    /// both ports can agree on — Swift rebuilds the child list front-to-back.
+    /// Four fragments, four ids, in sequence.
+    #[test]
+    fn erase_split_of_two_paths_mints_in_document_order() {
+        use crate::geometry::element::FillRule;
+        use std::rc::Rc;
+        let bar = |y: f64, id: &str| {
+            Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: 0.0, y },
+                    PathCommand::LineTo { x: 100.0, y },
+                ],
+                fill: None,
+                stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+                width_points: Vec::new(),
+                common: CommonProps {
+                    id: Some(id.to_string()),
+                    ..CommonProps::default()
+                },
+                fill_gradient: None,
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })
+        };
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(bar(0.0, "top")));
+            children.push(Rc::new(bar(10.0, "bottom")));
+        }
+        let mut model = Model::new(doc, None);
+        // A tall eraser rect at x = 50 crosses BOTH bars in one call.
+        with_corpus_id_counter(|| {
+            path_erase_at_rect(&mut model, 50.0, 5.0, 50.0, 5.0, 8.0)
+        });
+        let ids: Vec<Option<String>> = (0..4)
+            .map(|i| path_at(&model, &[0, i]).common.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                Some("01234567".to_string()),
+                Some("89abcdef".to_string()),
+                Some("ghijklmn".to_string()),
+                Some("opqrstuv".to_string()),
+            ]
+        );
+    }
+
+    // ── The cardinality law at the blob-brush merge ──
+    //
+    // JYH, ratified 2026-07-26: "Identity survives a one-to-one edit. It does
+    // not survive a change in cardinality." So at
+    // doc.blob_brush.commit_painting the arm is chosen by the MATCH COUNT:
+    //   0 matches -> a brand-new blob with the tool's own attributes;
+    //   1 match   -> the 1 -> 1 case, so the Theseus law applies in full;
+    //   N >= 2    -> a merge, so identity dies and the result carries no id.
+    // "The largest source keeps the id" was explicitly REJECTED in both
+    // directions, so no arm tie-breaks among sources.
+
+    /// The state `doc.blob_brush.commit_painting` reads. `fill_color` is taken
+    /// FROM the source so `blob_brush_fill_matches` accepts it — that helper
+    /// compares lowercased hex plus opacity, and `Color::to_hex` round-trips.
+    fn seed_blob_brush_merge_state(store: &mut StateStore, src: &PathElem) {
+        let fill = src.fill.expect("the fixture carries a solid fill");
+        store.set("fill_color", serde_json::json!(fill.color.to_hex()));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+    }
+
+    /// A 6-point horizontal sweep along `y` from `x0` to `x1`, in a
+    /// test-private buffer (the point buffers are process-global, and tests
+    /// run in parallel).
+    fn seed_blob_brush_sweep_in(buffer: &str, x0: f64, x1: f64, y: f64) {
+        super::super::point_buffers::clear(buffer);
+        for i in 0..=5 {
+            let t = i as f64 / 5.0;
+            super::super::point_buffers::push(buffer, x0 + (x1 - x0) * t, y);
+        }
+    }
+
+    fn blob_brush_commit_painting_effects(buffer: &str) -> Vec<serde_json::Value> {
+        vec![serde_json::json!({
+            "doc.blob_brush.commit_painting": {
+                "buffer": buffer,
+                "fidelity_epsilon": "5.0",
+                "merge_only_with_selection": "false",
+                "keep_selected": "false"
+            }
+        })]
+    }
+
+    /// EXACTLY ONE match is the 1 -> 1 case: one PathElem in, one out with a
+    /// rewritten `d`. The law applies in full, `id` included. `fill` is not
+    /// re-derived from `state.fill_color` — the match loop already gated on
+    /// fill equality, so the source's fill matches the stroke's.
+    #[test]
+    fn theseus_blob_brush_merge_one_match_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 100.0 },
+            PathCommand::LineTo { x: 0.0, y: 100.0 },
+            PathCommand::ClosePath,
+        ]);
+        let mut store = StateStore::new();
+        seed_blob_brush_merge_state(&mut store, &src);
+        let buffer = "theseus_blob_merge_one";
+        seed_blob_brush_sweep_in(buffer, 50.0, 150.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the sweep overlapped the one existing blob, so it merged"
+        );
+        assert_only_d_changed(
+            &src, &path_at(&model, &[0, 0]),
+            "blob_brush.commit_painting (exactly one match)");
+    }
+
+    /// TWO matches change cardinality, so identity DIES: the merged element
+    /// carries NEITHER source's id, and wears a FRESH one minted inside the
+    /// effect (carrying a source's id would leave the merge wearing a dead
+    /// ship's name). Pinned as a literal under the per-char counter Swift's
+    /// twin also installs.
+    ///
+    /// Separation from the pre-fix behaviour: the old code left the merged
+    /// element at `id: None`, which is neither "01234567" nor either source's.
+    #[test]
+    fn blob_brush_merge_of_two_sources_mints_a_fresh_id() {
+        use crate::geometry::element::FillRule;
+        use std::rc::Rc;
+        let red = Fill::new(Color::from_hex("#ff0000").unwrap());
+        let blob = |id: &str, x0: f64, x1: f64| {
+            Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: x0, y: 40.0 },
+                    PathCommand::LineTo { x: x1, y: 40.0 },
+                    PathCommand::LineTo { x: x1, y: 60.0 },
+                    PathCommand::LineTo { x: x0, y: 60.0 },
+                    PathCommand::ClosePath,
+                ],
+                fill: Some(red),
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps {
+                    tool_origin: Some("blob_brush".to_string()),
+                    id: Some(id.to_string()),
+                    ..CommonProps::default()
+                },
+                fill_gradient: None,
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })
+        };
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(blob("left", 0.0, 40.0)));
+            children.push(Rc::new(blob("right", 60.0, 100.0)));
+        }
+        let mut model = Model::new(doc, None);
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!(red.color.to_hex()));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+        let buffer = "theseus_blob_merge_two";
+        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        with_corpus_id_counter(|| run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None));
+        super::super::point_buffers::clear(buffer);
+        // Both sources plus the sweep collapsed into ONE child: had only one
+        // matched, the other would still be sitting there.
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the sweep bridged both blobs, so both were merged away"
+        );
+        let out = path_at(&model, &[0, 0]);
+        assert_eq!(out.common.id.as_deref(), Some("01234567"),
+            "a merge of two sources wears a FRESH id, not either source's");
+        assert_eq!(out.common.tool_origin.as_deref(), Some("blob_brush"),
+            "the merged blob stays a blob-brush element");
+    }
+
+    /// The erase arm PRESERVES `tool_origin` where `CommonProps::default()`
+    /// used to clear it, so an erased fragment is now a blob-merge candidate
+    /// it previously was not. A closed path erased once yields ONE fragment
+    /// (the 1 -> 1 arm), and a sweep over that fragment is again 1 -> 1, so
+    /// the whole chain must preserve everything but `d`. If erase dropped
+    /// `tool_origin`, the sweep would append a SECOND element instead.
+    #[test]
+    fn theseus_erase_then_blob_merge_preserves_everything_but_d() {
+        let (mut model, src) = model_with_theseus(vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 100.0 },
+            PathCommand::LineTo { x: 0.0, y: 100.0 },
+            PathCommand::ClosePath,
+        ]);
+        path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0);
+        let fragment = path_at(&model, &[0, 0]);
+        assert_eq!(fragment.common.tool_origin.as_deref(), Some("blob_brush"),
+            "the erased fragment keeps tool_origin — that is what makes it a \
+             merge candidate");
+        let mut store = StateStore::new();
+        seed_blob_brush_merge_state(&mut store, &src);
+        let buffer = "theseus_blob_merge_after_erase";
+        seed_blob_brush_sweep_in(buffer, 50.0, 150.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the erased fragment was merged into, not left beside a new blob"
+        );
+        assert_only_d_changed(
+            &src, &path_at(&model, &[0, 0]), "erase then blob_brush merge");
+    }
+
+    // ── Unanimous attributes on an N -> 1 merge ──
+    //
+    // JYH, ratified 2026-07-26: if EVERY source agrees on a non-paint
+    // attribute the result carries it; if they disagree, the tool's default
+    // is taken. No winner is ever picked — "the largest source keeps it" was
+    // rejected in both directions. The rationale is the Theseus principle: an
+    // edit preserves what it does not speak to, and painting a stroke says
+    // nothing about opacity. `transform` is EXCLUDED regardless (see the
+    // site).
+
+    /// A test-only mask, so `mask` can be given a non-default value.
+    fn unanimity_mask() -> crate::geometry::element::Mask {
+        use crate::geometry::element::{Mask, Transform};
+        Mask {
+            subtree: Box::new(Element::Rect(RectElem {
+                x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::rgb(1.0, 1.0, 1.0))),
+                stroke: None,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            })),
+            clip: true, invert: true, disabled: false, linked: false,
+            unlink_transform: Some(Transform::default()),
+        }
+    }
+
+    /// Two overlapping blob-brush sources (left + right, same red fill)
+    /// bridged by ONE sweep, so the commit takes the N = 2 merge arm. Returns
+    /// the merged element. `buffer` must be unique per test — the point
+    /// buffers are process-global and tests run in parallel.
+    fn merge_two_blobs(
+        left: CommonProps, right: CommonProps, buffer: &str,
+    ) -> PathElem {
+        use crate::geometry::element::FillRule;
+        use std::rc::Rc;
+        let red = Fill::new(Color::from_hex("#ff0000").unwrap());
+        let blob = |x0: f64, x1: f64, common: CommonProps| {
+            Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: x0, y: 40.0 },
+                    PathCommand::LineTo { x: x1, y: 40.0 },
+                    PathCommand::LineTo { x: x1, y: 60.0 },
+                    PathCommand::LineTo { x: x0, y: 60.0 },
+                    PathCommand::ClosePath,
+                ],
+                fill: Some(red),
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps {
+                    tool_origin: Some("blob_brush".to_string()),
+                    ..common
+                },
+                fill_gradient: None,
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })
+        };
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(blob(0.0, 40.0, left)));
+            children.push(Rc::new(blob(60.0, 100.0, right)));
+        }
+        let mut model = Model::new(doc, None);
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!(red.color.to_hex()));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the sweep bridged both blobs, so both were merged away"
+        );
+        path_at(&model, &[0, 0])
+    }
+
+    /// UNANIMOUS: both sources carry the same five non-paint attributes, so
+    /// all five ride onto the merged element.
+    ///
+    /// Separation from the pre-fix behaviour: the old code built the result
+    /// from `CommonProps::default()`, so it returned opacity 1.0, Normal,
+    /// Preview, locked false and mask None — the opposite of every value
+    /// asserted here.
+    #[test]
+    fn blob_merge_carries_unanimous_attributes() {
+        use crate::geometry::element::{BlendMode, Visibility};
+        let agreed = || CommonProps {
+            opacity: 0.5,
+            mode: BlendMode::Multiply,
+            visibility: Visibility::Outline,
+            locked: true,
+            mask: Some(Box::new(unanimity_mask())),
+            ..CommonProps::default()
+        };
+        let out = merge_two_blobs(agreed(), agreed(), "unanimity_agree");
+        assert_eq!(out.common.opacity, 0.5);
+        assert_eq!(out.common.mode, BlendMode::Multiply);
+        assert_eq!(out.common.visibility, Visibility::Outline);
+        assert!(out.common.locked);
+        assert_eq!(out.common.mask, Some(Box::new(unanimity_mask())));
+    }
+
+    /// DISAGREEMENT: the sources differ on every one of the five, so the
+    /// merged element takes the tool's defaults. No source is ever the winner.
+    ///
+    /// This vector does NOT separate the pre-fix behaviour (which also
+    /// produced the defaults) — it is the anti-arbitrariness pin, and it goes
+    /// red the moment anyone implements "the first/largest source wins".
+    #[test]
+    fn blob_merge_of_disagreeing_sources_takes_the_defaults() {
+        use crate::geometry::element::{BlendMode, Visibility};
+        let left = CommonProps {
+            opacity: 0.5,
+            mode: BlendMode::Multiply,
+            visibility: Visibility::Outline,
+            locked: true,
+            mask: Some(Box::new(unanimity_mask())),
+            ..CommonProps::default()
+        };
+        let right = CommonProps {
+            opacity: 0.25,
+            mode: BlendMode::Screen,
+            visibility: Visibility::Preview,
+            locked: false,
+            mask: None,
+            ..CommonProps::default()
+        };
+        let out = merge_two_blobs(left, right, "unanimity_disagree");
+        let d = CommonProps::default();
+        assert_eq!(out.common.opacity, d.opacity);
+        assert_eq!(out.common.mode, d.mode);
+        assert_eq!(out.common.visibility, d.visibility);
+        assert_eq!(out.common.locked, d.locked);
+        assert_eq!(out.common.mask, d.mask);
+    }
+
+    /// `transform` is EXCLUDED even when the sources agree. The merge matches
+    /// raw geometry against a document-space sweep, so it is already
+    /// transform-blind (transcripts/BLOB_BRUSH_TOOL.md); carrying a unanimous
+    /// transform would COMPOUND that bug by relocating the merged artwork.
+    ///
+    /// This vector does not separate the pre-fix behaviour either — it is the
+    /// pin that stops `transform` being swept into the unanimity list later.
+    #[test]
+    fn blob_merge_never_carries_transform_even_when_unanimous() {
+        use crate::geometry::element::Transform;
+        let with_transform = || CommonProps {
+            transform: Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 40.0, f: 70.0 }),
+            ..CommonProps::default()
+        };
+        let out = merge_two_blobs(
+            with_transform(), with_transform(), "unanimity_transform");
+        assert_eq!(out.common.transform, None,
+            "a unanimous transform must NOT ride onto the merge");
     }
 }

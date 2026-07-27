@@ -87,8 +87,14 @@ public struct BooleanOptions: Equatable {
     /// If true, DIVIDE drops fragments with no fill and no stroke.
     public let divideRemoveUnpainted: Bool
 
+    /// Defaults are the ones `workspace/state.yaml` declares for the
+    /// backing `state.boolean_*` fields, so an options-free call and a
+    /// call driven by an untouched store agree. `removeRedundantPoints`
+    /// defaulted to `true` here while `state.yaml` and Rust's
+    /// `BooleanOptions::default()` said `false` — so the collapse pass
+    /// ran in exactly one port.
     public init(precision: Double = DEFAULT_PRECISION,
-                removeRedundantPoints: Bool = true,
+                removeRedundantPoints: Bool = false,
                 divideRemoveUnpainted: Bool = false) {
         self.precision = precision
         self.removeRedundantPoints = removeRedundantPoints
@@ -948,9 +954,25 @@ public func elementToPolygonSetWith(
         case .generated(let gen):
             return gen.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
         }
+    // THE CARRIED RULE CROSSES HERE (transcripts/BOOLEAN.md, "Fill
+    // rule: the polygon set carries it"). A path's subpaths are only a
+    // region once a fill rule reads them, and the element says which —
+    // so hand the declared rule to the algorithm layer and let
+    // boolCanonicalize spend it. Dropping it and letting the sweep's
+    // bare even-odd convention take over would make this boundary LIE:
+    // a document declaring fill-rule="nonzero" would come back from a
+    // boolean op with a hole cut into it that the artist never drew.
+    //
+    // Cost: canonicalization is the same O(E^2) scan the boolean
+    // pipeline already pays on every operand, so this is a
+    // constant-factor addition, and it is idempotent — its output is
+    // canonical, so the downstream pass is a pure pass-through.
     case .path(let p):
-        return flattenPathToRings(p.d)
+        return boolCanonicalize(BoolRuledPolygonSet(
+            flattenPathToRings(p.d), rule: BoolFillRule(p.fillRule)))
     case .textPath(let tp):
+        // No fill rule to carry: a TextPath's `d` is a baseline, not a
+        // filled region, so the bare even-odd reading is all it means.
         return flattenPathToRings(tp.d)
     case .line, .text:
         // Line has zero area; Text glyph flattening is deferred.
@@ -1004,10 +1026,26 @@ public func boundsOfPolygonSet(_ ps: BoolPolygonSet) -> BBox {
 
 // MARK: - Internal ring samplers
 
-private func segmentsForArc(radius: Double, precision: Double) -> Int {
-    guard radius > 0, precision > 0 else { return 32 }
+/// Segment count for sampling a circular / elliptical ring.
+///
+/// Internal rather than private so `R9NaNLeaksThroughGuardTests` can hold it to
+/// its Rust twin (`geometry/live.rs segments_for_arc`).
+///
+/// `isFinite` is part of the guard, not decoration: the two ports' guards were
+/// NOT mirror images before. `radius > 0` is FALSE for NaN so this port fell
+/// back to 32, while Rust's `radius <= 0.0` is ALSO false for NaN so it fell
+/// through and landed on 8 — a display-list divergence with no crash on either
+/// side. An infinite radius trapped here and produced a usize::MAX-length point
+/// vector there. A non-finite radius is not a circle, so both ports now take the
+/// same fallback they take for a non-positive one. Risk R9.
+func segmentsForArc(radius: Double, precision: Double) -> Int {
+    guard radius > 0, radius.isFinite, precision > 0, precision.isFinite else {
+        return 32
+    }
     let n = Double.pi * (radius / (2.0 * precision)).squareRoot()
-    return max(8, Int(n.rounded(.up)))
+    // saturatingInt: the guard above admits a finite radius over a tiny
+    // precision, whose quotient can still overflow to infinity (risk R9).
+    return max(8, saturatingInt(n.rounded(.up)))
 }
 
 private func circleToRing(cx: Double, cy: Double, r: Double, precision: Double) -> BoolRing {

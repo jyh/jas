@@ -9,24 +9,62 @@
 //!
 //! # Data model
 //!
-//! All inputs and outputs are [`PolygonSet`] values. A `PolygonSet`
-//! is a flat list of *rings*; a ring is a closed polygon expressed
-//! as a list of `(x, y)` vertices (without an explicit closing
-//! vertex — the last vertex is implicitly connected back to the
-//! first).
+//! A [`PolygonSet`] is a flat list of *rings*; a ring is a closed
+//! polygon expressed as a list of `(x, y)` vertices (without an
+//! explicit closing vertex — the last vertex is implicitly connected
+//! back to the first).
 //!
-//! Multiple rings represent a region using the **even-odd fill
-//! rule**: a point is *inside* the region iff a ray from the point
-//! crosses an odd number of ring edges. This means a polygon with
-//! a hole is two rings (the outer boundary and the hole), and the
+//! # THE CARRIED-RULE LAW (JYH-ratified 2026-07-26)
+//!
+//! **A polygon set does not have a fill rule of its own — it carries
+//! the one its source declared.** Rings alone are geometry, not a
+//! region: it takes a fill rule to say which points they enclose, and
+//! the two rules disagree on exactly the inter-ring cases (nested
+//! same-orientation rings are a hole under even-odd and a solid under
+//! non-zero; two overlapping same-orientation rings are a symmetric
+//! difference under even-odd and a union under non-zero). Neither rule
+//! is universally "more natural" for an artist — even-odd matches
+//! deliberate holes, non-zero matches self-crossing freehand drawing —
+//! which is why SVG and PDF put `fill-rule` **on the path**. jas
+//! imports and exports SVG and `PathElem` already carries `fill_rule`,
+//! so a rule fixed in this layer would make the boundary *lie*: a
+//! document declaring `fill-rule="nonzero"` would be silently
+//! reinterpreted by a boolean op. Hence [`RuledPolygonSet`], which
+//! pairs rings with the rule that reads them, and
+//! [`canonicalize`], which resolves that pair into rings the rest of
+//! this module can read without asking.
+//!
+//! Two corollaries, both load-bearing:
+//!
+//! 1. **Canonical form.** [`canonicalize`] returns simple rings that
+//!    denote the same region *read under even-odd*, whatever rule the
+//!    input carried — so the rule has been fully consumed and nothing
+//!    downstream needs it. (From a non-zero input they are also
+//!    pairwise non-overlapping, which makes the two readings coincide;
+//!    see the normalizer's output contract for the exact shades.) The
+//!    sweep below takes canonical rings and emits canonical rings.
+//! 2. **Results declare EVEN-ODD.** Every `PolygonSet` this module
+//!    *emits* is declared even-odd — see [`PolyFillRule::EvenOdd`]
+//!    being the `Default`, and `Controller::apply_destructive_boolean`
+//!    stamping `FillRule::EvenOdd` on multi-ring results. This is a
+//!    deliberate choice for machine-made compound shapes: even-odd
+//!    does not depend on the sweep emitting consistent winding, so a
+//!    result stays correct even if a future connection step hands back
+//!    a hole wound the "wrong" way. A bare `PolygonSet` crossing a
+//!    function boundary inside this module therefore means "even-odd,
+//!    already canonical".
+//!
+//! Under either rule a polygon with a hole is two rings, and the
 //! result of a boolean operation may legitimately produce many
 //! disjoint pieces and/or holes — all collected in the same flat
 //! `PolygonSet`.
 //!
-//! Ring orientation is **not** part of the contract. The
+//! Ring orientation is **not** part of the *output* contract. The
 //! implementation is free to emit clockwise or counter-clockwise
 //! rings; the test suite asserts on the *region* (area, sample
-//! points, bounding box), never on raw vertex sequences.
+//! points, bounding box), never on raw vertex sequences. Orientation
+//! is of course meaningful in a non-zero-ruled *input*, which is
+//! precisely what [`canonicalize`] consumes it for.
 //!
 //! # Out of scope here
 //!
@@ -35,10 +73,11 @@
 //!   that wires these functions to `Element::Path` /
 //!   `Element::Circle` / etc. lives elsewhere; this module is
 //!   pure geometry.
-//! - Self-intersecting input rings. The behaviour on a
-//!   self-intersecting input is left intentionally undefined; if
-//!   we need to handle them, we'll add a normalisation pass and
-//!   tests for it explicitly.
+//! - Self-intersecting input rings. The sweep itself assumes simple
+//!   rings; [`crate::algorithms::boolean_normalize`] is the pre-pass
+//!   that makes them simple, and it is where the carried rule is
+//!   consumed. Call [`canonicalize`] (or one of the `*_ruled`
+//!   entry points) rather than feeding raw artwork to the sweep.
 //! - Open polylines. Boolean operations are defined on regions,
 //!   not curves; lines and polylines have no interior.
 
@@ -51,13 +90,107 @@
 /// include a duplicate closing vertex.
 pub type Ring = Vec<(f64, f64)>;
 
-/// A region in the plane, represented as a flat list of rings under
-/// the even-odd fill rule. Multiple rings can encode disjoint pieces
+/// A flat list of rings. Multiple rings can encode disjoint pieces
 /// and/or holes.
+///
+/// **Rings alone are geometry, not a region.** Which points they
+/// enclose is decided by a [`PolyFillRule`], which a `PolygonSet`
+/// deliberately does not fix — see the module docs' carried-rule law
+/// and [`RuledPolygonSet`]. A bare `PolygonSet` is only well-defined
+/// once a rule is attached to it; the one standing convention is that
+/// a set this module *emits* is canonical and declared even-odd.
 pub type PolygonSet = Vec<Ring>;
+
+/// Which fill rule reads a [`PolygonSet`]'s rings — the thing the
+/// algorithm layer must carry rather than assume. Mirrors SVG/PDF
+/// `fill-rule` and `crate::geometry::element::FillRule`, which is the
+/// document-side spelling of the same choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PolyFillRule {
+    /// SVG `fill-rule="nonzero"`. A point is inside iff the signed
+    /// winding number of **all** rings taken together is non-zero.
+    /// What a self-crossing freehand stroke means, and the SVG
+    /// document default — so it is the rule most imported artwork
+    /// carries.
+    NonZero,
+    /// SVG `fill-rule="evenodd"`. A point is inside iff a ray from it
+    /// crosses the rings an odd number of times.
+    ///
+    /// The **default here**, because this module's own emissions are
+    /// even-odd: see corollary 2 of the carried-rule law. That is a
+    /// statement about machine-made results, not about what artwork
+    /// means — never let it leak back into reading an operand.
+    #[default]
+    EvenOdd,
+}
+
+/// The fill rule a boolean RESULT declares. Clause 4 of the
+/// carried-rule law, named rather than left incidental: every emitter
+/// of a multi-ring boolean result stamps *this* constant, so the choice
+/// is stated in one place and can be re-read (or, one day, re-ruled)
+/// without hunting literals.
+///
+/// Why even-odd for machine-made compound shapes: it does not depend on
+/// the sweep emitting consistent winding. A hole stays a hole even if a
+/// future connection step hands its ring back wound the other way,
+/// whereas a non-zero declaration would silently fill it. Artwork the
+/// artist drew keeps whatever rule the artist declared — this constant
+/// governs only what jas itself generates.
+pub const RESULT_FILL_RULE: PolyFillRule = PolyFillRule::EvenOdd;
+
+/// A polygon set that carries the fill rule reading it: the operand
+/// type the carried-rule law calls for. Construct it at the boundary
+/// where the rule is still known (an element's `fill_rule`, an SVG
+/// attribute, a corpus vector's `fill_rule` field) and resolve it with
+/// [`canonicalize`] before handing rings to anything that does not
+/// take a rule.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RuledPolygonSet {
+    pub rings: PolygonSet,
+    pub rule: PolyFillRule,
+}
+
+impl RuledPolygonSet {
+    pub fn new(rings: PolygonSet, rule: PolyFillRule) -> Self {
+        Self { rings, rule }
+    }
+
+    /// Rings read under the even-odd rule.
+    pub fn even_odd(rings: PolygonSet) -> Self {
+        Self::new(rings, PolyFillRule::EvenOdd)
+    }
+
+    /// Rings read under the non-zero winding rule.
+    pub fn non_zero(rings: PolygonSet) -> Self {
+        Self::new(rings, PolyFillRule::NonZero)
+    }
+
+    /// This set's [`canonicalize`]d rings.
+    pub fn canonical(&self) -> PolygonSet {
+        canonicalize(self)
+    }
+}
+
+/// Consume the carried rule: return the simple, pairwise
+/// non-overlapping rings that bound exactly the region `set` denotes.
+///
+/// The even-odd and non-zero readings of the returned rings agree, so
+/// the rule has been fully spent and the result is safe to hand to the
+/// sweep, to a renderer as an even-odd path, or to any other consumer
+/// that takes bare rings. This is the *one* place a declared rule is
+/// interpreted; every other function in this module takes canonical
+/// rings.
+pub fn canonicalize(set: &RuledPolygonSet) -> PolygonSet {
+    crate::algorithms::boolean_normalize::normalize(&set.rings, set.rule)
+}
 
 // ---------------------------------------------------------------------------
 // Public API — algorithm-agnostic
+//
+// The four bare-`PolygonSet` entry points below read both operands as
+// EVEN-ODD, per the standing convention for a bare set. Use the
+// `*_ruled` twins whenever the operands came from a document, where
+// the declared rule is known and must be honoured.
 // ---------------------------------------------------------------------------
 
 /// `a ∪ b` — the region covered by either operand.
@@ -79,6 +212,26 @@ pub fn boolean_subtract(a: &PolygonSet, b: &PolygonSet) -> PolygonSet {
 /// one of the operands. Equivalent to `(a ∪ b) − (a ∩ b)`.
 pub fn boolean_exclude(a: &PolygonSet, b: &PolygonSet) -> PolygonSet {
     run_boolean(a, b, Operation::Xor)
+}
+
+/// `a ∪ b`, honouring each operand's declared fill rule.
+pub fn boolean_union_ruled(a: &RuledPolygonSet, b: &RuledPolygonSet) -> PolygonSet {
+    run_boolean_ruled(a, b, Operation::Union)
+}
+
+/// `a ∩ b`, honouring each operand's declared fill rule.
+pub fn boolean_intersect_ruled(a: &RuledPolygonSet, b: &RuledPolygonSet) -> PolygonSet {
+    run_boolean_ruled(a, b, Operation::Intersection)
+}
+
+/// `a − b`, honouring each operand's declared fill rule.
+pub fn boolean_subtract_ruled(a: &RuledPolygonSet, b: &RuledPolygonSet) -> PolygonSet {
+    run_boolean_ruled(a, b, Operation::Difference)
+}
+
+/// `a ⊕ b`, honouring each operand's declared fill rule.
+pub fn boolean_exclude_ruled(a: &RuledPolygonSet, b: &RuledPolygonSet) -> PolygonSet {
+    run_boolean_ruled(a, b, Operation::Xor)
 }
 
 // ---------------------------------------------------------------------------
@@ -465,19 +618,37 @@ fn snap_round(ps: &PolygonSet, grid: f64) -> PolygonSet {
 }
 
 fn run_boolean(a: &PolygonSet, b: &PolygonSet, op: Operation) -> PolygonSet {
+    run_boolean_ruled(
+        &RuledPolygonSet::even_odd(a.clone()),
+        &RuledPolygonSet::even_odd(b.clone()),
+        op,
+    )
+}
+
+fn run_boolean_ruled(
+    a: &RuledPolygonSet,
+    b: &RuledPolygonSet,
+    op: Operation,
+) -> PolygonSet {
     // Snap-round inputs onto a grid sized as a fixed fraction of the
     // combined bounding-box diagonal. See `SNAP_RATIO`.
-    let (a_snap, b_snap) = match snap_grid(a, b) {
-        Some(grid) => (snap_round(a, grid), snap_round(b, grid)),
-        None => (clone_nondegenerate(a), clone_nondegenerate(b)),
+    let (a_snap, b_snap) = match snap_grid(&a.rings, &b.rings) {
+        Some(grid) => (snap_round(&a.rings, grid), snap_round(&b.rings, grid)),
+        None => (
+            clone_nondegenerate(&a.rings),
+            clone_nondegenerate(&b.rings),
+        ),
     };
 
-    // Resolve any self-intersections under the non-zero winding fill
-    // rule, so the sweep below can keep assuming simple input rings.
-    // The normalizer is a no-op for inputs that are already simple,
-    // which is the common case.
-    let a_norm = crate::algorithms::boolean_normalize::normalize(&a_snap);
-    let b_norm = crate::algorithms::boolean_normalize::normalize(&b_snap);
+    // Consume each operand's DECLARED fill rule (the carried-rule law):
+    // resolve self-intersections and inter-ring relations into canonical
+    // rings, so the sweep below can keep assuming simple input rings
+    // read under one rule. The normalizer is a no-op for inputs that
+    // are already canonical, which is the common case.
+    let a_norm =
+        crate::algorithms::boolean_normalize::normalize(&a_snap, a.rule);
+    let b_norm =
+        crate::algorithms::boolean_normalize::normalize(&b_snap, b.rule);
 
     // The normalizer can introduce new vertices at intersection
     // points that don't land on the snap grid. Re-snap so downstream
@@ -1228,7 +1399,239 @@ fn connect_edges(events: &[SweepEvent], order: &[usize]) -> PolygonSet {
         }
     }
 
-    result
+    // Split any ring that revisits a vertex. See
+    // [`split_pinched_rings`]: the walk above cannot tell which of two
+    // regions touching at a pinch vertex it is on, so it produces one
+    // self-touching ring where the answer is two simple ones.
+    split_pinched_rings(&result)
+}
+
+/// Cut every ring that visits the same vertex twice into the separate
+/// loops it really is.
+///
+/// **Why the sweep needs this.** [`connect_edges`] walks the result
+/// boundary edge by edge, and at a vertex where two output regions
+/// touch at a single point it has no way to tell which region it is
+/// on: both regions' edges are incident to that one vertex. So it
+/// walks into one lobe, back out through the pinch, and on into the
+/// other, returning ONE ring that visits the pinch twice. The region
+/// is right — area and every sample point are correct — but the ring
+/// is not simple, and *every* `PolygonSet` consumer assumes simple
+/// rings (the normalizer's fast path, the even-odd renderer, the
+/// refit). EXCLUDE of two squares overlapping at a corner is the
+/// canonical case: twelve vertices visiting (10,5) and (5,10) twice,
+/// where the answer is two L-shapes of 75 touching only at those two
+/// isolated points.
+///
+/// **Why it is exact.** Cutting at the repeat is region-preserving by
+/// construction. If a ring reads `… a, X, b … c, X, d …` then the span
+/// from the first `X` up to (not including) the second is a closed loop
+/// on its own — it starts and ends at `X` — and the remainder, with the
+/// duplicate `X` kept once, is another. No vertex is invented, none is
+/// moved, and the two loops' signed areas sum to the original's, so the
+/// region is untouched. The recursion handles a ring with several
+/// pinches (the EXCLUDE case has two).
+///
+/// Order is fixed — lobe before remainder, first repeat by `(j, i)` —
+/// so Rust and Swift emit the same rings in the same sequence, which is
+/// what the exact-comparison corpus requires.
+///
+/// **Cost.** [`first_repeated_vertex`] is O(n) expected on a ring of at
+/// least [`PINCH_MAP_THRESHOLD`] vertices and O(n^2) worst case below it,
+/// and each cut removes one duplicate vertex, so a ring with `p` pinches
+/// costs O(p * n) expected for a long ring and at most
+/// O(p * THRESHOLD^2) for a short one — the latter bounded by 8001
+/// comparisons per call (the n=127 worst case; see
+/// [`PINCH_MAP_THRESHOLD`]), measured at 2.55 us. The pathological limit is
+/// O(n^2) either way, where a constant fraction of vertices is a pinch.
+/// The overwhelmingly common `p = 0` (one pass, no split) and the
+/// EXCLUDE-corner `p = 2` are linear on long rings. Worth stating because
+/// this runs on EVERY boolean result, including curve-flattened ones with
+/// thousands of vertices; the same bound is documented on the
+/// normalizer's O(E^2) arrangement.
+fn split_pinched_rings(rings: &PolygonSet) -> PolygonSet {
+    let mut out = PolygonSet::new();
+    for ring in rings {
+        split_pinched_ring(ring, &mut out);
+    }
+    out
+}
+
+fn split_pinched_ring(ring: &Ring, out: &mut PolygonSet) {
+    if ring.len() < 3 {
+        return;
+    }
+    match first_repeated_vertex(ring) {
+        None => out.push(ring.clone()),
+        Some((i, j)) => {
+            // ring[i] == ring[j], i < j.
+            let lobe: Ring = ring[i..j].to_vec();
+            let mut rest: Ring = ring[..i].to_vec();
+            rest.extend_from_slice(&ring[j..]);
+            split_pinched_ring(&lobe, out);
+            split_pinched_ring(&rest, out);
+        }
+    }
+}
+
+/// The hash key of a vertex, or `None` when the vertex can never equal
+/// anything (a NaN coordinate).
+///
+/// The key must reproduce `f64 ==` EXACTLY, and raw `to_bits` does not:
+///
+///  * `-0.0 == 0.0` is true while the bit patterns differ, so a raw key
+///    would MISS a pinch. `x + 0.0` maps -0.0 to +0.0 and is the
+///    identity on every other value (no rounding), which fixes it.
+///  * `NaN != NaN`, yet two NaNs of the same payload have equal bits, so
+///    a raw key would INVENT a pinch. Returning `None` for a NaN
+///    coordinate keeps such a vertex out of the map entirely, so it
+///    matches nothing — exactly what `==` does.
+///
+/// `first_repeated_vertex_matches_the_quadratic_scan` pins both cases
+/// against the pairwise scan.
+fn vertex_key(v: &(f64, f64)) -> Option<(u64, u64)> {
+    if v.0.is_nan() || v.1.is_nan() {
+        return None;
+    }
+    Some(((v.0 + 0.0).to_bits(), (v.1 + 0.0).to_bits()))
+}
+
+/// Ring length at which [`first_repeated_vertex`] switches from the
+/// pairwise scan to the index map.
+///
+/// MEASURED, not assumed, and the measurement is CHECKABLE: the harness
+/// lives at `scripts/benchmarks/pinch_dispatcher/` (`pinch_bench.rs` and
+/// `PinchBench.swift`), standalone and outside every build, so a reader
+/// can re-derive this table rather than trust it. Method: the two bodies
+/// over pinch-free rings (the case both must scan to the end), `rustc -O`
+/// and `swiftc -O` on an Apple-silicon laptop, iteration counts calibrated
+/// per case to at least 100 ms of work, best-of-5 timed repeats, and an
+/// opaque barrier on BOTH the argument and the result -- `black_box` in
+/// Rust; Swift has no equivalent, so the harness feeds the result into a
+/// global accumulator and passes the ring through an `@inline(never)`
+/// identity. Both halves of that Swift barrier are load-bearing: without
+/// them `swiftc -O` deletes the timed loop outright and the scan appears
+/// to cost 0.0 ns at every n.
+///
+/// | n    | Rust scan | Rust map | Swift scan | Swift map |
+/// |------|-----------|----------|------------|-----------|
+/// | 4    | 3.6 ns    | 77 ns    | 9.3 ns     | 183 ns    |
+/// | 64   | 0.58 us   | 1.12 us  | 0.56 us    | 2.20 us   |
+/// | 127  | 2.55 us   | 2.41 us  | 2.23 us    | 4.21 us   |
+/// | 128  | 2.48 us   | 2.32 us  | 2.27 us    | 4.25 us   |
+/// | 256  | 9.15 us   | 4.58 us  | 9.05 us    | 8.36 us   |
+/// | 4096 | 1897 us   | 71.7 us  | 1886 us    | 139 us    |
+///
+/// The n=4 row carries a caveat two earlier versions of this table did
+/// not. The scan at n=4 performs three comparisons, which costs at or
+/// below the harness floor: an empty-bodied call through the same barriers
+/// measures 0.6-0.7 ns in Rust and 7.7-8.8 ns in Swift, so nearly all of
+/// the Swift 9.3 ns and about a fifth of the Rust 3.6 ns is harness rather
+/// than algorithm. The RATIO at n=4 is therefore not a reproducible
+/// quantity. This harness reads 20-21x in both languages; an earlier
+/// version of this doc asserted 28x and 77x; a third, independent harness
+/// read 10.5x in Rust. Do not cite a ratio here. What all of them agree
+/// on is the figure that is actually load-bearing: the map's ABSOLUTE cost
+/// on a short ring, 73-84 ns in Rust and 183-196 ns in Swift across every
+/// run any of the three harnesses has recorded. That fixed cost -- not any
+/// ratio -- is what the map-only version this replaces paid on every short
+/// ring, and it is the whole reason the dispatcher exists.
+///
+/// The remaining rows do reproduce, within about 10% run to run. The map
+/// overtakes the scan near n=125 in Rust and near n=230 in Swift, and by
+/// n=4096 it is 26-27x faster in Rust and 14x in Swift.
+///
+/// Which rings are short, computed rather than assumed. Rect and Polygon
+/// operands contribute a handful of vertices. An Ellipse is flattened by
+/// `ellipse_to_ring` to `ceil(pi * sqrt(r / 2p))` vertices (min 8) for
+/// major radius `r` at [`BooleanOptions::precision`], whose default is
+/// 0.0283 -- so 30 vertices at r=5, 42 at r=10, 94 at r=50, 133 at r=100,
+/// 296 at r=500. Ellipse-driven results are therefore NOT all short: the
+/// n=128 boundary falls at r ~ 94 pt, which is ordinary artwork. (An
+/// earlier draft of this doc asserted they all sat far below the crossover.
+/// They do not.)
+///
+/// That is what makes 128 a good shared constant rather than merely a
+/// legible one: it puts small shapes and rect/polygon work on the scan and
+/// large ellipse results on the map, each on the side where it wins. It
+/// sits AT Rust's crossover rather than comfortably above it: five repeats
+/// of the search for the smallest n at which the map first wins returned
+/// 120, 120, 120, 124 and 132, and at n=127/128 the two bodies are within
+/// 10% of each other, so the choice costs little in either direction right
+/// at the boundary. (Swift's four repeats returned 224, 228, 228, 232.)
+/// The most Swift can lose by switching at 128 instead of its own ~230 is
+/// the n=128 row: 4.25 us against 2.27 us, about 2 us. In the other
+/// direction the scan's worst case below the threshold is the longest ring
+/// it is ever handed, n=127, at 126*127/2 = 8001 comparisons, measured at
+/// 2.55 us in Rust and 2.23 us in Swift. (An earlier version of this line
+/// wrote 127*128/2 = 8128. That is the count for n=128 -- a length this
+/// threshold routes to the map, not to the scan.) Both bounds are small
+/// and explicit.
+///
+/// The threshold cannot change WHAT is returned: both bodies return the
+/// same pair for every ring, which
+/// `first_repeated_vertex_matches_the_quadratic_scan` checks directly on
+/// each of them, and `first_repeated_vertex_agrees_across_the_threshold`
+/// checks on rings straddling this value.
+const PINCH_MAP_THRESHOLD: usize = 128;
+
+/// The first repeated vertex of `ring` as `(i, j)` with `i < j` and
+/// `ring[i] == ring[j]`, scanning `j` ascending then `i` ascending so
+/// the choice is total and port-independent. Exact equality is the
+/// right test: the sweep's vertices come from snap-rounded input and
+/// arrangement splits, so a revisited vertex is bit-identical.
+///
+/// **Cost.** O(n^2) worst case below [`PINCH_MAP_THRESHOLD`] and O(n)
+/// expected at or above it -- see that constant for the measurements
+/// behind the switch. The post-pass runs on EVERY boolean result, so both
+/// regimes matter: ordinary results are short and the scan wins there,
+/// while a curve-flattened result carries thousands of vertices, where
+/// the scan costs milliseconds.
+///
+/// Both bodies return the SAME pair. The map holds the FIRST index at
+/// which each distinct vertex was seen (insert only when absent) and `j`
+/// still ascends, so it reports the same `(smallest j that repeats,
+/// smallest i equal to it)` the scan does. That identity is load-bearing:
+/// [`split_pinched_ring`] cuts at this pair, and the exact-comparison
+/// corpus pins the resulting ring order across both ports. JasSwift
+/// carries the identical pair of bodies, threshold and key
+/// canonicalization included.
+fn first_repeated_vertex(ring: &Ring) -> Option<(usize, usize)> {
+    if ring.len() < PINCH_MAP_THRESHOLD {
+        first_repeated_vertex_scan(ring)
+    } else {
+        first_repeated_vertex_map(ring)
+    }
+}
+
+/// The pairwise scan. Separately named so the differential test can drive
+/// it on rings of any length, not only the ones the threshold routes here.
+fn first_repeated_vertex_scan(ring: &Ring) -> Option<(usize, usize)> {
+    for j in 1..ring.len() {
+        for i in 0..j {
+            if ring[i] == ring[j] {
+                return Some((i, j));
+            }
+        }
+    }
+    None
+}
+
+/// The index-map reduction. Separately named for the same reason as
+/// [`first_repeated_vertex_scan`].
+fn first_repeated_vertex_map(ring: &Ring) -> Option<(usize, usize)> {
+    let mut seen: std::collections::HashMap<(u64, u64), usize> =
+        std::collections::HashMap::with_capacity(ring.len());
+    for (j, v) in ring.iter().enumerate() {
+        let Some(key) = vertex_key(v) else { continue };
+        match seen.get(&key) {
+            Some(&i) => return Some((i, j)),
+            None => {
+                seen.insert(key, j);
+            }
+        }
+    }
+    None
 }
 
 /// Return a deep copy of every ring in `ps` that has at least 3
@@ -1245,6 +1648,352 @@ fn clone_nondegenerate(ps: &PolygonSet) -> PolygonSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ----------- first_repeated_vertex: the index-map reduction -----------
+
+    /// An independent copy of the pairwise scan, kept as the oracle so an
+    /// edit to the shipped `first_repeated_vertex_scan` has something to
+    /// disagree with. Neither body of `first_repeated_vertex` is allowed to
+    /// return a different (i, j) pair from this one, in either direction:
+    /// `split_pinched_ring` cuts at that pair and the exact-comparison
+    /// corpus pins the resulting ring order across both ports. (Which body
+    /// is FASTER depends on the ring length -- see `PINCH_MAP_THRESHOLD`,
+    /// whose doc carries the measurements.)
+    fn first_repeated_vertex_quadratic(ring: &Ring) -> Option<(usize, usize)> {
+        for j in 1..ring.len() {
+            for i in 0..j {
+                if ring[i] == ring[j] {
+                    return Some((i, j));
+                }
+            }
+        }
+        None
+    }
+
+    fn lcg(seed: &mut u64) -> f64 {
+        // Numerical Recipes constants.
+        *seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+        let v = (*seed >> 11) as f64 / (1u64 << 53) as f64; // [0,1)
+        2.0 * v - 1.0
+    }
+
+    /// Adversarial rings: the two cases where a bit-keyed hash map and
+    /// `f64 ==` disagree, plus the ordinary ones.
+    ///
+    ///  * `-0.0 == 0.0` is TRUE but the bit patterns differ, so a naive
+    ///    `to_bits` key would MISS a pinch the scan finds.
+    ///  * `NaN != NaN` is FALSE-y for equality but two NaNs have equal
+    ///    bits, so a naive key would INVENT a pinch that is not there.
+    fn adversarial_rings() -> Vec<Ring> {
+        vec![
+            // No repeat at all.
+            vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
+            // A plain pinch.
+            vec![(0.0, 0.0), (5.0, 5.0), (10.0, 0.0), (5.0, 5.0), (0.0, 10.0)],
+            // Signed zero on x: equal under ==, different bits.
+            vec![(0.0, 1.0), (5.0, 5.0), (-0.0, 1.0), (9.0, 9.0)],
+            // Signed zero on y.
+            vec![(1.0, -0.0), (5.0, 5.0), (1.0, 0.0), (9.0, 9.0)],
+            // Signed zero in BOTH coordinates.
+            vec![(-0.0, -0.0), (5.0, 5.0), (0.0, 0.0), (9.0, 9.0)],
+            // Two NaNs: equal bits, NOT equal values.
+            vec![(f64::NAN, 1.0), (5.0, 5.0), (f64::NAN, 1.0), (9.0, 9.0)],
+            // A NaN and a real repeat after it — the repeat must win.
+            vec![(f64::NAN, 0.0), (3.0, 3.0), (f64::NAN, 0.0), (3.0, 3.0)],
+            // Three occurrences: the FIRST pair (smallest j, then
+            // smallest i) is the answer.
+            vec![(1.0, 1.0), (2.0, 2.0), (1.0, 1.0), (1.0, 1.0)],
+            // Degenerate lengths.
+            vec![],
+            vec![(1.0, 1.0)],
+            vec![(1.0, 1.0), (1.0, 1.0)],
+        ]
+    }
+
+    /// Every body against the oracle, on every fixture, INDEPENDENTLY of
+    /// the length threshold. Calling the map body directly is what keeps
+    /// the signed-zero / NaN cases covered: the fixtures are short, so the
+    /// dispatcher would route all of them to the scan and never exercise
+    /// the map at all.
+    #[test]
+    fn first_repeated_vertex_matches_the_quadratic_scan() {
+        for (n, ring) in adversarial_rings().iter().enumerate() {
+            let want = first_repeated_vertex_quadratic(ring);
+            assert_eq!(first_repeated_vertex_map(ring), want,
+                       "adversarial ring {n}, map body, disagrees: {ring:?}");
+            assert_eq!(first_repeated_vertex_scan(ring), want,
+                       "adversarial ring {n}, scan body, disagrees: {ring:?}");
+            assert_eq!(first_repeated_vertex(ring), want,
+                       "adversarial ring {n}, dispatcher, disagrees: {ring:?}");
+        }
+        // Random rings drawn from a small coordinate alphabet so
+        // repeats are common, including signed zeros.
+        let alphabet = [0.0f64, -0.0, 1.0, 2.0, -1.0, 0.5];
+        let mut seed = 0x5eed_1234u64;
+        for _ in 0..4000 {
+            let len = ((lcg(&mut seed).abs() * 12.0) as usize) + 1;
+            let ring: Ring = (0..len)
+                .map(|_| {
+                    let xi = (lcg(&mut seed).abs() * alphabet.len() as f64) as usize
+                        % alphabet.len();
+                    let yi = (lcg(&mut seed).abs() * alphabet.len() as f64) as usize
+                        % alphabet.len();
+                    (alphabet[xi], alphabet[yi])
+                })
+                .collect();
+            let want = first_repeated_vertex_quadratic(&ring);
+            assert_eq!(first_repeated_vertex_map(&ring), want,
+                       "random ring, map body, disagrees: {ring:?}");
+            assert_eq!(first_repeated_vertex_scan(&ring), want,
+                       "random ring, scan body, disagrees: {ring:?}");
+            assert_eq!(first_repeated_vertex(&ring), want,
+                       "random ring, dispatcher, disagrees: {ring:?}");
+        }
+    }
+
+    /// The dispatcher must give the same answer on both sides of
+    /// `PINCH_MAP_THRESHOLD`, so the switch is invisible in the output.
+    /// Rings are built at length T-1, T and T+1, each in three flavours:
+    /// pinch-free, a pinch in the first half, and a pinch at the very end
+    /// (the case that scans furthest). The pinch coordinate is a signed
+    /// zero pair, so the map body's canonicalization is exercised at these
+    /// lengths too.
+    #[test]
+    fn first_repeated_vertex_agrees_across_the_threshold() {
+        for len in [PINCH_MAP_THRESHOLD - 1, PINCH_MAP_THRESHOLD, PINCH_MAP_THRESHOLD + 1] {
+            // Distinct coordinates: i is unique, so no accidental repeat.
+            let base: Ring = (0..len).map(|i| (i as f64, (i as f64) * 2.0 + 0.5)).collect();
+            let mut pinch_early = base.clone();
+            pinch_early[1] = (-0.0, 0.0);
+            pinch_early[len / 2] = (0.0, -0.0);
+            let mut pinch_late = base.clone();
+            pinch_late[0] = (-0.0, 0.0);
+            pinch_late[len - 1] = (0.0, -0.0);
+            for (label, ring) in [("pinch-free", &base),
+                                  ("pinch-early", &pinch_early),
+                                  ("pinch-late", &pinch_late)] {
+                let want = first_repeated_vertex_quadratic(ring);
+                assert_eq!(first_repeated_vertex(ring), want,
+                           "len {len} {label}: dispatcher disagrees with the oracle");
+                assert_eq!(first_repeated_vertex_map(ring), want,
+                           "len {len} {label}: map body disagrees with the oracle");
+                assert_eq!(first_repeated_vertex_scan(ring), want,
+                           "len {len} {label}: scan body disagrees with the oracle");
+            }
+            // The fixtures must actually contain what they claim, or the
+            // agreement above is vacuous.
+            assert_eq!(first_repeated_vertex_quadratic(&base), None,
+                       "the pinch-free fixture at len {len} has a repeat");
+            assert_eq!(first_repeated_vertex_quadratic(&pinch_late), Some((0, len - 1)),
+                       "the pinch-late fixture at len {len} does not end in the pinch");
+        }
+    }
+
+    // ----------- The carried-rule law, clauses 1 and 4 -----------
+
+    #[test]
+    fn a_bare_polygon_set_reads_as_even_odd() {
+        // Clause 1's standing convention, pinned so the four bare
+        // entry points cannot quietly change which rule they assume.
+        // A bare `PolygonSet` is even-odd, which is also what
+        // `PolyFillRule::default()` says.
+        assert_eq!(PolyFillRule::default(), PolyFillRule::EvenOdd);
+        assert_eq!(RuledPolygonSet::default().rule, PolyFillRule::EvenOdd);
+
+        // The bare `boolean_subtract` must therefore agree with the
+        // ruled call that spells even-odd out. Operand `a` is a donut
+        // drawn the natural way (two CCW rings); under even-odd its
+        // middle is a hole, so subtracting a strip below the hole
+        // leaves 20*17 - 100 = 240 over two rings.
+        let a: PolygonSet = vec![
+            vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)],
+            vec![(5.0, 5.0), (15.0, 5.0), (15.0, 15.0), (5.0, 15.0)],
+        ];
+        let b: PolygonSet = vec![vec![
+            (0.0, 0.0),
+            (20.0, 0.0),
+            (20.0, 3.0),
+            (0.0, 3.0),
+        ]];
+        let bare = boolean_subtract(&a, &b);
+        let ruled = boolean_subtract_ruled(
+            &RuledPolygonSet::even_odd(a.clone()),
+            &RuledPolygonSet::even_odd(b.clone()),
+        );
+        assert_eq!(bare, ruled);
+        assert_eq!(bare.len(), 2, "even-odd keeps the hole: {:?}", bare);
+
+        // And the non-zero reading of the SAME rings is genuinely
+        // different — otherwise carrying the rule would be theatre.
+        let nz = boolean_subtract_ruled(
+            &RuledPolygonSet::non_zero(a),
+            &RuledPolygonSet::even_odd(b),
+        );
+        assert_eq!(nz.len(), 1, "non-zero fills the middle: {:?}", nz);
+    }
+
+    // ----------- The pinch split (BOOLEAN.md multi-ring section) -----------
+
+    /// Shoelace signed area of one ring.
+    fn shoelace(ring: &Ring) -> f64 {
+        let n = ring.len();
+        if n < 3 {
+            return 0.0;
+        }
+        let mut sum = 0.0;
+        for i in 0..n {
+            let (x1, y1) = ring[i];
+            let (x2, y2) = ring[(i + 1) % n];
+            sum += x1 * y2 - x2 * y1;
+        }
+        sum / 2.0
+    }
+
+    /// Rotate a ring so its lexicographically smallest vertex is first,
+    /// so a test can pin a vertex sequence without pinning where the
+    /// walk happened to start.
+    fn rotated(ring: &Ring) -> Ring {
+        let n = ring.len();
+        let mut best = 0usize;
+        for i in 1..n {
+            if ring[i] < ring[best] {
+                best = i;
+            }
+        }
+        (0..n).map(|k| ring[(best + k) % n]).collect()
+    }
+
+    #[test]
+    fn exclude_of_corner_overlapping_squares_gives_two_simple_lobes() {
+        // The case that used to be a corpus known-gap. EXCLUDE of
+        // [0,10]^2 and [5,15]^2: the overlap [5,10]^2 drops out, leaving
+        // two L-shapes that touch ONLY at the isolated points (10,5)
+        // and (5,10).
+        //
+        // Derivation, from first principles rather than from the
+        // implementation:
+        //   lower-left L = [0,10]^2 minus [5,10]^2, boundary
+        //     (0,0) (10,0) (10,5) (5,5) (5,10) (0,10)
+        //     shoelace 0 + 50 + 25 + 25 + 50 + 0 = 150 -> area 75
+        //   upper-right L = [5,15]^2 minus [5,10]^2, boundary
+        //     (10,5) (15,5) (15,15) (5,15) (5,10) (10,10)
+        //     shoelace -25 + 150 + 150 - 25 - 50 - 50 = 150 -> area 75
+        // 75 + 75 = 150 = 100 + 100 - 2*25, as XOR demands. Two rings,
+        // both simple. The sweep alone returns ONE twelve-vertex ring
+        // visiting each pinch twice — same region, wrong topology —
+        // because connect_edges cannot tell which lobe it is on at a
+        // pinch; the split-at-repeated-vertex post-pass fixes it
+        // exactly.
+        let a: PolygonSet =
+            vec![vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]];
+        let b: PolygonSet = vec![vec![
+            (5.0, 5.0),
+            (15.0, 5.0),
+            (15.0, 15.0),
+            (5.0, 15.0),
+        ]];
+        let out = boolean_exclude(&a, &b);
+        assert_eq!(out.len(), 2, "expected two lobes, got {:?}", out);
+        let mut got: Vec<Ring> = out.iter().map(rotated).collect();
+        got.sort_by(|x, y| x.partial_cmp(y).unwrap());
+        assert_eq!(
+            got,
+            vec![
+                vec![
+                    (0.0, 0.0),
+                    (10.0, 0.0),
+                    (10.0, 5.0),
+                    (5.0, 5.0),
+                    (5.0, 10.0),
+                    (0.0, 10.0)
+                ],
+                vec![
+                    (5.0, 10.0),
+                    (10.0, 10.0),
+                    (10.0, 5.0),
+                    (15.0, 5.0),
+                    (15.0, 15.0),
+                    (5.0, 15.0)
+                ],
+            ]
+        );
+        for r in &out {
+            assert!(
+                (shoelace(r).abs() - 75.0).abs() < 1e-9,
+                "each lobe is 75: {:?}",
+                r
+            );
+            assert!(
+                first_repeated_vertex(r).is_none(),
+                "lobe still self-touching: {:?}",
+                r
+            );
+        }
+    }
+
+    #[test]
+    fn splitting_a_pinched_ring_preserves_the_region() {
+        // The post-pass in isolation, on a hand-built pinch: two unit
+        // squares joined at (1,1), traced as ONE ring that visits (1,1)
+        // twice.
+        //   (0,0) (1,0) (1,1) (2,1) (2,2) (1,2) (1,1) (0,1)
+        //
+        // Derivation. Cutting at the repeat gives the span between the
+        // two occurrences — (1,1) (2,1) (2,2) (1,2), the upper-right
+        // unit square, shoelace 1*1-2*1 + 2*2-2*1 + 2*2-1*2 + 1*1-1*2
+        //   = -1 + 2 + 2 - 1 = 2 -> area 1 — and the remainder with the
+        // duplicate kept once — (0,0) (1,0) (1,1) (0,1), the
+        // lower-left unit square, area 1. Two rings of 1, total 2,
+        // exactly the original's total: the cut invents no geometry.
+        let pinched: Ring = vec![
+            (0.0, 0.0),
+            (1.0, 0.0),
+            (1.0, 1.0),
+            (2.0, 1.0),
+            (2.0, 2.0),
+            (1.0, 2.0),
+            (1.0, 1.0),
+            (0.0, 1.0),
+        ];
+        let before = shoelace(&pinched).abs();
+        let out = split_pinched_rings(&vec![pinched]);
+        assert_eq!(out.len(), 2, "expected two loops, got {:?}", out);
+        let after: f64 = out.iter().map(|r| shoelace(r).abs()).sum();
+        assert!(
+            (after - before).abs() < 1e-9,
+            "area changed: {} -> {}",
+            before,
+            after
+        );
+        assert!((after - 2.0).abs() < 1e-9);
+        for r in &out {
+            assert!((shoelace(r).abs() - 1.0).abs() < 1e-9, "{:?}", r);
+            assert!(first_repeated_vertex(r).is_none());
+        }
+        // A ring with no repeat is returned untouched, in place.
+        let clean: Ring = vec![(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)];
+        assert_eq!(
+            split_pinched_rings(&vec![clean.clone()]),
+            vec![clean]
+        );
+    }
+
+    #[test]
+    fn generated_results_declare_even_odd() {
+        // Clause 4. The constant is what `apply_destructive_boolean`
+        // stamps on a multi-ring result, and the bridge to the
+        // document-side enum must be lossless in both directions.
+        use crate::geometry::element::FillRule;
+        assert_eq!(RESULT_FILL_RULE, PolyFillRule::EvenOdd);
+        assert_eq!(FillRule::from(RESULT_FILL_RULE), FillRule::EvenOdd);
+        for (doc, algo) in [
+            (FillRule::NonZero, PolyFillRule::NonZero),
+            (FillRule::EvenOdd, PolyFillRule::EvenOdd),
+        ] {
+            assert_eq!(PolyFillRule::from(doc), algo);
+            assert_eq!(FillRule::from(algo), doc);
+        }
+    }
 
     // -------------------------------------------------------------------
     // Region helpers
@@ -1263,112 +2012,15 @@ mod tests {
     // case we care about, without being brittle to representation.
     // -------------------------------------------------------------------
 
-    /// Shoelace area of a single ring. Sign reflects winding
-    /// direction; we use the absolute value when comparing regions.
-    fn ring_signed_area(ring: &Ring) -> f64 {
-        if ring.len() < 3 {
-            return 0.0;
-        }
-        let mut sum = 0.0;
-        let n = ring.len();
-        for i in 0..n {
-            let (x1, y1) = ring[i];
-            let (x2, y2) = ring[(i + 1) % n];
-            sum += x1 * y2 - x2 * y1;
-        }
-        sum / 2.0
-    }
-
-    /// Even-odd area of a region. Holes (rings with opposite winding
-    /// or rings whose interior is "subtracted" by overlap parity)
-    /// are handled by summing absolute areas of outer rings minus
-    /// holes; in practice the implementation is free to use either
-    /// winding-rule or even-odd output as long as the *net* covered
-    /// area matches what we expect.
-    ///
-    /// We compute "net area" as the integral of the indicator
-    /// function over the bounding box, which we approximate by
-    /// summing absolute signed-areas with alternating signs based
-    /// on a containment count at a sample inside each ring. That's
-    /// overkill for the small test cases here, so we use a simpler
-    /// rule: net_area = sum(|signed_area(ring)|) for outer rings
-    /// minus sum(|signed_area(ring)|) for hole rings, where a hole
-    /// is detected by being contained in another ring with the
-    /// opposite winding sign.
-    ///
-    /// For all the test polygons in this file the simpler rule
-    /// suffices because every test fixture has a known structure.
-    /// We expose `polygon_set_area` only for asserting against a
-    /// pre-computed expected value, so even a slightly liberal
-    /// interpretation is fine for our purposes.
-    fn polygon_set_area(ps: &PolygonSet) -> f64 {
-        // Sum |signed_area| of every ring, with the sign of the
-        // *outer* ring chosen as positive and contained rings
-        // contributing with the opposite sign of their parent.
-        // Implementation note: nearly every test below uses
-        // pairwise-disjoint outer rings, so the simple sum of
-        // absolute signed areas is correct in those cases. Only the
-        // "with hole" tests need the containment correction.
-        let mut total = 0.0;
-        for (i, ring) in ps.iter().enumerate() {
-            let a = ring_signed_area(ring).abs();
-            // Count containments — a ring contained in an odd number
-            // of other rings is a hole and contributes negatively.
-            let mut depth = 0;
-            if let Some(&pt) = ring.first() {
-                for (j, other) in ps.iter().enumerate() {
-                    if i == j {
-                        continue;
-                    }
-                    if point_in_ring(other, pt) {
-                        depth += 1;
-                    }
-                }
-            }
-            if depth % 2 == 0 {
-                total += a;
-            } else {
-                total -= a;
-            }
-        }
-        total
-    }
-
-    /// Standard ray-casting point-in-ring test. The ring is treated
-    /// as a closed polygon (last vertex implicitly connects to the
-    /// first).
-    fn point_in_ring(ring: &Ring, pt: (f64, f64)) -> bool {
-        let (px, py) = pt;
-        let n = ring.len();
-        if n < 3 {
-            return false;
-        }
-        let mut inside = false;
-        let mut j = n - 1;
-        for i in 0..n {
-            let (xi, yi) = ring[i];
-            let (xj, yj) = ring[j];
-            let intersects = ((yi > py) != (yj > py))
-                && (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
-            if intersects {
-                inside = !inside;
-            }
-            j = i;
-        }
-        inside
-    }
-
-    /// Even-odd "is point inside this region" — true iff `pt` lies
-    /// inside an odd number of rings.
-    fn point_in_polygon_set(ps: &PolygonSet, pt: (f64, f64)) -> bool {
-        let mut inside_count = 0;
-        for ring in ps {
-            if point_in_ring(ring, pt) {
-                inside_count += 1;
-            }
-        }
-        inside_count % 2 == 1
-    }
+    // The three region metrics -- ring_signed_area, polygon_set_area
+    // (even-odd net area) and point_in_polygon_set -- live in one place,
+    // crate::algorithms::polygon_metrics, and are gated by the
+    // `polygon_metrics` corpus family. They used to be a private copy
+    // here and a second private copy in the roundtrip binary, with
+    // nothing comparing them.
+    use crate::algorithms::polygon_metrics::{
+        point_in_polygon_set, polygon_set_area, ring_signed_area,
+    };
 
     /// Axis-aligned bounding box of a `PolygonSet`. Returns
     /// `None` if the set has no vertices.

@@ -129,7 +129,8 @@ private func normalizeElement(_ elem: Element) -> Element {
                           fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                           widthPoints: e.widthPoints,
                           opacity: e.opacity, transform: e.transform,
-                          locked: e.locked, visibility: e.visibility, name: e.name, id: e.id))
+                          locked: e.locked, visibility: e.visibility, name: e.name, id: e.id,
+                          fillRule: e.fillRule))
     case .text(let e):
         // Pass the tspans tuple through so multi-tspan text
         // survives normalisation. The content-init would collapse

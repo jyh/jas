@@ -21,6 +21,8 @@ pub mod length;
 pub mod workspace;
 pub mod panel_layout;
 pub mod widget_tree;
+pub mod bind_values;
+pub mod widget_commit;
 pub mod menu_state;
 
 #[cfg(feature = "web")]

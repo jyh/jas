@@ -102,6 +102,75 @@ import Testing
     #expect(abs(t - 0.5) < 1e-2)
 }
 
+// MARK: - Projection distances must not overflow
+//
+// All SIX projection distances in Sources/Geometry/PathOps.swift come from
+// Foundation's `hypot` (two in `closestOnLine`, four in `closestOnCubic`),
+// matching Rust's six `.hypot` sites in geometry/path_ops.rs. The naive
+// `sqrt(dx*dx + dy*dy)` squares first, so at coordinates above ~1e154 every
+// distance saturates to +inf — and `closestOnCubic` then compares +inf against
+// +inf, which makes its coarse-scan and trisection branches take the wrong
+// side.
+//
+// These four are the FAST-suite copy; the cross-language pin is the
+// `path_project` corpus family (test_fixtures/algorithms/path_project.json).
+//
+// `closestOnCubicDoesNotOverflow` alone pins only two of the four cubic
+// sites: it puts the true answer at t = 0, which is also where two of the
+// saturating failure modes land (`bestT` starts at 0, so a saturating coarse
+// scan never updates it, and a saturating `d2` collapses the trisection onto
+// lo = 0). Hence `closestOnCubicPointAboveMiddleDoesNotOverflow` below, whose
+// answer is t = 0.5 — far from both.
+
+@Test func closestOnLineDegenerateSegmentDoesNotOverflow() {
+    // Zero-length segment at the origin: distance is |p| = 1.414e200.
+    let (d, t) = closestOnLine(0, 0, 0, 0, 1e200, 1e200)
+    #expect(d.isFinite)
+    #expect(abs(d - 1.4142135623730951e200) / 1.4142135623730951e200 < 1e-12)
+    #expect(t == 0)
+}
+
+@Test func closestOnLineProjectedDistanceDoesNotOverflow() {
+    // Segment (0,0)-(1e100,0); the point sits above its midpoint, 1e200 away.
+    let (d, t) = closestOnLine(0, 0, 1e100, 0, 5e99, 1e200)
+    #expect(d.isFinite)
+    #expect(abs(d - 1e200) / 1e200 < 1e-12)
+    #expect(abs(t - 0.5) < 1e-9)
+}
+
+@Test func closestOnCubicDoesNotOverflow() {
+    // A cubic tracing the straight line (0,0)-(1e200,0). The point is 1e200
+    // directly above the START, so the closest t is 0 and the distance is
+    // 1e200. With saturating distances, no coarse sample beats the initial
+    // +inf and the trisection walks `lo` up instead of pulling `hi` down, so
+    // t lands near the far end of the first bracket (0.02) instead of 0.
+    let (d, t) = closestOnCubic(0, 0, 1e200 / 3, 0, 2e200 / 3, 0, 1e200, 0,
+                                0, 1e200)
+    #expect(d.isFinite)
+    #expect(abs(d - 1e200) / 1e200 < 1e-6)
+    #expect(t < 1e-5)
+}
+
+@Test func closestOnCubicPointAboveMiddleDoesNotOverflow() {
+    // Same cubic, but the point sits 1e200 above the MIDDLE, so the answer is
+    // t = 0.5 and the distance is 1e200. Observed values with one saturating
+    // site at a time (each reverted on its own):
+    //   coarse-scan `d`   -> t = 0.0199969927, d = 1.1092e200 (11% high)
+    //   trisection `d1`   -> t = 0.5199939854
+    //   trisection `d2`   -> t = 0.4800060146
+    //   final `bestDist`  -> d = +inf
+    // The `t` expectation is what catches the first three: its 1e-4 bound is
+    // 200x tighter than the smallest of their t deviations (0.0199939854). The
+    // fourth is caught by `isFinite`. Do not lean on the distance bound alone —
+    // for the `d1`/`d2` mutations the relative distance error is only
+    // 1.9986e-4, barely past 1e-4.
+    let (d, t) = closestOnCubic(0, 0, 1e200 / 3, 0, 2e200 / 3, 0, 1e200, 0,
+                                5e199, 1e200)
+    #expect(d.isFinite)
+    #expect(abs(d - 1e200) / 1e200 < 1e-4)
+    #expect(abs(t - 0.5) < 1e-4)
+}
+
 @Test func closestSegmentAndTPicksCorrectSegment() {
     let cmds: [PathCommand] = [
         .moveTo(0, 0),

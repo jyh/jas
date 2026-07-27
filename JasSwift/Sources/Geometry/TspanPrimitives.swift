@@ -217,8 +217,15 @@ public func tspansToSvgFragment(_ tspans: [Tspan]) -> String {
     return out
 }
 
-private func _fmtDouble(_ v: Double) -> String {
-    v == v.rounded() ? "\(Int(v))" : "\(v)"
+/// Internal rather than private so `R9GuardedCastTests` can hold it to Rust's
+/// `fmt_f64` (geometry/tspan.rs).
+///
+/// `saturatingInt` mirrors that function's `v as i64`. The `v == v.rounded()`
+/// predicate is TRUE for +/-infinity and for every integral value at or above
+/// 2^63, so a plain `Int(v)` trapped on SAVE for a value Rust writes out (risk
+/// R9) -- and this formatter is applied to roughly twenty Tspan Double fields.
+func _fmtDouble(_ v: Double) -> String {
+    v == v.rounded() ? "\(saturatingInt(v))" : "\(v)"
 }
 
 private func _xmlEscape(_ s: String) -> String {

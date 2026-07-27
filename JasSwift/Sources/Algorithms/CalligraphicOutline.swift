@@ -110,7 +110,15 @@ private func sampleLine(_ out: inout [Sample],
     let len = ((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0)).squareRoot()
     if len == 0.0 { return }
     let tangent = atan2(y1 - y0, x1 - x0)
-    let n = max(1, Int((len / SAMPLE_INTERVAL_PT).rounded(.up)))
+    // `if len == 0.0` above is FALSE for NaN, so a NaN coordinate reaches this
+    // conversion, where `Int(_:)` was a precondition failure. Rust's
+    // `.ceil() as u32` yields 0 for NaN and `max(1, …)` lifts it to one
+    // interval; saturatingInt agrees at THAT end, which is the end that is
+    // reachable and gated (both ports assert a four-point polygon). It does not
+    // agree at the top: a huge finite length saturates to Int.max here and
+    // u32::MAX there, and both ports then loop on a count no renderer could
+    // consume. Risk R9; the top end is banked, not fixed.
+    let n = max(1, saturatingInt((len / SAMPLE_INTERVAL_PT).rounded(.up)))
     let startI = out.isEmpty ? 0 : 1
     for i in startI...n {
         let t = Double(i) / Double(n)
