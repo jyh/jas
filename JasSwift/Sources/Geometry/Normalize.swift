@@ -125,11 +125,27 @@ private func normalizeElement(_ elem: Element) -> Element {
                                 opacity: e.opacity, transform: e.transform,
                                 locked: e.locked, visibility: e.visibility, name: e.name, id: e.id))
     case .path(let e):
+        // `toolOrigin` is forwarded because this rebuild dropped it, and the
+        // drop was invisible: it is not a key of the canonical test JSON, so
+        // the only thing that reads it is the Blob Brush merge. Every path
+        // opened from a file therefore reached the tool untagged, and a sweep
+        // over an imported blob started a NEW element where Rust unioned into
+        // the existing one. Pinned by test_fixtures/gestures/blob_import_merge.
+        //
+        // Deliberately narrow: this arm still omits blendMode, mask,
+        // fillGradient, strokeGradient, strokeBrush and strokeBrushOverrides,
+        // and the other nine arms of this function omit their own sets. None
+        // of those are reachable by any current fixture (the corpus manifest's
+        // declared `codec-optional-fields-unset` gap: those keys appear in
+        // zero of the expected goldens), so forwarding them here would be an
+        // unpinned change. Reported for a ruling rather than smuggled in.
         return .path(Path(d: e.d,
                           fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                           widthPoints: e.widthPoints,
                           opacity: e.opacity, transform: e.transform,
-                          locked: e.locked, visibility: e.visibility, name: e.name, id: e.id,
+                          locked: e.locked, visibility: e.visibility,
+                          toolOrigin: e.toolOrigin,
+                          name: e.name, id: e.id,
                           fillRule: e.fillRule))
     case .text(let e):
         // Pass the tspans tuple through so multi-tspan text
