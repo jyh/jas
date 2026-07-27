@@ -4316,6 +4316,83 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
+    // Panel bind-VALUE (resolved snapshot) algorithm test vectors
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn algorithm_bind_values_vectors() {
+        use crate::interpreter::bind_values::bind_values;
+
+        let json_str = read_fixture("algorithms/panel_bind_values.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let panels = &bundle["panels"];
+
+        for tc in tests.as_array().unwrap() {
+            let name = tc["name"].as_str().unwrap();
+            let func = tc["function"].as_str().unwrap();
+            assert_eq!(func, "bind_values", "Unknown function: {}", func);
+            let panel_id = tc["args"]["panel"].as_str().unwrap();
+            // ctx is a JSON object data scope (state / panel / data namespaces);
+            // it passes straight to the expr evaluator, as in the two sibling
+            // panel passes. Default to empty (everything resolves to null).
+            let empty = serde_json::json!({});
+            let ctx = tc["args"].get("ctx").unwrap_or(&empty);
+            let expected = &tc["expected"];
+
+            let actual = bind_values(&panels[panel_id], ctx);
+            assert_eq!(&actual, expected, "Panel bind values '{}' mismatch", name);
+        }
+    }
+
+    /// The census 5.8 claim, in this port: two data scopes differing only in
+    /// `panel.hex` — "664040" vs "664141", the colour divergence's byte pattern
+    /// — are INDISTINGUISHABLE to `widget_tree` (key names only) and to
+    /// `layout_panel` (scalar count times a constant), and differ in exactly one
+    /// `bind_values` row. That difference is the reason this family exists, so
+    /// it is asserted here rather than only in the shared corpus.
+    #[test]
+    fn bind_values_separates_equal_length_hex_where_the_older_gates_cannot() {
+        use crate::interpreter::bind_values::bind_values;
+        use crate::interpreter::panel_layout::layout_panel;
+        use crate::interpreter::widget_tree::widget_tree;
+
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let panel = &bundle["panels"]["color_panel_content"];
+
+        let ctx_of = |hex: &str| {
+            serde_json::json!({
+                "state": {"fill_color": "#664040", "fill_on_top": true},
+                "panel": {"mode": "hsb", "hex": hex},
+            })
+        };
+        let (a, b) = (ctx_of("664040"), ctx_of("664141"));
+
+        assert_eq!(widget_tree(panel, &a), widget_tree(panel, &b),
+            "widget_tree is expected to be blind to bind VALUES");
+        assert_eq!(layout_panel(panel, 228, 600, &a), layout_panel(panel, 228, 600, &b),
+            "layout_panel is expected to be blind to equal-length text");
+
+        let rows_a = bind_values(panel, &a);
+        let rows_b = bind_values(panel, &b);
+        let ra = rows_a.as_array().unwrap();
+        let rb = rows_b.as_array().unwrap();
+        assert_eq!(ra.len(), rb.len());
+        let diff: Vec<_> = ra.iter().zip(rb.iter()).filter(|(x, y)| x != y).collect();
+        assert_eq!(diff.len(), 1, "expected exactly one differing row, got {:?}", diff);
+        let (x, y) = diff[0];
+        assert_eq!(x["id"], "cp_hex");
+        assert_eq!(x["key"], "bind.value");
+        assert_eq!(x["value"], "664040");
+        assert_eq!(y["value"], "664141");
+    }
+
+    // ---------------------------------------------------------------
     // Menu enabled/checked (chrome seam) algorithm test vectors
     // ---------------------------------------------------------------
 
