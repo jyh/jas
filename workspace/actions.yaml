@@ -334,8 +334,19 @@ actions:
           anchor_y: "param.anchor_y"
   zoom_to_actual_size:
     description: >
-      Set zoom to 1.0 (100%); leave pan unchanged. Bound to Ctrl+1 and
-      to double-click on the Zoom tool toolbar icon.
+      Set zoom to 1.0 (100%), anchored at the viewport center: the
+      document point under the center of the visible canvas before the
+      change is under it after, so the artist keeps looking at the same
+      place. view_offset_x / view_offset_y are recomputed by the same
+      anchor math zoom_in and zoom_out use, with the anchor at
+      (viewport_w / 2, viewport_h / 2). If the viewport has not been
+      measured yet there is no center to anchor on, and the offsets are
+      left as they stand. Note that view_offset is the DOCUMENT ORIGIN's
+      screen position rather than the center, so leaving it alone would
+      NOT hold the view still — it would multiply the visible region
+      around the origin and walk the artwork off the canvas, which is
+      why this action recenters. Bound to Ctrl+1 and to double-click on
+      the Zoom tool toolbar icon.
     category: view
     tier: 3
     enabled_when: "state.tab_count > 0"
