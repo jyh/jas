@@ -182,7 +182,160 @@ private func strokeJson(_ stroke: Stroke?) -> String {
     o.str("linejoin", linejoinStr(s.linejoin))
     o.num("opacity", s.opacity)
     o.num("width", s.width)
+    // The four stroke fields the canonical test JSON dropped by construction
+    // until 2026-07-28 (see `extendedElementFields`). Emitted only when
+    // non-default, per this file's identity-omission convention, so a stroke
+    // that carries none of them serializes byte-identically to before.
+    // Mirrors the Rust serializer key for key.
+    if s.align != .center {
+        o.str("align", strokeAlignStr(s.align))
+    }
+    if !s.dashPattern.isEmpty {
+        o.raw("dash_pattern", jsonArray(s.dashPattern.map { fmt($0) }))
+    }
+    if s.dashAlignAnchors {
+        o.bool("dash_align_anchors", true)
+    }
+    if s.miterLimit != 10.0 {
+        o.num("miter_limit", s.miterLimit)
+    }
     return o.build()
+}
+
+private func strokeAlignStr(_ a: StrokeAlign) -> String {
+    switch a {
+    case .center: "center"
+    case .inside: "inside"
+    case .outside: "outside"
+    }
+}
+
+/// A gradient, in the ONE form both ports can write byte-identically.
+///
+/// A stop's colour is emitted as this file's shared colour OBJECT rather than
+/// as the hex string this port stores, deliberately: jas_dioxus stores it as a
+/// `Color` (rgb / hsb / cmyk with alpha) and this port as a `"#rrggbb"`
+/// String, so hex is the NARROWER of the two and writing it would silently
+/// flatten an hsb or translucent Rust stop — a codec speaks to nothing, so it
+/// may not narrow anything. The cost is stated rather than hidden: a shared
+/// fixture can only carry a stop colour THIS port can express, because the
+/// reader below converts the object back to hex.
+private func gradientJson(_ g: Gradient) -> String {
+    let o = JsonObj()
+    o.num("angle", g.angle)
+    o.num("aspect_ratio", g.aspectRatio)
+    o.bool("dither", g.dither)
+    o.str("method", g.method.rawValue)
+    o.raw("nodes", jsonArray(g.nodes.map { n in
+        let no = JsonObj()
+        no.raw("color", colorJson(Color.fromHex(n.color) ?? Color(r: 0, g: 0, b: 0, a: 1)))
+        no.num("opacity", n.opacity)
+        no.num("spread", n.spread)
+        no.num("x", n.x)
+        no.num("y", n.y)
+        return no.build()
+    }))
+    o.raw("stops", jsonArray(g.stops.map { s in
+        let so = JsonObj()
+        so.raw("color", colorJson(Color.fromHex(s.color) ?? Color(r: 0, g: 0, b: 0, a: 1)))
+        so.num("location", s.location)
+        so.num("midpoint_to_next", s.midpointToNext)
+        so.num("opacity", s.opacity)
+        return so.build()
+    }))
+    o.str("stroke_sub_mode", g.strokeSubMode.rawValue)
+    o.str("type", g.type.rawValue)
+    return o.build()
+}
+
+/// An opacity mask. The subtree is a FULL nested element, so the mask's own
+/// artwork carries everything an element carries — including, recursively, a
+/// mask of its own.
+private func maskJson(_ m: Mask) -> String {
+    let o = JsonObj()
+    o.bool("clip", m.clip)
+    o.bool("disabled", m.disabled)
+    o.bool("invert", m.invert)
+    o.bool("linked", m.linked)
+    o.raw("subtree", m.subtree.first.map { elementJson($0) } ?? "null")
+    o.raw("unlink_transform", transformJson(m.unlinkTransform))
+    return o.build()
+}
+
+private func widthPointsJson(_ pts: [StrokeWidthPoint]) -> String {
+    jsonArray(pts.map { p in
+        let o = JsonObj()
+        o.num("t", p.t)
+        o.num("width_left", p.widthLeft)
+        o.num("width_right", p.widthRight)
+        return o.build()
+    })
+}
+
+private func elementWidthPoints(_ elem: Element) -> [StrokeWidthPoint] {
+    switch elem {
+    case .line(let v): return v.widthPoints
+    case .path(let v): return v.widthPoints
+    default: return []
+    }
+}
+
+private func elementToolOrigin(_ elem: Element) -> String? {
+    // `toolOrigin` is a stored property of `Path` alone in this port, while
+    // jas_dioxus carries it on every element's CommonProps
+    // (EDIT_SEMANTICS_FREEZE.md §3.5, "Cross-port field vocabulary"). A value
+    // a port cannot hold is a value it cannot lose, so the key simply never
+    // appears for the other kinds here — the same answer the binary codec
+    // gives.
+    if case .path(let v) = elem { return v.toolOrigin }
+    return nil
+}
+
+/// The TWELVE fields the canonical test JSON dropped by construction until
+/// 2026-07-28, emitted here for every element kind that can hold them.
+///
+/// WHY THIS EXISTS, and why it is not a nicety. Every document-level gate in
+/// this repository — including THE PRESERVATION LAW's primary gate
+/// (transcripts/EDIT_SEMANTICS_FREEZE.md §4.1/§4.2, "serialize before,
+/// serialize after, diff") — snapshots this codec. A field the codec does not
+/// emit is a field the law cannot range over: before 2026-07-28 an edit that
+/// destroyed a BYSTANDER's mask, blend mode, dash pattern, stroke brush,
+/// width profile or either gradient produced byte-identical canonical JSON
+/// and the gate stayed green. The blindness was measured, not inferred: it is
+/// the `test_json` column of test_fixtures/expected/codec_field_survival.json,
+/// where all twelve read DROPPED while the BINARY codec's dropped set was a
+/// strict SUBSET of it.
+///
+/// Every key is emitted CONDITIONALLY on being non-default, per this file's
+/// identity-omission convention (the same rule `id` and `fill_rule` already
+/// follow). That is what keeps an element carrying none of them serializing
+/// byte-identically to before — and it is also what makes destruction
+/// visible: a bystander whose mask is destroyed loses the key entirely, and
+/// key-presence is part of the diff. Mirrors Rust `extended_element_fields`.
+private func extendedElementFields(_ o: JsonObj, _ elem: Element) {
+    if elem.blendMode != .normal {
+        o.str("mode", elem.blendMode.rawValue)
+    }
+    if let m = elem.mask {
+        o.raw("mask", maskJson(m))
+    }
+    if let t = elementToolOrigin(elem) {
+        o.str("tool_origin", t)
+    }
+    if let g = elem.fillGradient {
+        o.raw("fill_gradient", gradientJson(g))
+    }
+    if let g = elem.strokeGradient {
+        o.raw("stroke_gradient", gradientJson(g))
+    }
+    let wp = elementWidthPoints(elem)
+    if !wp.isEmpty {
+        o.raw("width_points", widthPointsJson(wp))
+    }
+    if case .path(let p) = elem {
+        if let b = p.strokeBrush { o.str("stroke_brush", b) }
+        if let b = p.strokeBrushOverrides { o.str("stroke_brush_overrides", b) }
+    }
 }
 
 private func linecapStr(_ lc: LineCap) -> String {
@@ -560,6 +713,7 @@ package func elementJson(_ elem: Element) -> String {
             o.raw("params", canonicalRecordedValue(gen.params))
         }
     }
+    extendedElementFields(o, elem)
     return o.build()
 }
 
@@ -836,7 +990,97 @@ private func parseStroke(_ v: Any?) -> Stroke? {
     default: lj = .miter
     }
     let opacity = (d["opacity"] as? Double) ?? 1.0
-    return Stroke(color: parseColor(d["color"]), width: parseF(d["width"]), linecap: lc, linejoin: lj, opacity: opacity)
+    // The four extended stroke keys (absent ⇒ the default, matching the
+    // writer's identity-omission convention). These took the initializer's
+    // defaults here until 2026-07-28, which is why a dashed, inside-aligned
+    // stroke came back solid and centred.
+    let align: StrokeAlign
+    switch d["align"] as? String ?? "center" {
+    case "inside": align = .inside
+    case "outside": align = .outside
+    default: align = .center
+    }
+    let dashes = (d["dash_pattern"] as? [Any] ?? []).prefix(6).map { parseF($0) }
+    // ARROWHEADS ARE STILL DROPPED. `startArrow`, `endArrow`, the two scales
+    // and `arrowAlign` are the same shape of blindness this wave closed for
+    // the four fields above, and they are NOT in the shipped matrix's
+    // `fields` list, so nothing measures them in any codec. Carrying them
+    // here without measuring the binary and SVG columns would be a claim
+    // wider than the evidence, so they are BANKED, named: add the five rows
+    // to test_fixtures/expected/codec_field_survival.json and close whichever
+    // codecs then read DROPPED.
+    return Stroke(color: parseColor(d["color"]), width: parseF(d["width"]),
+                  linecap: lc, linejoin: lj,
+                  miterLimit: (d["miter_limit"] as? NSNumber)?.doubleValue ?? 10.0,
+                  align: align,
+                  dashPattern: Array(dashes),
+                  dashAlignAnchors: d["dash_align_anchors"] as? Bool ?? false,
+                  opacity: opacity)
+}
+
+private func parseGradient(_ v: Any?) -> Gradient? {
+    guard let d = v as? [String: Any] else { return nil }
+    let stops = (d["stops"] as? [[String: Any]] ?? []).map { s in
+        GradientStop(color: "#" + parseColor(s["color"]).toHex(),
+                     opacity: (s["opacity"] as? NSNumber)?.doubleValue ?? 100,
+                     location: parseF(s["location"]),
+                     midpointToNext: (s["midpoint_to_next"] as? NSNumber)?.doubleValue ?? 50)
+    }
+    let nodes = (d["nodes"] as? [[String: Any]] ?? []).map { n in
+        GradientNode(x: parseF(n["x"]), y: parseF(n["y"]),
+                     color: "#" + parseColor(n["color"]).toHex(),
+                     opacity: (n["opacity"] as? NSNumber)?.doubleValue ?? 100,
+                     spread: (n["spread"] as? NSNumber)?.doubleValue ?? 25)
+    }
+    return Gradient(
+        type: GradientType(rawValue: d["type"] as? String ?? "linear") ?? .linear,
+        angle: parseF(d["angle"]),
+        aspectRatio: (d["aspect_ratio"] as? NSNumber)?.doubleValue ?? 100,
+        method: GradientMethod(rawValue: d["method"] as? String ?? "classic") ?? .classic,
+        dither: d["dither"] as? Bool ?? false,
+        strokeSubMode: StrokeSubMode(rawValue: d["stroke_sub_mode"] as? String ?? "within") ?? .within,
+        stops: stops, nodes: nodes)
+}
+
+private func parseMask(_ v: Any?) -> Mask? {
+    guard let d = v as? [String: Any], d["subtree"] != nil else { return nil }
+    return Mask(subtreeElement: parseElement(d["subtree"]),
+                clip: d["clip"] as? Bool ?? true,
+                invert: d["invert"] as? Bool ?? false,
+                disabled: d["disabled"] as? Bool ?? false,
+                linked: d["linked"] as? Bool ?? true,
+                unlinkTransform: parseTransform(d["unlink_transform"]))
+}
+
+private func parseWidthPoints(_ v: Any?) -> [StrokeWidthPoint] {
+    (v as? [[String: Any]] ?? []).map {
+        StrokeWidthPoint(t: parseF($0["t"]), widthLeft: parseF($0["width_left"]),
+                         widthRight: parseF($0["width_right"]))
+    }
+}
+
+/// Read back the twelve extended fields `extendedElementFields` writes.
+/// Kept as a post-pass over the built element rather than threaded through the
+/// twelve constructor calls below: every kind that can hold a field gets it
+/// from ONE place, so a new element kind cannot silently miss one. Every
+/// helper it routes through is clone-then-mutate, so this pass adds no new
+/// omission site. Mirrors Rust `apply_extended_element_fields`.
+private func applyExtendedElementFields(_ elem: Element, _ d: [String: Any]) -> Element {
+    var e = elem.withCommon(
+        blendMode: BlendMode(rawValue: d["mode"] as? String ?? "normal") ?? .normal)
+    e = withMask(e, mask: parseMask(d["mask"]))
+    e = withFillGradient(e, fillGradient: parseGradient(d["fill_gradient"]))
+    e = withStrokeGradient(e, strokeGradient: parseGradient(d["stroke_gradient"]))
+    e = withWidthPoints(e, widthPoints: parseWidthPoints(d["width_points"]))
+    if case .path = e {
+        e = withStrokeBrush(e, strokeBrush: d["stroke_brush"] as? String)
+        e = withStrokeBrushOverrides(e, overrides: d["stroke_brush_overrides"] as? String)
+        if case .path(var p) = e {
+            p.toolOrigin = d["tool_origin"] as? String
+            e = .path(p)
+        }
+    }
+    return e
 }
 
 private func parseTransform(_ v: Any?) -> Transform? {
@@ -1030,6 +1274,10 @@ private func parseRecordedOp(_ d: [String: Any]) -> PrimitiveOp {
 
 package func parseElement(_ v: Any?) -> Element {
     guard let d = v as? [String: Any] else { fatalError("Expected JSON object for element") }
+    return applyExtendedElementFields(parseElementBase(d), d)
+}
+
+private func parseElementBase(_ d: [String: Any]) -> Element {
     let typ = d["type"] as? String ?? ""
     let (opacity, transform, locked, visibility, name, id) = parseCommon(d)
 
