@@ -183,10 +183,63 @@ def self_test() -> int:
         # marker handling being disabled.) This source line carries the literal,
         # so the gate scanning its own file exempts it too.
         "POLICY.md": b'Never use "Adobe" -- naming-rule-exempt\nbut this line is watched\n',
-        # (i) binaries are out of scope by suffix, not by luck
-        "assets/icons/pen tools.ai": b'xmlns:x="adobe:ns:meta/"\n',  # naming-rule-exempt: scope fixture
+        # (i) a real binary is out of scope -- decided by CONTENT, not by name.
+        # A PNG: the NUL byte in its signature is the giveaway. The vendor
+        # string here is verbatim what the 10 tracked PNGs that match actually
+        # contain -- an XMP namespace URI, not authored prose.
+        "assets/icons/x.png": b'\x89PNG\r\n\x1a\n\x00\x00\x00\riTXtXML:com.adobe.xmp\x00<x:xmpmeta xmlns:x="adobe:ns:meta/">',  # naming-rule-exempt: scope fixture
         # (j) a clean file stays clean
         "docs/clean.md": b"a vector illustration application\n",
+
+        # ---- CLASS A: text files with no suffix, or an unlisted one --------
+        # These are ordinary authored text and must be scanned. Before this,
+        # a 24-entry suffix whitelist silently skipped 37 tracked text files
+        # including these very paths.
+        # (k) an extension-less build file
+        "BUILD": b'# ported from the Illustrator plugin layout\n',  # naming-rule-exempt: fail-path fixture
+        # (l) a dotfile
+        ".gitattributes": b"*.ai binary   # Illustrator sources\n",  # naming-rule-exempt: fail-path fixture
+        # (m) an unlisted-suffix text file
+        "requirements.txt.lock": b"# pinned for Adobe RGB conversion\n",  # naming-rule-exempt: fail-path fixture
+        # (n) an unlisted-suffix text file that is CLEAN stays clean and
+        #     still counts as scanned -- widening scope must not invent hits.
+        "prototypes/p/results/run.csv": b"t,x,y\n0,1,2\n",
+
+        # ---- CLASS A': a binary whose NAME looks like text ----------------
+        # (o) The `.ai` artwork sources are PDF containers. Measured: their
+        #     first NUL byte is at offset 379756, so an 8 KB NUL sniff calls
+        #     them TEXT; they fail UTF-8 at byte 9. Spelled here with that
+        #     real header so a prefix-sniff regression is caught.
+        "assets/icons/pen tools.ai": b"%PDF-1.6\r%\xe2\xe3\xcf\xd3\r\n1 0 obj\r<</Metadata 2 0 R>>\n" + b"x" * 900 + b'<xmp:CreatorTool>Adobe Illustrator</xmp:CreatorTool>\n',  # naming-rule-exempt: scope fixture
+
+        # ---- CLASS B: the names as they appear in IDENTIFIERS -------------
+        # A word-boundary pattern misses every one of these. They are not
+        # obfuscation; they are how a word is spelled in code.
+        # (p) CamelCase, leading
+        "jas_dioxus/src/color.rs": b'const P: &str = "AdobeRGB1998";\n',  # naming-rule-exempt: fail-path fixture
+        # (q) CamelCase, interior (lowercase-to-uppercase hump)
+        "JasSwift/Sources/C.swift": b"func toAdobeRGB() -> Color {}\n",  # naming-rule-exempt: fail-path fixture
+        # (r) CamelCase, the product name as a type prefix
+        "workspace_interpreter/io.py": b"class IllustratorImporter:\n",  # naming-rule-exempt: fail-path fixture
+        # (s) snake_case
+        "jas_dioxus/src/cs.rs": b"let adobe_rgb = 1;\n",  # naming-rule-exempt: fail-path fixture
+        # (t) SCREAMING_SNAKE_CASE
+        "workspace/tests/t.yaml": b"  profile: ADOBE_RGB\n",  # naming-rule-exempt: fail-path fixture
+        # (u) snake_case, the product name, non-leading segment
+        "JasSwift/Sources/D.swift": b"let mode = illustrator_compat\n",  # naming-rule-exempt: fail-path fixture
+
+        # ---- CLASS B': innocent words must NOT be flagged -----------------
+        # Both banned words are ordinary English in other senses. The rule
+        # matches an identifier SEGMENT, so derived and compound forms that
+        # are not the bare word pass. If any of these ever start failing, a
+        # contributor is being punished for correct English.
+        "docs/innocent.md": (
+            b"This is a vector illustration application.\n"
+            b"The behaviour is illustrated by the figure below.\n"
+            b"See the illustrations, and the illustrative example.\n"
+            b"Several illustrators contributed the icon set.\n"
+            b"The adobelike texture shader is unrelated.\n"
+        ),
     }
     hits, exempted, scanned, skipped_binary = scan(sorted(corpus), corpus.__getitem__)
     got = sorted(h.split(":")[0].strip() for h in hits)
@@ -196,22 +249,45 @@ def self_test() -> int:
     # it, so a rename must break loudly rather than silently widen nothing.
     if MARKER != "naming-rule-exempt":
         failures.append(f"MARKER renamed to {MARKER!r}; update POLICY.md and the docstring")
-    want = ["assets/i.svg", "docs/live.md", "jas_dioxus/src/x.rs"]
+
+    # Every fixture that must be caught, spelled out. Anything absent here and
+    # present in `got` is a FALSE POSITIVE, which is just as much a bug.
+    want = [
+        ".gitattributes",                # (l) dotfile
+        "BUILD",                         # (k) no suffix at all
+        "JasSwift/Sources/C.swift",      # (q) CamelCase hump
+        "JasSwift/Sources/D.swift",      # (u) snake_case, non-leading segment
+        "assets/i.svg",                  # (c) SVG generator comment
+        "docs/live.md",                  # (a) prose
+        "jas_dioxus/src/color.rs",       # (p) CamelCase, leading
+        "jas_dioxus/src/cs.rs",          # (s) snake_case
+        "jas_dioxus/src/x.rs",           # (b) code comment
+        "requirements.txt.lock",         # (m) unlisted suffix
+        "workspace/tests/t.yaml",        # (t) SCREAMING_SNAKE_CASE
+        "workspace_interpreter/io.py",   # (r) CamelCase type prefix
+    ]
     if got != want:
-        failures.append(f"caught {got}, expected {want}")
+        missed = [w for w in want if w not in got]
+        extra = [gg for gg in got if gg not in want]
+        failures.append(f"caught {len(got)}, expected {len(want)}; MISSED {missed}; FALSE POSITIVES {extra}")
     if len(exempted) != 1 or "POLICY.md:1" not in exempted[0]:
         failures.append(f"line-marker exemption wrong: {exempted}")
-    # 10 fixtures, minus 4 in exempt trees, minus 1 binary skipped on suffix
-    # before it is ever read.
-    if scanned != 5:
-        failures.append(f"scanned {scanned}, expected 5 (10 - 4 exempt - 1 binary)")
+
+    want_binary = ["assets/icons/pen tools.ai", "assets/icons/x.png"]
+    if skipped_binary != want_binary:
+        failures.append(f"binary skips {skipped_binary}, expected {want_binary}")
+
+    # 22 fixtures, minus 4 in exempt trees, minus 2 binary by CONTENT.
+    if scanned != 16:
+        failures.append(f"scanned {scanned}, expected 16 (22 - 4 exempt - 2 binary)")
 
     if failures:
         print("naming-rule SELF-TEST: FAILED")
         for f in failures:
             print(f"  {f}")
         return 1
-    print(f"naming-rule SELF-TEST: OK (10 cases, {scanned} scanned, 3 caught, 1 line-exempt)")
+    print(f"naming-rule SELF-TEST: OK (22 cases, {scanned} scanned, {len(got)} caught, "
+          f"{len(exempted)} line-exempt, {len(skipped_binary)} binary)")
     return 0
 
 
