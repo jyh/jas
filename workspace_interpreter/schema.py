@@ -143,7 +143,7 @@ def load_schema_from_workspace(workspace_dir: str) -> SchemaTable:
 
     state_path = os.path.join(workspace_dir, "state.yaml")
     if os.path.exists(state_path):
-        with open(state_path) as f:
+        with open(state_path, encoding="utf-8") as f:
             doc = yaml.safe_load(f)
         for name, defn in (doc.get("state") or {}).items():
             try:
@@ -158,7 +158,7 @@ def load_schema_from_workspace(workspace_dir: str) -> SchemaTable:
                 continue
             panel_id = fname[:-5]
             fpath = os.path.join(panels_dir, fname)
-            with open(fpath) as f:
+            with open(fpath, encoding="utf-8") as f:
                 doc = yaml.safe_load(f)
             for name, defn in (doc.get("state") or {}).items():
                 try:

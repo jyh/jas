@@ -58,7 +58,7 @@ def load_workspace(path: str) -> dict:
         for fname in sorted(os.listdir(path)):
             if fname.endswith(".yaml") or fname.endswith(".yml"):
                 fpath = os.path.join(path, fname)
-                with open(fpath, "r") as f:
+                with open(fpath, "r", encoding="utf-8") as f:
                     part = yaml.safe_load(f)
                 if isinstance(part, dict):
                     data.update(part)
@@ -78,7 +78,7 @@ def load_workspace(path: str) -> dict:
                 if not (fname.endswith(".yaml") or fname.endswith(".yml")):
                     continue
                 fpath = os.path.join(subdir_path, fname)
-                with open(fpath, "r") as f:
+                with open(fpath, "r", encoding="utf-8") as f:
                     part = yaml.safe_load(f)
                 if not isinstance(part, dict):
                     continue
@@ -99,7 +99,7 @@ def load_workspace(path: str) -> dict:
                     continue
                 appearance_name = os.path.splitext(fname)[0]
                 fpath = os.path.join(appearances_dir, fname)
-                with open(fpath, "r") as f:
+                with open(fpath, "r", encoding="utf-8") as f:
                     appearance_data = json.load(f)
                 if isinstance(appearance_data, dict):
                     appearances[appearance_name] = appearance_data
@@ -114,7 +114,7 @@ def load_workspace(path: str) -> dict:
                     continue
                 lib_name = os.path.splitext(fname)[0]
                 fpath = os.path.join(swatches_dir, fname)
-                with open(fpath, "r") as f:
+                with open(fpath, "r", encoding="utf-8") as f:
                     lib_data = json.load(f)
                 if isinstance(lib_data, dict):
                     swatch_libraries[lib_name] = lib_data
@@ -132,7 +132,7 @@ def load_workspace(path: str) -> dict:
                     continue
                 lib_name = os.path.splitext(fname)[0]
                 fpath = os.path.join(gradients_dir, fname)
-                with open(fpath, "r") as f:
+                with open(fpath, "r", encoding="utf-8") as f:
                     lib_data = json.load(f)
                 if isinstance(lib_data, dict):
                     gradient_libraries[lib_name] = lib_data
@@ -151,13 +151,13 @@ def load_workspace(path: str) -> dict:
                 manifest = os.path.join(lib_dir, "library.json")
                 if not os.path.isfile(manifest):
                     continue
-                with open(manifest, "r") as f:
+                with open(manifest, "r", encoding="utf-8") as f:
                     lib_data = json.load(f)
                 if isinstance(lib_data, dict):
                     brush_libraries[entry] = lib_data
             data["brush_libraries"] = brush_libraries
     else:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
     missing = REQUIRED_KEYS - set(data.keys())
     if missing:
@@ -198,7 +198,7 @@ def resolve_includes(element: dict, workspace_dir: str) -> None:
             if "include" in child:
                 rel_path = child.pop("include")
                 fpath = os.path.join(workspace_dir, rel_path)
-                with open(fpath, "r") as f:
+                with open(fpath, "r", encoding="utf-8") as f:
                     included = yaml.safe_load(f)
                 if isinstance(included, dict):
                     for k, v in child.items():

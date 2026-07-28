@@ -24,9 +24,9 @@ class MeasureFilesKindTest(unittest.TestCase):
             repo = Path(tmp)
             tools = repo / "app" / "tools"
             tools.mkdir(parents=True)
-            (tools / "a_tool.rs").write_text("")
-            (tools / "b_tool.rs").write_text("")
-            (tools / "notatool.rs").write_text("")
+            (tools / "a_tool.rs").write_text("", encoding="utf-8", newline="")
+            (tools / "b_tool.rs").write_text("", encoding="utf-8", newline="")
+            (tools / "notatool.rs").write_text("", encoding="utf-8", newline="")
             patterns = {
                 "app": {
                     "tool_files": {
@@ -43,9 +43,9 @@ class MeasureFilesKindTest(unittest.TestCase):
             repo = Path(tmp)
             tools = repo / "app" / "tools"
             tools.mkdir(parents=True)
-            (tools / "a_tool.rs").write_text("")
-            (tools / "b_tool.rs").write_text("")
-            (tools / "excluded_tool.rs").write_text("")
+            (tools / "a_tool.rs").write_text("", encoding="utf-8", newline="")
+            (tools / "b_tool.rs").write_text("", encoding="utf-8", newline="")
+            (tools / "excluded_tool.rs").write_text("", encoding="utf-8", newline="")
             patterns = {
                 "app": {
                     "tool_files": {
@@ -82,10 +82,10 @@ class MeasureRegexCountKindTest(unittest.TestCase):
             (panels / "a_panel.rs").write_text(
                 "PanelMenuItem::Action\n"
                 "PanelMenuItem::Toggle\n"
-            )
+            , encoding="utf-8", newline="")
             (panels / "b_panel.rs").write_text(
                 "PanelMenuItem::Radio\n"
-            )
+            , encoding="utf-8", newline="")
             patterns = {
                 "app": {
                     "menu_items": {
@@ -108,7 +108,7 @@ class MeasureRegexCountKindTest(unittest.TestCase):
                 "// preamble\n"
                 "    pub const LABEL: &str = \"A\";\n"
                 "    pub const LABEL: &str = \"B\";\n"
-            )
+            , encoding="utf-8", newline="")
             patterns = {
                 "app": {
                     "labels": {
@@ -128,7 +128,7 @@ class MeasureRegexCountKindTest(unittest.TestCase):
             panels = repo / "app" / "panels"
             panels.mkdir(parents=True)
             (panels / "binary_panel.rs").write_bytes(b"\xff\xfe\x00\x01\xff")
-            (panels / "ok_panel.rs").write_text("PanelMenuItem::Action\n")
+            (panels / "ok_panel.rs").write_text("PanelMenuItem::Action\n", encoding="utf-8", newline="")
             patterns = {
                 "app": {
                     "menu_items": {

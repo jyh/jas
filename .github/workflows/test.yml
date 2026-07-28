@@ -108,6 +108,132 @@ jobs:
         run: python scripts/check_naming_rule.py --self-test
       - name: Naming rule (product-agnostic framing)
         run: python scripts/check_naming_rule.py
+      # The Windows bring-up (2026-07-28) found 91 sites reading text with no
+      # encoding= and 37 writing with no newline=. macOS and Linux default to
+      # UTF-8 and LF, so the whole class is invisible here by construction; on
+      # Windows the locale codec is cp1252 and text writes emit CRLF. This gate
+      # runs on EVERY platform because it is a source-level property — it needs
+      # no Windows to be true, only to have been noticed there. Self-test first,
+      # same as the naming rule above: trusted for its RED.
+      - name: Self-test the encoding-hygiene gate
+        run: python scripts/check_encoding_hygiene.py --self-test
+      - name: Encoding hygiene (explicit encoding= on text I/O, newline= on writes)
+        run: python scripts/check_encoding_hygiene.py
+
+  # THE WINDOWS LANE. Added 2026-07-28, the day this project's gates ran on
+  # Windows for the first time: 11 of 24 invocations failed and NOT ONE failure
+  # was a real defect in repo content. Every cause was a platform assumption in
+  # shared tooling, invisible by construction on macOS and Linux because both
+  # default to UTF-8 and LF — a bare open() taking the cp1252 locale codec, a
+  # text write emitting CRLF into a byte-compared golden, and a "/"-anchored
+  # regex matched against str(Path). The source-level gate above stops the first
+  # two classes regrowing; this lane is what notices everything neither of us
+  # thought to write a gate for.
+  #
+  # BLOCKING on purpose (no continue-on-error). A Windows lane that cannot fail
+  # the build would report "Windows is covered" while rotting, and a claim wider
+  # than its evidence is this project's most serious defect. The lane was green
+  # 24/24 on kenai before it was written, so it starts from a known state.
+  #
+  # DO NOT set PYTHONUTF8, PYTHONIOENCODING or PYTHONLEGACYWINDOWSSTDIO here.
+  # PYTHONUTF8=1 repairs the encoding half without editing a single file — that
+  # made it the instrument that PROVED the two defects independent, and it would
+  # make this lane pass straight over the class it exists to catch.
+  windows:
+    name: Windows gates (the platform that can see encoding + newline)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: dtolnay/rust-toolchain@stable
+      # From requirements.txt, so this lane's deps cannot drift from what the
+      # code actually imports — same reasoning as the workspace-interpreter job.
+      - run: pip install -r requirements.txt
+
+      # ---- the lane's two premises, asserted rather than assumed ----------
+      # Premise 1: Python's default text encoding here is NOT UTF-8. The
+      # encoding half of this lane tests nothing if it is. Printed rather than
+      # enforced because PEP 686 makes UTF-8 the default in a future Python:
+      # when this line reads utf-8, this lane has gone vacuous on that half and
+      # wants revisiting — better a visible line in the log than a silent pass.
+      - name: Preflight — record the runner's default text encoding
+        run: |
+          python -c "import locale, sys; print('preferred encoding:', locale.getpreferredencoding(False)); print('stdout encoding :', sys.stdout.encoding)"
+      # Premise 2: the checkout is LF despite core.autocrlf being true on the
+      # Windows runner image. .gitattributes ("* text=auto eol=lf", under the
+      # comment "LF is law in this repository") is what makes that hold. If it
+      # ever stops holding, the corpus-freshness gates below would be measuring
+      # git's behaviour rather than ours, and would fail confusingly.
+      - name: Preflight — the checkout must be LF
+        run: |
+          if git ls-files --eol | grep -q 'w/crlf'; then
+            echo "CRLF in the working tree — .gitattributes did not hold:" >&2
+            git ls-files --eol | grep 'w/crlf' | head -20 >&2
+            exit 1
+          fi
+          echo "working tree is LF"
+
+      - name: Encoding hygiene — self-test, then the lint
+        run: |
+          python scripts/check_encoding_hygiene.py --self-test
+          python scripts/check_encoding_hygiene.py
+
+      - name: Structural gates
+        run: |
+          bash scripts/check_workspace_json.sh
+          python scripts/check_menu_structure.py
+          python scripts/check_toolbar_structure.py
+          python scripts/check_action_refs.py
+          bash scripts/check_panel_goldens.sh
+          python scripts/check_path_b_exclusions.py
+          bash scripts/check_intent_map.sh
+          python scripts/check_preservation_corpus.py
+          python scripts/check_corpus_manifest.py --self-test
+          python scripts/check_corpus_manifest.py
+
+      # These five are the newline half's blast radius: each regenerates a
+      # corpus and byte-compares it against the committed golden, so a text
+      # write without newline="" turns all five red on data that is current.
+      - name: Corpus freshness
+        run: |
+          bash scripts/check_expr_corpus.sh
+          bash scripts/check_concept_corpus.sh
+          bash scripts/check_concept_operations_corpus.sh
+          bash scripts/check_concept_fitters_corpus.sh
+          bash scripts/check_concept_constraints_corpus.sh
+
+      # The separator half: genericity's exclude patterns are "/"-anchored, and
+      # matching them against str(Path) silently no-opped every exclusion here.
+      - name: Genericity
+        run: |
+          python scripts/genericity_check_test.py
+          python scripts/genericity_check.py
+
+      - name: Reference interpreter conformance
+        run: python -m pytest workspace_interpreter/tests -q
+
+      - name: Rust tests
+        run: cd jas_dioxus && cargo test
+
+      # SINGLE-LANE ORACLE, deliberately without --require-comparisons: there is
+      # no Swift toolchain on Windows, so no lane-vs-lane comparison is possible
+      # here. The cross-language job below documents this as the legitimate mode
+      # for a box with one lane — it checks the PINNED GOLDENS rather than mutual
+      # agreement, which is exactly the property a third platform should confirm.
+      # The blocking two-lane equivalence gate remains the macOS job; this does
+      # not replace it and must not be read as doing so.
+      - name: Cross-language — rust oracle against the pinned goldens
+        run: |
+          python scripts/lane_report.py --self-test
+          python scripts/cross_language_algorithms.py --lang rust
+          python scripts/cross_language_commutativity.py --lang rust
+          python scripts/cross_language_workspace.py --lang rust
 
   rust:
     name: Rust tests

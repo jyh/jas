@@ -688,8 +688,8 @@ def main():
         return self_test(ws)
 
     entries, summary = build_map(ws)
-    args.json.write_text(render_json(entries, summary), encoding="utf-8")
-    args.md.write_text(render_md(entries, summary), encoding="utf-8")
+    args.json.write_text(render_json(entries, summary), encoding="utf-8", newline="")
+    args.md.write_text(render_md(entries, summary), encoding="utf-8", newline="")
     print(f"wrote {args.json} and {args.md} "
           f"({summary['total_actions']} actions, "
           f"{summary['journaling_actions']} journaling).")

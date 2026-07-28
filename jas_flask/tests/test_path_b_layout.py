@@ -30,7 +30,7 @@ def theme():
 @pytest.fixture
 def panels():
     import renderer
-    b = json.load(open(BUNDLE))
+    b = json.load(open(BUNDLE, encoding="utf-8"))
     renderer.set_panels(b.get("panels", {}))
     renderer.set_icons(b.get("icons", {}))
     return b["panels"]

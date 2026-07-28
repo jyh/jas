@@ -794,7 +794,7 @@ def run_real() -> int:
 def _write(root: str, rel: str, content: str):
     path = os.path.join(root, rel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(content)
 
 

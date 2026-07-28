@@ -1596,7 +1596,7 @@ class TestGradientPrimitivesFixture:
     def test_fixture_renders_nine_tiles_and_one_slider(self, theme):
         import yaml
         from renderer import render_element
-        with open(self._fixture_path()) as f:
+        with open(self._fixture_path(), encoding="utf-8") as f:
             fixture = yaml.safe_load(f)
         state = fixture.get("state", {})
         # Render each top-level panel item and concatenate.

@@ -41,7 +41,7 @@ def _fixture_paths() -> list[str]:
 
 
 def _load_actions() -> dict:
-    with open(_ACTIONS_PATH) as f:
+    with open(_ACTIONS_PATH, encoding="utf-8") as f:
         loaded = yaml.safe_load(f)
     return loaded.get("actions", {})
 
@@ -53,7 +53,7 @@ _ids = [os.path.splitext(os.path.basename(p))[0] for p in _paths]
 
 @pytest.mark.parametrize("fixture_path", _paths, ids=_ids)
 def test_phase3_fixture(fixture_path: str) -> None:
-    with open(fixture_path) as f:
+    with open(fixture_path, encoding="utf-8") as f:
         fixture = yaml.safe_load(f)
 
     action_name = fixture["action"]

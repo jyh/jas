@@ -41,7 +41,7 @@ def main():
             sys.exit(2)
 
     if output_path:
-        with open(output_path, "w", encoding="utf-8") as f:
+        with open(output_path, "w", encoding="utf-8", newline="") as f:
             json.dump(ws, f, indent=2)
     else:
         json.dump(ws, sys.stdout, indent=2)

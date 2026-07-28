@@ -34,7 +34,7 @@ def load_concepts():
     for fn in sorted(os.listdir(CONCEPTS_DIR)):
         if not fn.endswith(".yaml"):
             continue
-        with open(os.path.join(CONCEPTS_DIR, fn)) as f:
+        with open(os.path.join(CONCEPTS_DIR, fn), encoding="utf-8") as f:
             c = yaml.safe_load(f)
         concepts[c["id"]] = c
     return concepts
@@ -42,7 +42,7 @@ def load_concepts():
 
 def compile_corpus():
     concepts = load_concepts()
-    with open(CORPUS_YAML) as f:
+    with open(CORPUS_YAML, encoding="utf-8") as f:
         cases = yaml.safe_load(f)["tests"]
     out = []
     for case in cases:
@@ -65,7 +65,7 @@ def main():
     out_path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_OUT
     cases = compile_corpus()
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
         json.dump(cases, f, indent=2, ensure_ascii=False)
         f.write("\n")
 

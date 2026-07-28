@@ -68,11 +68,11 @@ def main() -> int:
                     help="rewrite the golden from the current workspace.json menubar")
     args = ap.parse_args()
 
-    workspace = json.loads(_WORKSPACE_JSON.read_text())
+    workspace = json.loads(_WORKSPACE_JSON.read_text(encoding="utf-8"))
     actual = _canonical(project_menubar(workspace["menubar"])) + "\n"
 
     if args.regenerate:
-        _GOLDEN.write_text(actual)
+        _GOLDEN.write_text(actual, encoding="utf-8", newline="")
         print(f"regenerated {_GOLDEN.relative_to(_ROOT)} "
               f"({len(workspace['menubar'])} menus)")
         return 0
@@ -80,7 +80,7 @@ def main() -> int:
     if not _GOLDEN.exists():
         print(f"FAIL: golden missing: {_GOLDEN}", file=sys.stderr)
         return 1
-    expected = _GOLDEN.read_text()
+    expected = _GOLDEN.read_text(encoding="utf-8")
     if actual != expected:
         print("FAIL: menu structure does not match the golden.\n"
               "  The compiled menubar drifted from test_fixtures/expected/"
