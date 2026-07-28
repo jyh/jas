@@ -772,3 +772,60 @@ a human reading. Removing a defaulted initializer parameter is the ratified tric
 
 **Deferred by JYH, consciously:** large selections under AI assistance may change
 the performance calculus. Revisit then, with data — not before.
+
+### D7 — cumulative paste offsets. RULED 2026-07-28: follow the spec.
+> JYH: *"D7: yes, follow the spec."*
+
+`workspace/actions.yaml:186` already specifies *"Repeated pastes stack with
+cumulative offsets."* **Neither port implements it** — measured, the second paste
+lands exactly on the first (x=24, not 48); `paste_count`/`pasteCount` have zero
+hits in either port. Both ports are wrong TOGETHER, so this is a tier-1 spec
+violation rather than a divergence, and no adjudication was needed: the written
+requirement stands and the code must meet it.
+
+Implement the stacking; do NOT amend the sentence. (A previous lane started to
+delete that sentence and correctly put it back — deleting a requirement is
+deciding a ruling.)
+
+### Open question 1 — layer naming on create. RULED 2026-07-28: verbatim.
+> JYH: *"R3: verbatim."*
+
+When R3's preserving paste creates a layer the document lacks, it takes the
+fragment's layer name **exactly as given**, not a disambiguated variant.
+"Preserving layers" means preserving them, names included; a user who reached for
+that command wants their names back. The known cost is accepted: two documents'
+"Layer 1" can fuse on a later paste, which is the same command doing what it says.
+
+### Open question 3 — mixed depths under R1. RULED 2026-07-28: frontmost wins.
+> JYH: *"R1: preference for frontmost."*
+
+When a selection spans different DEPTHS — an element alongside something nested
+deeper inside a group — the **frontmost path wins, even when it is the deeper
+one**, so a shallower element is pulled INTO the group. This confirms the
+conservative reading the R1 lane took to compile and pinned in a fixture; it is
+now ruled rather than provisional.
+
+Consistent with R1 itself: frontmost governs placement in both cases, so there is
+one rule to remember rather than two.
+
+---
+
+## 10. STILL OPEN — not ruled, and NOT to be inferred
+
+These were put to JYH in the same sitting and were not answered. They are
+recorded as open rather than resolved, because assuming a ruling is exactly the
+failure this document exists to prevent.
+
+1. **Paste and element ids.** Both ports copy ids VERBATIM, so a pasted element
+   can duplicate a live identity. The cardinality law says a paste is 0 -> N and
+   should mint fresh, so this looks ratified-by-implication — **but it touches
+   IDENTITY, and identity rulings in this project have twice been got wrong by
+   inference.** It needs JYH's explicit word. The `paste` verb landed with R2/R3
+   is what finally makes it gateable.
+2. **R3 into a LOCKED or hidden layer.** Unaddressed everywhere in the spec. The
+   proposal on the table was: append succeeds and the layer STAYS locked --
+   locking guards against accidental edits and an explicit paste is not
+   accidental, while silently unlocking discards a state the artist set and
+   failing would be the silent no-op that R1 just abolished. Not ruled.
+3. **Cross-artboard selections.** Nobody has looked. It may already work, or be a
+   fourth instance of this family. **Measure before ruling.**
