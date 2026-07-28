@@ -3548,6 +3548,80 @@ mod tests {
         assert!(paths.contains(&vec![0, 0])); // rect at (0,0) 10x10
     }
 
+    // D1 (SCOPE-effective-locked.md §3): a marquee must not reach into a
+    // LOCKED layer.
+    //
+    // PER-PORT, and here is why: no shared conformance fixture can express
+    // this. Every document case in the cross-language corpus is seeded from a
+    // `setup_svg`, and the SVG codec does not persist `locked` at all
+    // (`geometry/svg.rs` hardcodes `locked: false` in `parse_common` and never
+    // writes it), so a layer parsed from SVG is always unlocked. The corpus is
+    // structurally blind to lock as a PRECONDITION. Until the codec carries
+    // it, this can only be pinned in-port; JasSwift carries the mirror of
+    // these three in `Tests/Document/ControllerTests.swift`.
+    //
+    // This port already had the guard. These are REGRESSION PINS, not
+    // red-first evidence -- the red was in JasSwift, whose `selectFlat`
+    // checked visibility only. They exist so the pair cannot drift apart
+    // again in either direction.
+
+    /// Two layers, one rect each, side by side and both inside any marquee
+    /// large enough to cover them. Layer 0's lock is the parameter.
+    fn locked_layer_model(lock_first: bool) -> Model {
+        let locked = Element::Layer(LayerElem {
+            children: vec![Rc::new(make_rect(0.0, 0.0, 10.0, 10.0))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps {
+                name: Some("Locked".to_string()),
+                locked: lock_first,
+                ..Default::default()
+            },
+        });
+        let open = Element::Layer(LayerElem {
+            children: vec![Rc::new(make_rect(20.0, 0.0, 10.0, 10.0))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("Open".to_string()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![locked, open],
+            selected_layer: 0,
+            selection: vec![],
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    /// Positive control: with NOTHING locked the same marquee reaches both
+    /// rects. Without this the locked assertion below could pass for a
+    /// geometric reason and never see the guard at all.
+    #[test]
+    fn select_rect_reaches_both_layers_when_nothing_is_locked() {
+        let mut model = locked_layer_model(false);
+        Controller::select_rect(&mut model, -1.0, -1.0, 120.0, 120.0, false);
+        assert_eq!(sel_paths(&model), vec![vec![0, 0], vec![1, 0]]);
+    }
+
+    #[test]
+    fn select_rect_skips_a_locked_layer_and_keeps_going() {
+        let mut model = locked_layer_model(true);
+        Controller::select_rect(&mut model, -1.0, -1.0, 120.0, 120.0, false);
+        // Only the unlocked layer's rect. `[1, 0]` also proves the guard
+        // CONTINUES rather than aborting the layer walk.
+        assert_eq!(sel_paths(&model), vec![vec![1, 0]]);
+    }
+
+    /// `select_polygon` (the lasso) shares `select_flat` with `select_rect`,
+    /// so it inherits the same guard -- asserted, not assumed.
+    #[test]
+    fn select_polygon_skips_a_locked_layer() {
+        let mut model = locked_layer_model(true);
+        let poly = [(-1.0, -1.0), (120.0, -1.0), (120.0, 120.0), (-1.0, 120.0)];
+        Controller::select_polygon(&mut model, &poly, false);
+        assert_eq!(sel_paths(&model), vec![vec![1, 0]]);
+    }
+
     #[test]
     fn select_rect_misses_element() {
         let mut model = setup_model();
