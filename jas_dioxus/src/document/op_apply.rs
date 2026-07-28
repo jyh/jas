@@ -1727,7 +1727,12 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
     // txn for it would spuriously journal a selection-only batch as an
     // undoable step. `select_by_ids` is the id-primary twin (selection-only,
     // non-undoable), so it is excluded for the identical reason.
-    if name != "select_rect" && name != "select_by_ids" && !model.in_txn() {
+    // `select_element` is the path-addressed click seam — selection-only for
+    // exactly the same reason as `select_rect`, and excluded on the same
+    // grounds.
+    if name != "select_rect" && name != "select_by_ids" && name != "select_element"
+        && !model.in_txn()
+    {
         model.begin_txn();
     }
     // Fork-4 `targets` (OP_LOG.md §9). Populated for the THREE replay-safe
@@ -1785,6 +1790,26 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             // Keystone: the resolved selection is this op's targets, so
             // `capture_recipe` can seed its working set (empty targets ⇒
             // empty recipe). Resolved AFTER the Controller call.
+            targets = controller::selection_to_ids(model.document());
+        }
+        // The path-addressed CLICK seam — the same `Controller::select_element`
+        // the Type / Type-on-Path tools call after they create an element, and
+        // the site transcripts/LAYER_STRUCTURE.md §13 rules on (its own-flag
+        // `locked` read sat one line above an INHERITED `effective_visibility`
+        // read). Selection-only and non-undoable, exactly like `select_rect`.
+        // Routed through the production Controller mutator, never a copy of it.
+        "select_element" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            // A path that names no element is an addressed target that does not
+            // exist — the MissingTarget class, not a benign no-op. (A REFUSED
+            // select is a different thing: the element is there and the answer
+            // is "no", which is `Ok` with an unchanged selection.)
+            if model.document().get_element(&path).is_none() {
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
+            }
+            Controller::select_element(model, &path);
             targets = controller::selection_to_ids(model.document());
         }
         "move_selection" => {

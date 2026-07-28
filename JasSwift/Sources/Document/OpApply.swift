@@ -1433,8 +1433,11 @@ public func opApply(
     // journal-neutral — opening a txn for it would spuriously journal a
     // selection-only batch as an undoable step. `select_by_ids` is the
     // id-primary twin (selection-only, non-undoable), so it is excluded for the
-    // identical reason.
-    if name != "select_rect" && name != "select_by_ids" && !model.isInTxn {
+    // identical reason. `select_element` is the path-addressed click seam —
+    // selection-only for exactly the same reason as `select_rect`, and excluded
+    // on the same grounds.
+    if name != "select_rect" && name != "select_by_ids" && name != "select_element"
+        && !model.isInTxn {
         model.beginTxn()
     }
     // Fork-4 `targets` (OP_LOG.md §9). Populated for the THREE replay-safe verbs
@@ -1489,6 +1492,25 @@ public func opApply(
         // Keystone: the resolved selection is this op's targets, so
         // captureRecipe can seed its working set (empty targets ⇒ empty
         // recipe). Resolved AFTER the Controller call.
+        targets = selectionToIds(model.document)
+    // The path-addressed CLICK seam — the same `Controller.selectElement` the
+    // Type / Type-on-Path tools call after they create an element, and the site
+    // transcripts/LAYER_STRUCTURE.md §13 rules on (its own-flag `isLocked` read
+    // sat one line above an INHERITED `effectiveVisibility` read). Selection-only
+    // and non-undoable, exactly like `select_rect`. Routed through the production
+    // Controller mutator, never a copy of it. Mirrors Rust's `select_element`.
+    case "select_element":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        // A path that names no element is an addressed target that does not
+        // exist — the MissingTarget class, not a benign no-op. (A REFUSED select
+        // is a different thing: the element is there and the answer is "no",
+        // which succeeds with an unchanged selection.) `selectElement` traps on
+        // an empty or out-of-range path, so this guard is also what keeps a
+        // malformed op an ERROR rather than a crash.
+        guard !path.isEmpty, model.document.tryGetElement(path) != nil else {
+            return .missingTarget(id: String(describing: path))
+        }
+        controller.selectElement(path)
         targets = selectionToIds(model.document)
     case "move_selection":
         controller.moveSelection(dx: numField(op, "dx"), dy: numField(op, "dy"))

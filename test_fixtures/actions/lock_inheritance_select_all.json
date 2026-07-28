@@ -1,0 +1,43 @@
+[
+  {
+    "_doc": [
+      "SELECT ALL AND INHERITED LOCK — transcripts/LAYER_STRUCTURE.md §13.",
+      "`actions.yaml` §select_all has always said 'Hidden and locked objects",
+      "are excluded'. It never said whether 'locked' meant the object's own",
+      "flag or its ancestry, and the two ports answered differently: jas_dioxus",
+      "`Controller::select_all` is a hand-rolled layer->child loop that checked",
+      "`child.locked()` and NEVER the layer's, so it swept up the whole contents",
+      "of a locked layer; JasSwift's `selectAll` delegates to `selectFlat`,",
+      "which skips a locked layer outright. A live prime-directive divergence,",
+      "invisible to the corpus until `jas:locked` gave a fixture a way to start",
+      "locked (§13.1).",
+      "",
+      "THE DOCUMENT (locked_layer_and_element.svg):",
+      "  [0]   Layer 'Locked Layer'  jas:locked",
+      "  [0,0]    rect                own flag FALSE",
+      "  [0,1]    group 'Inner Group' own flag FALSE",
+      "  [0,1,0]    circle            own flag FALSE",
+      "  [1]   Layer 'Open Layer'    unlocked",
+      "  [1,0]    rect      jas:locked",
+      "  [1,1]    circle              free",
+      "",
+      "So the only selectable object in the document is [1,1].",
+      "",
+      "DELIBERATELY GROUPLESS IN THE OPEN LAYER. The two ports still disagree",
+      "about whether Select All EXPANDS a group (SCOPE-effective-locked.md D2 /",
+      "Q2 — Rust adds the group alone, Swift adds the group and every",
+      "grandchild), and that question is UNRULED. A fixture whose unlocked",
+      "layer held an unlocked group would red on THAT divergence and say",
+      "nothing about lock. This one isolates the ruled question."
+    ],
+    "name": "select_all_skips_a_locked_layers_whole_subtree",
+    "setup_svg": "locked_layer_and_element.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      }
+    ],
+    "expected_json": "select_all_skips_a_locked_layers_whole_subtree_expected.json"
+  }
+]

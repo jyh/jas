@@ -724,6 +724,22 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("paste_clipboard_text.json")
 }
 
+/// LOCK IS INHERITED, NOT MATERIALIZED — transcripts/LAYER_STRUCTURE.md §13
+/// (RULED by JYH 2026-07-28). Twin of Rust `operation_lock_inheritance`.
+///
+/// Drives the two selection seams the ruling names: `select_element` (the
+/// path-addressed click, where the element's OWN `isLocked` was read one line
+/// above an INHERITED `effectiveVisibility`) and `select_rect` (the marquee).
+/// Both op verbs route through the production `Controller` mutators.
+///
+/// This family could not have existed before `jas:locked` landed the same day
+/// (§13.1): every case is seeded from a `setup_svg`, and until then the SVG
+/// codec dropped `common.locked` in both ports, so NO shared fixture anywhere
+/// could start from a locked document.
+@Test func operationLockInheritance() throws {
+    try runOperationFixture("lock_inheritance.json")
+}
+
 /// `state.boolean_remove_redundant_points` defaults to FALSE
 /// (`workspace/state.yaml`), so the collinear-collapse pass does NOT run on a
 /// default boolean. Two rects overlapping in x with the same y-extent: the
@@ -3529,6 +3545,15 @@ private let actionFixtures = [
     // stays pinned by `menu_group_two_rects` in menu_object_ops.json, which R1
     // must leave byte-identical.
     "group_flatten.json",
+    // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
+    // inherited lock. `actions.yaml` §select_all always said "locked objects
+    // are excluded" without saying WHOSE flag, and the two ports answered
+    // differently — Rust's hand-rolled loop never checked the LAYER's, so
+    // Select All swept up a locked layer's whole contents while this port
+    // skipped it. Deliberately groupless in the open layer: Select All's
+    // group-expansion difference (SCOPE-effective-locked.md D2 / Q2) is
+    // UNRULED and would red here for a reason that is not about lock.
+    "lock_inheritance_select_all.json",
 ]
 
 /// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml

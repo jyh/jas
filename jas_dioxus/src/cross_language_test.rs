@@ -991,6 +991,7 @@ mod tests {
                          "operations/id_primary_move.json",
                          "operations/id_primary_copy.json",
                          "operations/boolean_collapse_default.json",
+                         "operations/lock_inheritance.json",
                          "operations/paste_layers.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
@@ -1452,6 +1453,15 @@ mod tests {
         // `menu_group_two_rects` in menu_object_ops.json, which R1 must leave
         // byte-identical.
         "group_flatten.json",
+        // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
+        // inherited lock. `actions.yaml` §select_all always said "locked
+        // objects are excluded" without saying WHOSE flag, and the two ports
+        // answered differently — Rust's hand-rolled loop never checked the
+        // LAYER's, so Select All swept up a locked layer's whole contents while
+        // Swift skipped it. Deliberately groupless in the open layer: Select
+        // All's group-expansion difference (SCOPE-effective-locked.md D2 / Q2)
+        // is UNRULED and would red here for a reason that is not about lock.
+        "lock_inheritance_select_all.json",
     ];
 
     /// Run an action fixture and return the resulting `AppState`.
@@ -3630,6 +3640,25 @@ mod tests {
     #[test]
     fn operation_paste_clipboard_text() {
         run_operation_fixture("operations/paste_clipboard_text.json");
+    }
+
+    /// LOCK IS INHERITED, NOT MATERIALIZED — transcripts/LAYER_STRUCTURE.md §13
+    /// (RULED by JYH 2026-07-28). A locked layer locks everything inside it, at
+    /// every depth, and those elements cannot be individually unlocked.
+    ///
+    /// Drives the two selection seams the ruling names: `select_element` (the
+    /// path-addressed click, where the element's OWN `locked` was read one line
+    /// above an INHERITED `effective_visibility`) and `select_rect` (the
+    /// marquee). Both op verbs route through the production `Controller`
+    /// mutators.
+    ///
+    /// This family could not have existed before `jas:locked` landed the same
+    /// day (§13.1): every case is seeded from a `setup_svg`, and until then the
+    /// SVG codec dropped `common.locked` in both ports, so NO shared fixture
+    /// anywhere could start from a locked document.
+    #[test]
+    fn operation_lock_inheritance() {
+        run_operation_fixture("operations/lock_inheritance.json");
     }
 
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*

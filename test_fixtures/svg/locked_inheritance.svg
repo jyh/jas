@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 128 128" width="128" height="128">
+  <g inkscape:groupmode="layer" inkscape:label="Locked Layer" jas:locked="true">
+    <rect x="0" y="0" width="16" height="16" fill="rgb(255,0,0)" stroke="none"/>
+    <g inkscape:label="Inner Group">
+      <rect x="0" y="32" width="16" height="16" fill="rgb(255,128,0)" stroke="none"/>
+    </g>
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="Open Layer">
+    <rect x="32" y="0" width="16" height="16" fill="rgb(0,128,0)" stroke="none" jas:locked="true"/>
+    <g inkscape:label="Locked Group" jas:locked="true">
+      <rect x="32" y="32" width="16" height="16" fill="rgb(0,0,255)" stroke="none"/>
+    </g>
+    <rect x="64" y="0" width="16" height="16" fill="rgb(0,255,255)" stroke="none"/>
+    <g inkscape:label="Mixed Group">
+      <rect x="64" y="32" width="16" height="16" fill="rgb(255,0,255)" stroke="none" jas:locked="true"/>
+      <rect x="96" y="32" width="16" height="16" fill="rgb(128,128,128)" stroke="none"/>
+    </g>
+  </g>
+</svg>
