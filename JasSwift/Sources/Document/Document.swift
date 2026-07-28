@@ -315,18 +315,22 @@ public struct Document: Equatable {
     /// identical document work stayed inlined in a SwiftUI closure. Pure.
     /// Mirrors Rust `renderer.rs` `toggle_element_lock_at`.
     ///
-    /// Two things happen, in this order:
+    /// Three things happen, in this order:
     ///   1. the element's own `locked` flips;
     ///   2. locking a CONTAINER materializes `locked = true` onto its direct
     ///      children, and unlocking restores whatever `savedToRestore`
-    ///      holds (the caller owns that map).
+    ///      holds (the caller owns that map);
+    ///   3. locking removes the element AND its descendants from the
+    ///      selection, exactly as ``cyclingElementVisibility(at:)`` does
+    ///      when an element becomes `.invisible`.
+    ///
+    /// Step 3 is not cosmetic: nothing downstream refuses to move or delete
+    /// a selected element for being locked, so a lock that left the
+    /// selection alone left locked content draggable (D5a).
     ///
     /// Step 2 is the materialization design `workspace/panels/layers.yaml`
     /// still specifies. If it is repealed in favour of inherited lock, this
-    /// method loses `savedToRestore` and its second half; step 1 survives.
-    ///
-    /// This is a lift-and-shift of the SwiftUI closure body, unchanged. It
-    /// is deliberately NOT yet what Rust does — see D5a.
+    /// method loses `savedToRestore` and its middle third; 1 and 3 survive.
     public func togglingElementLock(
         at path: ElementPath, savedToRestore: [Bool]? = nil
     ) -> Document {
@@ -345,6 +349,13 @@ public struct Document: Equatable {
             for (i, c) in kids.enumerated() where i < saved.count {
                 doc = doc.replaceElement(path + [i], with: c.withLocked(saved[i]))
             }
+        }
+        // Locking an element removes it and its descendants from selection.
+        if wasUnlocked {
+            let filtered = doc.selection.filter {
+                !($0.path == path || $0.path.starts(with: path))
+            }
+            return doc.replacing(selection: filtered)
         }
         return doc
     }
