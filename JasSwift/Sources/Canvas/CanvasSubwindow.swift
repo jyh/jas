@@ -3449,77 +3449,18 @@ class CanvasNSView: NSView {
         }
     }
 
-    /// Apply the named View action directly. Each action mutates
-    /// view state on Model and triggers a redraw via @Published.
-    /// Mirrors the Rust dispatch_action path for these specific
-    /// actions; we don't invoke the full effect pipeline because
-    /// the actions read preferences.viewport.* which are loaded
-    /// from workspace.json at evaluation time.
+    /// Apply the named View action from a keyboard chord, through the ONE seam
+    /// the View menu and the toolbar double-click also use (``ViewActions``),
+    /// which dispatches the YAML action. This method used to re-implement the
+    /// verbs here: it read `preferences.viewport.*` correctly but still fitted
+    /// `document.artboards.first` where the workspace says
+    /// `active_document.current_artboard`, still wrote `zoom_level` alone for
+    /// Cmd+1, and had no `fit_in_window` arm at all. RULED 2026-07-27,
+    /// transcripts/ZOOM_TOOL.md.
     private func runViewAction(_ name: String) {
         guard let model = controller?.model else { return }
-        let zoomStep = readPrefNumber("zoom_step", default: 1.2)
-        let minZoom = readPrefNumber("min_zoom", default: 0.1)
-        let maxZoom = readPrefNumber("max_zoom", default: 64.0)
-        let padding = readPrefNumber("fit_padding_px", default: 20.0)
-        switch name {
-        case "zoom_in":
-            // Anchor at viewport center for keyboard invocations.
-            applyZoomAnchored(model: model, factor: zoomStep,
-                              ax: model.viewportW / 2.0,
-                              ay: model.viewportH / 2.0,
-                              minZoom: minZoom, maxZoom: maxZoom)
-        case "zoom_out":
-            applyZoomAnchored(model: model, factor: 1.0 / zoomStep,
-                              ax: model.viewportW / 2.0,
-                              ay: model.viewportH / 2.0,
-                              minZoom: minZoom, maxZoom: maxZoom)
-        case "zoom_to_actual_size":
-            model.zoomLevel = min(max(1.0, minZoom), maxZoom)
-        case "fit_active_artboard":
-            if let ab = model.document.artboards.first {
-                fitRectIntoViewport(model: model,
-                                    x: Double(ab.x), y: Double(ab.y),
-                                    w: Double(ab.width),
-                                    h: Double(ab.height),
-                                    padding: padding)
-            }
-        case "fit_all_artboards":
-            let abs = model.document.artboards
-            guard !abs.isEmpty else { return }
-            var minX = Double.infinity, minY = Double.infinity
-            var maxX = -Double.infinity, maxY = -Double.infinity
-            for ab in abs {
-                minX = min(minX, Double(ab.x))
-                minY = min(minY, Double(ab.y))
-                maxX = max(maxX, Double(ab.x + ab.width))
-                maxY = max(maxY, Double(ab.y + ab.height))
-            }
-            fitRectIntoViewport(model: model, x: minX, y: minY,
-                                w: maxX - minX, h: maxY - minY,
-                                padding: padding)
-        default:
-            break
-        }
+        ViewActions.dispatch(name, model: model)
         needsDisplay = true
-    }
-
-    /// Apply a zoom factor anchored at (ax, ay) in viewport pixels.
-    /// Mirrors doc.zoom.apply but called directly from the keyboard
-    /// handler with viewport-center defaults.
-    private func applyZoomAnchored(
-        model: Model, factor: Double, ax: Double, ay: Double,
-        minZoom: Double, maxZoom: Double
-    ) {
-        // Shares the exact anchor math the pinch-zoom gesture uses
-        // (CanvasNavMath.zoomAbout), which mirrors doc.zoom.apply.
-        let (z, ox, oy) = CanvasNavMath.zoomAbout(
-            zoom: model.zoomLevel,
-            offsetX: model.viewOffsetX, offsetY: model.viewOffsetY,
-            factor: factor, anchorX: ax, anchorY: ay,
-            minZoom: minZoom, maxZoom: maxZoom)
-        model.zoomLevel = z
-        model.viewOffsetX = ox
-        model.viewOffsetY = oy
     }
 
     /// Switch the active tool from a keyboard-initiated change (shortcut,
