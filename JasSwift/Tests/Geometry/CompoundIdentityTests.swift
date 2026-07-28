@@ -203,6 +203,59 @@ private func bbox(_ points: [(Double, Double)]) -> (Double, Double, Double, Doub
     #expect(src.operands[1].id == "op-front")
 }
 
+/// THE WALK ITSELF, pinned against the document's OWN id walk instead of
+/// against a hand-written id list — the Swift twin of Rust's
+/// `clear_ids_leaves_document_element_ids_empty_over_a_nested_compound`.
+///
+/// `clearingIds()` exists precisely so that ``Document/elementIds`` comes back
+/// EMPTY over a cleared subtree, and the operand blind spot survived every
+/// by-name assertion written at the time because nobody enumerated the owners:
+/// the ratified audit asked "does the helper drop a field?" (no) instead of
+/// "does the helper's walk reach what the id walk reaches?" (it did not). See
+/// transcripts/EDIT_SEMANTICS_FREEZE.md §7.3's clipboard/duplicate entry.
+///
+/// The compound sits inside a GROUP inside the layer, so one pass must cross
+/// `children` -> `children` -> `operands`.
+///
+/// STATED BLIND SPOT, so this is not over-read: it proves agreement over the
+/// owners THIS FIXTURE contains. A future non-`children` owner added to
+/// `elementIds` and not to `clearingIds()` is caught by the document-level
+/// invariant gate (freeze §4 tier 1), not by this test.
+@Test func clearingIdsLeavesDocumentElementIdsEmptyOverANestedCompound() {
+    let cs = richCompound(.union)
+    assertCompoundFixtureIsRich(cs)
+    let group = Element.group(Group(children: [.live(.compoundShape(cs))],
+                                    name: "G", id: "g-outer"))
+    let layer = Layer(name: "L0", children: [group], id: "layer-id")
+    let before = Document(layers: [layer]).elementIds
+    #expect(before.count == 5,
+            """
+            the fixture must carry an id at all five depths (layer, group, \
+            compound, two operands) or the walk proves nothing, got \(before)
+            """)
+
+    guard case .layer(let cleared) = Element.layer(layer).clearingIds() else {
+        Issue.record("expected a layer back"); return
+    }
+    // MANDATORY GEOMETRY PAIRING: clearing identity must not disturb the
+    // shape. The back operand keeps x=0 w=10 exactly where richCompound put
+    // it, two containers below the element this call was made on.
+    guard case .group(let g) = cleared.children.first,
+          case .live(.compoundShape(let out)) = g.children.first,
+          case .rect(let r) = out.operands.first else {
+        Issue.record("expected layer > group > compound > rect"); return
+    }
+    #expect(abs(r.x - 0) < 1e-9 && abs(r.width - 10) < 1e-9,
+            "geometry moved: x=\(r.x) w=\(r.width)")
+
+    let after = Document(layers: [cleared]).elementIds
+    #expect(after.isEmpty,
+            """
+            clearingIds() left \(after) live in the document — its walk no \
+            longer agrees with Document.elementIds
+            """)
+}
+
 // MARK: - `Element.withCommon` over a live element
 
 /// A LIVE DIVERGENCE found by this wave's own enumeration of Element.swift,

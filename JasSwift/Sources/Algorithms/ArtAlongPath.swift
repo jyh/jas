@@ -88,7 +88,10 @@ func pointAtArcLength(_ pts: [(Double, Double)], _ cum: [Double],
 }
 
 /// Flatten the first subpath of `commands` into a polyline.
-func flattenArtPath(_ commands: [PathCommand]) -> [(Double, Double)] {
+/// `public` rather than internal so the `AlgorithmRoundtrip` tool target can
+/// drive it: the `art_flatten` conformance family is the only thing that can
+/// see a defect this function shares with its Rust twin.
+public func flattenArtPath(_ commands: [PathCommand]) -> [(Double, Double)] {
     var out: [(Double, Double)] = []
     var cx = 0.0, cy = 0.0, sx = 0.0, sy = 0.0
     var started = false
@@ -123,6 +126,25 @@ func flattenArtPath(_ commands: [PathCommand]) -> [(Double, Double)] {
             }
             cx = x; cy = y; started = true
         case .closePath:
+            // S-4: a LEADING ClosePath is a no-op. Ruled by JYH at the fleet
+            // council, 2026-07-27 -- a close appearing before any point has
+            // been established contributes nothing, because the artist never
+            // means a close-before-anything.
+            //
+            // Without this guard the arm below returned the (still empty)
+            // accumulator, so `[Z, M(3,2), L(13,2)]` -- a path an artist can
+            // draw -- flattened to NOTHING and art / pattern-along-path / the
+            // bristle brush drew nothing at all. The ruling was already
+            // honoured by `flattenPathCommands` and by `flattenPathToRings`;
+            // this was the third flattener, and it was wrong identically in
+            // both ports, so no equivalence gate saw it.
+            //
+            // The guard is deliberately "nothing emitted yet" and NOT
+            // "cx == sx && cy == sy": at a moveTo-then-Z degenerate subpath
+            // those coordinates are equal too, and there the close is REAL --
+            // it ends the subpath. Gated by
+            // test_fixtures/algorithms/art_flatten.json.
+            if out.isEmpty { continue }
             if cx != sx || cy != sy { push(sx, sy) }
             return out
         default:

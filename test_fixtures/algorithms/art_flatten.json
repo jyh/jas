@@ -1,0 +1,420 @@
+[
+  {
+    "name": "art_leading_close_alone",
+    "function": "art_flatten",
+    "_comment": "S-4 at the bare case: a path that is nothing but Z. A ClosePath before any point has been established is a NO-OP (JYH, fleet council 2026-07-27: the artist never means a close-before-anything), so the art flattener emits nothing. NOT discriminating on its own -- the pre-fix code also returned [] here, for the wrong reason (it BAILED OUT rather than skipping). It is here as the boundary that stops a fix from emitting the uninitialised subpath start (0,0).",
+    "element": {
+      "type": "path",
+      "d": [
+        {
+          "cmd": "Z"
+        }
+      ],
+      "fill": null,
+      "stroke": null,
+      "opacity": 1.0,
+      "transform": null,
+      "locked": false,
+      "visibility": "preview"
+    },
+    "expected": []
+  },
+  {
+    "name": "art_leading_close_then_lineto",
+    "function": "art_flatten",
+    "_comment": "The probe that first exposed the shared defect. A leading Z contributes nothing, so the L is the only point. DISCRIMINATES: the pre-fix close arm returned the empty accumulator immediately, so the whole path flattened to [] and art / pattern-along-path / bristle brush drew nothing at all.",
+    "element": {
+      "type": "path",
+      "d": [
+        {
+          "cmd": "Z"
+        },
+        {
+          "cmd": "L",
+          "x": 5.0,
+          "y": 5.0
+        }
+      ],
+      "fill": null,
+      "stroke": null,
+      "opacity": 1.0,
+      "transform": null,
+      "locked": false,
+      "visibility": "preview"
+    },
+    "expected": [
+      [
+        5.0,
+        5.0
+      ]
+    ]
+  },
+  {
+    "name": "art_leading_close_then_first_subpath",
+    "function": "art_flatten",
+    "_comment": "The exact vector measured in both ports: d = [Z, M(3,2), L(13,2)] returned [] with the leading Z and [[3,2],[13,2]] without it -- a path the artist can draw, silently flattening to nothing under a brush. DISCRIMINATES.",
+    "element": {
+      "type": "path",
+      "d": [
+        {
+          "cmd": "Z"
+        },
+        {
+          "cmd": "M",
+          "x": 3.0,
+          "y": 2.0
+        },
+        {
+          "cmd": "L",
+          "x": 13.0,
+          "y": 2.0
+        }
+      ],
+      "fill": null,
+      "stroke": null,
+      "opacity": 1.0,
+      "transform": null,
+      "locked": false,
+      "visibility": "preview"
+    },
+    "expected": [
+      [
+        3.0,
+        2.0
+      ],
+      [
+        13.0,
+        2.0
+      ]
+    ]
+  },
+  {
+    "name": "art_two_leading_closes_then_first_subpath",
+    "function": "art_flatten",
+    "_comment": "A no-op is a no-op however many times it repeats: two leading closes still leave the first real subpath intact. DISCRIMINATES against a fix that skips only the FIRST leading close (e.g. one guarded by a 'first command' flag rather than by the empty accumulator).",
+    "element": {
+      "type": "path",
+      "d": [
+        {
+          "cmd": "Z"
+        },
+        {
+          "cmd": "Z"
+        },
+        {
+          "cmd": "M",
+          "x": 3.0,
+          "y": 2.0
+        },
+        {
+          "cmd": "L",
+          "x": 13.0,
+          "y": 2.0
+        }
+      ],
+      "fill": null,
+      "stroke": null,
+      "opacity": 1.0,
+      "transform": null,
+      "locked": false,
+      "visibility": "preview"
+    },
+    "expected": [
+      [
+        3.0,
+        2.0
+      ],
+      [
+        13.0,
+        2.0
+      ]
+    ]
+  },
+  {
+    "name": "art_leading_close_then_closed_subpath",
+    "function": "art_flatten",
+    "_comment": "A leading Z in front of a subpath that closes NORMALLY. The leading close is a no-op; the trailing close is a real close and returns to the MoveTo (4,1), then ends the first subpath. The MoveTo is deliberately off the origin so a phantom point would differ by value as well as by count. DISCRIMINATES: pre-fix, [].",
+    "element": {
+      "type": "path",
+      "d": [
+        {
+          "cmd": "Z"
+        },
+        {
+          "cmd": "M",
+          "x": 4.0,
+          "y": 1.0
+        },
+        {
+          "cmd": "L",
+          "x": 14.0,
+          "y": 1.0
+        },
+        {
+          "cmd": "L",
+          "x": 14.0,
+          "y": 11.0
+        },
+        {
+          "cmd": "Z"
+        }
+      ],
+      "fill": null,
+      "stroke": null,
+      "opacity": 1.0,
+      "transform": null,
+      "locked": false,
+      "visibility": "preview"
+    },
+    "expected": [
+      [
+        4.0,
+        1.0
+      ],
+      [
+        14.0,
+        1.0
+      ],
+      [
+        14.0,
+        11.0
+      ],
+      [
+        4.0,
+        1.0
+      ]
+    ]
+  },
+  {
+    "name": "art_leading_close_then_cubic",
+    "function": "art_flatten",
+    "_comment": "The leading-close guard must not disturb the CURVE SAMPLER downstream of it: a leading Z, a MoveTo and one cubic yield the MoveTo plus the flattener's 16 uniform samples, values pinned. This is the geometry-VALUE vector for the family -- a leading-close battery that only counted points would be blind to a sampler that had drifted. The art flattener uses 16 steps for a cubic and 12 for a quad, NOT the shared FLATTEN_STEPS of the hit-test flattener, which is why this family cannot be folded into `flatten`. DISCRIMINATES: pre-fix, [].",
+    "element": {
+      "type": "path",
+      "d": [
+        {
+          "cmd": "Z"
+        },
+        {
+          "cmd": "M",
+          "x": 0.0,
+          "y": 0.0
+        },
+        {
+          "cmd": "C",
+          "x1": 0.0,
+          "y1": 10.0,
+          "x2": 10.0,
+          "y2": 10.0,
+          "x": 10.0,
+          "y": 0.0
+        }
+      ],
+      "fill": null,
+      "stroke": null,
+      "opacity": 1.0,
+      "transform": null,
+      "locked": false,
+      "visibility": "preview"
+    },
+    "expected": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.1123046875,
+        1.7578125
+      ],
+      [
+        0.4296875,
+        3.28125
+      ],
+      [
+        0.9228515625,
+        4.5703125
+      ],
+      [
+        1.5625,
+        5.625
+      ],
+      [
+        2.3193359375,
+        6.4453125
+      ],
+      [
+        3.1640625,
+        7.03125
+      ],
+      [
+        4.0673828125,
+        7.3828125
+      ],
+      [
+        5.0,
+        7.5
+      ],
+      [
+        5.9326171875,
+        7.3828125
+      ],
+      [
+        6.8359375,
+        7.03125
+      ],
+      [
+        7.6806640625,
+        6.4453125
+      ],
+      [
+        8.4375,
+        5.625
+      ],
+      [
+        9.0771484375,
+        4.5703125
+      ],
+      [
+        9.5703125,
+        3.28125
+      ],
+      [
+        9.8876953125,
+        1.7578125
+      ],
+      [
+        10.0,
+        0.0
+      ]
+    ]
+  },
+  {
+    "name": "art_close_terminates_the_first_subpath",
+    "function": "art_flatten",
+    "_comment": "SCOPE BOUNDARY, pinned against the OVER-fix. A close that is not leading still closes and still ENDS the first subpath: art along a path rides the first subpath only. The second subpath is not appended. This vector does not fail under the pre-fix code -- it is pinned against a WRONG fix (turning the close arm into an unconditional continue, which would append (23,2),(33,2) and silently change what 'the first subpath' means).",
+    "element": {
+      "type": "path",
+      "d": [
+        {
+          "cmd": "M",
+          "x": 3.0,
+          "y": 2.0
+        },
+        {
+          "cmd": "L",
+          "x": 13.0,
+          "y": 2.0
+        },
+        {
+          "cmd": "Z"
+        },
+        {
+          "cmd": "M",
+          "x": 23.0,
+          "y": 2.0
+        },
+        {
+          "cmd": "L",
+          "x": 33.0,
+          "y": 2.0
+        }
+      ],
+      "fill": null,
+      "stroke": null,
+      "opacity": 1.0,
+      "transform": null,
+      "locked": false,
+      "visibility": "preview"
+    },
+    "expected": [
+      [
+        3.0,
+        2.0
+      ],
+      [
+        13.0,
+        2.0
+      ],
+      [
+        3.0,
+        2.0
+      ]
+    ]
+  },
+  {
+    "name": "art_moveto_then_immediate_close",
+    "function": "art_flatten",
+    "_comment": "SCOPE BOUNDARY, and the reason the guard is 'the accumulator is empty' and NOT 'the current point equals the subpath start'. A MoveTo followed immediately by Z is a degenerate ZERO-LENGTH subpath: cx == sx and cy == sy exactly as at a leading close, but a point HAS been established, so the close is real -- it emits no duplicate vertex and ends the subpath, leaving the single MoveTo point. A guard written on the coordinates would wrongly treat this as leading and run on into whatever follows.",
+    "element": {
+      "type": "path",
+      "d": [
+        {
+          "cmd": "M",
+          "x": 5.0,
+          "y": 5.0
+        },
+        {
+          "cmd": "Z"
+        }
+      ],
+      "fill": null,
+      "stroke": null,
+      "opacity": 1.0,
+      "transform": null,
+      "locked": false,
+      "visibility": "preview"
+    },
+    "expected": [
+      [
+        5.0,
+        5.0
+      ]
+    ]
+  },
+  {
+    "name": "art_second_moveto_ends_the_first_subpath",
+    "function": "art_flatten",
+    "_comment": "SCOPE BOUNDARY: the OTHER terminator. A second MoveTo after a real segment ends the first subpath, with no close involved at all. Pinned so the leading-close guard cannot be mistaken for a licence to keep walking.",
+    "element": {
+      "type": "path",
+      "d": [
+        {
+          "cmd": "M",
+          "x": 3.0,
+          "y": 2.0
+        },
+        {
+          "cmd": "L",
+          "x": 13.0,
+          "y": 2.0
+        },
+        {
+          "cmd": "M",
+          "x": 23.0,
+          "y": 2.0
+        },
+        {
+          "cmd": "L",
+          "x": 33.0,
+          "y": 2.0
+        }
+      ],
+      "fill": null,
+      "stroke": null,
+      "opacity": 1.0,
+      "transform": null,
+      "locked": false,
+      "visibility": "preview"
+    },
+    "expected": [
+      [
+        3.0,
+        2.0
+      ],
+      [
+        13.0,
+        2.0
+      ]
+    ]
+  }
+]

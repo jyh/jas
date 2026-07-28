@@ -72,6 +72,9 @@ fn main() {
         "element_bounds" => run_element_bounds(&vectors),
         "element_evaluated_bounds" => run_element_evaluated_bounds(&vectors),
         "flatten" => run_flatten(&vectors),
+        "art_flatten" => run_art_flatten(&vectors),
+        "calligraphic_outline" => run_calligraphic_outline(&vectors),
+        "paste_translate" => run_paste_translate(&vectors),
         "arrow_trim" => run_arrow_trim(&vectors),
         "gradient_remap" => run_gradient_remap(&vectors),
         "length" => run_length(&vectors),
@@ -252,6 +255,133 @@ fn run_flatten(vectors: &[Value]) -> Vec<Value> {
             let pts = flatten_path_commands(&d);
             let result: Vec<Value> = pts.iter().map(|(x, y)| json!([x, y])).collect();
             json!({"name": name, "result": result})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// art_flatten (the FIRST-SUBPATH flattener behind art-along-path,
+// pattern-along-path and the bristle brush)
+// ---------------------------------------------------------------
+//
+// A separate verb from `flatten` on purpose: `art_along_path::flatten` is not
+// a wrapper over `flatten_path_commands`. It walks the first subpath only,
+// dedupes coincident vertices, and samples curves at its own step counts. It
+// had no corpus family at all, which is how a leading-ClosePath bail-out
+// survived in BOTH ports at once (S-4).
+
+fn run_art_flatten(vectors: &[Value]) -> Vec<Value> {
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem = parse_element(&tc["element"]);
+            let d = match &elem {
+                Element::Path(e) => e.d.clone(),
+                _ => Vec::new(),
+            };
+            let pts = jas_dioxus::algorithms::art_along_path::flatten(&d);
+            let result: Vec<Value> = pts.iter().map(|(x, y)| json!([x, y])).collect();
+            json!({"name": name, "result": result})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// calligraphic_outline (the Calligraphic brush's variable-width outline)
+// ---------------------------------------------------------------
+//
+// Driven for the same reason as `art_flatten`: its private stroke sampler is a
+// FOURTH first-subpath walker, with its own step counts and its own
+// accumulator, and it carried the same leading-ClosePath bail-out in both
+// ports. Gated at the public function rather than at the sampler so the family
+// asserts what the artist sees (the ribbon), not an internal.
+
+fn run_calligraphic_outline(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::calligraphic_outline::{
+        calligraphic_outline, CalligraphicBrush,
+    };
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem = parse_element(&tc["element"]);
+            let d = match &elem {
+                Element::Path(e) => e.d.clone(),
+                _ => Vec::new(),
+            };
+            let b = &tc["brush"];
+            let brush = CalligraphicBrush {
+                angle: b["angle"].as_f64().unwrap_or(0.0),
+                roundness: b["roundness"].as_f64().unwrap_or(100.0),
+                size: b["size"].as_f64().unwrap_or(1.0),
+            };
+            let pts = calligraphic_outline(&d, &brush);
+            let result: Vec<Value> = pts.iter().map(|(x, y)| json!([x, y])).collect();
+            json!({"name": name, "result": result})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// paste_translate (the offset a PASTE applies to each pasted element)
+// ---------------------------------------------------------------
+//
+// `workspace/actions.yaml` §paste: "offset 24 points down and to the right
+// from the original position", against `paste_in_place`'s explicit "no offset".
+// Both ports implement that by translating each pasted element, and until this
+// family NOTHING watched it: `op_apply` has no paste verb in either port and no
+// corpus vector pastes anything.
+//
+// This verb deliberately calls the function each port's PASTE PATH calls, not
+// the tidiest one available: Rust's `translate_element` (invoked at both paste
+// sites in workspace/clipboard.rs) and Swift's `EditClipboard.translateElement`
+// (invoked by `pasteClipboard`). Pointing it at Swift's `Element.translated`
+// instead would be a decoy — that function was already correct while the paste
+// path was not.
+//
+// SCOPE, stated: this gates the per-element transform a paste applies. The rest
+// of the paste FLOW is still ungated and still divergent (Rust appends to the
+// selected layer; Swift merges by layer name) — see the manifest's
+// `paste-offset-compound-divergence` row.
+
+fn run_paste_translate(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::document::document::Document;
+    use jas_dioxus::geometry::element::{translate_element, CommonProps, LayerElem};
+    use jas_dioxus::geometry::test_json::document_to_test_json;
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem = parse_element(&tc["element"]);
+            let dx = tc["dx"].as_f64().unwrap_or(0.0);
+            let dy = tc["dy"].as_f64().unwrap_or(0.0);
+            let moved = translate_element(&elem, dx, dy);
+            // Serialized through the SHARED document writer so the comparison
+            // sees every field, not only the coordinates: the Swift paste
+            // helper's group/layer arms also dropped name, id, visibility,
+            // blend mode and mask, which a coordinate-only result would miss.
+            let doc = Document {
+                layers: vec![jas_dioxus::geometry::element::Element::Layer(LayerElem {
+                    children: vec![std::rc::Rc::new(moved)],
+                    common: CommonProps { name: Some("L0".into()), ..Default::default() },
+                    isolated_blending: false,
+                    knockout_group: false,
+                })],
+                // Explicitly EMPTY: `Document::default()` seeds a Letter
+                // artboard whose id is random, which would make the golden
+                // non-deterministic and port-divergent for reasons that have
+                // nothing to do with paste. Swift's `Document(layers:)`
+                // defaults artboards to empty already.
+                artboards: Vec::new(),
+                ..Document::default()
+            };
+            // The writer's CANONICAL STRING, not a re-parsed object: round-
+            // tripping it through a JSON library normalises `1.0` to `1` in one
+            // port and not the other, which would have been a harness
+            // divergence wearing the costume of a port divergence. This is the
+            // same comparison the operations corpus makes.
+            json!({"name": name, "result": document_to_test_json(&doc)})
         })
         .collect()
 }

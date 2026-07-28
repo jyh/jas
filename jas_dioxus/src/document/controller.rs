@@ -6221,6 +6221,80 @@ mod preservation_law_tests {
         assert_eq!(src.operands[1].common().id.as_deref(), Some("op-front"));
     }
 
+    /// THE WALK ITSELF, pinned against the document's OWN id walk instead
+    /// of against a hand-written id list. `clear_ids` exists precisely so
+    /// that `Document::element_ids` comes back EMPTY over a cleared
+    /// subtree, and the operand blind spot survived every by-name
+    /// assertion written at the time because nobody enumerated the owners:
+    /// the audit asked "does the helper drop a field?" (no) instead of
+    /// "does the helper's walk reach what the id walk reaches?" (it did
+    /// not). See EDIT_SEMANTICS_FREEZE.md §7.3's clipboard/duplicate entry.
+    ///
+    /// The compound sits inside a GROUP inside the layer, so one pass must
+    /// cross `children` -> `children` -> `operands`.
+    ///
+    /// STATED BLIND SPOT, so this is not over-read: it proves agreement
+    /// over the owners THIS FIXTURE contains. A future non-`children`
+    /// owner added to `element_ids` and not to `clear_ids` is caught by the
+    /// document-level invariant gate (freeze §4 tier 1), not by this test.
+    #[test]
+    fn clear_ids_leaves_document_element_ids_empty_over_a_nested_compound() {
+        let model = rich_compound(crate::geometry::live::CompoundOperation::Union);
+        let cs = model.document().layers[0].children().unwrap()[0].as_ref().clone();
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(cs)],
+            common: CommonProps { id: Some("g-outer".into()), ..Default::default() },
+            isolated_blending: false,
+            knockout_group: false,
+        });
+        let mut layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(group)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps {
+                id: Some("layer-id".into()),
+                name: Some("L0".into()),
+                ..Default::default()
+            },
+        });
+        let doc_of = |l: &Element| Document {
+            layers: vec![l.clone()],
+            ..Document::default()
+        };
+        let before = doc_of(&layer).element_ids();
+        assert_eq!(
+            before.len(),
+            5,
+            "the fixture must carry an id at all five depths (layer, group, \
+             compound, two operands) or the walk proves nothing, got {before:?}"
+        );
+        crate::geometry::element::clear_ids(&mut layer);
+        // MANDATORY GEOMETRY PAIRING: clearing identity must not disturb the
+        // shape. The back operand keeps x=0 w=10 exactly where rich_compound
+        // put it, two containers below the layer this call was made on.
+        let Element::Group(g) = layer.children().unwrap()[0].as_ref() else {
+            panic!("group")
+        };
+        let Element::Live(LiveVariant::CompoundShape(cleared)) =
+            g.children[0].as_ref()
+        else {
+            panic!("compound")
+        };
+        let Element::Rect(r) = cleared.operands[0].as_ref() else { panic!("rect") };
+        assert!(
+            (r.x - 0.0).abs() < 1e-9 && (r.width - 10.0).abs() < 1e-9,
+            "geometry moved: x={} w={}",
+            r.x,
+            r.width
+        );
+        let after = doc_of(&layer).element_ids();
+        assert!(
+            after.is_empty(),
+            "clear_ids left {after:?} live in the document — its walk no \
+             longer agrees with Document::element_ids"
+        );
+    }
+
     /// THE VIOLATION, as a document invariant. Expanding an EXCLUDE compound
     /// emits two rings, and every ring wore `cs-1` — two live elements
     /// sharing one identity, breaching REFERENCE_GRAPH.md §2.5's uniqueness

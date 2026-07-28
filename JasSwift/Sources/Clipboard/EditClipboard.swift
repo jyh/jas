@@ -10,7 +10,12 @@ import AppKit
 /// The pasteboard is injectable so round-trip tests use a private pasteboard
 /// instead of clobbering the system one (mirrors ``RichClipboardTests``). The
 /// bodies moved verbatim out of ``JasCommands`` — no behavior change.
-enum EditClipboard {
+/// `public` so the `AlgorithmRoundtrip` tool target can drive
+/// ``translateElement(_:dx:dy:)`` — the `paste_translate` conformance family is
+/// the only thing that watches the offset `workspace/actions.yaml` §paste
+/// specifies, and it must call the function the PASTE PATH calls rather than
+/// the tidiest one available.
+public enum EditClipboard {
     /// Serialize the current selection to SVG on the pasteboard. Clipboard-only:
     /// no document write, no undo step. No-op on an empty selection.
     static func copySelection(_ model: Model, pasteboard: NSPasteboard = .general) {
@@ -122,19 +127,39 @@ enum EditClipboard {
 
     // MARK: - Helpers (moved verbatim from JasCommands)
 
-    static func translateElement(_ elem: Element, dx: Double, dy: Double) -> Element {
+    /// Translate one pasted element by the paste offset.
+    ///
+    /// `workspace/actions.yaml` §paste specifies "offset 24 points down and to
+    /// the right from the original position", against `paste_in_place`'s
+    /// explicit "no offset" — so the zero case must be a no-op and the non-zero
+    /// case must MOVE. This body used to be its own recursive walk and got both
+    /// halves of that wrong for two kinds:
+    ///
+    /// 1. a live COMPOUND SHAPE fell through to `moveControlPoints(.all, …)`,
+    ///    whose only live arm is `.reference`, so it came back UNMOVED — the
+    ///    pasted compound landed exactly on top of its source, invisible, which
+    ///    is the one outcome the offset exists to prevent. Rust's
+    ///    `translate_element` bakes the offset into the operands, so this was a
+    ///    live prime-directive divergence.
+    /// 2. the `.group` arm rebuilt `Group(children:opacity:transform:locked:)`
+    ///    field by field and therefore dropped `name`, `id`, `visibility`,
+    ///    `blendMode`, `mask`, `isolatedBlending` and `knockoutGroup` — the
+    ///    Swift copy-site omission class (EDIT_SEMANTICS_FREEZE.md §3.1),
+    ///    landing at a paste. Pasting a NAMED group produced an unnamed one.
+    ///
+    /// Both are gone because there is nothing left here to get wrong:
+    /// ``Element/translated(dx:dy:)`` is already the field-preserving,
+    /// clone-then-mutate mirror of Rust's `translate_element`, compound arm
+    /// included, and it was already correct while this helper was not. The
+    /// duplicate is deleted rather than repaired, which is the only version of
+    /// the fix that cannot drift again.
+    ///
+    /// Kept as a named function (rather than inlining the call at the paste
+    /// site) because the `paste_translate` conformance family drives THIS
+    /// symbol: a gate pointed at `Element.translated` would have been a decoy.
+    public static func translateElement(_ elem: Element, dx: Double, dy: Double) -> Element {
         if dx == 0 && dy == 0 { return elem }
-        switch elem {
-        case .group(let g):
-            return .group(Group(children: g.children.map { translateElement($0, dx: dx, dy: dy) },
-                                opacity: g.opacity, transform: g.transform, locked: g.locked))
-        case .layer(let l):
-            return .layer(Layer(name: l.name,
-                                children: l.children.map { translateElement($0, dx: dx, dy: dy) },
-                                opacity: l.opacity, transform: l.transform, locked: l.locked))
-        default:
-            return elem.moveControlPoints(.all, dx: dx, dy: dy)
-        }
+        return elem.translated(dx: dx, dy: dy)
     }
 
     static func isSvg(_ text: String) -> Bool {
