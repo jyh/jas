@@ -235,4 +235,20 @@ struct GroupFlattenTests {
         #expect(cl.children == [alpha, beta],
                 "and it still carries BOTH its own children, intact")
     }
+
+    /// R1 case 8 — a STALE selection path. Rust's `get_element` returns None
+    /// and the operation no-ops; Swift's `getElement` INDEXES and would trap,
+    /// so without `pathResolves` the same stale selection is quiet in one port
+    /// and a CRASH here. That is the saturate-vs-trap divergence class, and R1
+    /// widened its reach by accepting selections the old guard used to reject
+    /// before ever resolving them.
+    @Test func aStaleSelectionPathIsANoOpNotATrap() {
+        let a = rect(0)
+        let model = doc([Layer(name: "Stage", children: [a])], [[0, 0], [0, 7]])
+        Controller(model: model).groupSelection()
+        let after = model.document
+        #expect(after.layers[0].children.count == 1, "the document is untouched")
+        #expect(after.layers[0].children[0] == a,
+                "and the one real element is still itself")
+    }
 }

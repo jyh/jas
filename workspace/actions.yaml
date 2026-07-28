@@ -223,9 +223,50 @@ actions:
   # ── Object ────────────────────────────────────────────────
   group:
     description: >
-      Wrap the selected objects in a new Group element. The group inherits
-      the z-order position of the frontmost selected object. The selection
-      changes to the new group. Requires at least 2 selected objects.
+      Wrap the selected objects in a new Group element. The selection
+      changes to the new group, and the whole operation is a single undo
+      step. Requires at least 2 selected objects.
+
+      GROUPING ALWAYS FLATTENS. The selected objects do NOT have to share a
+      parent: they may sit in different layers, in different groups, or at
+      different nesting depths, and every one of them becomes a child of the
+      new group regardless of where it came from. The command never refuses
+      and never silently does nothing. This is forced by what a group IS —
+      a group's children are its children, and there is no representation in
+      which one group's children remain spread across two different parents
+      — so relocating them is the only thing grouping can mean.
+
+      WHERE THE NEW GROUP LANDS. It is placed in the FRONTMOST selected
+      object's parent container, at the z-order position that object leaves
+      behind once the other selected objects have been removed. Frontmost
+      means last in paint order, the object drawn on top. Choosing the
+      frontmost position minimises the visual change: the group renders
+      roughly where its frontmost member already rendered, so the artwork
+      does not jump forward or backward past unrelated content the way it
+      would if the group were dropped into the active layer instead. Note
+      that z-order is being used here to choose a PLACEMENT, which is
+      inherently an ordering question; the new group is a freshly created
+      container and never inherits any selected object's identity, name or
+      id.
+
+      WHAT THE OBJECTS KEEP. Moving into the group is a relocation, not a
+      rebuild: each object keeps its own identity and every one of its
+      properties — geometry, fill, stroke, opacity, blend mode, transform,
+      name, lock and visibility. Their relative front-to-back order is
+      preserved: they become children in document order, so the object that
+      was behind stays behind inside the group.
+
+      WHAT HAPPENS TO THE CONTAINERS THEY LEFT. A layer or group that gives
+      up all of its children is KEPT, empty. It was not what the command
+      spoke to, it is still the artist's container, and it carries a name,
+      an id and its own properties that deleting it would destroy. An
+      emptied layer keeps its place in the Layers panel; an emptied group
+      keeps its place in the stacking order.
+
+      SELECTING A CONTAINER AND SOMETHING INSIDE IT. If a selected group
+      and one of its own descendants are both selected, the container
+      carries its descendants and the descendant is not moved separately,
+      so the object appears in the new group exactly once.
     category: object
     tier: 3
     enabled_when: "active_document.selection_count >= 2"

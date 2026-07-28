@@ -1247,7 +1247,59 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
-    /// Group selected elements into a single Group.
+    /// Group selected elements into a single Group. **R1 — group ALWAYS
+    /// flattens** (transcripts/LAYER_STRUCTURE.md §3, ratified 2026-07-28).
+    ///
+    /// Every selected element becomes a child of the new Group regardless of
+    /// where it came from — across layers, across sibling groups, at any
+    /// depth. There is no refusal and no silent no-op. This replaced a guard
+    /// that required all selected paths to share one parent prefix AND one
+    /// path LENGTH; with it, Cmd+G on a selection spanning two layers did
+    /// nothing and said nothing (defect D2).
+    ///
+    /// **Why flattening rather than preservation.** A Group is an element and
+    /// its children are its children; there is no representation in which one
+    /// Group's children live in two different parents. Unlike paste there is
+    /// no structure-preserving option to choose between, so this is the
+    /// Preservation Law's *what it cannot preserve it must not guess* clause
+    /// resolved by T3's documented default.
+    ///
+    /// **Placement: the FRONTMOST selected element's parent, at the z-slot
+    /// that element vacates.** Frontmost is the GREATEST path — paths sort
+    /// ascending and the canvas paints `for layer in &doc.layers` forward
+    /// into Canvas2D, so a higher index paints later and therefore on top.
+    /// This is the same rule BOOLEAN.md fixes and `make_compound_shape_with_op`
+    /// already implements with `elements.last()`. Placing the group frontmost
+    /// minimises visual change: it renders roughly where the frontmost member
+    /// already rendered, instead of hurling the selection backward past
+    /// unrelated content.
+    ///
+    /// Note this half of R1 also corrects the SAME-PARENT case. `actions.yaml`
+    /// §group has always said the group "inherits the z-order position of the
+    /// frontmost selected object"; both ports inserted at `paths[0]`, the
+    /// BACKMOST. The two agree only when the selection is contiguous, which is
+    /// why the existing corpus golden never saw it.
+    ///
+    /// **On electing a winner from geometry.** The Preservation Law forbids
+    /// electing an IDENTITY winner from geometry, z-order included, and this
+    /// is deliberately NOT that. Identity here is a FRESH group — a 0 -> 1
+    /// creation under the cardinality law, wearing `CommonProps::default()`
+    /// and never a member's id — while z-order is being used for PLACEMENT,
+    /// which is inherently an ordering concern. The surface resemblance will
+    /// otherwise read as a contradiction.
+    ///
+    /// **Emptied source containers are KEPT — both layers and groups.** A
+    /// container the selection drained was never what the edit spoke to; it is
+    /// a bystander (T4), and it carries a name, an id and blend flags that
+    /// deleting would destroy on an unrequested 1 -> 0. This is NOT the orphan
+    /// D3 was fixed for: there a container was emptied by a WRONG insert that
+    /// should have landed inside it, whereas here the emptying is the correct
+    /// consequence of a move the artist asked for. The loss is visible in the
+    /// Layers panel and is one undo step.
+    ///
+    /// Twin probes: the `r1_*` tests below and
+    /// `JasSwift/Tests/Document/GroupFlattenTests.swift`, case for case, plus
+    /// the shared corpus family `test_fixtures/actions/group_flatten.json`.
     pub fn group_selection(model: &mut Model) {
         let doc = model.document();
         if doc.selection.is_empty() {
@@ -1255,39 +1307,72 @@ impl Controller {
         }
         let mut paths: Vec<ElementPath> = doc.selection.iter().map(|es| es.path.clone()).collect();
         paths.sort();
-        if paths.len() < 2 {
+        paths.dedup();
+        // An ancestor carries its own children, so a selected path that sits
+        // UNDER another selected path is dropped from the move. Without this,
+        // selecting a Group and one of its children would clone the child into
+        // the new group AND leave it inside the cloned subtree: the same
+        // element twice, one live id duplicated — the uniqueness break
+        // (REFERENCE_GRAPH.md §2.5) `make_compound_shape_with_op` was fixed
+        // for, where a reference silently rebinds to whichever copy the index
+        // walk reaches first.
+        //
+        // UNRULED, and taken as the conservative reading rather than as law:
+        // brief §6 open question 3 (mixed DEPTHS) is not settled, and this is
+        // the sub-case where the naive reading is not merely debatable but
+        // unsafe. Banked for JYH.
+        let roots: Vec<ElementPath> = paths
+            .iter()
+            .filter(|p| !paths.iter().any(|q| *q != **p && p.starts_with(q)))
+            .cloned()
+            .collect();
+        if roots.len() < 2 {
             return;
         }
-        // All selected elements must be siblings (same parent prefix)
-        let parent: ElementPath = paths[0][..paths[0].len() - 1].to_vec();
-        if !paths.iter().all(|p| p.len() == paths[0].len() && p[..p.len() - 1] == parent[..]) {
-            return;
-        }
-        // Gather elements in order
-        let elements: Vec<Rc<Element>> = paths
+        // Gather elements in document order. A path that resolves to nothing
+        // aborts rather than silently wrapping a short list.
+        let elements: Vec<Rc<Element>> = roots
             .iter()
             .filter_map(|p| doc.get_element(p).cloned().map(Rc::new))
             .collect();
-        if elements.len() != paths.len() {
+        if elements.len() != roots.len() {
             return;
         }
-        // Delete selected elements in reverse order
+        // The destination: the FRONTMOST root's own path, with each component
+        // shifted down by the deletions that land EARLIER in that same
+        // container. A deleted path shifts `front[k]` exactly when it is a
+        // direct child of `front[..k]` with a smaller index — deleting a whole
+        // subtree removes one entry from its parent, so every later sibling
+        // (including an ANCESTOR of the frontmost element) slides back one.
+        // Computing this arithmetically rather than reusing `roots[0]` is what
+        // makes the general cross-parent case land where the artist was
+        // looking.
+        let front = roots.last().expect("roots is non-empty; len >= 2 checked above");
+        let mut insert_path = front.clone();
+        for k in 0..front.len() {
+            let shift = roots
+                .iter()
+                .filter(|d| {
+                    *d != front && d.len() == k + 1 && d[..k] == front[..k] && d[k] < front[k]
+                })
+                .count();
+            insert_path[k] -= shift;
+        }
+        // Delete the sources in reverse document order (descending paths keep
+        // the remaining indices valid).
         let mut new_doc = doc.clone();
-        for p in paths.iter().rev() {
+        for p in roots.iter().rev() {
             new_doc = new_doc.delete_element(p);
         }
-        // Create group and insert at first selected position
+        // The new Group is a fresh 0 -> 1 container: it never wears a member's
+        // identity (transcripts/EDIT_SEMANTICS_FREEZE.md §3.4).
         let group = Element::Group(crate::geometry::element::GroupElem {
             children: elements,
             common: crate::geometry::element::CommonProps::default(),
             isolated_blending: false,
             knockout_group: false,
         });
-        let insert_path = paths[0].clone();
-        new_doc = new_doc.insert_element_at(&insert_path, group.clone());
-        // Select the new group
-        let n = control_point_count(&group);
-        let _ = n;
+        new_doc = new_doc.insert_element_at(&insert_path, group);
         new_doc.selection = vec![ElementSelection::all(insert_path)];
         model.edit_document(new_doc);
     }
@@ -3301,6 +3386,26 @@ mod tests {
         let cl = inner[1].children().unwrap();
         assert_eq!(cl.len(), 2, "and it still carries BOTH its own children");
         assert_eq!((&*cl[0], &*cl[1]), (&alpha, &beta), "alpha and beta intact inside it");
+    }
+
+    /// R1 case 8 — a STALE selection path. Rust's `get_element` returns None
+    /// and the operation no-ops; Swift's `getElement` INDEXES and would trap,
+    /// so without an explicit resolvability check the same stale selection is
+    /// quiet in one port and a crash in the other. That is the saturate-vs-trap
+    /// divergence class, and R1 widened its reach by accepting selections the
+    /// old guard used to reject before ever resolving them.
+    #[test]
+    fn r1_a_stale_selection_path_is_a_no_op_not_a_panic() {
+        let a = make_rect(0.0, 0.0, 10.0, 10.0);
+        let mut model = group_doc(
+            vec![make_layer("Stage", vec![a.clone()])],
+            vec![vec![0, 0], vec![0, 7]],
+        );
+        Controller::group_selection(&mut model);
+        let after = model.document();
+        let kids = after.layers[0].children().expect("layer children");
+        assert_eq!(kids.len(), 1, "the document is untouched");
+        assert_eq!(*kids[0], a, "and the one real element is still itself");
     }
 
     fn setup_model() -> Model {
