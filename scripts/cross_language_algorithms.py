@@ -790,8 +790,6 @@ def main():
     # apart, this is a third bucket, not a member of either.
     s4_passed, s4_failed, s4_errors = check_leading_close_invariance(
         langs, algos, args.verbose)
-    passed += s4_passed
-    failed += s4_failed
     errors += s4_errors
 
     for algo in algos:
@@ -992,8 +990,10 @@ def main():
         oracle_passed=oracle_passed, oracle_failed=oracle_failed,
         comparison_passed=compare_passed, comparison_failed=compare_failed,
         harness_failed=harness_failed, errors=errors,
+        relational_passed=s4_passed, relational_failed=s4_failed,
         oracle_what="vs the pinned goldens",
         comparison_what="lane-vs-lane agreement",
+        relational_what="S-4 leading-ClosePath invariance, same lane",
         per_lane_comparisons=per_lane,
         require_comparisons=args.require_comparisons,
         unexercised=lane_report.unexercised_active_ports(lanes),

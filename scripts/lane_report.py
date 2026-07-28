@@ -166,8 +166,17 @@ class LaneReport:
     comparison_failed: int = 0
     harness_failed: int = 0          # preflight faults: neither kind of check
     errors: int = 0
+    # THE THIRD KIND. A relational check asserts a property BETWEEN two runs of
+    # the same lane -- e.g. "a leading ClosePath changes no answer" -- so it is
+    # neither an oracle check (no pinned golden) nor a comparison (no second
+    # lane). It was added because folding it into either one produced a count
+    # that could not be read: the S-4 invariance pass runs on a SINGLE lane and
+    # would have inflated an "oracle" number that means "reproduces a golden".
+    relational_passed: int = 0
+    relational_failed: int = 0
     oracle_what: str = "vs pinned goldens"
     comparison_what: str = "lane-vs-lane agreement"
+    relational_what: str = "same-lane invariants"
     # Which lanes the oracle checks cover. Usually just the reference lane;
     # the commutativity runner's diagonal cells cover EVERY lane, and a report
     # that named only the reference there would understate its own evidence.
@@ -188,12 +197,18 @@ class LaneReport:
         return self.comparison_passed + self.comparison_failed
 
     @property
+    def relational_checks(self) -> int:
+        return self.relational_passed + self.relational_failed
+
+    @property
     def total_passed(self) -> int:
-        return self.oracle_passed + self.comparison_passed
+        return (self.oracle_passed + self.comparison_passed
+                + self.relational_passed)
 
     @property
     def total_failed(self) -> int:
-        return self.oracle_failed + self.comparison_failed + self.harness_failed
+        return (self.oracle_failed + self.comparison_failed
+                + self.relational_failed + self.harness_failed)
 
     @property
     def silent_lanes(self) -> list:
@@ -226,6 +241,15 @@ class LaneReport:
             return (f"{self.comparison_checks} comparison check(s) counted, but "
                     f"this run has NO comparison lane -- the runner is counting "
                     f"something that cannot be a cross-language comparison")
+        # The headline prints the total as a written-out SUM of its parts. If
+        # that arithmetic ever stops holding, the headline is lying about its
+        # own components, which is the whole defect this module exists to stop.
+        parts = (self.oracle_passed + self.comparison_passed
+                 + self.relational_passed)
+        if parts != self.total_passed:
+            return (f"headline total {self.total_passed} != ORACLE "
+                    f"{self.oracle_passed} + COMPARISON {self.comparison_passed}"
+                    f" + RELATIONAL {self.relational_passed} = {parts}")
         return None
 
     @property
@@ -241,6 +265,10 @@ class LaneReport:
             return "CROSS-LANGUAGE"
         if self.oracle_checks:
             return "ORACLE-ONLY"
+        if self.relational_checks:
+            # Not VACUOUS: a same-lane invariant genuinely establishes
+            # something, just not that two implementations agree.
+            return "RELATIONAL-ONLY"
         return "VACUOUS"
 
     # -- output ----------------------------------------------------------
@@ -255,13 +283,17 @@ class LaneReport:
             f"{self.title}: {self.total_passed} checks passed, "
             f"{self.total_failed} failed, {self.errors} errors "
             f"= ORACLE {self.oracle_passed} + COMPARISON "
-            f"{self.comparison_passed}  ({self.scope})",
+            f"{self.comparison_passed} + RELATIONAL "
+            f"{self.relational_passed}  ({self.scope})",
             f"  ORACLE     {self.oracle_passed} passed, {self.oracle_failed} "
             f"failed   ({self.oracle_lane_label} {self.oracle_what})",
             f"  COMPARISON {self.comparison_passed} passed, "
             f"{self.comparison_failed} failed   ({self.comparison_what}: "
             + (f"{ref} vs {comp})" if self.lanes.comparison
                else "NONE PERFORMED -- only one lane in this run)"),
+            f"  RELATIONAL {self.relational_passed} passed, "
+            f"{self.relational_failed} failed   ({self.relational_what}"
+            + ("; none registered)" if self.relational_checks == 0 else ")"),
             f"  lanes requested: {req} | reference: {ref} | "
             f"comparison lanes: {comp}",
         ]
@@ -352,10 +384,20 @@ class LaneReport:
                          f"performed none.")
             return tail
         if self.verdict == "ORACLE-ONLY":
-            return (f"0 cross-language comparisons performed; "
+            tail = (f"0 cross-language comparisons performed; "
                     f"{self.oracle_checks} oracle check(s), "
                     f"{self.oracle_passed} passed. This run did NOT check that "
                     f"any two implementations agree.")
+            if self.relational_checks:
+                tail += (f" Plus {self.relational_checks} relational check(s) "
+                         f"({self.relational_what}), which likewise compare no "
+                         f"two implementations.")
+            return tail
+        if self.verdict == "RELATIONAL-ONLY":
+            return (f"0 cross-language comparisons AND 0 oracle checks; only "
+                    f"{self.relational_checks} relational check(s) "
+                    f"({self.relational_what}). Nothing here shows any two "
+                    f"implementations agree, nor that any golden reproduces.")
         return ("0 cross-language comparisons AND 0 oracle checks: this run "
                 "established nothing.")
 
@@ -382,6 +424,7 @@ class LaneReport:
 
 ORACLE_LINE = re.compile(r"^\s*ORACLE\s+(\d+) passed, (\d+) failed")
 COMPARISON_LINE = re.compile(r"^\s*COMPARISON\s+(\d+) passed, (\d+) failed")
+RELATIONAL_LINE = re.compile(r"^\s*RELATIONAL\s+(\d+) passed, (\d+) failed")
 TOTAL_LINE = re.compile(r"(\d+) checks passed")
 
 
@@ -393,7 +436,7 @@ def _read_like_a_skimmer(lines):
     is read back out of the printed lines.
     """
     text = "\n".join(lines)
-    oracle = comparison = None
+    oracle = comparison = relational = None
     total = None
     for line in lines:
         m = ORACLE_LINE.match(line)
@@ -402,12 +445,16 @@ def _read_like_a_skimmer(lines):
         m = COMPARISON_LINE.match(line)
         if m:
             comparison = (int(m.group(1)), int(m.group(2)))
+        m = RELATIONAL_LINE.match(line)
+        if m:
+            relational = (int(m.group(1)), int(m.group(2)))
         m = TOTAL_LINE.search(line)
         if m and total is None:
             total = int(m.group(1))
     return {
         "oracle": oracle,
         "comparison": comparison,
+        "relational": relational,
         "total": total,
         # Literal phrases, never module constants -- see WARN_HEADLINE.
         "banner": "ZERO CROSS-LANGUAGE COMPARISONS WERE PERFORMED" in text,
@@ -587,15 +634,78 @@ def self_test() -> int:
                      comparison_passed=14).contradiction is None,
           "(G) a real comparison lane must not trip the invariant")
 
+    # --- CASE H: THE THIRD BUCKET. A relational check compares no two
+    # implementations and reproduces no golden, so folding it into either
+    # count would overstate that run. This case exists because the two were
+    # merged textually-clean and semantically broken: one lane split ORACLE
+    # from COMPARISON while another added same-lane S-4 checks to the old
+    # pooled counters, and the runner died on an unbound name. -------------
+    h = LaneReport(title="Cross-language algorithms", scope="24 algorithms",
+                   lanes=two, oracle_passed=465, comparison_passed=396,
+                   relational_passed=225, per_lane_comparisons={"swift": 396})
+    rh = _read_like_a_skimmer(h.render())
+    check(rh["relational"] == (225, 0),
+          f"(H) the RELATIONAL line must be readable on its own: {rh['relational']}")
+    check(rh["oracle"] == (465, 0) and rh["comparison"] == (396, 0),
+          "(H) adding a third bucket must not disturb the other two")
+    check(rh["total"] == 1086,
+          f"(H) the headline must be the SUM of all three: {rh['total']}")
+    # Guarded, so a missing line FAILS this case cleanly instead of raising a
+    # TypeError that would hide which assertion broke. (Found by mutating the
+    # RELATIONAL line out: the self-test crashed rather than reporting.)
+    if all(rh[k] is not None for k in ("oracle", "comparison", "relational")):
+        check(rh["total"] == rh["oracle"][0] + rh["comparison"][0]
+              + rh["relational"][0],
+              "(H) a skimmer must be able to check the arithmetic from the text")
+    else:
+        check(False, "(H) all three bucket lines must be present to be skimmed")
+    check("RELATIONAL 225" in rh["text"],
+          "(H) the headline must name the third bucket, not hide it in a total")
+
+    # A relational FAILURE is a real failure: it must be attributed and must
+    # not exit 0.
+    h_fail = LaneReport(title="t", scope="s", lanes=two, oracle_passed=1,
+                        comparison_passed=1, relational_failed=3)
+    check(_read_like_a_skimmer(h_fail.render())["relational"] == (0, 3),
+          "(H) relational failures must be attributed to their own bucket")
+    check(h_fail.exit_code() == EXIT_FAILED,
+          f"(H) a relational failure must exit non-zero, got {h_fail.exit_code()}")
+
+    # Relational-only is NOT vacuous -- it establishes something, just not
+    # agreement or golden-reproduction -- and the verdict must say which.
+    h_only = LaneReport(title="t", scope="s", lanes=one, relational_passed=75)
+    rho = _read_like_a_skimmer(h_only.render())
+    check("RELATIONAL-ONLY" in rho["last"],
+          f"(H) relational-only must not be called VACUOUS: {rho['last']!r}")
+    check("VACUOUS" not in rho["last"], f"(H) verdict: {rho['last']!r}")
+    check("implementations agree" in rho["last"]
+          and "Nothing here shows" in rho["last"],
+          f"(H) a relational-only verdict must still disclaim agreement: "
+          f"{rho['last']!r}")
+
+    # The arithmetic invariant itself must fire when the headline stops being
+    # the sum of its parts -- the lie this bucket could otherwise introduce.
+    class _Liar(LaneReport):
+        @property
+        def total_passed(self):
+            return 999
+    liar = _Liar(title="t", scope="s", lanes=two, oracle_passed=1,
+                 comparison_passed=1, relational_passed=1)
+    check(liar.contradiction is not None,
+          "(H) a headline total that is not the sum of its parts must be caught")
+    check("IMPOSSIBLE COUNT" in _read_like_a_skimmer(liar.render())["text"],
+          "(H) and it must be printed, not merely computed")
+    check(liar.exit_code() == EXIT_FAILED, "(H) a lying total must exit non-zero")
+
     if bad:
         print("lane-report SELF-TEST: FAILED")
         for msg in bad:
             print(f"  {msg}")
         return 1
-    print("lane-report SELF-TEST: OK (7 report cases, 13 lane-arithmetic cases; "
-          "oracle/comparison split, zero-comparison banner, silent-lane warning, "
-          "impossible-count invariant, verdict line and all four exit paths "
-          "proven)")
+    print("lane-report SELF-TEST: OK (8 report cases, 13 lane-arithmetic cases; "
+          "oracle/comparison/relational split, zero-comparison banner, "
+          "silent-lane warning, impossible-count invariant, headline-sum "
+          "invariant, verdict line and all four exit paths proven)")
     return 0
 
 
