@@ -1728,6 +1728,18 @@ public func opApply(
             return .missingTarget(id: String(describing: path))
         }
         targets = t
+    // The Layers-panel LOCK BUTTON's document work (`actions.yaml`
+    // §toggle_element_lock). Until LOCKINHERIT this behaviour lived only behind
+    // a SwiftUI closure and a Dioxus click handler, so NO shared fixture could
+    // reach it and the materialization design it implemented was watched by
+    // nothing cross-language. The verb routes through the SAME pure
+    // `Document.togglingElementLock` the panel calls. Mirrors Rust's arm.
+    case "toggle_element_lock":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard !path.isEmpty, model.document.tryGetElement(path) != nil else {
+            return .missingTarget(id: String(describing: path))
+        }
+        model.editDocument(model.document.togglingElementLock(at: path))
     case "lock_selection":
         controller.lockSelection()
     case "unlock_all":

@@ -992,6 +992,7 @@ mod tests {
                          "operations/id_primary_copy.json",
                          "operations/boolean_collapse_default.json",
                          "operations/lock_inheritance.json",
+                         "operations/lock_toggle_no_materialization.json",
                          "operations/paste_layers.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
@@ -3659,6 +3660,24 @@ mod tests {
     #[test]
     fn operation_lock_inheritance() {
         run_operation_fixture("operations/lock_inheritance.json");
+    }
+
+    /// MATERIALIZATION IS REPEALED — transcripts/LAYER_STRUCTURE.md §13.
+    ///
+    /// The shipped spec (`workspace/panels/layers.yaml`, `workspace/actions.yaml`
+    /// §toggle_element_lock) said locking a container WRITES `locked = true`
+    /// onto each direct child and restores saved states on unlock, while the
+    /// Rust comments in `controller.rs` / `doc_primitives.rs` asserted the
+    /// opposite. Nothing could see the contradiction because the lock button's
+    /// document work lived only behind a Dioxus click handler — no op verb, no
+    /// action, no gesture reached it.
+    ///
+    /// The `toggle_element_lock` verb this family added routes through the SAME
+    /// pure `toggle_element_lock_at` the panel calls, so it gates the panel's
+    /// behaviour rather than duplicating it.
+    #[test]
+    fn operation_lock_toggle_no_materialization() {
+        run_operation_fixture("operations/lock_toggle_no_materialization.json");
     }
 
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*

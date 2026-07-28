@@ -480,6 +480,38 @@ public struct Document: Equatable {
         return effective
     }
 
+    /// Effective LOCK of the element at `path`: the OR of the `locked` flags
+    /// of every element along the path from the root layer down to the target.
+    /// A Group or Layer's lock locks everything it contains, at every depth.
+    ///
+    /// RULED by JYH 2026-07-28 (transcripts/LAYER_STRUCTURE.md §13): lock is
+    /// INHERITED, not materialized. The repealed design wrote `locked = true`
+    /// onto a container's direct children and kept a restore table; this one
+    /// stores nothing and reads down the path, exactly as
+    /// ``effectiveVisibility(_:)`` does. Because the fold is an OR, a child
+    /// CANNOT be unlocked inside a locked parent — JYH ruled that
+    /// expressiveness loss explicitly, so there is deliberately no escape
+    /// hatch here.
+    ///
+    /// An empty or unresolvable path is NOT locked: nothing is protected by an
+    /// address that names no artwork, and a caller that cannot find its element
+    /// must not be told the missing thing is locked.
+    ///
+    /// The twin is jas_dioxus `Document::effective_locked`.
+    public func effectiveLocked(_ path: ElementPath) -> Bool {
+        guard !path.isEmpty else { return false }
+        guard path[0] >= 0, path[0] < layers.count else { return false }
+        var node: Element = .layer(layers[path[0]])
+        var locked = node.isLocked
+        for idx in path.dropFirst() {
+            let children = childrenOf(node)
+            guard idx >= 0, idx < children.count else { return locked }
+            node = children[idx]
+            if node.isLocked { locked = true }
+        }
+        return locked
+    }
+
     /// Return a new document with the element at path replaced by newElem.
     public func replaceElement(_ path: ElementPath, with newElem: Element) -> Document {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }

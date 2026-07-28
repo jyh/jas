@@ -574,19 +574,30 @@ public class Controller {
         var selection: Selection = []
         for (li, layer) in doc.layers.enumerated() {
             let layerVis = layer.visibility
-            // A locked layer's subtree is non-selectable; skip the whole
-            // layer, like the invisible case. Mirrors this port's own
-            // `docHitTest` / `docHitTestDeep` and jas_dioxus `select_flat`.
-            if layer.locked || layerVis == .invisible { continue }
+            // A locked layer's subtree is non-selectable by INHERITANCE — lock
+            // is not materialized onto children (transcripts/LAYER_STRUCTURE.md
+            // §13, RULED 2026-07-28), so the guard has to be an ancestor-aware
+            // read at every level rather than a flag on each element. Mirrors
+            // this port's own `docHitTest` / `docHitTestDeep` and jas_dioxus
+            // `select_flat`.
+            if doc.effectiveLocked([li]) || layerVis == .invisible { continue }
             for (ci, child) in layer.children.enumerated() {
-                if child.isLocked { continue }
+                if doc.effectiveLocked([li, ci]) { continue }
                 let childVis = min(layerVis, child.visibility)
                 if childVis == .invisible { continue }
                 if case .group(let g) = child {
-                    let anyHit = g.children.contains { predicate($0) }
+                    // A locked grandchild neither TRIGGERS the group selection
+                    // nor JOINS it. Before §13 the predicate ran over every
+                    // grandchild unguarded, so a rubber band that touched only
+                    // a locked member dragged the group and its unlocked
+                    // siblings into the selection with it.
+                    let anyHit = g.children.enumerated().contains {
+                        !doc.effectiveLocked([li, ci, $0.offset]) && predicate($0.element)
+                    }
                     if anyHit {
                         selection.insert(ElementSelection.all([li, ci]))
                         for gi in 0..<g.children.count {
+                            if doc.effectiveLocked([li, ci, gi]) { continue }
                             selection.insert(ElementSelection.all([li, ci, gi]))
                         }
                     }
@@ -686,7 +697,11 @@ public class Controller {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }
         let doc = model.document
         let elem = doc.getElement(path)
-        if elem.isLocked { return }
+        // Both reads below are INHERITED down the path. Until LOCKINHERIT the
+        // first one read the element's OWN `isLocked` flag, one line above an
+        // ancestor-aware visibility read — so a click on a child of a locked
+        // layer selected it. transcripts/LAYER_STRUCTURE.md §13.
+        if doc.effectiveLocked(path) { return }
         if doc.effectiveVisibility(path) == .invisible { return }
         if path.count >= 2 {
             let parentPath = Array(path.dropLast())

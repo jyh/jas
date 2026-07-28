@@ -403,6 +403,44 @@ impl Document {
         effective
     }
 
+    /// Return the effective LOCK of the element at `path`: the OR of the
+    /// `locked` flags of every element along the path from the root layer
+    /// down to the target. A Group or Layer's lock locks everything it
+    /// contains, at every depth.
+    ///
+    /// RULED by JYH 2026-07-28 (transcripts/LAYER_STRUCTURE.md §13): lock is
+    /// INHERITED, not materialized. The repealed design wrote `locked = true`
+    /// onto a container's direct children and kept a restore table; this one
+    /// stores nothing and reads down the path, exactly as
+    /// [`Self::effective_visibility`] does. Because the fold is an OR, a child
+    /// CANNOT be unlocked inside a locked parent — JYH ruled that
+    /// expressiveness loss explicitly, so there is deliberately no escape
+    /// hatch here.
+    ///
+    /// An empty or unresolvable path is NOT locked: nothing is protected by an
+    /// address that names no artwork, and a caller that cannot find its element
+    /// must not be told the missing thing is locked.
+    ///
+    /// The twin is JasSwift `Document.effectiveLocked(_:)`.
+    pub fn effective_locked(&self, path: &ElementPath) -> bool {
+        if path.is_empty() {
+            return false;
+        }
+        let mut node = match self.layers.get(path[0]) {
+            Some(n) => n,
+            None => return false,
+        };
+        let mut locked = node.locked();
+        for &idx in &path[1..] {
+            node = match node.children().and_then(|c| c.get(idx)) {
+                Some(n) => n,
+                None => return locked,
+            };
+            locked = locked || node.locked();
+        }
+        locked
+    }
+
     /// Return a new Document with the element at path replaced.
     pub fn replace_element(&self, path: &ElementPath, new_elem: Element) -> Self {
         let mut doc = self.clone();

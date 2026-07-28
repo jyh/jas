@@ -2144,6 +2144,23 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             }
             targets = t;
         }
+        // The Layers-panel LOCK BUTTON's document work (`actions.yaml`
+        // §toggle_element_lock). Until LOCKINHERIT this behaviour lived only
+        // behind a Dioxus click handler and a SwiftUI closure, so NO shared
+        // fixture could reach it and the materialization design it implemented
+        // was watched by nothing cross-language. The verb routes through the
+        // SAME pure `toggle_element_lock_at` the panel calls.
+        "toggle_element_lock" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            if model.document().get_element(&path).is_none() {
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
+            }
+            let new_doc = crate::interpreter::renderer::toggle_element_lock_at(
+                model.document(), &path, None);
+            model.edit_document(new_doc);
+        }
         "lock_selection" => {
             Controller::lock_selection(model);
         }

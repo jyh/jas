@@ -777,6 +777,13 @@ impl Controller {
     }
 
     /// Select all unlocked, visible elements in the document.
+    ///
+    /// "Unlocked" is INHERITED (transcripts/LAYER_STRUCTURE.md §13). This loop
+    /// used to test `child.locked()` and never the LAYER's own flag, so Select
+    /// All swept up the entire contents of a locked layer — while JasSwift's
+    /// `selectAll` (which delegates to `selectFlat`) skipped it. A live
+    /// prime-directive divergence, invisible to the corpus until `jas:locked`
+    /// let a fixture start from a locked document.
     pub fn select_all(model: &mut Model) {
         use crate::geometry::element::Visibility;
         let doc = model.document().clone();
@@ -786,9 +793,12 @@ impl Controller {
             if layer_vis == Visibility::Invisible {
                 continue;
             }
+            if doc.effective_locked(&vec![li]) {
+                continue;
+            }
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
-                    if child.locked() {
+                    if doc.effective_locked(&vec![li, ci]) {
                         continue;
                     }
                     if std::cmp::min(layer_vis, child.visibility()) == Visibility::Invisible {
@@ -853,11 +863,15 @@ impl Controller {
             return;
         }
         let doc = model.document().clone();
-        let elem = match doc.get_element(path) {
-            Some(e) => e,
-            None => return,
-        };
-        if elem.locked() {
+        // A path that names no element selects nothing.
+        if doc.get_element(path).is_none() {
+            return;
+        }
+        // Both reads below are INHERITED down the path. Until LOCKINHERIT the
+        // first one read the element's OWN `locked` flag, one line above an
+        // ancestor-aware visibility read — so a click on a child of a locked
+        // layer selected it. transcripts/LAYER_STRUCTURE.md §13.
+        if doc.effective_locked(path) {
             return;
         }
         if doc.effective_visibility(path) == Visibility::Invisible {
@@ -2797,21 +2811,17 @@ fn select_flat(
     let mut entries: Selection = Vec::new();
     for (li, layer) in doc.layers.iter().enumerate() {
         let layer_vis = layer.visibility();
-        // A locked layer's subtree is non-selectable by inheritance (lock is
-        // not materialized onto children); skip the whole layer. Mirrors the
-        // hit_test path, and — since D1 was closed — JasSwift `selectFlat`.
-        // Until then the Swift half of that claim was simply FALSE (its
-        // `selectFlat` checked visibility only), and no gate could see it,
-        // because the shared corpus cannot seed a locked document at all.
-        // The pair is now pinned per-port at both ends (see
-        // `select_rect_skips_a_locked_layer_and_keeps_going` below and
-        // JasSwift `selectRectSkipsALockedLayerAndKeepsGoing`).
-        if layer.locked() || layer_vis == Visibility::Invisible {
+        // A locked layer's subtree is non-selectable by INHERITANCE — lock is
+        // not materialized onto children (transcripts/LAYER_STRUCTURE.md §13,
+        // RULED 2026-07-28), so the guard has to be an ancestor-aware read at
+        // every level rather than a flag on each element. Mirrors the hit_test
+        // path and JasSwift `selectFlat`.
+        if doc.effective_locked(&vec![li]) || layer_vis == Visibility::Invisible {
             continue;
         }
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
-                if child.locked() {
+                if doc.effective_locked(&vec![li, ci]) {
                     continue;
                 }
                 let child_vis = std::cmp::min(layer_vis, child.visibility());
@@ -2819,11 +2829,21 @@ fn select_flat(
                     continue;
                 }
                 if child.is_group() {
+                    // A locked grandchild neither TRIGGERS the group selection
+                    // nor JOINS it. Before §13 the predicate ran over every
+                    // grandchild unguarded, so a rubber band that touched only
+                    // a locked member dragged the group and its unlocked
+                    // siblings into the selection with it.
                     if let Some(grandchildren) = child.children()
-                        && grandchildren.iter().any(|gc| predicate(gc))
+                        && grandchildren.iter().enumerate().any(|(gi, gc)| {
+                            !doc.effective_locked(&vec![li, ci, gi]) && predicate(gc)
+                        })
                     {
                         entries.push(ElementSelection::all(vec![li, ci]));
-                        for (gi, _gc) in grandchildren.iter().enumerate() {
+                        for gi in 0..grandchildren.len() {
+                            if doc.effective_locked(&vec![li, ci, gi]) {
+                                continue;
+                            }
                             entries.push(ElementSelection::all(vec![li, ci, gi]));
                         }
                     }

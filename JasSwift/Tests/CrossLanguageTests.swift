@@ -740,6 +740,20 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("lock_inheritance.json")
 }
 
+/// MATERIALIZATION IS REPEALED — transcripts/LAYER_STRUCTURE.md §13. Twin of
+/// Rust `operation_lock_toggle_no_materialization`.
+///
+/// The shipped spec (`workspace/panels/layers.yaml`, `workspace/actions.yaml`
+/// §toggle_element_lock) said locking a container WRITES `locked = true` onto
+/// each direct child and restores saved states on unlock. Nothing could see it
+/// because the lock button's document work lived only behind a SwiftUI closure
+/// — no op verb, no action, no gesture reached it. The `toggle_element_lock`
+/// verb this family added routes through the SAME pure
+/// `Document.togglingElementLock` the panel calls.
+@Test func operationLockToggleNoMaterialization() throws {
+    try runOperationFixture("lock_toggle_no_materialization.json")
+}
+
 /// `state.boolean_remove_redundant_points` defaults to FALSE
 /// (`workspace/state.yaml`), so the collinear-collapse pass does NOT run on a
 /// default boolean. Two rects overlapping in x with the same y-extent: the
