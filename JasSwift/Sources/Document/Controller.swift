@@ -1035,19 +1035,21 @@ public class Controller {
         // Create group and insert at position of first element
         let group = Element.group(Group(children: elements))
         let insertPath = paths[0]
-        let layerIdx = insertPath[0]
-        let childIdx = insertPath.count > 1 ? insertPath[1] : 0
-        let layer = newDoc.layers[layerIdx]
-        var newChildren = layer.children
-        newChildren.insert(group, at: childIdx)
-        // T4 bystander clause: the layer is rebuilt only to reach its children.
-        // See `addElement` — the same four-of-eleven literal, same seven fields
-        // lost, and the containing layer is the artist's, not this op's.
-        let newLayer = layer.withChildren(newChildren)
-        var newLayers = newDoc.layers
-        newLayers[layerIdx] = newLayer
+        // Insert at the selection's TRUE depth. This previously read only
+        // `insertPath[1]` and inserted into `layers[insertPath[0]].children`,
+        // discarding every deeper component -- so grouping a selection that
+        // already lived inside a Group placed the new group one level too high
+        // AND left the emptied container behind as an orphan. `deleteElement`
+        // above recurses correctly, so the delete and the insert disagreed
+        // about depth inside a single operation. Mirrors Rust's
+        // `insert_element_at`, which recurses on `&path[1..]`.
+        // Gate: Tests/Document/NestedGroupProbeTests.swift, and its Rust twin
+        // `grouping_inside_a_group_stays_inside_that_group`.
+        let parentPath = Array(insertPath.dropLast())
+        let childIdx = insertPath.last ?? 0
+        let inserted = insertElementAtPath(newDoc, parentPath, childIdx, group)
         let newSelection: Selection = [ElementSelection.all(insertPath)]
-        model.editDocument(newDoc.replacing(layers: newLayers, selection: newSelection))
+        model.editDocument(inserted.replacing(selection: newSelection))
     }
 
     /// Ungroup all selected Group elements, replacing each with its children.

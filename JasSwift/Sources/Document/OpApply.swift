@@ -672,7 +672,14 @@ func applyInsertElementAt(
 /// (parent path plus the final index) and delegates to the document's
 /// path-addressed insert. Mirrors Rust's
 /// `new_doc.insert_element_at(&insert_path, element)` for the non-empty parent.
-private func insertElementAtPath(
+/// Depth-aware insert: place `element` at `index` within the container at
+/// `parentPath`, at any nesting depth. Internal rather than private because
+/// `Controller.groupSelection` needs it: it previously inserted straight into
+/// `layers[path[0]].children`, discarding every path component past the
+/// second, so grouping a selection inside a Group placed the new group one
+/// level too high and stranded the emptied container. Rust's counterpart is
+/// `insert_at_in_children`, which recurses on `&path[1..]`.
+func insertElementAtPath(
     _ doc: Document, _ parentPath: ElementPath, _ index: Int, _ element: Element
 ) -> Document {
     // Resolve the parent container's child count to clamp the index, then insert
@@ -710,7 +717,7 @@ private func containerChildren(_ elem: Element) -> [Element] {
 
 /// The children of the container at `path` (a Layer or Group). An empty path
 /// addresses the top-level layers (returned as `.layer` elements).
-private func childrenOfPath(_ doc: Document, _ path: ElementPath) -> [Element] {
+func childrenOfPath(_ doc: Document, _ path: ElementPath) -> [Element] {
     if path.isEmpty { return doc.layers.map { .layer($0) } }
     return containerChildren(doc.getElement(path))
 }
@@ -726,7 +733,7 @@ private func withContainerChildren(_ elem: Element, _ newChildren: [Element]) ->
 }
 
 /// Rebuild the document with the container at `path` carrying `newChildren`.
-private func setChildrenOfPath(_ doc: Document, _ path: ElementPath, _ newChildren: [Element]) -> Document {
+func setChildrenOfPath(_ doc: Document, _ path: ElementPath, _ newChildren: [Element]) -> Document {
     if path.isEmpty {
         let layers: [Layer] = newChildren.compactMap { if case .layer(let l) = $0 { return l }; return nil }
         return withLayers(doc, layers)

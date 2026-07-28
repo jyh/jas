@@ -2973,6 +2973,43 @@ mod tests {
         paths
     }
 
+    /// Twin of JasSwift's NestedGroupProbeTests: group two elements that
+    /// already live INSIDE a Group. Rust's `insert_element_at` recurses on
+    /// `&path[1..]`, so the new group should stay inside the outer group.
+    /// Swift's `groupSelection` reads only `insertPath[1]` and pushes into
+    /// `layers[layerIdx].children`, so it escapes a level and strands the
+    /// emptied outer group as debris.
+    #[test]
+    fn grouping_inside_a_group_stays_inside_that_group() {
+        let inner = make_group(vec![
+            make_line(0.0, 0.0, 5.0, 5.0),
+            make_line(1.0, 1.0, 6.0, 6.0),
+        ]);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(make_rect(0.0, 0.0, 10.0, 10.0)), Rc::new(inner)],
+            ..LayerElem::default()
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![
+                ElementSelection::all(vec![0, 1, 0]),
+                ElementSelection::all(vec![0, 1, 1]),
+            ],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::group_selection(&mut model);
+
+        let after = model.document();
+        let layer_kids = after.layers[0].children().map_or(0, |c| c.len());
+        assert_eq!(layer_kids, 2,
+            "layer holds {layer_kids} children; a third means the new group escaped one level");
+        let outer = after.get_element(&vec![0, 1]).expect("outer group still at [0,1]");
+        assert_eq!(outer.children().map_or(0, |c| c.len()), 1,
+            "outer group should hold exactly the new nested group");
+    }
+
     fn setup_model() -> Model {
         let rect = make_rect(0.0, 0.0, 10.0, 10.0);
         let line = make_line(0.0, 0.0, 5.0, 5.0);
@@ -6380,3 +6417,4 @@ mod preservation_law_tests {
         assert_ids_unique(&model, "expand compound shape (single ring)");
     }
 }
+
