@@ -829,3 +829,55 @@ failure this document exists to prevent.
    failing would be the silent no-op that R1 just abolished. Not ruled.
 3. **Cross-artboard selections.** Nobody has looked. It may already work, or be a
    fourth instance of this family. **Measure before ruling.**
+
+### Paste and element ids — RULED 2026-07-28: MINT FRESH.
+> JYH: *"Paste ids, it seems we have to mint fresh, we should not duplicate."*
+
+A paste is 0 -> N under the cardinality law, so pasted elements take FRESH ids.
+Both ports currently copy ids verbatim.
+
+**The shipped spec contradicts this ruling and must be corrected**:
+`workspace/actions.yaml` says *"Pasted objects keep the ids they were copied
+with"* in BOTH paste descriptions, and that text is on public `main`. It was the
+lane's provisional reading, written before the ruling existed. Code and spec both
+change.
+
+### Locked layers — the question was reframed by measurement, then RULED.
+> JYH: *"the artist will assume locked means locked, no changes, but if we
+> silently drop that is also a problem... paste into a new similarly-named layer
+> when the target layer is locked."*
+> Then, after the measurement below: *"yes, lock should protect contents."*
+
+**WHAT THE MEASUREMENT FOUND.** Both ports have `effective_visibility` /
+`effectiveVisibility` which INHERIT visibility down the tree — `select_all`
+computes `min(layer_vis, child.visibility())`. But for locking the same code
+checks `child.locked()`, the child's OWN flag, and **there is no
+`effective_locked` anywhere in either port.**
+
+So **locking a layer does not protect its contents today.** Its children stay
+individually selectable, clickable and editable; the lock only stops you
+selecting the layer object itself. The question "what should paste do with a
+locked layer" could not be answered honestly until that was known, because the
+premise — that lock protects anything — was false.
+
+**RULED: lock must protect its contents.** An artist locks a layer in order to
+work around it. Scoping is under way (`seat/fleet/SCOPE-effective-locked.md`);
+it is a change well beyond paste, touching selection, hit-testing and every
+operation that walks children, and the SVG codec may not persist `locked` at all
+— which would make persistence a prerequisite rather than a detail.
+
+**The paste behaviour follows from it, and is JYH's proposal:** once lock really
+protects, pasting into a locked layer would create content the artist cannot
+touch, so R3 diverts to a NEW similarly-named layer — neither violating the lock,
+nor silently dropping artwork, nor stranding it. It is also *visible*: a new
+layer appears in the panel. Generalised, R3's rule becomes **"append into the
+matching layer if it can accept content; otherwise create."**
+
+Two costs on the record: this is the one place R3's ratified VERBATIM naming does
+not hold, so it needs a stated exception and a naming convention; and whether the
+divert follows automatically or needs its own ruling is listed as an open
+question in the scope.
+
+**The currently shipped text is the opposite** — *"A matching layer that is locked
+or hidden is appended to unchanged: the paste neither refuses nor unlocks nor
+reveals it"* — published, provisional, and now superseded pending the scope.
