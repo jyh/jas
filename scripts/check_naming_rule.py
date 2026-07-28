@@ -107,7 +107,7 @@ def tracked_files(root: pathlib.Path) -> list[str]:
 def scan(rels, read):
     """Core rule, decoupled from git and the filesystem so it is testable.
 
-    `read(rel)` returns the file's text. Returns (hits, exempted, scanned).
+    `read(rel)` returns the file's raw BYTES. Returns (hits, exempted, scanned).
     """
     hits: list[str] = []
     exempted: list[str] = []
@@ -119,9 +119,10 @@ def scan(rels, read):
         if rel in EXEMPT_FILES or rel.startswith(EXEMPT_PREFIXES):
             continue
         try:
-            text = read(rel)
+            data = read(rel)
         except OSError:
             continue
+        text = data.decode("utf-8", errors="replace")
         scanned += 1
         for n, line in enumerate(text.splitlines(), 1):
             if not BANNED.search(line):
@@ -143,29 +144,29 @@ def self_test() -> int:
     """
     corpus = {
         # (a) a live tree must be caught ...
-        "docs/live.md": "fine line\nmatching Illustrator-style semantics\n",  # naming-rule-exempt: fail-path fixture
+        "docs/live.md": b"fine line\nmatching Illustrator-style semantics\n",  # naming-rule-exempt: fail-path fixture
         # (b) ... in code as well as prose ...
-        "jas_dioxus/src/x.rs": '// Adobe RGB (1998)\n',  # naming-rule-exempt: fail-path fixture
+        "jas_dioxus/src/x.rs": b'// Adobe RGB (1998)\n',  # naming-rule-exempt: fail-path fixture
         # (c) ... and in an SVG generator comment, the likeliest future leak.
-        "assets/i.svg": "<!-- Generator: Adobe Illustrator 30.2 -->\n",  # naming-rule-exempt: fail-path fixture
+        "assets/i.svg": b"<!-- Generator: Adobe Illustrator 30.2 -->\n",  # naming-rule-exempt: fail-path fixture
         # (d) the archive is exempt (JYH ruled: leave it as-is)
-        "transcripts/TRANSCRIPT.md": "an application like Illustrator\n",  # naming-rule-exempt: exemption fixture
+        "transcripts/TRANSCRIPT.md": b"an application like Illustrator\n",  # naming-rule-exempt: exemption fixture
         # (e) prose analysis is exempt
-        "article/ARTICLE.md": "compared with Illustrator\n",  # naming-rule-exempt: exemption fixture
+        "article/ARTICLE.md": b"compared with Illustrator\n",  # naming-rule-exempt: exemption fixture
         # (f) + (g) both frozen ports are exempt
-        "jas_ocaml/lib/a.ml": "(* Mirrors Illustrator *)\n",  # naming-rule-exempt: exemption fixture
-        "jas/algorithms/t.py": "# per Illustrator\n",  # naming-rule-exempt: exemption fixture
+        "jas_ocaml/lib/a.ml": b"(* Mirrors Illustrator *)\n",  # naming-rule-exempt: exemption fixture
+        "jas/algorithms/t.py": b"# per Illustrator\n",  # naming-rule-exempt: exemption fixture
         # (h) a line-scoped marker suppresses just that line
         # The marker is spelled out LITERALLY here, never built from MARKER: a
         # fixture derived from the constant it tests cancels the mutation out.
         # (Measured -- an earlier version did exactly that and could not detect
         # marker handling being disabled.) This source line carries the literal,
         # so the gate scanning its own file exempts it too.
-        "POLICY.md": 'Never use "Adobe" -- naming-rule-exempt\nbut this line is watched\n',
+        "POLICY.md": b'Never use "Adobe" -- naming-rule-exempt\nbut this line is watched\n',
         # (i) binaries are out of scope by suffix, not by luck
-        "assets/icons/pen tools.ai": "xmlns:x=" + '"adobe:ns:meta/"' + "\n",  # naming-rule-exempt: scope fixture
+        "assets/icons/pen tools.ai": b'xmlns:x="adobe:ns:meta/"\n',  # naming-rule-exempt: scope fixture
         # (j) a clean file stays clean
-        "docs/clean.md": "a vector illustration application\n",
+        "docs/clean.md": b"a vector illustration application\n",
     }
     hits, exempted, scanned = scan(sorted(corpus), corpus.__getitem__)
     got = sorted(h.split(":")[0].strip() for h in hits)
@@ -201,7 +202,7 @@ def main() -> int:
     root = pathlib.Path(__file__).resolve().parent.parent
     hits, exempted, scanned = scan(
         tracked_files(root),
-        lambda rel: (root / rel).read_text(encoding="utf-8", errors="replace"),
+        lambda rel: (root / rel).read_bytes(),
     )
 
     if hits:
