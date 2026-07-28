@@ -33,7 +33,7 @@ private func richCompound(_ op: CompoundOperation) -> CompoundShape {
     CompoundShape(
         operation: op,
         operands: [richRect(0, "op-back", "port"),
-                   richRect(5, "op-front", "starboard")],
+                   richRect(5, "op-front", "starboard")], name: nil,
         id: "cs-1",
         fill: mvFill,
         stroke: mvStroke,
@@ -49,7 +49,7 @@ private func richCompound(_ op: CompoundOperation) -> CompoundShape {
 /// batteries below read: a fixture that silently decayed to defaults would
 /// pass on nothing.
 private func assertCompoundFixtureIsRich(_ cs: CompoundShape) {
-    let d = CompoundShape(operation: cs.operation, operands: [])
+    let d = CompoundShape(operation: cs.operation, operands: [], name: nil)
     #expect(cs.id != nil, "fixture must carry an id")
     #expect(cs.opacity != d.opacity, "fixture opacity decayed to the default")
     #expect(cs.transform != d.transform, "fixture transform decayed")

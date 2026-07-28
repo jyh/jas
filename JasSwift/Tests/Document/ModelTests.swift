@@ -453,7 +453,7 @@ private func appendToLayer0(_ doc: Document, _ elem: Element) -> Document {
 
     // The index resolves a live reference to the surviving target.
     let resolver = IdIndexResolver(index: model.idIndex)
-    let reference = ReferenceElem(target: ElementRef("r1"))
+    let reference = ReferenceElem(target: ElementRef("r1"), name: nil)
     var visiting = VisitSet()
     let ps = reference.evaluateWith(
         precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)

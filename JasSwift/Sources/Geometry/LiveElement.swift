@@ -155,8 +155,24 @@ public struct CompoundShape: Equatable {
     /// A compound is a first-class element that can be a reference target
     /// (REFERENCE_GRAPH.md §4); like `.reference`, `.live` has no flat
     /// `Element.id` slot, so the compound carries its identity here inline.
-    /// No name field is intended for live elements.
     public var id: String?
+    /// This compound's user-visible name (`common.name` in jas_dioxus, SVG
+    /// `inkscape:label`). ANY ELEMENT CARRIES A NAME — live kinds included.
+    ///
+    /// This slot did not exist until 2026-07-27, and the comment that used to
+    /// sit here asserted the opposite ("No name field is intended for live
+    /// elements") while jas_dioxus's `CompoundShape` held a full `CommonProps`
+    /// with a `name` in it. Measured consequence: feeding both roundtrip
+    /// binaries a compound carrying `"name": "hull"`, Rust returned
+    /// `"name":"hull"` and this port returned `"name":null`.
+    ///
+    /// `name` has NO DEFAULT on the initializer, and that is deliberate. Rust
+    /// rebuilds elements with `..clone()` so a new field rides along; Swift
+    /// rebuilds field by field, so every construction site silently drops what
+    /// it does not name. A defaulted parameter would have reproduced the very
+    /// omission class this field was added under. Required, the compiler
+    /// enumerates the sites.
+    public var name: String?
     public var fill: Fill?
     public var stroke: Stroke?
     public var opacity: Double
@@ -169,6 +185,7 @@ public struct CompoundShape: Equatable {
     public init(
         operation: CompoundOperation,
         operands: [Element],
+        name: String?,
         id: String? = nil,
         fill: Fill? = nil,
         stroke: Stroke? = nil,
@@ -181,6 +198,7 @@ public struct CompoundShape: Equatable {
     ) {
         self.operation = operation
         self.operands = operands
+        self.name = name
         self.id = id
         self.fill = fill
         self.stroke = stroke
@@ -300,6 +318,10 @@ public struct ReferenceElem: Equatable {
     /// reference carries its identity here inline (matching how it carries
     /// the rest of its common props).
     public var id: String?
+    /// This reference's user-visible name (`common.name`, SVG
+    /// `inkscape:label`). See ``CompoundShape/name`` for why this slot exists
+    /// and why the initializer parameter carries no default.
+    public var name: String?
     /// The render CTM (Rust's `common.transform`): a whole-element move /
     /// rotate / scale that rides the render layer only. Set by moveSelection /
     /// translated; serialized as the `transform` key. Distinct from
@@ -324,6 +346,7 @@ public struct ReferenceElem: Equatable {
 
     public init(
         target: ElementRef,
+        name: String?,
         id: String? = nil,
         transform: Transform? = nil,
         instanceTransform: Transform? = nil,
@@ -336,6 +359,7 @@ public struct ReferenceElem: Equatable {
         mask: Mask? = nil
     ) {
         self.target = target
+        self.name = name
         self.id = id
         self.transform = transform
         self.instanceTransform = instanceTransform
@@ -418,6 +442,10 @@ public struct RecordedElem: Equatable {
     public var stroke: Stroke?
     // Common props carried inline, mirroring ReferenceElem's layout.
     public var id: String?
+    /// This recorded element's user-visible name (`common.name`, SVG
+    /// `inkscape:label`). See ``CompoundShape/name`` for why this slot exists
+    /// and why the initializer parameter carries no default.
+    public var name: String?
     public var transform: Transform?
     public var opacity: Double
     public var locked: Bool
@@ -428,6 +456,7 @@ public struct RecordedElem: Equatable {
     public init(
         ops: [PrimitiveOp],
         inputs: [ElementRef],
+        name: String?,
         fill: Fill? = nil,
         stroke: Stroke? = nil,
         id: String? = nil,
@@ -440,6 +469,7 @@ public struct RecordedElem: Equatable {
     ) {
         self.ops = ops
         self.inputs = inputs
+        self.name = name
         self.fill = fill
         self.stroke = stroke
         self.id = id
@@ -466,6 +496,7 @@ public struct RecordedElem: Equatable {
             && lhs.fill == rhs.fill
             && lhs.stroke == rhs.stroke
             && lhs.id == rhs.id
+            && lhs.name == rhs.name
             && lhs.transform == rhs.transform
             && lhs.opacity == rhs.opacity
             && lhs.locked == rhs.locked
@@ -1166,6 +1197,10 @@ public struct GeneratedElem: Equatable {
     public var fill: Fill?
     public var stroke: Stroke?
     public var id: String?
+    /// This generated element's user-visible name (`common.name`, SVG
+    /// `inkscape:label`). See ``CompoundShape/name`` for why this slot exists
+    /// and why the initializer parameter carries no default.
+    public var name: String?
     public var transform: Transform?
     public var opacity: Double
     public var locked: Bool
@@ -1176,6 +1211,7 @@ public struct GeneratedElem: Equatable {
     public init(
         conceptId: String,
         params: [String: Any],
+        name: String?,
         fill: Fill? = nil,
         stroke: Stroke? = nil,
         id: String? = nil,
@@ -1188,6 +1224,7 @@ public struct GeneratedElem: Equatable {
     ) {
         self.conceptId = conceptId
         self.params = params
+        self.name = name
         self.fill = fill
         self.stroke = stroke
         self.id = id
@@ -1211,6 +1248,7 @@ public struct GeneratedElem: Equatable {
             && lhs.fill == rhs.fill
             && lhs.stroke == rhs.stroke
             && lhs.id == rhs.id
+            && lhs.name == rhs.name
             && lhs.transform == rhs.transform
             && lhs.opacity == rhs.opacity
             && lhs.locked == rhs.locked
@@ -1290,6 +1328,18 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.id
         case .recorded(let rec): return rec.id
         case .generated(let gen): return gen.id
+        }
+    }
+
+    /// This live element's user-visible name. Every conformer carries one
+    /// inline, exactly as it carries its id — jas_dioxus reads the same value
+    /// off `common().name` for all four kinds.
+    public var name: String? {
+        switch self {
+        case .compoundShape(let cs): return cs.name
+        case .reference(let r): return r.name
+        case .recorded(let rec): return rec.name
+        case .generated(let gen): return gen.name
         }
     }
 
@@ -1605,6 +1655,31 @@ public enum LiveVariant: Equatable {
         case .generated(let gen):
             var updated = gen
             updated.id = id
+            return .generated(updated)
+        }
+    }
+
+    /// Return a copy with the live element's own `name` replaced (pass `nil`
+    /// to clear). The twin of ``withId(_:)``, and the setter half of ``name``:
+    /// jas_dioxus writes this through the generic `common_mut().name`, so a
+    /// rename must reach a live element in this port too.
+    public func withName(_ name: String?) -> LiveVariant {
+        switch self {
+        case .compoundShape(let cs):
+            var updated = cs
+            updated.name = name
+            return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.name = name
+            return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.name = name
+            return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.name = name
             return .generated(updated)
         }
     }

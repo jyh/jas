@@ -22,7 +22,7 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
 @Test func compoundShapeUnionOfTwoRects() {
     let cs = CompoundShape(
         operation: .union,
-        operands: [rectAt(0, 0), rectAt(5, 0)]
+        operands: [rectAt(0, 0), rectAt(5, 0)], name: nil
     )
     let polygons = cs.evaluate(precision: DEFAULT_PRECISION)
     #expect(polygons.count == 1)
@@ -34,7 +34,7 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
 @Test func compoundShapeIntersection() {
     let cs = CompoundShape(
         operation: .intersection,
-        operands: [rectAt(0, 0), rectAt(5, 0)]
+        operands: [rectAt(0, 0), rectAt(5, 0)], name: nil
     )
     let polygons = cs.evaluate(precision: DEFAULT_PRECISION)
     #expect(polygons.count == 1)
@@ -46,7 +46,7 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
 @Test func compoundShapeExclude() {
     let cs = CompoundShape(
         operation: .exclude,
-        operands: [rectAt(0, 0), rectAt(5, 0)]
+        operands: [rectAt(0, 0), rectAt(5, 0)], name: nil
     )
     let polygons = cs.evaluate(precision: DEFAULT_PRECISION)
     #expect(polygons.count == 2)
@@ -55,7 +55,7 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
 @Test func compoundShapeSubtractFront() {
     let cs = CompoundShape(
         operation: .subtractFront,
-        operands: [rectAt(0, 0), rectAt(5, 0)]
+        operands: [rectAt(0, 0), rectAt(5, 0)], name: nil
     )
     let polygons = cs.evaluate(precision: DEFAULT_PRECISION)
     #expect(polygons.count == 1)
@@ -67,7 +67,7 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
 @Test func compoundShapeBoundsReflectEvaluation() {
     let cs = CompoundShape(
         operation: .union,
-        operands: [rectAt(0, 0), rectAt(5, 0)]
+        operands: [rectAt(0, 0), rectAt(5, 0)], name: nil
     )
     let (bx, by, bw, bh) = cs.bounds
     #expect(abs(bx - 0) < 1e-6)
@@ -77,7 +77,7 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
 }
 
 @Test func emptyCompoundHasEmptyBounds() {
-    let cs = CompoundShape(operation: .union, operands: [])
+    let cs = CompoundShape(operation: .union, operands: [], name: nil)
     let (bx, by, bw, bh) = cs.bounds
     #expect(bx == 0 && by == 0 && bw == 0 && bh == 0)
 }
@@ -86,7 +86,7 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
     let red = Fill(color: Color(r: 1, g: 0, b: 0))
     let cs = CompoundShape(
         operation: .exclude,
-        operands: [rectAt(0, 0), rectAt(5, 0)],
+        operands: [rectAt(0, 0), rectAt(5, 0)], name: nil,
         fill: red
     )
     let expanded = cs.expand(precision: DEFAULT_PRECISION)
@@ -103,7 +103,7 @@ private func bboxOfRing(_ ring: BoolRing) -> (Double, Double, Double, Double) {
 @Test func releaseReturnsOperandsVerbatim() {
     let r1 = rectAt(0, 0)
     let r2 = rectAt(5, 0)
-    let cs = CompoundShape(operation: .union, operands: [r1, r2])
+    let cs = CompoundShape(operation: .union, operands: [r1, r2], name: nil)
     let released = cs.release()
     #expect(released.count == 2)
 }
@@ -133,14 +133,14 @@ private struct MapResolver: ElementResolver {
 private struct CycleResolver: ElementResolver {
     func resolve(_ id: ElementRef) -> Element? {
         id.id == "a"
-            ? .live(.reference(ReferenceElem(target: ElementRef("a"))))
+            ? .live(.reference(ReferenceElem(target: ElementRef("a"), name: nil)))
             : nil
     }
 }
 
 @Test func referenceEvaluatesToTargetGeometry() {
     let resolver = MapResolver(map: ["r1": rectAt(0, 0)])
-    let reference = ReferenceElem(target: ElementRef("r1"))
+    let reference = ReferenceElem(target: ElementRef("r1"), name: nil)
     var visiting = VisitSet()
     let ps = reference.evaluateWith(
         precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
@@ -153,7 +153,7 @@ private struct CycleResolver: ElementResolver {
 }
 
 @Test func danglingReferenceEvaluatesEmpty() {
-    let reference = ReferenceElem(target: ElementRef("missing"))
+    let reference = ReferenceElem(target: ElementRef("missing"), name: nil)
     var visiting = VisitSet()
     let ps = reference.evaluateWith(
         precision: DEFAULT_PRECISION, resolver: NullResolver(), visiting: &visiting)
@@ -161,7 +161,7 @@ private struct CycleResolver: ElementResolver {
 }
 
 @Test func referenceCycleBreaksToEmpty() {
-    let reference = ReferenceElem(target: ElementRef("a"))
+    let reference = ReferenceElem(target: ElementRef("a"), name: nil)
     var visiting = VisitSet()
     let ps = reference.evaluateWith(
         precision: DEFAULT_PRECISION, resolver: CycleResolver(), visiting: &visiting)
@@ -170,7 +170,7 @@ private struct CycleResolver: ElementResolver {
 }
 
 @Test func referenceReportsItsTargetAsDependency() {
-    let reference = ReferenceElem(target: ElementRef("t"))
+    let reference = ReferenceElem(target: ElementRef("t"), name: nil)
     #expect(reference.dependencies == [ElementRef("t")])
     let lv = LiveVariant.reference(reference)
     #expect(lv.dependencies == [ElementRef("t")])
@@ -180,7 +180,7 @@ private struct CycleResolver: ElementResolver {
 @Test func referenceRoundTripsThroughElementToPolygonSet() {
     // elementToPolygonSetWith resolves a reference nested in a layer.
     let resolver = MapResolver(map: ["r1": rectAt(0, 0)])
-    let reference = Element.live(.reference(ReferenceElem(target: ElementRef("r1"))))
+    let reference = Element.live(.reference(ReferenceElem(target: ElementRef("r1"), name: nil)))
     var visiting = VisitSet()
     let ps = elementToPolygonSetWith(
         reference, precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
@@ -200,7 +200,7 @@ private struct CycleResolver: ElementResolver {
     // The index has the rect by its id.
     #expect(resolver.resolve(ElementRef("r1")) != nil)
     // A reference targeting "r1" evaluates to the rect's single ring.
-    let reference = ReferenceElem(target: ElementRef("r1"))
+    let reference = ReferenceElem(target: ElementRef("r1"), name: nil)
     var visiting = VisitSet()
     let ps = reference.evaluateWith(
         precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
@@ -249,7 +249,7 @@ private struct CycleResolver: ElementResolver {
     // whole point of the off-canvas store: masters are resolvable but never in
     // `layers`. Mirrors Rust `instance_resolves_to_master_geometry_from_symbols`.
     let masterRect = Rect(x: 9, y: 18, width: 27, height: 36, id: "m1")
-    let instance = Element.live(.reference(ReferenceElem(target: ElementRef("m1"), id: "i1")))
+    let instance = Element.live(.reference(ReferenceElem(target: ElementRef("m1"), name: nil, id: "i1")))
     let doc = Document(
         layers: [Layer(name: "Layer", children: [instance])],
         symbols: [.rect(masterRect)])
@@ -298,7 +298,7 @@ private struct CycleResolver: ElementResolver {
 
 /// Build a bare reference to `target` with no transform.
 private func bareReference(_ target: String) -> Element {
-    .live(.reference(ReferenceElem(target: ElementRef(target))))
+    .live(.reference(ReferenceElem(target: ElementRef(target), name: nil)))
 }
 
 @Test func moveReferenceAllSetsTransform() {
@@ -353,14 +353,14 @@ private func bareReference(_ target: String) -> Element {
     // PolygonSet (composition: instanceTransform ∘ geometry). Mirrors Rust
     // `reference_instance_transform_scales_target_geometry`.
     let resolver = MapResolver(map: ["r1": rectAt(0, 0)])
-    var reference = ReferenceElem(target: ElementRef("r1"))
+    var reference = ReferenceElem(target: ElementRef("r1"), name: nil)
     reference.instanceTransform = Transform.scale(2, 2)
     var visiting = VisitSet()
     let scaled = reference.evaluateWith(
         precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
 
     // Unscaled reference for comparison.
-    let plain = ReferenceElem(target: ElementRef("r1"))
+    let plain = ReferenceElem(target: ElementRef("r1"), name: nil)
     let resolver2 = MapResolver(map: ["r1": rectAt(0, 0)])
     var visiting2 = VisitSet()
     let unscaled = plain.evaluateWith(
@@ -384,7 +384,7 @@ private func bareReference(_ target: String) -> Element {
     // target geometry (no transform applied, no double-apply). Mirrors Rust
     // `reference_none_instance_transform_leaves_eval_unchanged`.
     let resolver = MapResolver(map: ["r1": rectAt(0, 0)])
-    let reference = ReferenceElem(target: ElementRef("r1"))
+    let reference = ReferenceElem(target: ElementRef("r1"), name: nil)
     #expect(reference.instanceTransform == nil, "instance transform defaults to nil")
     var visiting = VisitSet()
     let viaRef = reference.evaluateWith(
@@ -433,13 +433,13 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     // A group containing a reference DOES have one (the stale hazard).
     let groupWithRef = Element.group(Group(children: [
         rectAt(0, 0),
-        .live(.reference(ReferenceElem(target: ElementRef("x")))),
+        .live(.reference(ReferenceElem(target: ElementRef("x"), name: nil))),
     ]))
     #expect(subtreeHasReference(groupWithRef) == true)
     // A compound shape whose operand is a reference also has one.
     let compoundWithRef = Element.live(.compoundShape(CompoundShape(
         operation: .union,
-        operands: [rectAt(0, 0), .live(.reference(ReferenceElem(target: ElementRef("x"))))]
+        operands: [rectAt(0, 0), .live(.reference(ReferenceElem(target: ElementRef("x"), name: nil)))], name: nil
     )))
     #expect(subtreeHasReference(compoundWithRef) == true)
 }
@@ -452,7 +452,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     setRecomputeCacheGeneration(7)
     let resolver = CellResolver()
     resolver.set("p4c_r1", rectAt(0, 0))
-    let reference = ReferenceElem(target: ElementRef("p4c_r1"))
+    let reference = ReferenceElem(target: ElementRef("p4c_r1"), name: nil)
     #expect(recomputeCacheStateForTest("p4c_r1", DEFAULT_PRECISION) == nil)
 
     var v1 = VisitSet()
@@ -480,7 +480,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     setRecomputeCacheGeneration(1)
     let resolver = CellResolver()
     resolver.set("p4c_r1", rectAt(0, 0))           // 10x10
-    let reference = ReferenceElem(target: ElementRef("p4c_r1"))
+    let reference = ReferenceElem(target: ElementRef("p4c_r1"), name: nil)
 
     var v1 = VisitSet()
     let before = reference.evaluateWith(
@@ -526,10 +526,10 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     let resolver = CellResolver()
     resolver.set("p4c_x", rectAt(0, 0))            // nested leaf, 10x10
     let g = Element.group(Group(children: [
-        .live(.reference(ReferenceElem(target: ElementRef("p4c_x")))),
+        .live(.reference(ReferenceElem(target: ElementRef("p4c_x"), name: nil))),
     ]))
     resolver.set("p4c_g", g)                        // outer = group referencing x
-    let outer = ReferenceElem(target: ElementRef("p4c_g"))
+    let outer = ReferenceElem(target: ElementRef("p4c_g"), name: nil)
 
     var v1 = VisitSet()
     let first = outer.evaluateWith(
@@ -567,7 +567,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     let resolver = CellResolver()
     resolver.set("p4c_r1", rectAt(0, 0))
 
-    let plain = ReferenceElem(target: ElementRef("p4c_r1"))
+    let plain = ReferenceElem(target: ElementRef("p4c_r1"), name: nil)
     var v1 = VisitSet()
     let plainPs = plain.evaluateWith(
         precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v1)
@@ -576,7 +576,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     #expect(abs(pmaxx - 10) < 1e-6 && abs(pmaxy - 10) < 1e-6)
 
     let scaled = ReferenceElem(
-        target: ElementRef("p4c_r1"), instanceTransform: Transform.scale(2, 2))
+        target: ElementRef("p4c_r1"), name: nil, instanceTransform: Transform.scale(2, 2))
     var v2 = VisitSet()
     let scaledPs = scaled.evaluateWith(
         precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v2)
@@ -595,7 +595,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     setRecomputeCacheGeneration(3)
     let resolver = CellResolver()
     resolver.set("p4c_c1", .circle(Circle(cx: 0, cy: 0, r: 100)))
-    let reference = ReferenceElem(target: ElementRef("p4c_c1"))
+    let reference = ReferenceElem(target: ElementRef("p4c_c1"), name: nil)
 
     let coarse = 1.0
     let fine = 0.01
@@ -623,7 +623,7 @@ private func recordedOp(_ op: String, _ params: [String: Any]) -> PrimitiveOp {
         recordedOp("copy", ["from": ["eye"], "dx": 0.0, "dy": 0.0]),
         recordedOp("translate", ["ids": ["$0"], "dx": 50.0, "dy": 0.0]),
     ]
-    let recorded = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], id: "rec")
+    let recorded = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], name: nil, id: "rec")
 
     // Source eye at (0,0,10,10) → derived copy translated +50 → bbox [50,60].
     let resolver = MapResolver(map: ["eye": rectAt(0, 0)])
@@ -646,7 +646,7 @@ private func recordedOp(_ op: String, _ params: [String: Any]) -> PrimitiveOp {
 
 @Test func recordedDanglingInputEvaluatesEmpty() {
     let recipe = [recordedOp("copy", ["from": ["x"], "dx": 0.0, "dy": 0.0])]
-    let recorded = RecordedElem(ops: recipe, inputs: [ElementRef("x")])
+    let recorded = RecordedElem(ops: recipe, inputs: [ElementRef("x")], name: nil)
     var visiting = VisitSet()
     let ps = recorded.evaluateWith(
         precision: DEFAULT_PRECISION, resolver: NullResolver(), visiting: &visiting)
@@ -654,7 +654,7 @@ private func recordedOp(_ op: String, _ params: [String: Any]) -> PrimitiveOp {
 }
 
 @Test func recordedReportsItsInputsAsDependencies() {
-    let recorded = RecordedElem(ops: [], inputs: [ElementRef("eye")], id: "rec")
+    let recorded = RecordedElem(ops: [], inputs: [ElementRef("eye")], name: nil, id: "rec")
     #expect(recorded.dependencies == [ElementRef("eye")])
     let lv = LiveVariant.recorded(recorded)
     #expect(lv.dependencies == [ElementRef("eye")])
@@ -670,7 +670,7 @@ private func recordedOp(_ op: String, _ params: [String: Any]) -> PrimitiveOp {
         recordedOp("copy", ["from": ["eye"], "dx": 0.0, "dy": 0.0]),
         recordedOp("translate", ["ids": ["$0"], "dx": 50.0, "dy": 0.0]),
     ]
-    let rec = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], id: "rec")
+    let rec = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], name: nil, id: "rec")
     let layer = Layer(children: [.live(.recorded(rec))])
     // No artboards, so the round-trip comparison isolates the recorded element.
     let doc = Document(layers: [layer], selectedLayer: 0, selection: [], artboards: [])
@@ -708,7 +708,7 @@ private func recordedOp(_ op: String, _ params: [String: Any]) -> PrimitiveOp {
 
     // The captured recipe replays + re-derives like the hand-built one.
     let recorded = RecordedElem(
-        ops: recipe, inputs: inputs.map { ElementRef($0) }, id: "rec")
+        ops: recipe, inputs: inputs.map { ElementRef($0) }, name: nil, id: "rec")
     let resolver = MapResolver(map: ["eye": rectAt(0, 0)])
     var visiting = VisitSet()
     let ps = recorded.evaluateWith(
@@ -745,7 +745,7 @@ private func recordedOp(_ op: String, _ params: [String: Any]) -> PrimitiveOp {
     // The captured recipe replays + re-derives identically to the
     // selection-relative capture (proving the two capture forms agree).
     let recorded = RecordedElem(
-        ops: recipe, inputs: inputs.map { ElementRef($0) }, id: "rec")
+        ops: recipe, inputs: inputs.map { ElementRef($0) }, name: nil, id: "rec")
     let resolver = MapResolver(map: ["eye": rectAt(0, 0)])
     var visiting = VisitSet()
     let ps = recorded.evaluateWith(

@@ -23,7 +23,7 @@ import Testing
                                   name: "Star", id: "M1"))
     let unnamed = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "M2"))
     let instance = Element.live(.reference(ReferenceElem(
-        target: ElementRef("M1"), id: "R1")))
+        target: ElementRef("M1"), name: nil, id: "R1")))
     let doc = Document(
         layers: [Layer(children: [instance])],
         symbols: [named, unnamed]

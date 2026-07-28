@@ -947,23 +947,23 @@ private func packElementBase(_ elem: Element) -> MsgValue {
         // compound carries none here), mirroring the test_json live codec.
         switch v {
         case .compoundShape(let cs):
-            // CompoundShape carries a stable id but no name field, so name
-            // packs as nil while id packs through (matching Python's
-            // getattr-based _pack_common). An id-less compound is byte-
-            // identical to before.
+            // A live element's `name` rides the generic common block at slot 5
+            // like every other element's — jas_dioxus packs `pack_common(&cs.common)`
+            // for all four kinds. This used to hand-write a literal `nil`,
+            // which is why a named compound survived a binary save in Rust and
+            // not here. An unnamed compound is byte-identical to before.
             let common = packCommon(locked: cs.locked, opacity: cs.opacity,
                                     visibility: cs.visibility, transform: cs.transform,
-                                    name: nil, id: cs.id)
+                                    name: cs.name, id: cs.id)
             // [tag, common(1..6), kind(7), operation(8), operands(9)]
             let operands: [MsgValue] = cs.operands.map { packElement($0) }
             return .array([vint(tagLive)] + common +
                           [vstr("compound_shape"), vstr(cs.operation.rawValue),
                            .array(operands)])
         case .reference(let r):
-            // ReferenceElem has its own id but no name field (name packs nil).
             let common = packCommon(locked: r.locked, opacity: r.opacity,
                                     visibility: r.visibility, transform: r.transform,
-                                    name: nil, id: r.id)
+                                    name: r.name, id: r.id)
             // [tag, common(1..6), kind(7), target(8), instance_transform(9)]
             // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
             // (distinct from the render CTM packed at slot 4) rides slot 9 via
@@ -973,10 +973,9 @@ private func packElementBase(_ elem: Element) -> MsgValue {
                           [vstr("reference"), vstr(r.target.id),
                            packTransform(r.instanceTransform)])
         case .recorded(let rec):
-            // RecordedElem has its own id but no name field (name packs nil).
             let common = packCommon(locked: rec.locked, opacity: rec.opacity,
                                     visibility: rec.visibility, transform: rec.transform,
-                                    name: nil, id: rec.id)
+                                    name: rec.name, id: rec.id)
             // The recipe (inputs + ops) rides slots 8/9 as canonical JSON
             // strings (RECORDED_ELEMENTS.md), mirroring the Rust binary codec.
             // [tag, common(1..6), kind(7), inputs-json(8), ops-json(9)].
@@ -986,10 +985,9 @@ private func packElementBase(_ elem: Element) -> MsgValue {
             return .array([vint(tagLive)] + common +
                           [vstr("recorded"), vstr(inputsJson), vstr(opsJson)])
         case .generated(let gen):
-            // GeneratedElem has its own id but no name field (name packs nil).
             let common = packCommon(locked: gen.locked, opacity: gen.opacity,
                                     visibility: gen.visibility, transform: gen.transform,
-                                    name: nil, id: gen.id)
+                                    name: gen.name, id: gen.id)
             // The concept id + params ride slots 8/9 as canonical JSON strings
             // (CONCEPTS.md), mirroring the Rust binary codec.
             // [tag, common(1..6), kind(7), concept(8), params-json(9)].
@@ -1273,13 +1271,13 @@ private func unpackElement(_ v: MsgValue) -> Element {
         switch kind {
         case "compound_shape":
             // Unknown operation strings default to union, matching the
-            // Rust / Python readers. CompoundShape carries a stable id but
-            // no name slot, so id passes through while name is dropped
-            // (paint is nil in Phase 1).
+            // Rust / Python readers. `name` and `id` both come out of the
+            // generic common block (paint is nil in Phase 1); the reader used
+            // to drop `name` on the floor because there was nowhere to put it.
             let operation = CompoundOperation(rawValue: asStr(arr[8])) ?? .union
             let operands = asArray(arr[9]).map { unpackElement($0) }
             return .live(.compoundShape(CompoundShape(
-                operation: operation, operands: operands, id: id,
+                operation: operation, operands: operands, name: name, id: id,
                 opacity: opacity, transform: xform,
                 locked: locked, visibility: vis,
                 blendMode: mode, mask: mask)))
@@ -1293,6 +1291,7 @@ private func unpackElement(_ v: MsgValue) -> Element {
             let instanceXform = arr.count > 9 ? unpackTransform(arr[9]) : nil
             return .live(.reference(ReferenceElem(
                 target: target,
+                name: name,
                 id: id,
                 transform: xform,
                 instanceTransform: instanceXform,
@@ -1306,7 +1305,7 @@ private func unpackElement(_ v: MsgValue) -> Element {
             let inputs = decodeRecordedInputs(inputsJson)
             let ops = decodeRecordedOps(opsJson)
             return .live(.recorded(RecordedElem(
-                ops: ops, inputs: inputs, id: id,
+                ops: ops, inputs: inputs, name: name, id: id,
                 transform: xform, opacity: opacity,
                 locked: locked, visibility: vis,
                 blendMode: mode, mask: mask)))
@@ -1318,7 +1317,7 @@ private func unpackElement(_ v: MsgValue) -> Element {
             let params = (try? JSONSerialization.jsonObject(
                 with: Data(paramsJson.utf8))) as? [String: Any] ?? [:]
             return .live(.generated(GeneratedElem(
-                conceptId: conceptId, params: params, id: id,
+                conceptId: conceptId, params: params, name: name, id: id,
                 transform: xform, opacity: opacity,
                 locked: locked, visibility: vis,
                 blendMode: mode, mask: mask)))

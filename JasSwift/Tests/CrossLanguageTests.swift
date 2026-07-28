@@ -606,7 +606,7 @@ private func recordedCanonicalDocument() -> Document {
         PrimitiveOp(op: "copy", params: ["from": ["eye"], "dx": 0.0, "dy": 0.0], targets: []),
         PrimitiveOp(op: "translate", params: ["ids": ["$0"], "dx": 50.0, "dy": 0.0], targets: []),
     ]
-    let rec = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], id: "rec")
+    let rec = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], name: nil, id: "rec")
     let layer = Layer(children: [.live(.recorded(rec))])
     return Document(layers: [layer], selectedLayer: 0, selection: [], artboards: [])
 }
@@ -1055,7 +1055,7 @@ private func runPreservationVector(_ tc: [String: Any]) -> (before: String, afte
     #expect(recordedStrIds(recipe[0].params, "from") == ["eye"])
 
     // Wrap + re-derive against the EDITED source (eye moved to x=100 px).
-    let recorded = RecordedElem(ops: recipe, inputs: inputs.map { ElementRef($0) }, id: "rec")
+    let recorded = RecordedElem(ops: recipe, inputs: inputs.map { ElementRef($0) }, name: nil, id: "rec")
     let editedSvg = svg.replacingOccurrences(of: "x=\"0\" y=\"0\"", with: "x=\"100\" y=\"0\"")
     let editedEl = svgToDocument(editedSvg).getElement([0, 0])
     struct OneResolver: ElementResolver {
@@ -1460,7 +1460,7 @@ private func rederiveRecordedOutput(_ fixture: [String: Any], _ journal: [Transa
     let segment = journal.last!.ops
     let (recipe, inputs) = captureRecipe(segment)
     let recorded = RecordedElem(
-        ops: recipe, inputs: inputs.map { ElementRef($0) }, id: "rec")
+        ops: recipe, inputs: inputs.map { ElementRef($0) }, name: nil, id: "rec")
 
     // Apply the fixture's edit to the source SVG, parse, and resolve the edited
     // element by id. Mirror the effects.rs proof's textual edit (replace
@@ -2772,7 +2772,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 @Test func generatedLiveVariantRoundTripsAndSerializes() throws {
     let ge = GeneratedElem(
         conceptId: "regular_polygon",
-        params: ["sides": 6, "radius": 50],
+        params: ["sides": 6, "radius": 50], name: nil,
         id: "poly1")
     let layer = Layer(name: "Layer", children: [.live(.generated(ge))])
     let doc = Document(layers: [layer], artboards: [])
@@ -2803,7 +2803,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
                 : nil
         }
     }
-    let ge = GeneratedElem(conceptId: "regular_polygon", params: ["sides": 4, "radius": 10])
+    let ge = GeneratedElem(conceptId: "regular_polygon", params: ["sides": 4, "radius": 10], name: nil)
     var visiting = VisitSet()
     let ps = ge.evaluateWith(precision: 1.0, resolver: OneConcept(), visiting: &visiting)
     #expect(ps.count == 1)
@@ -2828,7 +2828,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     #expect(resolver.resolveConcept("no_such_concept") == nil)
 
     let ge = GeneratedElem(conceptId: "regular_polygon",
-                           params: ["sides": 4, "radius": 10])
+                           params: ["sides": 4, "radius": 10], name: nil)
     var visiting = VisitSet()
     let ps = ge.evaluateWith(precision: 1.0, resolver: resolver, visiting: &visiting)
     #expect(ps.count == 1)
@@ -3858,17 +3858,17 @@ private func wireTagElements() -> [Element] {
         .textPath(TextPath(d: [.moveTo(0, 0), .lineTo(1, 1)], content: "hi", startOffset: 0,
                            fontFamily: "Arial", fontSize: 12, fontWeight: "normal",
                            fontStyle: "normal", textDecoration: "none")),
-        .live(.reference(ReferenceElem(target: ElementRef("m1")))),
+        .live(.reference(ReferenceElem(target: ElementRef("m1"), name: nil))),
     ]
 }
 
 /// Every LIVE kind, which all share `tag_arity["live"]`.
 private func wireLiveElements() -> [Element] {
     [
-        .live(.compoundShape(CompoundShape(operation: .union, operands: []))),
-        .live(.reference(ReferenceElem(target: ElementRef("m1")))),
-        .live(.recorded(RecordedElem(ops: [], inputs: []))),
-        .live(.generated(GeneratedElem(conceptId: "spiral", params: [:]))),
+        .live(.compoundShape(CompoundShape(operation: .union, operands: [], name: nil))),
+        .live(.reference(ReferenceElem(target: ElementRef("m1"), name: nil))),
+        .live(.recorded(RecordedElem(ops: [], inputs: [], name: nil))),
+        .live(.generated(GeneratedElem(conceptId: "spiral", params: [:], name: nil))),
     ]
 }
 
