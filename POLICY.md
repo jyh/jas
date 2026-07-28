@@ -137,9 +137,20 @@ Language-specific unit tests go in each app's test directory.
 The Flask framework is generic across vector-illustration products,
 so its code and docs avoid naming specific vendor products.
 
-**Never** use "Adobe" or "Illustrator" in code, schema, or
-documentation. Preferred term: "vector illustration application."
+**Never** use "Adobe" or "Illustrator" in code, schema, or <!-- naming-rule-exempt: a rule must name what it forbids -->
+documentation. Preferred term: "vector illustration application"
+(or "the incumbent" where a comparative claim needs a referent).
 This applies to all 5 apps, all docs, all test fixtures.
+
+**Enforced by `scripts/check_naming_rule.py`**, which scans every
+git-tracked text file and runs in CI. The rule went silently broken
+on public `main` for an unknown period -- 18 occurrences across 9
+files, found on 2026-07-27 only because a pre-push audit happened to
+grep for it. A rule that depends on everyone remembering it is not a
+rule. The check's docstring records its four exemption classes (the
+`TRANSCRIPT.md` archive, `article/`, the two frozen ports, and
+line-scoped markers such as the one above) with the reasoning for
+each, and states its own blind spots.
 
 ---
 

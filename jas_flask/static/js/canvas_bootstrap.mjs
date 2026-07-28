@@ -279,7 +279,7 @@ export function bootstrap() {
 
     /** Edit → Select All. Selects every direct child of every layer
      * that's neither locked nor invisible. Group/Layer recursion is
-     * deferred — top-level children only, matching Illustrator-style
+     * deferred — top-level children only, matching the conventional
      * "the group itself is one selection" semantics. */
     selectAll() {
       const m = activeModel();
