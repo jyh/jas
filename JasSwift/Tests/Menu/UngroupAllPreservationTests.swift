@@ -217,6 +217,14 @@ struct UngroupAllPreservationTests {
     /// separately because `locked` was the one flag the old rebuild happened to
     /// carry — this probe stays GREEN across the repair and proves the repair
     /// did not trade one dropped field for another.
+    ///
+    /// It also PINS A FACT WORTH A RULING, rather than leaving it unmeasured:
+    /// a locked LAYER does NOT protect its contents. `flatten` is applied to
+    /// every layer with no lock check at all, so the unlocked group inside a
+    /// locked layer is dissolved — in BOTH ports (Rust's twin
+    /// `locked_layer_stays_locked` asserts the same). If lock becomes
+    /// INHERITED, this assertion is what has to move, and it is written so the
+    /// move is visible instead of silent.
     @Test func lockedLayerStaysLocked() {
         let model = Model(document: Document(
             layers: [Layer(name: "Locked", children: [nest], locked: true)],
@@ -224,5 +232,7 @@ struct UngroupAllPreservationTests {
         MenuActions.ungroupAll(model)
         #expect(model.document.layers[0].locked == true)
         #expect(model.document.layers[0].children.count == 1)
+        // Today: the group inside a LOCKED layer is dissolved anyway.
+        #expect(isRect(model.document.layers[0].children[0]))
     }
 }

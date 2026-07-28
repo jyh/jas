@@ -7050,6 +7050,11 @@ mod ungroup_all_preservation_tests {
     }
 
     /// Twin of `lockedLayerStaysLocked`.
+    ///
+    /// Also pins a fact worth a ruling: a locked LAYER does not protect its
+    /// contents. `flatten` is applied to every layer with no lock check, so an
+    /// unlocked group inside a locked layer is dissolved anyway — the same in
+    /// both ports. If lock becomes INHERITED, this assertion is what moves.
     #[test]
     fn locked_layer_stays_locked() {
         let doc = Document {
@@ -7070,5 +7075,10 @@ mod ungroup_all_preservation_tests {
         let out = model.document();
         assert!(out.layers[0].locked());
         assert_eq!(out.layers[0].children().unwrap().len(), 1);
+        // Today: the group inside a LOCKED layer is dissolved anyway.
+        assert!(matches!(
+            &*out.layers[0].children().unwrap()[0],
+            Element::Rect(_)
+        ));
     }
 }
