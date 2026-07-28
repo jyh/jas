@@ -50,7 +50,7 @@ reasonable follow-up.
 
 Hard-coded at 5 in the YAML (`points: 5` in `doc.add_element`).
 Changing the point count today requires editing the workspace
-constant — Illustrator's toolbar has a modal dialog for this
+constant — the incumbent's toolbar has a modal dialog for this
 that's out of scope for the current tool.
 
 ## Overlay
@@ -62,12 +62,12 @@ stroke-dasharray: 4 4; fill: none;`. The preview uses the same
 
 ## Known gaps
 
-- **Shift-constrained upright orientation** — Illustrator keeps
+- **Shift-constrained upright orientation** — the incumbent keeps
   the star upright (first outer vertex at top-center)
   regardless of drag direction when Shift is held; the current
   tool always inscribes the star in the axis-aligned bbox so
   dragging in unusual directions just grows / flips the bbox,
   not rotates the star.
-- **Arrow-key point-count / inner-radius tuning** — Illustrator
+- **Arrow-key point-count / inner-radius tuning** — the incumbent
   adjusts the star's point count and inner-to-outer ratio with
   arrow keys and Ctrl during the drag. Out of scope today.

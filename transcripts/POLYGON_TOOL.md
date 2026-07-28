@@ -43,7 +43,7 @@ opposite direction — the tool has no explicit rotation handle.
 YAML threads this through `doc.add_element` as the `sides` field.
 Changing the side count today requires editing the workspace
 constant — there is no panel control. A "Polygon options" dialog
-(like Illustrator's double-click-the-toolbar-button modal) is a
+(like the incumbent's double-click-the-toolbar-button modal) is a
 reasonable follow-up.
 
 ## Overlay
@@ -56,10 +56,10 @@ see is exactly what you get.
 
 ## Known gaps
 
-- **Shift-constrained horizontal first edge** — Illustrator
+- **Shift-constrained horizontal first edge** — the incumbent
   constrains the first edge to 0/45/90° when Shift is held.
   Not currently wired.
-- **Arrow-key side-count change during drag** — Illustrator
+- **Arrow-key side-count change during drag** — the incumbent
   increments / decrements the polygon side count with the Up
   / Down arrow keys mid-drag. Out of scope for the current
   tool; the workspace YAML has no plumbing for per-drag side
