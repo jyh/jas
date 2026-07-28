@@ -744,6 +744,8 @@ private func recordedCanonicalDocument() -> Document {
 /// transaction) and is pinned by ``PasteStackingTests`` and its Rust twin.
 @Test func operationPasteStacking() throws {
     try runOperationFixture("paste_stacking.json")
+}
+
 /// LOCK IS INHERITED, NOT MATERIALIZED — transcripts/LAYER_STRUCTURE.md §13
 /// (RULED by JYH 2026-07-28). Twin of Rust `operation_lock_inheritance`.
 ///

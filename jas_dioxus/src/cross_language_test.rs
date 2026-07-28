@@ -3667,6 +3667,8 @@ mod tests {
     #[test]
     fn operation_paste_stacking() {
         run_operation_fixture("operations/paste_stacking.json");
+    }
+
     /// LOCK IS INHERITED, NOT MATERIALIZED — transcripts/LAYER_STRUCTURE.md §13
     /// (RULED by JYH 2026-07-28). A locked layer locks everything inside it, at
     /// every depth, and those elements cannot be individually unlocked.
