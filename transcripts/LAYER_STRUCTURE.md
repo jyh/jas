@@ -1227,8 +1227,19 @@ carries `common: g.common.clone()` and loses nothing. `locked` is threaded now.
 The fields still dropped there — `visibility`, `blendMode`, `mask`,
 `isolatedBlending`, `knockoutGroup` — are a REAL divergence from Rust that no
 SVG gate can see, because none of them survives an SVG round trip in either port
-either. Named in a comment at the site; `isolatedBlending` / `knockoutGroup` are
-already the standing coverage gap `container-blend-fields-survive-no-codec`.
+either. Named in a comment at the site; `isolatedBlending` / `knockoutGroup` were then
+the standing coverage gap `container-blend-fields-survive-no-codec`.
+
+**That gap CLOSED on 2026-07-28** (CONTAINERFLAGS), which retires half of the
+sentence above: `isolatedBlending` and `knockoutGroup` now survive **all three**
+codecs in both ports — the canonical test JSON emits them conditionally on true,
+the binary codec carries two container-private trailing slots, and SVG carries
+` jas:isolated-blending` / ` jas:knockout-group` in the same `urn:jas:1`
+namespace `jas:locked` uses. All four cells are asserted in
+`test_fixtures/expected/codec_field_survival.json`, whose `fields` list gained
+`group.*` and `layer.*` rows so the two container kinds are measured separately.
+`visibility`, `blendMode` and `mask` are unchanged by that wave and remain
+SVG-invisible.
 
 **THE REFERENCE CANNOT ADJUDICATE THIS, and that is a standing fact about lock
 persistence, not a gap this stone left.** `workspace_interpreter/` has **no SVG

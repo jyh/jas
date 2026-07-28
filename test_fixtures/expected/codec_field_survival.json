@@ -161,7 +161,19 @@
       "was amended on 2026-07-28: JasSwift/Sources/Geometry/Element.swift:3227",
       "and :3229 declare `isolatedBlending` and `knockoutGroup` on Layer, and",
       ":3174/:3177 on Group. Re-verified here by reading those lines. Both ports",
-      "hold all four values; every loss below is a CODEC loss, not a model limit."
+      "hold all four values; every loss below is a CODEC loss, not a model limit.",
+      "",
+      "BANKED, NOT DONE (amending the freeze is a council act, not a lane's).",
+      "transcripts/EDIT_SEMANTICS_FREEZE.md still carries two statements that",
+      "this wave made stale, and they are stated here so the next reader does not",
+      "have to re-derive them: (1) the 'Still open in the codec' paragraph lists",
+      "`isolated_blending` and `knockout_group` among the binary codec's drops --",
+      "they are carried as of 2026-07-28; (2) the same paragraph's parenthetical,",
+      "'on Layer in Rust, where JasSwift's Layer has no such field at all -- a",
+      "model divergence', is the claim amendment A2 already corrected, and A2 is",
+      "right. A2's own follow-on sentence ('destroyed by all three codecs in both",
+      "ports ... nothing measures them in any codec') is the gap this file now",
+      "closes. Nothing else in the freeze is affected."
     ],
     "layer": {
       "name": "Layer 1",
