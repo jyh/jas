@@ -1525,3 +1525,76 @@ observable by any shared gate — the corpus can prove that unlocking leaves the
 children untouched, which is the same fact from the outside, but the tables'
 disappearance is watched by the compiler alone. And the frozen ports keep the
 materialization design at their tag, correctly.
+
+---
+
+## 15. LOCK IS IMMUTABLE, AND WHAT PASTE DOES ABOUT IT. RULED 2026-07-28.
+
+> JYH, on Q3: *"yes, locked is locked and immutable."*
+> On Q6: *"numeric suffixes; hidden is not locked so it can be appended to; I
+> think plain Paste should just refuse, it is more intuitive."*
+
+### 15.1 Q3 — a locked element refuses OPERATIONS, not only selection
+Selection-level enforcement (§13, Stone 4) was deliberately scoped narrow because
+Q3 was unruled. It is ruled now: **locked means immutable.** An operation must
+not mutate a locked element even if it somehow reaches one.
+
+The measured surface, from `seat/fleet/SCOPE-effective-locked.md` — every one of
+these ignores lock TODAY even for a **directly** locked element:
+delete · move / drag / nudge · group / ungroup · boolean ops ·
+fill / stroke / brush apply · anchor drag (Rust's direct-Path arm) ·
+**Align, whose own module doc states the rule while `align.rs` contains `locked`
+on exactly two lines, both comments.**
+
+**STILL OPEN — where the guard lives.** Two shapes, and this was NOT ruled:
+* **Per-operation guards** — one check in each of ~8 places. Simple, and it rots
+  the way this class always rots: the ninth operation arrives without one.
+* **At the write chokepoint** — every mutation already funnels through
+  `setDocumentUnbracketed(_:intent:)` (Arc 1, S1). One guard there is inherited
+  by every future operation for free. But it must diff a write to know what it
+  touched, and some writes legitimately touch locked elements — unlocking, for
+  one. **Measure whether the chokepoint can see enough before committing.**
+
+### 15.2 Q6 — the principle: WHO CHOSE THE TARGET
+JYH's split between plain and preserving paste is not arbitrary and generalises:
+
+> **Refuse when the ARTIST chose the target. Divert when the FRAGMENT chose it.**
+
+* **Plain Paste (R2) targets the ACTIVE layer — the artist's explicit choice.**
+  Landing artwork somewhere else would silently override that choice, which is
+  worse than declining. **It refuses.**
+* **Preserving Paste (R3) targets a layer named by the incoming fragment.** The
+  artist asked for STRUCTURE, not for that layer. Diverting serves their actual
+  intent, so **it creates a sibling** rather than refusing.
+
+### 15.3 The three sub-rulings
+1. **Numeric suffixes.** A diverted layer takes the fragment's name plus a
+   numeric suffix — "Sky" locked ⇒ "Sky 2". This is the ONE place R3's ratified
+   VERBATIM naming cannot hold, and it is a stated exception rather than a
+   silent one. Precedent in-house: `advance_next_untitled_past` /
+   `advanceNextUntitledPast` already suffix Untitled-N numerically.
+2. **Hidden is NOT locked.** Hidden is a visibility state, not a protection, so a
+   hidden target is **appended to normally** and the artist unhides to see the
+   result. Diverting there would manufacture layers to avoid a condition that
+   protects nothing. The asymmetry is deliberate.
+3. **Plain Paste refuses** into a locked active layer.
+
+### 15.4 A REFUSAL MUST NOT BE A SILENT NO-OP
+This is the defect §13 abolished for grouping: select across layers, press Cmd+G,
+nothing happens and nothing says why — which reads as broken software.
+
+**Recommended implementation, using machinery that already exists rather than a
+new notification system:** declare `enabled_when` on `paste` so the Edit menu
+item GREYS OUT while the active layer is locked. The artist then sees the
+refusal before attempting it, and Cmd+V doing nothing is explained rather than
+mysterious.
+
+Measured: `paste` currently declares **no** `enabled_when`; the expression
+language CAN already read `.common.locked` (`actions.yaml:1534,1851`); but there
+is **no `active_document.active_layer_locked`** primitive to hang it on. Adding
+one is small and well-precedented — `active_document.*` already exposes
+`has_selection`, `can_undo`, `current_artboard` and a dozen more.
+
+**Not ruled, flagged:** whether a refusal ALSO wants an active message (status
+bar or transient) on top of the disabled item, for the artist who presses Cmd+V
+without looking at the menu.
