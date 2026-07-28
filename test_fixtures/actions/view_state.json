@@ -265,5 +265,183 @@
       "view_offset_x": 120.0,
       "view_offset_y": 20.0
     }
+  },
+  {
+    "_doc": [
+      "ZOOMPKG (2026-07-27). The DEFAULT-ANCHOR vectors. These were deliberately",
+      "absent when the family was seeded: the `view-anchor-default-divergence`",
+      "coverage-gap row recorded that zoom_in / zoom_out with NO anchor params",
+      "anchored at the viewport centre in Rust and at the doc origin's screen",
+      "position in Swift, and that pinning the spec value would red the swift",
+      "lane. JYH RULED 2026-07-27 that the viewport centre is the requirement",
+      "(transcripts/ZOOM_TOOL.md, the ruling headed 'the DEFAULT ZOOM ANCHOR is",
+      "the viewport centre'), Swift was fixed in the same wave as this vector,",
+      "and that gap row is now closed.",
+      "",
+      "TWO causes had to land together for this vector to pass, which is why it",
+      "could not be pinned earlier as a half-fix:",
+      "  (a) the dispatcher must merge the action's DECLARED param defaults, so",
+      "      `param.anchor_x` resolves to actions.yaml's -1 rather than null->0;",
+      "  (b) doc.zoom.apply must have a viewport-centre branch for that -1",
+      "      sentinel. Swift had NEITHER; it carried viewportW and never read it.",
+      "Fixing only (a) lands at (-100, -50); only (b) lands at (-120, -60); the",
+      "golden below is reached by both together. So this vector discriminates",
+      "three ways and its expected value coincides with no partial fix.",
+      "",
+      "GOLDEN, spec-derived (the 'Anchor and clamp math' block of ZOOM_TOOL.md",
+      "with ax = viewport_w / 2, ay = viewport_h / 2):",
+      "  ax=400 ay=300 ; doc_ax=(400-(-100))/2=250 ; doc_ay=(300-(-50))/2=175",
+      "  z_new=2.0*1.2=2.4 ; px=400-250*2.4=-200 ; py=300-175*2.4=-120"
+    ],
+    "name": "zoom_in_default_anchor",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 2.0,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "zoom_in", "params": {} }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 2.4,
+      "view_offset_x": -200.0,
+      "view_offset_y": -120.0
+    }
+  },
+  {
+    "_doc": [
+      "The zoom_out half of the default-anchor pair. Same seed, same anchor rule,",
+      "factor 1/1.2. Both offsets move AWAY from the seed and view_offset_y",
+      "changes SIGN (-50 -> +8.33...), which neither a pan-unchanged nor an",
+      "origin-anchored implementation produces, so this is not a value a wrong",
+      "port reaches by luck.",
+      "Exact double results, not rounded transcriptions:",
+      "  z_new = 2.0 * (1.0/1.2) = 1.6666666666666667",
+      "  px = 400 - 250*z_new   = -16.666666666666686",
+      "  py = 300 - 175*z_new   =   8.333333333333314"
+    ],
+    "name": "zoom_out_default_anchor",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 2.0,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "zoom_out", "params": {} }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 1.6666666666666667,
+      "view_offset_x": -16.666666666666686,
+      "view_offset_y": 8.333333333333314
+    }
+  },
+  {
+    "_doc": [
+      "The UNMEASURED-VIEWPORT fallback of the default anchor. Both ports fall",
+      "back to the doc origin's screen position (px, py) when viewport_w /",
+      "viewport_h are still 0 -- the state before the canvas widget has reported",
+      "its size. This is the one case where the pre-ruling Swift output was",
+      "already right, so the fallback is PINNED rather than deleted, and this is",
+      "the vector that catches a 'fix' that divides into a zero viewport.",
+      "  ax=px=-100 ; ay=py=-50 ; doc_ax=doc_ay=0 ; z_new=2.4 ; pan unchanged"
+    ],
+    "name": "zoom_in_default_anchor_unmeasured_viewport",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 2.0,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0,
+      "viewport_w": 0.0,
+      "viewport_h": 0.0
+    },
+    "actions": [
+      { "action": "zoom_in", "params": {} }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 2.4,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0
+    }
+  },
+  {
+    "_doc": [
+      "ZOOMPKG (2026-07-27). zoom_to_actual_size RECENTRES on the viewport",
+      "centre. Also deliberately absent when the family was seeded: the",
+      "`view-zoom-set-pan-divergence` gap row recorded Swift leaving the pan",
+      "alone and Rust recentring, and -- correctly at the time -- that the",
+      "WRITTEN SPEC sided with Swift. JYH RULED 2026-07-27 that the spec was",
+      "wrong in four places and Rust was right (transcripts/ZOOM_TOOL.md, the",
+      "ruling headed 'zoom_to_actual_size RECENTRES'). Those four statements plus",
+      "ZOOM_TOOL_TESTS.md's ZOOM-134 parenthetical were rewritten in the same",
+      "wave as this vector, and that gap row is now closed.",
+      "",
+      "Why 'pan unchanged' was the wrong requirement: view_offset is the DOC",
+      "ORIGIN's screen position, so holding it fixed while zoom goes 4x -> 1x",
+      "quadruples the visible region around that point. At the seed below the",
+      "view would move from doc [75..275]x[50..200] to [300..1100]x[200..800]",
+      "and the artwork leaves the screen.",
+      "",
+      "GOLDEN, spec-derived (the doc point under the viewport centre is held):",
+      "  cx=400 cy=300 ; doc_cx=(400-(-300))/4=175 ; doc_cy=(300-(-200))/4=125",
+      "  z_new=1.0 ; px=400-175*1=225 ; py=300-125*1=175",
+      "The invariant that encodes: (400-225)/1 == 175 == doc_cx and",
+      "(300-175)/1 == 125 == doc_cy -- the artist keeps looking at doc",
+      "(175, 125)."
+    ],
+    "name": "zoom_to_actual_size_recentres",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 4.0,
+      "view_offset_x": -300.0,
+      "view_offset_y": -200.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "actions": [
+      { "action": "zoom_to_actual_size", "params": {} }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 1.0,
+      "view_offset_x": 225.0,
+      "view_offset_y": 175.0
+    }
+  },
+  {
+    "_doc": [
+      "The UNMEASURED-VIEWPORT fallback of zoom_to_actual_size: with viewport_w",
+      "/ viewport_h at 0 there is no centre to anchor on, so both ports write",
+      "zoom_level and leave the pan literally unchanged. Pins the guard that",
+      "keeps the recentre from dividing into an unmeasured viewport, and is the",
+      "only vector in this family where 'pan unchanged' is still the right",
+      "answer."
+    ],
+    "name": "zoom_to_actual_size_unmeasured_viewport",
+    "setup_svg": "two_rects.svg",
+    "view": {
+      "zoom_level": 4.0,
+      "view_offset_x": -300.0,
+      "view_offset_y": -200.0,
+      "viewport_w": 0.0,
+      "viewport_h": 0.0
+    },
+    "actions": [
+      { "action": "zoom_to_actual_size", "params": {} }
+    ],
+    "expected_json": "view_state_two_rects_unchanged_expected.json",
+    "expected_view": {
+      "zoom_level": 1.0,
+      "view_offset_x": -300.0,
+      "view_offset_y": -200.0
+    }
   }
 ]
