@@ -123,6 +123,220 @@ mod rich_clipboard_tests {
     }
 }
 
+/// THE INTERNAL CLIPBOARD, CONFIRMED — the Rust half.
+///
+/// `transcripts/LAYER_STRUCTURE.md` §7 admitted a blind spot: only the SVG paste
+/// path had been read, and JYH's ratification rode on confirming the
+/// internal-clipboard path. These are the Rust measurements.
+///
+/// **NAMED GAP, stated before the evidence.** The internal paste SINK —
+/// `clipboard_read_and_paste`'s tail, `clipboard.rs:213-234` — is unreachable
+/// from `cargo test --lib`: its body sits inside a `spawn_local` closure (a
+/// wasm-only executor) over an `Rc<RefCell<AppState>>` and a Dioxus `Signal`,
+/// neither constructible outside a Dioxus runtime. So the sink is established by
+/// READING, and what these tests drive is the SOURCE — the payload the five copy
+/// sites store — plus `translate_element`, the one helper the sink calls. That
+/// split is deliberate: the payload is where the layer question is actually
+/// decided, because a payload that never recorded a layer cannot have one
+/// restored downstream.
+///
+/// The five copy sites store byte-identical payloads:
+/// `keyboard.rs:327` (Cmd+C), `keyboard.rs:376` (Cmd+X), `menu_bar.rs:129`
+/// (menu Cut), `menu_bar.rs:166` (menu Copy), `renderer.rs:3572`
+/// (`doc.copy_selection_to_clipboard`). Each is
+/// `doc.selection.iter().filter_map(|es| doc.get_element(&es.path).cloned()).collect()`
+/// — reproduced verbatim in `copy_payload` below.
+#[cfg(test)]
+mod internal_clipboard_confirm_tests {
+    use super::*;
+    use crate::document::document::Document;
+    use crate::geometry::element::{
+        Color, CommonProps, Element, Fill, LayerElem, RectElem,
+    };
+
+    /// The copy payload, verbatim from the five production copy sites.
+    fn copy_payload(doc: &Document) -> Vec<GeoElement> {
+        doc.selection
+            .iter()
+            .filter_map(|es| doc.get_element(&es.path).cloned())
+            .collect()
+    }
+
+    fn rect(x: f64, y: f64, id: &str) -> Element {
+        Element::Rect(RectElem {
+            x,
+            y,
+            width: 10.0,
+            height: 10.0,
+            rx: 0.0,
+            ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps {
+                id: Some(id.to_string()),
+                ..CommonProps::default()
+            },
+            fill_gradient: None,
+            stroke_gradient: None,
+        })
+    }
+
+    /// Two NAMED layers, one element each, both selected — the shape the brief's
+    /// central claim is about.
+    fn two_layer_doc() -> Document {
+        let sky = Element::Layer(LayerElem {
+            children: vec![Rc::new(rect(0.0, 0.0, "r-sky"))],
+            common: CommonProps {
+                name: Some("Sky".to_string()),
+                ..CommonProps::default()
+            },
+            ..LayerElem::default()
+        });
+        let ground = Element::Layer(LayerElem {
+            children: vec![Rc::new(rect(100.0, 100.0, "r-ground"))],
+            common: CommonProps {
+                name: Some("Ground".to_string()),
+                ..CommonProps::default()
+            },
+            ..LayerElem::default()
+        });
+        Document {
+            layers: vec![sky, ground],
+            selected_layer: 0,
+            selection: vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![1, 0]),
+            ],
+            ..Document::default()
+        }
+    }
+
+    /// THE FINDING THAT SETTLES Q2/Q3 FOR RUST, and it is settled at the SOURCE.
+    /// `TabState.clipboard` is `Vec<Element>` (`app_state.rs:68`). A cross-layer
+    /// copy yields two ELEMENTS and no layer at all — the payload has nowhere to
+    /// record which layer each came from. So the flattening is not a choice the
+    /// paste sink makes; it is already total by the time the sink runs, and no
+    /// sink could undo it. The brief's central claim holds for the internal path.
+    #[test]
+    fn internal_copy_payload_is_flat_elements_carrying_no_layer_identity() {
+        let doc = two_layer_doc();
+        let payload = copy_payload(&doc);
+        assert_eq!(payload.len(), 2, "expected both selected elements");
+        for (i, e) in payload.iter().enumerate() {
+            assert!(
+                !matches!(e, Element::Layer(_)),
+                "payload[{i}] is a Layer; the internal clipboard is supposed to \
+                 hold elements, and a layer here would be the only way it could \
+                 carry layer identity"
+            );
+        }
+        // MANDATORY VALUE ASSERTION: say which elements, by geometry, so this
+        // cannot pass on an empty or wrong-shaped payload.
+        let xs: Vec<f64> = payload
+            .iter()
+            .map(|e| match e {
+                Element::Rect(r) => r.x,
+                _ => f64::NAN,
+            })
+            .collect();
+        assert_eq!(
+            xs,
+            vec![0.0, 100.0],
+            "payload x-coordinates {xs:?}; expected [0, 100] in SELECTION order"
+        );
+    }
+
+    /// THE CROSS-PORT CONTRAST, and an unrecorded divergence.
+    /// Rust's `Selection` is `Vec<ElementSelection>` (`document.rs:207`), so the
+    /// payload order is the selection's stored order and is DETERMINISTIC across
+    /// runs. Swift's is `Set<ElementSelection>` (`Document.swift:175`), so its
+    /// payload comes out in per-process hash order — measured at ten different
+    /// orders in ten `swift test` processes. Same gesture, different stacking.
+    #[test]
+    fn internal_copy_payload_order_is_deterministic_selection_order() {
+        let mut children = Vec::new();
+        for i in 0..5 {
+            children.push(Rc::new(rect(i as f64 * 10.0, 0.0, &format!("r{i}"))));
+        }
+        let layer = Element::Layer(LayerElem {
+            children,
+            ..LayerElem::default()
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: (0..5).map(|i| ElementSelection::all(vec![0, i])).collect(),
+            ..Document::default()
+        };
+        // Run it repeatedly: a Vec cannot reorder, and saying so by measurement
+        // is the point of the twin.
+        for _ in 0..10 {
+            let xs: Vec<f64> = copy_payload(&doc)
+                .iter()
+                .map(|e| match e {
+                    Element::Rect(r) => r.x,
+                    _ => f64::NAN,
+                })
+                .collect();
+            assert_eq!(
+                xs,
+                vec![0.0, 10.0, 20.0, 30.0, 40.0],
+                "payload order moved: {xs:?}"
+            );
+        }
+    }
+
+    /// Q5. The sink pastes `translate_element(elem, offset, offset)`, and
+    /// `translate_element` is `..e.clone()` — id included. `clear_ids` exists
+    /// and is deliberately NOT called here (`element.rs:2247`). So the internal
+    /// path duplicates identity exactly as the SVG path does: after copy+paste
+    /// two live elements claim one id. Under the cardinality law a paste is
+    /// 0 -> N and should mint. When that fix lands, invert this probe.
+    #[test]
+    fn internal_paste_keeps_the_source_id_so_identity_is_duplicated() {
+        let src = rect(0.0, 0.0, "keel-1");
+        let pasted = translate_element(&src, 24.0, 24.0);
+        assert_eq!(
+            pasted.common().id.as_deref(),
+            Some("keel-1"),
+            "the internal paste minted or dropped an id; TODAY it copies verbatim"
+        );
+        // MANDATORY VALUE ASSERTION: it is a genuinely different element in a
+        // different place sharing one identity — which is why it matters.
+        match pasted {
+            Element::Rect(r) => {
+                assert_eq!((r.x, r.y), (24.0, 24.0), "the paste did not move");
+            }
+            other => panic!("expected a Rect back, got {other:?}"),
+        }
+    }
+
+    /// Q6. The offset the sink applies, and `paste_in_place`'s explicit "no
+    /// offset". The cross-language `paste_translate` family already pins
+    /// `translate_element` itself; this pins the two CALL shapes the sink uses —
+    /// `PASTE_OFFSET` and `0.0` — against the same helper.
+    #[test]
+    fn internal_paste_offsets_and_paste_in_place_does_not() {
+        let src = rect(7.0, 11.0, "r-1");
+        match translate_element(&src, 24.0, 24.0) {
+            Element::Rect(r) => assert_eq!(
+                (r.x, r.y),
+                (31.0, 35.0),
+                "paste should offset (7,11) by 24 to (31,35)"
+            ),
+            other => panic!("expected a Rect, got {other:?}"),
+        }
+        match translate_element(&src, 0.0, 0.0) {
+            Element::Rect(r) => assert_eq!(
+                (r.x, r.y),
+                (7.0, 11.0),
+                "paste_in_place moved the element"
+            ),
+            other => panic!("expected a Rect, got {other:?}"),
+        }
+    }
+}
+
 /// Write text to the system clipboard (fire-and-forget async).
 pub(crate) fn clipboard_write(text: String) {
     if let Some(_window) = web_sys::window() {
