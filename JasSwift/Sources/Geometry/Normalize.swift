@@ -28,6 +28,11 @@ public func normalizeDocument(_ doc: Document) -> Document {
 /// documents round-trip unchanged; only ill-formed (e.g. foreign-SVG)
 /// duplicates are normalized. Called by every document reader. Mirrors the
 /// reference implementation's `dedupe_element_ids`.
+///
+/// The walk descends into the operands a live `CompoundShape` OWNS as well as
+/// into group/layer children: an operand is a real element carrying its own
+/// `common.id`, so it is part of the one document-wide id space the invariant
+/// speaks about.
 public func dedupeElementIds(_ doc: Document) -> Document {
     var seen = Set<String>()
     let layers: [Layer] = doc.layers.map { layer in
@@ -49,8 +54,14 @@ public func dedupeElementIds(_ doc: Document) -> Document {
 /// Pre-order id-dedupe visitor: visit `elem` (parent) before its children,
 /// depth-first, children in order. The first element to use an id keeps it;
 /// a later element carrying an already-seen id has its id cleared to nil.
-/// Recurses into Group/Layer children only (other kinds have no children),
-/// matching the reference's `children_mut`.
+/// Recurses into Group/Layer children, and into the operands a live
+/// `CompoundShape` OWNS — an operand is a real element carrying its own
+/// `common.id`, so it is part of the one document-wide id space the invariant
+/// speaks about. The live switch is EXHAUSTIVE over all four `LiveVariant`
+/// arms: only `compoundShape` owns child elements; `reference`, `recorded`
+/// and `generated` name their inputs by id and own none. Written exhaustively
+/// so a future payload that gains owned children forces the decision again
+/// rather than silently going unwalked. Twin of Rust `dedupe_ids_walk`.
 private func dedupeIdsWalk(_ elem: Element, _ seen: inout Set<String>) -> Element {
     var out = elem
     if let id = elem.id {
@@ -65,6 +76,14 @@ private func dedupeIdsWalk(_ elem: Element, _ seen: inout Set<String>) -> Elemen
         return .group(g.withChildren(g.children.map { dedupeIdsWalk($0, &seen) }))
     case .layer(let l):
         return .layer(l.withChildren(l.children.map { dedupeIdsWalk($0, &seen) }))
+    case .live(let v):
+        switch v {
+        case .compoundShape(var cs):
+            cs.operands = cs.operands.map { dedupeIdsWalk($0, &seen) }
+            return .live(.compoundShape(cs))
+        case .reference, .recorded, .generated:
+            return out
+        }
     default:
         return out
     }
@@ -125,11 +144,27 @@ private func normalizeElement(_ elem: Element) -> Element {
                                 opacity: e.opacity, transform: e.transform,
                                 locked: e.locked, visibility: e.visibility, name: e.name, id: e.id))
     case .path(let e):
+        // `toolOrigin` is forwarded because this rebuild dropped it, and the
+        // drop was invisible: it is not a key of the canonical test JSON, so
+        // the only thing that reads it is the Blob Brush merge. Every path
+        // opened from a file therefore reached the tool untagged, and a sweep
+        // over an imported blob started a NEW element where Rust unioned into
+        // the existing one. Pinned by test_fixtures/gestures/blob_import_merge.
+        //
+        // Deliberately narrow: this arm still omits blendMode, mask,
+        // fillGradient, strokeGradient, strokeBrush and strokeBrushOverrides,
+        // and the other nine arms of this function omit their own sets. None
+        // of those are reachable by any current fixture (the corpus manifest's
+        // declared `codec-optional-fields-unset` gap: those keys appear in
+        // zero of the expected goldens), so forwarding them here would be an
+        // unpinned change. Reported for a ruling rather than smuggled in.
         return .path(Path(d: e.d,
                           fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                           widthPoints: e.widthPoints,
                           opacity: e.opacity, transform: e.transform,
-                          locked: e.locked, visibility: e.visibility, name: e.name, id: e.id,
+                          locked: e.locked, visibility: e.visibility,
+                          toolOrigin: e.toolOrigin,
+                          name: e.name, id: e.id,
                           fillRule: e.fillRule))
     case .text(let e):
         // Pass the tspans tuple through so multi-tspan text

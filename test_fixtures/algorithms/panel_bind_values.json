@@ -2793,5 +2793,744 @@
         "value": "false"
       }
     ]
+  },
+  {
+    "name": "swatches@multi_selection",
+    "function": "bind_values",
+    "args": {
+      "panel": "swatches_panel_content",
+      "ctx": {
+        "state": {
+          "fill_color": "#ff0000",
+          "stroke_color": null,
+          "fill_on_top": false
+        },
+        "panel": {
+          "open_libraries": [
+            {
+              "id": "lib1",
+              "collapsed": false
+            },
+            {
+              "id": "lib2",
+              "collapsed": true
+            }
+          ],
+          "selected_swatches": [
+            "lib1:0",
+            "lib1:1",
+            "lib2:0"
+          ],
+          "recent_colors": [],
+          "thumbnail_size": 16
+        },
+        "data": {
+          "swatch_libraries": {
+            "lib1": {
+              "name": "Default",
+              "swatches": [
+                {
+                  "color": "#ff0000"
+                },
+                {
+                  "color": "#00ff00"
+                }
+              ]
+            },
+            "lib2": {
+              "name": "Grays",
+              "swatches": [
+                {
+                  "color": "#808080"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0,
+          0
+        ],
+        "id": "sp_fill_swatch",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#ff0000"
+      },
+      {
+        "path": [
+          0,
+          0,
+          0
+        ],
+        "id": "sp_fill_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "1"
+      },
+      {
+        "path": [
+          0,
+          0,
+          1
+        ],
+        "id": "sp_stroke_swatch",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          0,
+          1
+        ],
+        "id": "sp_stroke_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "2"
+      },
+      {
+        "path": [
+          0,
+          0,
+          4,
+          1
+        ],
+        "id": "sp_gradient_btn",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          2,
+          0
+        ],
+        "id": "sp_recent_0",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "id": "sp_recent_1",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          2
+        ],
+        "id": "sp_recent_2",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          3
+        ],
+        "id": "sp_recent_3",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          4
+        ],
+        "id": "sp_recent_4",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          5
+        ],
+        "id": "sp_recent_5",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          6
+        ],
+        "id": "sp_recent_6",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          7
+        ],
+        "id": "sp_recent_7",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          8
+        ],
+        "id": "sp_recent_8",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          9
+        ],
+        "id": "sp_recent_9",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          0
+        ],
+        "id": "",
+        "key": "bind.collapsed",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          0
+        ],
+        "id": "",
+        "key": "label",
+        "type": "string",
+        "value": "Default"
+      },
+      {
+        "path": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "id": "",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#ff0000"
+      },
+      {
+        "path": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "id": "",
+        "key": "bind.selected_in",
+        "type": "list",
+        "value": "[lib1:0,lib1:1,lib2:0]"
+      },
+      {
+        "path": [
+          3,
+          0,
+          0,
+          1
+        ],
+        "id": "",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#00ff00"
+      },
+      {
+        "path": [
+          3,
+          0,
+          0,
+          1
+        ],
+        "id": "",
+        "key": "bind.selected_in",
+        "type": "list",
+        "value": "[lib1:0,lib1:1,lib2:0]"
+      },
+      {
+        "path": [
+          3,
+          1
+        ],
+        "id": "",
+        "key": "bind.collapsed",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          3,
+          1
+        ],
+        "id": "",
+        "key": "label",
+        "type": "string",
+        "value": "Grays"
+      },
+      {
+        "path": [
+          3,
+          1,
+          0,
+          0
+        ],
+        "id": "",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#808080"
+      },
+      {
+        "path": [
+          3,
+          1,
+          0,
+          0
+        ],
+        "id": "",
+        "key": "bind.selected_in",
+        "type": "list",
+        "value": "[lib1:0,lib1:1,lib2:0]"
+      }
+    ]
+  },
+  {
+    "name": "swatches@nested_selection",
+    "function": "bind_values",
+    "args": {
+      "panel": "swatches_panel_content",
+      "ctx": {
+        "state": {
+          "fill_color": null,
+          "stroke_color": null,
+          "fill_on_top": true
+        },
+        "panel": {
+          "open_libraries": [
+            {
+              "id": "lib1",
+              "collapsed": false
+            }
+          ],
+          "selected_swatches": [
+            [
+              "lib1:0",
+              "lib1:1"
+            ],
+            [],
+            [
+              "lib2:0",
+              [
+                "deep"
+              ]
+            ]
+          ],
+          "recent_colors": [],
+          "thumbnail_size": 16
+        },
+        "data": {
+          "swatch_libraries": {
+            "lib1": {
+              "name": "Default",
+              "swatches": [
+                {
+                  "color": "#ff0000"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0,
+          0
+        ],
+        "id": "sp_fill_swatch",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          0,
+          0
+        ],
+        "id": "sp_fill_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "2"
+      },
+      {
+        "path": [
+          0,
+          0,
+          1
+        ],
+        "id": "sp_stroke_swatch",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          0,
+          0,
+          1
+        ],
+        "id": "sp_stroke_swatch",
+        "key": "bind.z_index",
+        "type": "number",
+        "value": "1"
+      },
+      {
+        "path": [
+          0,
+          0,
+          4,
+          1
+        ],
+        "id": "sp_gradient_btn",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          2,
+          0
+        ],
+        "id": "sp_recent_0",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "id": "sp_recent_1",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          2
+        ],
+        "id": "sp_recent_2",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          3
+        ],
+        "id": "sp_recent_3",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          4
+        ],
+        "id": "sp_recent_4",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          5
+        ],
+        "id": "sp_recent_5",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          6
+        ],
+        "id": "sp_recent_6",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          7
+        ],
+        "id": "sp_recent_7",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          8
+        ],
+        "id": "sp_recent_8",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          2,
+          9
+        ],
+        "id": "sp_recent_9",
+        "key": "bind.color",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3,
+          0
+        ],
+        "id": "",
+        "key": "bind.collapsed",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3,
+          0
+        ],
+        "id": "",
+        "key": "label",
+        "type": "string",
+        "value": "Default"
+      },
+      {
+        "path": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "id": "",
+        "key": "bind.color",
+        "type": "color",
+        "value": "#ff0000"
+      },
+      {
+        "path": [
+          3,
+          0,
+          0,
+          0
+        ],
+        "id": "",
+        "key": "bind.selected_in",
+        "type": "list",
+        "value": "[[lib1:0,lib1:1],[],[lib2:0,[deep]]]"
+      }
+    ]
+  },
+  {
+    "name": "layers@selection_lists",
+    "function": "bind_values",
+    "args": {
+      "panel": "layers_panel_content",
+      "ctx": {
+        "state": {},
+        "panel": {
+          "panel_selection": [
+            "el_a",
+            "el_b",
+            "el_c"
+          ],
+          "type_filter": [
+            "path",
+            "text"
+          ],
+          "isolation_stack": [],
+          "twirl_states": null,
+          "renaming_element": null,
+          "drag_active": false,
+          "search_query": ""
+        },
+        "active_document": {
+          "element_tree": null,
+          "element_selection": [
+            {
+              "__path__": [
+                0,
+                1
+              ]
+            },
+            {
+              "__path__": [
+                0,
+                2,
+                3
+              ]
+            },
+            {
+              "__path__": [
+                1
+              ]
+            }
+          ],
+          "artboards_panel_selection_ids": []
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0
+        ],
+        "id": "lp_breadcrumb",
+        "key": "bind.visible",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          1,
+          0
+        ],
+        "id": "",
+        "key": "bind.disabled",
+        "type": "bool",
+        "value": "true"
+      },
+      {
+        "path": [
+          1,
+          1
+        ],
+        "id": "lp_search_input",
+        "key": "bind.value",
+        "type": "string",
+        "value": ""
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "lp_tree",
+        "key": "bind.drag_active",
+        "type": "bool",
+        "value": "false"
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "lp_tree",
+        "key": "bind.element_selection",
+        "type": "list",
+        "value": "[0.1,0.2.3,1]"
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "lp_tree",
+        "key": "bind.isolation_root",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "lp_tree",
+        "key": "bind.panel_selection",
+        "type": "list",
+        "value": "[el_a,el_b,el_c]"
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "lp_tree",
+        "key": "bind.renaming_element",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "lp_tree",
+        "key": "bind.search_query",
+        "type": "string",
+        "value": ""
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "lp_tree",
+        "key": "bind.source",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "lp_tree",
+        "key": "bind.twirl_states",
+        "type": "null",
+        "value": ""
+      },
+      {
+        "path": [
+          3
+        ],
+        "id": "lp_tree",
+        "key": "bind.type_filter",
+        "type": "list",
+        "value": "[path,text]"
+      }
+    ]
   }
 ]

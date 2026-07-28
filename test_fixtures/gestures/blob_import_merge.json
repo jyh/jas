@@ -1,0 +1,19 @@
+[
+  {
+    "name": "blob_import_merge",
+    "setup_svg": "blob_import_merge_setup.svg",
+    "tool": "blob_brush",
+    "app_state": {
+      "fill_color": "#ff0000",
+      "blob_brush_size": 10.0,
+      "blob_brush_merge_only_with_selection": false
+    },
+    "events": [
+      { "kind": "press", "x": 50, "y": 50 },
+      { "kind": "move", "x": 100, "y": 50, "dragging": true },
+      { "kind": "move", "x": 150, "y": 50, "dragging": true },
+      { "kind": "release", "x": 150, "y": 50 }
+    ],
+    "expected_json": "blob_import_merge_expected.json"
+  }
+]

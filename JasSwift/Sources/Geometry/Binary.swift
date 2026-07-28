@@ -58,6 +58,122 @@ private let tagLive: Int = 11
 private let fillRuleNonZero: Int = 0
 private let fillRuleEvenOdd: Int = 1
 
+// MARK: - The per-tag trailing common extension
+//
+// RULED 2026-07-27 (transcripts/EDIT_SEMANTICS_FREEZE.md): `common.mode`,
+// `common.mask` and `common.tool_origin` were dropped by this codec in BOTH
+// active ports -- save as binary, reload, and they were gone -- and
+// `stroke_brush` / `stroke_brush_overrides` with them on Path. A round trip
+// speaks to NOTHING, so under the preservation law it must preserve
+// EVERYTHING.
+//
+// The SHAPE is forced by the layout: `unpackCommon` reads FIXED indices 1..6
+// and every variant's payload starts at index 7, so the shared common block
+// cannot be extended once. The three fields it never carried are therefore
+// appended PER ELEMENT TAG at the tag's own trailing edge. `version` STAYS AT
+// 2: the frozen tag-pinned readers reject `version > 2` and index positionally
+// without validating array length, so trailing append keeps them able to read
+// what we write -- the same reasoning that settled the fill_rule slot-11
+// decision.
+//
+// jas_dioxus/src/geometry/binary.rs mirrors these offsets, and
+// test_fixtures/expected/binary_wire.json pins the resulting arity and BYTES
+// for both ports at once.
+
+/// Offset of `common.mode` within a tag's extension block.
+private let extMode = 0
+/// Offset of `common.mask` within a tag's extension block.
+private let extMask = 1
+/// Offset of `common.tool_origin` within a tag's extension block.
+private let extToolOrigin = 2
+/// Slots in the extension block that EVERY tag carries.
+private let commonExtLen = 3
+/// tagPath only, immediately after the common extension.
+private let extStrokeBrush = commonExtLen
+private let extStrokeBrushOverrides = commonExtLen + 1
+
+/// Slots a tag carried BEFORE the extension -- equivalently, the index at
+/// which its extension block starts. Mirrors Rust's `tag_base_arity` and is
+/// declared as data in test_fixtures/expected/binary_wire.json.
+private func tagBaseArity(_ tag: Int) -> Int {
+    switch tag {
+    case tagLayer: return 8
+    case tagGroup: return 8
+    case tagLine: return 13
+    case tagRect: return 15
+    case tagCircle: return 12
+    case tagEllipse: return 13
+    case tagPolyline: return 10
+    case tagPolygon: return 10
+    case tagPath: return 12
+    case tagText: return 20
+    case tagTextPath: return 18
+    case tagLive: return 10
+    // An unknown tag never reaches here: `unpackElement` rejects it before
+    // the extension is read, and `packElement` is exhaustive.
+    default: return 0
+    }
+}
+
+/// Blend-mode wire tags, in `BlendMode`'s declaration order. Mirrors Rust's
+/// `blend_mode_tag`; an unrecognized tag reads as `.normal`, the value every
+/// document written before this slot existed was authored with.
+private func blendModeTag(_ m: BlendMode) -> Int {
+    switch m {
+    case .normal: return 0
+    case .darken: return 1
+    case .multiply: return 2
+    case .colorBurn: return 3
+    case .lighten: return 4
+    case .screen: return 5
+    case .colorDodge: return 6
+    case .overlay: return 7
+    case .softLight: return 8
+    case .hardLight: return 9
+    case .difference: return 10
+    case .exclusion: return 11
+    case .hue: return 12
+    case .saturation: return 13
+    case .color: return 14
+    case .luminosity: return 15
+    }
+}
+
+/// Deliberately does NOT go through `asInt`, which `fatalError`s on msgpack
+/// nil / string / array and truncates a float: Rust's `blend_mode_from_tag`
+/// accepts none of those and traps on none of them, and matching it keeps the
+/// ports equal AND keeps the standing contract that a
+/// malformed-but-decodable blob does not take the app down.
+private func blendModeFromTag(_ v: MsgValue?) -> BlendMode {
+    guard case .some(.int(let n)) = v else { return .normal }
+    switch n {
+    case 1: return .darken
+    case 2: return .multiply
+    case 3: return .colorBurn
+    case 4: return .lighten
+    case 5: return .screen
+    case 6: return .colorDodge
+    case 7: return .overlay
+    case 8: return .softLight
+    case 9: return .hardLight
+    case 10: return .difference
+    case 11: return .exclusion
+    case 12: return .hue
+    case 13: return .saturation
+    case 14: return .color
+    case 15: return .luminosity
+    default: return .normal
+    }
+}
+
+/// A trailing optional-string slot: absent, nil, or anything that is not a
+/// string all read as `nil` rather than trapping. Mirrors Rust's
+/// `tolerant_opt_str`.
+private func tolerantOptStr(_ v: MsgValue?) -> String? {
+    guard case .some(.string(let s)) = v else { return nil }
+    return s
+}
+
 // Path command tags.
 private let cmdMoveTo: Int = 0
 private let cmdLineTo: Int = 1
@@ -377,7 +493,7 @@ private func asOptBool(_ v: MsgValue) -> Bool? {
 }
 
 /// Pack a single Tspan as a compact msgpack array. Mirrors Rust's
-/// `pack_tspan` — 22 fields in the same order.
+/// `pack_tspan` — 51 fields in the same order.
 private func packTspan(_ t: Tspan) -> MsgValue {
     let decor: MsgValue
     if let members = t.textDecoration {
@@ -417,6 +533,41 @@ private func packTspan(_ t: Tspan) -> MsgValue {
         optStr(t.textTransform),
         transform,
         optStr(t.xmlLang),
+        // Slots 22..50, appended 2026-07-27. This writer stopped at 22 while
+        // Rust's `pack_tspan` wrote 51, so the two ports had never produced the
+        // same bytes for any Text or TextPath and this port lost 29 fields on a
+        // round trip. Found by the byte-level wire gate
+        // (test_fixtures/expected/binary_wire.json). The ORDER below is Rust's,
+        // slot for slot -- that is the whole contract.
+        optStr(t.jasRole),
+        optF64(t.jasLeftIndent),
+        optF64(t.jasRightIndent),
+        optBool(t.jasHyphenate),
+        optBool(t.jasHangingPunctuation),
+        optStr(t.jasListStyle),
+        optStr(t.textAlign),
+        optStr(t.textAlignLast),
+        optF64(t.textIndent),
+        optF64(t.jasSpaceBefore),
+        optF64(t.jasSpaceAfter),
+        optF64(t.jasWordSpacingMin),
+        optF64(t.jasWordSpacingDesired),
+        optF64(t.jasWordSpacingMax),
+        optF64(t.jasLetterSpacingMin),
+        optF64(t.jasLetterSpacingDesired),
+        optF64(t.jasLetterSpacingMax),
+        optF64(t.jasGlyphScalingMin),
+        optF64(t.jasGlyphScalingDesired),
+        optF64(t.jasGlyphScalingMax),
+        optF64(t.jasAutoLeading),
+        optStr(t.jasSingleWordJustify),
+        optF64(t.jasHyphenateMinWord),
+        optF64(t.jasHyphenateMinBefore),
+        optF64(t.jasHyphenateMinAfter),
+        optF64(t.jasHyphenateLimit),
+        optF64(t.jasHyphenateZone),
+        optF64(t.jasHyphenateBias),
+        optBool(t.jasHyphenateCapitalized),
     ])
 }
 
@@ -442,6 +593,9 @@ private func unpackTspan(_ v: MsgValue) -> Tspan {
     } else {
         transform = nil
     }
+    // NOTE: the argument order below must match `Tspan.init`'s declaration
+    // order, not the WIRE order -- Swift enforces the former. The wire order is
+    // the `get(n)` indices, which are Rust's slot numbers.
     return Tspan(
         id: id, content: content,
         baselineShift: asOptF64(get(2)),
@@ -455,6 +609,38 @@ private func unpackTspan(_ v: MsgValue) -> Tspan {
         jasFractionalWidths: asOptBool(get(10)),
         jasKerningMode: asOptStr(get(11)),
         jasNoBreak: asOptBool(get(12)),
+        // Slots 22..50 (see packTspan). `get` is already tolerant of a short
+        // array, so a pre-2026-07-27 blob -- including every .bin the frozen
+        // Python writer produced -- still reads with these fields nil.
+        jasRole: asOptStr(get(22)),
+        jasLeftIndent: asOptF64(get(23)),
+        jasRightIndent: asOptF64(get(24)),
+        jasHyphenate: asOptBool(get(25)),
+        jasHangingPunctuation: asOptBool(get(26)),
+        jasListStyle: asOptStr(get(27)),
+        textAlign: asOptStr(get(28)),
+        textAlignLast: asOptStr(get(29)),
+        textIndent: asOptF64(get(30)),
+        jasSpaceBefore: asOptF64(get(31)),
+        jasSpaceAfter: asOptF64(get(32)),
+        jasWordSpacingMin: asOptF64(get(33)),
+        jasWordSpacingDesired: asOptF64(get(34)),
+        jasWordSpacingMax: asOptF64(get(35)),
+        jasLetterSpacingMin: asOptF64(get(36)),
+        jasLetterSpacingDesired: asOptF64(get(37)),
+        jasLetterSpacingMax: asOptF64(get(38)),
+        jasGlyphScalingMin: asOptF64(get(39)),
+        jasGlyphScalingDesired: asOptF64(get(40)),
+        jasGlyphScalingMax: asOptF64(get(41)),
+        jasAutoLeading: asOptF64(get(42)),
+        jasSingleWordJustify: asOptStr(get(43)),
+        jasHyphenateMinWord: asOptF64(get(44)),
+        jasHyphenateMinBefore: asOptF64(get(45)),
+        jasHyphenateMinAfter: asOptF64(get(46)),
+        jasHyphenateLimit: asOptF64(get(47)),
+        jasHyphenateZone: asOptF64(get(48)),
+        jasHyphenateBias: asOptF64(get(49)),
+        jasHyphenateCapitalized: asOptBool(get(50)),
         letterSpacing: asOptF64(get(13)),
         lineHeight: asOptF64(get(14)),
         rotate: asOptF64(get(15)),
@@ -608,7 +794,70 @@ private func packCommon(locked: Bool, opacity: Double, visibility: Visibility,
      packTransform(transform), optStr(name), optStr(id)]
 }
 
+/// Pack an opacity mask: `[subtree, clip, invert, disabled, linked,
+/// unlinkTransform]`. The subtree is a full nested element, so a masked
+/// element's mask artwork round-trips with all of its own fields. Mirrors
+/// Rust's `pack_mask`.
+private func packMask(_ m: Mask?) -> MsgValue {
+    guard let m = m else { return .nil }
+    return .array([packElement(m.subtreeElement),
+                   vbool(m.clip), vbool(m.invert), vbool(m.disabled), vbool(m.linked),
+                   packTransform(m.unlinkTransform)])
+}
+
+/// Inverse of `packMask`, tolerant in the same way `unpackFillRule` is: an
+/// absent slot, a nil slot, a slot holding something that is not an array, and
+/// an array whose subtree slot is not itself an element array ALL read as "no
+/// mask" rather than trapping or guessing. Mirrors Rust's `unpack_mask`.
+private func unpackMask(_ v: MsgValue?) -> Mask? {
+    guard case .some(.array(let arr)) = v, let first = arr.first,
+          case .array = first else { return nil }
+    func b(_ i: Int, _ fallback: Bool) -> Bool {
+        guard i < arr.count, case .bool(let x) = arr[i] else { return fallback }
+        return x
+    }
+    let unlink: Transform?
+    if arr.count > 5, case .array = arr[5] { unlink = unpackTransform(arr[5]) } else { unlink = nil }
+    return Mask(subtreeElement: unpackElement(first),
+                clip: b(1, true), invert: b(2, false),
+                disabled: b(3, false), linked: b(4, true),
+                unlinkTransform: unlink)
+}
+
+/// The trailing per-tag extension block: the `CommonProps` fields the fixed
+/// 1..6 block cannot hold. Written for EVERY tag, always, so a tag's arity is
+/// constant and the shared wire gate can assert it.
+///
+/// `toolOrigin` lives only on `Path` in THIS port's model (Rust carries it on
+/// every element's `CommonProps`), so every other tag packs nil here -- the
+/// same shape as `packCommon(name: nil, ...)` for the live variants, which
+/// have no `name` field. Documented, not guessed: a Swift element that cannot
+/// hold the value cannot lose it either.
+private func packCommonExt(_ elem: Element) -> [MsgValue] {
+    var toolOrigin: String? = nil
+    if case .path(let e) = elem { toolOrigin = e.toolOrigin }
+    return [vint(blendModeTag(elem.blendMode)), packMask(elem.mask), optStr(toolOrigin)]
+}
+
 private func packElement(_ elem: Element) -> MsgValue {
+    guard case .array(var slots) = packElementBase(elem) else {
+        fatalError("packElementBase must produce an array")
+    }
+    // The per-tag trailing common extension (see extMode / extMask /
+    // extToolOrigin). Appended here rather than inside each arm so no tag can
+    // be forgotten.
+    slots += packCommonExt(elem)
+    if case .path(let e) = elem {
+        // Path-only, immediately after the common extension.
+        slots.append(optStr(e.strokeBrush))
+        slots.append(optStr(e.strokeBrushOverrides))
+    }
+    return .array(slots)
+}
+
+/// The tag's slots up to `tagBaseArity(tag)` -- everything the format carried
+/// before the trailing extension.
+private func packElementBase(_ elem: Element) -> MsgValue {
     switch elem {
     case .layer(let e):
         let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
@@ -876,27 +1125,47 @@ private func unpackCommon(_ arr: [MsgValue]) -> (Bool, Double, Visibility, Trans
             asOptStr(arr[5]), asOptStr(arr[6]))
 }
 
+/// Read the tag's TRAILING extension block at `tagBaseArity(tag)`. Read
+/// TOLERANTLY -- an absent slot yields the documented default, so a blob
+/// written before the extension existed still loads with exactly the values it
+/// was authored with. Mirrors the extension half of Rust's `unpack_common`.
+private func unpackCommonExt(_ arr: [MsgValue], _ tag: Int) -> (BlendMode, Mask?, String?) {
+    let base = tagBaseArity(tag)
+    func slot(_ off: Int) -> MsgValue? {
+        let i = base + off
+        return i < arr.count ? arr[i] : nil
+    }
+    return (blendModeFromTag(slot(extMode)),
+            unpackMask(slot(extMask)),
+            tolerantOptStr(slot(extToolOrigin)))
+}
+
 private func unpackElement(_ v: MsgValue) -> Element {
     let arr = asArray(v)
     let tag = asInt(arr[0])
     let (locked, opacity, vis, xform, name, id) = unpackCommon(arr)
-    // Type-specific payload begins at index 7 (after the common block).
+    let (mode, mask, toolOrigin) = unpackCommonExt(arr, tag)
+    // Type-specific payload begins at index 7 (after the common block); the
+    // trailing extension begins at tagBaseArity(tag).
 
     switch tag {
     case tagLayer:
         let children = asArray(arr[7]).map { unpackElement($0) }
         return .layer(Layer(name: name, children: children, opacity: opacity,
-                            transform: xform, locked: locked, visibility: vis, id: id))
+                            transform: xform, locked: locked, visibility: vis,
+                            blendMode: mode, mask: mask, id: id))
     case tagGroup:
         let children = asArray(arr[7]).map { unpackElement($0) }
         return .group(Group(children: children, opacity: opacity,
-                            transform: xform, locked: locked, visibility: vis, name: name, id: id))
+                            transform: xform, locked: locked, visibility: vis,
+                            blendMode: mode, mask: mask, name: name, id: id))
     case tagLine:
         let wp = arr.count > 12 ? unpackWidthPoints(arr[12]) : []
         return .line(Line(x1: asF64(arr[7]), y1: asF64(arr[8]),
                           x2: asF64(arr[9]), y2: asF64(arr[10]),
                           stroke: unpackStroke(arr[11]), widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                          blendMode: mode, mask: mask,
                           name: name, id: id))
     case tagRect:
         return .rect(Rect(x: asF64(arr[7]), y: asF64(arr[8]),
@@ -904,36 +1173,50 @@ private func unpackElement(_ v: MsgValue) -> Element {
                           rx: asF64(arr[11]), ry: asF64(arr[12]),
                           fill: unpackFill(arr[13]), stroke: unpackStroke(arr[14]),
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                          blendMode: mode, mask: mask,
                           name: name, id: id))
     case tagCircle:
         return .circle(Circle(cx: asF64(arr[7]), cy: asF64(arr[8]), r: asF64(arr[9]),
                               fill: unpackFill(arr[10]), stroke: unpackStroke(arr[11]),
                               opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                              blendMode: mode, mask: mask,
                               name: name, id: id))
     case tagEllipse:
         return .ellipse(Ellipse(cx: asF64(arr[7]), cy: asF64(arr[8]),
                                 rx: asF64(arr[9]), ry: asF64(arr[10]),
                                 fill: unpackFill(arr[11]), stroke: unpackStroke(arr[12]),
                                 opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                                blendMode: mode, mask: mask,
                                 name: name, id: id))
     case tagPolyline:
         let points = asArray(arr[7]).map { (asF64(asArray($0)[0]), asF64(asArray($0)[1])) }
         return .polyline(Polyline(points: points, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
                                   opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                                  blendMode: mode, mask: mask,
                                   name: name, id: id))
     case tagPolygon:
         let points = asArray(arr[7]).map { (asF64(asArray($0)[0]), asF64(asArray($0)[1])) }
         return .polygon(Polygon(points: points, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
                                 opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                                blendMode: mode, mask: mask,
                                 name: name, id: id))
     case tagPath:
         let cmds = asArray(arr[7]).map { unpackPathCommand($0) }
         let wp = arr.count > 10 ? unpackWidthPoints(arr[10]) : []
         // Trailing slot 11; absent in pre-fillRule blobs.
         let rule = unpackFillRule(arr.count > 11 ? arr[11] : nil)
+        let base = tagBaseArity(tagPath)
+        func pathSlot(_ off: Int) -> MsgValue? {
+            let i = base + off
+            return i < arr.count ? arr[i] : nil
+        }
         return .path(Path(d: cmds, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
                           widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                          blendMode: mode, mask: mask,
+                          strokeBrush: tolerantOptStr(pathSlot(extStrokeBrush)),
+                          strokeBrushOverrides: tolerantOptStr(pathSlot(extStrokeBrushOverrides)),
+                          toolOrigin: toolOrigin,
                           name: name, id: id, fillRule: rule))
     case tagText:
         // Prefer the trailing tspans field when present; otherwise
@@ -950,6 +1233,7 @@ private func unpackElement(_ v: MsgValue) -> Element {
                               width: asF64(arr[15]), height: asF64(arr[16]),
                               fill: unpackFill(arr[17]), stroke: unpackStroke(arr[18]),
                               opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                              blendMode: mode, mask: mask,
                               name: name, id: id))
         }
         return .text(Text(x: asF64(arr[7]), y: asF64(arr[8]), content: asStr(arr[9]),
@@ -959,6 +1243,7 @@ private func unpackElement(_ v: MsgValue) -> Element {
                           width: asF64(arr[15]), height: asF64(arr[16]),
                           fill: unpackFill(arr[17]), stroke: unpackStroke(arr[18]),
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                          blendMode: mode, mask: mask,
                           name: name, id: id))
     case tagTextPath:
         let cmds = asArray(arr[7]).map { unpackPathCommand($0) }
@@ -970,6 +1255,7 @@ private func unpackElement(_ v: MsgValue) -> Element {
                                       textDecoration: asStr(arr[14]),
                                       fill: unpackFill(arr[15]), stroke: unpackStroke(arr[16]),
                                       opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                                      blendMode: mode, mask: mask,
                                       name: name, id: id))
         }
         return .textPath(TextPath(d: cmds, content: asStr(arr[8]), startOffset: asF64(arr[9]),
@@ -978,6 +1264,7 @@ private func unpackElement(_ v: MsgValue) -> Element {
                                   textDecoration: asStr(arr[14]),
                                   fill: unpackFill(arr[15]), stroke: unpackStroke(arr[16]),
                                   opacity: opacity, transform: xform, locked: locked, visibility: vis,
+                                  blendMode: mode, mask: mask,
                                   name: name, id: id))
     case tagLive:
         // Live elements (REFERENCE_GRAPH.md Phase 2b): dispatch on the
@@ -994,7 +1281,8 @@ private func unpackElement(_ v: MsgValue) -> Element {
             return .live(.compoundShape(CompoundShape(
                 operation: operation, operands: operands, id: id,
                 opacity: opacity, transform: xform,
-                locked: locked, visibility: vis)))
+                locked: locked, visibility: vis,
+                blendMode: mode, mask: mask)))
         case "reference":
             // ReferenceElem is a first-class element with its own id; it
             // takes the full common block (target at index 8, paint nil).
@@ -1008,7 +1296,8 @@ private func unpackElement(_ v: MsgValue) -> Element {
                 id: id,
                 transform: xform,
                 instanceTransform: instanceXform,
-                opacity: opacity, locked: locked, visibility: vis)))
+                opacity: opacity, locked: locked, visibility: vis,
+                blendMode: mode, mask: mask)))
         case "recorded":
             // Decode the recipe from the two JSON strings packed at slots 8/9
             // (RECORDED_ELEMENTS.md), mirroring the Rust binary codec.
@@ -1019,7 +1308,8 @@ private func unpackElement(_ v: MsgValue) -> Element {
             return .live(.recorded(RecordedElem(
                 ops: ops, inputs: inputs, id: id,
                 transform: xform, opacity: opacity,
-                locked: locked, visibility: vis)))
+                locked: locked, visibility: vis,
+                blendMode: mode, mask: mask)))
         case "generated":
             // Decode the concept id + params from slots 8/9 (CONCEPTS.md),
             // mirroring the Rust binary codec.
@@ -1030,7 +1320,8 @@ private func unpackElement(_ v: MsgValue) -> Element {
             return .live(.generated(GeneratedElem(
                 conceptId: conceptId, params: params, id: id,
                 transform: xform, opacity: opacity,
-                locked: locked, visibility: vis)))
+                locked: locked, visibility: vis,
+                blendMode: mode, mask: mask)))
         default: fatalError("unknown live kind: \(kind)")
         }
     default: fatalError("unknown element tag: \(tag)")
@@ -1139,6 +1430,36 @@ package func documentToBinary(_ doc: Document, compress: Bool = true) -> Data {
     out.append(UInt8((flags >> 8) & 0xFF))
     out.append(contentsOf: payload)
     return Data(out)
+}
+
+/// The number of msgpack slots `packElement` writes for `elem` -- the arity
+/// the per-tag trailing append is defined against. Read by the shared
+/// byte-level wire gate (test_fixtures/expected/binary_wire.json), whose whole
+/// purpose is that a one-port slot mismatch cannot land silently. Mirrors
+/// Rust's `packed_element_slot_count`.
+package func packedElementSlotCount(_ elem: Element) -> Int {
+    guard case .array(let slots) = packElement(elem) else { return 0 }
+    return slots.count
+}
+
+/// The wire tag name for an element -- the `tag_arity` keys of
+/// test_fixtures/expected/binary_wire.json. Mirrors Rust's
+/// `element_tag_label`.
+package func elementTagLabel(_ elem: Element) -> String {
+    switch elem {
+    case .layer: return "layer"
+    case .group: return "group"
+    case .line: return "line"
+    case .rect: return "rect"
+    case .circle: return "circle"
+    case .ellipse: return "ellipse"
+    case .polyline: return "polyline"
+    case .polygon: return "polygon"
+    case .path: return "path"
+    case .text: return "text"
+    case .textPath: return "text_path"
+    case .live: return "live"
+    }
 }
 
 /// Deserialize a Document from the JAS binary format.

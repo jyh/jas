@@ -47,7 +47,11 @@ case "measure":           results = runMeasure(activeVectors)
 case "element_bounds":    results = runElementBounds(activeVectors)
 case "element_evaluated_bounds": results = runElementEvaluatedBounds(activeVectors)
 case "flatten":           results = runFlatten(activeVectors)
+case "art_flatten":       results = runArtFlatten(activeVectors)
+case "calligraphic_outline": results = runCalligraphicOutline(activeVectors)
+case "paste_translate":   results = runPasteTranslate(activeVectors)
 case "arrow_trim":        results = runArrowTrim(activeVectors)
+case "gradient_remap":    results = runGradientRemap(activeVectors)
 case "length":            results = runLength(activeVectors)
 case "color_convert":     results = runColorConvert(activeVectors)
 case "number_commit":     results = runNumberCommit(activeVectors)
@@ -119,6 +123,92 @@ func runFlatten(_ vectors: [[String: Any]]) -> [[String: Any]] {
     }
 }
 
+// MARK: - Art Flatten (first-subpath flattener behind art-along-path,
+//         pattern-along-path and the bristle brush)
+//
+// A separate verb from `flatten` on purpose: `flattenArtPath` is not a wrapper
+// over `flattenPathCommands`. It walks the first subpath only, dedupes
+// coincident vertices, and samples curves at its own step counts. It had no
+// corpus family at all, which is how a leading-ClosePath bail-out survived in
+// BOTH ports at once (S-4).
+
+func runArtFlatten(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        var d: [PathCommand] = []
+        if case .path(let p) = elem { d = p.d }
+        let pts = flattenArtPath(d)
+        let result = pts.map { [$0.0, $0.1] }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Calligraphic Outline (the Calligraphic brush's variable-width outline)
+//
+// Driven for the same reason as `art_flatten`: its private stroke sampler is a
+// FOURTH first-subpath walker, with its own step counts and its own
+// accumulator, and it carried the same leading-ClosePath bail-out in both
+// ports. Gated at the public function rather than at the sampler so the family
+// asserts what the artist sees (the ribbon), not an internal.
+
+func runCalligraphicOutline(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        var d: [PathCommand] = []
+        if case .path(let p) = elem { d = p.d }
+        let b = tc["brush"] as? [String: Any] ?? [:]
+        let brush = CalligraphicBrush(angle: (b["angle"] as? NSNumber)?.doubleValue ?? 0,
+                                      roundness: (b["roundness"] as? NSNumber)?.doubleValue ?? 100,
+                                      size: (b["size"] as? NSNumber)?.doubleValue ?? 1)
+        let pts = calligraphicOutline(d, brush)
+        let result = pts.map { [$0.0, $0.1] }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Paste Translate (the offset a PASTE applies to each pasted element)
+//
+// `workspace/actions.yaml` §paste: "offset 24 points down and to the right from
+// the original position", against `paste_in_place`'s explicit "no offset". Both
+// ports implement that by translating each pasted element, and until this family
+// NOTHING watched it: `opApply` has no paste verb in either port and no corpus
+// vector pastes anything.
+//
+// This verb deliberately calls the function the PASTE PATH calls, not the
+// tidiest one available: `EditClipboard.translateElement` (invoked by
+// `pasteClipboard`), whose Rust counterpart is `translate_element` at both paste
+// sites in workspace/clipboard.rs. Pointing it at `Element.translated` instead
+// would be a decoy — that function was already correct while the paste path was
+// not.
+//
+// SCOPE, stated: this gates the per-element transform a paste applies. The rest
+// of the paste FLOW is still ungated and still divergent (Rust appends to the
+// selected layer; Swift merges by layer name) — see the manifest's
+// `paste-offset-compound-divergence` row.
+
+func runPasteTranslate(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        let dx = (tc["dx"] as? NSNumber)?.doubleValue ?? 0
+        let dy = (tc["dy"] as? NSNumber)?.doubleValue ?? 0
+        let moved = EditClipboard.translateElement(elem, dx: dx, dy: dy)
+        // Serialized through the SHARED document writer so the comparison sees
+        // every field, not only the coordinates: this helper's group/layer arms
+        // also dropped name, id, visibility, blend mode and mask, which a
+        // coordinate-only result would miss.
+        // The writer's CANONICAL STRING, not a re-parsed object: round-tripping
+        // it through a JSON library normalises `1.0` to `1` in one port and not
+        // the other, which would have been a harness divergence wearing the
+        // costume of a port divergence. This is the same comparison the
+        // operations corpus makes.
+        let doc = Document(layers: [Layer(name: "L0", children: [moved])])
+        return ["name": name, "result": documentToTestJson(doc)]
+    }
+}
+
 // MARK: - Arrow Trim (arc-length trim of an arrowheaded stroke path)
 
 func cmdToJSON(_ cmd: PathCommand) -> [String: Any] {
@@ -131,6 +221,41 @@ func cmdToJSON(_ cmd: PathCommand) -> [String: Any] {
         return ["cmd": "Q", "x1": x1, "y1": y1, "x": x, "y": y]
     case .closePath: return ["cmd": "Z"]
     default: return ["cmd": "?"]
+    }
+}
+
+// MARK: - Gradient Remap
+//
+// LINEAR gradient stop remap onto a split fragment (S-2). Colours travel as
+// 8-bit hex in BOTH directions, because a GradientStop's colour IS a hex string
+// here while Rust's is a Color with f64 channels -- hex is the widest value the
+// two stop models share, so the corpus compares it exactly.
+
+func runGradientRemap(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    func bbox(_ v: Any?) -> GradientBBox {
+        let a = (v as? [Any])?.compactMap { ($0 as? NSNumber)?.doubleValue } ?? []
+        func g(_ i: Int) -> Double { i < a.count ? a[i] : 0.0 }
+        return (g(0), g(1), g(2), g(3))
+    }
+    return vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let stops: [GradientStop] = (tc["stops"] as? [[String: Any]] ?? []).map { s in
+            GradientStop(
+                color: s["hex"] as? String ?? "000000",
+                opacity: (s["opacity"] as? NSNumber)?.doubleValue ?? 100.0,
+                location: (s["location"] as? NSNumber)?.doubleValue ?? 0.0,
+                midpointToNext: (s["midpoint"] as? NSNumber)?.doubleValue ?? 50.0)
+        }
+        let out = remapLinearStops(
+            stops,
+            angleDeg: (tc["angle"] as? NSNumber)?.doubleValue ?? 0.0,
+            parent: bbox(tc["parent"]),
+            fragment: bbox(tc["fragment"]))
+        let result: [[String: Any]] = out.map { s in
+            ["hex": s.color, "opacity": s.opacity,
+             "location": s.location, "midpoint": s.midpointToNext]
+        }
+        return ["name": name, "result": result]
     }
 }
 

@@ -51,5 +51,69 @@
    "_comment": "The evaluated bbox is built from GEOMETRIC bounds, so a 4-wide stroke must NOT inflate it: [0,0,10,10], not the preview bbox [-2,-2,14,14]. The transform is the identity here so the vector isolates that one choice.",
    "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": {"color": {"r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 4.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
    "layer_transform": null,
-   "expected": [0.0, 0.0, 10.0, 10.0]}
+   "expected": [0.0, 0.0, 10.0, 10.0]},
+
+  {"name": "ellipse_no_transform_control", "function": "element_evaluated_bounds",
+   "_geometric_bounds_from": "ellipse_bounds",
+   "_comment": "NON-RECT geometry starts here. The nine vectors above are all rects, where the geometric bbox IS the shape, so every one of them is blind to the family's central choice: this pass maps the four CORNERS of the geometric bbox and axis-aligns them, it does not bound the transformed shape. On a rect the two rules agree; on an ellipse or a curve they do not. Each transform-bearing vector below is paired with a control like this one -- both matrices null, so the answer must be the plain geometric bbox -- which is what lets the reference oracle take the shape's geometric bounds from the element_bounds family's own golden (named by `_geometric_bounds_from`) instead of re-deriving geometry the reference does not implement. The control is also what makes that legal: it measures, in BOTH ports, that this strokeless element's bounds() equals its geometric_bounds().",
+   "element": {"type": "ellipse", "cx": 50.0, "cy": 50.0, "rx": 30.0, "ry": 20.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [20.0, 30.0, 60.0, 40.0]},
+
+  {"name": "ellipse_rotate_45_maps_bbox_corners", "function": "element_evaluated_bounds",
+   "_geometric_bounds_from": "ellipse_bounds",
+   "_comment": "THE VECTOR THE RECT-ONLY SET COULD NOT WRITE. rotate(45) on a 60x40 ellipse. Corner-mapping (the contract) gives a 70.7107-square box; bounding the ROTATED ELLIPSE gives [-25.4951,45.2156,50.9902,50.9902], a box 28 percent narrower that a viewer would see as visibly tighter around the shape. Both ports return the corner-mapped box, and so does the reference (effects._element_evaluated_bbox maps corners), so the corner rule is the ratified answer, not a shared slip -- it is what keeps the Properties panel's numbers equal to the drawn selection box (evaluated_bounds.rs module docs). This vector is what would notice a port switching to the tighter rule.",
+   "element": {"type": "ellipse", "cx": 50.0, "cy": 50.0, "rx": 30.0, "ry": 20.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": {"a": 0.7071067811865476, "b": 0.7071067811865476, "c": -0.7071067811865476, "d": 0.7071067811865476, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [-35.35533905932738, 35.35533905932738, 70.71067811865476, 70.71067811865476]},
+
+  {"name": "path_cubic_no_transform_control", "function": "element_evaluated_bounds",
+   "_geometric_bounds_from": "path_cubic_tight_bounds",
+   "_comment": "Control for the curve pair: the cubic's TIGHT bbox is [0,0,20,7.5] (the hull would be 10 tall), and this vector pins that the evaluated pass starts from it.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "C", "x1": 5.0, "y1": 10.0, "x2": 15.0, "y2": 10.0, "x": 20.0, "y": 0.0}], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [0.0, 0.0, 20.0, 7.5]},
+
+  {"name": "path_cubic_composed_matrix", "function": "element_evaluated_bounds",
+   "_comment": "A CURVE under a general matrix (a=2 b=1 c=-0.5 d=1.5 e=7 f=-3). Corner-mapping the tight bbox [0,0,20,7.5] gives [3.25,-3,43.75,31.25]; transforming the four control points and re-bounding the resulting cubic gives [7,-3,40,23.923] -- 3.75 wider and 7.3 taller than the true curve, the error this family is DEFINED to keep, so that the panel's box matches the drawn one. Three of the four components differ, so the vector separates the rules on its own.",
+   "_geometric_bounds_from": "path_cubic_tight_bounds",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "C", "x1": 5.0, "y1": 10.0, "x2": 15.0, "y2": 10.0, "x": 20.0, "y": 0.0}], "fill": null, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 1.0, "c": -0.5, "d": 1.5, "e": 7.0, "f": -3.0}, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [3.25, -3.0, 43.75, 31.25]},
+
+  {"name": "path_arc_no_transform_control", "function": "element_evaluated_bounds",
+   "_geometric_bounds_from": "path_arc_half_then_close",
+   "_comment": "Control for the arc pair: the half elliptical arc's peak at y=-30 sets the top bound, so the geometric bbox is [0,-30,100,30].",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "A", "rx": 50.0, "ry": 30.0, "x_rotation": 0.0, "large_arc": false, "sweep": true, "x": 100.0, "y": 0.0}, {"cmd": "Z"}], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [0.0, -30.0, 100.0, 30.0]},
+
+  {"name": "path_arc_layer_rotate_90", "function": "element_evaluated_bounds",
+   "_geometric_bounds_from": "path_arc_half_then_close",
+   "_comment": "The ANCESTOR leg on non-rect geometry: the arc carries no matrix and the LAYER rotates 90 degrees (a=0 b=1 c=-1 d=0), which transposes the box to [0,0,30,100]. A port that folded only the element's own transform returns the geometric [0,-30,100,30]; one that rotated the other way (b and c swapped) returns [-30,-100,30,100]. Three of the four components differ from the geometric bbox, and the fourth-component agreement is on x=0 only.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "A", "rx": 50.0, "ry": 30.0, "x_rotation": 0.0, "large_arc": false, "sweep": true, "x": 100.0, "y": 0.0}, {"cmd": "Z"}], "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "layer_transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0},
+   "expected": [0.0, 0.0, 30.0, 100.0]},
+
+  {"name": "group_no_transform_control", "function": "element_evaluated_bounds",
+   "_geometric_bounds_from": "group_bounds",
+   "_comment": "Control for the container pair: the group's geometric bbox is the union of its two children, [5,10,100,55].",
+   "element": {"type": "group",
+    "children": [
+      {"type": "rect", "x": 5.0, "y": 10.0, "width": 100.0, "height": 50.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      {"type": "ellipse", "cx": 50.0, "cy": 50.0, "rx": 25.0, "ry": 15.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}],
+    "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [5.0, 10.0, 100.0, 55.0]},
+
+  {"name": "group_scale_2x", "function": "element_evaluated_bounds",
+   "_geometric_bounds_from": "group_bounds",
+   "_comment": "A CONTAINER carrying the matrix: scale(2) about the document origin, so the union's origin moves too -- [10,20,200,110], not [5,10,200,110]. Pairs with element_bounds/group_transform_is_ignored, which is the same group under a matrix in the family that must NOT fold it.",
+   "element": {"type": "group",
+    "children": [
+      {"type": "rect", "x": 5.0, "y": 10.0, "width": 100.0, "height": 50.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+      {"type": "ellipse", "cx": 50.0, "cy": 50.0, "rx": 25.0, "ry": 15.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}],
+    "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "layer_transform": null,
+   "expected": [10.0, 20.0, 200.0, 110.0]}
 ]

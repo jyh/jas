@@ -23,6 +23,7 @@ jobs:
       - run: bash scripts/check_panel_goldens.sh
       - run: python scripts/check_path_b_exclusions.py
       - run: bash scripts/check_intent_map.sh
+      - run: python scripts/check_preservation_corpus.py
       - run: python scripts/check_corpus_manifest.py --self-test && python scripts/check_corpus_manifest.py
 
   expr-corpus-fresh:
@@ -92,6 +93,14 @@ jobs:
         run: python scripts/genericity_check_test.py
       - name: Run the lint
         run: python scripts/genericity_check.py
+      # POLICY.md section 5 — the naming rule. It went silently broken on
+      # public main until a chance pre-push grep found 18 occurrences; this
+      # is what stops the next one. Self-test first: the gate is trusted
+      # for its red, and a check that can only pass is not a check.
+      - name: Self-test the naming-rule gate
+        run: python scripts/check_naming_rule.py --self-test
+      - name: Naming rule (product-agnostic framing)
+        run: python scripts/check_naming_rule.py
 
   rust:
     name: Rust tests

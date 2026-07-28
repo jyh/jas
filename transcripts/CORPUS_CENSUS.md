@@ -88,9 +88,9 @@ document* > *committed selection/state* > *view* > *crash* (loud) > *latent*.
 | **3** | Boolean output rebuild drops `CommonProps` | `controller.rs:1766` `common: common.clone()` | `Document/Controller.swift:1288` field-by-field | PARTIAL | R8 R6 | set any operand's opacity <100%, then union | **[V-BASE]** opacity forced 1.0, `locked` forced false, blend/mask/name/id/`tool_origin` dropped |
 | **4** | Eyedropper appearance cache: **float enum vs hex string** | `interpreter/effects.rs:5177` serde over `Color` | `Algorithms/Eyedropper.swift:459` `colorToString → c.toHex()` | NONE | R1 R6 R8 | Eyedropper click → Alt+click | **[V-HEAD]** `colorToString` still `c.toHex()` at `:459-460`; loses **alpha + colour-space variant**, and `state.eyedropper_cache.fill.color` is an **object** in Rust, a **string** in Swift |
 | **5** | `segmentsOfElement` has **no `.live` case**; filled polyline goes bbox-only | `algorithms/hit_test.rs:232` (Live arm at `:268`, evaluates rings) | `Algorithms/HitTest.swift:88`, `default:` at **`:115`** | NOT_IN_ROUNDTRIP | R6 R3 | marquee / lasso — everyday | **[V-HEAD]** dispatch arms at HEAD are `.line .rect .polyline .polygon .path default` — no `.live`. Lasso across a donut hole: **selects in Swift, not in Rust**. **CLOSED — both legs; see §9.1(b)** |
-| **6** | `doc.zoom.apply` — the `anchor = -1` "viewport centre" default | `interpreter/effects.rs:1752` (uses `viewport_w/2`) | `Tools/YamlToolEffects.swift:764` `anchorXRaw < 0 ? px : anchorXRaw` | NONE | R6 | any zoom action with default anchors | **[V-HEAD]** line 764 read at HEAD — **no viewport-centre branch**; Swift carries `viewportW` and does not use it |
-| **7** | `doc.zoom.set` — Rust recomputes pan, Swift does not | `effects.rs:1786` | `YamlToolEffects.swift:777` ("pan unchanged") | NONE | R6 R8 | Cmd-1 from 4× | **[V-BASE]** Rust has the fix; Swift is the pre-fix version; **`workspace/actions.yaml:343` still documents the OLD behaviour**, so the reference cannot arbitrate |
-| **8** | Six view actions **bypass the YAML pipeline** in Swift (native `Model` methods, hardcoded constants) | `workspace/keyboard.rs:500`, `menu_bar.rs:422` → actions | `Canvas/ContentView.swift:540`, `Menu/JasCommands.swift:352` → `Model.swift:530-583` | NONE | R6 R8 | View menu, Cmd-+/−/0/1 | **[V-BASE]** `pad = 20.0`, clamp `0.1…64.0` hardcoded; `preferences.viewport.*` moves Rust only; `fitActiveArtboard` uses `artboards.first` vs Rust's `current_artboard`; **the correct Swift effects are dead on the user path** |
+| **6** | `doc.zoom.apply` — the `anchor = -1` "viewport centre" default | `interpreter/effects.rs:1752` (uses `viewport_w/2`) | `Tools/YamlToolEffects.swift:764` `anchorXRaw < 0 ? px : anchorXRaw` | NONE | R6 | any zoom action with default anchors | **[V-HEAD]** line 764 read at HEAD — **no viewport-centre branch**; Swift carries `viewportW` and does not use it. **CLOSED 2026-07-27 (ZOOMPKG) — see the note below** |
+| **7** | `doc.zoom.set` — Rust recomputes pan, Swift does not | `effects.rs:1786` | `YamlToolEffects.swift:777` ("pan unchanged") | NONE | R6 R8 | Cmd-1 from 4× | **[V-BASE]** Rust has the fix; Swift is the pre-fix version; **`workspace/actions.yaml:343` still documents the OLD behaviour**, so the reference cannot arbitrate. **CLOSED 2026-07-27 (ZOOMPKG) — JYH ruled the SPEC wrong; five statements rewritten. See the note below** |
+| **8** | Six view actions **bypass the YAML pipeline** in Swift (native `Model` methods, hardcoded constants) | `workspace/keyboard.rs:500`, `menu_bar.rs:422` → actions | `Canvas/ContentView.swift:540`, `Menu/JasCommands.swift:352` → `Model.swift:530-583` | NONE | R6 R8 | View menu, Cmd-+/−/0/1 | **[V-BASE]** `pad = 20.0`, clamp `0.1…64.0` hardcoded; `preferences.viewport.*` moves Rust only; `fitActiveArtboard` uses `artboards.first` vs Rust's `current_artboard`; **the correct Swift effects are dead on the user path**. **CLOSED 2026-07-27 (ZOOMPKG) — THREE surfaces, not two. See the note below** |
 | **9** | Swift boolean generic dispatcher registers **4 of 9 verbs** | `interpreter/renderer.rs:3094` — all 9 | `Panels/LayersPanel.swift:839` — union, subtract_front, intersection, exclude | NONE | R6 | menu → Pathfinder → Divide/Trim/Merge/Crop | **[V-HEAD]** the 4-pair list read at HEAD `:839-846`; the action corpus drives **this** dispatcher and holds exactly those 4 verbs — gap invisible **by construction** |
 | **10** | `hypot` — libm vs naive `sqrt(dx²+dy²)` | `interpreter/expr_eval.rs:891` `dx.hypot(dy)` | `Interpreter/ExprEval.swift:1361` `(dx*dx+dy*dy).squareRoot()` | PARTIAL | R1 R5 | **every drag** (Line min-length, Pen click-vs-drag) | **[V-HEAD]** both bodies read at HEAD. **[MEASURED]** 1-ULP apart on 423 / 779,961 pairs; `hypot(1e200,1e200)` = 1.41e200 vs **+inf**. Corpus has one case, `hypot(3,4)==5` — the one input that cannot fail |
 | **11** | `grayscale()` / `cmyk()` — saturating cast vs **trapping initialiser** | `expr_eval.rs:600` `.round() as u8` (saturates) | `ExprEval.swift:1148` `UInt8(((1-k/100)*255).rounded())` — **no clamp** | NONE | R7 | panel-driven `k` outside 0–100 | **[V-HEAD]** line 1148 read at HEAD. `grayscale(101)` → `UInt8(-3.0)` → **Swift fatal error**; Rust returns `#000000`. Not a value difference — a **crash vs a clamp** |
@@ -260,6 +260,65 @@ Worth a council ruling.
 "leave pan unchanged" — so on this primitive **the spec text agrees with the port that is behind.**
 Whichever way it is resolved, the YAML English must change in the same commit or the next reader will
 "fix" Rust back.
+
+> **ROWS RE-VERIFIED AND RECORDED — VIEWSEED, 2026-07-27.** All three re-measured at
+> `arc2-edit-semantics` with probe vectors run through both action corpora, and each is now a
+> coverage-gap row carrying its seed, its spec-derived triple and both ports' observed output:
+> `view-anchor-default-divergence` (#6), `view-zoom-set-pan-divergence` (#7),
+> `view-actions-bypass-yaml-in-swift` (#8). Three corrections to the account above:
+>
+> - **#6 has TWO causes, and Swift's anchor is the canvas top-left, not the document origin** —
+>   Swift never merges the action's declared `default: -1`, so the `< 0` branch this row cites is
+>   never reached (see the ROW NARROWED note at §5.7).
+> - **#7: the spec is not merely stale, it is doubled.** `transcripts/ZOOM_TOOL.md` says "pan
+>   unchanged" in BOTH its shortcut table and its prose, and `actions.yaml` a third time. Rust's
+>   `doc.zoom.set` comment cites a ZOOM_TOOL.md sentence that is **not in that file** (grep for
+>   "approximately" returns nothing). So this is not "Swift is behind" — by every written rule
+>   **Swift is right and Rust diverges**, and the row needs a ruling, not a port fix.
+> - **#8's fix has an ORDER dependency this row does not state.** Routing Swift's menu/keyboard
+>   through the YAML pipeline today would REGRESS the menu: native `zoomIn` anchors at the viewport
+>   centre (correct), the YAML path in Swift anchors at the top-left corner. #6 first, then #8.
+
+> **ALL THREE ROWS CLOSED — ZOOMPKG, 2026-07-27.** JYH ruled all three the same afternoon and ruled
+> that they land as ONE piece of work, because #6 and #7 fix the effects and #8 is what makes the fix
+> reach the artist: landing #6 and #7 alone turns two gates green while the flagship port still
+> recentres wrongly on every keystroke. The order dependency the VIEWSEED note identified was
+> honoured — the anchor fix precedes the routing inside the same wave. Everything above stands as the
+> record of the pre-fix state; what follows corrects it.
+>
+> - **#6 closed both causes together**, each reverted individually to confirm the corpus sees it. The
+>   declared param-default merge now lives in `JasSwift/Sources/Interpreter/ActionParams.swift`
+>   (applied at all three generic dispatchers, mirroring Rust's single `dispatch_action`), and
+>   `doc.zoom.apply` gained the viewport-centre branch. Reverting one at a time reproduces the two
+>   half-fix triples the ruling predicted, `(-100, -50)` and `(-120, -60)`.
+> - **#7 went AGAINST the written spec.** The VIEWSEED note was right that "by every written rule
+>   Swift is right and Rust diverges", and right to demand a ruling rather than a port fix. The
+>   ruling found the RULE wrong: `view_offset` is the document origin's screen position, so holding
+>   it fixed while zoom changes by 4× multiplies the visible region around the origin and the artwork
+>   leaves the screen. Swift now matches Rust, and **five** written statements were rewritten in the
+>   same wave — not the three this note counted. The fifth is `ZOOM_TOOL_TESTS.md`'s **ZOOM-134
+>   parenthetical**, which presented "whatever was under the viewport center stays approximately
+>   under it" as a CONSEQUENCE of pan-unchanged. That is the sentence Rust's comment was accused of
+>   inventing: someone read the gloss, found it did not follow, and changed the port to match the
+>   gloss instead of the requirement. It is now in `ZOOM_TOOL.md` as the requirement.
+> - **#8 had THREE surfaces, not two.** This row and the coverage-gap row both named
+>   `ContentView` and `JasCommands`; `CanvasSubwindow.runViewAction` — the actual `Cmd+=` / `Cmd+-` /
+>   `Cmd+1` / `Cmd+0` / `Cmd+Alt+0` handler — was missed by both. All three now dispatch through one
+>   seam (`Canvas/ViewActions.swift`) and the six native `Model` methods are deleted. Because no
+>   fixture could reach any of those routes, the work built its own gate,
+>   `JasSwift/Tests/Canvas/ViewActionRouteTests.swift`.
+> - **Two further defects surfaced only by collecting the routes**, neither in any row above:
+>   `fit_in_window` on an EMPTY document was a silent no-op on all three native paths (the native
+>   `fitRect` guarded `w > 0` and returned) where the spec says 100% centred on the origin; and
+>   Swift keeps the artboards panel selection in **two store buckets that cannot see each other**,
+>   which is why the third param-default verb still has no corpus vector. Banked as
+>   `swift-panel-state-map-omits-artboards-selection`.
+> - **The "smallest family" estimate above was close.** It said 8 vectors; the family is 13, and the
+>   two it did not anticipate are the unmeasured-viewport fallbacks (`viewport_w == 0`), which are
+>   the branch a careless recentre fix would divide into. The "one non-default `zoom_step`" vector it
+>   proposed was NOT written: the corpus has no way to vary a preference per case. The route gate
+>   covers that property instead, by recomputing its expectations from the live preference rather
+>   than from a literal.
 
 ---
 
@@ -490,6 +549,56 @@ oracle behind all three codec gates structurally cannot express multi-line text,
 be added for it until the writer is fixed.** Verified: no `\n`, `\t` or `\u` anywhere in
 `test_fixtures/expected/`.
 
+**5.5 — CLOSED 2026-07-27** (`CTRLCHAR`). The ceiling is lifted, and **three of this entry's own
+claims were wrong or too wide**, each corrected by measurement rather than by argument.
+
+**(a) "Neither writer" undercounted by six.** There were **four** canonical-JSON string escapers per
+active port, at **three different escaping levels**, and only one of them was named above:
+`geometry/test_json.rs:61` and `TestJson.swift:31` (two replacements); `workspace/test_json.rs:43` and
+`WorkspaceTestJson.swift:31` (two replacements); `document/dependency_index.rs:504` and
+`DependencyIndex.swift:517` (two replacements, and **each one's doc comment claimed to match the
+geometry writer**); plus Rust's `canonical_value` and Swift's `canonicalRecordedValue`. Within
+`geometry/test_json.rs` alone, `opt_str_vec:128` and `text_decoration_json:316` quoted with **no
+escaping at all**, as did Swift's `textDecorationJson` and the recipe `targets` list.
+
+**(b) It was NOT purely a shared ceiling — the params path was a live byte DIVERGENCE.** Rust's
+`canonical_value` spelled strings with `{:?}`, i.e. `char::escape_debug`: U+0000 became `\0` and
+U+0001 became `\u{1}` (neither is JSON), and **every scalar Rust calls non-printable** was escaped
+too — a combining acute became `ae\u{301}b`, a ZWJ `\u{200d}`, NBSP `\u{a0}`. Swift's mirror emitted
+all of those **raw**. So a recipe param, a recorded op name or a generated concept param containing a
+combining mark serialised to *different bytes in the two ports*, and Rust's were not JSON. Measured
+by probe, both ports, on `2d56bbf3`. This entry's "not a silent divergence" was true of the writer it
+examined and false of the one it did not.
+
+**(c) "No fixture can express multi-line text" was wider than what was verified.** The claim checked
+`test_fixtures/expected/` and generalised to the fixture format. The **fixture format never had this
+ceiling**: `algorithms/text_layout.json` already carried `"content": "ab\ncd"` (vector
+`hard_newline`), and `text_layout_paragraph.json` the same — the algorithms harness feeds those
+straight to `layout_text`, never through the document writer. Only the **document codec** had the
+ceiling. Also unverified and now measured: U+007F is the one character *above* the ceiling that both
+parsers accept **raw** (serde_json and `JSONSerialization` both ACCEPT it), and no fixture anywhere
+had ever carried one.
+
+**The fix.** One escaper per port (`json_escape_string` / `jsonEscapeString`), all four copies routed
+through it, with the rule adjudicated by `json.dumps(s, ensure_ascii=False)` — five short escapes,
+`\u00xx` lower-case hex below U+0020, everything at U+0020 and above literal, solidus not escaped.
+`test_fixtures/algorithms/canonical_json_string.json` (23 vectors, every `canonical` field produced
+by that `json.dumps` call in `scripts/derive_canonical_json_string_goldens.py`, not typed) is the
+contract, run by both ports. A newline-bearing Text now survives
+`document_to_test_json` → `test_json_to_document` → `document_to_test_json` in each port.
+`check_json_string_escapers` in `cross_language_algorithms.py` stops a fifth copy, in the shape §5.9
+established for the measure unit.
+
+**Not one golden byte moved**, by measurement: a scan of all 543 files under `test_fixtures/` and
+`workspace/` finds zero C0 bytes in any `.json`, zero U+007F anywhere, and zero scalars Rust's
+`escape_debug` would have escaped; and the two suites went 2669 → 2671 and 2598 → 2600, which is
+exactly the tests added.
+
+**Residue**, carried as coverage gap `codec-control-chars-unit-gated-only`: the escaping is gated at
+the writer and at the document round trip, but every `expected/*.json` golden comes from parsing an
+SVG, and **whether the two SVG text parsers preserve a newline in element content was not measured**.
+That is the next thing to measure, before any `svg/` fixture is added.
+
 **5.6 — Swift has two effect dispatchers that disagree, and the corpus drives the wrong one.**
 `Effects.swift` registers the full verb set and reads panel state; `LayersPanel.swift:839` registers
 **4** boolean verbs and hardcodes defaults. The Swift action-corpus arm goes through **the second**, so
@@ -506,6 +615,38 @@ which argues for a **shared registration** rather than a third per-domain patch.
 build the model at the identity view where screen↔doc is algebraically the identity. **The
 multiply/divide-by-zoom half of every tool is ungated**, and no fixture can currently express
 otherwise — the runners would need a view-state seed. This is a machinery limit, not a missing family.
+
+> **ROW NARROWED — VIEWSEED, 2026-07-27.** The machinery limit is gone: both runners in both ports
+> take an optional `view` seed, and the action runner an `expected_view` assertion. `test_fixtures/
+> actions/view_state.json` (7 vectors, spec-derived from ZOOM_TOOL.md's anchor/clamp block via
+> CPython) and `test_fixtures/gestures/draw_rect_zoomed.json` (1 vector) are the first fixtures
+> anywhere that set the view. **9 of the 72 action/gesture driver cases now run off the identity;
+> 63 still do not**, so the row is narrowed, not closed — see the re-measured `identity-view-only`
+> row in `scripts/corpus_manifest.json` for what remains and for the per-family unblock.
+>
+> The family found **two Swift bugs neither this section nor row #8 predicted**, both fixed:
+> `LayersPanel.dispatchYamlAction` registered **no `doc.zoom.*` handler at all** (so all six View
+> verbs were silent no-ops through the generic dispatcher, while the Zoom *tool* could zoom), and
+> its eval ctx carried **no `preferences` namespace** (so `factor: preferences.viewport.zoom_step`
+> evaluated to 0 and a zoom-IN clamped the canvas to `min_zoom` — a zoom-in that zooms all the way
+> out). Rust had both.
+>
+> **Correction to this section's own account of #6.** It says Swift anchors at "the document
+> origin's screen position". Measured through the action dispatcher it anchors at **screen (0, 0)**,
+> the canvas top-left, because Swift also fails to merge an action's declared param **defaults**, so
+> `param.anchor_x` arrives as null→0 rather than the declared −1. The `< 0 ? px` fallback the row
+> cites is real but is never reached. Two causes, not one; both recorded in
+> `view-anchor-default-divergence`.
+
+> **RE-MEASURED — ZOOMPKG, 2026-07-27.** Counted mechanically over the parsed fixtures rather than
+> transcribed: **14 of 77** action/gesture driver cases now run off the identity view — 13 in
+> `test_fixtures/actions/view_state.json` and the one zoomed Rect gesture — so **63 still do not**,
+> the same 63 as before: this wave added five view-bearing cases and no coverage anywhere else. (The
+> VIEWSEED note above says "7 vectors" and "9 of the 72"; the file held 8 cases at the time, so that
+> breakdown was already inconsistent with its own total.) Both seeds also accept an explicit **0**
+> for `viewport_w` / `viewport_h`, which is what lets two of the new vectors pin the
+> unmeasured-viewport fallback branches of `doc.zoom.apply` and `doc.zoom.set`. The row stays
+> narrowed, not closed.
 
 **5.8 — The `bind.*` value surface is unpinned in both ports.** `panel_widget_tree` records the
 **sorted key names** of `bind`/`style` and nothing about their values, and deliberately does not
@@ -581,7 +722,8 @@ duplicate ids and an *absent* key are all errors), and **printed on every run be
 `stale-known-gap`. Nine rows landed: `text-index-unit`, `element-bounds-untransformed`,
 `flatten-wrong-flattener`, `flatten-no-curves`, `fit-curve-first-pass-only`,
 `codec-optional-fields-unset`, `codec-no-control-chars`, `identity-view-only`,
-`panel-text-width-scalar-count-only`.
+`panel-text-width-scalar-count-only`. (Of those nine, `codec-no-control-chars` was **closed and
+replaced** on 2026-07-27 by `codec-control-chars-unit-gated-only` — see §5.5.)
 
 **Three figures above did not survive re-measurement, and this is the argument for §0's warning
 applying to §5 too:**
@@ -596,6 +738,21 @@ applying to §5 too:**
   `element_intersects_polygon` are now driven by **both** roundtrip binaries over **6** of that
   family's **40** vectors, so the family gates 9 predicates, not 7. Not recorded as a gap. The
   `element_bounds` leg (17 of 17 vectors at `transform: null`) and the `flatten` leg both stand.
+  - **UPDATE 2026-07-27, fixture-only.** The `element_bounds` leg is now **half closed, and the
+    half that closed is not the half the row expected.** `Element::bounds` ignoring `transform` is
+    the *contract*, not the gap (`evaluated_bounds.rs` module docs; `PropertiesPanelSync.swift`
+    lines 29-33), and the transform-aware box already had its own family. What was missing was
+    that **neither** fact was pinned. Both now are: `element_bounds` is **22** vectors, the last
+    five carrying a live matrix and expecting the UNTRANSFORMED box, and
+    `element_evaluated_bounds` is **17**, the eight new ones being the first NON-RECT geometry it
+    has ever seen. That matters because the family maps the four CORNERS of the geometric bbox —
+    on a rect that is indistinguishable from bounding the transformed shape, and on an ellipse or
+    a curve it is not (rotate 45 on a 60x40 ellipse: corner-mapped **70.7107** square vs a true
+    **50.9902** square, 28% narrower). The reference `_element_evaluated_bbox` corner-maps too, so
+    per the hierarchy the corner rule is the **ratified** answer — it is what keeps the Properties
+    panel's numbers equal to the drawn selection box — not a shared slip to be fixed. **No port
+    disagreed on any new vector.** Still open: every evaluated vector sits at `layers[0].children[0]`,
+    so the ancestor walk is one level deep and a group whose CHILDREN carry matrices is ungated.
 
 §5.3, §5.6, §5.10 and §5.11 are deliberately **not** in `coverage_gaps`: they are real, but this
 pass did not re-verify them, and an unverified row there would be the same false assurance the
@@ -955,10 +1112,28 @@ command is `Z` therefore diverges.** The lens proved it live with a throwaway pr
 (`d = [Z, L(5,5)]`): `FAIL: flatten/PROBE_leading_close [rust vs swift]`. Decide the
 right answer from the reference, then fix and gate it.
 
-**(c) The `bind_values` list contract is unpinned.** All 3 list rows in the 225-row
+**(c) The `bind_values` list contract is unpinned.** ~~All 3 list rows in the 225-row
 corpus are the single-element `[lib1:0]`, so the documented "bracketed and
 comma-joined element-wise" behaviour survives a mutation: changing the separator to
-`;` leaves both ports' tests green. Needs a multi-element and a nested-list vector.
+`;` leaves both ports' tests green. Needs a multi-element and a nested-list vector.~~
+**CLOSED 2026-07-27, fixture-only.** Three seeds added to `BIND_SEED` in
+`scripts/gen_panel_layout_fixture.py`; the corpus is now 7 vectors / 281 rows with 10
+list rows. `swatches@multi_selection` is a three-element selection over two libraries;
+`swatches@nested_selection` is a deliberately SYNTHETIC list of lists (no binding in
+the bundle produces one — see the seed comment) covering an inner multi-element list,
+an EMPTY inner list, and a doubly-nested element; `layers@selection_lists` binds the
+tree_view's `element_selection` as a list of PATH values, an element arm `type` that
+occurred ZERO times in the previous 225 rows. Both ports matched the
+reference-generated golden on their first run — no divergence. Discrimination
+measured, per port, one mutation at a time and reverted individually:
+separator `,`→`;` reds `swatches@multi_selection` in Rust
+(`algorithm_bind_values_vectors` asserts per vector and aborts there, so the four
+pre-existing vectors compared EQUAL under the mutation) and reds exactly the three
+new vectors in Swift (`testAlgorithmBindValues` reports per vector without aborting:
+3 issues, none of them a pre-existing vector). A second mutation replacing the
+element-wise recursion with a flat `to_string_coerce` reds exactly ONE vector in each
+port — `swatches@nested_selection` — so the nested vector, and only it, pins the
+recursion.
 
 **(d) FALSE ACCOUNTING IN A COMMIT MESSAGE (durable record).** Commit `64282375`
 says the carried set is "the WHOLE non-paint set" and then accounts for only EIGHT of

@@ -44,9 +44,9 @@ tool" work.
 
 ## Known gaps
 
-- **Shift-constrained circle** — Illustrator's ellipse tool
+- **Shift-constrained circle** — the incumbent's ellipse tool
   constrains to a circle when Shift is held. Not wired.
-- **Alt-from-center draw** — Illustrator draws centered on the
+- **Alt-from-center draw** — the incumbent draws centered on the
   press point when Alt is held. Not wired.
 - **No `ellipse` overlay renderer** — the rect/line/polygon/
   star/buffer/pen/partial-selection overlay registry in

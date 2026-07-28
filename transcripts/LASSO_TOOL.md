@@ -47,7 +47,7 @@ intersection. An element is selected if any corner of its
 bounding box is inside the polygon OR the polygon and the
 element's bounding box have any segment-segment intersection.
 
-This matches Illustrator's Lasso behavior: the polygon need not
+This matches the incumbent's lasso behaviour: the polygon need not
 enclose the element entirely; crossing any part of the bounding
 box is enough.
 

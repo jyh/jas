@@ -763,8 +763,24 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let z = model.zoomLevel
         let px = model.viewOffsetX
         let py = model.viewOffsetY
-        let ax = anchorXRaw < 0 ? px : anchorXRaw
-        let ay = anchorYRaw < 0 ? py : anchorYRaw
+        // Default-anchor convention: -1 means the VIEWPORT CENTRE, per
+        // ZOOM_TOOL.md's ruling "the DEFAULT ZOOM ANCHOR is the viewport
+        // centre" (2026-07-27) and matching Rust's arm of the same name.
+        // The Model carries viewportW / viewportH (synced from the canvas
+        // widget), so the centre is computable here; fall back to the doc
+        // origin's screen position ONLY while the viewport is unmeasured.
+        // Before this, `anchorXRaw < 0 ? px : anchorXRaw` had no
+        // viewport-centre branch at all — it carried viewportW and never
+        // read it — and, because the dispatcher did not merge declared
+        // param defaults either, anchorXRaw arrived 0 (null) rather than
+        // the declared -1, so a keyboard/menu zoom anchored at the doc
+        // origin's screen position instead of at what the artist was
+        // looking at. Both causes are fixed together; either alone leaves
+        // the corpus vector zoom_in_default_anchor red.
+        let viewportCx = model.viewportW > 0 ? model.viewportW / 2.0 : px
+        let viewportCy = model.viewportH > 0 ? model.viewportH / 2.0 : py
+        let ax = anchorXRaw < 0 ? viewportCx : anchorXRaw
+        let ay = anchorYRaw < 0 ? viewportCy : anchorYRaw
         let docAx = (ax - px) / z
         let docAy = (ay - py) / z
         let zNew = min(max(z * factor, minZoom), maxZoom)
@@ -774,14 +790,38 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
-    // doc.zoom.set — absolute zoom_level; pan unchanged. Used by
-    // zoom_to_actual_size (level: 1.0).
+    // doc.zoom.set — absolute zoom_level, anchored at the VIEWPORT
+    // CENTRE. Used by zoom_to_actual_size (level: 1.0).
+    //
+    // RULED 2026-07-27 (ZOOM_TOOL.md, "zoom_to_actual_size RECENTRES"):
+    // this recomputes view_offset so the doc point under the viewport
+    // centre stays under it. It used to write zoom_level alone and leave
+    // the pan literally unchanged, which the spec said in four places and
+    // which is the wrong requirement: view_offset is the DOC ORIGIN's
+    // screen position, so holding it fixed while zoom goes 4x -> 1x
+    // quadruples the visible region around that point and the artwork
+    // walks off the canvas. Matches Rust's doc.zoom.set (ff4d46d).
+    //
+    // Falls back to literal pan-unchanged only while the viewport is
+    // unmeasured (viewportW / viewportH still 0, before the canvas widget
+    // reports its size) — there is no centre to anchor on then. zOld != 0
+    // guards the division; the Model never persists a zero zoom.
     effects["doc.zoom.set"] = { spec, ctx, store in
         guard let args = spec as? [String: Any] else { return nil }
         let level = evalNumber(args["level"], store: store, ctx: ctx)
         let minZoom = readPrefNumber("min_zoom", default: 0.1)
         let maxZoom = readPrefNumber("max_zoom", default: 64.0)
-        model.zoomLevel = min(max(level, minZoom), maxZoom)
+        let zOld = model.zoomLevel
+        let zNew = min(max(level, minZoom), maxZoom)
+        if model.viewportW > 0, model.viewportH > 0, zOld != 0 {
+            let cx = model.viewportW / 2.0
+            let cy = model.viewportH / 2.0
+            let docCx = (cx - model.viewOffsetX) / zOld
+            let docCy = (cy - model.viewOffsetY) / zOld
+            model.viewOffsetX = cx - docCx * zNew
+            model.viewOffsetY = cy - docCy * zNew
+        }
+        model.zoomLevel = zNew
         return nil
     }
 
@@ -1355,12 +1395,7 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let newAbs = doc.artboards + [ab]
         // Undoable create: editDocument self-brackets (joins the owner txn if
         // open). Mirrors Rust artboard_create_commit's edit_document.
-        model.editDocument(Document(
-            layers: doc.layers,
-            selectedLayer: doc.selectedLayer,
-            selection: doc.selection,
-            artboards: newAbs,
-            artboardOptions: doc.artboardOptions))
+        model.editDocument(doc.replacing(artboards: newAbs))
         return nil
     }
 
@@ -1622,19 +1657,78 @@ private enum PathEditIdentity {
 /// `identity: .splitFragment(id:)` swaps in the caller's freshly minted id and
 /// carries everything else: copying the source's id onto every fragment would
 /// leave N live elements sharing one id and break the unique-id invariant of
-/// REFERENCE_GRAPH.md §2.5. STILL OWED for the severing case: a
-/// linear-gradient stop remap (a gradient carries no position — linear
-/// resolves angle + stops against the element's OWN bbox centre and
-/// half-diagonal — so each fragment re-fits the whole ramp instead of showing
-/// its slice; the fix is an affine remap of stop locations with clipping and
-/// interpolated endpoint colours). Radial cannot be preserved without a model
-/// change; the recentre is accepted.
+/// REFERENCE_GRAPH.md §2.5. The severing case ALSO re-expresses each
+/// fragment's LINEAR gradients on its own extent — see
+/// `remapFragmentLinearGradients`, applied by the caller after this returns.
+/// Re-express `frag`'s LINEAR fill and stroke gradients on its own extent,
+/// given the `parent` bbox they were authored against. A gradient that is not
+/// linear, or a gradient-less slot, is returned untouched.
+///
+/// `parent` and `fragment` must be the boxes the PAINTER resolves gradients
+/// against, which for a Path is `Element.bounds` on both the fill and the
+/// stroke arm. Mirrors Rust `remap_linear_gradients`.
+private func remapFragmentLinearGradients(
+    _ frag: Path, parent: GradientBBox, fragment: GradientBBox
+) -> Path {
+    func remapped(_ g: Gradient?) -> Gradient? {
+        guard let g = g, g.type == .linear else { return g }
+        // Gradient's properties are `let`, so this is a full rebuild rather
+        // than a field write. Every field but `stops` is forwarded verbatim.
+        return Gradient(type: g.type, angle: g.angle,
+                        aspectRatio: g.aspectRatio, method: g.method,
+                        dither: g.dither, strokeSubMode: g.strokeSubMode,
+                        stops: remapLinearStops(g.stops, angleDeg: g.angle,
+                                                parent: parent,
+                                                fragment: fragment),
+                        nodes: g.nodes)
+    }
+    return Path(d: frag.d, fill: frag.fill, stroke: frag.stroke,
+                widthPoints: frag.widthPoints,
+                opacity: frag.opacity, transform: frag.transform,
+                locked: frag.locked,
+                visibility: frag.visibility,
+                blendMode: frag.blendMode,
+                mask: frag.mask,
+                fillGradient: remapped(frag.fillGradient),
+                strokeGradient: remapped(frag.strokeGradient),
+                strokeBrush: frag.strokeBrush,
+                strokeBrushOverrides: frag.strokeBrushOverrides,
+                toolOrigin: frag.toolOrigin,
+                name: frag.name, id: frag.id,
+                fillRule: frag.fillRule)
+}
+
+/// Where the rebuilt Path's ring structure came from — T1's RING TERM
+/// (EDIT_SEMANTICS_FREEZE.md §1.1, third closure): *the fill rule belongs to
+/// whoever made the rings.* There is no default, deliberately, for the same
+/// reason `PathEditIdentity` has none: the compiler, not a reviewer, then
+/// enumerates every call site whenever this distinction changes — and this is
+/// exactly the distinction a hand audit got wrong at the blob-brush arms.
+private enum PathEditRings {
+    /// The edit rewrote `d` while PRESERVING the ring structure the artist's
+    /// own path had — anchor move, insert, smooth, eraser split. The declared
+    /// `fillRule` still describes those rings, so it is preserved.
+    case preserved
+    /// The edit RE-DERIVED the rings through the polygon-set layer (a boolean
+    /// union / subtract). The rings on the way out are machine-wound, so the
+    /// generated-geometry constant is stamped: a non-zero declaration over
+    /// machine-wound rings silently fills holes (`Boolean.swift` documents
+    /// why in its own words).
+    case regenerated
+}
+
 private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand],
-                              identity: PathEditIdentity) -> Path {
+                              identity: PathEditIdentity,
+                              rings: PathEditRings) -> Path {
     let newId: String?
     switch identity {
     case .sameElement: newId = pe.id
     case .splitFragment(let id): newId = id
+    }
+    let newFillRule: FillRule
+    switch rings {
+    case .preserved: newFillRule = pe.fillRule
+    case .regenerated: newFillRule = FillRule(boolResultFillRule)
     }
     return Path(d: cmds, fill: pe.fill, stroke: pe.stroke,
                 widthPoints: pe.widthPoints,
@@ -1650,7 +1744,7 @@ private func pathWithCommands(_ pe: Path, _ cmds: [PathCommand],
                 toolOrigin: pe.toolOrigin,
                 name: pe.name,
                 id: newId,
-                fillRule: pe.fillRule)
+                fillRule: newFillRule)
 }
 
 /// Implementation of doc.path.delete_anchor_near.
@@ -1665,16 +1759,13 @@ private func pathDeleteAnchorNear(
     // runEffects owner txn when one is open). Mirrors Rust's doc.snapshot ->
     // begin_txn pattern; replaces the legacy snapshot() + bare write.
     if let newCmds = deleteAnchorFromPath(pe.d, anchorIdx) {
-        let newPe = pathWithCommands(pe, newCmds, identity: .sameElement)
+        let newPe = pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved)
         var doc = model.document.replaceElement(path, with: .path(newPe))
         // Keep the path in the selection (matches native Delete-anchor).
         var sel = doc.selection
         sel = sel.filter { $0.path != path }
         sel.insert(ElementSelection.all(path))
-        doc = Document(layers: doc.layers, selectedLayer: doc.selectedLayer,
-                       selection: sel,
-                       artboards: doc.artboards,
-                       artboardOptions: doc.artboardOptions)
+        doc = doc.replacing(selection: sel)
         model.editDocument(doc)
     } else {
         // Path too small — remove the element entirely.
@@ -1710,7 +1801,7 @@ private func pathInsertAnchorOnSegmentNear(
     guard let hit = best, hit.3 <= radius else { return }
     guard case .path(let pe) = model.document.getElement(hit.0) else { return }
     let ins = insertPointInPath(pe.d, hit.1, hit.2)
-    let newPe = pathWithCommands(pe, ins.commands, identity: .sameElement)
+    let newPe = pathWithCommands(pe, ins.commands, identity: .sameElement, rings: .preserved)
     // Undoable edit (editDocument self-brackets; joins the owner txn if open).
     model.editDocument(model.document.replaceElement(hit.0, with: .path(newPe)))
 }
@@ -1817,35 +1908,55 @@ private func pathEraseAtRect(
                 else { return }
                 identities = minted.map { .splitFragment(id: $0) }
             }
+            let severed = results.count > 1
             for (cmds, identity) in zip(results, identities) {
                 let open = cmds.filter { if case .closePath = $0 { return false }; return true }
-                newChildren.append(.path(
-                    pathWithCommands(pe, open, identity: identity)))
+                var frag = pathWithCommands(pe, open, identity: identity, rings: .preserved)
+                if severed {
+                    // LINEAR GRADIENTS ARE REMAPPED on the severing arm (S-2,
+                    // ruled 2026-07-26). A gradient carries no position -- a
+                    // linear one resolves angle + stops against the element's
+                    // OWN bbox centre and half-diagonal -- so a fragment that
+                    // inherited the parent's stops verbatim re-fitted the
+                    // whole ramp to its own smaller box.
+                    //
+                    // Only the severing arm needs this. A single surviving
+                    // fragment is the 1 -> 1 case, which the Theseus law owns;
+                    // changing it is a separate ruling. RADIAL is deliberately
+                    // left alone (its centre is forced to the bbox centre and
+                    // the model has nowhere to record an anchor; JYH accepted
+                    // the recentre) and FREEFORM paints nothing. Mirrors
+                    // Rust's remap_linear_gradients call site.
+                    let fb = Element.path(frag).bounds
+                    frag = remapFragmentLinearGradients(
+                        frag,
+                        parent: (bounds.x, bounds.y, bounds.width, bounds.height),
+                        fragment: (fb.x, fb.y, fb.width, fb.height))
+                }
+                newChildren.append(.path(frag))
             }
             layerChanged = true
         }
         if layerChanged {
-            newLayers[li] = Layer(name: layer.name, children: newChildren,
-                                   opacity: layer.opacity, transform: layer.transform,
-                                   locked: layer.locked,
-                                   visibility: layer.visibility,
-                                   blendMode: layer.blendMode,
-                                   isolatedBlending: layer.isolatedBlending,
-                                   knockoutGroup: layer.knockoutGroup,
-                                   mask: layer.mask)
+            // T4, THE BYSTANDER CLAUSE: the layer is a container this edit
+            // rebuilt only to reach the paths inside it, so it must come back
+            // unchanged. This was a ten-field hand list that forwarded
+            // everything EXCEPT `id` — nine right and the tenth is identity.
+            // `Layer.withChildren` is the whole-struct copy that cannot drop
+            // one; Rust's twin never rebuilds the layer at all
+            // (`children_mut()` writes the slot in place).
+            newLayers[li] = layer.withChildren(newChildren)
             changed = true
         }
     }
     if changed {
         let doc = model.document
         // Undoable erase. editDocument joins the open drag txn (doc.snapshot at
-        // mousedown) or self-brackets standalone. Mirrors Rust path_erase_at_rect.
-        model.editDocument(Document(
-            layers: newLayers, selectedLayer: doc.selectedLayer,
-            selection: [],
-            artboards: doc.artboards,
-            artboardOptions: doc.artboardOptions
-        ))
+        // mousedown) or self-brackets standalone. Mirrors Rust path_erase_at_rect,
+        // which clones the whole document and mutates it — so `replacing` (not a
+        // five-of-eight hand list, which dropped `symbols`, `documentSetup` and
+        // `printPreferences`) is what makes the two ports agree.
+        model.editDocument(doc.replacing(layers: newLayers, selection: []))
     }
 }
 
@@ -1994,14 +2105,14 @@ private func pathCommitAnchorEdit(
     case "pressed_smooth":
         let newCmds = convertSmoothToCorner(pe.d, anchorIdx: anchorIdx)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved))))
     case "pressed_corner":
         let moved = hypot(targetX - originX, targetY - originY)
         if moved <= 1.0 { return }
         let newCmds = convertCornerToSmooth(
             pe.d, anchorIdx: anchorIdx, hx: targetX, hy: targetY)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved))))
     case "pressed_handle":
         let handleType = (store.getTool("anchor_point", "handle_type") as? String) ?? ""
         let dx = targetX - originX, dy = targetY - originY
@@ -2010,7 +2121,7 @@ private func pathCommitAnchorEdit(
             pe.d, anchorIdx: anchorIdx,
             handleType: handleType, dx: dx, dy: dy)
         model.editDocument(model.document.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement))))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved))))
     default: break
     }
 }
@@ -2226,7 +2337,7 @@ private func paintbrushEditCommit(
     newCmds.append(contentsOf: targetPe.d[(c1 + 1)...])
 
     let newDoc = model.document.replaceElement(
-        targetPath, with: .path(pathWithCommands(targetPe, newCmds, identity: .sameElement)))
+        targetPath, with: .path(pathWithCommands(targetPe, newCmds, identity: .sameElement, rings: .preserved)))
     model.editDocument(newDoc)
 }
 
@@ -2275,7 +2386,7 @@ private func pathSmoothAtCursor(
         newCmds.append(contentsOf: pe.d[(lastCmd + 1)...])
         guard newCmds.count < pe.d.count else { continue }
         newDoc = newDoc.replaceElement(
-            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement)))
+            path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved)))
         changed = true
     }
     if changed {
@@ -2581,7 +2692,35 @@ private func blobBrushCommitPainting(
             if mergeOnlyWithSelection && !selectedPaths.contains(path) {
                 continue
             }
-            let existing = pathToPolygonSet(pe.d)
+            // BOTH SIDES IN DOCUMENT SPACE (BLOB_BRUSH_TOOL.md §Transform).
+            // `swept` came from the point buffer in document coordinates;
+            // `pe.d` is in the element's own space, which `transform` maps to
+            // the document. Testing them against each other without the matrix
+            // matches on where the artwork is STORED, not where it is DRAWN: a
+            // scaled blob 300 units away used to union with a sweep that never
+            // came near it.
+            //
+            // A SINGULAR matrix disqualifies the element rather than matching
+            // it. Such an element collapses to a line or a point on screen, so
+            // there is nothing to paint into, and the n == 1 arm below could
+            // not write the result back into its space anyway — the inverse
+            // that maps the unified doc-space region into local coordinates
+            // does not exist. Skipping is the only answer that leaves the
+            // document unchanged instead of guessing at one.
+            //
+            // NO FIXTURE SEPARATES THIS GUARD, matching Rust's note at the
+            // twin site: `transformPolygonSet` maps a singular source onto a
+            // zero-area figure and `booleanIntersect` reports empty for that,
+            // so the loop `continue`s one line later anyway. The guard makes
+            // the skip a stated RULE rather than a consequence of the boolean
+            // layer's treatment of degenerate input.
+            let existing: BoolPolygonSet
+            if let t = pe.transform {
+                if t.inverse() == nil { continue }
+                existing = transformPolygonSet(pathToPolygonSet(pe.d), t)
+            } else {
+                existing = pathToPolygonSet(pe.d)
+            }
             // Cheap reject: skip if no spatial overlap.
             if booleanIntersect(unified, existing).isEmpty { continue }
             unified = booleanUnion(unified, existing)
@@ -2601,8 +2740,13 @@ private func blobBrushCommitPainting(
         insertIdx = lowest[1]
     }
 
-    let newD = polygonSetToPath(unified)
-    if newD.isEmpty { return }
+    // `unified` is in DOCUMENT space. Where it is written back depends on the
+    // arm below: the n == 1 arm keeps the source element, hence the source's
+    // `transform`, so its `d` must be expressed in the source's LOCAL space;
+    // the n == 0 and n >= 2 arms build a transform-less element, whose local
+    // space IS the document. The emptiness guard reads the document-space set,
+    // which is the one that decides whether anything was painted at all.
+    if polygonSetToPath(unified).isEmpty { return }
     // THE CARDINALITY LAW (JYH, ratified 2026-07-26): "Identity survives a
     // one-to-one edit. It does not survive a change in cardinality." The arm
     // is chosen by the MATCH COUNT, and Rust's blob_brush_commit_painting
@@ -2637,7 +2781,28 @@ private func blobBrushCommitPainting(
         // from the fills being identical. Consequence: painting into a
         // translucent or CMYK blob preserves its colour rather than
         // overwriting it with the tool's.
-        newElem = pathWithCommands(src, newD, identity: .sameElement)
+        //
+        // The survivor keeps its `transform`, so its `d` is read through that
+        // matrix — write the unified region back in the element's OWN space.
+        // The nil arm of `inverse()` is not reachable (the match loop
+        // `continue`d past every singular source), and is written as an abort
+        // rather than a force-unwrap so that a future change to that loop
+        // degrades into a no-op edit instead of a crash in the tool.
+        let local: BoolPolygonSet
+        if let t = src.transform {
+            guard let inv = t.inverse() else { return }
+            local = transformPolygonSet(unified, inv)
+        } else {
+            local = unified
+        }
+        // `rings: .regenerated` — T1's RING TERM. `local` came out of
+        // `booleanUnion` above, so the rings this arm writes are MACHINE-WOUND,
+        // not the artist's, and `fillRule` is therefore a field this edit
+        // SPEAKS TO. Carrying the source's rule here is OVER-preservation,
+        // which the law forbids in the same breath as under-preservation.
+        // Everything else still travels, because the arm is 1 -> 1.
+        newElem = pathWithCommands(src, polygonSetToPath(local),
+                                   identity: .sameElement, rings: .regenerated)
     } else {
         // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both build
         // a fresh element carrying the tool's own attributes. For the merge
@@ -2665,6 +2830,7 @@ private func blobBrushCommitPainting(
         var visibility: Visibility = .preview
         var blendMode: BlendMode = .normal
         var mask: Mask? = nil
+        var name: String? = nil
         if matches.count >= 2 {
             var existingIds = doc.elementIds
             guard let minted = mintUniqueIds(1, existing: &existingIds,
@@ -2681,11 +2847,16 @@ private func blobBrushCommitPainting(
             // nothing about opacity, so merging two 50%-opaque blobs must not
             // yield a fully opaque one.
             //
-            // `transform` is EXCLUDED regardless of agreement. This merge
-            // matches RAW geometry against a DOCUMENT-space sweep, so it is
-            // already transform-blind (transcripts/BLOB_BRUSH_TOOL.md);
-            // carrying a unanimous transform would COMPOUND that bug by
-            // relocating the merged artwork. `toolOrigin` is set by the tool
+            // `transform` is EXCLUDED regardless of agreement. The reason has
+            // changed and the exclusion has not: it was excluded because the
+            // merge matched RAW geometry against a DOCUMENT-space sweep, so
+            // carrying a matrix would have compounded that. That blindness is
+            // now fixed — `unified` is document-space and this arm's element
+            // is transform-less, which is CONSISTENT on its own terms. So the
+            // exclusion is no longer forced by a bug; whether a unanimous
+            // transform should now carry (and `d` be expressed in its space)
+            // is JYH's to rule. Until then this stays as ruled.
+            // `toolOrigin` is set by the tool
             // below, `id` is minted fresh, and the paint attributes are what
             // the stroke DOES speak to — so these five compositing fields are
             // the whole list. Rust's twin carries the same five.
@@ -2702,9 +2873,33 @@ private func blobBrushCommitPainting(
             if let v = unanimous({ $0.visibility }) { visibility = v }
             if let v = unanimous({ $0.locked }) { locked = v }
             if let v = unanimous({ $0.mask }) { mask = v }
+
+            // `name` — ASSERTING-SOURCES (JYH, ratified 2026-07-27;
+            // EDIT_SEMANTICS_FREEZE.md §3.3). For `name` ONLY, unanimity
+            // ranges over the sources that ASSERT one: silence is not a
+            // competing claim, so "hull" + unnamed yields "hull". Two
+            // DIFFERENT assertions are T2 shape 2 — a value across disagreeing
+            // sources — and take the documented default (no name) per T3; no
+            // winner is elected by z-order, area or document position.
+            //
+            // Why not strict unanimity: no drawing tool writes `name`, so the
+            // commonest real case is one named source among unnamed
+            // neighbours. Strict unanimity would delete the artist's word
+            // exactly there, and the id is already dying at this arm — the
+            // product would be left with no handle of any kind. Rust's twin
+            // carries the identical rule.
+            let asserted = sources.compactMap { $0.name }
+            if let first = asserted.first,
+               asserted.allSatisfy({ $0 == first }) {
+                name = first
+            }
         }
+        // `transform` is left nil on this arm — for n == 0 because a fresh
+        // blob has no matrix, for n >= 2 because the unanimity carry excludes
+        // `transform`. Either way the element's local space IS the document,
+        // so the document-space union is written straight in.
         newElem = Path(
-            d: newD,
+            d: polygonSetToPath(unified),
             fill: newFill, stroke: nil,
             widthPoints: [],
             opacity: opacity,
@@ -2713,10 +2908,15 @@ private func blobBrushCommitPainting(
             blendMode: blendMode,
             mask: mask,
             toolOrigin: "blob_brush",
+            name: name,
             id: freshId,
-            // Rust's blob_brush_commit_painting stamps NonZero on the
-            // unified region; parity, not preference.
-            fillRule: .nonzero
+            // T1's RING TERM, as on the 1 -> 1 arm above: `unified` is a
+            // machine-wound polygon set (the swept dabs on the 0 -> 1 arm, the
+            // union with the sources on the N -> 1 arm), so the
+            // generated-rings constant is stamped. This used to be a literal
+            // `.nonzero` — "parity, not preference", as the comment here
+            // conceded — which fills exactly the holes `booleanUnion` can wind.
+            fillRule: FillRule(boolResultFillRule)
         )
     }
 
@@ -2772,20 +2972,20 @@ private func blobBrushCommitErasing(
             if newD.isEmpty {
                 newDoc = newDoc.deleteElement(path)
             } else {
-                let newPe = Path(
-                    d: newD,
-                    fill: pe.fill, stroke: pe.stroke,
-                    widthPoints: pe.widthPoints,
-                    opacity: pe.opacity, transform: pe.transform,
-                    locked: pe.locked, visibility: pe.visibility,
-                    blendMode: pe.blendMode, mask: pe.mask,
-                    fillGradient: pe.fillGradient,
-                    strokeGradient: pe.strokeGradient,
-                    strokeBrush: pe.strokeBrush,
-                    strokeBrushOverrides: pe.strokeBrushOverrides,
-                    toolOrigin: pe.toolOrigin,
-                    name: pe.name, id: pe.id,
-                    fillRule: pe.fillRule)
+                // A surviving remainder is 1 -> 1, so everything but the
+                // geometry travels — routed through `pathWithCommands` rather
+                // than a second hand-written field list, which is how this
+                // site used to be spelled and is exactly the omission
+                // pathology §3.1 exists to stop.
+                //
+                // `rings: .regenerated` — T1's RING TERM, and this is the arm
+                // where the failure mode bites hardest: `booleanSubtract` can
+                // punch a HOLE ring into the source, and a carried `.nonzero`
+                // declaration over machine-wound rings fills exactly that hole
+                // back in — the artist erases a doughnut and sees a disc.
+                let newPe = pathWithCommands(pe, newD,
+                                             identity: .sameElement,
+                                             rings: .regenerated)
                 newDoc = newDoc.replaceElement(path, with: .path(newPe))
             }
         }
@@ -2805,13 +3005,24 @@ private func blobBrushInsertAt(
     var children = layer.children
     let clamped = max(0, min(childIdx, children.count))
     children.insert(element, at: clamped)
-    layers[layerIdx] = Layer(
-        name: layer.name, children: children,
-        opacity: layer.opacity, transform: layer.transform)
-    return Document(
-        layers: layers, selectedLayer: doc.selectedLayer,
-        selection: doc.selection, artboards: doc.artboards,
-        artboardOptions: doc.artboardOptions)
+    // THE BYSTANDER CLAUSE (EDIT_SEMANTICS_FREEZE.md T4): an edit preserves
+    // every element it does not name, INCLUDING the containers it rebuilds to
+    // reach its target. This line used to be an inline
+    // `Layer(name:children:opacity:transform:)` — one of the 41 literals §3.5
+    // enumerates — which forwarded four fields and destroyed the layer's `id`,
+    // `mask`, `blendMode`, `visibility`, `isolatedBlending` and
+    // `knockoutGroup` on EVERY blob commit. `Layer.withChildren` is the
+    // whole-struct copy that cannot drop one. Found red by the corpus, not by
+    // reading: `blob_paint_beside_everything_creates_without_minting` reported
+    // `id_survival VIOLATED: ["lyr_blob"]` in the Swift lane while Rust's twin
+    // held.
+    layers[layerIdx] = layer.withChildren(children)
+    // The document is a container too, and this rebuild reaches through it. The
+    // hand list that stood here forwarded all eight fields CORRECTLY — and that
+    // is the pathology, not the cure: a hand list is right until someone adds a
+    // ninth field. `Document.replacing` (Document.swift) is the port's
+    // preserving whole-document copy; there is no reason for a second body.
+    return doc.replacing(layers: layers)
 }
 
 // MARK: - Path validity
@@ -3873,18 +4084,17 @@ private func artboardTranslateElement(
     if dx == 0 && dy == 0 { return elem }
     switch elem {
     case .group(let g):
-        return .group(Group(
-            children: g.children.map {
-                artboardTranslateElement($0, dx: dx, dy: dy)
-            },
-            opacity: g.opacity, transform: g.transform, locked: g.locked))
+        // T4: translating a group speaks to its children's geometry and to
+        // nothing of the group's own. The four-field literals that stood here
+        // dropped `id`, `name`, `mask`, `blendMode`, `visibility`,
+        // `isolatedBlending` and `knockoutGroup` — so dragging an artboard
+        // un-hid every hidden group inside it and orphaned every reference to
+        // one. Rust's `translate_element` spreads `..e.clone()` on both arms.
+        return .group(g.withChildren(
+            g.children.map { artboardTranslateElement($0, dx: dx, dy: dy) }))
     case .layer(let l):
-        return .layer(Layer(
-            name: l.name,
-            children: l.children.map {
-                artboardTranslateElement($0, dx: dx, dy: dy)
-            },
-            opacity: l.opacity, transform: l.transform, locked: l.locked))
+        return .layer(l.withChildren(
+            l.children.map { artboardTranslateElement($0, dx: dx, dy: dy) }))
     default:
         return elem.moveControlPoints(.all, dx: dx, dy: dy)
     }
@@ -3936,10 +4146,8 @@ private func artboardTranslateFromPreview(
                 }
                 return child
             }
-            return Layer(
-                name: layer.name, children: newChildren,
-                opacity: layer.opacity, transform: layer.transform,
-                locked: layer.locked)
+            // T4: the layer is a bystander this rebuild only passes through.
+            return layer.withChildren(newChildren)
         }
     }
 
@@ -3984,10 +4192,7 @@ private func artboardTranslateFromPreview(
                         }
                         return child
                     }
-                rebuilt.append(Layer(
-                    name: layer.name, children: newChildren,
-                    opacity: layer.opacity, transform: layer.transform,
-                    locked: layer.locked))
+                rebuilt.append(layer.withChildren(newChildren))
             }
             newLayers = rebuilt
         }
@@ -3995,12 +4200,8 @@ private func artboardTranslateFromPreview(
 
     // PREVIEW (live-drag) re-apply off the restored snapshot: non-undoable.
     // Mirrors Rust artboard_translate_from_preview's set_document_unbracketed.
-    model.setDocumentUnbracketed(Document(
-        layers: newLayers,
-        selectedLayer: doc.selectedLayer,
-        selection: doc.selection,
-        artboards: newAbs,
-        artboardOptions: doc.artboardOptions), intent: .liveDrag)
+    model.setDocumentUnbracketed(
+        doc.replacing(layers: newLayers, artboards: newAbs), intent: .liveDrag)
 }
 
 /// doc.artboard.move_apply implementation per ARTBOARD_TOOL.md
@@ -4205,10 +4406,8 @@ private func artboardResizeApply(
     }
     // PREVIEW (live-drag) resize off the restored snapshot: non-undoable.
     // Mirrors Rust artboard_resize_apply's set_document_unbracketed.
-    model.setDocumentUnbracketed(Document(
-        layers: doc.layers, selectedLayer: doc.selectedLayer,
-        selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions), intent: .liveDrag)
+    model.setDocumentUnbracketed(
+        doc.replacing(artboards: newAbs), intent: .liveDrag)
 }
 
 /// doc.artboard.resize_commit — integer-pt rounded final bounds.
@@ -4242,10 +4441,7 @@ private func artboardResizeCommit(model: Model, store: StateStore) {
     // COMMIT: undoable. editDocument self-brackets one undo step (joins the
     // runEffects owner txn if open). Mirrors Rust artboard_resize_commit's
     // edit_document.
-    model.editDocument(Document(
-        layers: doc.layers, selectedLayer: doc.selectedLayer,
-        selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions))
+    model.editDocument(doc.replacing(artboards: newAbs))
 }
 
 /// doc.artboard.duplicate_init implementation per
@@ -4288,10 +4484,9 @@ private func artboardDuplicateInit(model: Model, store: StateStore) {
                 appended += 1
             }
         }
-        newLayers.append(Layer(
-            name: layer.name, children: newChildren,
-            opacity: layer.opacity, transform: layer.transform,
-            locked: layer.locked))
+        // T4: the layer is a bystander of the duplicate — it gains a child and
+        // keeps everything else, `id` included.
+        newLayers.append(layer.withChildren(newChildren))
     }
 
     // Mint the duplicate artboard's id through THE ONE MINT LOOP.
@@ -4314,10 +4509,7 @@ private func artboardDuplicateInit(model: Model, store: StateStore) {
 
     // Undoable: editDocument self-brackets (joins the owner txn if open).
     // Mirrors Rust artboard_duplicate_init's edit_document.
-    model.editDocument(Document(
-        layers: newLayers, selectedLayer: doc.selectedLayer,
-        selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions))
+    model.editDocument(doc.replacing(layers: newLayers, artboards: newAbs))
 
     // Retarget tool state.
     store.setTool("artboard", "hit_artboard_id", newId)
@@ -4337,10 +4529,7 @@ private func artboardDeletePanelSelected(model: Model, store: StateStore) {
     model.beginTxn()
     let doc = model.document
     let newAbs = doc.artboards.filter { !targetIds.contains($0.id) }
-    model.setDocument(Document(
-        layers: doc.layers, selectedLayer: doc.selectedLayer,
-        selection: doc.selection, artboards: newAbs,
-        artboardOptions: doc.artboardOptions))
+    model.setDocument(doc.replacing(artboards: newAbs))
 }
 
 /// doc.artboard.move_commit — re-applies translate with integer-pt

@@ -28,9 +28,11 @@ private class JsonObj {
     private var entries: [(String, String)] = []
 
     func str(_ key: String, _ v: String) {
-        let escaped = v.replacingOccurrences(of: "\\", with: "\\\\")
-                       .replacingOccurrences(of: "\"", with: "\\\"")
-        entries.append((key, "\"\(escaped)\""))
+        // THE shared escaper, not a second copy of it. This file's header
+        // says it follows `TestJson.swift`'s conventions, and a local
+        // two-replacement copy stopped being true of that the moment the
+        // geometry writer learned control characters.
+        entries.append((key, jsonEscapeString(v)))
     }
 
     func num(_ key: String, _ v: Double) {

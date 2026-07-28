@@ -216,6 +216,8 @@ mod tests {
             "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
             // Import normalization: duplicate ids collapse to first-pre-order-wins.
             "dup_id_import",
+            // The same normalization reaching INSIDE a live compound's operands.
+            "dup_id_compound_operand",
             // A compound shape carrying its own stable id (round-trips through
             // all three codecs; id is the only common field SVG preserves for
             // live elements — name is intentionally excluded).
@@ -385,6 +387,18 @@ mod tests {
         // first pre-order occurrence keeps the id, later ones are cleared
         // (REFERENCE_GRAPH.md §2.5). All apps normalize identically.
         assert_svg_parse("dup_id_import");
+    }
+
+    #[test]
+    fn svg_parse_dup_id_compound_operand() {
+        // The same §2.5 normalization, reaching INSIDE a live compound's
+        // operands — the operands are real elements carrying their own
+        // common.id, so they are part of the one document-wide id space.
+        // The vector pins both directions of that: the operand whose id
+        // repeats an earlier layer child is CLEARED, and the operand id that
+        // is first-seen ENTERS the seen set, so a later layer child repeating
+        // it is cleared in turn.
+        assert_svg_parse("dup_id_compound_operand");
     }
 
     #[test]
@@ -849,6 +863,7 @@ mod tests {
                          "operations/structural_delete_selection.json",
                          "operations/structural_insert_after.json",
                          "operations/structural_insert_at.json",
+                         "operations/bystander_containers.json",
                          "operations/wrap_in_group.json",
                          "operations/wrap_in_layer.json",
                          "operations/unpack_group_at.json",
@@ -900,6 +915,12 @@ mod tests {
     /// polygon / star).
     const GESTURE_FIXTURES: &[&str] = &[
         "draw_rect.json",
+        // VIEWSEED: the same Rect drag at a NON-identity view (zoom 2, offset
+        // (-100, -50)). Every other gesture vector runs at the identity view,
+        // where the screen→doc conversion in pointer_event_payload is
+        // algebraically the identity and a tool that skipped it would still
+        // pass. See CORPUS_CENSUS.md §5.7.
+        "draw_rect_zoomed.json",
         "draw_line.json",
         "draw_ellipse.json",
         "draw_rounded_rect.json",
@@ -949,6 +970,57 @@ mod tests {
         "recorded_blob_dot.json",
         "recorded_blob_merge.json",
         "recorded_blob_separate.json",
+        // TRANSFORM-BLIND MERGE gate (S-3). The setup's only element is a
+        // blob-brush path whose LOCAL `d` is the square 0..72 (doc units) and
+        // whose `common.transform` is translate(300,300) — so it RENDERS at
+        // doc 300..372. The sweep runs at doc y=50 from x=50 to x=150, i.e.
+        // the painted region is x 45..155 / y 45..55, which does not come
+        // within 145 units of where that blob is drawn. The correct document
+        // therefore has TWO children: the existing blob untouched, plus a new
+        // blob at the painted location.
+        //
+        // What the transform-blind code produced: the match test ran
+        // `path_to_polygon_set(&pe.d)` on the RAW `d` (0..72), which DOES
+        // overlap the sweep, so the two merged into ONE child whose `d` was
+        // the doc-space union pushed back through no matrix at all — one
+        // child, and the new ink drawn offset by the matrix's (300, 300) from
+        // where the artist put it. See transcripts/BLOB_BRUSH_TOOL.md
+        // §Transform.
+        "blob_transform_no_merge.json",
+        // The POSITIVE half of the pair above. The setup is the same square
+        // 0..72 with the transform removed, so it sits exactly under the sweep
+        // and the merge is CORRECT: one child, the union, at doc x 0..155.
+        //
+        // Also a gate on `jas:tool-origin` surviving an SVG IMPORT.
+        // `tool_origin` is not a key of the canonical test JSON, so no
+        // serialization gate observes it directly; only a merge depends on it.
+        // Counted mechanically: `grep -rl "jas:tool-origin" test_fixtures/svg`
+        // returns three files, all added with these fixtures, and the two that
+        // MERGE (this one and blob_transform_merge) are the ones whose goldens
+        // change if the tag is dropped — blob_transform_no_merge yields two
+        // children either way. This is the fixture that caught it.
+        //
+        // It is also the identity-transform guard on the transform work: a
+        // matrix-aware merge must leave a transform-less element's result
+        // byte-identical to what it was before.
+        "blob_import_merge.json",
+        // The n == 1 arm WITH a matrix — the only gate whose merged `d` is
+        // written THROUGH a matrix, so the only one the inverse write-back can
+        // be seen through (mutation-proved: dropping the inverse fails
+        // gesture_corpus on this vector and nothing else). Same setup as
+        // blob_transform_no_merge (local square 0..72, translate(300,300), so
+        // drawn at doc 300..372); this sweep runs at doc y=336 from x=320 to
+        // x=420, which DOES cross it. One child results, keeping the source's
+        // id and its matrix, and `d` must come back in the source's LOCAL
+        // space: the square unioned with the sweep mapped through the inverse,
+        // spanning local x 0..125, y 0..72.
+        //
+        // Without the inverse the union is written in document coordinates and
+        // the whole element is then drawn through translate(300,300) on top of
+        // that — offset by (300, 300) from where it belongs — while every
+        // field-list test (`assert_only_d_changed`) still passes: they graft
+        // the source's `d` onto the output and never look at it.
+        "blob_transform_merge.json",
     ];
 
     /// Run a gesture fixture and return the resulting Model. Resolves
@@ -1235,6 +1307,14 @@ mod tests {
         // and painted in Swift. The second case pins the Mixed outcome (the
         // declared default stands — absent is not null).
         "fill_stroke_action_scope.json",
+        // VIEWSEED: the FIRST fixtures anywhere in test_fixtures/ that set
+        // zoom_level / view_offset. Every other case runs at the identity
+        // view, where screen↔doc conversion is algebraically the identity and
+        // so cannot fail (CORPUS_CENSUS.md §5.7). These cases seed a
+        // non-identity view via `view` and assert the resulting view triple
+        // via `expected_view` — a fact NO document golden can see, because
+        // view state is not document content.
+        "view_state.json",
     ];
 
     /// Run an action fixture and return the resulting `AppState`.
@@ -1310,10 +1390,60 @@ mod tests {
         }
     }
 
+    /// OPTIONAL third assertion: `expected_view`.
+    ///
+    /// View state — `zoom_level`, `view_offset_x`, `view_offset_y` — is
+    /// NOT document content, so `document_to_test_json` cannot see it and
+    /// no golden in this corpus constrained it before VIEWSEED. Combined
+    /// with the case's `view` seed this is the whole point of the
+    /// view-state family: run the action off the identity view and pin
+    /// the triple the view effects produce.
+    ///
+    /// The comparison is EXACT (`==` on f64). Both ports evaluate the same
+    /// IEEE-754 double operations on the same inputs, and the fixture
+    /// literals are shortest-round-trip forms, so any difference is a real
+    /// divergence and not a formatting artifact. Cases without the block
+    /// are unaffected. Mirrors Swift's `assertActionView`.
+    fn assert_action_view(
+        tc: &serde_json::Value, st: &crate::workspace::app_state::AppState,
+    ) {
+        let Some(expected) = tc.get("expected_view").and_then(|v| v.as_object())
+        else { return };
+        let name = tc["name"].as_str().unwrap();
+        // Read the triple straight off the Model the run produced: view
+        // state is NOT document content, so the golden cannot carry it.
+        let model = &st.tabs[st.active_tab].model;
+        let (zoom, offx, offy) =
+            (model.zoom_level, model.view_offset_x, model.view_offset_y);
+        for (key, want) in expected {
+            let want = want.as_f64().unwrap_or_else(|| {
+                panic!("Action test '{}': expected_view.{} is not a number", name, key)
+            });
+            let got = match key.as_str() {
+                "zoom_level" => zoom,
+                "view_offset_x" => offx,
+                "view_offset_y" => offy,
+                other => panic!(
+                    "Action test '{}': expected_view names {:?}, which is not part \
+                     of the view triple (zoom_level / view_offset_x / view_offset_y)",
+                    name, other,
+                ),
+            };
+            assert_eq!(
+                got, want,
+                "Action test '{}': view state {} is {} but the corpus pins {}. \
+                 The view transform decides which region of the document the \
+                 user is looking at and how every screen coordinate converts, \
+                 so a wrong value here is a canvas that shows the wrong thing.",
+                name, key, got, want,
+            );
+        }
+    }
+
     /// Mirror of `assert_gesture_test`: replay the action sequence and
     /// compare the canonical document JSON against the pinned golden,
     /// dumping EXPECTED/ACTUAL on mismatch. Then apply the case's optional
-    /// `expected_panel_state` block.
+    /// `expected_panel_state` and `expected_view` blocks.
     fn assert_action_test(tc: &serde_json::Value) {
         let name = tc["name"].as_str().unwrap();
         let expected_file = tc["expected_json"].as_str().unwrap();
@@ -1330,6 +1460,7 @@ mod tests {
             panic!("Action test '{}' failed: canonical JSON mismatch", name);
         }
         assert_action_panel_state(tc, &st);
+        assert_action_view(tc, &st);
     }
 
     #[test]
@@ -1865,6 +1996,362 @@ mod tests {
         for tc in tests.as_array().unwrap() {
             assert_operation_test(tc);
         }
+    }
+
+    // ===============================================================
+    // PRESERVATION corpus — the DOCUMENT-LEVEL INVARIANT GATE
+    // (transcripts/EDIT_SEMANTICS_FREEZE.md §4.1, the primary tier).
+    //
+    // The freeze's own finding is that a per-copy-API battery is
+    // structurally blind to the gravest violation class: inline
+    // container rebuilds are not copy APIs, so no battery would ever be
+    // written for them. This gate does not look at any copy site. It
+    // serializes the WHOLE document before and after an edit and asserts
+    // six invariants over the canonical (cross-language) test JSON —
+    // "one predicate both ports can fail identically" (§4.2). The Swift
+    // twin in JasSwift/Tests/CrossLanguageTests.swift evaluates exactly
+    // the same six names over exactly the same vectors.
+    //
+    // A vector may PIN a known violation for this port. A pinned
+    // invariant is asserted to FAIL: fixing the site turns this gate red
+    // until the pin is removed, so a pin can never rot into a silent
+    // suppression. `scripts/check_preservation_corpus.py` gates the data
+    // shape (V1-V5 anti-vacuity).
+    // ===============================================================
+
+    /// One evaluated invariant: `None` = held, `Some(why)` = violated.
+    type InvResult = (&'static str, Option<String>);
+
+    /// Recursively collect every id-bearing element of a canonical
+    /// document JSON: the ids in document order, and each id's own
+    /// attribute object with `children` stripped (a container that
+    /// legitimately gained or lost a child still has ITS OWN fields
+    /// compared — that is the T4 bystander predicate).
+    fn preservation_walk(
+        node: &serde_json::Value,
+        ids: &mut Vec<String>,
+        attrs: &mut std::collections::HashMap<String, serde_json::Value>,
+    ) {
+        match node {
+            serde_json::Value::Array(items) => {
+                for it in items {
+                    preservation_walk(it, ids, attrs);
+                }
+            }
+            serde_json::Value::Object(obj) => {
+                if obj.contains_key("type")
+                    && let Some(id) = obj.get("id").and_then(|v| v.as_str())
+                {
+                    ids.push(id.to_string());
+                    let mut stripped = obj.clone();
+                    stripped.remove("children");
+                    attrs.insert(id.to_string(), serde_json::Value::Object(stripped));
+                }
+                for key in ["layers", "children", "symbols"] {
+                    if let Some(v) = obj.get(key) {
+                        preservation_walk(v, ids, attrs);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    struct PreservationSnapshot {
+        ids: Vec<String>,
+        attrs: std::collections::HashMap<String, serde_json::Value>,
+    }
+
+    fn preservation_snapshot(doc_json: &str) -> PreservationSnapshot {
+        let v: serde_json::Value = serde_json::from_str(doc_json)
+            .expect("canonical document JSON parses");
+        let mut ids = Vec::new();
+        let mut attrs = std::collections::HashMap::new();
+        preservation_walk(&v, &mut ids, &mut attrs);
+        PreservationSnapshot { ids, attrs }
+    }
+
+    fn str_list(tc: &serde_json::Value, key: &str) -> Vec<String> {
+        tc[key]
+            .as_array()
+            .unwrap_or_else(|| panic!("preservation vector needs a '{key}' array"))
+            .iter()
+            .map(|v| v.as_str().expect("a string").to_string())
+            .collect()
+    }
+
+    /// Evaluate the six document-level invariants for one vector.
+    fn preservation_invariants_for(
+        tc: &serde_json::Value,
+        before: &PreservationSnapshot,
+        after: &PreservationSnapshot,
+    ) -> Vec<InvResult> {
+        use std::collections::BTreeSet;
+        let subject: BTreeSet<String> = str_list(tc, "subject_ids").into_iter().collect();
+        let consumed: BTreeSet<String> = str_list(tc, "consumed_ids").into_iter().collect();
+        let speaks_to: BTreeSet<String> = str_list(tc, "speaks_to").into_iter().collect();
+        let want_fresh = tc["expected_fresh_ids"].as_u64().expect("expected_fresh_ids") as usize;
+
+        let before_set: BTreeSet<&String> = before.ids.iter().collect();
+        let after_set: BTreeSet<&String> = after.ids.iter().collect();
+
+        let mut out: Vec<InvResult> = Vec::new();
+
+        // id_uniqueness — the REFERENCE_GRAPH.md §2.5 uniqueness invariant,
+        // document-wide, after the edit.
+        let mut dups: Vec<&String> = Vec::new();
+        for id in &after.ids {
+            if after.ids.iter().filter(|o| *o == id).count() > 1 && !dups.contains(&id) {
+                dups.push(id);
+            }
+        }
+        out.push((
+            "id_uniqueness",
+            if dups.is_empty() {
+                None
+            } else {
+                Some(format!("id(s) appear more than once after the edit: {dups:?}"))
+            },
+        ));
+
+        // id_survival — every identity the edit did not consume is still there.
+        let lost: Vec<&&String> = before_set
+            .iter()
+            .filter(|id| !consumed.contains(**id) && !after_set.contains(**id))
+            .collect();
+        out.push((
+            "id_survival",
+            if lost.is_empty() {
+                None
+            } else {
+                Some(format!("id(s) present before and NOT consumed vanished: {lost:?}"))
+            },
+        ));
+
+        // consumed_ids_die — over-preservation is a violation too (§3.3).
+        let survived: Vec<&String> = consumed.iter().filter(|id| after_set.contains(id)).collect();
+        out.push((
+            "consumed_ids_die",
+            if survived.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "id(s) the edit consumed rode out on the result: {survived:?}"
+                ))
+            },
+        ));
+
+        // fresh_ids — how many identities the edit minted.
+        let fresh: Vec<&&String> = after_set.iter().filter(|id| !before_set.contains(**id)).collect();
+        out.push((
+            "fresh_ids",
+            if fresh.len() == want_fresh {
+                None
+            } else {
+                Some(format!(
+                    "expected {want_fresh} freshly minted id(s), got {} ({fresh:?})",
+                    fresh.len()
+                ))
+            },
+        ));
+
+        // bystanders_unchanged — T4, including the containers the edit
+        // rebuilt to reach its target. Compared only for bystanders that
+        // still carry their id after the edit; a bystander whose id was
+        // destroyed is id_survival's failure, not this one's.
+        let mut byst_fail: Vec<String> = Vec::new();
+        for id in &before_set {
+            if subject.contains(*id) || consumed.contains(*id) {
+                continue;
+            }
+            let (Some(b), Some(a)) = (before.attrs.get(*id), after.attrs.get(*id)) else {
+                continue;
+            };
+            if b != a {
+                byst_fail.push(format!("{id}: {b} -> {a}"));
+            }
+        }
+        out.push((
+            "bystanders_unchanged",
+            if byst_fail.is_empty() {
+                None
+            } else {
+                Some(format!("bystander attributes changed: {byst_fail:?}"))
+            },
+        ));
+
+        // subject_fields_only — clause 1: only the spoken-to keys may differ.
+        let mut subj_fail: Vec<String> = Vec::new();
+        for id in &subject {
+            let (Some(b), Some(a)) = (before.attrs.get(id), after.attrs.get(id)) else {
+                continue;
+            };
+            let bo = b.as_object().unwrap();
+            let ao = a.as_object().unwrap();
+            let keys: BTreeSet<&String> = bo.keys().chain(ao.keys()).collect();
+            for k in keys {
+                if speaks_to.contains(k) {
+                    continue;
+                }
+                if bo.get(k) != ao.get(k) {
+                    subj_fail.push(format!("{id}.{k}: {:?} -> {:?}", bo.get(k), ao.get(k)));
+                }
+            }
+        }
+        out.push((
+            "subject_fields_only",
+            if subj_fail.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "subject changed keys outside speaks_to {speaks_to:?}: {subj_fail:?}"
+                ))
+            },
+        ));
+
+        out
+    }
+
+    /// Anti-vacuity, asserted at RUNTIME (the data-shape half lives in
+    /// `scripts/check_preservation_corpus.py`): the edit must have changed
+    /// the document, every named id must have existed before it, and there
+    /// must be at least one bystander to watch.
+    fn assert_preservation_not_vacuous(
+        name: &str,
+        tc: &serde_json::Value,
+        before_json: &str,
+        after_json: &str,
+        before: &PreservationSnapshot,
+        after: &PreservationSnapshot,
+    ) {
+        assert_ne!(
+            before_json, after_json,
+            "preservation vector '{name}' left the document byte-identical — \
+             every invariant over it would be vacuously true"
+        );
+        for key in ["subject_ids", "consumed_ids"] {
+            for id in str_list(tc, key) {
+                assert!(
+                    before.ids.contains(&id),
+                    "preservation vector '{name}' names {key} id '{id}', which is \
+                     absent from the loaded setup document"
+                );
+            }
+        }
+        let named: Vec<String> = str_list(tc, "subject_ids")
+            .into_iter()
+            .chain(str_list(tc, "consumed_ids"))
+            .collect();
+        let bystanders = before.ids.iter().filter(|i| !named.contains(i)).count();
+        assert!(
+            bystanders > 0,
+            "preservation vector '{name}' has no bystander — T4 is unwatchable here"
+        );
+
+        // `must_change` (optional) turns `speaks_to` from a PERMISSION into a
+        // CLAIM. `subject_fields_only` only forbids differences OUTSIDE
+        // `speaks_to`, so listing a key there makes the gate blind to it: an
+        // implementation that stopped writing the key entirely would still be
+        // green. Naming it here asserts the edit really does rewrite it, which
+        // is what lets a corpus vector separate a behaviour rather than merely
+        // tolerate it — e.g. the blob 1-match vector, whose `fill_rule` claim
+        // is the ring term (T1's third closure) made visible to the corpus.
+        if let Some(keys) = tc.get("must_change").and_then(|v| v.as_array()) {
+            for id in str_list(tc, "subject_ids") {
+                let (Some(b), Some(a)) = (before.attrs.get(&id), after.attrs.get(&id))
+                else {
+                    panic!(
+                        "preservation vector '{name}' declares must_change but \
+                         subject '{id}' is missing from one of the snapshots"
+                    );
+                };
+                for key in keys {
+                    let key = key.as_str().expect("must_change entries are strings");
+                    assert_ne!(
+                        b.get(key), a.get(key),
+                        "preservation vector '{name}' claims the edit rewrites \
+                         {id}.{key}, but it is unchanged — the claim is stale, \
+                         or the behaviour it watches has regressed"
+                    );
+                }
+            }
+        }
+    }
+
+    /// THE DOCUMENT-LEVEL INVARIANT GATE. Runs every
+    /// `test_fixtures/preservation/*.json` vector through the production op
+    /// dispatcher and asserts the six invariants over the whole document.
+    #[test]
+    fn preservation_invariants() {
+        let json_str = read_fixture("preservation/preservation_invariants.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str)
+            .expect("preservation_invariants.json parses");
+        let mut failures: Vec<String> = Vec::new();
+
+        for tc in tests.as_array().expect("an array of vectors") {
+            let name = tc["name"].as_str().expect("a name");
+
+            // BEFORE: the setup document, loaded and serialized with no ops.
+            let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
+            let before_model = Model::new(svg_to_document(&setup_svg), None);
+            let before_json = <DocumentOps as OpWorld>::to_test_json(&before_model);
+
+            // AFTER. A vector drives its edit through ONE of two production
+            // paths, chosen by its own shape: `events` replays pointer input
+            // through the real tool (the gesture corpus's runner), `txns`
+            // dispatches ops. The gesture arm is not a convenience — the blob
+            // brush's commit arms are a YAML effect with NO `op_apply` verb, so
+            // an op-only gate is structurally blind to them, which is the same
+            // shape of blindness §4.1 records for per-copy-API batteries.
+            let after_model = if tc.get("events").is_some() {
+                run_gesture_model(tc)
+            } else {
+                run_operation_model(tc)
+            };
+            let after_json = <DocumentOps as OpWorld>::to_test_json(&after_model);
+
+            let before = preservation_snapshot(&before_json);
+            let after = preservation_snapshot(&after_json);
+            assert_preservation_not_vacuous(
+                name, tc, &before_json, &after_json, &before, &after);
+
+            let pinned: Vec<(String, String)> = tc["expected_violations"]["rust"]
+                .as_array()
+                .expect("expected_violations.rust is an array")
+                .iter()
+                .map(|r| {
+                    (
+                        r["invariant"].as_str().expect("invariant").to_string(),
+                        r["row"].as_str().expect("row").to_string(),
+                    )
+                })
+                .collect();
+
+            for (inv, result) in preservation_invariants_for(tc, &before, &after) {
+                let pin = pinned.iter().find(|(p, _)| p == inv);
+                match (pin, &result) {
+                    // Unpinned invariant that failed — the law is broken here.
+                    (None, Some(why)) => failures.push(format!(
+                        "[{name}] {inv} VIOLATED: {why}"
+                    )),
+                    // Pinned violation that no longer reproduces — the pin is
+                    // stale and must be deleted (this is what stops a pin from
+                    // rotting into a suppression).
+                    (Some((_, row)), None) => failures.push(format!(
+                        "[{name}] {inv} is PINNED as a known violation ({row}) but now \
+                         HOLDS — remove the pin from the vector"
+                    )),
+                    _ => {}
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "preservation invariant gate: {} failure(s):\n  {}",
+            failures.len(),
+            failures.join("\n  ")
+        );
     }
 
     /// `OpWorld` trait-level pin for the DOCUMENT world (OP_LOG.md §2 Fork 5 /
@@ -2911,6 +3398,22 @@ mod tests {
     #[test]
     fn operation_structural_insert_at() {
         run_operation_fixture("operations/structural_insert_at.json");
+    }
+
+    /// EDIT_SEMANTICS_FREEZE.md T4 (the BYSTANDER CLAUSE) as a cross-port byte
+    /// gate: *an edit preserves, unchanged, every element it does not name —
+    /// including the containers it rebuilds to reach its target.* The three
+    /// structural mutators (replace / delete / insert-after) each reach a
+    /// grandchild through a Layer and a Group that both carry an `id`, a `name`
+    /// and — for the replace vector — a non-default `visibility`. Everything the
+    /// shared test-JSON encoding can see about those two containers must survive
+    /// the edit byte-identically. Rust conformed on the day this landed; the
+    /// fixture exists because the Swift twin did not (its private `withChildren`
+    /// rebuilt Layer/Group from four fields), and a per-port unit test cannot
+    /// discharge the ratification condition on its own.
+    #[test]
+    fn operation_bystander_containers() {
+        run_operation_fixture("operations/bystander_containers.json");
     }
 
     /// OP_LOG.md §9 Phase P4 — Fork-4 targets: an inserting verb whose carried
@@ -4875,6 +5378,470 @@ mod tests {
             assert!(same_workspace_value(got, want),
                     "{}: CharacterPanelState::default() has {} but the \
                      workspace declares {}", field, got, want);
+        }
+    }
+
+
+    // ---------------------------------------------------------------
+    // CODEC FIELD SURVIVAL
+    //
+    // Every other codec gate in this file compares `document_to_test_json`
+    // STRINGS. That catches a dropped field perfectly -- but only for fields
+    // the canonical test-JSON itself emits, and the set of fields the BINARY
+    // codec drops is a strict SUBSET of the set the test-JSON drops. So no
+    // fixture, however saturated, can red-light a binary-codec drop through
+    // the string oracle: it would be normalized back to default on the way in
+    // and pass, green and vacuous.
+    //
+    // This gate compares at the MODEL level instead (PartialEq on PathElem),
+    // which is what lets it see the fields the oracle cannot express. The
+    // saturated Path below is mirrored in JasSwift/Tests/CrossLanguageTests
+    // .swift (`saturatedPath`) and stated once in prose in the fixture's
+    // `saturated_path` block. See transcripts/EDIT_SEMANTICS_FREEZE.md: a
+    // round trip speaks to NOTHING, so it must preserve EVERYTHING.
+    // ---------------------------------------------------------------
+
+    fn survival_gradient() -> Box<crate::geometry::element::Gradient> {
+        use crate::geometry::element::*;
+        Box::new(Gradient {
+            gtype: GradientType::Radial,
+            angle: 45.0,
+            aspect_ratio: 200.0,
+            method: GradientMethod::Smooth,
+            dither: true,
+            stroke_sub_mode: StrokeSubMode::Along,
+            stops: vec![
+                GradientStop { color: Color::Rgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+                               opacity: 100.0, location: 0.0, midpoint_to_next: 25.0 },
+                GradientStop { color: Color::Rgb { r: 0.0, g: 0.0, b: 1.0, a: 1.0 },
+                               opacity: 50.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            nodes: vec![],
+        })
+    }
+
+    /// The attribute-SATURATED Path: every optional field on the kind set to a
+    /// non-default value. Mirrored by `saturatedPath()` in JasSwift.
+    fn survival_saturated_path() -> crate::geometry::element::PathElem {
+        use crate::geometry::element::*;
+        PathElem {
+            d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 10.0, y: 10.0 },
+                    PathCommand::ClosePath],
+            fill: Some(Fill { color: Color::Hsb { h: 120.0, s: 0.5, b: 0.6, a: 0.8 }, opacity: 0.6 }),
+            stroke: Some(Stroke {
+                color: Color::Cmyk { c: 0.1, m: 0.2, y: 0.3, k: 0.4, a: 0.9 },
+                width: 4.5,
+                linecap: LineCap::Round,
+                linejoin: LineJoin::Bevel,
+                miter_limit: 7.5,
+                align: StrokeAlign::Inside,
+                // Chosen so the SVG round trip is EXACT: the writer emits
+                // lengths in px at 4 decimal places, so a pt value whose px
+                // form is not exact at 4dp (4pt -> 5.3333px -> 3.999975pt)
+                // comes back off by ~1e-5 and the cell would read DROPPED for
+                // a PRECISION reason rather than an omission. 3/1.5/6/0.75 pt
+                // are 4/2/8/1 px exactly. Mirrored in JasSwift.
+                dash_pattern: [3.0, 1.5, 6.0, 0.75, 0.0, 0.0],
+                dash_len: 4,
+                dash_align_anchors: true,
+                start_arrow: Arrowhead::ClosedArrow,
+                end_arrow: Arrowhead::Circle,
+                start_arrow_scale: 150.0,
+                end_arrow_scale: 75.0,
+                arrow_align: ArrowAlign::CenterAtEnd,
+                opacity: 0.75,
+            }),
+            width_points: vec![
+                StrokeWidthPoint { t: 0.0, width_left: 1.0, width_right: 2.0 },
+                StrokeWidthPoint { t: 1.0, width_left: 3.0, width_right: 4.0 },
+            ],
+            common: CommonProps {
+                opacity: 0.5,
+                mode: BlendMode::Multiply,
+                transform: Some(Transform { a: 2.0, b: 0.0, c: 0.0, d: 3.0, e: 5.0, f: 7.0 }),
+                locked: true,
+                visibility: Visibility::Outline,
+                mask: Some(Box::new(Mask {
+                    subtree: Box::new(Element::Rect(RectElem {
+                        x: 1.0, y: 2.0, width: 3.0, height: 4.0, rx: 0.0, ry: 0.0,
+                        fill: Some(Fill::new(Color::Rgb { r: 1.0, g: 1.0, b: 1.0, a: 1.0 })),
+                        stroke: None,
+                        common: CommonProps::default(),
+                        fill_gradient: None,
+                        stroke_gradient: None,
+                    })),
+                    clip: true,
+                    invert: true,
+                    disabled: false,
+                    linked: false,
+                    unlink_transform: Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 9.0, f: 9.0 }),
+                })),
+                tool_origin: Some("blob_brush".to_string()),
+                name: Some("name_path".to_string()),
+                id: Some("id_path".to_string()),
+            },
+            fill_gradient: Some(survival_gradient()),
+            stroke_gradient: Some(survival_gradient()),
+            fill_rule: FillRule::EvenOdd,
+            stroke_brush: Some("basic/calligraphic_5".to_string()),
+            stroke_brush_overrides: Some("{\"angle\":30}".to_string()),
+        }
+    }
+
+    fn survival_doc() -> crate::document::document::Document {
+        use crate::geometry::element::*;
+        let mut d = crate::document::document::Document::default();
+        let mut lc = CommonProps::default();
+        lc.name = Some("Layer 1".to_string());
+        d.layers = vec![Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(Element::Path(survival_saturated_path()))],
+            common: lc,
+            isolated_blending: false,
+            knockout_group: false,
+        })];
+        d
+    }
+
+    fn survival_first_path(
+        d: &crate::document::document::Document,
+    ) -> Option<crate::geometry::element::PathElem> {
+        use crate::geometry::element::Element;
+        let kids = match d.layers.first()? { Element::Layer(e) => &e.children, _ => return None };
+        match kids.first()?.as_ref() { Element::Path(p) => Some(p.clone()), _ => None }
+    }
+
+    /// PRESERVED / DROPPED for each watched field of `after` against `before`.
+    fn survival_row(
+        before: &crate::geometry::element::PathElem,
+        after: Option<&crate::geometry::element::PathElem>,
+    ) -> Vec<(&'static str, &'static str)> {
+        let a = match after {
+            Some(a) => a,
+            None => panic!("codec_field_survival: the saturated Path did not survive the \
+                            round trip AT ALL -- every field row below is meaningless"),
+        };
+        let s = |ok: bool| if ok { "PRESERVED" } else { "DROPPED" };
+        vec![
+            ("common.mask", s(a.common.mask == before.common.mask)),
+            ("common.mode", s(a.common.mode == before.common.mode)),
+            ("common.tool_origin", s(a.common.tool_origin == before.common.tool_origin)),
+            ("fill_gradient", s(a.fill_gradient == before.fill_gradient)),
+            ("fill_rule", s(a.fill_rule == before.fill_rule)),
+            ("stroke.align", s(a.stroke.map(|x| x.align) == before.stroke.map(|x| x.align))),
+            ("stroke.dash_align_anchors",
+             s(a.stroke.map(|x| x.dash_align_anchors) == before.stroke.map(|x| x.dash_align_anchors))),
+            // The ACTIVE slice, not the fixed six-slot array: the two ports
+            // store the pattern differently (Rust [f64; 6] + dash_len, Swift a
+            // Vec), and `dash_array()` / `dashPattern` is the shape they share.
+            ("stroke.dash_pattern",
+             s(a.stroke.map(|x| x.dash_array().to_vec()) == before.stroke.map(|x| x.dash_array().to_vec()))),
+            ("stroke.miter_limit",
+             s(a.stroke.map(|x| x.miter_limit) == before.stroke.map(|x| x.miter_limit))),
+            ("stroke_brush", s(a.stroke_brush == before.stroke_brush)),
+            ("stroke_brush_overrides", s(a.stroke_brush_overrides == before.stroke_brush_overrides)),
+            ("stroke_gradient", s(a.stroke_gradient == before.stroke_gradient)),
+            ("width_points", s(a.width_points == before.width_points)),
+        ]
+    }
+
+    #[test]
+    fn codec_field_survival() {
+        let raw = read_fixture("expected/codec_field_survival.json");
+        let fx: serde_json::Value = serde_json::from_str(&raw)
+            .expect("codec_field_survival.json is not valid JSON");
+        let fields: Vec<String> = fx["fields"].as_array().unwrap().iter()
+            .map(|v| v.as_str().unwrap().to_string()).collect();
+        assert!(!fields.is_empty(), "codec_field_survival: the field list is empty");
+
+        let doc = survival_doc();
+        let before = survival_first_path(&doc).expect("saturated doc has a Path");
+
+        let via_json = test_json_to_document(&document_to_test_json(&doc));
+        let via_bin = binary_to_document(&document_to_binary(&doc, false))
+            .expect("binary round trip of the saturated doc");
+        let via_svg = svg_to_document(&document_to_svg(&doc));
+
+        for (codec, rt) in [("test_json", &via_json), ("binary", &via_bin), ("svg", &via_svg)] {
+            let got = survival_row(&before, survival_first_path(rt).as_ref());
+            assert_eq!(got.len(), fields.len(),
+                "codec_field_survival: the gate watches {} fields, the fixture declares {}",
+                got.len(), fields.len());
+            for (field, actual) in got {
+                assert!(fields.iter().any(|f| f == field),
+                    "codec_field_survival: field '{}' is watched by the gate but absent \
+                     from the fixture's `fields` list", field);
+                // A `port_overrides` entry means the two ports measurably
+                // disagree on this cell today; this port is asserted to produce
+                // the OTHER value, so closing the divergence reds this gate
+                // until the entry is deleted.
+                let override_val = fx["port_overrides"]["entries"].as_array().unwrap().iter()
+                    .find(|e| e["codec"] == codec && e["field"] == field && e["port"] == "rust")
+                    .and_then(|e| e["value"].as_str());
+                let expected = override_val.unwrap_or_else(|| {
+                    fx["survival"][codec][field].as_str().unwrap_or_else(|| panic!(
+                        "codec_field_survival: fixture declares no cell for {}/{}", codec, field))
+                });
+                assert_eq!(expected, actual,
+                    "codec_field_survival: {}/{} -- fixture says {}, rust measured {}{}",
+                    codec, field, expected, actual,
+                    if override_val.is_some() {
+                        " (a port_overrides entry pins this cell; if the divergence closed, \
+                          delete the entry)"
+                    } else { "" });
+            }
+        }
+    }
+
+
+    // ---------------------------------------------------------------
+    // BINARY WIRE -- the byte-level gate
+    //
+    // RULED 2026-07-27 together with the codec's per-tag trailing extension:
+    // every OTHER codec gate compares canonical test-JSON strings, and the
+    // fields the binary codec drops are a strict SUBSET of the fields that
+    // string oracle also drops. So a one-port slot mismatch in `pack_element`
+    // would land SILENTLY -- extending a format whose divergences we cannot
+    // see is not acceptable. Coverage gap
+    // `codec-string-oracle-cannot-see-a-dropped-field` is the record.
+    //
+    // This gate compares BYTES against ONE shared golden
+    // (test_fixtures/expected/binary_wire.json), which is what makes it a
+    // cross-port statement: a port that drifts cannot fix itself by editing
+    // its own literal, because there is no per-port literal to edit. The
+    // fixture also declares the per-tag ARITY the trailing append is defined
+    // against, asserted here through `packed_element_slot_count`.
+    //
+    // Twin: `binaryWire` in JasSwift/Tests/CrossLanguageTests.swift.
+    // ---------------------------------------------------------------
+
+    /// One element per wire tag, in the fixture's `tag_arity` key order.
+    /// Mirrored by `wireTagElements()` in JasSwift. The CONTENT is
+    /// deliberately minimal: arity is a property of the tag, not of the
+    /// values, so a shape with fewer numbers makes the pinned bytes readable.
+    fn wire_tag_elements() -> Vec<crate::geometry::element::Element> {
+        use crate::geometry::element::*;
+        use crate::geometry::live::*;
+        let c = CommonProps::default;
+        vec![
+            Element::Layer(LayerElem { children: vec![], isolated_blending: false,
+                                       knockout_group: false, common: c() }),
+            Element::Group(GroupElem { children: vec![], isolated_blending: false,
+                                       knockout_group: false, common: c() }),
+            Element::Line(LineElem { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0, stroke: None,
+                                     width_points: vec![], common: c(),
+                                     stroke_gradient: None }),
+            Element::Rect(RectElem { x: 0.0, y: 0.0, width: 1.0, height: 2.0, rx: 0.0, ry: 0.0,
+                                     fill: None, stroke: None, common: c(),
+                                     fill_gradient: None, stroke_gradient: None }),
+            Element::Circle(CircleElem { cx: 0.0, cy: 0.0, r: 1.0, fill: None, stroke: None,
+                                         common: c(), fill_gradient: None,
+                                         stroke_gradient: None }),
+            Element::Ellipse(EllipseElem { cx: 0.0, cy: 0.0, rx: 1.0, ry: 2.0, fill: None,
+                                           stroke: None, common: c(), fill_gradient: None,
+                                           stroke_gradient: None }),
+            Element::Polyline(PolylineElem { points: vec![(0.0, 0.0), (1.0, 1.0)], fill: None,
+                                             stroke: None, common: c(), fill_gradient: None,
+                                             stroke_gradient: None }),
+            Element::Polygon(PolygonElem { points: vec![(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)],
+                                           fill: None, stroke: None, common: c(),
+                                           fill_gradient: None, stroke_gradient: None }),
+            Element::Path(PathElem { d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                                             PathCommand::LineTo { x: 1.0, y: 1.0 }],
+                                     fill: None, stroke: None, width_points: vec![],
+                                     common: c(), fill_gradient: None, stroke_gradient: None,
+                                     fill_rule: FillRule::NonZero, stroke_brush: None,
+                                     stroke_brush_overrides: None }),
+            Element::Text(TextElem::from_string(1.0, 2.0, "hi", "Arial", 12.0, "normal",
+                                                "normal", "none", 10.0, 12.0, None, None, c())),
+            Element::TextPath(TextPathElem::from_string(
+                vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                     PathCommand::LineTo { x: 1.0, y: 1.0 }],
+                "hi", 0.0, "Arial", 12.0, "normal", "normal", "none", None, None, c())),
+            Element::Live(LiveVariant::Reference(
+                ReferenceElem::new(ElementRef("m1".to_string()), c()))),
+        ]
+    }
+
+    /// Every LIVE kind, which all share `tag_arity["live"]`.
+    fn wire_live_elements() -> Vec<crate::geometry::element::Element> {
+        use crate::geometry::element::*;
+        use crate::geometry::live::*;
+        let c = CommonProps::default;
+        vec![
+            Element::Live(LiveVariant::CompoundShape(CompoundShape {
+                operation: CompoundOperation::Union, operands: vec![],
+                fill: None, stroke: None, common: c() })),
+            Element::Live(LiveVariant::Reference(
+                ReferenceElem::new(ElementRef("m1".to_string()), c()))),
+            Element::Live(LiveVariant::Recorded(RecordedElem::new(vec![], vec![], c()))),
+            Element::Live(LiveVariant::Generated(GeneratedElem::new(
+                "spiral".to_string(), serde_json::Value::Object(Default::default()), c()))),
+        ]
+    }
+
+    /// The document a named wire case packs. Mirrored by `wireCaseDocument`
+    /// in JasSwift -- the two constructions ARE the thing being compared, so
+    /// they must stay identical shape for identical shape.
+    fn wire_case_document(name: &str) -> crate::document::document::Document {
+        use crate::document::document::Document;
+        use crate::geometry::element::*;
+        let layer = |kids: Vec<Element>| Element::Layer(LayerElem {
+            children: kids.into_iter().map(std::rc::Rc::new).collect(),
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = |kids: Vec<Element>| Document {
+            layers: vec![layer(kids)], selected_layer: 0, ..Document::default()
+        };
+        match name {
+            // Every non-text, non-live tag at its default, so the arity of
+            // each is visible in the bytes.
+            "shapes_default" => doc(wire_tag_elements().into_iter()
+                .filter(|e| !matches!(e, Element::Text(_) | Element::TextPath(_)
+                                        | Element::Live(_) | Element::Layer(_)))
+                .collect()),
+            // Text and TextPath, split out because the tspan payload is where
+            // the two ports are KNOWN to diverge (see the fixture's
+            // `port_hex`).
+            "text_default" => doc(wire_tag_elements().into_iter()
+                .filter(|e| matches!(e, Element::Text(_) | Element::TextPath(_)))
+                .collect()),
+            "live_default" => doc(wire_live_elements()),
+            // The extension's whole reason for existing, at non-default
+            // values: a masked, blend-moded, tool-tagged, brushed Path.
+            "saturated_extension" => doc(vec![Element::Path(survival_saturated_path())]),
+            other => panic!("binary_wire: unknown case '{other}'"),
+        }
+    }
+
+    fn wire_hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// Regeneration helper after an INTENTIONAL codec change. Run with:
+    ///   cargo test print_binary_wire_hex -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn print_binary_wire_hex() {
+        for e in wire_tag_elements() {
+            println!("ARITY {} = {}", crate::geometry::binary::element_tag_label(&e),
+                     crate::geometry::binary::packed_element_slot_count(&e));
+        }
+        for name in ["shapes_default", "text_default", "live_default",
+                     "saturated_extension"] {
+            println!("CASE {} = {}", name,
+                     wire_hex(&document_to_binary(&wire_case_document(name), false)));
+        }
+    }
+
+    #[test]
+    fn binary_wire() {
+        let raw = read_fixture("expected/binary_wire.json");
+        let fx: serde_json::Value = serde_json::from_str(&raw)
+            .expect("binary_wire.json is not valid JSON");
+
+        // (1) ARITY. Every tag's packed slot count is declared as data and
+        // asserted here, so a slot added to one port and not the other cannot
+        // hide behind a compensating change elsewhere in the array.
+        let arity = fx["tag_arity"].as_object().expect("tag_arity object");
+        let mut seen: Vec<String> = Vec::new();
+        for elem in wire_tag_elements().iter().chain(wire_live_elements().iter()) {
+            let label = crate::geometry::binary::element_tag_label(elem);
+            let want = arity.get(label)
+                .unwrap_or_else(|| panic!("binary_wire: tag_arity declares no '{label}'"))
+                .as_u64().expect("tag_arity value is an integer") as usize;
+            let got = crate::geometry::binary::packed_element_slot_count(elem);
+            assert_eq!(got, want,
+                "binary_wire: TAG '{label}' packs {got} slots, the fixture declares {want}");
+            if !seen.iter().any(|s| s == label) { seen.push(label.to_string()); }
+        }
+        assert_eq!(seen.len(), arity.len(),
+            "binary_wire: the gate reaches {} tags, the fixture declares {} -- every tag \
+             must be watched", seen.len(), arity.len());
+
+        // (2) BYTES. One shared golden per case, uncompressed so the pinned
+        // string is the msgpack itself rather than a deflate stream.
+        for case in fx["cases"].as_array().expect("cases array") {
+            let name = case["name"].as_str().expect("case name");
+            let expected = case["port_hex"].get("rust").and_then(|v| v.as_str())
+                .unwrap_or_else(|| case["hex"].as_str().expect("case hex"));
+            let got = wire_hex(&document_to_binary(&wire_case_document(name), false));
+            assert_eq!(got, expected,
+                "binary_wire: case '{name}' bytes changed. If the codec changed on \
+                 PURPOSE, regenerate with `cargo test print_binary_wire_hex -- --ignored \
+                 --nocapture` and update the SHARED fixture, which will red the other \
+                 port until it agrees.");
+            // The bytes must also decode -- a pinned string that no longer
+            // parses would be a green gate over a broken codec.
+            let doc = binary_to_document(&crate::geometry::binary::unhex_for_tests(expected))
+                .unwrap_or_else(|e| panic!("binary_wire: case '{name}' does not decode: {e}"));
+            assert!(!doc.layers.is_empty(), "binary_wire: case '{name}' decoded to no layers");
+        }
+    }
+
+    /// A `jas:`-prefixed attribute obliges the root `<svg>` to declare the
+    /// namespace: a strict XML parser rejects an undeclared prefix, and it
+    /// rejects the WHOLE DOCUMENT, not the attribute. `jas:tool-origin` is the
+    /// case the saturated `codec_field_survival` fixture cannot see, because a
+    /// saturated path also carries arrowheads and the arrowheads pull the
+    /// namespace in by themselves.
+    ///
+    /// The element here is what Blob Brush actually commits: a tool-origin tag
+    /// and no arrowheads. Mirrors `svgToolOriginSurvivesWithoutArrowheads` in
+    /// JasSwift/Tests/CrossLanguageTests.swift.
+    #[test]
+    fn svg_tool_origin_survives_without_arrowheads() {
+        use crate::geometry::element::*;
+        let mut common = CommonProps::default();
+        common.tool_origin = Some("blob_brush".to_string());
+        let path = Element::Path(PathElem {
+            d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 10.0, y: 10.0 }],
+            fill: None,
+            stroke: Some(Stroke::new(Color::Rgb { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, 2.0)),
+            width_points: vec![],
+            common,
+            fill_gradient: None,
+            stroke_gradient: None,
+            fill_rule: FillRule::NonZero,
+            stroke_brush: None,
+            stroke_brush_overrides: None,
+        });
+        let mut lc = CommonProps::default();
+        lc.name = Some("L".to_string());
+        let mut doc = crate::document::document::Document::default();
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(path)],
+            common: lc,
+            isolated_blending: false,
+            knockout_group: false,
+        })];
+
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains("jas:tool-origin=\"blob_brush\""),
+                "the writer must emit jas:tool-origin; got:\n{}", svg);
+        assert!(svg.contains("xmlns:jas="),
+                "a jas:-prefixed attribute obliges the root <svg> to declare \
+                 xmlns:jas; got:\n{}", svg);
+
+        let back = svg_to_document(&svg);
+        let kids = match back.layers.first() {
+            Some(Element::Layer(l)) => l.children.len(),
+            _ => 0,
+        };
+        assert_eq!(kids, 1,
+            "the round-tripped document lost its content entirely -- an \
+             undeclared namespace prefix makes a strict parser reject the \
+             whole file");
+        match back.layers.first() {
+            Some(Element::Layer(l)) => match l.children.first().map(|c| c.as_ref()) {
+                Some(Element::Path(p)) => assert_eq!(
+                    p.common.tool_origin.as_deref(), Some("blob_brush"),
+                    "tool origin did not survive the SVG round trip"),
+                other => panic!("expected a Path, got {:?}", other),
+            },
+            other => panic!("expected a Layer, got {:?}", other),
         }
     }
 

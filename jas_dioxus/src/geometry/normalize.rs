@@ -34,6 +34,11 @@ pub fn normalize_document(doc: &Document) -> Document {
 /// document whose ids are already unique (the normal case) — well-formed
 /// documents round-trip unchanged; only ill-formed (e.g. foreign-SVG)
 /// duplicates are normalized. Called by every document reader.
+///
+/// The walk descends into the operands a live `CompoundShape` OWNS as well as
+/// into group/layer children: an operand is a real element carrying its own
+/// `common.id`, so it is part of the one document-wide id space the invariant
+/// speaks about. Swift's `dedupeElementIds` is the twin.
 pub fn dedupe_element_ids(doc: &Document) -> Document {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut layers: Vec<Element> = doc.layers.clone();
@@ -70,6 +75,26 @@ fn dedupe_ids_walk(elem: &mut Element, seen: &mut std::collections::HashSet<Stri
     if let Some(children) = elem.children_mut() {
         for child in children.iter_mut() {
             dedupe_ids_walk(Rc::make_mut(child), seen);
+        }
+    }
+    // `children_mut()` deliberately does NOT report a compound shape's
+    // operands — they are not path-addressable tree children — so this walk
+    // matches the live payload itself, exactly as `Document::element_ids`
+    // does. Of the four `LiveVariant` arms only `CompoundShape` owns child
+    // `Element`s; `Reference`, `Recorded` and `Generated` name their inputs
+    // by id and own none. The match is exhaustive so a future payload that
+    // gains owned children forces this decision to be made again rather than
+    // silently going unwalked.
+    if let Element::Live(variant) = elem {
+        match variant {
+            crate::geometry::live::LiveVariant::CompoundShape(cs) => {
+                for operand in cs.operands.iter_mut() {
+                    dedupe_ids_walk(Rc::make_mut(operand), seen);
+                }
+            }
+            crate::geometry::live::LiveVariant::Reference(_)
+            | crate::geometry::live::LiveVariant::Recorded(_)
+            | crate::geometry::live::LiveVariant::Generated(_) => {}
         }
     }
 }

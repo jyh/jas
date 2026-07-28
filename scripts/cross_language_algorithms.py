@@ -33,7 +33,40 @@ ALGORITHMS = {
     # (measured: a rect with translate(100,50) still reports [0,0,10,10]).
     "element_evaluated_bounds": ("tolerance", 1e-4),
     "flatten":           ("tolerance", 1e-9),
+    # The ART flattener (`art_along_path::flatten` / `flattenArtPath`), which
+    # is a DIFFERENT function from `flatten` above and not a wrapper over it:
+    # it walks the FIRST SUBPATH only, dedupes coincident vertices as it goes,
+    # and samples a cubic at 16 steps and a quad at 12 rather than at the
+    # hit-test flattener's shared FLATTEN_STEPS. Shared by art-along-path,
+    # pattern-along-path and the bristle brush, and driven by NO family until
+    # this one: both ports dropped the whole path on a leading ClosePath,
+    # identically, so no port-vs-port comparison could see it (S-4).
+    "art_flatten":       ("tolerance", 1e-9),
+    # The Calligraphic brush's variable-width outline. A FOURTH first-subpath
+    # walker lives inside it (`sample_stroke_path` / `sampleStrokePath`, private
+    # in both ports) with its own step counts -- 32 cubic / 24 quadratic samples
+    # and a 1pt arc-length interval -- so it is not expressible through
+    # `art_flatten`. It carried the same leading-ClosePath bail-out, identically
+    # in both ports, and the calligraphic brush is the Phase-1 DEFAULT brush.
+    # Gated at the public function so the family asserts the ribbon the artist
+    # sees rather than an internal.
+    "calligraphic_outline": ("tolerance", 1e-9),
+    # The offset a PASTE applies to each pasted element (workspace/actions.yaml
+    # §paste: "offset 24 points down and to the right", against
+    # paste_in_place's explicit "no offset"). EXACT, and the result is the whole
+    # element serialized through the shared document writer rather than a
+    # coordinate list: the divergence this family exists for came in two halves,
+    # a compound shape that did not move AND a group that lost its name, and a
+    # coordinate-only comparison would have seen only the first.
+    "paste_translate":    ("exact", None),
     "arrow_trim":        ("tolerance", 1e-4),
+    # LINEAR gradient stop remap onto a split fragment (S-2). EXACT: colours
+    # are reported as 8-bit hex (a Swift GradientStop stores its colour as a
+    # hex string, so that is the widest value the two stop models share), and
+    # locations are hand-derived halves and quarters that both ports reach by
+    # the same arithmetic. A tolerance here would only hide a quantisation
+    # disagreement, which is precisely what the family is for.
+    "gradient_remap":    ("exact", None),
     "length":            ("tolerance", 1e-9),
     # Colour conversion is integer-valued in every channel (the panel's units),
     # so the comparison is EXACT: a one-unit miss is exactly the bug this
@@ -340,6 +373,75 @@ def check_measure_injection():
 
 
 # ---------------------------------------------------------------
+# Preflight: one JSON string escaper per port
+# ---------------------------------------------------------------
+#
+# The same shape as check_measure_injection, for the same reason. Until
+# 2026-07-27 each active port carried FOUR independent copies of the
+# canonical-JSON string escaper -- geometry test_json, workspace test_json,
+# the dependency index, and (Rust only) `canonical_value`'s `{:?}` -- and
+# three of them said in their own doc comments that they matched the first.
+# They did not: `canonical_value` spelled U+0001 `\u{1}` where JasSwift
+# emitted it raw, and none of the two-replacement copies escaped a control
+# character at all, so the byte oracle behind the codec gates could not
+# express a newline (coverage gap `codec-no-control-chars`, census 5.5).
+#
+# Each port now has ONE escaper -- `json_escape_string` / `jsonEscapeString`,
+# gated across both ports by test_fixtures/algorithms/canonical_json_string.json
+# -- and the check below requires that no other file re-derives it. A doc
+# comment claiming to match a writer is not a mechanism; this is.
+ESCAPER_HOMES = {
+    "jas_dioxus/src/geometry/test_json.rs",
+    "JasSwift/Sources/Geometry/TestJson.swift",
+}
+
+ESCAPER_ROOTS = [
+    ("jas_dioxus/src", ".rs", "json_escape_string"),
+    ("JasSwift/Sources", ".swift", "jsonEscapeString"),
+]
+
+# The two-replacement idiom, as it appears in each language's source text.
+ESCAPER_SIGNATURES = [
+    ('.replace(\'\\\\\', "\\\\\\\\")', "Rust"),
+    ('replacingOccurrences(of: "\\\\", with: "\\\\\\\\")', "Swift"),
+]
+
+
+def check_json_string_escapers():
+    """Returns a list of problem strings (empty when each port has one)."""
+    problems = []
+    for rel_root, ext, helper in ESCAPER_ROOTS:
+        root = os.path.join(REPO_ROOT, rel_root)
+        if not os.path.isdir(root):
+            problems.append(f"{rel_root}: not a directory")
+            continue
+        for dirpath, _dirs, files in os.walk(root):
+            for fname in sorted(files):
+                if not fname.endswith(ext):
+                    continue
+                path = os.path.join(dirpath, fname)
+                rel = os.path.relpath(path, REPO_ROOT)
+                if rel in ESCAPER_HOMES:
+                    continue
+                try:
+                    with open(path, encoding="utf-8") as fh:
+                        lines = fh.readlines()
+                except (OSError, UnicodeDecodeError) as e:
+                    problems.append(f"{rel}: cannot read ({e})")
+                    continue
+                for i, ln in enumerate(lines):
+                    for sig, lang in ESCAPER_SIGNATURES:
+                        if sig in ln:
+                            problems.append(
+                                f"{rel}:{i + 1}: a {lang} inline JSON string "
+                                f"escaper — call {helper}() instead. A local "
+                                f"copy cannot escape a control character and "
+                                f"re-opens `codec-no-control-chars`: "
+                                f"{ln.strip()}")
+    return problems
+
+
+# ---------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------
 
@@ -375,6 +477,13 @@ def main():
     # surfacing later as a mysterious text_layout mismatch.
     for problem in check_measure_injection():
         print(f"  FAIL: harness/measure-unit {problem}")
+        failed += 1
+
+    # Preflight (see check_json_string_escapers): a second inline escaper is a
+    # PORT fault that no family can see, because every fixture string is
+    # printable ASCII. Reported here by name for the same reason.
+    for problem in check_json_string_escapers():
+        print(f"  FAIL: port/json-string-escaper {problem}")
         failed += 1
 
     for algo in algos:

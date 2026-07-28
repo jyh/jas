@@ -23,7 +23,10 @@
   "families": {
     "test_fixtures/actions": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "name-list (ACTION_FIXTURES in src/cross_language_test.rs) + data references",
@@ -33,7 +36,11 @@
     },
     "test_fixtures/algorithms": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "rust": "path literals (cross_language_test.rs + module-scattered tests, e.g. geometry/tspan.rs)",
@@ -45,7 +52,9 @@
     },
     "test_fixtures/artboards": {
       "kind": "fixtures",
-      "required_consumers": ["reference"],
+      "required_consumers": [
+        "reference"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "reference": "os.path.join segments (test_artboards_effects.py)"
@@ -54,7 +63,11 @@
     },
     "test_fixtures/character_apply": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift", "reference"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (read_fixture in src/cross_language_test.rs character_apply_panel_edit_corpus)",
@@ -65,7 +78,12 @@
     },
     "test_fixtures/concept_constraints": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference",
+        "scripts"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
@@ -77,7 +95,12 @@
     },
     "test_fixtures/concept_fitters": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference",
+        "scripts"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
@@ -89,7 +112,12 @@
     },
     "test_fixtures/concept_operations": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference",
+        "scripts"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
@@ -101,7 +129,12 @@
     },
     "test_fixtures/concepts": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "reference", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference",
+        "scripts"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
@@ -113,18 +146,26 @@
     },
     "test_fixtures/expected": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "rust": "name-lists (json/binary/svg round-trip arrays) + assert_svg_parse helper calls + path literals",
         "swift": "name-lists (jsonRoundtripAllExpected / binaryRoundtripAllExpected / binaryReadPythonFixtures) + assertSvgParse/assertWorkspaceFixture helper calls + path literals",
         "scripts": "commutativity FIXTURE_NAMES + _golden() calls + structural-golden checkers (check_menu_structure.py, check_toolbar_structure.py)"
       },
-      "notes": "Rust-authored canonical goldens (parse/roundtrip expectations, .bin byte pins, dependency-index and workspace-layout goldens, structural goldens). Port symmetry is hand-maintained per name-list (the S5-symmetrized json/binary/svg arrays) rather than machine-checked: a per-file symmetry rule would false-red the legitimately single-consumer members (menu_structure.json and toolbar_structure.json are scripts-only structural goldens; dup_id_import.json is parse-only). Orphan detection here is REAL (no glob claims this directory)."
+      "notes": "Rust-authored canonical goldens (parse/roundtrip expectations, .bin byte pins, dependency-index and workspace-layout goldens, structural goldens). Port symmetry is hand-maintained per name-list (the S5-symmetrized json/binary/svg arrays) rather than machine-checked: a per-file symmetry rule would false-red the legitimately single-consumer members (menu_structure.json and toolbar_structure.json are scripts-only structural goldens; dup_id_import.json and dup_id_compound_operand.json are parse-only). Orphan detection here is REAL (no glob claims this directory)."
     },
     "test_fixtures/expressions": {
       "kind": "compiled",
-      "required_consumers": ["rust", "swift", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "scripts"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
@@ -135,7 +176,10 @@
     },
     "test_fixtures/gestures": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "name-list (GESTURE_FIXTURES) + data references",
@@ -145,7 +189,10 @@
     },
     "test_fixtures/keys": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "name-list (KEY_FIXTURES) + data references",
@@ -155,7 +202,10 @@
     },
     "test_fixtures/operations": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literals (run_operation_fixture calls + txn/drag_coalesce/recorded literals) + data references",
@@ -163,9 +213,27 @@
       },
       "notes": "The op_apply corpus — the journal/undo spine's byte gate. 60+ of these files exist ONLY as data references (expected_json / expected_journal_json inside the driver fixtures); the transitive pass claims them. Port symmetry here is the gate's founding case: the Swift registration set lacked tspan_ops.json until S4 forced the remediation."
     },
+    "test_fixtures/preservation": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "rust",
+        "swift",
+        "scripts"
+      ],
+      "port_symmetry": true,
+      "claim_style": {
+        "rust": "path literal (read_fixture in src/cross_language_test.rs preservation_invariants) + data references",
+        "swift": "path literal (readFixture in CrossLanguageTests.swift preservationInvariants) + data references",
+        "scripts": "whole-directory read (check_preservation_corpus.py)"
+      },
+      "notes": "The PRESERVATION corpus (transcripts/EDIT_SEMANTICS_FREEZE.md §4.1, the DOCUMENT-LEVEL INVARIANT GATE). Unlike every other fixtures family here it pins no golden document: it asserts six invariants (id_uniqueness / id_survival / consumed_ids_die / fresh_ids / bystanders_unchanged / subject_fields_only) over the canonical test JSON before and after an edit. That is what lets ONE vector be evaluated identically by both ports while each fails on its OWN sites — a golden could not, since the ports diverge on exactly the keys the law legislates. Setup SVGs are claimed transitively via setup_svg. A vector may PIN a known violation per port (expected_violations); a pinned invariant is asserted to FAIL, so fixing the site turns the gate red until the pin is removed — a pin cannot rot into a silent suppression. scripts/check_preservation_corpus.py gates the DATA shape with five anti-vacuity guards (V1-V5)."
+    },
     "test_fixtures/production_capture": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literals (production_capture/eye_demo*.json) + data references",
@@ -175,7 +243,11 @@
     },
     "test_fixtures/stroke_apply": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift", "reference"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literal (read_fixture in src/cross_language_test.rs stroke_apply_panel_edit_corpus)",
@@ -186,7 +258,11 @@
     },
     "test_fixtures/svg": {
       "kind": "source",
-      "required_consumers": ["rust", "swift", "scripts"],
+      "required_consumers": [
+        "rust",
+        "swift",
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "rust": "DIRECTORY GLOB (tests/cross_language_test.rs json_roundtrip_all_fixtures reads every svg/*.svg) + name-lists + data references",
@@ -197,7 +273,10 @@
     },
     "test_fixtures/workspace_operations": {
       "kind": "fixtures",
-      "required_consumers": ["rust", "swift"],
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
       "port_symmetry": true,
       "claim_style": {
         "rust": "path literals (run_workspace_operation_fixture calls) + data references",
@@ -207,7 +286,9 @@
     },
     "workspace/tests/concept_constraints.yaml": {
       "kind": "source",
-      "required_consumers": ["scripts"],
+      "required_consumers": [
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "scripts": "compile source (compile_concept_constraints_corpus.py + check_concept_constraints_corpus.sh)"
@@ -216,7 +297,9 @@
     },
     "workspace/tests/concept_fitters.yaml": {
       "kind": "source",
-      "required_consumers": ["scripts"],
+      "required_consumers": [
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "scripts": "compile source (compile_concept_fitters_corpus.py + check_concept_fitters_corpus.sh)"
@@ -225,7 +308,9 @@
     },
     "workspace/tests/concept_operations.yaml": {
       "kind": "source",
-      "required_consumers": ["scripts"],
+      "required_consumers": [
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "scripts": "compile source (compile_concept_operations_corpus.py + check_concept_operations_corpus.sh)"
@@ -234,7 +319,9 @@
     },
     "workspace/tests/concepts.yaml": {
       "kind": "source",
-      "required_consumers": ["scripts"],
+      "required_consumers": [
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "scripts": "compile source (compile_concept_corpus.py + check_concept_corpus.sh)"
@@ -243,7 +330,10 @@
     },
     "workspace/tests/expressions.yaml": {
       "kind": "source",
-      "required_consumers": ["reference", "scripts"],
+      "required_consumers": [
+        "reference",
+        "scripts"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "reference": "os.path.join segments (test_expr.py runs the yaml directly)",
@@ -253,7 +343,9 @@
     },
     "workspace/tests/gradient_primitives.yaml": {
       "kind": "source",
-      "required_consumers": ["reference"],
+      "required_consumers": [
+        "reference"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "reference": "os.path.join segments (test_gradient_primitives.py)"
@@ -262,7 +354,9 @@
     },
     "workspace/tests/phase3": {
       "kind": "source",
-      "required_consumers": ["reference"],
+      "required_consumers": [
+        "reference"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "reference": "DIRECTORY GLOB (test_phase3_fixtures.py globs *.yaml)"
@@ -271,7 +365,9 @@
     },
     "workspace/tests/set_effect": {
       "kind": "source",
-      "required_consumers": ["reference"],
+      "required_consumers": [
+        "reference"
+      ],
       "port_symmetry": false,
       "claim_style": {
         "reference": "DIRECTORY GLOB (test_set_effect.py globs *.yaml)"
@@ -304,6 +400,20 @@
   ],
   "coverage_gaps": [
     {
+      "id": "preservation-op-vocabulary-only",
+      "title": "The preservation gate can only reach violations expressible in op_apply's verb vocabulary, so six of EDIT_SEMANTICS_FREEZE.md §3.5's rows stay invisible to it",
+      "evidence": "Measured on this commit by grepping the dispatchers. op_apply has exactly ONE boolean verb in each port (jas_dioxus/src/document/op_apply.rs `\"boolean_union\"`, JasSwift/Sources/Document/OpApply.swift `case \"boolean_union\"`) and ZERO verbs matching apply_mask / set_width_points / make_compound_shape / boolean_subtract / boolean_intersect / boolean_divide. No verb can produce a PARTIAL (control-point) selection either: the string `Partial` occurs once in the whole of op_apply.rs, inside a `#[derive(...)]`. Consequently these §3.5 rows are unreachable from this corpus: Swift `withMask` .path arm; Swift `withWidthPoints` .path arm; Rust `move_control_points` Rect->Polygon arm (needs a corner drag, i.e. a partial selection); Rust `make_compound_shape_with_op` duplicate id; the boolean SURVIVOR arms (subtract_front / subtract_back / crop / trim / divide) and their Swift `locked: false` + dropped name/id/toolOrigin/mask; and both blob-brush `fillRule` arms (a gesture, not an op). RE-MEASURED 2026-07-27, after the DIVIDE and MERGE arms were repaired in Rust: still exactly ONE boolean verb per port (grep -c for boolean_divide / boolean_merge / boolean_trim over jas_dioxus/src/document/op_apply.rs and JasSwift/Sources/Document/OpApply.swift returns 0 in BOTH files), so neither repaired arm is expressible as a shared vector. JasSwift's applyDestructiveBoolean does implement `case \"divide\"` and `case \"trim\", \"merge\"`, so the missing piece is the op-verb registration, not the arm.",
+      "blocks": "Of the §3.5 table, this gate today catches the Rust UNION frontmost-id carry, the Swift withChildren class (5 vectors), and one of the 41 Swift inline Layer(/Group( literals. The rest of the table is not gated by anything cross-language. Named consequence as of 2026-07-27: the Rust DIVIDE arm (which handed every output region the designated operand's whole `common`, leaving two live elements wearing one id) and the Rust MERGE arm (which elected the frontmost contributor's whole `common` by z-order) were both repaired with per-port batteries in jas_dioxus/src/document/controller.rs's `preservation_law_tests`, and NEITHER repair is visible to any cross-language gate. The Swift twins of both arms are unaudited by this corpus for the same reason.",
+      "unblock": "Two independent routes, both fixture-plus-verb: (a) widen the op vocabulary with the missing boolean verbs and a mask/width-points setter, then add preservation vectors for the 1->1 survivor arms — where subject_fields_only is exactly the right predicate; (b) give the GESTURE corpus the same invariant gate, which reaches the blob-brush arms and the Rect corner drag that the op corpus cannot address. Route (a) is now the cheap one for these two arms specifically: registering `boolean_divide` and `boolean_merge` in both ports' op_apply dispatchers is additive (each delegates to an applyDestructiveBoolean arm that already exists in both), after which a divide vector over preservation_nested_attrs.svg pins id_uniqueness and fresh_ids directly. Expect the swift lane to need pins on that vector until JasSwift's boolean rebuild is brought to the same rule."
+    },
+    {
+      "id": "preservation-minted-element-fields",
+      "title": "The six preservation invariants say nothing about the FIELDS of a freshly minted element, so the boolean result's lossy kind demotion and its dropped non-paint fields are invisible",
+      "evidence": "The invariants are id_uniqueness / id_survival / consumed_ids_die / fresh_ids / bystanders_unchanged / subject_fields_only. Every one of them is keyed on an id that existed BEFORE the edit; a minted element has no before-image to diff against, so nothing in the set constrains it. Concretely, on the boolean_union_merges_two_rects vector both ports emit a single-ring `Polygon` — the §3.5 row 'Boolean flatten, single-ring arm, both ports' calls that a lossy demotion (a Polygon has no slot for widthPoints / strokeBrush / strokeBrushOverrides / fillRule) — and the gate reports nothing, because the invariants never look at the output's kind or its non-identity fields.",
+      "blocks": "§3.3's unanimity carry, §3.6's per-op paint column, and T1's representation term (no lossy demotion) are all statements ABOUT the minted element. None of them is gated here.",
+      "unblock": "Add a seventh declarative invariant to the vector shape — an `expected_output` block naming the required kind and the fields the result must carry (unanimous values, RESULT_FILL_RULE) — and implement it in both port gates. This is additive to the existing five vectors and needs no new op verbs."
+    },
+    {
       "id": "text-index-unit",
       "title": "Swift indexes text by grapheme cluster; Rust and the reference index by Unicode scalar, so no non-ASCII vector can be added to the three text families",
       "evidence": "Measured through the roundtrip harnesses at char_width 10 on this commit. content \"ae\\u0301b\" (4 scalars / 3 clusters): reference and Rust give char_count 4 with 4 glyphs, Swift gives 3 with 3. The ZWJ family emoji U+1F468 U+200D U+1F469 U+200D U+1F467 (5 scalars / 1 cluster): reference and Rust give 5, Swift gives 1. Total line advance now AGREES (40 and 50 both ports) because the injected measurer counts scalars; it is the per-glyph subdivision and every index derived from it that diverge. Root cause is `Array(content)` in TextLayout.swift and PathTextLayout.swift. (TextLayoutParagraph.swift was cited here in error: it contains ZERO `Array(` occurrences - it holds only the hyphenation/segment/counter helpers.)",
@@ -313,10 +423,10 @@
     },
     {
       "id": "element-bounds-untransformed",
-      "title": "element_bounds gates a function that ignores transform entirely; the transform-aware bbox is now gated by its own family, but only for a single-layer path",
-      "evidence": "All 17 vectors in test_fixtures/algorithms/element_bounds.json carry \"transform\": null. That is not a fixture oversight: Element::bounds / Element.bounds IGNORE common.transform in both ports -- measured through the two roundtrip binaries on this commit, a 10x10 rect at the origin carrying translate(100,50) reports [0,0,10,10] from Rust and from Swift alike. So transform-bearing vectors added HERE would pin the transform being ignored, not the transform-aware path. The transform-aware function is element_evaluated_bbox / elementEvaluatedBBox, and it is now driven by the element_evaluated_bounds family (9 vectors: translate, non-uniform scale, rotate 45, skewX, a full composed matrix, an ancestor-only layer transform, an element-then-layer composition-order vector, a stroked geometric-vs-preview vector, and a no-transform control).",
-      "blocks": "Two narrower things than before. (1) The new family places every vector as layers[0].children[0], so the ancestor walk is exercised at ONE level -- a nested group chain, and a group whose CHILDREN carry transforms (geometric_children_bounds does not fold those), are still ungated. (2) Whether Element::bounds SHOULD stay transform-blind is an open product question, not a corpus one: both ports agree today, so there is no divergence to catch, and the corpus pins the agreement.",
-      "unblock": "For (1), extend element_evaluated_bounds with group-nesting vectors once the runners can express a nested document. For (2), a ruling on whether the untransformed bbox is the intended contract of Element::bounds.",
+      "title": "element_bounds gates a function that ignores transform entirely -- now PINNED as such; the transform-aware bbox is gated by its own family, but still only for a single-layer path",
+      "evidence": "Element::bounds / Element.bounds IGNORE common.transform in both ports -- measured through the two roundtrip binaries, a 10x10 rect at the origin carrying translate(100,50) reports [0,0,10,10] from Rust and from Swift alike. Every vector of element_bounds.json used to carry \"transform\": null, so that contract was UNPINNED: a port that started folding the matrix moved no golden. As of 2026-07-27 the family is 22 vectors, the last five carrying a live matrix and expecting the UNTRANSFORMED box (rect translate, ellipse rotate 45, cubic under a general matrix, a stroked line under scale(3) where the stroke still inflates and the matrix still does not, and a group under translate). Discrimination measured: teaching Rust's Element::bounds to corner-map the matrix reds exactly those five on both legs (oracle-vs-golden and rust-vs-swift) and leaves all 17 older vectors green; reverted. The transform-aware function is element_evaluated_bbox / elementEvaluatedBBox, driven by the element_evaluated_bounds family, now 17 vectors: the original 9 (all RECTS -- translate, non-uniform scale, rotate 45, skewX, a full composed matrix, an ancestor-only layer transform, an element-then-layer composition-order vector, a stroked geometric-vs-preview vector, and a no-transform control) plus 8 NON-RECT ones added the same day (rotated ellipse, cubic under the composed matrix, arc under a layer rotation, scaled group, each with a null-transform control). The non-rect vectors are what make the family's central choice observable: it maps the four CORNERS of the geometric bbox, which on a rect is indistinguishable from bounding the transformed shape and on an ellipse or curve is not (rotate 45 on a 60x40 ellipse: corner-mapped 70.7107 square vs a true 50.9902 square). Reference, Rust and Swift all corner-map, so that is the ratified rule, not a shared slip.",
+      "blocks": "One narrower thing than before. Every vector of the evaluated family is still placed as layers[0].children[0], so the ancestor walk is exercised at ONE level -- a nested group chain, and a group whose CHILDREN carry transforms (geometric_children_bounds does not fold those), are still ungated. Whether Element::bounds SHOULD stay transform-blind remains an open product question rather than a corpus one; both ports agree, and the corpus now genuinely pins that agreement instead of merely reporting it.",
+      "unblock": "Extend element_evaluated_bounds with group-nesting vectors once the runners can express a nested document (both build a fixed layer/child pair today). Separately, a ruling on whether the untransformed bbox is the intended contract of Element::bounds -- the five is_ignored vectors record the behaviour, they do not settle the question.",
       "census": "5.1"
     },
     {
@@ -330,7 +440,7 @@
     {
       "id": "flatten-no-arcs",
       "title": "flatten.json has no arc command, so the A-degrades-to-a-line branch of the flattener is ungated",
-      "evidence": "Re-counted mechanically over the parsed fixture on this commit: 12 vectors, with 8 of them carrying a C and 4 a Q (8 C commands and 4 Q commands in total), and ZERO A commands. The census row this replaces said 3 vectors and no curve command at all -- true when it was written, and closed since by the cubic/quadratic vectors; the arc leg is what survives of it.",
+      "evidence": "Re-counted mechanically over the parsed fixture on this commit: 18 vectors, with 8 of them carrying a C and 4 a Q (8 C commands and 4 Q commands in total), and ZERO A commands. The census row this replaces said 3 vectors and no curve command at all -- true when it was written, and closed since by the cubic/quadratic vectors; the arc leg is what survives of it.",
       "blocks": "Both flatteners send SmoothCurveTo / SmoothQuadTo / ArcTo to their endpoint as a straight line, in a catch-all arm no vector enters. The same arm also carries the current-point write for those commands, which is the defect class cubic_then_quad_current_point_chain was added to catch for cubics.",
       "unblock": "Fixture-only: add an arc vector, and one where an arc is followed by a command that reads the current point.",
       "census": "5.2"
@@ -352,6 +462,97 @@
       "census": "5.4"
     },
     {
+      "id": "codec-control-chars-unit-gated-only",
+      "title": "The codec now round-trips control characters, but only two per-port unit tests say so -- the SVG-driven golden lane still carries none, and nobody has established whether an SVG fixture could express one",
+      "evidence": "Replaces `codec-no-control-chars`, which is CLOSED: json_escape_string / jsonEscapeString escape U+0000-U+001F, test_fixtures/algorithms/canonical_json_string.json pins 23 vectors byte-for-byte in both ports, and multi_line_text_round_trips_through_test_json / multiLineTextRoundTripsThroughTestJson drive a newline-bearing Text through the document writer, the parser and the writer again in each port. What remains: all 39 test_fixtures/expected/*.json goldens are produced by parsing test_fixtures/svg/*.svg, and a scan of every file under test_fixtures/ and workspace/ on this commit (543 files) finds zero C0 bytes in any .json and zero U+007F anywhere, so no SVG-driven golden exercises the new escaping. Whether the two SVG parsers preserve a newline inside a <text> element was NOT measured.",
+      "blocks": "The escaping rule is gated at the writer and at the document round trip, but the path an actual multi-line text element would travel in production -- SVG import, then serialise -- has no vector. A port whose SVG text parser collapsed or dropped a newline would pass every gate that exists today.",
+      "unblock": "Measure first, then decide: probe both SVG text parsers for what they do with a literal newline in element content (XML whitespace handling is a real ruling, not an obvious one). If the two ports agree and preserve it, add one svg/ + expected/ pair with multi-line content. If they disagree, that divergence outranks the fixture and belongs with the Captain.",
+      "census": "5.5"
+    },
+    {
+      "id": "identity-view-only",
+      "title": "NARROWED further (ZOOMPKG, 2026-07-27): 14 of 77 action/gesture driver cases now run off the identity view, but the 63 that do not is the SAME 63 as before -- this wave added five view-bearing cases and no coverage anywhere else",
+      "evidence": "Re-measured mechanically on this commit by parsing every JSON array of name-bearing objects under test_fixtures/actions/ and test_fixtures/gestures/: 77 driver cases, 14 carrying a `view` block -- 13 in actions/view_state.json and the one zoomed Rect gesture, and none elsewhere. (The previous text said 9 of 72 and glossed the 13 as '7 view-state action vectors'; the file held 8 at the time, so that breakdown was already off by one against its own total. Counted, not transcribed, this time.) Both runners in both ports accept the seed (`seed_case_view` / `seedCaseView`), including an explicit 0 for viewport_w / viewport_h, which is what lets the two unmeasured-viewport vectors pin the fallback branches. So a case that wants a non-identity view still only has to ask.",
+      "blocks": "The zoom division is now gated for exactly ONE tool (Rect, through pointer_event_payload, which is shared by every YAML tool) and for the doc.zoom.* effect family. Everything downstream of a tool handler that re-reads the view for itself -- overlay hit radii, the handle/curve hit tests, the eraser and blob radii, anything comparing a SCREEN-space threshold against a DOCUMENT-space distance -- is still only ever exercised where zoom is 1.0. Mutation-measured: dropping the zoom division in pointer_event_payload reds exactly 2 of the 2668 Rust lib tests (the new gesture vector and the pre-existing recorder::fidelity lockstep_rect_draw_under_pan_zoom_is_faithful).",
+      "unblock": "Per-family, and now cheap: add a `view` block to an existing case in each family whose tool reads a screen-space threshold. Highest value first -- a selection click/marquee at zoom != 1 (the hit radius), a path-eraser stroke (the historical bug), a paintbrush stroke (ditto). No machinery is needed for any of them.",
+      "census": "5.7"
+    },
+    {
+      "id": "view-anchor-default-divergence",
+      "title": "CLOSED (ZOOMPKG, 2026-07-27): zoom_in / zoom_out with no anchor params now anchor at the viewport centre in BOTH ports, and the vector that says so is in the corpus",
+      "evidence": "RULED by JYH 2026-07-27 (transcripts/ZOOM_TOOL.md, 'the DEFAULT ZOOM ANCHOR is the viewport centre'): the spec already said viewport centre and Rust already did it; Swift changed. Both causes this row identified landed together and each was reverted INDIVIDUALLY to confirm the vector sees it. (a) the declared param-default merge now lives in JasSwift/Sources/Interpreter/ActionParams.swift and is applied at all three generic dispatchers; reverted alone, the vectors fail at (-120, -60). (b) doc.zoom.apply gained the viewport-centre branch for the -1 sentinel; reverted alone, they fail at (-100, -50) -- exactly the two half-fix values this row predicted. Three vectors landed in test_fixtures/actions/view_state.json: zoom_in_default_anchor (2.4, -200, -120), zoom_out_default_anchor (1.6666666666666667, -16.666666666666686, 8.333333333333314) and zoom_in_default_anchor_unmeasured_viewport (2.4, -100, -50), which pins the fallback for an unmeasured viewport -- the one answer Swift already had right. Per-port unit gates: docZoomApplyDefaultAnchorIsViewportCentre and its unmeasured sibling.",
+      "blocks": "Nothing now for the two zoom verbs. The row's claim that fixing cause (a) also silently corrected artboards_panel_select is MEASURED FALSE and narrower than written: that verb's condition is `param.modifier == 'none' or param.modifier == null`, so it already took the replace branch on a null. Verified by mutating the merge off with the new artboardsPanelSelectWithNoModifierReplacesTheSelection test in place -- green both ways. What DOES remain is that the verb is unreachable from the action corpus: its effect writes panel-scoped state, and Swift's buildLiveStateMap does not publish artboards_panel_selection at all where Rust's build_live_state_map does, so expected_panel_state cannot express it. See the new swift-panel-state-map-omits-artboards-selection row.",
+      "unblock": "Done. Kept as a closed row rather than deleted because it records the two-cause shape and the half-fix values, which is what stopped an earlier writer from landing a partial that would have looked correct.",
+      "census": "1, row 6"
+    },
+    {
+      "id": "view-zoom-set-pan-divergence",
+      "title": "CLOSED (ZOOMPKG, 2026-07-27): zoom_to_actual_size recentres in BOTH ports -- the ruling went AGAINST the written spec, which was rewritten in five places in the same wave",
+      "evidence": "RULED by JYH 2026-07-27 (transcripts/ZOOM_TOOL.md, 'zoom_to_actual_size RECENTRES'). This row was right that the spec sided with Swift and right that a ruling was needed before code; the ruling found the SPEC wrong. `view_offset` is the doc ORIGIN's screen position, so holding it fixed while zoom goes 4x -> 1x multiplies the visible region around that point: at offset (-300, -200) the view moves from doc [75..275]x[50..200] to [300..1100]x[200..800] and the artwork leaves the screen. Swift's doc.zoom.set now recomputes view_offset around the viewport centre, matching Rust's ff4d46d, with a fallback to literal pan-unchanged only while the viewport is unmeasured. FIVE statements rewritten, as this row demanded of the same commit: ZOOM_TOOL.md's double-click paragraph, its Ctrl+1 shortcut-table row (Centering now reads 'Viewport center'), its zoom_to_actual_size prose, workspace/actions.yaml's description, and -- the one the row did not name -- ZOOM_TOOL_TESTS.md's ZOOM-134 parenthetical, which presented 'whatever was under the viewport center stays approximately under it' as a CONSEQUENCE of pan-unchanged when it is the opposite. Vectors: zoom_to_actual_size_recentres (1.0, 225, 175) and zoom_to_actual_size_unmeasured_viewport (1.0, -300, -200). This row's aside that Rust's comment cited a sentence absent from ZOOM_TOOL.md was correct at the time; the sentence is now in the file, as the requirement rather than as a gloss.",
+      "blocks": "Nothing. Both ports and all five written statements now agree.",
+      "unblock": "Done. Kept as a closed row because it is the case where the reference text and a deliberate code change pointed opposite ways, and the resolution -- rewrite the text, in the same commit, at every site including the one in a sibling file -- is the part worth remembering.",
+      "census": "1, row 7"
+    },
+    {
+      "id": "view-actions-bypass-yaml-in-swift",
+      "title": "CLOSED (ZOOMPKG, 2026-07-27): all three Swift View surfaces now dispatch the YAML action through one seam, and the route has a gate of its own",
+      "evidence": "RULED by JYH 2026-07-27 (transcripts/ZOOM_TOOL.md, 'Swift's MENU AND KEYBOARD must route through the YAML pipeline'), and ruled to ride WITH the two zoom rulings for exactly the reason this row gives -- routing first would have regressed the menu. THREE surfaces, not the two this row named: Menu/JasCommands.swift (View menu), Canvas/ContentView.swift (toolbar tool-options double-click) and Canvas/CanvasSubwindow.swift's runViewAction (the Cmd+= / Cmd+- / Cmd+1 / Cmd+0 / Cmd+Alt+0 chords, which this row missed). All three now call ViewActions.dispatch (JasSwift/Sources/Canvas/ViewActions.swift) -> LayersPanel.dispatchYamlAction, the dispatcher view_state.json drives. The six native Model methods plus applyZoomCentered / fitRect / applyZoomAnchored are DELETED. The work built its own gate, as ruled: JasSwift/Tests/Canvas/ViewActionRouteTests.swift, 12 tests whose expectations re-implement the ZOOM_TOOL.md formulas over the LIVE workspace preferences rather than repeating a literal, so a route that hardcodes zoom_step agrees only by coincidence. Landed in two commits so the red measures the defect and not a mutation: extracting the native switches into the seam and adding the gate reddened 22 expectations over 5 tests; routing them through the pipeline closed all 22.",
+      "blocks": "Nothing for these six verbs. THREE drifts the extraction surfaced, all now fixed and pinned, none of them in the ruling's text: (1) fit_active_artboard fitted document.artboards.first where actions.yaml resolves active_document.current_artboard, so a panel-selected artboard was ignored by Cmd+0 AND by the menu; (2) fit_in_window on an EMPTY document was a silent no-op in all three native paths (fitRect guarded w > 0 and returned) where doc.zoom.fit_elements specifies 100% centred on the origin; (3) the keyboard route had no fit_in_window arm -- which turns out to match the spec's decision that fit_in_window gains no chord, so the chord table is unchanged.",
+      "unblock": "Done. The surviving blind spots are stated in the test file: it gates the SEAM, not the call sites' use of it (viewVerbsHaveNoNativeReimplementation covers that by source text, and is itself blind to a native reimplementation under a name it does not know), and neither can see a NEW View verb never added to ViewActions.names.",
+      "census": "1, row 8"
+    },
+    {
+      "id": "view-current-artboard-panel-selection",
+      "title": "NARROWED (ZOOMPKG, 2026-07-27): the panel-selected branch of fit_active_artboard is now gated by a per-port unit test, but still by no CROSS-LANGUAGE vector -- the fixture format still cannot express a panel selection",
+      "evidence": "The action fixture format carries `selection` (canvas element paths, consumed by Controller::set_selection / setSelection) and nothing else; both runners' panel-selection arguments -- dispatchYamlAction's `artboardsPanelSelection`, Rust's equivalent -- are never fed from a fixture. Measured by reading run_action_case (jas_dioxus/src/recorder/replay.rs) and runActionModel (JasSwift/Tests/CrossLanguageTests.swift) on this commit. So view_state.json's fit_active_artboard_from_wrong_view vector resolves current_artboard to the first board, which is the ONE case where the divergence in view-actions-bypass-yaml-in-swift (artboards.first vs current_artboard) is invisible. NARROWED, this wave: viewRouteFitActiveArtboardHonoursThePanelSelection (JasSwift/Tests/Canvas/ViewActionRouteTests.swift) seeds the artboards panel scope with the SECOND of two boards whose rects differ in both dimensions and asserts the spec-derived fit triple, with a guard asserting the two boards fit at different zooms so the assertion is discriminating; a sibling pins the else-branch. That test measured the drift it was written for: the native menu / keyboard route fitted the first board at z 7.0 where the rule gives 6.333333333333333. But it is SWIFT-ONLY. Rust has no counterpart, so the two ports could still disagree on this branch and no gate would see it.",
+      "blocks": "The 'topmost panel-selected artboard, else the artboard at position 1' rule in actions.yaml and ARTBOARDS.md is half-gated: the else-branch is pinned, the branch itself is not.",
+      "unblock": "Unchanged and still the right move: teach both action runners an optional `artboards_panel_selection` block (a list of artboard ids) alongside the existing `selection`, then add a fit_active_artboard vector over two_artboards.svg selecting the SECOND board. two_artboards.svg already declares three boards with stable ids. NOTE the bucket trap discovered this wave: in Swift the selection must be written to the `artboards_panel_content` store scope (what set_panel_state normalises to), not the un-suffixed `artboards` bucket four other Swift sites use -- see swift-panel-state-map-omits-artboards-selection.",
+      "census": "2, #6-#8"
+    },
+    {
+      "id": "panel-text-width-scalar-count-only",
+      "title": "PARTLY CLOSED (BINDVALUE): bind.* values are now pinned for 4 of the 16 panels; the other 12 and panel enabled_when are not, and panel_layout still reduces resolved text to a scalar count",
+      "evidence": "CLOSED HALF: test_fixtures/algorithms/panel_bind_values.json -- 7 vectors, 281 rows -- resolves bind expressions and pins the resulting STRINGS. Driven by all three live implementations: the reference (workspace_interpreter/tests/test_bind_values.py), Rust (cross_language_test.rs algorithm_bind_values_vectors) and Swift (CrossLanguageTests.swift testAlgorithmBindValues); both ports matched the reference-generated golden on their first run. Each of the three also asserts the census's own claim directly: the two data scopes differing ONLY in panel.hex (\"664040\" vs \"664141\") give byte-identical widget_tree output and byte-identical layout_panel rects, and differ in exactly one bind_values row (cp_hex, bind.value). The LIST form is pinned as of 2026-07-27 (census 10(c)): 10 list rows over the 7 vectors, including a three-element selection, a nested list with an empty inner list, and a list of PATH values. OPEN HALF, counted over the compiled bundle: 311 declared bind entries across the 16 panels, of which 148 are in the four seeded panels (color 82, stroke 36, swatches 18, layers 12) and 163 are not; the largest uncovered surfaces are paragraph (30) and character (24). Panel enabled_when is evaluated by no gate at all -- 3 nodes carry it, all in gradient_panel_content, all with the literal expression false. panel_layout itself is UNCHANGED and still length-only: text_w is eval_text(...).chars().count() * CHAR_WIDTH in jas_dioxus/src/interpreter/panel_layout.rs and resolved.unicodeScalars.count * charWidth in JasSwift/Sources/Interpreter/PanelLayout.swift.",
+      "blocks": "A bind-value divergence in one of the 13 unseeded panels is still invisible, as is any divergence in a panel enabled_when. panel_widget_tree remains key-names-only by design (widening it would rewrite every record it emits), so nothing else covers those panels.",
+      "unblock": "Fixture-only for the panel coverage: add BIND_SEED entries in scripts/gen_panel_layout_fixture.py and regenerate. enabled_when needs a one-line arm in each of the three bind_values implementations PLUS a seeded gradient vector -- and must not be added without the vector, since an unexercised arm is exactly the shape this list exists to keep visible.",
+      "census": "5.8"
+    },
+    {
+      "id": "identity-law-boolean-operands-id-less",
+      "title": "Every boolean and compound-shape vector in the corpus runs on operands with NO id, so the identity half of the preservation law is invisible at exactly the arms that legislate it",
+      "evidence": "Enumerated on this commit by parsing all of test_fixtures/actions/*.json and test_fixtures/operations/*.json for cases whose body mentions boolean or compound: 8 vectors, drawing on 4 setup SVGs (overlapping_rects.svg, two_rects.svg, boolean_collinear_union.svg, compound_and_rect.svg). grep -o for an id= attribute over those four files returns ZERO hits, and none of them sets name, opacity, transform, mask, fill-rule, gradient, width profile, stroke brush or tool origin on an operand either. Driven consequence, measured this round: apply_destructive_boolean's UNION arm carried the FRONTMOST operand's whole CommonProps -- id included -- through an N->1 merge, and make_compound_shape_with_op put the frontmost's id on the wrapper while that operand stayed a child (an id walk yielded [id-front, id-back, id-front]). Both were fixed in the IDENTITY wave of 2026-07-27 WITHOUT ONE GOLDEN BYTE MOVING.",
+      "blocks": "The frontmost-id violation could be fixed, unfixed or inverted between the two ports and no cross-language golden in the ACTION or OPERATIONS lane would notice. As of 2026-07-27 both ports agree at the N->1 arm (fresh mint when an operand carried an id, paint from the frontmost, everything else by unanimity with `name` by ASSERTING-SOURCES) and at the 1->1 survivor arms (full preservation) -- but that agreement is asserted only by per-port unit batteries plus the single PRESERVATION-lane vector boolean_union_merges_two_rects, never by a golden. STILL UNSEEABLE here, and still real: DIVIDE copies the designated operand's whole common onto every fragment it was cut into, and a multi-contributor MERGE elects the frontmost contributor's common -- both ports do both, so the two agree while both violate the 1->N and N->1 rows; and both drop fillGradient/strokeGradient pending the gradients-as-paint amendment.",
+      "unblock": "Fixture work, in this order (it is condition (a) of transcripts/EDIT_SEMANTICS_FREEZE.md's ratification condition): add an attribute-rich boolean setup SVG carrying ids, names, transform, mask, opacity, blend mode, fill rule, gradient, width profile, stroke brush and tool origin on both operands; add union/intersection/exclude and subtract-survivor vectors over it; and assert id FRESHNESS (result id not in the pre-edit id set) rather than a literal id. The action lane already installs the deterministic mint override (recorder::replay::run_action_case), so a literal id is pinnable there; the OPERATIONS lane does NOT install it, so a minting op in that lane is non-deterministic today and needs either the override or a value-in-op id first. The precondition that used to block this -- JasSwift's boolean rebuild not being on the same rule -- was cleared on 2026-07-27, so the vectors can land now without redding the swift lane."
+    },
+    {
+      "id": "partial-cp-drag-unreached",
+      "title": "No gesture vector reaches a control-point drag, so the whole partial-selection promotion path -- including Rect -> Polygon -- has zero cross-language coverage",
+      "evidence": "The gesture corpus declares 9 tools on this commit (blob_brush, ellipse, line, paintbrush, polygon, rect, rounded_rect, selection, star); partial_selection is not among them, and the two selection vectors are select_marquee and select_click, neither of which presses a control point. grep -rl for partial_selection over test_fixtures/ returns only toolbar/shortcut structure and key-resolution fixtures -- no gesture. Separately, exactly ONE rounded rect exists anywhere in test_fixtures/svg/ (complex_document.svg, rx=ry=13.3333) and no vector drags its corners.",
+      "blocks": "move_control_points' Rect arm is a cross-kind copy site where the compiler demands each field and a human answers it; it dropped both gradients on a 1->1 kind change and discarded rx/ry with no ruling, and no corpus family could see either. The 2026-07-27 IDENTITY wave fixed both in Rust (gradients forwarded; rx/ry flattened into the emitted points per JYH's ratified answer (3)), which means Rust and JasSwift now DISAGREE on the promotion of a ROUNDED rect -- Swift still emits four square corners -- and nothing in the corpus can say so.",
+      "unblock": "Machinery first, then fixtures: the gesture runners must be able to seed a Partial control-point selection and dispatch the partial_selection tool, which no runner does today. Then a corner-drag vector over a rounded, gradient-filled rect pins the promotion in both ports at once. Landing the vector before JasSwift's moveControlPoints Rect arm flattens rx/ry would simply red the swift lane."
+    },
+    {
+      "id": "codec-string-oracle-cannot-see-a-dropped-field",
+      "title": "The string oracle still cannot see a dropped field -- but the BINARY codec now has a byte-level gate that can, and it found a live cross-port divergence on its first run",
+      "evidence": "Measured on this commit by round-tripping ONE attribute-saturated Path through all three codecs in both ports (test_fixtures/expected/codec_field_survival.json is the resulting matrix; the gates are `codec_field_survival` in jas_dioxus/src/cross_language_test.rs and `codecFieldSurvival` in JasSwift/Tests/CrossLanguageTests.swift). The canonical test-JSON drops 12 of the 13 watched fields (everything but fill_rule). The binary codec drops 7: common.mode, common.mask, common.tool_origin, fill_gradient, stroke_gradient, stroke_brush, stroke_brush_overrides. That 7 is a strict SUBSET of the 12. Since assert_svg_parse, assert_svg_roundtrip, json_roundtrip_all_expected and binary_roundtrip_all_expected all compare `document_to_test_json` STRINGS, a fixture that set any of those 7 would be normalized back to default on the way IN and the gate would pass, green and vacuous. Two figures in census row #18 did not survive this measurement and are corrected here: the binary codec PRESERVES stroke.dash_align_anchors and width_points (pack_stroke carries the whole Stroke -- align, dash pattern, dash length, miter limit and both arrowheads; pack_width_points carries the profile for Line and Path). CORRECTION to this wave's own commit 35f8c251, which said the two ports' <path> elements share 'seventeen attributes in the same order': re-measured at HEAD by diffing both writers' output for one attribute-rich path, the elements are byte-identical and carry TWENTY-TWO attributes. The byte-identity held; only the count was wrong. ---- 2026-07-27, THE REPAIR AND WHAT IT MEASURED. The ruled repair landed: a per-tag TRAILING EXTENSION appending common.mode / common.mask / common.tool_origin to every element tag and stroke_brush / stroke_brush_overrides to TAG_PATH, VERSION still 2, tolerant reads. Five of the seven cells above flipped to PRESERVED in codec_field_survival.json's `binary` column; the two gradients did NOT (banked, see that file's binary/fill_gradient classification -- the two ports' GradientStop.color models differ and byte-identity requires choosing which port normalises, which is a ruling). THE GATE THE RULING REQUIRED WITH IT: test_fixtures/expected/binary_wire.json, driven by `binary_wire` (cargo) and `binaryWire` (swift). It pins (a) the packed slot count of all TWELVE element tags and (b) the exact uncompressed BYTES of four documents, against ONE shared golden -- no per-port literal exists to edit, so a drifting port must move the shared file and red the other. WHAT IT FOUND IMMEDIATELY, and this is the justification for building it: jas_dioxus's `pack_tspan` writes FIFTY-ONE slots per tspan and JasSwift's `packTspan` writes TWENTY-TWO, with `unpackTspan` reading only 22. So at that commit the two ports did NOT write the same bytes for any Text or TextPath -- measured; whether they ever did is a history question nobody drove, and the gate's own commit message said 'have never', which is wider than the evidence. JasSwift's binary codec dropped 29 tspan fields on a round trip although its own `Tspan` struct holds every one of them. Pinned first as `port_hex.swift` on the `text_default` case, then CLOSED in the same wave: JasSwift's packTspan / unpackTspan now carry Rust's 51 slots in Rust's order, and the pin had to be DELETED for the gate to go green. Red observed first (`binaryRoundTripsASaturatedTspan` reported all 29 fields nil); a Rust twin, `binary_round_trips_a_saturated_tspan`, was green the day it was written and is kept against the reverse drift. Verified by MEASUREMENT, not argument, that trailing append keeps the frozen readers alive: the frozen Python reader (jas/geometry/binary.py, read-only) decodes all five pinned blobs (shapes_default 8 children, text_default in both byte forms, live_default 4 children, saturated_extension). The frozen OCaml reader was READ, not run: jas_ocaml/lib/geometry/binary.ml `unpack_element` indexes with List.nth at fixed positions and validates no length, so trailing slots are ignored -- stated at reading-strength. Third finding, from the same gate: JasSwift's `Text(x:y:content:...)` and `TextPath(d:content:...)` convenience initializers ACCEPTED `blendMode:` and `mask:` and forwarded NEITHER to the tspans-bearing init, so both were silently discarded at construction (the Swift copy-site omission class). Fixed. A mechanical enumeration of every delegating `public init` in JasSwift/Sources/Geometry/Element.swift, LiveElement.swift and Tspan.swift found exactly those two sites and no others; the method's blind spots are non-public inits and non-delegating rebuild sites, which it does not see.",
+      "blocks": "NARROWED, not closed. What is CLOSED: a one-port slot mismatch in the BINARY codec no longer lands silently -- `binary_wire` / `binaryWire` compare arity and bytes against a shared golden, so a slot added to one port alone reds that port. What REMAINS OPEN and is unchanged: (1) the string oracle is still the only thing behind the SVG and test-JSON codec gates, so the census's §5.4 prescription ('one maximal fixture per element type with every optional field non-default') is still NOT EXECUTABLE for those two codecs -- a saturated FIXTURE is still normalized back to default on the way in; (2) the byte gate compares documents each port CONSTRUCTS IN CODE, so a case whose two constructors are BOTH wrong about the intent passes -- it catches divergence, not incorrectness; (3) the two gradients are still dropped by the binary codec in both ports, pending the ruling; (4) the SVG codec's 6 drops are untouched and still invisible to any fixture.",
+      "unblock": "Route (a) FIELD-LEVEL and route (b) ORACLE-LEVEL below are both still open and still not substitutes; route (c) BYTE-LEVEL is now BUILT (test_fixtures/expected/binary_wire.json) and is what should be extended when a new binary slot lands: add the field to a case's document in both ports, regenerate the shared hex from the Rust helper, and let the swift lane red until it agrees. One named follow-up remains from what it produced: a ruling on the gradient stop-colour wire form, so the last two DROPPED cells in codec_field_survival.json's binary column can close. The tspan divergence it also found was pinned and then closed in the same wave. ---- ORIGINAL ROUTES, unchanged: Two independent routes, and they are not substitutes. (a) FIELD-LEVEL, already open: extend test_fixtures/expected/codec_field_survival.json -- add fields to the watched list and a mirrored accessor in each port's survival_row. This sees any field without touching the wire format. (b) ORACLE-LEVEL, a design decision that has NOT been taken: teach the canonical test-JSON to emit these keys CONDITIONALLY on non-default, the way it already emits `id` and `fill_rule`. That is additive (no existing golden moves, a grep of the 39 pre-existing .json files in test_fixtures/expected for mode / mask / fill_gradient / stroke_gradient / tool_origin / dash_align_anchors / width_points / stroke_brush returns ZERO hits) but it widens the CROSS_LANGUAGE_TESTING.md contract and must land in both ports in one step. Route (b) is what would let a saturated FIXTURE, rather than a saturated constructor, drive the gate. Repairing the binary codec itself is a third, separate question: it needs a ruling on where new slots go (the format has grown trailing slots twice -- doc index 3 for `symbols`, TAG_LIVE slot 9 for the instance transform -- but a shared common-block extension would have to be appended per element tag, since `unpack_common` reads fixed indices 1..6 of the variant's own array and every variant's payload starts at 7)."
+    },
+    {
+      "id": "clear-ids-blind-to-compound-operands",
+      "title": "clear_ids / clearingIds now DO descend into a compound shape's operands in both ports -- the defect this row was opened for is REPAIRED; what remains is that no vector can pin it, because the preservation vocabulary still has no cardinality word for a duplicate",
+      "evidence": "REPAIR, read on this commit: jas_dioxus/src/geometry/element.rs `clear_ids` carries an `Element::Live(LiveVariant::CompoundShape(cs))` arm that recurses `cs.operands` (landed by `PRESERVE: clear_ids missed a compound's operands, and duplicate reuses it`), and JasSwift/Sources/Geometry/Element.swift `clearingIds()`' `.live` arm switches exhaustively on the variant and maps `clearingIds()` over `cs.operands` (landed by `PRESERVE: Swift clearingIds was blind to a compound's operands, as Rust's was`). Both walks now mirror `Document::element_ids` / `Document.elementIds`. THE ORIGINAL MEASUREMENT, kept because it is what a future vector must reproduce: a THROWAWAY preservation vector over preservation_compound_operand_ids.svg running [select_by_ids cmp, copy_selection dx=0 dy=0] reported, in BOTH ports, the identical failure `id_uniqueness VIOLATED: id(s) appear more than once after the edit: [\"op_b\"]`. The call site is Controller::copy_selection / Controller.copySelection. WHAT WATCHES THE REPAIR TODAY: per-port unit batteries only -- `copy_selection_of_a_compound_shape_clears_its_operands_ids_too` (cargo) and `clearingIdsOfACompoundClearsItsOperandsIdsToo` + `copySelectionOfACompoundShapeClearsItsOperandsIdsToo` (swift), plus one WALK-AGREEMENT pin per port added 2026-07-27 -- `clear_ids_leaves_document_element_ids_empty_over_a_nested_compound` (cargo) and `clearingIdsLeavesDocumentElementIdsEmptyOverANestedCompound` (swift) -- which assert the CONSEQUENCE (`Document::element_ids` / `Document.elementIds` comes back EMPTY over a cleared layer > group > compound > operands subtree) rather than a hand-written id list, so they do not depend on a reviewer having enumerated the owners. Both were mutation-proved by deleting the operand arm in their own port (cargo: left {\"op-front\",\"op-back\"}; swift: left [\"op-back\",\"op-front\"]). Their stated blind spot: they prove agreement only over the owners the fixture contains, so a FUTURE non-`children` owner added to one walk and not the other is still tier 1's job, not theirs. Measured, both waves: the preservation gate stayed GREEN over the defect, so nothing cross-language sees it.",
+      "blocks": "Nothing is broken at HEAD; what is blocked is VERIFICATION. The two ports could drift apart again at this walk -- or a THIRD walk could be added with the same blind spot -- without one golden byte moving. The pin still cannot be landed: every preservation vector must declare a `cardinality` from the ratified set {one_to_one, delete, merge, split, wrap, unwrap}, and a DUPLICATE consumes nothing while producing an element, so T5's arrow (`the elements the edit consumes and the elements it produces from that material`) names none of the six. Choosing one, or adding a seventh word, would be inventing a ruling. transcripts/EDIT_SEMANTICS_FREEZE.md's audit list is corrected in the same commit as the Swift repair: its sentence `both ports' clear-id paths are field-preserving` was true about FIELDS and read as wider than reality about IDENTITY.",
+      "unblock": "One unlock left, and it is a ruling rather than code: a JYH ruling on the cardinality of a duplicate -- either which existing word covers it or a seventh word -- after which the probe vector above lands verbatim and PINS the repair on id_uniqueness in both ports. Until then the two ports' unit batteries are the only watch, and they cannot fail identically the way one shared vector would. A second, independent unlock would be to give the preservation runner a cardinality-free `invariants_only` vector kind, but that is a machinery ruling of its own and is not smuggled in here."
+    },
+    {
+      "id": "paste-offset-compound-divergence",
+      "title": "RESOLVED at the per-element transform: the paste offset now reaches a live compound in BOTH ports and is gated by the paste_translate family. What remains OPEN is the paste FLOW around it -- Rust appends to the selected layer, Swift merges by layer name -- which no fixture reaches because op_apply still has no paste verb",
+      "evidence": "THE DIVERGENCE, now DRIVEN rather than read. Adjudicated at tier 1, not by consistency: workspace/actions.yaml §paste specifies 'offset 24 points down and to the right from the original position' against paste_in_place's explicit 'no offset', so this was a written requirement Rust met and Swift did not -- the Python reference has no paste at all (grep: zero hits for 'paste' in workspace_interpreter/). Rust made authoritative on that basis. MEASURED on the new `paste_translate` family before the fix: 2 of 3 vectors failed rust-vs-swift and the zero-offset control passed. Swift returned the compound's operands at (0,0) and (5,0) instead of (24,24) and (29,24) -- the pasted compound exactly on top of its source, invisible, which is the one outcome the offset exists to prevent. A SECOND defect in the same helper surfaced in the same red: its `.group` arm rebuilt Group(children:opacity:transform:locked:) field by field and dropped name, id, visibility, blendMode, mask, isolatedBlending and knockoutGroup, so pasting a NAMED group produced an unnamed one (the Swift copy-site omission class, at a paste). THE FIX deletes the duplicate walk rather than repairing it: `EditClipboard.translateElement` now forwards to `Element.translated(dx:dy:)`, which was already the field-preserving mirror of Rust's `translate_element`, compound arm included -- it was correct all along while the paste path did not call it. WHAT WATCHES IT: test_fixtures/algorithms/paste_translate.json (3 vectors, EXACT, registered in cross_language_algorithms.py) plus JasSwift/Tests/Clipboard/PasteTranslateTests.swift (3 batteries). The family drives `EditClipboard.translateElement` and Rust's `translate_element` -- the functions the PASTE PATHS call -- deliberately NOT Swift's `Element.translated`, which would have been a decoy that never went red. Its result is the whole element serialized through the shared document writer, because a coordinate-only comparison would have seen the compound half and missed the group-name half. The golden was produced by the Rust binary and then VERIFIED independently against the spec by the generator (operands moved by exactly 24, identity intact, zero offset moves nothing) before being written. Mutation proof: restoring the old walk reds both halves in swift, naming both the wrong coordinates and the nil name.",
+      "blocks": "The per-element transform is no longer divergent or unwatched. Three things the corpus still cannot see, and the first is a LIVE divergence found while gating this one: (1) the paste FLOW differs between ports -- Rust's clipboard_read_and_paste appends every pasted child to doc.layers[selected], while Swift's pasteClipboard MERGES BY LAYER NAME and only falls back to the selected layer, so pasting a fragment whose layer name matches an existing layer lands in a different layer in the two ports. Read on this commit, not driven; no ruling exists (actions.yaml specifies the offset and the selection, and is silent on layer targeting). (2) Paste still copies ids verbatim in both ports, so a pasted element can duplicate a live identity -- the same blocked-on-a-cardinality-ruling state as the clear-ids row. (3) Rust's paste body still lives inside a spawn_local closure over Rc<RefCell<AppState>> and a Dioxus Signal, so it is unreachable from cargo test --lib; the new family reaches the helper it calls, not the body.",
+      "unblock": "For the flow: a JYH ruling on layer targeting (does a paste follow the clipboard fragment's layer name, or always land in the active layer?), then the machinery the previous version of this row described -- lift Rust's paste body into a pure function over (Document, Vec<Element>, offset) -> Document, give both ports a `paste` verb in op_apply routed through it, and add one operations vector. The verb is the piece that unblocks (2) as well, since the operations lane already installs the deterministic mint override."
+    },
+    {
       "id": "codec-no-control-chars",
       "title": "The canonical test-JSON writers escape only backslash and quote, so no fixture can express text containing a control character",
       "evidence": "JsonObj::str_val in jas_dioxus/src/geometry/test_json.rs and JsonObj.str in JasSwift/Sources/Geometry/TestJson.swift each apply exactly two replacements (\\\\ and \\\") and no U+0000-U+001F escaping. Consistent with that, zero of the 39 test_fixtures/expected/*.json contain an escaped control character.",
@@ -360,20 +561,50 @@
       "census": "5.5"
     },
     {
-      "id": "identity-view-only",
-      "title": "No fixture sets zoom_level or view_offset, so the screen-to-document half of every tool runs only where it is the identity",
-      "evidence": "grep for zoom_level and view_offset across all of test_fixtures/ and workspace/tests/ returns no file on this commit.",
-      "blocks": "The multiply/divide-by-zoom path of every tool is ungated, and no fixture can currently express otherwise -- the runners build the model at the identity view and have no view-state seed. A machinery limit, not a missing family.",
-      "unblock": "Teach both roundtrip runners to seed zoom_level and view_offset from the fixture, then add non-identity-view vectors to the gesture corpus.",
-      "census": "5.7"
+      "id": "identity-law-duplication-verbs-id-less",
+      "title": "Every fixture that reaches a DUPLICATION verb -- artboard duplicate, Layers-panel duplicate, clipboard paste -- copies an id-less element, so a copy wearing its source's identity is invisible to the whole corpus",
+      "evidence": "Measured on this commit. (a) The one cross-language vector that reaches a duplication verb is operations/artboard_duplicate (driven by cross_language_test.rs operation_artboard_duplicate); its setup SVG carries no id= attribute on any element, so it ran GREEN before and after the id defect was repaired. (b) The two landed unit batteries for doc.clone_at (renderer.rs doc_clone_at_then_insert_after_duplicates and production_route_duplicate_layer_selection_journals_one_insert_after) build their layers through make_state_with_layers, which hard-codes id: None -- likewise green in both directions. (c) The two landed batteries for artboard_duplicate_init build their rects with CommonProps::default(). Driven consequence, this wave: artboard_duplicate_init pushed Rc::new((**child).clone()) and doc.clone_at returned get_element(..).cloned(), both id included, so an id walk after duplicating a group yielded [\"g-outer\",\"r-inner\",\"g-outer\",\"r-inner\"]. Both are repaired in Rust WITHOUT ONE GOLDEN BYTE MOVING. Same shape as identity-law-boolean-operands-id-less, one lane over.",
+      "blocks": "The duplication verbs could be fixed, unfixed or inverted between the two ports and no cross-language golden would notice. Two live consequences the corpus still cannot see: (1) JasSwift has not been checked against the repaired Rust rule at these verbs, so the ports may now DISAGREE on whether a duplicate is born id-less; (2) workspace::clipboard::clipboard_read_and_paste remains UNREPAIRED in Rust -- it pastes translate_element(elem, dx, dy), which is ..e.clone() with the id, from the internal clipboard; and the SVG paste path runs dedupe_element_ids over the PASTED fragment alone, which is blind to ids already live in the target document. That site is unreachable from cargo test --lib (it lives inside a spawn_local closure over Rc<RefCell<AppState>> and a Dioxus Signal), so it has neither a unit battery nor a corpus vector.",
+      "unblock": "Fixture work plus one refactor. Fixtures: give the artboard-duplicate setup SVG ids, names and a nested identified child, and add a duplicate_layer_selection vector to the ACTION lane (which already installs the deterministic mint override via recorder::replay::run_action_case); assert id ABSENCE on the copy and id SURVIVAL on the source rather than literal ids. Refactor, before paste can be pinned at all: lift the paste body out of clipboard_read_and_paste into a pure function over (Document, Vec<Element>, offset) -> Document so a red can be shown at the layer that owns the bug."
     },
     {
-      "id": "panel-text-width-scalar-count-only",
-      "title": "PARTLY CLOSED (BINDVALUE): bind.* values are now pinned for 3 of the 16 panels; the other 13 and panel enabled_when are not, and panel_layout still reduces resolved text to a scalar count",
-      "evidence": "CLOSED HALF: test_fixtures/algorithms/panel_bind_values.json -- 4 vectors, 225 rows -- resolves bind expressions and pins the resulting STRINGS. Driven by all three live implementations: the reference (workspace_interpreter/tests/test_bind_values.py), Rust (cross_language_test.rs algorithm_bind_values_vectors) and Swift (CrossLanguageTests.swift testAlgorithmBindValues); both ports matched the reference-generated golden on their first run. Each of the three also asserts the census's own claim directly: the two data scopes differing ONLY in panel.hex (\"664040\" vs \"664141\") give byte-identical widget_tree output and byte-identical layout_panel rects, and differ in exactly one bind_values row (cp_hex, bind.value). OPEN HALF, counted over the compiled bundle: 311 declared bind entries across the 16 panels, of which 136 are in the three seeded panels (color 82, stroke 36, swatches 18) and 175 are not; the largest uncovered surfaces are paragraph (30) and character (24). Panel enabled_when is evaluated by no gate at all -- 3 nodes carry it, all in gradient_panel_content, all with the literal expression false. panel_layout itself is UNCHANGED and still length-only: text_w is eval_text(...).chars().count() * CHAR_WIDTH in jas_dioxus/src/interpreter/panel_layout.rs and resolved.unicodeScalars.count * charWidth in JasSwift/Sources/Interpreter/PanelLayout.swift.",
-      "blocks": "A bind-value divergence in one of the 13 unseeded panels is still invisible, as is any divergence in a panel enabled_when. panel_widget_tree remains key-names-only by design (widening it would rewrite every record it emits), so nothing else covers those panels.",
-      "unblock": "Fixture-only for the panel coverage: add BIND_SEED entries in scripts/gen_panel_layout_fixture.py and regenerate. enabled_when needs a one-line arm in each of the three bind_values implementations PLUS a seeded gradient vector -- and must not be added without the vector, since an unexercised arm is exactly the shape this list exists to keep visible.",
-      "census": "5.8"
+      "id": "swift-panel-state-map-omits-artboards-selection",
+      "title": "Swift keeps the artboards panel selection in TWO store buckets that cannot see each other, and publishes it in NEITHER live-state map -- so no action-corpus vector can assert it and the hamburger menu reads a selection the panel never wrote",
+      "evidence": "READ on this commit while routing the View verbs (ZOOMPKG); stated at exactly that strength -- the two-bucket half is read from the call sites, the corpus-unreachability half is driven. StateStore keys panel state by CONTENT ID and does no normalisation on read (`panels[panelId] ?? [:]`). The `set_panel_state { panel: artboards }` effect normalises the short name and writes `artboards_panel_content`, which is also the scope the Artboards panel body renders from -- so the panel is self-consistent. FOUR other Swift sites use the un-suffixed `artboards` bucket instead: ContentView.buildDialogOuterScope, ArtboardsPanel.dispatch (the hamburger route), YamlDialogView, and the Artboard TOOL's canvas-click writes in YamlToolEffects. A panel row-click and a canvas artboard click therefore record their selections where the other cannot see them. Rust has ONE bucket (AppState.artboards_panel_selection, published by build_live_state_map). Separately and driven: Swift's buildLiveStateMap does not publish artboards_panel_selection at all, so an `expected_panel_state` block naming it would fail in Swift on the key-presence assertion while passing in Rust.",
+      "blocks": "Two things. (1) artboards_panel_select -- one of only three actions declaring a param default, and the third verb the 2026-07-27 param-default ruling asked to be gated -- cannot be reached from the ACTION corpus at all; its gate had to be a per-port Swift unit test (artboardsPanelSelectWithNoModifierReplacesTheSelection). (2) Any Swift feature reading the artboards selection through the un-suffixed bucket sees an empty selection after a panel row-click, and vice versa; ViewActions.dispatch deliberately reads the canonical content-id scope rather than joining the split.",
+      "unblock": "Two independent steps. Bucket: pick the content-id scope as canonical (it is what the effect writes and the panel renders) and move the four un-suffixed sites onto it, in one commit, with a test per site -- the Artboard tool's write is the one that changes observable behaviour, so it needs a gesture-level check. Live-state map: publish artboards_panel_selection from Swift's buildLiveStateMap as Rust's build_live_state_map does, after which an expected_panel_state vector for artboards_panel_select becomes writable in the shared corpus and the per-port unit test can retire.",
+      "census": "new (ZOOMPKG)"
+    },
+    {
+      "id": "validator-strong-schema-never-runs",
+      "title": "The reference validator's REAL JSON Schema path has never run — anywhere — so every 'validation passes' comes from a hand-rolled subset",
+      "evidence": "workspace_interpreter/validator.py:58 `_try_import_jsonschema()` returns None when jsonschema is absent, and `_validate_structural` (:75-83) then falls back to `_validate_minimal` (:86), documented as a 'hand-rolled JSON Schema subset. Handles type, required, ...'. Measured 2026-07-27: `jsonschema` is NOT installed on the maintainer's machine, NOT in requirements.txt, NOT in jas_flask/requirements.txt, and NOT installed by any CI lane (grepped all three). The cloud referee did not install it either. So `Draft202012Validator` has never been exercised in any run we have evidence of, and the subset checker is what actually gates.",
+      "blocks": "A schema constraint the hand-rolled subset does not implement is unenforced while appearing enforced -- the instrument is weaker than the code reads. This is NOT a vacuous pass (the subset is a real checker) but it is a weaker guarantee than advertised. AND, the deeper hazard: the fallback is a second validator implementation that has never been differentially compared against the real one, so the two could disagree today and nothing would notice.",
+      "unblock": "RULED A PHASE OF ITS OWN by JYH 2026-07-27 ('better earlier than later'). NOT a dependency tidy-up. THREE PARTS, in order:\n(1) TURN IT ON AND TRIAGE. Install jsonschema, run every lane, and enumerate what falls out. Each finding is then its own small ruling -- is the SCHEMA wrong or is the DATA wrong? -- and a schema fix changes what counts as valid, which can cascade into fixtures. The number of findings is unknown, which is precisely why it cannot ride along inside another wave.\n(2) DECIDE THE FALLBACK'S FATE. `_validate_minimal` is a SECOND IMPLEMENTATION of JSON Schema validation living beside the real one, and the two have NEVER been compared -- structurally the same defect as Swift's two effect dispatchers, where the corpus drove the wrong one. Either delete it and make jsonschema a hard dependency, or keep it and GATE the two against each other over the schema corpus. Keeping two validators that can silently disagree is the option to reject.\n(3) DECLARE WHICH IS AUTHORITATIVE, in the spec, so no future reader has to infer it from an import guard.\nSequencing note: (1) before (2) -- you cannot judge whether the subset is adequate until you know what the strong validator finds that it misses."
+    },
+    {
+      "id": "first-subpath-walkers-and-the-leading-close-class",
+      "title": "RESOLVED for the two known instances: art_along_path's and calligraphic_outline's first-subpath walkers both dropped the whole path on a leading ClosePath, in BOTH ports, and both are now fixed and gated by new conformance families. What remains OPEN is the CLASS -- there is no mechanical gate that a future first-subpath walker honours S-4",
+      "evidence": "THE TWO INSTANCES, both measured red before the fix and green after, on this commit. (1) `flatten` (jas_dioxus/src/algorithms/art_along_path.rs) and `flattenArtPath` (JasSwift/Sources/Algorithms/ArtAlongPath.swift) both returned [] for d = [Z, M(3,2), L(13,2)] and [(3,2),(13,2)] without the leading Z; shared by art-along-path, pattern-along-path and the bristle brush. (2) NEWLY FOUND while enumerating the class for (1): `sample_stroke_path` (jas_dioxus/src/algorithms/calligraphic_outline.rs) and `sampleStrokePath` (JasSwift/Sources/Algorithms/CalligraphicOutline.swift) carried the identical bail-out, and Calligraphic is the Phase-1 DEFAULT brush -- a path whose `d` begins with Z stroked NOTHING. In both cases the close arm was `if cx != sx || cy != sy { emit }` followed by an unconditional return, and at a leading close cx == sx == cy == sy == 0. The two ports AGREED in both cases, which is exactly the class a port-vs-port comparison is blind to. WHAT NOW WATCHES THEM: two new cross-language families, `art_flatten` (test_fixtures/algorithms/art_flatten.json, 9 vectors) and `calligraphic_outline` (test_fixtures/algorithms/calligraphic_outline.json, 9 vectors), both registered in cross_language_algorithms.py's ALGORITHMS dict and driven by a new verb in each port's roundtrip binary; plus in-port batteries in all four files. The calligraphic goldens were derived by running the STRIPPED path (no leading Z) through the pre-fix binary -- a shape that code already computed correctly -- so no expected value is the bug's own output. THE CLASS ENUMERATION, with its method and its blind spot stated. Method: grep every `PathCommand::ClosePath =>` arm in jas_dioxus/src and every `case .closePath` in JasSwift/Sources, then read each one for the pattern 'walks a first subpath, keeps an (sx, sy) subpath start, and RETURNS or EMITS from the close arm'. Result: exactly two such functions per port, both now fixed. The arms that are NOT in the class, and why: `flatten_path_commands` and `flatten_path_to_rings` already honour S-4 (`!pts.is_empty()`, and a flush of an empty ring drops it); `arrow_trim`'s `dist(cur, sub_start) > EPS` is already a no-op at a leading close and does not return; `Controller`'s simplify walk flushes a buffer of fewer than two points harmlessly; the bounds walk sets `cx = sx` only; and the painter / renderer / codec / PDF arms forward the command rather than interpreting a subpath. BLIND SPOT: that is a grep plus a reading, the same kind of evidence that let this defect through the freeze's own audit list. A fifth walker added tomorrow is caught by nothing.",
+      "blocks": "Nothing artist-visible is broken at these two functions any more. What is blocked is CLASS closure: S-4 is a ruling about a shape of code ('a ClosePath before any point has been established contributes nothing'), and the tree now honours it in four flatteners by four separate hand-written guards, of two different forms -- `out.is_empty()` where the accumulator holds vertices, and a `has_current` / `hasCurrent` flag where it holds samples a bare MoveTo does not emit. Nothing forces the fifth walker to choose either. The two ports could also drift apart at the NEW guards without a golden moving except through the two new families, which cover only the inputs their vectors name.",
+      "unblock": "Two candidates, neither taken here because both are design decisions rather than fixes. (a) Collapse the four walkers onto ONE shared subpath iterator that applies S-4 once, parameterised by per-caller step counts and accumulator -- the four differ in sampling policy, not in subpath grammar, so this is plausible but it is a refactor across two ports and would move goldens. (b) Add a corpus family that feeds EVERY registered path-consuming algorithm the same leading-Z probe and asserts each one's output equals its output on the stripped path -- a relational gate rather than a value gate, which the current runner cannot express (it compares against pinned `expected` lists). (b) is the cheaper of the two and is the one that would actually close the class.",
+      "census": ""
+    },
+    {
+      "id": "swift-compound-shape-has-no-name-field",
+      "title": "Rust's CompoundShape carries common.name and Swift's CompoundShape has NO name field at all, so a named compound cannot round-trip through the Swift port -- a model-level divergence against the any-element-carries-a-name rule",
+      "evidence": "MEASURED on this commit while building the paste_translate family, then isolated out of it. Feeding both roundtrip binaries a compound_shape test-json element carrying \"name\": \"hull\", Rust returned \"name\":\"hull\" and Swift returned \"name\":null. Two causes, one above the other: (a) JasSwift/Sources/Geometry/LiveElement.swift's `CompoundShape` declares no `name` property, and its own doc comment says so -- \"No name field is intended for live elements\" -- while jas_dioxus's `CompoundShape` holds a full `CommonProps` including `name`; the same asymmetry applies to Swift's `.reference`, `.recorded` and `.generated` payloads. (b) Consistent with (a), TestJson.swift's `parseElement` \"live\" arm forwards `id` and not `name`, so the key is dropped on the way in even where a slot existed. The house rule is that ANY element carries a name (SVG inkscape:label), and Rust's own `rich_compound` fixture asserts `name: Some(\"hull\")`.",
+      "blocks": "Any fixture that names a live element is VACUOUS in Swift -- the field arrives nil and the golden either records nil or the swift lane reds for a reason unrelated to the vector's subject, which is exactly what happened to the first draft of paste_translate (its compound is deliberately unnamed, with a comment saying why). More broadly, the Layers panel cannot show a user-given name for a compound shape in JasSwift, and the preservation law's name-carry clauses cannot be expressed over live elements there at all.",
+      "unblock": "Not a fixture problem and not smuggled into this wave: adding `name` to Swift's four live conformers is precisely the copy-site omission class in reverse -- every construction site of every conformer must be enumerated, and the house's own answer to that class is to make the new initializer parameter REQUIRED so the compiler lists the sites. Do it as its own wave, Swift-only, with the Rust side already correct; then name the compound in paste_translate and in the clear-ids probe vector.",
+      "census": ""
+    },
+    {
+      "id": "paste-flow-layer-targeting-divergence",
+      "title": "Rust's paste appends to the SELECTED layer; Swift's paste MERGES BY LAYER NAME and only then falls back to the selected layer -- read, not driven, and no fixture can reach either flow",
+      "evidence": "READ on this commit while fixing the paste OFFSET, and stated at exactly that strength. jas_dioxus/src/workspace/clipboard.rs `clipboard_read_and_paste`: for every pasted layer's children it pushes into `doc.layers[idx]` where `idx = doc.selected_layer`, with no name lookup anywhere in the function. JasSwift/Sources/Clipboard/EditClipboard.swift `pasteClipboard`: for every pasted layer it searches `newLayers` for one whose `name` equals the pasted layer's name and uses that index, `?? doc.selectedLayer`. So pasting an SVG fragment whose layer is named \"Layer 1\" into a document that already has a \"Layer 1\" lands in that layer in Swift and in whatever layer is selected in Rust.",
+      "blocks": "A prime-directive divergence in the paste FLOW, one level up from the per-element offset that the paste_translate family now gates. It is invisible to every gate for the same reason the offset was: op_apply has no paste verb in either port, so neither the operations corpus nor the preservation gate can express a paste, and the gesture corpus declares no clipboard tool.",
+      "unblock": "A ruling FIRST, because both behaviours are defensible and workspace/actions.yaml §paste is silent -- it specifies the 24pt offset and that the pasted objects become the selection, and says nothing about layer targeting. Choosing one here would be inventing a ruling. Once ruled, the machinery is the same paste verb the row above needs.",
+      "census": ""
     }
   ]
 }

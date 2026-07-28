@@ -99,14 +99,14 @@ dashed for the preview curve.
 
 ## Known gaps
 
-- **Alt-drag to break handles** — Illustrator's Pen tool uses
+- **Alt-drag to break handles** — the incumbent's Pen tool uses
   Alt to break the in/out mirror on a smooth anchor during
   placement. The current Pen tool doesn't wire Alt; the
   follow-up Anchor Point tool handles the corner/smooth toggle.
-- **Shift-constrained 45° segments** — Illustrator constrains
+- **Shift-constrained 45° segments** — the incumbent constrains
   path segments to multiples of 45° when Shift is held. Not
   wired.
-- **Rubber-banding a previous-anchor handle** — Illustrator
+- **Rubber-banding a previous-anchor handle** — the incumbent
   allows dragging a previously-placed anchor's handle during
   the same drawing session (via the tool's click-back-on-anchor
   gesture). Not wired today.

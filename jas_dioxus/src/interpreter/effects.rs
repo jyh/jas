@@ -3524,7 +3524,7 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
     use crate::document::artboard::{
         generate_artboard_id, mint_unique_ids, next_artboard_name, Artboard,
     };
-    use crate::geometry::element::{Element, LayerElem};
+    use crate::geometry::element::{clear_ids, Element, LayerElem};
     use std::rc::Rc;
 
     let source_id = store
@@ -3559,6 +3559,26 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
     // and append to the same layer. Track each new copy's path so
     // move_apply can translate it.
     let mut duplicated_paths: Vec<Vec<usize>> = Vec::new();
+    // A COPY IS A NEW ELEMENT, so it may not wear the identity that is still
+    // live on the original (REFERENCE_GRAPH.md §2.5 uniqueness; the
+    // silent-rebinding hazard of transcripts/EDIT_SEMANTICS_FREEZE.md §3.7).
+    // This loop used to push `Rc::new((**child).clone())` verbatim, so
+    // duplicating an artboard's contents left two live elements wearing each
+    // id — at EVERY depth, since the clone is deep.
+    //
+    // `clear_ids` is the house's landed rule for a COPY, in
+    // `Controller::copy_selection`'s own words: "A copy must not inherit the
+    // source's stable id (no two elements may share an identity); it is born
+    // id-less." That rule is reused verbatim rather than a second one
+    // invented here. NAMED DELTA from the SPLIT arms (`path_erase_at_rect`,
+    // the boolean DIVIDE arm, compound-shape EXPAND), which MINT: there the
+    // source's identity died and something must stand in its place, whereas a
+    // copy only has to avoid an identity that is still live, and `id: None`
+    // is the documented lazy assign-on-create default T3 allows.
+    //
+    // Everything else — appearance, `transform`, `mask`, `name`,
+    // `tool_origin` — copies verbatim, and the ORIGINAL is a bystander (T4):
+    // untouched, id included.
     let new_layers: Vec<Element> = new_doc
         .layers
         .iter()
@@ -3581,7 +3601,9 @@ fn artboard_duplicate_init(model: &mut Model, store: &mut StateStore) {
                         // derived; Rc::new wraps a fresh allocation
                         // so the deep copy is independent of the
                         // original.
-                        new_children.push(Rc::new((**child).clone()));
+                        let mut copy = (**child).clone();
+                        clear_ids(&mut copy);
+                        new_children.push(Rc::new(copy));
                         duplicated_paths.push(vec![
                             layer_idx,
                             original_count + appended,
@@ -4370,6 +4392,30 @@ fn path_move_latched_handle(
 /// ports' id source identically (`set_test_id_rng`), exactly as the creation
 /// verbs are already gated. See OP_LOG.md §9 for what the 33-verb unification
 /// owes this verb.
+/// Re-express `frag`'s LINEAR fill and stroke gradients on its own extent,
+/// given the `parent` bbox they were authored against. In-place; a gradient
+/// that is not linear, or a gradient-less field, is untouched.
+///
+/// `parent` and `fragment` must be the boxes the PAINTER resolves gradients
+/// against, which for a Path is `Element::bounds()` on both the fill and the
+/// stroke arm (`painter::element_render`, the `tuple_bounds(elem)` call feeding
+/// `emit_fill_path` and `stroke_brush`).
+fn remap_linear_gradients(
+    frag: &mut crate::geometry::element::PathElem,
+    parent: (f64, f64, f64, f64),
+    fragment: (f64, f64, f64, f64),
+) {
+    use crate::algorithms::gradient_remap::remap_linear_stops;
+    use crate::geometry::element::GradientType;
+    for slot in [&mut frag.fill_gradient, &mut frag.stroke_gradient] {
+        let Some(g) = slot.as_deref_mut() else { continue };
+        if g.gtype != GradientType::Linear {
+            continue;
+        }
+        g.stops = remap_linear_stops(&g.stops, g.angle, parent, fragment);
+    }
+}
+
 fn path_erase_at_rect(
     model: &mut Model,
     last_x: f64, last_y: f64,
@@ -4467,13 +4513,19 @@ fn path_erase_at_rect(
             // REFERENCE_GRAPH.md §2.5. A failed mint aborts the whole erase —
             // never a half-identified split.
             //
-            // STILL OWED for the severing case: a linear-gradient stop remap
-            // (a gradient carries no position — linear resolves angle + stops
-            // against the element's OWN bbox centre and half-diagonal — so
-            // each fragment re-fits the whole ramp instead of showing its
-            // slice; the fix is an affine remap of stop locations with
-            // clipping and interpolated endpoint colours). Radial cannot be
-            // preserved without a model change; the recentre is accepted.
+            // LINEAR GRADIENTS ARE REMAPPED on the severing arm (S-2, ruled
+            // 2026-07-26). A gradient carries no position — linear resolves
+            // angle + stops against the element's OWN bbox centre and
+            // half-diagonal — so a fragment that inherited the parent's stops
+            // verbatim re-fitted the whole ramp to its own smaller box. Each
+            // fragment's stops are re-expressed on its own extent below; see
+            // algorithms::gradient_remap.
+            //
+            // RADIAL is deliberately left alone: its centre is forced to the
+            // bbox centre and the model has nowhere to record an anchor, so a
+            // fragment necessarily re-centres. JYH accepted that; "gradient
+            // anchor" is a separate stone. FREEFORM paints nothing
+            // (resolve_gradient returns None), so there is nothing to preserve.
             let severed = results.len() > 1;
             let fragment_ids: Vec<Option<String>> = if severed {
                 let Some(ids) = mint_unique_ids(
@@ -4490,6 +4542,16 @@ fn path_erase_at_rect(
             for (cmds, id) in results.into_iter().zip(fragment_ids) {
                 let mut frag = PathElem { d: cmds, ..path_elem.clone() };
                 frag.common.id = id;
+                if severed {
+                    // Only the severing arm needs this. A single surviving
+                    // fragment is the 1 -> 1 case, and even there the bbox
+                    // shrinks — but that arm is the Theseus law's, which
+                    // preserves everything but `d`, and re-fitting a ramp to a
+                    // trimmed outline is what a non-severing erase has always
+                    // done. Changing it is a separate ruling.
+                    let frag_bbox = Element::Path(frag.clone()).bounds();
+                    remap_linear_gradients(&mut frag, bounds, frag_bbox);
+                }
                 new_children.push(Rc::new(Element::Path(frag)));
             }
             layer_changed = true;
@@ -4928,7 +4990,9 @@ fn blob_brush_commit_painting(
     use crate::algorithms::boolean::boolean_union;
     use crate::document::artboard::{generate_element_id, mint_unique_ids};
     use crate::geometry::element::{Element, PathElem, CommonProps};
-    use crate::geometry::path_ops::{path_to_polygon_set, polygon_set_to_path};
+    use crate::geometry::path_ops::{
+        path_to_polygon_set, polygon_set_to_path, transform_polygon_set,
+    };
 
     let points: Vec<(f64, f64)> = super::point_buffers::with_points(
         buffer_name, |p| p.to_vec());
@@ -4977,7 +5041,41 @@ fn blob_brush_commit_painting(
             if merge_only_with_selection && !selected.contains(&path) {
                 continue;
             }
-            let existing = path_to_polygon_set(&pe.d);
+            // BOTH SIDES IN DOCUMENT SPACE (BLOB_BRUSH_TOOL.md §Transform).
+            // `swept` came from the point buffer in document coordinates;
+            // `pe.d` is in the element's own space, which `common.transform`
+            // maps to the document. Testing them against each other without
+            // the matrix matches on where the artwork is STORED, not where it
+            // is DRAWN: a scaled blob 300 units away used to union with a
+            // sweep that never came near it.
+            //
+            // A SINGULAR matrix disqualifies the element rather than matching
+            // it. Such an element collapses to a line or a point on screen, so
+            // there is nothing to paint into, and the n == 1 arm below could
+            // not write the result back into its space anyway — the inverse
+            // that maps the unified doc-space region into local coordinates
+            // does not exist. Skipping is the only answer that leaves the
+            // document unchanged instead of guessing at one.
+            //
+            // NO FIXTURE SEPARATES THIS GUARD, and the reason is worth
+            // recording: `transform_polygon_set` maps a singular source onto a
+            // zero-area figure, and `boolean_intersect` reports empty for
+            // that, so the loop `continue`s one line later anyway.
+            // `blob_merge_skips_a_source_whose_transform_is_singular` pins the
+            // OUTCOME (source untouched, sweep committed beside it) — which
+            // the guard and the boolean layer agree on — not the guard. What
+            // the guard adds is that the skip is a stated RULE instead of a
+            // consequence of the boolean layer's treatment of degenerate
+            // input, which no comment there promises.
+            let existing = match pe.common.transform {
+                Some(t) => {
+                    if t.inverse().is_none() {
+                        continue;
+                    }
+                    transform_polygon_set(&path_to_polygon_set(&pe.d), &t)
+                }
+                None => path_to_polygon_set(&pe.d),
+            };
             // Cheap reject: union-check via is_empty-after-intersect
             use crate::algorithms::boolean::boolean_intersect;
             let intersection = boolean_intersect(&unified, &existing);
@@ -5000,8 +5098,13 @@ fn blob_brush_commit_painting(
         (lowest[0], Some(lowest[1]))
     };
 
-    let new_d = polygon_set_to_path(&unified);
-    if new_d.is_empty() {
+    // `unified` is in DOCUMENT space. Where it is written back depends on the
+    // arm below: the n == 1 arm keeps the source element, hence the source's
+    // `transform`, so its `d` must be expressed in the source's LOCAL space;
+    // the n == 0 and n >= 2 arms build a transform-less element, whose local
+    // space IS the document. The emptiness guard reads the document-space set,
+    // which is the one that decides whether anything was painted at all.
+    if polygon_set_to_path(&unified).is_empty() {
         return;
     }
     // THE CARDINALITY LAW (JYH, ratified 2026-07-26): "Identity survives a
@@ -5030,7 +5133,34 @@ fn blob_brush_commit_painting(
             // Unreachable: the path was collected from this same `doc` above.
             _ => return,
         };
-        Element::Path(PathElem { d: new_d, ..src })
+        // The survivor keeps its `transform`, so its `d` is read through that
+        // matrix — write the unified region back in the element's OWN space.
+        // The `None` arm of `inverse()` is not reachable (the match loop
+        // `continue`d past every singular source), and is written as an abort
+        // rather than an unwrap so that a future change to that loop degrades
+        // into a no-op edit instead of a panic in the tool.
+        let local = match src.common.transform {
+            Some(t) => match t.inverse() {
+                Some(inv) => transform_polygon_set(&unified, &inv),
+                None => return,
+            },
+            None => unified.clone(),
+        };
+        // T1'S RING TERM (EDIT_SEMANTICS_FREEZE.md §1.1, third closure): *the
+        // fill rule belongs to whoever made the rings.* `local` came out of
+        // `boolean_union` above, so the rings this arm writes are
+        // MACHINE-WOUND, not the artist's — and `boolean.rs` documents in its
+        // own words why a non-zero declaration over machine-wound rings
+        // silently fills holes. `fill_rule` is therefore a field this edit
+        // SPEAKS TO, and `..src` carrying the source's rule is
+        // OVER-preservation, which the law forbids in the same breath as
+        // under-preservation. Everything else still travels by struct update:
+        // the arm is 1 -> 1, so the Theseus clause governs the rest.
+        Element::Path(PathElem {
+            d: polygon_set_to_path(&local),
+            fill_rule: crate::algorithms::boolean::RESULT_FILL_RULE.into(),
+            ..src
+        })
     } else {
         // 0 -> 1 (a brand-new blob) and N -> 1 with N >= 2 (a merge) both build
         // a fresh element carrying the tool's own attributes. For the merge
@@ -5068,11 +5198,16 @@ fn blob_brush_commit_painting(
             // nothing about opacity, so merging two 50%-opaque blobs must not
             // yield a fully opaque one.
             //
-            // `transform` is EXCLUDED regardless of agreement. This merge
-            // matches RAW geometry against a DOCUMENT-space sweep, so it is
-            // already transform-blind (transcripts/BLOB_BRUSH_TOOL.md);
-            // carrying a unanimous transform would COMPOUND that bug by
-            // relocating the merged artwork. `tool_origin` is set by the tool
+            // `transform` is EXCLUDED regardless of agreement. The reason has
+            // changed and the exclusion has not: it was excluded because the
+            // merge matched RAW geometry against a DOCUMENT-space sweep, so
+            // carrying a matrix would have compounded that. That blindness is
+            // now fixed — `unified` is document-space and this arm's element
+            // is transform-less, which is CONSISTENT on its own terms. So the
+            // exclusion is no longer forced by a bug; whether a unanimous
+            // transform should now carry (and `d` be expressed in its space)
+            // is JYH's to rule. Until then this stays as ruled.
+            // `tool_origin` is set by the tool
             // above, `id` is minted fresh, and the paint attributes are what
             // the stroke DOES speak to — so `common`'s five compositing
             // fields below are the whole list. Swift's twin carries the same
@@ -5109,9 +5244,38 @@ fn blob_brush_commit_painting(
             if let Some(v) = unanimous(&sources, |pe| pe.common.mask.clone()) {
                 common.mask = v;
             }
+
+            // `name` — ASSERTING-SOURCES (JYH, ratified 2026-07-27;
+            // EDIT_SEMANTICS_FREEZE.md §3.3). For `name` ONLY, unanimity
+            // ranges over the sources that ASSERT one: silence is not a
+            // competing claim, so "hull" + unnamed yields "hull". Two
+            // DIFFERENT assertions are T2 shape 2 — a value across disagreeing
+            // sources — and take the documented default (no name) per T3; no
+            // winner is elected by z-order, area or document position.
+            //
+            // Why not strict unanimity: no drawing tool writes `common.name`,
+            // so the commonest real case is one named source among unnamed
+            // neighbours. Strict unanimity would delete the artist's word
+            // exactly there, and the id is already dying at this arm — the
+            // product would be left with no handle of any kind. Swift's twin
+            // carries the identical rule.
+            let asserted: Vec<String> = sources
+                .iter()
+                .filter_map(|pe| pe.common.name.clone())
+                .collect();
+            if let Some(first) = asserted.first()
+                && asserted.iter().all(|n| n == first)
+            {
+                common.name = Some(first.clone());
+            }
         }
         Element::Path(PathElem {
-            d: new_d,
+            // `common.transform` is left at its default (None) on this arm —
+            // for n == 0 because a fresh blob has no matrix, for n >= 2
+            // because the unanimity carry excludes `transform`. Either way the
+            // element's local space IS the document, so the document-space
+            // union is written straight in.
+            d: polygon_set_to_path(&unified),
             fill: new_fill,
             stroke: None,
             width_points: Vec::new(),
@@ -5120,7 +5284,12 @@ fn blob_brush_commit_painting(
             stroke_gradient: None,
             stroke_brush: None,
             stroke_brush_overrides: None,
-            fill_rule: crate::geometry::element::FillRule::NonZero,
+            // T1's RING TERM, as on the 1 -> 1 arm above: `unified` is a
+            // machine-wound polygon set (the swept dabs on the 0 -> 1 arm, the
+            // union with the sources on the N -> 1 arm), so the generated-rings
+            // constant is stamped. This used to be a literal `NonZero`, which
+            // fills exactly the holes `boolean_union` can wind.
+            fill_rule: crate::algorithms::boolean::RESULT_FILL_RULE.into(),
         })
     };
 
@@ -5202,8 +5371,17 @@ fn blob_brush_commit_erasing(
             if new_d.is_empty() {
                 new_doc = new_doc.delete_element(&path);
             } else {
+                // T1's RING TERM again, and this is the arm where the failure
+                // mode bites hardest: `boolean_subtract` can punch a HOLE ring
+                // into the source, and a carried `NonZero` declaration over
+                // machine-wound rings fills exactly that hole back in — the
+                // artist erases a doughnut and sees a disc. Everything else
+                // travels by struct update; the arm is 1 -> 1 for a surviving
+                // element, so the Theseus clause governs the rest.
                 let new_elem = Element::Path(PathElem {
                     d: new_d,
+                    fill_rule: crate::algorithms::boolean::RESULT_FILL_RULE
+                        .into(),
                     ..pe.clone()
                 });
                 new_doc = new_doc.replace_element(&path, new_elem);
@@ -9049,6 +9227,237 @@ mod tests {
         assert_eq!(new_hit, dup.id);
     }
 
+    // ── THE PRESERVATION LAW at `artboard_duplicate_init` ─────────────────
+    //
+    // The same 1 -> N identity defect as `CompoundShape::expand` and the
+    // boolean DIVIDE arm, in a third place: the deep-copy loop pushes
+    // `Rc::new((**child).clone())` into the SAME layer while the original
+    // stays, so every duplicated element that carried an id left TWO live
+    // elements wearing it (REFERENCE_GRAPH.md §2.5 uniqueness; the
+    // silent-rebinding hazard of EDIT_SEMANTICS_FREEZE.md §3.7). The
+    // function already mints the duplicate ARTBOARD's id through the one
+    // mint loop, four lines below — the contents were simply never given
+    // the same treatment. Every pre-existing test here builds its rects with
+    // `CommonProps::default()`, i.e. NO id, which is exactly the blindness
+    // the corpus manifest declares as `identity-law-boolean-operands-id-less`.
+
+    /// A rect whose `common` differs from the default in every legislated
+    /// field, so the batteries below cannot pass on nothing (§3.1
+    /// ANTI-VACUITY).
+    #[cfg(test)]
+    fn rich_dup_rect(x: f64, y: f64, id: &str) -> crate::geometry::element::RectElem {
+        use crate::geometry::element::{
+            BlendMode, Color, CommonProps, Element, Fill, Mask, RectElem, Visibility,
+        };
+        RectElem {
+            x, y, width: 20.0, height: 20.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps {
+                opacity: 0.25,
+                mode: BlendMode::Multiply,
+                transform: None,
+                locked: false,
+                visibility: Visibility::Outline,
+                mask: Some(Box::new(Mask {
+                    subtree: Box::new(Element::Rect(RectElem {
+                        x: 0.0, y: 0.0, width: 4.0, height: 4.0, rx: 0.0, ry: 0.0,
+                        fill: Some(Fill::new(Color::BLACK)), stroke: None,
+                        common: CommonProps::default(),
+                        fill_gradient: None, stroke_gradient: None,
+                    })),
+                    clip: false, invert: false, disabled: false, linked: true,
+                    unlink_transform: None,
+                })),
+                tool_origin: Some("blob_brush".to_string()),
+                name: Some("hull".to_string()),
+                id: Some(id.to_string()),
+            },
+            fill_gradient: None, stroke_gradient: None,
+        }
+    }
+
+    /// Build the fixture used by the three duplicate batteries: one 100x100
+    /// source artboard holding a GROUP whose own `common` is rich and whose
+    /// single child is rich too, so the walk has to descend past the
+    /// duplicated element itself.
+    #[cfg(test)]
+    fn duplicate_fixture() -> (StateStore, Model) {
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        use crate::geometry::element::{CommonProps, Element, GroupElem, LayerElem};
+        use std::rc::Rc;
+
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("src00001".into());
+        a.x = 0.0; a.y = 0.0; a.width = 100.0; a.height = 100.0;
+        doc.artboards.push(a);
+        let inner = Element::Rect(rich_dup_rect(10.0, 10.0, "r-inner"));
+        let mut group_common = rich_dup_rect(0.0, 0.0, "g-outer").common;
+        group_common.name = Some("keel".to_string());
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(inner)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: group_common,
+        });
+        // ANTI-VACUITY: the fixture really is rich.
+        let d = CommonProps::default();
+        assert_ne!(group.common().opacity, d.opacity);
+        assert_ne!(group.common().mode, d.mode);
+        assert_ne!(group.common().visibility, d.visibility);
+        assert_ne!(group.common().mask, d.mask);
+        assert_ne!(group.common().tool_origin, d.tool_origin);
+        assert!(group.common().id.is_some() && group.common().name.is_some());
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: vec![Rc::new(group)],
+            ..LayerElem::default()
+        })];
+        let model = Model::new(doc, None);
+        store.set_tool("artboard", "hit_artboard_id",
+            serde_json::json!("src00001"));
+        (store, model)
+    }
+
+    #[cfg(test)]
+    fn run_duplicate_init(store: &mut StateStore, model: &mut Model) {
+        let effects = vec![serde_json::json!({
+            "doc.artboard.duplicate_init": {}
+        })];
+        run_effects(&effects, &serde_json::json!({}), store,
+            Some(model), None, None, None);
+    }
+
+    /// Every id in the document, WITH repeats — `Document::element_ids`
+    /// returns a `HashSet`, which silently dedupes exactly the duplicate
+    /// this battery exists to catch.
+    #[cfg(test)]
+    fn dup_ids_with_repeats(model: &Model) -> Vec<String> {
+        use crate::geometry::element::Element;
+        fn walk(e: &Element, out: &mut Vec<String>) {
+            if let Some(id) = e.common().id.as_ref() {
+                out.push(id.clone());
+            }
+            if let Some(children) = e.children() {
+                for c in children { walk(c, out); }
+            }
+        }
+        let mut out = Vec::new();
+        for layer in &model.document().layers { walk(layer, &mut out); }
+        out
+    }
+
+    /// THE VIOLATION, as a document invariant.
+    #[test]
+    fn artboard_duplicate_leaves_no_duplicate_id_in_the_document() {
+        use crate::geometry::element::Element;
+        let (mut store, mut model) = duplicate_fixture();
+        run_duplicate_init(&mut store, &mut model);
+        // MANDATORY GEOMETRY PAIRING: the copy really landed, at the source
+        // position (the translate op moves it afterwards, not here).
+        let Element::Layer(le) = &model.document().layers[0] else { panic!("layer") };
+        assert_eq!(le.children.len(), 2, "the deep copy was appended");
+        for child in &le.children {
+            let Element::Group(g) = child.as_ref() else { panic!("group") };
+            let Element::Rect(r) = g.children[0].as_ref() else { panic!("rect") };
+            assert!((r.x - 10.0).abs() < 1e-9 && (r.y - 10.0).abs() < 1e-9,
+                    "duplicate_init copies at the source position, got {},{}", r.x, r.y);
+        }
+        let seen = dup_ids_with_repeats(&model);
+        let mut sorted = seen.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), seen.len(),
+                   "artboard duplicate left a duplicate id in the document: {seen:?}");
+    }
+
+    /// A COPY IS BORN ID-LESS — `Controller::copy_selection`'s landed rule,
+    /// reused verbatim through `clear_ids` rather than reinvented — and the
+    /// walk must reach NESTED ids too, not just the duplicated element's own.
+    #[test]
+    fn artboard_duplicate_copy_is_born_id_less_at_every_depth() {
+        use crate::geometry::element::Element;
+        let (mut store, mut model) = duplicate_fixture();
+        let before: std::collections::HashSet<String> =
+            model.document().element_ids();
+        assert!(before.contains("g-outer") && before.contains("r-inner"));
+        run_duplicate_init(&mut store, &mut model);
+        let Element::Layer(le) = &model.document().layers[0] else { panic!("layer") };
+        let Element::Group(copy) = le.children[1].as_ref() else { panic!("group") };
+        assert!(copy.common.id.is_none(),
+                "the copy wears {:?} — an identity that is still live on the \
+                 original", copy.common.id);
+        let Element::Rect(inner) = copy.children[0].as_ref() else { panic!("rect") };
+        assert!(inner.common.id.is_none(),
+                "a NESTED id rode out on the copy: {:?}", inner.common.id);
+    }
+
+    /// The other half: identity is the ONLY thing the copy does not inherit,
+    /// and the ORIGINAL is a bystander (T4) — untouched, id included.
+    #[test]
+    fn artboard_duplicate_copies_every_other_field_and_leaves_the_source_alone() {
+        use crate::geometry::element::{BlendMode, Element, Visibility};
+        let (mut store, mut model) = duplicate_fixture();
+        run_duplicate_init(&mut store, &mut model);
+        let Element::Layer(le) = &model.document().layers[0] else { panic!("layer") };
+        let Element::Group(src) = le.children[0].as_ref() else { panic!("group") };
+        assert_eq!(src.common.id.as_deref(), Some("g-outer"),
+                   "the ORIGINAL is a bystander: duplicating never touches it");
+        let Element::Rect(src_inner) = src.children[0].as_ref() else { panic!("rect") };
+        assert_eq!(src_inner.common.id.as_deref(), Some("r-inner"));
+        let Element::Group(copy) = le.children[1].as_ref() else { panic!("group") };
+        assert_eq!(copy.common.name.as_deref(), Some("keel"));
+        assert_eq!(copy.common.opacity, 0.25);
+        assert_eq!(copy.common.mode, BlendMode::Multiply);
+        assert_eq!(copy.common.visibility, Visibility::Outline);
+        assert_eq!(copy.common.mask, src.common.mask);
+        assert_eq!(copy.common.tool_origin.as_deref(), Some("blob_brush"));
+        let Element::Rect(cin) = copy.children[0].as_ref() else { panic!("rect") };
+        assert_eq!(cin.common.name.as_deref(), Some("hull"));
+        assert_eq!(cin.common.opacity, 0.25);
+    }
+
+    /// GUARD: an id-LESS source's copy is unaffected — `clear_ids` neither
+    /// mints nor breaks on the common case. NAMED DELTA from the SPLIT arms,
+    /// which mint unconditionally because the source's identity DIED; a COPY
+    /// only has to avoid an identity that is still live, and an absent one
+    /// cannot collide.
+    #[test]
+    fn artboard_duplicate_of_an_id_less_element_mints_nothing() {
+        use crate::document::artboard::Artboard;
+        use crate::document::document::Document;
+        use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
+        use std::rc::Rc;
+        let mut store = StateStore::new();
+        let mut doc = Document::default();
+        doc.artboards.clear();
+        let mut a = Artboard::default_with_id("src00001".into());
+        a.x = 0.0; a.y = 0.0; a.width = 100.0; a.height = 100.0;
+        doc.artboards.push(a);
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: vec![Rc::new(Element::Rect(RectElem {
+                x: 10.0, y: 10.0, width: 20.0, height: 20.0, rx: 0.0, ry: 0.0,
+                fill: None, stroke: None, common: CommonProps::default(),
+                fill_gradient: None, stroke_gradient: None,
+            }))],
+            ..LayerElem::default()
+        })];
+        let mut model = Model::new(doc, None);
+        store.set_tool("artboard", "hit_artboard_id",
+            serde_json::json!("src00001"));
+        run_duplicate_init(&mut store, &mut model);
+        let Element::Layer(le) = &model.document().layers[0] else { panic!("layer") };
+        assert_eq!(le.children.len(), 2, "the copy landed");
+        // MANDATORY GEOMETRY PAIRING: the copy really is the source rect.
+        let Element::Rect(copy) = le.children[1].as_ref() else { panic!("rect") };
+        assert!((copy.x - 10.0).abs() < 1e-9 && (copy.width - 20.0).abs() < 1e-9);
+        assert!(copy.common.id.is_none(),
+                "an id-less source's copy must stay id-less, got {:?}",
+                copy.common.id);
+        assert!(dup_ids_with_repeats(&model).is_empty());
+    }
+
     #[test]
     fn test_doc_artboard_move_apply_translates_panel_selected() {
         // Single-target fallback path: with no panel-selection, the
@@ -10058,6 +10467,40 @@ mod tests {
         );
     }
 
+    /// The law at a RING-REGENERATING 1 -> 1 site (T1's third closure): `d`
+    /// AND `fill_rule` are both spoken to, everything else is preserved. The
+    /// exemption is not a loosening — the rule is asserted positively against
+    /// `RESULT_FILL_RULE`, so a site that silently kept the source's rule
+    /// still goes red.
+    ///
+    /// Kept separate from `assert_only_d_changed` on purpose: the ordinary
+    /// path edits (anchor move, insert, eraser split) preserve ring structure
+    /// and therefore preserve the rule, and must keep failing if they ever
+    /// stamp it.
+    fn assert_only_d_and_ring_rule_changed(
+        src: &PathElem, out: &PathElem, label: &str,
+    ) {
+        assert_ne!(
+            out.d, src.d,
+            "{label}: `d` is unchanged — the fixture did not exercise an edit"
+        );
+        assert_eq!(
+            out.fill_rule,
+            crate::geometry::element::FillRule::from(
+                crate::algorithms::boolean::RESULT_FILL_RULE),
+            "{label}: rings regenerated through the polygon-set layer wear \
+             the generated-geometry rule"
+        );
+        let grafted = PathElem {
+            d: src.d.clone(), fill_rule: src.fill_rule, ..out.clone()
+        };
+        assert_eq!(
+            &grafted, src,
+            "{label}: a field outside {{d, fill_rule}} changed (Ship of \
+             Theseus law)"
+        );
+    }
+
     fn model_with_theseus(d: Vec<PathCommand>) -> (Model, PathElem) {
         use crate::document::document::Document;
         use std::rc::Rc;
@@ -10199,13 +10642,28 @@ mod tests {
         for i in 0..n {
             let frag = path_at(&model, &[0, i]);
             let label = format!("erase fragment {i}");
-            // Appearance + name + transform survive; only `id` differs.
+            // Appearance + name + transform survive; `id` differs, and so do
+            // the LINEAR gradients' stop LOCATIONS + endpoint colours, which
+            // S-2 re-expresses on each fragment's own extent (a gradient
+            // carries no position, so an un-remapped fragment re-fits the
+            // whole ramp). The gradient slots are grafted back for the same
+            // reason `d` and `id` are: this assertion is about the fields the
+            // erase must NOT speak to, and after S-2 the gradients are fields
+            // it does. `gradient_split_remaps_linear_stops_onto_each_fragment`
+            // is what pins their new values.
             let grafted = PathElem {
                 d: src.d.clone(),
+                fill_gradient: src.fill_gradient.clone(),
+                stroke_gradient: src.stroke_gradient.clone(),
                 common: CommonProps { id: src.common.id.clone(), ..frag.common.clone() },
                 ..frag.clone()
             };
-            assert_eq!(&grafted, &src, "{label}: a non-`d`, non-`id` field changed");
+            assert_eq!(&grafted, &src, "{label}: a non-`d`, non-`id`, \
+                non-gradient field changed");
+            // The gradient DID move: a fragment that still carried the
+            // parent's stops verbatim would be the S-2 bug.
+            assert_ne!(frag.fill_gradient, src.fill_gradient,
+                "{label}: the linear fill gradient must be remapped");
             let id = frag.common.id.clone().unwrap_or_else(|| {
                 panic!("{label}: a split fragment must carry a fresh id")
             });
@@ -10213,6 +10671,163 @@ mod tests {
                 "{label}: no fragment may wear the severed source's id");
             assert!(!seen.contains(&id), "{label}: fragments must not share an id");
             seen.push(id);
+        }
+    }
+
+    /// S-2 AT THE SEAM: a severing erase re-expresses each fragment's LINEAR
+    /// gradient on that fragment's own extent.
+    ///
+    /// Geometry chosen so every number is hand-derivable, exactly as the
+    /// `gradient_remap` corpus family's vectors are. A horizontal segment from
+    /// (0,0) to (120,0) carries a red-to-blue linear gradient at angle 0. The
+    /// painter resolves it against `Element::bounds()`, which for this
+    /// stroke-less path is (0,0,120,0): centre.u = 60, half = 60, so the ramp
+    /// runs 0..120. Erasing a 2-wide bite at x = 60 severs it into
+    /// (0,0)-(59,0) and (61,0)-(120,0).
+    ///
+    /// Fragment 0's box is (0,0,59,0): centre.u = 29.5, half = 29.5. The red
+    /// stop sits at absolute 0 -> L' = 50*((0-29.5)/29.5 + 1) = 0. The blue
+    /// stop sits at 120 -> L' = 50*((120-29.5)/29.5 + 1) ~ 203.39, clipped;
+    /// the endpoint sample at 100 is t = 100/203.39 = 0.49166... of the way
+    /// from red to blue, so r = 1 - t. What the UNFIXED code produced instead:
+    /// the parent's stops verbatim, r = 1 and r = 0 — a fragment covering the
+    /// left half of the ramp painting the WHOLE red-to-blue.
+    #[test]
+    fn gradient_split_remaps_linear_stops_onto_each_fragment() {
+        use crate::geometry::element::{
+            FillRule, Gradient, GradientStop, GradientType,
+        };
+        use std::rc::Rc;
+        let ramp = Gradient {
+            gtype: GradientType::Linear,
+            angle: 0.0,
+            stops: vec![
+                GradientStop {
+                    color: Color::rgb(1.0, 0.0, 0.0),
+                    opacity: 100.0, location: 0.0, midpoint_to_next: 50.0,
+                },
+                GradientStop {
+                    color: Color::rgb(0.0, 0.0, 1.0),
+                    opacity: 100.0, location: 100.0, midpoint_to_next: 50.0,
+                },
+            ],
+            ..Gradient::default()
+        };
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 120.0, y: 0.0 },
+                ],
+                fill: None,
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps::default(),
+                fill_gradient: Some(Box::new(ramp)),
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })));
+        }
+        let mut model = Model::new(doc, None);
+        with_corpus_id_counter(|| {
+            path_erase_at_rect(&mut model, 60.0, 0.0, 60.0, 0.0, 1.0)
+        });
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 2,
+            "the bite at x = 60 severs the segment in two");
+
+        let frag0 = path_at(&model, &[0, 0]);
+        let g0 = frag0.fill_gradient.as_deref()
+            .expect("the fragment keeps a fill gradient");
+        assert_eq!(g0.stops.len(), 2);
+        assert_eq!(g0.stops[0].location, 0.0);
+        assert_eq!(g0.stops[1].location, 100.0);
+        // Fragment 0 spans x 0..59.
+        let (fx, _, fw, _) = Element::Path(frag0.clone()).bounds();
+        assert!((fx - 0.0).abs() < 1e-9 && (fw - 59.0).abs() < 1e-9,
+            "fragment 0 is the 0..59 piece, got x={fx} w={fw}");
+        let half = fw / 2.0;
+        let t = 100.0 / (50.0 * ((120.0 - half) / half + 1.0));
+        let (r0, _, b0, _) = g0.stops[0].color.to_rgba();
+        let (r1, _, b1, _) = g0.stops[1].color.to_rgba();
+        assert!((r0 - 1.0).abs() < 1e-9 && b0.abs() < 1e-9,
+            "the fragment's near end is still full red");
+        assert!((r1 - (1.0 - t)).abs() < 1e-9 && (b1 - t).abs() < 1e-9,
+            "the fragment's far end is the ramp colour at t={t}, got \
+             r={r1} b={b1} — an un-remapped fragment would report r=0 b=1");
+    }
+
+    /// A RADIAL gradient is NOT remapped, and its stops come through a
+    /// severing erase byte-identical.
+    ///
+    /// This is the ruled behaviour, not an oversight: a radial gradient's
+    /// centre is forced to the element's bbox centre and the model has nowhere
+    /// to record an anchor, so a fragment necessarily re-centres. JYH accepted
+    /// the recentre (2026-07-26); "gradient anchor" is a separate stone. What
+    /// this vector forbids is running the LINEAR remap on it anyway — the
+    /// linear map would move stop locations along an axis a radial ramp does
+    /// not have, which is worse than the accepted recentre.
+    ///
+    /// Same geometry as the linear vector above, so the ONLY difference is
+    /// `gtype`: drop the linear-only guard in `remap_linear_gradients` and
+    /// this fragment's stops move to 0 and 100 with a blended far end.
+    #[test]
+    fn gradient_split_leaves_a_radial_gradient_alone() {
+        use crate::geometry::element::{
+            FillRule, Gradient, GradientStop, GradientType,
+        };
+        use std::rc::Rc;
+        let stops = vec![
+            GradientStop {
+                color: Color::rgb(1.0, 0.0, 0.0),
+                opacity: 100.0, location: 0.0, midpoint_to_next: 50.0,
+            },
+            GradientStop {
+                color: Color::rgb(0.0, 0.0, 1.0),
+                opacity: 100.0, location: 80.0, midpoint_to_next: 50.0,
+            },
+        ];
+        let ramp = Gradient {
+            gtype: GradientType::Radial,
+            angle: 0.0,
+            stops: stops.clone(),
+            ..Gradient::default()
+        };
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                    PathCommand::LineTo { x: 120.0, y: 0.0 },
+                ],
+                fill: None,
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps::default(),
+                fill_gradient: Some(Box::new(ramp)),
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })));
+        }
+        let mut model = Model::new(doc, None);
+        with_corpus_id_counter(|| {
+            path_erase_at_rect(&mut model, 60.0, 0.0, 60.0, 0.0, 1.0)
+        });
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 2,
+            "the bite at x = 60 severs the segment in two");
+        for i in 0..2 {
+            let g = path_at(&model, &[0, i]).fill_gradient.clone()
+                .expect("the fragment keeps its fill gradient");
+            assert_eq!(g.gtype, GradientType::Radial);
+            assert_eq!(g.stops, stops,
+                "fragment {i}: a radial gradient's stops are untouched — \
+                 the 80 would become 100 under the linear remap");
         }
     }
 
@@ -10313,6 +10928,11 @@ mod tests {
     /// A 6-point horizontal sweep along `y` from `x0` to `x1`, in a
     /// test-private buffer (the point buffers are process-global, and tests
     /// run in parallel).
+    ///
+    /// The coordinates are DOCUMENT space, as the point buffer's are on the
+    /// live canvas. For a source carrying a `transform` that is not the
+    /// element's own `d` space, so a sweep meant to land ON such a source must
+    /// be given the coordinates where the source is DRAWN.
     fn seed_blob_brush_sweep_in(buffer: &str, x0: f64, x1: f64, y: f64) {
         super::super::point_buffers::clear(buffer);
         for i in 0..=5 {
@@ -10348,7 +10968,12 @@ mod tests {
         let mut store = StateStore::new();
         seed_blob_brush_merge_state(&mut store, &src);
         let buffer = "theseus_blob_merge_one";
-        seed_blob_brush_sweep_in(buffer, 50.0, 150.0, 50.0);
+        // The theseus fixture carries transform translate(40,70), so its local
+        // square 0..100 is DRAWN at doc x 40..140, y 70..170. The sweep is
+        // aimed there. (It used to run at doc y=50, which is where the square
+        // is STORED and 20 units above where it appears; the merge matched
+        // anyway, which was the transform-blind bug.)
+        seed_blob_brush_sweep_in(buffer, 90.0, 190.0, 120.0);
         run_effects(
             &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
             &mut store, Some(&mut model), None, None, None);
@@ -10357,7 +10982,13 @@ mod tests {
             model.document().layers[0].children().map_or(0, |c| c.len()), 1,
             "the sweep overlapped the one existing blob, so it merged"
         );
-        assert_only_d_changed(
+        // Ring-regenerating: the union rewrote `d` AND re-derived the ring
+        // structure, so `fill_rule` is spoken to as well (T1's third closure).
+        // The theseus fixture happens to declare EvenOdd, which is also the
+        // generated-rings constant, so this vector cannot separate carrying
+        // from stamping — `blob_merge_one_match_stamps_the_generated_rings_fill_rule`
+        // is the vector that does, on a NonZero source.
+        assert_only_d_and_ring_rule_changed(
             &src, &path_at(&model, &[0, 0]),
             "blob_brush.commit_painting (exactly one match)");
     }
@@ -10452,7 +11083,9 @@ mod tests {
         let mut store = StateStore::new();
         seed_blob_brush_merge_state(&mut store, &src);
         let buffer = "theseus_blob_merge_after_erase";
-        seed_blob_brush_sweep_in(buffer, 50.0, 150.0, 50.0);
+        // Doc space, as above: the fragment carries translate(40,70), so it is
+        // drawn at doc x 40..140, y 70..170.
+        seed_blob_brush_sweep_in(buffer, 90.0, 190.0, 120.0);
         run_effects(
             &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
             &mut store, Some(&mut model), None, None, None);
@@ -10461,7 +11094,10 @@ mod tests {
             model.document().layers[0].children().map_or(0, |c| c.len()), 1,
             "the erased fragment was merged into, not left beside a new blob"
         );
-        assert_only_d_changed(
+        // The final step is the blob merge's 1 -> 1 arm, which regenerates
+        // rings — see the note on the vector above for why the fixture's own
+        // EvenOdd cannot separate the two behaviours here.
+        assert_only_d_and_ring_rule_changed(
             &src, &path_at(&model, &[0, 0]), "erase then blob_brush merge");
     }
 
@@ -10496,8 +11132,13 @@ mod tests {
     /// bridged by ONE sweep, so the commit takes the N = 2 merge arm. Returns
     /// the merged element. `buffer` must be unique per test — the point
     /// buffers are process-global and tests run in parallel.
+    ///
+    /// The sources' local `d` spans x 0..40 and 60..100 at y 40..60; `sweep`
+    /// is `(x0, x1, y)` in DOCUMENT space, so a caller that gives its sources a
+    /// `transform` must offset the sweep by it to land on them.
     fn merge_two_blobs(
         left: CommonProps, right: CommonProps, buffer: &str,
+        sweep: (f64, f64, f64),
     ) -> PathElem {
         use crate::geometry::element::FillRule;
         use std::rc::Rc;
@@ -10536,7 +11177,7 @@ mod tests {
         store.set("blob_brush_size", serde_json::json!(10.0));
         store.set("blob_brush_angle", serde_json::json!(0.0));
         store.set("blob_brush_roundness", serde_json::json!(100.0));
-        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        seed_blob_brush_sweep_in(buffer, sweep.0, sweep.1, sweep.2);
         run_effects(
             &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
             &mut store, Some(&mut model), None, None, None);
@@ -10566,7 +11207,8 @@ mod tests {
             mask: Some(Box::new(unanimity_mask())),
             ..CommonProps::default()
         };
-        let out = merge_two_blobs(agreed(), agreed(), "unanimity_agree");
+        let out = merge_two_blobs(agreed(), agreed(), "unanimity_agree",
+                                  (10.0, 90.0, 50.0));
         assert_eq!(out.common.opacity, 0.5);
         assert_eq!(out.common.mode, BlendMode::Multiply);
         assert_eq!(out.common.visibility, Visibility::Outline);
@@ -10599,13 +11241,88 @@ mod tests {
             mask: None,
             ..CommonProps::default()
         };
-        let out = merge_two_blobs(left, right, "unanimity_disagree");
+        let out = merge_two_blobs(left, right, "unanimity_disagree",
+                                  (10.0, 90.0, 50.0));
         let d = CommonProps::default();
         assert_eq!(out.common.opacity, d.opacity);
         assert_eq!(out.common.mode, d.mode);
         assert_eq!(out.common.visibility, d.visibility);
         assert_eq!(out.common.locked, d.locked);
         assert_eq!(out.common.mask, d.mask);
+    }
+
+    /// A SINGULAR `transform` disqualifies a source from the merge.
+    ///
+    /// `scale(1, 0)` flattens the element onto a horizontal line: it has no
+    /// area on screen, so there is nothing to paint into, and it has no
+    /// inverse, so the unified document-space region could not be written back
+    /// into its space even if it did match. The sweep must therefore commit a
+    /// SECOND element and leave the degenerate one untouched.
+    ///
+    /// HONEST SCOPE: this vector does NOT separate the singular-matrix guard
+    /// in the match loop. `transform_polygon_set` collapses the source to a
+    /// zero-area figure and `boolean_intersect` reports empty for that, so
+    /// deleting the guard leaves this assertion green (verified by deleting
+    /// it: 2634 passed, 0 failed). What it pins is the OUTCOME — a degenerate
+    /// source is left alone and the sweep commits beside it, with no panic —
+    /// which is the corner case a user can actually reach by scaling a blob to
+    /// zero height.
+    #[test]
+    fn blob_merge_skips_a_source_whose_transform_is_singular() {
+        use crate::geometry::element::{FillRule, Transform};
+        use std::rc::Rc;
+        let red = Fill::new(Color::from_hex("#ff0000").unwrap());
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            children.push(Rc::new(Element::Path(PathElem {
+                d: vec![
+                    PathCommand::MoveTo { x: 0.0, y: 40.0 },
+                    PathCommand::LineTo { x: 100.0, y: 40.0 },
+                    PathCommand::LineTo { x: 100.0, y: 60.0 },
+                    PathCommand::LineTo { x: 0.0, y: 60.0 },
+                    PathCommand::ClosePath,
+                ],
+                fill: Some(red),
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps {
+                    tool_origin: Some("blob_brush".to_string()),
+                    // det == 0: everything lands on the line y = 50.
+                    transform: Some(Transform {
+                        a: 1.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0, f: 50.0,
+                    }),
+                    ..CommonProps::default()
+                },
+                fill_gradient: None,
+                stroke_gradient: None,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+                fill_rule: FillRule::NonZero,
+            })));
+        }
+        let mut model = Model::new(doc, None);
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!(red.color.to_hex()));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+        let buffer = "blob_singular_transform";
+        // Straight along the collapsed line, so the degenerate source is as
+        // reachable as it can be.
+        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 2,
+            "the degenerate source is skipped, so the sweep commits its own \
+             element beside it"
+        );
+        let untouched = path_at(&model, &[0, 0]);
+        assert_eq!(untouched.d.len(), 5, "the degenerate source keeps its `d`");
+        assert_eq!(path_at(&model, &[0, 1]).common.transform, None,
+            "the new blob is the transform-less one");
     }
 
     /// `transform` is EXCLUDED even when the sources agree. The merge matches
@@ -10622,9 +11339,266 @@ mod tests {
             transform: Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 40.0, f: 70.0 }),
             ..CommonProps::default()
         };
+        // Both sources carry translate(40,70), so their local x 0..40 /
+        // 60..100 at y 40..60 are DRAWN at doc x 40..80 / 100..140, y
+        // 110..130. The sweep is aimed there — at the old doc y=50 the fixture
+        // no longer merges at all, and the assertion below would be vacuous.
         let out = merge_two_blobs(
-            with_transform(), with_transform(), "unanimity_transform");
+            with_transform(), with_transform(), "unanimity_transform",
+            (50.0, 130.0, 120.0));
         assert_eq!(out.common.transform, None,
             "a unanimous transform must NOT ride onto the merge");
+    }
+
+    // ── `name` at an N -> 1 merge: ASSERTING-SOURCES ──
+    //
+    // JYH, ratified 2026-07-27 (EDIT_SEMANTICS_FREEZE.md §3.3, the `name`
+    // bullet): for `name` ONLY, unanimity ranges over the sources that ASSERT
+    // a name — silence is not a competing claim. "hull" + unnamed -> "hull";
+    // "hull" + "keel" -> the documented default (no name), per T3. This is not
+    // "the largest source keeps it" in disguise: nothing geometric elects the
+    // survivor, no float is compared, and the two-asserting-and-disagreeing
+    // case falls to the default rather than to a winner.
+    //
+    // The reason the STRICT variant was rejected is in the freeze: no drawing
+    // tool writes `common.name`, so the commonest real case is ONE named
+    // source among unnamed neighbours — strict unanimity would delete the
+    // artist's word exactly there, and with the id already dying at a merge
+    // the product would be left with no handle of any kind.
+
+    fn named(name: Option<&str>) -> CommonProps {
+        CommonProps { name: name.map(str::to_string), ..CommonProps::default() }
+    }
+
+    /// ONE source asserts a name; the other is silent. The assertion carries.
+    ///
+    /// Separation from the pre-fix behaviour: `name` was not carried at all,
+    /// so this returned `None`.
+    #[test]
+    fn blob_merge_carries_a_name_only_one_source_asserts() {
+        let out = merge_two_blobs(named(Some("hull")), named(None),
+                                  "name_one_asserts", (10.0, 90.0, 50.0));
+        assert_eq!(out.common.name.as_deref(), Some("hull"),
+            "a silent source does not veto the only name asserted");
+    }
+
+    /// The silent source may be either operand — the carry must not depend on
+    /// document order, which is geometry (z-order) wearing a different hat.
+    ///
+    /// Separation: as above, `None` before the fix. This vector additionally
+    /// separates an order-sensitive implementation ("the first source's name
+    /// wins"), which would return `None` here while the vector above passes.
+    #[test]
+    fn blob_merge_carries_a_name_asserted_by_the_second_source_only() {
+        let out = merge_two_blobs(named(None), named(Some("keel")),
+                                  "name_second_asserts", (10.0, 90.0, 50.0));
+        assert_eq!(out.common.name.as_deref(), Some("keel"),
+            "which operand asserts the name cannot change the answer");
+    }
+
+    /// ALL-SILENT: nothing is asserted, so the merged element takes the
+    /// documented default — no name. The anti-invention pin: it goes red the
+    /// moment anyone synthesises a name at a merge.
+    #[test]
+    fn blob_merge_of_silent_sources_has_no_name() {
+        let out = merge_two_blobs(named(None), named(None),
+                                  "name_all_silent", (10.0, 90.0, 50.0));
+        assert_eq!(out.common.name, None,
+            "no source asserted a name, so the default (none) stands");
+    }
+
+    /// DISAGREEMENT: two sources assert DIFFERENT names. That is exactly T2
+    /// shape 2 — a value across disagreeing sources — so T3 takes the
+    /// documented default. No winner by z-order, area or document position.
+    #[test]
+    fn blob_merge_of_disagreeing_names_takes_the_default() {
+        let out = merge_two_blobs(named(Some("hull")), named(Some("keel")),
+                                  "name_disagree", (10.0, 90.0, 50.0));
+        assert_eq!(out.common.name, None,
+            "two asserted names disagree, so neither is elected");
+    }
+
+    /// AGREEMENT: both sources assert the SAME name. Asserting-sources reduces
+    /// to plain unanimity here, so the agreed name carries.
+    #[test]
+    fn blob_merge_carries_a_name_both_sources_agree_on() {
+        let out = merge_two_blobs(named(Some("hull")), named(Some("hull")),
+                                  "name_agree", (10.0, 90.0, 50.0));
+        assert_eq!(out.common.name.as_deref(), Some("hull"),
+            "agreeing sources carry their name, as any unanimous field does");
+    }
+
+    // ── T1's RING TERM: the fill rule belongs to whoever made the rings ──
+    //
+    // EDIT_SEMANTICS_FREEZE.md §1.1 T1, third closure: "An edit that
+    // re-derives an element's ring structure through the polygon-set layer
+    // (every boolean-result emitter, both blob-brush arms) stamps the
+    // generated-geometry constant (RESULT_FILL_RULE)". Every blob-brush commit
+    // arm builds its `d` from a polygon set — `boolean_union` on the paint
+    // arms, `boolean_subtract` on the erase arm — so the rings on the way out
+    // are MACHINE-WOUND, and boolean.rs documents in its own words why a
+    // non-zero declaration over machine-wound rings silently fills holes.
+    //
+    // The subtlety at the 1-match arm: it is a 1 -> 1 edit, so the Theseus
+    // clause preserves everything else — but the rings were REGENERATED, so
+    // `fill_rule` is precisely a field the edit speaks to. Carrying the
+    // source's rule there is OVER-preservation, which the law forbids in the
+    // same breath as under-preservation.
+
+    /// `spans` are local `x0..x1` boxes at y 40..60, each a blob-brush source
+    /// declaring `rule`; the store is seeded for a commit whose fill matches.
+    /// An empty `spans` gives the 0 -> 1 (brand-new blob) arm.
+    fn blob_doc_with_rule(
+        spans: &[(f64, f64)], rule: crate::geometry::element::FillRule,
+    ) -> (Model, StateStore) {
+        use std::rc::Rc;
+        let red = Fill::new(Color::from_hex("#ff0000").unwrap());
+        let mut doc = crate::document::document::Document::default();
+        if let Some(children) = doc.layers[0].children_mut() {
+            for (x0, x1) in spans {
+                children.push(Rc::new(Element::Path(PathElem {
+                    d: vec![
+                        PathCommand::MoveTo { x: *x0, y: 40.0 },
+                        PathCommand::LineTo { x: *x1, y: 40.0 },
+                        PathCommand::LineTo { x: *x1, y: 60.0 },
+                        PathCommand::LineTo { x: *x0, y: 60.0 },
+                        PathCommand::ClosePath,
+                    ],
+                    fill: Some(red),
+                    stroke: None,
+                    width_points: Vec::new(),
+                    common: CommonProps {
+                        tool_origin: Some("blob_brush".to_string()),
+                        id: Some(format!("src{x0}")),
+                        ..CommonProps::default()
+                    },
+                    fill_gradient: None,
+                    stroke_gradient: None,
+                    stroke_brush: None,
+                    stroke_brush_overrides: None,
+                    fill_rule: rule,
+                })));
+            }
+        }
+        let mut store = StateStore::new();
+        store.set("fill_color", serde_json::json!(red.color.to_hex()));
+        store.set("blob_brush_size", serde_json::json!(10.0));
+        store.set("blob_brush_angle", serde_json::json!(0.0));
+        store.set("blob_brush_roundness", serde_json::json!(100.0));
+        (Model::new(doc, None), store)
+    }
+
+    /// The 1 -> 1 arm regenerates its rings by union, so it stamps
+    /// `RESULT_FILL_RULE` instead of carrying the source's `NonZero`.
+    ///
+    /// Separation from the pre-fix behaviour: the source declares `NonZero`
+    /// and the arm was `..src`, so this returned `NonZero`. The declared value
+    /// is deliberately the OPPOSITE of the constant — a source already at
+    /// `EvenOdd` (as the `theseus_path` fixture is) could not tell carrying
+    /// from stamping.
+    #[test]
+    fn blob_merge_one_match_stamps_the_generated_rings_fill_rule() {
+        use crate::geometry::element::FillRule;
+        let (mut model, mut store) =
+            blob_doc_with_rule(&[(0.0, 100.0)], FillRule::NonZero);
+        let buffer = "ring_rule_one_match";
+        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the sweep overlapped the one source, so it took the 1 -> 1 arm");
+        let out = path_at(&model, &[0, 0]);
+        assert_eq!(out.common.id.as_deref(), Some("src0"),
+            "the 1 -> 1 arm is still a survivor — its identity must not die");
+        assert_eq!(
+            out.fill_rule,
+            FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE),
+            "union-generated rings wear the generated-geometry rule, not the \
+             source's");
+    }
+
+    /// The N -> 1 merge arm stamps `RESULT_FILL_RULE` too — it must not
+    /// hardcode `NonZero` (the Swift twin's own comment called that "parity,
+    /// not preference").
+    ///
+    /// Separation: the arm wrote a literal `FillRule::NonZero`, which is the
+    /// opposite of the constant.
+    #[test]
+    fn blob_merge_of_two_sources_stamps_the_generated_rings_fill_rule() {
+        use crate::geometry::element::FillRule;
+        let out = merge_two_blobs(CommonProps::default(), CommonProps::default(),
+                                  "ring_rule_merge", (10.0, 90.0, 50.0));
+        assert_eq!(
+            out.fill_rule,
+            FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE),
+            "a merge's rings come out of boolean_union, so they wear the \
+             generated-geometry rule");
+    }
+
+    /// The 0 -> 1 arm — a brand-new blob — also builds its `d` from a unioned
+    /// polygon set (the swept dabs), so it stamps the constant as well.
+    ///
+    /// Separation: the same literal `FillRule::NonZero` served this arm.
+    #[test]
+    fn blob_new_blob_stamps_the_generated_rings_fill_rule() {
+        use crate::geometry::element::FillRule;
+        let (mut model, mut store) = blob_doc_with_rule(&[], FillRule::NonZero);
+        let buffer = "ring_rule_new_blob";
+        seed_blob_brush_sweep_in(buffer, 10.0, 90.0, 50.0);
+        run_effects(
+            &blob_brush_commit_painting_effects(buffer), &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "an empty document plus a sweep commits exactly one new blob");
+        assert_eq!(
+            path_at(&model, &[0, 0]).fill_rule,
+            FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE),
+            "the swept region is a machine-wound polygon set like any other");
+    }
+
+    /// The ERASE arm is the third ring-regenerating blob site, and the one
+    /// where the F4 corruption is easiest to reach: `boolean_subtract` can
+    /// punch a HOLE ring into a source, and a `NonZero` declaration over
+    /// machine-wound rings fills exactly that hole back in. So it stamps the
+    /// constant rather than carrying `..pe.clone()`'s rule.
+    ///
+    /// Separation: the source declares `NonZero` and the arm was `..pe.clone()`,
+    /// so this returned `NonZero`.
+    #[test]
+    fn blob_erase_stamps_the_generated_rings_fill_rule() {
+        use crate::geometry::element::FillRule;
+        let (mut model, mut store) =
+            blob_doc_with_rule(&[(0.0, 100.0)], FillRule::NonZero);
+        let buffer = "ring_rule_erase";
+        // A short sweep well inside the source's y 40..60 band, so the
+        // subtract bites a notch rather than clearing the element away.
+        seed_blob_brush_sweep_in(buffer, 40.0, 60.0, 50.0);
+        run_effects(
+            &[serde_json::json!({
+                "doc.blob_brush.commit_erasing": {
+                    "buffer": buffer, "fidelity_epsilon": "5.0"
+                }
+            })],
+            &serde_json::json!({}),
+            &mut store, Some(&mut model), None, None, None);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(
+            model.document().layers[0].children().map_or(0, |c| c.len()), 1,
+            "the notch leaves a non-empty remainder, so the element survives");
+        let out = path_at(&model, &[0, 0]);
+        assert_ne!(out.d.len(), 5,
+            "the erase actually bit into `d` — otherwise the rule assertion \
+             below would be watching an unedited element");
+        assert_eq!(out.common.id.as_deref(), Some("src0"),
+            "erase is 1 -> 1 for a surviving element — its identity lives");
+        assert_eq!(
+            out.fill_rule,
+            FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE),
+            "subtract-generated rings wear the generated-geometry rule");
     }
 }

@@ -23,15 +23,66 @@ private func fmt(_ v: Double) -> String {
     return s
 }
 
+// MARK: - String escaping
+
+/// The canonical Test-JSON spelling of one string, quotes included.
+///
+/// Every string VALUE the canonical writers emit goes through here -- element
+/// names and ids, tspan content, enum tags, text-decoration members, recipe op
+/// names, recorded input ids, concept params. Object KEYS deliberately do not:
+/// they are compile-time literals in these files (`JsonObj.build`), never
+/// data. The one key that IS data -- a recipe param's object key -- does go
+/// through here, in `canonicalRecordedValue`.
+///
+/// Before 2026-07-27 this port had
+/// two escaping levels, neither of which produced JSON for a control
+/// character, and the params level disagreed byte-for-byte with jas_dioxus's
+/// `canonical_value` (which used Rust's `{:?}` Debug, escaping combining
+/// marks, ZWJ, NBSP and soft hyphens that this port emitted raw).
+/// `test_fixtures/algorithms/canonical_json_string.json` is the rule's whole
+/// contract and both ports run it.
+///
+/// The rule is Python's `json.dumps(s, ensure_ascii=False)` -- the house
+/// adjudication hierarchy's "absent a guiding principle, the reference
+/// decides": short escapes for backslash, quote, U+0008, U+000C, U+000A,
+/// U+000D and U+0009; `\u00xx` with LOWER-CASE hex below U+0020; every scalar
+/// at U+0020 and above emitted literally (including U+007F, which JSON does
+/// not require escaping). Solidus is not escaped.
+///
+/// Iterates UNICODE SCALARS, not Characters: an astral scalar is one scalar
+/// and must stay one, and a combining mark must not be swallowed into the
+/// grapheme cluster ahead of it. Mirrors `json_escape_string` in
+/// jas_dioxus/src/geometry/test_json.rs, which iterates Rust `char`s.
+func jsonEscapeString(_ s: String) -> String {
+    var out = "\""
+    out.reserveCapacity(s.utf8.count + 2)
+    for u in s.unicodeScalars {
+        switch u {
+        case "\"":       out += "\\\""
+        case "\\":       out += "\\\\"
+        case "\u{08}":   out += "\\b"
+        case "\u{0C}":   out += "\\f"
+        case "\u{0A}":   out += "\\n"
+        case "\u{0D}":   out += "\\r"
+        case "\u{09}":   out += "\\t"
+        default:
+            if u.value < 0x20 {
+                out += String(format: "\\u%04x", u.value)
+            } else {
+                out.unicodeScalars.append(u)
+            }
+        }
+    }
+    return out + "\""
+}
+
 // MARK: - JSON builder with sorted keys
 
 private class JsonObj {
     private var entries: [(String, String)] = []
 
     func str(_ key: String, _ v: String) {
-        let escaped = v.replacingOccurrences(of: "\\", with: "\\\\")
-                       .replacingOccurrences(of: "\"", with: "\\\"")
-        entries.append((key, "\"\(escaped)\""))
+        entries.append((key, jsonEscapeString(v)))
     }
 
     func num(_ key: String, _ v: Double) {
@@ -267,7 +318,7 @@ private func textDecorationJson(_ td: String) -> String {
                    .map { String($0) }
                    .filter { $0 != "none" }
     tokens.sort()
-    let quoted = tokens.map { "\"\($0)\"" }
+    let quoted = tokens.map { jsonEscapeString($0) }
     return "[\(quoted.joined(separator: ","))]"
 }
 
@@ -299,7 +350,7 @@ private func tspanJson(_ t: Tspan) -> String {
     if let decor = t.textDecoration {
         var sorted = decor
         sorted.sort()
-        let quoted = sorted.map { "\"\($0)\"" }
+        let quoted = sorted.map { jsonEscapeString($0) }
         o.raw("text_decoration", "[\(quoted.joined(separator: ","))]")
     } else {
         o.null("text_decoration")
@@ -493,7 +544,7 @@ package func elementJson(_ elem: Element) -> String {
             // and the normalized recipe ops, canonicalized so the recorded
             // element serializes byte-identically across apps.
             commonFields(o, rec.opacity, rec.transform, rec.locked, rec.visibility, nil, rec.id)
-            let inputs = rec.inputs.map { "\"\($0.id)\"" }
+            let inputs = rec.inputs.map { jsonEscapeString($0.id) }
             o.raw("inputs", jsonArray(inputs))
             let ops = rec.ops.map { canonicalRecordedOp($0) }
             o.raw("ops", jsonArray(ops))

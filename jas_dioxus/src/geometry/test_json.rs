@@ -45,6 +45,55 @@ fn fmt(v: f64) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// String escaping
+// ---------------------------------------------------------------------------
+
+/// The canonical Test-JSON spelling of one string, quotes included.
+///
+/// Every string VALUE this file emits goes through here — element names and
+/// ids, tspan content, enum tags, text-decoration members, recipe op names,
+/// recorded input ids, concept params. Object KEYS deliberately do not: they
+/// are compile-time literals in this file (`JsonObj::build`, the `partial`
+/// wrapper in `selection_json`), never data, and routing them would suggest
+/// otherwise. The one key that IS data — a recipe param's object key — does
+/// go through here, in `canonical_value`.
+///
+/// Before 2026-07-27 there were three
+/// different escaping levels in this one file, only one of which produced
+/// JSON for a control character; the third (`canonical_value`'s `{:?}`) also
+/// disagreed byte-for-byte with JasSwift's mirror on combining marks, ZWJ,
+/// NBSP and soft hyphens. `test_fixtures/algorithms/canonical_json_string.json`
+/// is the rule's whole contract and both ports run it.
+///
+/// The rule is Python's `json.dumps(s, ensure_ascii=False)` — the house
+/// adjudication hierarchy's "absent a guiding principle, the reference
+/// decides": short escapes for `\ "   \n \r \t`, `\u00xx` with
+/// LOWER-CASE hex below U+0020, and every scalar at U+0020 and above emitted
+/// literally (including U+007F, which JSON does not require escaping).
+/// Solidus is not escaped.
+pub fn json_escape_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+// ---------------------------------------------------------------------------
 // JSON building helpers
 // ---------------------------------------------------------------------------
 
@@ -59,10 +108,7 @@ impl JsonObj {
     }
 
     fn str_val(&mut self, key: &str, v: &str) {
-        self.entries.push((
-            key.to_string(),
-            format!("\"{}\"", v.replace('\\', "\\\\").replace('"', "\\\"")),
-        ));
+        self.entries.push((key.to_string(), json_escape_string(v)));
     }
 
     fn num(&mut self, key: &str, v: f64) {
@@ -125,7 +171,7 @@ impl JsonObj {
                 sorted.sort();
                 let quoted: Vec<String> = sorted
                     .iter()
-                    .map(|s| format!("\"{}\"", s))
+                    .map(|s| json_escape_string(s))
                     .collect();
                 self.raw(key, format!("[{}]", quoted.join(",")));
             }
@@ -165,7 +211,11 @@ fn canonical_value(v: &serde_json::Value) -> String {
         serde_json::Value::Null => "null".to_string(),
         serde_json::Value::Bool(b) => b.to_string(),
         serde_json::Value::Number(n) => fmt(n.as_f64().unwrap_or(0.0)),
-        serde_json::Value::String(s) => format!("{s:?}"),
+        // NOT `{s:?}`: Rust's Debug spells U+0000 `\0` and U+0001 `\u{1}`,
+        // neither of which is JSON, and escapes every scalar Rust calls
+        // non-printable (combining marks, ZWJ, NBSP, soft hyphen) where
+        // JasSwift emitted them raw — a byte divergence on the params path.
+        serde_json::Value::String(s) => json_escape_string(s),
         serde_json::Value::Array(a) => {
             json_array(&a.iter().map(canonical_value).collect::<Vec<_>>())
         }
@@ -174,7 +224,7 @@ fn canonical_value(v: &serde_json::Value) -> String {
             keys.sort();
             let entries: Vec<String> = keys
                 .iter()
-                .map(|k| format!("{:?}:{}", k, canonical_value(&m[*k])))
+                .map(|k| format!("{}:{}", json_escape_string(k), canonical_value(&m[*k])))
                 .collect();
             format!("{{{}}}", entries.join(","))
         }
@@ -313,7 +363,7 @@ fn text_decoration_json(td: &str) -> String {
         .filter(|s| !s.is_empty() && *s != "none")
         .collect();
     parts.sort();
-    let quoted: Vec<String> = parts.iter().map(|s| format!("\"{}\"", s)).collect();
+    let quoted: Vec<String> = parts.iter().map(|s| json_escape_string(s)).collect();
     format!("[{}]", quoted.join(","))
 }
 
@@ -629,14 +679,16 @@ fn element_json(elem: &Element) -> String {
                 // Inputs (by id) and the normalized recipe ops, canonicalized so
                 // the recorded element serializes byte-identically across apps.
                 let inputs: Vec<String> =
-                    rec.inputs.iter().map(|i| format!("{:?}", i.0)).collect();
+                    rec.inputs.iter().map(|i| json_escape_string(&i.0)).collect();
                 o.raw("inputs", json_array(&inputs));
                 let ops: Vec<String> = rec.ops.iter().map(|op| {
                     let targets: Vec<String> =
-                        op.targets.iter().map(|t| format!("{t:?}")).collect();
+                        op.targets.iter().map(|t| json_escape_string(t)).collect();
                     format!(
-                        "{{\"op\":{:?},\"params\":{},\"targets\":{}}}",
-                        op.op, canonical_value(&op.params), json_array(&targets)
+                        "{{\"op\":{},\"params\":{},\"targets\":{}}}",
+                        json_escape_string(&op.op),
+                        canonical_value(&op.params),
+                        json_array(&targets)
                     )
                 }).collect();
                 o.raw("ops", json_array(&ops));
@@ -2202,5 +2254,279 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The shared canonical-JSON string-escaping corpus, driven through
+    /// BOTH of this file's string writers and through the shipping element
+    /// serializer. JasSwift runs the same file in
+    /// `CanonicalJsonStringTests.canonicalJsonStringCorpus`.
+    ///
+    /// Three independent claims per vector, because before 2026-07-27 the
+    /// three paths disagreed with each other:
+    ///   1. `json_escape_string` itself emits the fixture's `canonical`.
+    ///   2. `JsonObj::str_val` (the element/tspan/name path) emits it.
+    ///   3. `canonical_value` (the recipe-params / recorded-ops path,
+    ///      which used Rust's `{:?}` Debug) emits it.
+    /// Plus `reparses`: the emitted bytes are valid JSON that decodes back
+    /// to the input, which is the whole point of a byte oracle.
+    #[test]
+    fn canonical_json_string_corpus() {
+        let full = format!(
+            "{}/../test_fixtures/{}",
+            env!("CARGO_MANIFEST_DIR"),
+            "algorithms/canonical_json_string.json"
+        );
+        let raw = std::fs::read_to_string(&full)
+            .unwrap_or_else(|e| panic!("read {}: {}", full, e));
+        let file: serde_json::Value = serde_json::from_str(&raw).expect("parse fixture");
+        let vectors = file["vectors"].as_array().expect("vectors array");
+        assert!(!vectors.is_empty());
+        for v in vectors {
+            let name = v["name"].as_str().unwrap_or("?");
+            let input = v["input"].as_str().expect("input is a string");
+            let canonical = v["canonical"].as_str().expect("canonical is a string");
+
+            assert_eq!(
+                json_escape_string(input), canonical,
+                "vector {name}: json_escape_string"
+            );
+
+            let mut o = JsonObj::new();
+            o.str_val("k", input);
+            assert_eq!(
+                o.build(), format!("{{\"k\":{canonical}}}"),
+                "vector {name}: JsonObj::str_val"
+            );
+
+            assert_eq!(
+                canonical_value(&serde_json::Value::String(input.to_string())),
+                canonical,
+                "vector {name}: canonical_value"
+            );
+
+            if v["reparses"].as_bool().unwrap_or(false) {
+                let back: serde_json::Value =
+                    serde_json::from_str(&format!("{{\"k\":{canonical}}}"))
+                        .unwrap_or_else(|e| panic!("vector {name}: emitted invalid JSON: {e}"));
+                assert_eq!(
+                    back["k"].as_str(), Some(input),
+                    "vector {name}: reparse did not recover the input"
+                );
+            }
+        }
+    }
+
+    /// The vector the ceiling blocked: a text element whose content carries
+    /// a newline survives `document_to_test_json` -> `test_json_to_document`
+    /// -> `document_to_test_json` unchanged. Before the escaping lift the
+    /// FIRST of those calls produced a raw LF inside a JSON string, and the
+    /// second panicked in serde_json.
+    ///
+    /// Mirrored in JasSwift by
+    /// `CanonicalJsonStringTests.multiLineTextRoundTripsThroughTestJson`.
+    #[test]
+    fn multi_line_text_round_trips_through_test_json() {
+        let content = "line one\nline two\ttabbed";
+        // Built through the shipping parser so the test states no field
+        // defaults of its own (TextElem has no Default impl).
+        let text = parse_element(&serde_json::json!({
+            "type": "text",
+            "x": 10.0, "y": 20.0, "font_size": 12.0,
+            "name": "a\u{7f}name",
+            "tspans": [{ "id": 1, "content": content }],
+        }));
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(text)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document { layers: vec![layer], selected_layer: 0, ..Document::default() };
+
+        let json = document_to_test_json(&doc);
+        assert!(json.contains(r#""content":"line one\nline two\ttabbed""#),
+                "escaped content missing from: {json}");
+
+        let back = test_json_to_document(&json);
+        match &*back.layers[0].children().unwrap()[0] {
+            Element::Text(t) => {
+                assert_eq!(t.tspans[0].content, content, "content did not survive");
+                assert_eq!(t.common.name.as_deref(), Some("a\u{7f}name"));
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+        // The canonical form is a fixed point, which every golden relies on.
+        assert_eq!(document_to_test_json(&back), json);
+    }
+
+    // -----------------------------------------------------------------------
+    // Per-call-site pins for `json_escape_string`
+    //
+    // `canonical_json_string_corpus` above drives the escaper through exactly
+    // three entry points: the function itself, `JsonObj::str_val`, and
+    // `canonical_value`'s String arm. The escaper has SIX other call sites in
+    // this file, and each of them was reverted individually to its pre-2026-07-27
+    // form with the whole suite green — they were routed but not gated. One test
+    // per site follows, each named for its site and each reaching it through the
+    // shipping serializer rather than by calling the private helper, so the pin
+    // survives a refactor of the helper's signature.
+    //
+    // Every test uses ONE probe whose canonical spelling separates all three
+    // pre-lift forms at once:
+    //   probe            a " b \ c U+0008 d
+    //   canonical        "a\"b\\c\bd"          (json.dumps, ensure_ascii=False)
+    //   naive `"{}"`     "a"b\c<BS>d"          — invalid JSON, three ways wrong
+    //   two-replacement  "a\"b\\c<BS>d"        — raw control char, still invalid
+    //   Rust `{:?}`      "a\"b\\c\u{8}d"       — `\u{8}` is not a JSON escape
+    // The probe deliberately contains no whitespace, because the two
+    // text-decoration writers tokenize on whitespace and would swallow it.
+    const ESCAPE_PROBE: &str = "a\"b\\c\u{8}d";
+    /// The probe's canonical spelling, produced by
+    /// `json.dumps('a"b\\c\bd', ensure_ascii=False)` — the rule's adjudicator —
+    /// and NOT by running this port's escaper.
+    const ESCAPE_PROBE_JSON: &str = r#""a\"b\\c\bd""#;
+
+    /// SITE: `JsonObj::opt_str_vec` — a tspan's `text_decoration` member list.
+    ///
+    /// The element-wide list is held at `"none"` so it emits `[]`, which keeps
+    /// this test blind to `text_decoration_json` and pins `opt_str_vec` alone.
+    #[test]
+    fn tspan_text_decoration_members_are_json_escaped() {
+        let text = parse_element(&serde_json::json!({
+            "type": "text",
+            "x": 0.0, "y": 0.0, "font_size": 12.0,
+            "text_decoration": "none",
+            "tspans": [{
+                "id": 1,
+                "content": "t",
+                "text_decoration": [ESCAPE_PROBE],
+            }],
+        }));
+        let json = element_json(&text);
+        assert!(
+            json.contains(&format!("\"text_decoration\":[{ESCAPE_PROBE_JSON}]")),
+            "tspan text_decoration member not escaped in: {json}"
+        );
+        // The element-wide list really is the empty one, so the assertion above
+        // can only have been satisfied by the tspan writer.
+        assert!(json.contains("\"text_decoration\":[]"), "in: {json}");
+        // And the bytes are JSON: the whole point of the escaper.
+        serde_json::from_str::<serde_json::Value>(&json).expect("emitted invalid JSON");
+    }
+
+    /// SITE: `text_decoration_json` — the element-wide `text_decoration` list.
+    ///
+    /// The tspan's list is left absent so it emits `null`, which keeps this test
+    /// blind to `opt_str_vec` and pins `text_decoration_json` alone.
+    #[test]
+    fn element_text_decoration_members_are_json_escaped() {
+        let text = parse_element(&serde_json::json!({
+            "type": "text",
+            "x": 0.0, "y": 0.0, "font_size": 12.0,
+            "text_decoration": [ESCAPE_PROBE],
+            "tspans": [{ "id": 1, "content": "t" }],
+        }));
+        let json = element_json(&text);
+        assert!(
+            json.contains(&format!("\"text_decoration\":[{ESCAPE_PROBE_JSON}]")),
+            "element text_decoration member not escaped in: {json}"
+        );
+        assert!(json.contains("\"text_decoration\":null"), "tspan list not null in: {json}");
+        serde_json::from_str::<serde_json::Value>(&json).expect("emitted invalid JSON");
+    }
+
+    /// SITE: `canonical_value`'s object-KEY arm — a recipe param's own key,
+    /// the one key in this file that is data rather than a literal.
+    ///
+    /// The corpus test pins the String VALUE arm six lines above it; reverting
+    /// the key arm to `{:?}` alone left the suite green.
+    #[test]
+    fn recipe_param_object_keys_are_json_escaped() {
+        // Directly, and with a `true` value so no float formatting is involved.
+        assert_eq!(
+            canonical_value(&serde_json::json!({ ESCAPE_PROBE: true })),
+            format!("{{{ESCAPE_PROBE_JSON}:true}}"),
+        );
+        // And through the shipping serializer: a recorded op's params. The op
+        // name and targets are held ordinary so only the key arm can matter.
+        let rec = crate::geometry::live::RecordedElem::new(
+            vec![crate::document::op_log::PrimitiveOp {
+                op: "translate".to_string(),
+                params: serde_json::json!({ ESCAPE_PROBE: true }),
+                targets: Vec::new(),
+            }],
+            Vec::new(),
+            CommonProps::default(),
+        );
+        let json = element_json(&Element::Live(
+            crate::geometry::live::LiveVariant::Recorded(rec),
+        ));
+        assert!(
+            json.contains(&format!("\"params\":{{{ESCAPE_PROBE_JSON}:true}}")),
+            "recipe param key not escaped in: {json}"
+        );
+        serde_json::from_str::<serde_json::Value>(&json).expect("emitted invalid JSON");
+    }
+
+    /// SITE: `element_json`'s Recorded arm, the `inputs` id list (was `{:?}`).
+    #[test]
+    fn recorded_input_ids_are_json_escaped() {
+        let rec = crate::geometry::live::RecordedElem::new(
+            Vec::new(),
+            vec![crate::geometry::live::ElementRef(ESCAPE_PROBE.to_string())],
+            CommonProps::default(),
+        );
+        let json = element_json(&Element::Live(
+            crate::geometry::live::LiveVariant::Recorded(rec),
+        ));
+        assert!(
+            json.contains(&format!("\"inputs\":[{ESCAPE_PROBE_JSON}]")),
+            "recorded input id not escaped in: {json}"
+        );
+        serde_json::from_str::<serde_json::Value>(&json).expect("emitted invalid JSON");
+    }
+
+    /// SITE: `element_json`'s Recorded arm, an op's `targets` list (was `{:?}`).
+    #[test]
+    fn recorded_op_targets_are_json_escaped() {
+        let rec = crate::geometry::live::RecordedElem::new(
+            vec![crate::document::op_log::PrimitiveOp {
+                op: "translate".to_string(),
+                params: serde_json::json!({}),
+                targets: vec![ESCAPE_PROBE.to_string()],
+            }],
+            Vec::new(),
+            CommonProps::default(),
+        );
+        let json = element_json(&Element::Live(
+            crate::geometry::live::LiveVariant::Recorded(rec),
+        ));
+        assert!(
+            json.contains(&format!("\"targets\":[{ESCAPE_PROBE_JSON}]")),
+            "recorded op target not escaped in: {json}"
+        );
+        serde_json::from_str::<serde_json::Value>(&json).expect("emitted invalid JSON");
+    }
+
+    /// SITE: `element_json`'s Recorded arm, the op NAME (was `{:?}`).
+    #[test]
+    fn recorded_op_name_is_json_escaped() {
+        let rec = crate::geometry::live::RecordedElem::new(
+            vec![crate::document::op_log::PrimitiveOp {
+                op: ESCAPE_PROBE.to_string(),
+                params: serde_json::json!({}),
+                targets: Vec::new(),
+            }],
+            Vec::new(),
+            CommonProps::default(),
+        );
+        let json = element_json(&Element::Live(
+            crate::geometry::live::LiveVariant::Recorded(rec),
+        ));
+        assert!(
+            json.contains(&format!("\"op\":{ESCAPE_PROBE_JSON}")),
+            "recorded op name not escaped in: {json}"
+        );
+        serde_json::from_str::<serde_json::Value>(&json).expect("emitted invalid JSON");
     }
 }

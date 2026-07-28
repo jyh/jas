@@ -124,6 +124,18 @@ public enum LayersPanel {
               let effects = actionDef["effects"] as? [Any]
         else { return }
 
+        // Merge the action's DECLARED param defaults under the caller's params
+        // BEFORE building the eval ctx, so an effect referencing `param.X`
+        // resolves to the workspace's declared default rather than null->0 when
+        // the caller omits it. Rust's `dispatch_action` has always done this;
+        // this dispatcher did not, and the one place it showed was the biggest:
+        // `zoom_in` / `zoom_out` from the keyboard and the menu pass NO anchor,
+        // so the declared -1 ("anchor at the viewport centre") never arrived and
+        // the zoom threw the artist's view away. See
+        // ``mergeDeclaredParamDefaults`` for the precedence rule and the
+        // three-verb blast radius.
+        let params = mergeDeclaredParamDefaults(params, actionDef: actionDef)
+
         let activeDoc = buildActiveDocumentView(
             model: model,
             layersPanelSelection: panelSelection,
@@ -154,6 +166,25 @@ public enum LayersPanel {
             // this from AppState (`build_appstate_ctx`); this is Swift agreeing
             // (CPTRIAGE).
             "state": buildLiveStateMap(ws: ws, model: model),
+            // The `preferences` namespace, so YAML expressions like
+            // `preferences.viewport.zoom_step` resolve against the workspace
+            // defaults. Rust's `build_appstate_ctx` has always inserted this;
+            // this dispatcher did not, and an unresolved identifier evaluates
+            // to null -> 0, which is silent and WRONG rather than inert:
+            // zoom_in's `factor: preferences.viewport.zoom_step` became 0, so
+            // `z * factor` was 0 and the clamp pinned the canvas at min_zoom
+            // 0.1 — a keyboard zoom-IN that zooms all the way OUT. fit_*'s
+            // `padding: preferences.viewport.fit_padding_px` became 0, fitting
+            // with no margin. Measured by the view_state.json action fixtures
+            // (VIEWSEED); before this line zoom_in from 2.0x landed at 0.1x.
+            // The six View verbs are the only actions.yaml effects that read
+            // preferences.* — `grep -n 'preferences\.' workspace/actions.yaml`
+            // returns 13 lines, of which exactly 5 are effect ARGS (two
+            // `factor:`, three `padding:`) and all 5 belong to those verbs; the
+            // other 8 are prose or the unrelated
+            // `active_document.print_preferences`. So the blast radius of this
+            // line is exactly the View menu.
+            "preferences": ws.data["preferences"] ?? NSNull(),
         ]
 
         runLayersPanelEffects(effects, actionName: actionName, ctx: ctx,
@@ -840,6 +871,38 @@ public enum LayersPanel {
                 controller.applyDestructiveBoolean(op)
                 return nil
             }
+        }
+        // VIEW-STATE effects (VIEWSEED). actions.yaml's six View verbs —
+        // zoom_in, zoom_out, zoom_to_actual_size, fit_in_window,
+        // fit_active_artboard, fit_all_artboards — declare `doc.zoom.*`
+        // effects, and this generic dispatcher had NO handler registered for
+        // any of them, so every one of those actions was a SILENT NO-OP here:
+        // `runEffects` skips an unknown effect key without complaint. The
+        // handlers exist and are correct — they live in the tool-runtime table
+        // (``buildYamlToolEffects``), which YamlTool registers for canvas
+        // gestures — so the Zoom tool's click could zoom while the same verb
+        // dispatched as an ACTION could not. Rust has no such split: one
+        // `run_yaml_effect` match serves both its tool and its action dispatch.
+        //
+        // Only the view keys are lifted across, not the whole tool table:
+        // these effects touch view state alone (zoomLevel / viewOffsetX /
+        // viewOffsetY on Model), never document content, so they cannot
+        // interact with the doc.* handlers above. Measured by the
+        // `view_state.json` action fixtures, which seed a non-identity view
+        // and pin the resulting triple; without this registration all thirteen
+        // vectors leave the seeded view exactly as they found it. As of
+        // 2026-07-27 this is also the MENU AND KEYBOARD path (``ViewActions``),
+        // not only the corpus's.
+        let toolViewEffects = buildYamlToolEffects(model: model)
+        for key in ["doc.zoom.apply", "doc.zoom.set", "doc.zoom.set_full",
+                    "doc.zoom.scrubby", "doc.zoom.fit_rect",
+                    "doc.zoom.fit_marquee", "doc.zoom.fit_elements",
+                    "doc.zoom.fit_all_artboards", "doc.pan.apply"] {
+            guard let handler = toolViewEffects[key] else {
+                assertionFailure("view effect '\(key)' vanished from the tool table")
+                continue
+            }
+            platformEffects[key] = handler
         }
         if onCloseDialog != nil {
             platformEffects["close_dialog"] = closeDialogHandler

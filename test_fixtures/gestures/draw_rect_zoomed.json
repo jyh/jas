@@ -1,0 +1,49 @@
+[
+  {
+    "_doc": [
+      "VIEWSEED: the same Rect drag as draw_rect.json, run OFF the identity",
+      "view. draw_rect.json (and every other gesture vector) runs at zoom 1.0 /",
+      "offset (0, 0), where the screen->document conversion every tool applies —",
+      "`doc = (screen - view_offset) / zoom`, YamlTool's pointer_event_payload in",
+      "both ports — is algebraically the identity, so a tool that forgot to",
+      "convert would pass anyway. That is the whole of CORPUS_CENSUS.md §5.7, and",
+      "the reason the path-eraser, type-on-path and paintbrush coordinate-space",
+      "bugs were all found by hand in the live app instead of here.",
+      "",
+      "The corpus event coordinates are VIEWPORT-LOCAL PIXELS (what the canvas",
+      "widget delivers), not document units — the runners hand them straight to",
+      "onPress / onMove / onRelease, exactly as the canvas does. rect.yaml commits",
+      "geometry from `event.doc_x` / `event.doc_y`, so at zoom 2 with the document",
+      "origin drawn at screen (-100, -50):",
+      "",
+      "  press   screen (140,  90) -> doc ((140 + 100) / 2, ( 90 + 50) / 2) = (120,  70)",
+      "  release screen (340, 290) -> doc ((340 + 100) / 2, (290 + 50) / 2) = (220, 170)",
+      "",
+      "so the committed rect is x 120, y 70, w 100, h 100. A port that dropped the",
+      "conversion would commit x 140, y 90, w 200, h 200 — off by the offset in",
+      "position and by a factor of the zoom in size, which is exactly the failure",
+      "shape of all three historical bugs. The threshold guard in on_mouseup is in",
+      "SCREEN units (`abs(event.x - start_x) > 1`) and stays satisfied here: the",
+      "drag is 200 screen px.",
+      "",
+      "setup_svg is the same circle_basic.svg draw_rect.json uses, so the two",
+      "vectors differ ONLY in the view they run at."
+    ],
+    "name": "draw_rect_zoomed",
+    "setup_svg": "circle_basic.svg",
+    "tool": "rect",
+    "view": {
+      "zoom_level": 2.0,
+      "view_offset_x": -100.0,
+      "view_offset_y": -50.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "events": [
+      { "kind": "press", "x": 140, "y": 90 },
+      { "kind": "move", "x": 340, "y": 290, "dragging": true },
+      { "kind": "release", "x": 340, "y": 290 }
+    ],
+    "expected_json": "draw_rect_zoomed_expected.json"
+  }
+]

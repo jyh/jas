@@ -28,8 +28,9 @@ owned by HAND_TOOL.md; this spec only adds the Zoom entry to the
 existing alternates list and references the slot.
 
 **Double-click toolbar icon:** invokes `zoom_to_actual_size` (jumps
-to 100% zoom, pan unchanged). Distinct from the Hand-icon dblclick,
-which invokes `fit_active_artboard`.
+to 100% zoom, keeping the document point under the viewport centre
+under it). Distinct from the Hand-icon dblclick, which invokes
+`fit_active_artboard`.
 
 ## Gestures
 
@@ -210,7 +211,7 @@ or add View-menu actions:
 | `Ctrl+-`       | `zoom_out`              | Viewport center    | Existing stub  |
 | `Ctrl+0`       | `fit_active_artboard`   | n/a (fit recompute)| New            |
 | `Ctrl+Alt+0`   | `fit_all_artboards`     | n/a (fit recompute)| New            |
-| `Ctrl+1`       | `zoom_to_actual_size`   | Pan unchanged      | New            |
+| `Ctrl+1`       | `zoom_to_actual_size`   | Viewport center    | New            |
 
 Existing `fit_in_window` (which fits all elements, not artboards)
 keeps its current semantics and gains no new keyboard binding in
@@ -231,8 +232,23 @@ target exists; no fallback path is needed.
 `active_document.artboards`. Computed at action-dispatch time; not
 memoized.
 
-`zoom_to_actual_size` sets `zoom_level = 1.0` and leaves
-`view_offset_x` / `view_offset_y` unchanged.
+`zoom_to_actual_size` sets `zoom_level = 1.0` **anchored at the
+viewport center**: the document point under the viewport center before
+the change is under it after, so the artist keeps looking at the same
+place. `view_offset_x` / `view_offset_y` are recomputed by the same
+anchor math the rest of the family uses, with `ax = viewport_w / 2`,
+`ay = viewport_h / 2` — see §Anchor and clamp math. Only when the
+viewport has not been measured yet (`viewport_w` or `viewport_h` still
+0) is there no center to anchor on; then the offsets are left as they
+stand.
+
+`view_offset` is the DOCUMENT ORIGIN's screen position, not the
+viewport center, so holding it fixed does NOT hold the view: at
+`view_offset = (-300, -200)` a 4x -> 1x change would move the visible
+region from doc [75..275]x[50..200] to [300..1100]x[200..800] and the
+artwork would leave the screen. This paragraph said "leaves
+`view_offset_x` / `view_offset_y` unchanged" until 2026-07-27; see the
+ruling at the end of this file for why that was the wrong requirement.
 
 ## Document-open behavior
 
@@ -365,3 +381,146 @@ when a document is reopened from disk.
   collectively form the View > Zoom group. The tool is the
   canvas-side input pathway; the menu is the keyboard pathway. Both
   call into the same `doc.zoom.*` effects.
+
+---
+
+## RULED 2026-07-27 (JYH): `zoom_to_actual_size` RECENTRES — the four "pan
+## unchanged" statements above are SUPERSEDED
+
+**Ctrl+1 recomputes `view_offset` around the viewport centre**, so whatever the
+artist was looking at stays approximately under it. Rust's `doc.zoom.set` already
+does this (commit ff4d46d); **Swift changes to match**, and the four statements
+saying "pan unchanged" — §Double-click toolbar icon, the `Ctrl+1` row of the
+shortcut table, the `zoom_to_actual_size` prose, and `workspace/actions.yaml`'s
+description — are superseded by this ruling and must be rewritten.
+
+**Why the written record disagreed with itself, recorded so it is not re-derived:**
+`ZOOM_TOOL_TESTS.md` ZOOM-134 says *"pan unchanged (so whatever was under the
+viewport center stays approximately under it)"* — presenting the parenthetical as a
+CONSEQUENCE of pan-unchanged. **It is the opposite.** `view_offset` is the doc
+origin's screen position, so holding it fixed while zoom goes 4x -> 1x quadruples
+the visible region around that point: at offset (-300,-200) the view moves from doc
+[75..275]x[50..200] to [300..1100]x[200..800] — the artwork leaves the screen.
+Someone ran ZOOM-134, saw that pan-unchanged did not keep the centre, and changed
+Rust to match the **gloss** rather than the requirement. The gloss was a mistaken
+inference; the intuition behind it was right.
+
+**The three reasons the ruling goes Rust's way:**
+1. **Consistency inside the zoom family.** `zoom_in`/`zoom_out` anchor at the
+   viewport centre by default, and a fit "lands at the viewport center" (§109). If
+   Ctrl+1 alone abandoned the centre, Ctrl+= would keep your view and Ctrl+1 would
+   throw it away.
+2. **"Pan unchanged" is written at the wrong level** — it describes a field not
+   changing. What the artist experiences is "my view stays put." Specs belong at the
+   second level.
+3. **It was hit in practice**, not in theory: ff4d46d's note names the symptom,
+   "walked off the visible area."
+
+**ZOOM-134's parenthetical must be rewritten to state the requirement** rather than
+a false consequence of a different one — left as-is, the next reader re-derives the
+same error.
+
+**CARRIED OUT 2026-07-27 (ZOOMPKG).** Swift's `doc.zoom.set` recentres; the four
+statements above are rewritten (§Double-click toolbar icon, the `Ctrl+1` row —
+Centering column now reads "Viewport center" — the `zoom_to_actual_size` prose, and
+`workspace/actions.yaml`'s description) and so is ZOOM-134's parenthetical in
+`ZOOM_TOOL_TESTS.md`. Gated by the `zoom_to_actual_size_recentres` and
+`zoom_to_actual_size_unmeasured_viewport` vectors of
+`test_fixtures/actions/view_state.json`, whose triples are spec-derived, and by
+`docZoomSetAnchorsAtViewportCentre` in each port's unit suite. The
+`view-zoom-set-pan-divergence` coverage-gap row is closed.
+
+## RULED 2026-07-27 (JYH): the DEFAULT ZOOM ANCHOR is the viewport centre
+
+`zoom_in` / `zoom_out` invoked with **no anchor parameters** anchor at the
+**viewport centre**, as the spec already says and as Rust already does. **Swift
+changes**, and BOTH causes must land together:
+
+1. Swift's generic action dispatcher never merges an action's **declared param
+   defaults**, so `param.anchor_x` arrives null -> 0 instead of the declared `-1`.
+2. Swift's `anchorXRaw < 0 ? px : anchorXRaw` has **no viewport-centre branch at
+   all** — it carries `viewportW` and never reads it.
+
+Fixing only (1) moves Swift from (-120,-60) to (-100,-50) and still misses the
+spec's (-200,-120), so a half-fix leaves the vector red and unpinnable — an earlier
+writer correctly declined to land it. Measured with seed {zoom 2.0, offset
+(-100,-50), viewport 800x600}, `zoom_in` with params {}.
+
+**Side effect worth watching:** only 3 of 236 actions declare param defaults, but
+one is `artboards_panel_select`, which no fixture covers — so fixing (1) silently
+corrects a third verb nobody is watching. Gate it while you are there.
+
+This ruling and the `zoom_to_actual_size` ruling above are the same principle in two
+verbs: **the zoom family keeps the artist's view.**
+
+**CARRIED OUT 2026-07-27 (ZOOMPKG).** Both causes landed together: the merge lives in
+`JasSwift/Sources/Interpreter/ActionParams.swift` (applied at all three generic
+dispatchers), and `doc.zoom.apply` gained the viewport-centre branch. Gated by
+`zoom_in_default_anchor` / `zoom_out_default_anchor` /
+`zoom_in_default_anchor_unmeasured_viewport` in
+`test_fixtures/actions/view_state.json`; each cause was reverted individually and the
+vectors reproduced the two half-fix values this ruling predicted, (-100,-50) and
+(-120,-60). The `view-anchor-default-divergence` coverage-gap row is closed.
+
+**One prediction measured NARROWER than written.** "Fixing (1) silently corrects
+`artboards_panel_select`" is over-wide: that verb's condition is
+`param.modifier == 'none' or param.modifier == null`, so it already took the replace
+branch on a null and the merge changes nothing there. Verified by mutating the merge
+off with `artboardsPanelSelectWithNoModifierReplacesTheSelection` in place — green
+both ways. The gate landed as ruled anyway, so the path is pinned rather than
+believed, and `exactlyThreeActionsDeclareParamDefaults` reads the blast radius off the
+compiled workspace so a fourth declaring action fails loudly. Note also that this
+verb cannot be reached from the ACTION CORPUS: its effect writes panel-scoped state
+and Swift's `buildLiveStateMap` does not publish `artboards_panel_selection` at all,
+where Rust's `build_live_state_map` does — so `expected_panel_state` cannot express
+it. That asymmetry is banked, not fixed here.
+
+## RULED 2026-07-27 (JYH): Swift's MENU AND KEYBOARD must route through the YAML
+## pipeline — and it rides WITH the zoom work, not after it
+
+Six Swift View actions bypass the YAML pipeline via native `Model` methods with
+hardcoded constants. The `doc.zoom.*` effects exist and are correct (the Zoom TOOL
+uses them); the menu and keyboard never reach them.
+
+**Why this outranks an ordinary coverage gap:** the corpus CAN gate those effects and
+does — so a fix lands, the gate goes green, and **nothing a user can see changes.**
+The gate is testing a road nobody drives, which manufactures false confidence and is
+worse than an honest hole.
+
+**Why it rides WITH the two zoom rulings rather than after them:** if the menu and
+keyboard do not route through the effects, then fixing the effects **does not fix
+Ctrl+1.** Landing the zoom rulings alone would turn both gates green while the
+flagship port still recentres wrongly on every keystroke. JYH: *"better to do now
+than later."*
+
+Scope honestly: this is a refactor in the more important artist-facing port, touching
+the menu and keyboard paths, and **it has no fixture coverage today** — no vector can
+reach the menu or keyboard route — so the work must build its own gate alongside. The
+rejected alternative was to fix the effects and declare the user-path divergence as a
+gap; strictly better than the status quo, but it leaves the artist's experience wrong.
+
+**CARRIED OUT 2026-07-27 (ZOOMPKG).** The three surfaces — the View menu
+(`JasCommands`), the canvas keyboard chords (`CanvasSubwindow`) and the toolbar
+tool-options double-click (`ContentView`) — now dispatch through one seam,
+`JasSwift/Sources/Canvas/ViewActions.swift`, which calls the same
+`LayersPanel.dispatchYamlAction` the action corpus drives. The six native `Model`
+methods and their hardcoded `zoom_step` / clamp / padding constants are deleted.
+
+The gate it built for itself is `JasSwift/Tests/Canvas/ViewActionRouteTests.swift`
+(12 tests): the spec formulas are re-implemented in the test over the LIVE workspace
+preferences, so a route that hardcodes a constant agrees only by coincidence. Landed
+in two commits so the red is a measurement of the defect and not of a mutation —
+extracting the native switches into the seam and adding the gate reddened 22
+expectations over 5 tests, and routing them through the pipeline closed all 22.
+
+**Three drifts the extraction surfaced, none of them in the ruling's text:**
+1. `fit_active_artboard` fitted `document.artboards.first` where actions.yaml resolves
+   `active_document.current_artboard`, so a panel-selected artboard was ignored by
+   Cmd+0 and by the menu.
+2. `fit_in_window` on an EMPTY document was a silent no-op in all three native paths
+   (`fitRect` guarded `w > 0` and returned), where `doc.zoom.fit_elements` specifies
+   100% centred on the origin.
+3. The keyboard route had no `fit_in_window` arm at all — menu-only by accident rather
+   than by the decision recorded in §Keyboard shortcuts and actions, which says
+   `fit_in_window` gains no chord. That one turns out to be correct as written; the
+   chord table is unchanged.

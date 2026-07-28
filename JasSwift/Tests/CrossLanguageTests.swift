@@ -114,6 +114,13 @@ private func assertSvgRoundtrip(_ name: String) {
 /// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
 /// id="dup"; after dedupe the first keeps it and the second has no id.
 @Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
+/// The same §2.5 normalization, reaching INSIDE a live compound's operands —
+/// operands are real elements carrying their own common.id, so they share the
+/// one document-wide id space. Both directions are pinned: the operand whose
+/// id repeats an earlier layer child is cleared, and the operand id that is
+/// first-seen enters the seen set, so a later layer child repeating it is
+/// cleared in turn.
+@Test func svgParseDupIdCompoundOperand() { assertSvgParse("dup_id_compound_operand") }
 /// REFERENCE_GRAPH.md Phase 2a: a <use href="#id"> imports as a live
 /// reference (F-svg-use); the href minus '#' becomes the target.
 @Test func svgParseLiveReference() { assertSvgParse("live_reference") }
@@ -645,6 +652,232 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("boolean_collapse_default.json")
 }
 
+// MARK: - PRESERVATION corpus — the DOCUMENT-LEVEL INVARIANT GATE
+//
+// transcripts/EDIT_SEMANTICS_FREEZE.md §4.1, the primary enforcement tier, and
+// the exact twin of Rust's `preservation_invariants`. The freeze's finding is
+// that a per-copy-API battery is structurally blind to the gravest violation
+// class — inline container rebuilds are not copy APIs, so no battery would
+// ever be written for them. This gate inspects no copy site: it serializes the
+// WHOLE document before and after an edit and asserts six invariants over the
+// canonical test JSON, "one predicate both ports can fail identically" (§4.2).
+//
+// A vector may PIN a known violation for this port. A pinned invariant is
+// asserted to FAIL, so fixing the site turns this gate red until the pin is
+// removed and a pin can never rot into a silent suppression.
+// scripts/check_preservation_corpus.py gates the data shape (V1–V5).
+
+/// Every id-bearing element of a canonical document JSON: the ids in document
+/// order, and each id's own attributes as key -> canonical-JSON-of-value with
+/// `children` stripped (a container that legitimately gained or lost a child
+/// still has ITS OWN fields compared — the T4 bystander predicate).
+private struct PreservationSnapshot {
+    var ids: [String] = []
+    var attrs: [String: [String: String]] = [:]
+}
+
+private func preservationCanonical(_ value: Any) -> String {
+    let data = try! JSONSerialization.data(
+        withJSONObject: value, options: [.sortedKeys, .fragmentsAllowed])
+    return String(data: data, encoding: .utf8)!
+}
+
+private func preservationWalk(_ node: Any, _ snap: inout PreservationSnapshot) {
+    if let arr = node as? [Any] {
+        for item in arr { preservationWalk(item, &snap) }
+        return
+    }
+    guard let obj = node as? [String: Any] else { return }
+    if obj["type"] != nil, let id = obj["id"] as? String {
+        snap.ids.append(id)
+        var fields: [String: String] = [:]
+        for (k, v) in obj where k != "children" {
+            fields[k] = preservationCanonical(v)
+        }
+        snap.attrs[id] = fields
+    }
+    for key in ["layers", "children", "symbols"] {
+        if let v = obj[key] { preservationWalk(v, &snap) }
+    }
+}
+
+private func preservationSnapshot(_ docJson: String) -> PreservationSnapshot {
+    let parsed = try! JSONSerialization.jsonObject(
+        with: docJson.data(using: .utf8)!, options: [])
+    var snap = PreservationSnapshot()
+    preservationWalk(parsed, &snap)
+    return snap
+}
+
+/// Evaluate the six document-level invariants for one vector. `nil` = held.
+private func preservationInvariantsFor(
+    _ tc: [String: Any], _ before: PreservationSnapshot, _ after: PreservationSnapshot
+) -> [(String, String?)] {
+    let subject = Set(tc["subject_ids"] as! [String])
+    let consumed = Set(tc["consumed_ids"] as! [String])
+    let speaksTo = Set(tc["speaks_to"] as! [String])
+    let wantFresh = (tc["expected_fresh_ids"] as! NSNumber).intValue
+
+    let beforeSet = Set(before.ids)
+    let afterSet = Set(after.ids)
+    var out: [(String, String?)] = []
+
+    // id_uniqueness — the REFERENCE_GRAPH.md §2.5 uniqueness invariant.
+    var counts: [String: Int] = [:]
+    for id in after.ids { counts[id, default: 0] += 1 }
+    let dups = counts.filter { $0.value > 1 }.keys.sorted()
+    out.append(("id_uniqueness", dups.isEmpty ? nil
+        : "id(s) appear more than once after the edit: \(dups)"))
+
+    // id_survival — every identity the edit did not consume is still there.
+    let lost = beforeSet.filter { !consumed.contains($0) && !afterSet.contains($0) }.sorted()
+    out.append(("id_survival", lost.isEmpty ? nil
+        : "id(s) present before and NOT consumed vanished: \(lost)"))
+
+    // consumed_ids_die — over-preservation is a violation too (§3.3).
+    let survived = consumed.filter { afterSet.contains($0) }.sorted()
+    out.append(("consumed_ids_die", survived.isEmpty ? nil
+        : "id(s) the edit consumed rode out on the result: \(survived)"))
+
+    // fresh_ids — how many identities the edit minted.
+    let fresh = afterSet.subtracting(beforeSet).sorted()
+    out.append(("fresh_ids", fresh.count == wantFresh ? nil
+        : "expected \(wantFresh) freshly minted id(s), got \(fresh.count) (\(fresh))"))
+
+    // bystanders_unchanged — T4, including the containers the edit rebuilt to
+    // reach its target. Compared only for bystanders that still carry their id;
+    // a bystander whose id was destroyed is id_survival's failure, not this one's.
+    var bystFail: [String] = []
+    for id in beforeSet.sorted() {
+        if subject.contains(id) || consumed.contains(id) { continue }
+        guard let b = before.attrs[id], let a = after.attrs[id] else { continue }
+        // Report the DIFFERING KEYS only — dumping both whole attribute maps
+        // buries the one changed field under twenty unchanged ones.
+        for key in Set(b.keys).union(a.keys).sorted() where b[key] != a[key] {
+            bystFail.append("\(id).\(key): \(b[key] ?? "<absent>") -> \(a[key] ?? "<absent>")")
+        }
+    }
+    out.append(("bystanders_unchanged", bystFail.isEmpty ? nil
+        : "bystander attributes changed: \(bystFail)"))
+
+    // subject_fields_only — clause 1: only the spoken-to keys may differ.
+    var subjFail: [String] = []
+    for id in subject.sorted() {
+        guard let b = before.attrs[id], let a = after.attrs[id] else { continue }
+        for key in Set(b.keys).union(a.keys).sorted() {
+            if speaksTo.contains(key) { continue }
+            if b[key] != a[key] {
+                subjFail.append("\(id).\(key): \(b[key] ?? "<absent>") -> \(a[key] ?? "<absent>")")
+            }
+        }
+    }
+    out.append(("subject_fields_only", subjFail.isEmpty ? nil
+        : "subject changed keys outside speaks_to \(speaksTo.sorted()): \(subjFail)"))
+
+    return out
+}
+
+/// Apply one preservation vector's edit and return the canonical document JSON
+/// before and after.
+///
+/// A vector drives its edit through ONE of two production paths, chosen by its
+/// own shape: `events` replays pointer input through the real tool (the gesture
+/// corpus's runner), `txns`/`ops` dispatches through `opApply` (the same shape
+/// `runOperationFixture` uses). The gesture arm is not a convenience — the blob
+/// brush's commit arms are a YAML effect with NO `opApply` verb, so an op-only
+/// gate is structurally blind to them, the same shape of blindness §4.1 records
+/// for per-copy-API batteries. Mirrors Rust `preservation_invariants`.
+private func runPreservationVector(_ tc: [String: Any]) -> (before: String, after: String) {
+    let svg = readFixture("svg/\(tc["setup_svg"] as! String)")
+    let beforeJson = documentToTestJson(svgToDocument(svg))
+
+    if tc["events"] != nil {
+        return (beforeJson, documentToTestJson(runGestureModel(tc).document))
+    }
+
+    let model = Model(document: svgToDocument(svg))
+    let controller = Controller(model: model)
+    if let txns = tc["txns"] as? [[String: Any]] {
+        for txn in txns {
+            model.beginTxn()
+            if let txnName = txn["name"] as? String { model.nameTxn(txnName) }
+            for op in (txn["ops"] as! [[String: Any]]) {
+                applyFixtureOp(model, controller, op)
+            }
+            model.commitTxn()
+        }
+    } else {
+        model.beginTxn()
+        for op in (tc["ops"] as! [[String: Any]]) {
+            applyFixtureOp(model, controller, op)
+        }
+        model.commitTxn()
+    }
+    return (beforeJson, documentToTestJson(model.document))
+}
+
+/// THE DOCUMENT-LEVEL INVARIANT GATE. Mirrors Rust `preservation_invariants`.
+@Test func preservationInvariants() throws {
+    let raw = readFixture("preservation/preservation_invariants.json")
+    let vectors = try JSONSerialization.jsonObject(
+        with: raw.data(using: .utf8)!, options: []) as! [[String: Any]]
+    var failures: [String] = []
+
+    for tc in vectors {
+        let name = tc["name"] as! String
+        let (beforeJson, afterJson) = runPreservationVector(tc)
+        let before = preservationSnapshot(beforeJson)
+        let after = preservationSnapshot(afterJson)
+
+        // Runtime anti-vacuity (the data-shape half lives in
+        // scripts/check_preservation_corpus.py).
+        #expect(beforeJson != afterJson,
+            "preservation vector '\(name)' left the document byte-identical — every invariant over it would be vacuously true")
+        let named = (tc["subject_ids"] as! [String]) + (tc["consumed_ids"] as! [String])
+        for id in named {
+            #expect(before.ids.contains(id),
+                "preservation vector '\(name)' names id '\(id)', which is absent from the loaded setup document")
+        }
+        #expect(before.ids.contains(where: { !named.contains($0) }),
+            "preservation vector '\(name)' has no bystander — T4 is unwatchable here")
+
+        // `must_change` (optional) turns `speaks_to` from a PERMISSION into a
+        // CLAIM. `subject_fields_only` only forbids differences OUTSIDE
+        // `speaks_to`, so listing a key there makes the gate blind to it: an
+        // implementation that stopped writing the key entirely would still be
+        // green. Naming it here asserts the edit really does rewrite it, which
+        // is what lets a corpus vector separate a behaviour rather than merely
+        // tolerate it. Mirrors Rust's arm in
+        // `assert_preservation_not_vacuous`.
+        if let mustChange = tc["must_change"] as? [String] {
+            for id in (tc["subject_ids"] as! [String]) {
+                guard let b = before.attrs[id], let a = after.attrs[id] else {
+                    Issue.record("preservation vector '\(name)' declares must_change but subject '\(id)' is missing from one of the snapshots")
+                    continue
+                }
+                for key in mustChange {
+                    #expect(b[key] != a[key],
+                        "preservation vector '\(name)' claims the edit rewrites \(id).\(key), but it is unchanged — the claim is stale, or the behaviour it watches has regressed")
+                }
+            }
+        }
+
+        let pinned = (tc["expected_violations"] as! [String: Any])["swift"] as! [[String: Any]]
+        for (inv, result) in preservationInvariantsFor(tc, before, after) {
+            let pin = pinned.first { ($0["invariant"] as! String) == inv }
+            if pin == nil, let why = result {
+                failures.append("[\(name)] \(inv) VIOLATED: \(why)")
+            } else if let pin, result == nil {
+                failures.append(
+                    "[\(name)] \(inv) is PINNED as a known violation (\(pin["row"] as! String)) but now HOLDS — remove the pin from the vector")
+            }
+        }
+    }
+
+    #expect(failures.isEmpty,
+        "preservation invariant gate: \(failures.count) failure(s):\n  \(failures.joined(separator: "\n  "))")
+}
+
 // MARK: - OP_LOG.md §9 verb33 unification fixtures (P1–P7)
 //
 // The shared test_fixtures/operations/* fixtures the Rust P1–P7 phases added are
@@ -677,6 +910,17 @@ private func recordedCanonicalDocument() -> Document {
 @Test func operationStructuralDeleteSelection() throws { try runOperationFixture("structural_delete_selection.json") }
 @Test func operationStructuralInsertAfter() throws { try runOperationFixture("structural_insert_after.json") }
 @Test func operationStructuralInsertAt() throws { try runOperationFixture("structural_insert_at.json") }
+
+// EDIT_SEMANTICS_FREEZE.md T4 — the BYSTANDER CLAUSE, as a cross-port byte gate:
+// *an edit preserves, unchanged, every element it does not name — including the
+// containers it rebuilds to reach its target.* Each vector reaches a GRANDCHILD
+// (path [0, 0, i]) through a Layer and a Group that both carry an `id` and a
+// `name`, and — in the replace vector — through a Group the artist has hidden.
+// The golden was generated by the conforming port (Rust) and pins every
+// container attribute the shared test-JSON encoding can see. Registered in both
+// ports because the ratification condition rules that the law is not enforced
+// until the CORPUS can see it: a per-port unit test alone does not discharge it.
+@Test func operationBystanderContainers() throws { try runOperationFixture("bystander_containers.json") }
 
 // P5 — group / layer wrapping (multi-step → one op).
 @Test func operationWrapInGroup() throws { try runOperationFixture("wrap_in_group.json") }
@@ -2593,6 +2837,12 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 /// same press(10,20)->drag(110,70)->release(110,70) gesture as draw_rect.
 private let gestureFixtures = [
     "draw_rect.json",
+    // VIEWSEED: the same Rect drag at a NON-identity view (zoom 2, offset
+    // (-100, -50)). Every other gesture vector runs at the identity view, where
+    // the screen->doc conversion in pointerEventPayload is algebraically the
+    // identity and a tool that skipped it would still pass. See
+    // CORPUS_CENSUS.md §5.7.
+    "draw_rect_zoomed.json",
     "draw_line.json",
     "draw_ellipse.json",
     "draw_rounded_rect.json",
@@ -2628,6 +2878,52 @@ private let gestureFixtures = [
     "recorded_blob_dot.json",
     "recorded_blob_merge.json",
     "recorded_blob_separate.json",
+    // TRANSFORM-BLIND MERGE gate (S-3). The setup's only element is a
+    // blob-brush path whose LOCAL `d` is the square 0..72 (doc units) and
+    // whose `transform` is translate(300,300) — so it RENDERS at doc
+    // 300..372. The sweep runs at doc y=50 from x=50 to x=150, i.e. the
+    // painted region is x 45..155 / y 45..55, which does not come within 145
+    // units of where that blob is drawn. The correct document therefore has
+    // TWO children: the existing blob untouched, plus a new blob at the
+    // painted location.
+    //
+    // What the transform-blind code produced: the match test ran
+    // `pathToPolygonSet(pe.d)` on the RAW `d` (0..72), which DOES overlap the
+    // sweep, so the two merged into ONE child whose `d` was the doc-space
+    // union pushed back through no matrix at all — one child, and the new ink
+    // drawn offset by the matrix's (300, 300) from where the artist put it.
+    // See transcripts/BLOB_BRUSH_TOOL.md §Transform.
+    "blob_transform_no_merge.json",
+    // The POSITIVE half of the pair above, and the only gate in the corpus
+    // that can see `jas:tool-origin` survive an SVG IMPORT. The setup is the
+    // same square 0..72 with the transform removed, so it sits exactly under
+    // the sweep and the merge is CORRECT: one child, the union, at doc
+    // x 0..155.
+    //
+    // `tool_origin` is not a key of the canonical test JSON, so no
+    // serialization gate can observe it directly; the merge is the only
+    // behaviour that depends on it, which makes this fixture the sole reader.
+    // It caught `normalizeElement` rebuilding an imported Path field-by-field
+    // WITHOUT `toolOrigin`, so every path opened from a file reached the tool
+    // untagged and Swift never merged where Rust did.
+    "blob_import_merge.json",
+    // The n == 1 arm WITH a matrix — the only gate whose merged `d` is written
+    // THROUGH a matrix, so the only one the inverse write-back can be seen
+    // through (mutation-proved: dropping the inverse fails gestureCorpus on
+    // this vector and nothing else). Same setup as
+    // blob_transform_no_merge (local square 0..72, translate(300,300), so
+    // drawn at doc 300..372); this sweep runs at doc y=336 from x=320 to
+    // x=420, which DOES cross it. One child results, keeping the source's id
+    // and its matrix, and `d` must come back in the source's LOCAL space: the
+    // square unioned with the sweep mapped through the inverse, spanning local
+    // x 0..125, y 0..72.
+    //
+    // Without the inverse the union is written in document coordinates and the
+    // whole element is then drawn through translate(300,300) on top of that —
+    // offset by (300, 300) from where it belongs — while every field-list test
+    // still passes: they graft the source's `d` onto the output and never look
+    // at it.
+    "blob_transform_merge.json",
 ]
 
 /// Apply a gesture fixture's optional `app_state` precondition onto the
@@ -2701,6 +2997,10 @@ private func runGestureModel(_ tc: [String: Any]) -> Model {
     guard let tool = loadYamlTool(toolId, in: ws) else {
         fatalError("workspace declares no tool '\(toolId)' (or it failed to parse)")
     }
+
+    // Optional non-identity view seed (VIEWSEED) — before `activate`, since a
+    // tool's on_enter may snapshot the view.
+    seedCaseView(model, tc)
 
     let ctx = gestureToolContext(model)
     tool.activate(ctx)
@@ -2973,6 +3273,13 @@ private let actionFixtures = [
     // here. The second case pins the Mixed outcome (the declared default
     // stands — absent is not null).
     "fill_stroke_action_scope.json",
+    // VIEWSEED: the FIRST fixtures anywhere in test_fixtures/ that set
+    // zoom_level / view_offset. Every other case runs at the identity view,
+    // where screen<->doc conversion is algebraically the identity and so cannot
+    // fail (CORPUS_CENSUS.md §5.7). These cases seed a non-identity view via
+    // `view` and assert the resulting view triple via `expected_view` — a fact
+    // NO document golden can see, because view state is not document content.
+    "view_state.json",
 ]
 
 /// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml
@@ -3002,6 +3309,78 @@ private func actionModelFromSvg(_ setupSvg: String) -> Model {
     return Model(document: svgToDocument(svg))
 }
 
+/// Seed the per-tab VIEW STATE from a corpus case's optional `view` block:
+/// `{zoom_level, view_offset_x, view_offset_y, viewport_w, viewport_h}`, any
+/// subset, each key defaulting to whatever `Model.init` produced (the identity
+/// view at the layout's default viewport).
+///
+/// Why this exists (VIEWSEED, CORPUS_CENSUS.md §5.7): every corpus runner in
+/// both ports built its Model at the IDENTITY view, and at the identity view
+/// screen<->document conversion is algebraically the identity — `(x - 0) / 1 ==
+/// x`. So the multiply/divide-by-zoom half of every tool, and every
+/// `doc.zoom.*` effect that reads the live view, was untestable *by
+/// construction*, which is how three coordinate-space bugs (path eraser,
+/// type-on-path, paintbrush) all reached the live app before anyone saw them. A
+/// case that names a `view` block runs off the identity and the conversion has
+/// to be right.
+///
+/// Cases without the block are unaffected, so the seed is additive to every
+/// existing fixture. Mirrors Rust's `seed_case_view`.
+private func seedCaseView(_ model: Model, _ tc: [String: Any]) {
+    guard let view = tc["view"] as? [String: Any] else { return }
+    func num(_ key: String) -> Double? { (view[key] as? NSNumber)?.doubleValue }
+    if let v = num("zoom_level") { model.zoomLevel = v }
+    if let v = num("view_offset_x") { model.viewOffsetX = v }
+    if let v = num("view_offset_y") { model.viewOffsetY = v }
+    if let v = num("viewport_w") { model.viewportW = v }
+    if let v = num("viewport_h") { model.viewportH = v }
+}
+
+/// OPTIONAL third assertion: `expected_view`.
+///
+/// View state — `zoomLevel`, `viewOffsetX`, `viewOffsetY` — is NOT document
+/// content, so `documentToTestJson` cannot see it and no golden in this corpus
+/// constrained it before VIEWSEED. Combined with the case's `view` seed this is
+/// the whole point of the view-state family: run the action off the identity
+/// view and pin the triple the view effects produce.
+///
+/// The comparison is EXACT (`==` on Double). Both ports evaluate the same
+/// IEEE-754 double operations on the same inputs, and the fixture literals are
+/// shortest-round-trip forms, so any difference is a real divergence and not a
+/// formatting artifact. Cases without the block are unaffected. Mirrors Rust's
+/// `assert_action_view`.
+private func assertActionView(_ tc: [String: Any], _ model: Model) {
+    guard let expected = tc["expected_view"] as? [String: Any] else { return }
+    let name = tc["name"] as! String
+    for (key, wantRaw) in expected {
+        guard let want = (wantRaw as? NSNumber)?.doubleValue else {
+            Issue.record("Action test '\(name)': expected_view.\(key) is not a number")
+            continue
+        }
+        let got: Double
+        switch key {
+        case "zoom_level": got = model.zoomLevel
+        case "view_offset_x": got = model.viewOffsetX
+        case "view_offset_y": got = model.viewOffsetY
+        default:
+            Issue.record("""
+                Action test '\(name)': expected_view names '\(key)', which is not \
+                part of the view triple (zoom_level / view_offset_x / view_offset_y)
+                """)
+            continue
+        }
+        #expect(
+            got == want,
+            """
+            Action test '\(name)': view state \(key) is \(got) but the corpus \
+            pins \(want). The view transform decides which region of the \
+            document the user is looking at and how every screen coordinate \
+            converts, so a wrong value here is a canvas that shows the wrong thing.
+            """
+        )
+    }
+}
+
 /// Run an action fixture and return the resulting Model. Loads the setup SVG,
 /// then dispatches each `actions[i]` through the REAL
 /// `LayersPanel.dispatchYamlAction` (the same generic dispatcher the UI menu
@@ -3010,6 +3389,9 @@ private func actionModelFromSvg(_ setupSvg: String) -> Model {
 private func runActionModel(_ tc: [String: Any]) -> Model {
     let setupSvg = tc["setup_svg"] as! String
     let model = actionModelFromSvg(setupSvg)
+    // Optional non-identity view seed (VIEWSEED) — must precede the dispatch
+    // loop, since a view action reads the live zoom/pan.
+    seedCaseView(model, tc)
 
     // Install the deterministic id source for the dispatch below: a per-char
     // counter (0,1,2,…) so the FIRST minted id is "01234567" (each char =
@@ -3131,6 +3513,7 @@ private func assertActionTest(_ tc: [String: Any]) {
     }
     #expect(actual == expected, "Action test '\(name)' failed: canonical JSON mismatch")
     assertActionPanelState(tc, model)
+    assertActionView(tc, model)
 }
 
 /// Inc-2 of the shared action-fixture corpus: replay each fixture's action
@@ -3266,5 +3649,323 @@ private func assertKeyTest(_ group: [String: Any]) {
         for group in groups {
             assertKeyTest(group)
         }
+    }
+}
+
+// MARK: - Codec field survival
+
+// Every other codec gate in this file compares `documentToTestJson` STRINGS.
+// That catches a dropped field perfectly -- but only for fields the canonical
+// test-JSON itself emits, and the set of fields the BINARY codec drops is a
+// strict SUBSET of the set the test-JSON drops. So no fixture, however
+// saturated, can red-light a binary-codec drop through the string oracle: it
+// would be normalized back to default on the way in and pass, green and
+// vacuous.
+//
+// This gate compares at the MODEL level instead (Equatable on Path), which is
+// what lets it see the fields the oracle cannot express. The saturated Path
+// below is mirrored by `survival_saturated_path` in
+// jas_dioxus/src/cross_language_test.rs and stated once in prose in the
+// fixture's `saturated_path` block. See transcripts/EDIT_SEMANTICS_FREEZE.md:
+// a round trip speaks to NOTHING, so it must preserve EVERYTHING.
+
+private func survivalGradient() -> Gradient {
+    Gradient(type: .radial, angle: 45, aspectRatio: 200, method: .smooth,
+             dither: true, strokeSubMode: .along,
+             stops: [GradientStop(color: "#ff0000", opacity: 100, location: 0, midpointToNext: 25),
+                     GradientStop(color: "#0000ff", opacity: 50, location: 100, midpointToNext: 50)])
+}
+
+/// The attribute-SATURATED Path: every optional field on the kind set to a
+/// non-default value. Mirrors `survival_saturated_path()` in Rust.
+private func saturatedPath() -> Path {
+    Path(
+        d: [.moveTo(0, 0), .lineTo(10, 10), .closePath],
+        fill: Fill(color: .hsb(h: 120, s: 0.5, b: 0.6, a: 0.8), opacity: 0.6),
+        stroke: Stroke(color: .cmyk(c: 0.1, m: 0.2, y: 0.3, k: 0.4, a: 0.9),
+                       width: 4.5, linecap: .round, linejoin: .bevel,
+                       miterLimit: 7.5, align: .inside,
+                       // Chosen so the SVG round trip is EXACT: the writer emits
+                       // lengths in px at 4 decimal places, so a pt value whose
+                       // px form is not exact at 4dp (4pt -> 5.3333px ->
+                       // 3.999975pt) comes back off by ~1e-5 and the cell would
+                       // read DROPPED for a PRECISION reason rather than an
+                       // omission. 3/1.5/6/0.75 pt are 4/2/8/1 px exactly.
+                       // Mirrored in Rust.
+                       dashPattern: [3, 1.5, 6, 0.75], dashAlignAnchors: true,
+                       startArrow: .closedArrow, endArrow: .circle,
+                       startArrowScale: 150, endArrowScale: 75,
+                       arrowAlign: .centerAtEnd, opacity: 0.75),
+        widthPoints: [StrokeWidthPoint(t: 0, widthLeft: 1, widthRight: 2),
+                      StrokeWidthPoint(t: 1, widthLeft: 3, widthRight: 4)],
+        opacity: 0.5,
+        transform: Transform(a: 2, b: 0, c: 0, d: 3, e: 5, f: 7),
+        locked: true,
+        visibility: .outline,
+        blendMode: .multiply,
+        mask: Mask(subtreeElement: .rect(Rect(x: 1, y: 2, width: 3, height: 4,
+                                              fill: Fill(color: Color(r: 1, g: 1, b: 1)))),
+                   clip: true, invert: true, disabled: false, linked: false,
+                   unlinkTransform: Transform(a: 1, b: 0, c: 0, d: 1, e: 9, f: 9)),
+        fillGradient: survivalGradient(),
+        strokeGradient: survivalGradient(),
+        strokeBrush: "basic/calligraphic_5",
+        strokeBrushOverrides: "{\"angle\":30}",
+        toolOrigin: "blob_brush",
+        name: "name_path",
+        id: "id_path",
+        fillRule: .evenodd
+    )
+}
+
+private func survivalDoc() -> Document {
+    Document(rawLayers: [Layer(name: "Layer 1", children: [.path(saturatedPath())])],
+             rawSelectedLayer: 0, rawSelection: [], rawArtboards: [],
+             rawArtboardOptions: .default)
+}
+
+private func survivalFirstPath(_ d: Document) -> Path? {
+    guard let l = d.layers.first, let e = l.children.first else { return nil }
+    if case .path(let p) = e { return p }
+    return nil
+}
+
+/// PRESERVED / DROPPED for each watched field of `after` against `before`.
+/// The key order matches the Rust `survival_row` vector.
+private func survivalRow(_ before: Path, _ after: Path?) -> [(String, String)] {
+    guard let a = after else {
+        Issue.record("codecFieldSurvival: the saturated Path did not survive the round trip AT ALL")
+        return []
+    }
+    func s(_ ok: Bool) -> String { ok ? "PRESERVED" : "DROPPED" }
+    return [
+        ("common.mask", s(a.mask == before.mask)),
+        ("common.mode", s(a.blendMode == before.blendMode)),
+        ("common.tool_origin", s(a.toolOrigin == before.toolOrigin)),
+        ("fill_gradient", s(a.fillGradient == before.fillGradient)),
+        ("fill_rule", s(a.fillRule == before.fillRule)),
+        ("stroke.align", s(a.stroke?.align == before.stroke?.align)),
+        ("stroke.dash_align_anchors", s(a.stroke?.dashAlignAnchors == before.stroke?.dashAlignAnchors)),
+        // The ACTIVE slice, not the fixed six-slot array: the two ports store
+        // the pattern differently (Rust [f64; 6] + dash_len, Swift a Vec), and
+        // `dash_array()` / `dashPattern` is the shape they share.
+        ("stroke.dash_pattern", s(a.stroke?.dashPattern == before.stroke?.dashPattern)),
+        ("stroke.miter_limit", s(a.stroke?.miterLimit == before.stroke?.miterLimit)),
+        ("stroke_brush", s(a.strokeBrush == before.strokeBrush)),
+        ("stroke_brush_overrides", s(a.strokeBrushOverrides == before.strokeBrushOverrides)),
+        ("stroke_gradient", s(a.strokeGradient == before.strokeGradient)),
+        ("width_points", s(a.widthPoints == before.widthPoints)),
+    ]
+}
+
+@Test func codecFieldSurvival() throws {
+    let raw = readFixture("expected/codec_field_survival.json")
+    let fx = try JSONSerialization.jsonObject(with: raw.data(using: .utf8)!) as! [String: Any]
+    let fields = fx["fields"] as! [String]
+    #expect(!fields.isEmpty, "codecFieldSurvival: the field list is empty")
+    let survival = fx["survival"] as! [String: [String: String]]
+    let overrides = (fx["port_overrides"] as! [String: Any])["entries"] as! [[String: Any]]
+
+    let doc = survivalDoc()
+    let before = survivalFirstPath(doc)!
+
+    let viaJson = testJsonToDocument(documentToTestJson(doc))
+    let viaBin = try binaryToDocument(documentToBinary(doc, compress: false))
+    let viaSvg = svgToDocument(documentToSvg(doc))
+
+    for (codec, rt) in [("test_json", viaJson), ("binary", viaBin), ("svg", viaSvg)] {
+        let got = survivalRow(before, survivalFirstPath(rt))
+        #expect(got.count == fields.count,
+                "codecFieldSurvival: the gate watches \(got.count) fields, the fixture declares \(fields.count)")
+        for (field, actual) in got {
+            #expect(fields.contains(field),
+                    "codecFieldSurvival: field '\(field)' is watched by the gate but absent from the fixture's `fields` list")
+            // A `port_overrides` entry means the two ports measurably disagree
+            // on this cell today; this port is asserted to produce the OTHER
+            // value, so closing the divergence reds this gate until the entry
+            // is deleted.
+            let overrideVal = overrides.first {
+                ($0["codec"] as? String) == codec && ($0["field"] as? String) == field
+                    && ($0["port"] as? String) == "swift"
+            }?["value"] as? String
+            guard let expected = overrideVal ?? survival[codec]?[field] else {
+                Issue.record("codecFieldSurvival: fixture declares no cell for \(codec)/\(field)")
+                continue
+            }
+            let pinNote = overrideVal != nil
+                ? " (a port_overrides entry pins this cell; if the divergence closed, delete the entry)"
+                : ""
+            #expect(expected == actual,
+                    "codecFieldSurvival: \(codec)/\(field) -- fixture says \(expected), swift measured \(actual)\(pinNote)")
+        }
+    }
+}
+
+// MARK: - Binary wire (the byte-level gate)
+
+// RULED 2026-07-27 together with the codec's per-tag trailing extension: every
+// OTHER codec gate compares canonical test-JSON strings, and the fields the
+// binary codec drops are a strict SUBSET of the fields that string oracle also
+// drops. So a one-port slot mismatch in `packElement` would land SILENTLY --
+// extending a format whose divergences we cannot see is not acceptable.
+//
+// This gate compares BYTES against ONE shared golden
+// (test_fixtures/expected/binary_wire.json), which is what makes it a
+// cross-port statement: a port that drifts cannot fix itself by editing its
+// own literal, because there is no per-port literal to edit.
+//
+// Twin: `binary_wire` in jas_dioxus/src/cross_language_test.rs.
+
+/// One element per wire tag, in the fixture's `tag_arity` key order. Mirrors
+/// `wire_tag_elements()` in Rust. The CONTENT is deliberately minimal: arity
+/// is a property of the tag, not of the values.
+private func wireTagElements() -> [Element] {
+    [
+        .layer(Layer(children: [])),
+        .group(Group(children: [])),
+        .line(Line(x1: 0, y1: 0, x2: 1, y2: 1)),
+        .rect(Rect(x: 0, y: 0, width: 1, height: 2)),
+        .circle(Circle(cx: 0, cy: 0, r: 1)),
+        .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 2)),
+        .polyline(Polyline(points: [(0, 0), (1, 1)])),
+        .polygon(Polygon(points: [(0, 0), (1, 1), (2, 0)])),
+        .path(Path(d: [.moveTo(0, 0), .lineTo(1, 1)], fillRule: .nonzero)),
+        .text(Text(x: 1, y: 2, content: "hi", fontFamily: "Arial", fontSize: 12,
+                   fontWeight: "normal", fontStyle: "normal", textDecoration: "none",
+                   width: 10, height: 12)),
+        .textPath(TextPath(d: [.moveTo(0, 0), .lineTo(1, 1)], content: "hi", startOffset: 0,
+                           fontFamily: "Arial", fontSize: 12, fontWeight: "normal",
+                           fontStyle: "normal", textDecoration: "none")),
+        .live(.reference(ReferenceElem(target: ElementRef("m1")))),
+    ]
+}
+
+/// Every LIVE kind, which all share `tag_arity["live"]`.
+private func wireLiveElements() -> [Element] {
+    [
+        .live(.compoundShape(CompoundShape(operation: .union, operands: []))),
+        .live(.reference(ReferenceElem(target: ElementRef("m1")))),
+        .live(.recorded(RecordedElem(ops: [], inputs: []))),
+        .live(.generated(GeneratedElem(conceptId: "spiral", params: [:]))),
+    ]
+}
+
+/// The document a named wire case packs. Mirrors `wire_case_document` in Rust
+/// -- the two constructions ARE the thing being compared, so they must stay
+/// identical shape for identical shape.
+private func wireCaseDocument(_ name: String) -> Document {
+    func doc(_ kids: [Element]) -> Document {
+        Document(layers: [Layer(children: kids)], selectedLayer: 0)
+    }
+    func isText(_ e: Element) -> Bool {
+        if case .text = e { return true }
+        if case .textPath = e { return true }
+        return false
+    }
+    func isLiveOrLayer(_ e: Element) -> Bool {
+        if case .live = e { return true }
+        if case .layer = e { return true }
+        return false
+    }
+    switch name {
+    case "shapes_default":
+        return doc(wireTagElements().filter { !isText($0) && !isLiveOrLayer($0) })
+    case "text_default":
+        return doc(wireTagElements().filter { isText($0) })
+    case "live_default":
+        return doc(wireLiveElements())
+    case "saturated_extension":
+        return doc([.path(saturatedPath())])
+    default:
+        fatalError("binaryWire: unknown case '\(name)'")
+    }
+}
+
+private func wireHex(_ data: Data) -> String {
+    data.map { String(format: "%02x", $0) }.joined()
+}
+
+private func wireUnhex(_ s: String) -> Data {
+    var out = Data()
+    var i = s.startIndex
+    while i < s.endIndex {
+        let j = s.index(i, offsetBy: 2)
+        out.append(UInt8(s[i..<j], radix: 16)!)
+        i = j
+    }
+    return out
+}
+
+@Test func binaryWire() throws {
+    let raw = readFixture("expected/binary_wire.json")
+    let fx = try JSONSerialization.jsonObject(with: raw.data(using: .utf8)!) as! [String: Any]
+
+    // (1) ARITY. Every tag's packed slot count is declared as data, so a slot
+    // added to one port and not the other cannot hide behind a compensating
+    // change elsewhere in the array.
+    let arity = fx["tag_arity"] as! [String: Int]
+    var seen = Set<String>()
+    for elem in wireTagElements() + wireLiveElements() {
+        let label = elementTagLabel(elem)
+        guard let want = arity[label] else {
+            Issue.record("binaryWire: tag_arity declares no '\(label)'")
+            continue
+        }
+        let got = packedElementSlotCount(elem)
+        #expect(got == want,
+                "binaryWire: TAG '\(label)' packs \(got) slots, the fixture declares \(want)")
+        seen.insert(label)
+    }
+    #expect(seen.count == arity.count,
+            "binaryWire: the gate reaches \(seen.count) tags, the fixture declares \(arity.count) -- every tag must be watched")
+
+    // (2) BYTES. One shared golden per case, uncompressed so the pinned string
+    // is the msgpack itself rather than a deflate stream.
+    for case_ in fx["cases"] as! [[String: Any]] {
+        let name = case_["name"] as! String
+        let portHex = (case_["port_hex"] as? [String: String]) ?? [:]
+        let expected = portHex["swift"] ?? (case_["hex"] as! String)
+        let got = wireHex(documentToBinary(wireCaseDocument(name), compress: false))
+        let pinNote = portHex["swift"] != nil
+            ? " (a port_hex entry pins this case as a live divergence; if it closed, delete the entry)"
+            : ""
+        #expect(got == expected,
+                "binaryWire: case '\(name)' bytes changed.\(pinNote) If the codec changed on PURPOSE, regenerate from the Rust helper and update the SHARED fixture.")
+        // The bytes must also decode -- a pinned string that no longer parses
+        // would be a green gate over a broken codec.
+        let decoded = try binaryToDocument(wireUnhex(expected))
+        #expect(!decoded.layers.isEmpty, "binaryWire: case '\(name)' decoded to no layers")
+    }
+}
+
+/// A `jas:`-prefixed attribute obliges the root `<svg>` to declare the
+/// namespace: Foundation's strict XML parser rejects an undeclared prefix, and
+/// it rejects the WHOLE DOCUMENT, not the attribute. `jas:tool-origin` is the
+/// case the saturated survival fixture cannot see, because a saturated path
+/// also carries arrowheads and the arrowheads pull the namespace in.
+///
+/// The element here is what Blob Brush actually commits: a tool-origin tag and
+/// no arrowheads. Mirrors `svg_tool_origin_survives_without_arrowheads` in
+/// jas_dioxus/src/cross_language_test.rs.
+@Test func svgToolOriginSurvivesWithoutArrowheads() {
+    let p = Path(d: [.moveTo(0, 0), .lineTo(10, 10)],
+                 stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 2),
+                 toolOrigin: "blob_brush",
+                 fillRule: .nonzero)
+    let doc = Document(rawLayers: [Layer(name: "L", children: [.path(p)])],
+                       rawSelectedLayer: 0, rawSelection: [], rawArtboards: [],
+                       rawArtboardOptions: .default)
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("jas:tool-origin=\"blob_brush\""),
+            "the writer must emit jas:tool-origin")
+    #expect(svg.contains("xmlns:jas="),
+            "a jas:-prefixed attribute obliges the root <svg> to declare xmlns:jas; emitted SVG was:\n\(svg)")
+
+    let back = svgToDocument(svg)
+    let kids = back.layers.first?.children ?? []
+    #expect(kids.count == 1,
+            "the round-tripped document lost its content entirely (\(kids.count) children) -- an undeclared namespace prefix makes the strict parser reject the whole file")
+    if case .path(let q)? = kids.first {
+        #expect(q.toolOrigin == "blob_brush", "tool origin did not survive the SVG round trip")
     }
 }

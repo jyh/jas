@@ -117,6 +117,27 @@ private func expectOnlyDChanged(
     }
 }
 
+/// The law at a RING-REGENERATING 1 -> 1 site (EDIT_SEMANTICS_FREEZE.md §1.1
+/// T1, third closure): `d` AND `fillRule` are both spoken to, everything else
+/// is preserved. The exemption is not a loosening — the rule is asserted
+/// positively against `boolResultFillRule`, so a site that silently kept the
+/// source's rule still goes red.
+///
+/// Kept separate from `expectOnlyDChanged` on purpose: the ordinary path edits
+/// (anchor move, insert, eraser split) preserve ring structure and therefore
+/// preserve the rule, and must keep failing if they ever stamp it. Mirrors
+/// Rust `assert_only_d_and_ring_rule_changed`.
+private func expectOnlyDAndRingRuleChanged(
+    _ src: Path, _ out: Path, _ label: String,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    #expect(out.fillRule == FillRule(boolResultFillRule),
+            "\(label): rings regenerated through the polygon-set layer wear the generated-geometry rule",
+            sourceLocation: sourceLocation)
+    expectOnlyDChanged(src, out, label, alsoExempt: ["fillRule"],
+                       sourceLocation: sourceLocation)
+}
+
 private func modelWithTheseus(_ d: [PathCommand]) -> (Model, Path) {
     let src = theseusPath(d)
     return (Model(document: Document(
@@ -296,7 +317,14 @@ private func eraseAtRect(_ model: Model, lastX: Double, lastY: Double,
 /// transform and `name`, but must NOT propagate `id`: copying it would leave N
 /// live elements sharing an id and break the unique-id invariant of
 /// REFERENCE_GRAPH.md §2.5. Each fragment gets a FRESH id, minted inside the
-/// effect. (The linear-gradient stop remap is still owed.)
+/// effect.
+///
+/// `fillGradient` / `strokeGradient` join `id` on the exempt list: S-2 makes
+/// the severing arm re-express a LINEAR gradient on each fragment's own
+/// extent, so they are now fields the erase DOES speak to. This assertion is
+/// about the ones it must not; `gradientSplitRemapsLinearStopsOntoEachFragment`
+/// pins their new values, and the #expect below refuses a fragment that still
+/// carries the parent's ramp verbatim.
 @Test func theseusEraseSplitKeepsAppearanceAndNameWithFreshIds() throws {
     let (model, src) = modelWithTheseus([.moveTo(0, 0), .lineTo(100, 0)])
     withCorpusIdCounter {
@@ -307,7 +335,10 @@ private func eraseAtRect(_ model: Model, lastX: Double, lastY: Double,
     var seen: [String] = []
     for i in 0..<n {
         let frag = try #require(pathAt(model, [0, i]))
-        expectOnlyDChanged(src, frag, "erase fragment \(i)", alsoExempt: ["id"])
+        expectOnlyDChanged(src, frag, "erase fragment \(i)",
+                           alsoExempt: ["id", "fillGradient", "strokeGradient"])
+        #expect(frag.fillGradient != src.fillGradient,
+                "erase fragment \(i): the linear fill gradient must be remapped")
         let id = try #require(frag.id,
                               "erase fragment \(i): a split fragment must carry a fresh id")
         #expect(id != src.id,
@@ -317,6 +348,100 @@ private func eraseAtRect(_ model: Model, lastX: Double, lastY: Double,
         seen.append(id)
         #expect(frag.name == "theseus",
                 "erase fragment \(i): the name must survive the split")
+    }
+}
+
+
+/// S-2 AT THE SEAM: a severing erase re-expresses each fragment's LINEAR
+/// gradient on that fragment's own extent. Twin of Rust's
+/// `gradient_split_remaps_linear_stops_onto_each_fragment`.
+///
+/// Geometry chosen so every number is hand-derivable, exactly as the
+/// `gradient_remap` corpus family's vectors are. A horizontal segment from
+/// (0,0) to (120,0) carries a red-to-blue linear gradient at angle 0. The
+/// painter resolves it against `Element.bounds`, which for this stroke-less
+/// path is (0,0,120,0): centre.u = 60, half = 60, so the ramp runs 0..120.
+/// Erasing a 2-wide bite at x = 60 severs it into (0,0)-(59,0) and
+/// (61,0)-(120,0).
+///
+/// Fragment 0's box is (0,0,59,0): centre.u = 29.5, half = 29.5. The red stop
+/// sits at absolute 0 -> L' = 0. The blue stop sits at 120 -> L' ~ 203.39,
+/// clipped; the endpoint sample at 100 is t = 100/203.39 of the way from red to
+/// blue. What the UNFIXED code produced instead: the parent's stops verbatim,
+/// ff0000 and 0000ff -- a fragment covering the left half of the ramp painting
+/// the WHOLE red-to-blue.
+@Test func gradientSplitRemapsLinearStopsOntoEachFragment() throws {
+    let ramp = Gradient(type: .linear, angle: 0, stops: [
+        GradientStop(color: "ff0000", opacity: 100, location: 0),
+        GradientStop(color: "0000ff", opacity: 100, location: 100),
+    ])
+    let model = Model(document: Document(
+        layers: [Layer(children: [
+            .path(Path(d: [.moveTo(0, 0), .lineTo(120, 0)],
+                       fillGradient: ramp, fillRule: .nonzero)),
+        ])],
+        selectedLayer: 0, selection: []))
+    withCorpusIdCounter {
+        eraseAtRect(model, lastX: 60, lastY: 0, x: 60, y: 0, eraserSize: 1)
+    }
+    #expect(model.document.layers[0].children.count == 2,
+            "the bite at x = 60 severs the segment in two")
+    let frag0 = try #require(pathAt(model, [0, 0]))
+    let g0 = try #require(frag0.fillGradient)
+    #expect(g0.stops.count == 2)
+    #expect(g0.stops[0].location == 0.0)
+    #expect(g0.stops[1].location == 100.0)
+    let fb = Element.path(frag0).bounds
+    #expect(abs(fb.x - 0.0) < 1e-9 && abs(fb.width - 59.0) < 1e-9,
+            "fragment 0 is the 0..59 piece, got x=\(fb.x) w=\(fb.width)")
+    let half = fb.width / 2.0
+    let t = 100.0 / (50.0 * ((120.0 - half) / half + 1.0))
+    let c0 = try #require(Color.fromHex(g0.stops[0].color)).toRgba()
+    let c1 = try #require(Color.fromHex(g0.stops[1].color)).toRgba()
+    #expect(abs(c0.0 - 1.0) < 1e-9 && abs(c0.2) < 1e-9,
+            "the fragment's near end is still full red")
+    // Both stop colours are 8-bit hex here, so the far end is compared at
+    // quantisation width rather than 1e-9: 1/255 is 0.0039, and the value this
+    // separates from is 0 (an un-remapped fragment reports 0000ff).
+    #expect(abs(c1.0 - (1.0 - t)) < 1.0 / 255.0 && abs(c1.2 - t) < 1.0 / 255.0,
+            "the fragment's far end is the ramp colour at t=\(t), got \(g0.stops[1].color) \u{2014} an un-remapped fragment would report 0000ff")
+}
+
+/// A RADIAL gradient is NOT remapped, and its stops come through a severing
+/// erase unchanged. Twin of Rust's
+/// `gradient_split_leaves_a_radial_gradient_alone`.
+///
+/// This is the ruled behaviour, not an oversight: a radial gradient's centre is
+/// forced to the element's bbox centre and the model has nowhere to record an
+/// anchor, so a fragment necessarily re-centres. JYH accepted the recentre
+/// (2026-07-26); "gradient anchor" is a separate stone. What this vector
+/// forbids is running the LINEAR remap on it anyway.
+///
+/// Same geometry as the linear vector above, so the ONLY difference is `type`:
+/// drop the linear-only guard and this fragment's 80 moves to 100.
+@Test func gradientSplitLeavesARadialGradientAlone() throws {
+    let stops = [
+        GradientStop(color: "ff0000", opacity: 100, location: 0),
+        GradientStop(color: "0000ff", opacity: 100, location: 80),
+    ]
+    let model = Model(document: Document(
+        layers: [Layer(children: [
+            .path(Path(d: [.moveTo(0, 0), .lineTo(120, 0)],
+                       fillGradient: Gradient(type: .radial, angle: 0, stops: stops),
+                       fillRule: .nonzero)),
+        ])],
+        selectedLayer: 0, selection: []))
+    withCorpusIdCounter {
+        eraseAtRect(model, lastX: 60, lastY: 0, x: 60, y: 0, eraserSize: 1)
+    }
+    #expect(model.document.layers[0].children.count == 2,
+            "the bite at x = 60 severs the segment in two")
+    for i in 0..<2 {
+        let frag = try #require(pathAt(model, [0, i]))
+        let g = try #require(frag.fillGradient)
+        #expect(g.type == .radial)
+        #expect(g.stops == stops,
+                "fragment \(i): a radial gradient's stops are untouched \u{2014} the 80 would become 100 under the linear remap")
     }
 }
 
@@ -381,6 +506,11 @@ private func seedBlobBrushMergeState(_ store: StateStore, _ src: Path) {
 
 /// A 6-point horizontal sweep along `y` from `x0` to `x1`, in a test-private
 /// buffer (the point buffers are process-global and tests run in parallel).
+///
+/// The coordinates are DOCUMENT space, as the point buffer's are on the live
+/// canvas. For a source carrying a `transform` that is not the element's own
+/// `d` space, so a sweep meant to land ON such a source must be given the
+/// coordinates where the source is DRAWN.
 private func seedBlobBrushSweepIn(_ buffer: String, _ x0: Double,
                                   _ x1: Double, _ y: Double) {
     pointBuffersClear(buffer)
@@ -417,12 +547,24 @@ private let theseusSquare: [PathCommand] = [
     let store = StateStore()
     seedBlobBrushMergeState(store, src)
     let buffer = "theseus_blob_merge_one_swift"
-    seedBlobBrushSweepIn(buffer, 50, 150, 50)
+    // The theseus fixture carries transform translate(40,70), so its local
+    // square 0..100 is DRAWN at doc x 40..140, y 70..170. The sweep is aimed
+    // there. (It used to run at doc y=50, which is where the square is STORED
+    // and 20 units above where it appears; the merge matched anyway, which was
+    // the transform-blind bug.)
+    seedBlobBrushSweepIn(buffer, 90, 190, 120)
     runBlobBrushCommitPainting(model, store, buffer: buffer)
     #expect(model.document.layers[0].children.count == 1,
             "the sweep overlapped the one existing blob, so it merged")
-    expectOnlyDChanged(src, try #require(pathAt(model, [0, 0])),
-                       "doc.blob_brush.commit_painting (exactly one match)")
+    // Ring-regenerating: the union rewrote `d` AND re-derived the ring
+    // structure, so `fillRule` is spoken to as well (T1's third closure). The
+    // theseus fixture happens to declare `.evenodd`, which is also the
+    // generated-rings constant, so this vector cannot separate carrying from
+    // stamping — `blobMergeOneMatchStampsTheGeneratedRingsFillRule` is the
+    // vector that does, on a `.nonzero` source.
+    expectOnlyDAndRingRuleChanged(
+        src, try #require(pathAt(model, [0, 0])),
+        "doc.blob_brush.commit_painting (exactly one match)")
 }
 
 /// TWO matches change cardinality, so identity DIES: the merged element
@@ -464,6 +606,52 @@ private let theseusSquare: [PathCommand] = [
             "the merged blob stays a blob-brush element")
 }
 
+/// A SINGULAR `transform` disqualifies a source from the merge.
+///
+/// `scale(1, 0)` flattens the element onto a horizontal line: it has no area
+/// on screen, so there is nothing to paint into, and it has no inverse, so the
+/// unified document-space region could not be written back into its space even
+/// if it did match. The sweep must therefore commit a SECOND element and leave
+/// the degenerate one untouched.
+///
+/// HONEST SCOPE, matching Rust's twin: this vector does NOT separate the
+/// singular-matrix guard in the match loop. `transformPolygonSet` collapses the
+/// source to a zero-area figure and `booleanIntersect` reports empty for that,
+/// so deleting the guard leaves this assertion green. What it pins is the
+/// OUTCOME — a degenerate source is left alone and the sweep commits beside it,
+/// with no crash — which is the corner case a user can actually reach by
+/// scaling a blob to zero height.
+@Test func blobMergeSkipsASourceWhoseTransformIsSingular() throws {
+    let red = Fill(color: Color.fromHex("#ff0000")!)
+    let model = Model(document: Document(
+        layers: [Layer(children: [
+            .path(Path(d: [.moveTo(0, 40), .lineTo(100, 40),
+                           .lineTo(100, 60), .lineTo(0, 60), .closePath],
+                       fill: red,
+                       // det == 0: everything lands on the line y = 50.
+                       transform: Transform(a: 1, b: 0, c: 0, d: 0, e: 0, f: 50),
+                       toolOrigin: "blob_brush",
+                       fillRule: .nonzero)),
+        ])],
+        selectedLayer: 0, selection: []))
+    let store = StateStore()
+    store.set("fill_color", red.color.toHex())
+    store.set("blob_brush_size", 10.0)
+    store.set("blob_brush_angle", 0.0)
+    store.set("blob_brush_roundness", 100.0)
+    let buffer = "blob_singular_transform_swift"
+    // Straight along the collapsed line, so the degenerate source is as
+    // reachable as it can be.
+    seedBlobBrushSweepIn(buffer, 10, 90, 50)
+    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    #expect(model.document.layers[0].children.count == 2,
+            "the degenerate source is skipped, so the sweep commits beside it")
+    let untouched = try #require(pathAt(model, [0, 0]))
+    #expect(untouched.d.count == 5, "the degenerate source keeps its `d`")
+    let fresh = try #require(pathAt(model, [0, 1]))
+    #expect(fresh.transform == nil, "the new blob is the transform-less one")
+}
+
 /// The erase arm PRESERVES `toolOrigin` where the initializer defaults used to
 /// clear it, so an erased fragment is now a blob-merge candidate it previously
 /// was not. A closed path erased once yields ONE fragment (the 1 -> 1 arm),
@@ -483,12 +671,20 @@ private let theseusSquare: [PathCommand] = [
     let store = StateStore()
     seedBlobBrushMergeState(store, src)
     let buffer = "theseus_blob_merge_after_erase_swift"
-    seedBlobBrushSweepIn(buffer, 50, 150, 50)
+    // The theseus fixture carries transform translate(40,70), so its local
+    // square 0..100 is DRAWN at doc x 40..140, y 70..170. The sweep is aimed
+    // there. (It used to run at doc y=50, which is where the square is STORED
+    // and 20 units above where it appears; the merge matched anyway, which was
+    // the transform-blind bug.)
+    seedBlobBrushSweepIn(buffer, 90, 190, 120)
     runBlobBrushCommitPainting(model, store, buffer: buffer)
     #expect(model.document.layers[0].children.count == 1,
             "the erased fragment was merged into, not left beside a new blob")
-    expectOnlyDChanged(src, try #require(pathAt(model, [0, 0])),
-                       "erase then blob_brush merge")
+    // The final step is the blob merge's 1 -> 1 arm, which regenerates rings —
+    // see the note on the vector above for why the fixture's own `.evenodd`
+    // cannot separate the two behaviours here.
+    expectOnlyDAndRingRuleChanged(src, try #require(pathAt(model, [0, 0])),
+                                  "erase then blob_brush merge")
 }
 
 // MARK: - Unanimous attributes on an N -> 1 merge
@@ -516,14 +712,19 @@ private struct BlobAttrs {
     var visibility: Visibility = .preview
     var blendMode: BlendMode = .normal
     var mask: Mask? = nil
+    var name: String? = nil
 }
 
 /// Two overlapping blob-brush sources (left + right, same red fill) bridged by
 /// ONE sweep, so the commit takes the N = 2 merge arm. Returns the merged
 /// element. `buffer` must be unique per test — the point buffers are
 /// process-global and tests run in parallel. Mirrors Rust `merge_two_blobs`.
+/// The sources' local `d` spans x 0..40 and 60..100 at y 40..60; `sweep` is
+/// `(x0, x1, y)` in DOCUMENT space, so a caller that gives its sources a
+/// `transform` must offset the sweep by it to land on them.
 private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
-                           buffer: String) -> Path? {
+                           buffer: String,
+                           sweep: (Double, Double, Double)) -> Path? {
     let red = Fill(color: Color.fromHex("#ff0000")!)
     func blob(_ x0: Double, _ x1: Double, _ a: BlobAttrs) -> Element {
         .path(Path(d: [.moveTo(x0, 40), .lineTo(x1, 40),
@@ -533,6 +734,7 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
                    locked: a.locked, visibility: a.visibility,
                    blendMode: a.blendMode, mask: a.mask,
                    toolOrigin: "blob_brush",
+                   name: a.name,
                    fillRule: .nonzero))
     }
     let model = Model(document: Document(
@@ -543,7 +745,7 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
     store.set("blob_brush_size", 10.0)
     store.set("blob_brush_angle", 0.0)
     store.set("blob_brush_roundness", 100.0)
-    seedBlobBrushSweepIn(buffer, 10, 90, 50)
+    seedBlobBrushSweepIn(buffer, sweep.0, sweep.1, sweep.2)
     runBlobBrushCommitPainting(model, store, buffer: buffer)
     #expect(model.document.layers[0].children.count == 1,
             "the sweep bridged both blobs, so both were merged away")
@@ -559,7 +761,8 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
 @Test func blobMergeCarriesUnanimousAttributes() throws {
     let agreed = BlobAttrs(opacity: 0.5, locked: true, visibility: .outline,
                            blendMode: .multiply, mask: unanimityMask())
-    let out = try #require(mergeTwoBlobs(agreed, agreed, buffer: "unanimity_agree_swift"))
+    let out = try #require(mergeTwoBlobs(agreed, agreed, buffer: "unanimity_agree_swift",
+                                        sweep: (10, 90, 50)))
     #expect(out.opacity == 0.5)
     #expect(out.blendMode == .multiply)
     #expect(out.visibility == .outline)
@@ -578,7 +781,8 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
                          blendMode: .multiply, mask: unanimityMask())
     let right = BlobAttrs(opacity: 0.25, locked: false, visibility: .preview,
                           blendMode: .screen, mask: nil)
-    let out = try #require(mergeTwoBlobs(left, right, buffer: "unanimity_disagree_swift"))
+    let out = try #require(mergeTwoBlobs(left, right, buffer: "unanimity_disagree_swift",
+                                        sweep: (10, 90, 50)))
     #expect(out.opacity == 1.0)
     #expect(out.blendMode == .normal)
     #expect(out.visibility == .preview)
@@ -596,8 +800,184 @@ private func mergeTwoBlobs(_ left: BlobAttrs, _ right: BlobAttrs,
 @Test func blobMergeNeverCarriesTransformEvenWhenUnanimous() throws {
     let withTransform = BlobAttrs(
         transform: Transform(a: 1, b: 0, c: 0, d: 1, e: 40, f: 70))
+    // Both sources carry translate(40,70), so their local x 0..40 / 60..100 at
+    // y 40..60 are DRAWN at doc x 40..80 / 100..140, y 110..130. The sweep is
+    // aimed there — at the old doc y=50 the fixture no longer merges at all,
+    // and the assertion below would be vacuous.
     let out = try #require(mergeTwoBlobs(withTransform, withTransform,
-                                         buffer: "unanimity_transform_swift"))
+                                         buffer: "unanimity_transform_swift",
+                                         sweep: (50, 130, 120)))
     #expect(out.transform == nil,
             "a unanimous transform must NOT ride onto the merge")
+}
+
+// MARK: - `name` at an N -> 1 merge: ASSERTING-SOURCES
+//
+// JYH, ratified 2026-07-27 (EDIT_SEMANTICS_FREEZE.md §3.3, the `name` bullet):
+// for `name` ONLY, unanimity ranges over the sources that ASSERT a name —
+// silence is not a competing claim. "hull" + unnamed -> "hull"; "hull" +
+// "keel" -> the documented default (no name), per T3. Nothing geometric elects
+// the survivor. Mirrors Rust's twin vectors exactly.
+
+/// ONE source asserts a name; the other is silent. The assertion carries.
+///
+/// Separation from the pre-fix behaviour: `name` was not carried at all (the
+/// merge arm's `Path(...)` passed no `name:`), so this returned nil.
+@Test func blobMergeCarriesANameOnlyOneSourceAsserts() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(name: "hull"), BlobAttrs(),
+                                         buffer: "name_one_asserts_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.name == "hull",
+            "a silent source does not veto the only name asserted")
+}
+
+/// The silent source may be either operand — the carry must not depend on
+/// document order, which is geometry (z-order) wearing a different hat.
+@Test func blobMergeCarriesANameAssertedByTheSecondSourceOnly() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(), BlobAttrs(name: "keel"),
+                                         buffer: "name_second_asserts_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.name == "keel",
+            "which operand asserts the name cannot change the answer")
+}
+
+/// ALL-SILENT: nothing is asserted, so the documented default (no name)
+/// stands. The anti-invention pin.
+@Test func blobMergeOfSilentSourcesHasNoName() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(), BlobAttrs(),
+                                         buffer: "name_all_silent_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.name == nil,
+            "no source asserted a name, so the default (none) stands")
+}
+
+/// DISAGREEMENT: two sources assert DIFFERENT names — T2 shape 2 — so T3 takes
+/// the documented default. No winner by z-order, area or document position.
+@Test func blobMergeOfDisagreeingNamesTakesTheDefault() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(name: "hull"),
+                                         BlobAttrs(name: "keel"),
+                                         buffer: "name_disagree_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.name == nil,
+            "two asserted names disagree, so neither is elected")
+}
+
+/// AGREEMENT: both sources assert the SAME name, so asserting-sources reduces
+/// to plain unanimity and the agreed name carries.
+@Test func blobMergeCarriesANameBothSourcesAgreeOn() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(name: "hull"),
+                                         BlobAttrs(name: "hull"),
+                                         buffer: "name_agree_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.name == "hull",
+            "agreeing sources carry their name, as any unanimous field does")
+}
+
+// MARK: - T1's RING TERM: the fill rule belongs to whoever made the rings
+//
+// EDIT_SEMANTICS_FREEZE.md §1.1 T1, third closure: an edit that re-derives an
+// element's ring structure through the polygon-set layer stamps the
+// generated-geometry constant (`boolResultFillRule`). Every blob-brush commit
+// arm builds its `d` from a polygon set — `booleanUnion` on the paint arms,
+// `booleanSubtract` on the erase arm — so its rings are MACHINE-WOUND, and a
+// non-zero declaration over machine-wound rings silently fills holes.
+//
+// The subtlety at the 1-match arm: it is a 1 -> 1 edit, so Theseus preserves
+// everything else — but the rings were REGENERATED, so `fillRule` is precisely
+// a field the edit speaks to. Carrying the source's rule there is
+// OVER-preservation, which the law forbids just as firmly.
+
+/// `spans` are local `x0..x1` boxes at y 40..60, each a blob-brush source
+/// declaring `rule`; the store is seeded for a commit whose fill matches. An
+/// empty `spans` gives the 0 -> 1 (brand-new blob) arm. Mirrors Rust
+/// `blob_doc_with_rule`.
+private func blobDocWithRule(_ spans: [(Double, Double)],
+                             _ rule: FillRule) -> (Model, StateStore) {
+    let red = Fill(color: Color.fromHex("#ff0000")!)
+    let children: [Element] = spans.map { (x0, x1) in
+        .path(Path(d: [.moveTo(x0, 40), .lineTo(x1, 40),
+                       .lineTo(x1, 60), .lineTo(x0, 60), .closePath],
+                   fill: red, toolOrigin: "blob_brush",
+                   id: "src\(x0)", fillRule: rule))
+    }
+    let model = Model(document: Document(
+        layers: [Layer(children: children)], selectedLayer: 0, selection: []))
+    let store = StateStore()
+    store.set("fill_color", red.color.toHex())
+    store.set("blob_brush_size", 10.0)
+    store.set("blob_brush_angle", 0.0)
+    store.set("blob_brush_roundness", 100.0)
+    return (model, store)
+}
+
+/// The 1 -> 1 arm regenerates its rings by union, so it stamps
+/// `boolResultFillRule` instead of carrying the source's `.nonzero`.
+///
+/// Separation from the pre-fix behaviour: the source declares `.nonzero` and
+/// the arm forwarded `pe.fillRule`, so this returned `.nonzero`. The declared
+/// value is deliberately the OPPOSITE of the constant — a source already at
+/// `.evenodd` (as `theseusPath` is) could not tell carrying from stamping.
+@Test func blobMergeOneMatchStampsTheGeneratedRingsFillRule() throws {
+    let (model, store) = blobDocWithRule([(0, 100)], .nonzero)
+    let buffer = "ring_rule_one_match_swift"
+    seedBlobBrushSweepIn(buffer, 10, 90, 50)
+    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    #expect(model.document.layers[0].children.count == 1,
+            "the sweep overlapped the one source, so it took the 1 -> 1 arm")
+    let out = try #require(pathAt(model, [0, 0]))
+    #expect(out.id == "src0.0",
+            "the 1 -> 1 arm is still a survivor — its identity must not die")
+    #expect(out.fillRule == FillRule(boolResultFillRule),
+            "union-generated rings wear the generated-geometry rule, not the source's")
+}
+
+/// The N -> 1 merge arm stamps the constant too — it must not hardcode
+/// `.nonzero` ("parity, not preference", as the arm's own comment conceded).
+@Test func blobMergeOfTwoSourcesStampsTheGeneratedRingsFillRule() throws {
+    let out = try #require(mergeTwoBlobs(BlobAttrs(), BlobAttrs(),
+                                         buffer: "ring_rule_merge_swift",
+                                         sweep: (10, 90, 50)))
+    #expect(out.fillRule == FillRule(boolResultFillRule),
+            "a merge's rings come out of booleanUnion, so they wear the generated-geometry rule")
+}
+
+/// The 0 -> 1 arm — a brand-new blob — also builds its `d` from a unioned
+/// polygon set (the swept dabs), so it stamps the constant as well.
+@Test func blobNewBlobStampsTheGeneratedRingsFillRule() throws {
+    let (model, store) = blobDocWithRule([], .nonzero)
+    let buffer = "ring_rule_new_blob_swift"
+    seedBlobBrushSweepIn(buffer, 10, 90, 50)
+    runBlobBrushCommitPainting(model, store, buffer: buffer)
+    #expect(model.document.layers[0].children.count == 1,
+            "an empty document plus a sweep commits exactly one new blob")
+    let out = try #require(pathAt(model, [0, 0]))
+    #expect(out.fillRule == FillRule(boolResultFillRule),
+            "the swept region is a machine-wound polygon set like any other")
+}
+
+/// The ERASE arm is the third ring-regenerating blob site, and the one where
+/// the corruption is easiest to reach: `booleanSubtract` can punch a HOLE ring
+/// into a source, and a carried `.nonzero` declaration over machine-wound
+/// rings fills exactly that hole back in.
+@Test func blobEraseStampsTheGeneratedRingsFillRule() throws {
+    let (model, store) = blobDocWithRule([(0, 100)], .nonzero)
+    let buffer = "ring_rule_erase_swift"
+    // A short sweep well inside the source's y 40..60 band, so the subtract
+    // bites a notch rather than clearing the element away.
+    seedBlobBrushSweepIn(buffer, 40, 60, 50)
+    runEffects([["doc.blob_brush.commit_erasing": [
+                    "buffer": buffer, "fidelity_epsilon": "5.0",
+                ]]],
+               ctx: [:], store: store,
+               platformEffects: buildYamlToolEffects(model: model))
+    pointBuffersClear(buffer)
+    #expect(model.document.layers[0].children.count == 1,
+            "the notch leaves a non-empty remainder, so the element survives")
+    let out = try #require(pathAt(model, [0, 0]))
+    #expect(out.d.count != 5,
+            "the erase actually bit into `d` — otherwise the rule assertion below would be watching an unedited element")
+    #expect(out.id == "src0.0",
+            "erase is 1 -> 1 for a surviving element — its identity lives")
+    #expect(out.fillRule == FillRule(boolResultFillRule),
+            "subtract-generated rings wear the generated-geometry rule")
 }

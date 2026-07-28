@@ -1,0 +1,76 @@
+[
+  {
+    "name": "bystander_replace_preserves_containers",
+    "setup_svg": "nested_containers.svg",
+    "txns": [
+      {
+        "name": "hide_the_cluster",
+        "ops": [
+          { "op": "select_by_ids", "ids": ["cluster"] },
+          { "op": "hide_selection" }
+        ]
+      },
+      {
+        "name": "move_a_child_of_the_hidden_cluster",
+        "ops": [
+          { "op": "select_by_ids", "ids": ["alpha"] },
+          { "op": "move_by_ids", "ids": ["alpha"], "dx": 5.0, "dy": 7.0 }
+        ]
+      }
+    ],
+    "expected_json": "bystander_replace_preserves_containers_expected.json"
+  },
+  {
+    "name": "bystander_delete_preserves_containers",
+    "setup_svg": "nested_containers.svg",
+    "txns": [
+      {
+        "name": "delete_beta",
+        "ops": [
+          { "op": "delete_at", "path": [0, 0, 1] }
+        ]
+      }
+    ],
+    "expected_json": "bystander_delete_preserves_containers_expected.json"
+  },
+  {
+    "name": "bystander_insert_after_preserves_containers",
+    "setup_svg": "nested_containers.svg",
+    "txns": [
+      {
+        "name": "insert_gamma_after_alpha",
+        "ops": [
+          {
+            "op": "insert_after",
+            "path": [0, 0, 0],
+            "element": {
+              "Rect": {
+                "x": 40.0,
+                "y": 0.0,
+                "width": 10.0,
+                "height": 10.0,
+                "rx": 0.0,
+                "ry": 0.0,
+                "fill": {
+                  "color": { "Rgb": { "r": 0.0, "g": 1.0, "b": 0.0, "a": 1.0 } },
+                  "opacity": 1.0
+                },
+                "stroke": null,
+                "common": {
+                  "opacity": 1.0,
+                  "mode": "normal",
+                  "transform": null,
+                  "locked": false,
+                  "visibility": "Preview",
+                  "mask": null,
+                  "id": "gamma"
+                }
+              }
+            }
+          }
+        ]
+      }
+    ],
+    "expected_json": "bystander_insert_after_preserves_containers_expected.json"
+  }
+]

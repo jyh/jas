@@ -222,23 +222,58 @@ public struct CompoundShape: Equatable {
         boundsOfPolygonSet(evaluate(precision: DEFAULT_PRECISION))
     }
 
-    /// Replace the compound shape with Polygon elements derived
-    /// from its evaluated geometry. Each polygon carries the
-    /// compound shape's own fill / stroke / common props; rings
-    /// with fewer than 3 points are dropped. See BOOLEAN.md §
-    /// Expand and Release semantics.
+    /// Replace the compound shape with Polygon elements derived from its
+    /// evaluated geometry. Each polygon carries every field the compound
+    /// shape itself carries — fill, stroke, `opacity`, `transform`, `locked`,
+    /// `visibility`, `blendMode` AND `mask` (it used to hand-forward six of
+    /// those and silently drop `blendMode` and `mask`, so a masked, multiplied
+    /// compound expanded to rings that were neither). Rings with fewer than 3
+    /// points are dropped. See BOOLEAN.md § Expand and Release semantics.
+    ///
+    /// IDENTITY is the exception, and the arrow is counted off the ring count
+    /// (T5, transcripts/EDIT_SEMANTICS_FREEZE.md §3.6's "Compound Shape
+    /// EXPAND" row) — matching Rust `CompoundShape::expand` branch for branch:
+    ///
+    ///   one ring    -> 1 -> 1. The identity is PRESERVABLE, so it is
+    ///                  preserved. Killing it would be as much a guess as
+    ///                  carrying one that is not — the branch `pathEraseAtRect`
+    ///                  and the DIVIDE arm already take. A NAMED DELTA from
+    ///                  §3.6, whose EXPAND row writes "fresh mint" flat: the
+    ///                  row describes its 1 -> N heading, and the degenerate
+    ///                  1 -> 1 falls to §3.1.
+    ///   two or more -> 1 -> N. The identity DIES (the cardinality law), so no
+    ///                  ring may wear it; a ring that did would put two live
+    ///                  elements under one id into the caller's hands, and a
+    ///                  reference to that id silently REBINDS to whichever the
+    ///                  index walk reaches first (§3.7).
+    ///
+    /// KNOWN PORT DELTA, stated rather than papered over: on the split arm
+    /// Rust's effect layer (`Controller::expand_compound_shape_minting`) mints
+    /// one FRESH id per fragment against an avoid-set, because a pure function
+    /// has no document and cannot mint. JasSwift's `Controller.expandCompoundShape`
+    /// does not mint, so its fragments are born id-LESS. That is the T3
+    /// documented default rather than a guess, and it is the pre-existing
+    /// Swift behaviour on every arm; closing the delta needs a mint loop in
+    /// the effect layer and is not this function's to make.
+    ///
+    /// `fillGradient` / `strokeGradient` go to nil in both ports: a
+    /// `CompoundShape` has no gradient slot to forward from (a target-only
+    /// field with no counterpart source, per T1's representation term).
     public func expand(precision: Double) -> [Element] {
-        let ps = evaluate(precision: precision)
-        return ps.compactMap { ring -> Element? in
-            guard ring.count >= 3 else { return nil }
-            return .polygon(Polygon(
+        let rings = evaluate(precision: precision).filter { $0.count >= 3 }
+        let identityDies = rings.count > 1
+        return rings.map { ring in
+            .polygon(Polygon(
                 points: ring,
                 fill: fill,
                 stroke: stroke,
                 opacity: opacity,
                 transform: transform,
                 locked: locked,
-                visibility: visibility
+                visibility: visibility,
+                blendMode: blendMode,
+                mask: mask,
+                id: identityDies ? nil : id
             ))
         }
     }
@@ -557,17 +592,13 @@ func canonicalRecordedValue(_ v: Any) -> String {
     case let i as Int:
         return recordedFmt(Double(i))
     case let s as String:
-        let escaped = s.replacingOccurrences(of: "\\", with: "\\\\")
-                       .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"\(escaped)\""
+        return jsonEscapeString(s)
     case let arr as [Any]:
         return "[\(arr.map(canonicalRecordedValue).joined(separator: ","))]"
     case let obj as [String: Any]:
         let keys = obj.keys.sorted()
         let entries = keys.map { k -> String in
-            let escaped = k.replacingOccurrences(of: "\\", with: "\\\\")
-                           .replacingOccurrences(of: "\"", with: "\\\"")
-            return "\"\(escaped)\":\(canonicalRecordedValue(obj[k]!))"
+            "\(jsonEscapeString(k)):\(canonicalRecordedValue(obj[k]!))"
         }
         return "{\(entries.joined(separator: ","))}"
     default:
@@ -578,10 +609,9 @@ func canonicalRecordedValue(_ v: Any) -> String {
 /// Canonical JSON of a single recipe op: `{op, params, targets}` with sorted
 /// params keys. Mirrors the Rust op emitter in `element_json`.
 func canonicalRecordedOp(_ op: PrimitiveOp) -> String {
-    let targets = op.targets.map { "\"\($0)\"" }.joined(separator: ",")
-    let opEscaped = op.op.replacingOccurrences(of: "\\", with: "\\\\")
-                        .replacingOccurrences(of: "\"", with: "\\\"")
-    return "{\"op\":\"\(opEscaped)\",\"params\":\(canonicalRecordedValue(op.params))," +
+    let targets = op.targets.map { jsonEscapeString($0) }.joined(separator: ",")
+    return "{\"op\":\(jsonEscapeString(op.op))," +
+        "\"params\":\(canonicalRecordedValue(op.params))," +
         "\"targets\":[\(targets)]}"
 }
 
@@ -1415,6 +1445,55 @@ public enum LiveVariant: Equatable {
         case .generated(let gen):
             var updated = gen
             updated.visibility = visibility
+            return .generated(updated)
+        }
+    }
+
+    /// Return a copy with the live element's own `opacity` replaced. Every
+    /// conformer already STORES `opacity` (and reports it through the
+    /// ``opacity`` accessor); only the setter was missing, which made
+    /// `Element.withCommon`'s live arm a silent no-op for a Properties-panel
+    /// Opacity edit while jas_dioxus wrote it through `common_mut()`.
+    public func withOpacity(_ opacity: Double) -> LiveVariant {
+        switch self {
+        case .compoundShape(let cs):
+            var updated = cs
+            updated.opacity = opacity
+            return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.opacity = opacity
+            return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.opacity = opacity
+            return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.opacity = opacity
+            return .generated(updated)
+        }
+    }
+
+    /// Return a copy with the live element's own `blendMode` replaced. The
+    /// `withOpacity` note applies verbatim.
+    public func withBlendMode(_ blendMode: BlendMode) -> LiveVariant {
+        switch self {
+        case .compoundShape(let cs):
+            var updated = cs
+            updated.blendMode = blendMode
+            return .compoundShape(updated)
+        case .reference(let r):
+            var updated = r
+            updated.blendMode = blendMode
+            return .reference(updated)
+        case .recorded(let rec):
+            var updated = rec
+            updated.blendMode = blendMode
+            return .recorded(updated)
+        case .generated(let gen):
+            var updated = gen
+            updated.blendMode = blendMode
             return .generated(updated)
         }
     }

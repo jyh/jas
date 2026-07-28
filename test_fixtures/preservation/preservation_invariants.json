@@ -1,0 +1,494 @@
+[
+  {
+    "name": "move_nested_rect_is_1to1",
+    "doc": "T1/§3.1 Theseus. Move one rect nested two levels deep. Speaks to the rect's own geometry only; every id in the document survives, and both containers (lyr_main, grp_inner) are bystanders that must come back byte-identical.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [
+      "r_front"
+    ],
+    "speaks_to": [
+      "x",
+      "y"
+    ],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "move front rect",
+        "ops": [
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_front"
+            ]
+          },
+          {
+            "op": "move_selection",
+            "dx": 10.0,
+            "dy": 0.0
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "delete_bystander_leaf_keeps_containers",
+    "doc": "§3.7 / T4. Deleting one leaf ends exactly one identity. The two containers are rebuilt to reach the target — the bystander clause says they must survive the rebuild unchanged.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "delete",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": [
+      "r_bystander"
+    ],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "delete the bystander rect",
+        "ops": [
+          {
+            "op": "delete_at",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "boolean_union_merges_two_rects",
+    "doc": "§3.3 / §3.6 UNION row. N→1: both operand identities die and the result mints a fresh id. Neither operand's id may ride out on the result — 'the frontmost source keeps the id' is the rejected rule, and over-preservation is as much a violation as under-preservation.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "merge",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": [
+      "r_back",
+      "r_front"
+    ],
+    "expected_fresh_ids": 1,
+    "txns": [
+      {
+        "name": "union the two nested rects",
+        "ops": [
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_back",
+              "r_front"
+            ]
+          },
+          {
+            "op": "boolean_union"
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "wrap_two_rects_in_group",
+    "doc": "§3.4 WRAP / T5. The arrow counts material at stake: 0→1 for the new container, 1→1 for each child. Every child id survives; the wrapper's id is the one supplied by the op, and must not duplicate an existing one.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "wrap",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": [],
+    "expected_fresh_ids": 1,
+    "txns": [
+      {
+        "name": "wrap the two nested rects",
+        "ops": [
+          {
+            "op": "wrap_in_group",
+            "paths": [
+              [
+                0,
+                0,
+                0
+              ],
+              [
+                0,
+                0,
+                1
+              ]
+            ],
+            "id": "grp_wrap"
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "unpack_inner_group",
+    "doc": "§3.4 UNWRAP / T5. The container's identity ends; the children keep theirs (both ports' apply_unpack_group_at already say 'children keep their ids — NO minting'). The outer layer is a bystander it must rebuild to reach the group.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "unwrap",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": [
+      "grp_inner"
+    ],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "unpack the inner group",
+        "ops": [
+          {
+            "op": "unpack_group_at",
+            "path": [
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "blob_paint_into_one_blob_is_1to1",
+    "doc": "§3.1 Theseus + T1's RING TERM, driven through the production blob-brush gesture rather than op_apply (the commit arms have no op verb at all). The sweep overlaps blob_left only, so the commit takes the 1-match arm: the element survives with its id, and the ONLY keys that may differ are `d` and `fill_rule` — the latter because the union RE-DERIVED the rings, which is exactly what T1's third closure says such an edit speaks to. blob_right, r_bystander and the container lyr_blob are bystanders. `must_change` names both keys, which is what makes this vector SEPARATE the ring term rather than merely tolerate it: `subject_fields_only` is blind to anything listed in `speaks_to`, so without the claim an arm that carried the source's rule would stay green here (measured: it does).",
+    "setup_svg": "preservation_blob_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [
+      "blob_left"
+    ],
+    "speaks_to": [
+      "d",
+      "fill_rule"
+    ],
+    "must_change": [
+      "d",
+      "fill_rule"
+    ],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "tool": "blob_brush",
+    "app_state": {
+      "fill_color": "#ff0000",
+      "blob_brush_size": 10.0,
+      "blob_brush_merge_only_with_selection": false
+    },
+    "events": [
+      {
+        "kind": "press",
+        "x": 5.0,
+        "y": 37.5
+      },
+      {
+        "kind": "move",
+        "x": 15.0,
+        "y": 37.5,
+        "dragging": true
+      },
+      {
+        "kind": "move",
+        "x": 25.0,
+        "y": 37.5,
+        "dragging": true
+      },
+      {
+        "kind": "release",
+        "x": 25.0,
+        "y": 37.5
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "blob_paint_merges_two_blobs",
+    "doc": "§3.3 / the cardinality law, at the arm §4's ratification condition records as having ZERO corpus coverage: 'no gesture fixture reaches the N>=2 merge arm'. One sweep bridges blob_left and blob_right, so both identities die and the result wears exactly one freshly minted id. Neither source's id may ride out — over-preservation is as much a violation as under-preservation. lyr_blob and r_bystander are the bystanders.",
+    "setup_svg": "preservation_blob_attrs.svg",
+    "cardinality": "merge",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": [
+      "blob_left",
+      "blob_right"
+    ],
+    "expected_fresh_ids": 1,
+    "tool": "blob_brush",
+    "app_state": {
+      "fill_color": "#ff0000",
+      "blob_brush_size": 10.0,
+      "blob_brush_merge_only_with_selection": false
+    },
+    "events": [
+      {
+        "kind": "press",
+        "x": 10.0,
+        "y": 37.5
+      },
+      {
+        "kind": "move",
+        "x": 45.0,
+        "y": 37.5,
+        "dragging": true
+      },
+      {
+        "kind": "move",
+        "x": 80.0,
+        "y": 37.5,
+        "dragging": true
+      },
+      {
+        "kind": "release",
+        "x": 80.0,
+        "y": 37.5
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "blob_paint_beside_everything_creates_without_minting",
+    "doc": "The 0 -> 1 arm. The sweep lands where nothing matches, so the commit creates a brand-new blob beside the existing artwork. No creation tool in this app mints an element id (§5.1), so expected_fresh_ids is 0 — and all THREE existing elements plus the container are bystanders, which makes this the widest T4 watch in the family.",
+    "setup_svg": "preservation_blob_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [],
+    "speaks_to": [],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "tool": "blob_brush",
+    "app_state": {
+      "fill_color": "#ff0000",
+      "blob_brush_size": 10.0,
+      "blob_brush_merge_only_with_selection": false
+    },
+    "events": [
+      {
+        "kind": "press",
+        "x": 10.0,
+        "y": 90.0
+      },
+      {
+        "kind": "move",
+        "x": 30.0,
+        "y": 90.0,
+        "dragging": true
+      },
+      {
+        "kind": "move",
+        "x": 50.0,
+        "y": 90.0,
+        "dragging": true
+      },
+      {
+        "kind": "release",
+        "x": 50.0,
+        "y": 90.0
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "compound_operand_dup_id_is_deduped_on_import",
+    "doc": "id_uniqueness at the SERIALIZATION BOUNDARY (REFERENCE_GRAPH.md 2.5). The setup SVG is ill-formed on purpose: a live compound shape's OPERAND repeats the id of an earlier tree child. Every document reader runs dedupe_element_ids / dedupeElementIds to establish the invariant on import; those walks descended through group/layer children only, so an operand duplicate rode through untouched and the LOADED document violated the invariant its own reader exists to enforce. The edit here is deliberately trivial (move the bystander rect) - the vector is not about the edit, it is about what the reader handed the edit. Nothing else in the corpus watches the reader this way: id_uniqueness is evaluated on the post-edit document, and a 1:1 move carries an import-time duplicate straight through to it.",
+    "setup_svg": "preservation_compound_operand_ids.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [
+      "r_bystander"
+    ],
+    "speaks_to": [
+      "x",
+      "y"
+    ],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "move bystander rect",
+        "ops": [
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_bystander"
+            ]
+          },
+          {
+            "op": "move_selection",
+            "dx": 10.0,
+            "dy": 0.0
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "lock_a_group_keeps_the_group_itself",
+    "doc": "T4 in its purest form. Locking a group speaks to `locked` and nothing else, so the container must come back carrying its own id, name, opacity and transform. Swift's Controller.lockSelection rebuilt the Group from an inline five-argument literal, so the very container the artist locked lost its identity; Rust's lock_element is clone-then-mutate and never had the hole. The lock materializes onto the descendants too (both ports recurse), so r_back and r_front are subjects rather than bystanders here; lyr_main and r_bystander are the T4 witnesses.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [
+      "grp_inner",
+      "r_back",
+      "r_front"
+    ],
+    "speaks_to": [
+      "locked"
+    ],
+    "must_change": [
+      "locked"
+    ],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "lock the inner group",
+        "ops": [
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "grp_inner"
+            ]
+          },
+          {
+            "op": "lock_selection"
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "unlock_all_keeps_every_container_it_walks",
+    "doc": "T4. unlock_all rewrites `locked` on every element in the document, so it rebuilds EVERY container on the way down; each of those containers is a bystander whose own fields must survive. The lock in this vector is put on a LEAF (r_front) so the only container-rebuilding op under test is unlock_all itself, and the lock/unlock pair nets to zero — the document's one real change is the r_bystander nudge, which is what keeps the run from being byte-identical and therefore vacuous.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [
+      "r_bystander"
+    ],
+    "speaks_to": [
+      "x",
+      "y"
+    ],
+    "must_change": [
+      "x"
+    ],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "nudge one rect, then lock a leaf and unlock everything",
+        "ops": [
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_bystander"
+            ]
+          },
+          {
+            "op": "move_selection",
+            "dx": 5.0,
+            "dy": 0.0
+          },
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_front"
+            ]
+          },
+          {
+            "op": "lock_selection"
+          },
+          {
+            "op": "unlock_all"
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  },
+  {
+    "name": "show_all_keeps_every_container_it_walks",
+    "doc": "T4. show_all walks the whole document resetting `visibility`, rebuilding every container it passes; those containers are bystanders. The hide is applied to a LEAF (r_front) so show_all is the only container-rebuilding op under test, and hide/show nets to zero — the r_bystander nudge is the document's one real change, so the run is not byte-identical and the invariants are not vacuous.",
+    "setup_svg": "preservation_nested_attrs.svg",
+    "cardinality": "one_to_one",
+    "subject_ids": [
+      "r_bystander"
+    ],
+    "speaks_to": [
+      "x",
+      "y"
+    ],
+    "must_change": [
+      "x"
+    ],
+    "consumed_ids": [],
+    "expected_fresh_ids": 0,
+    "txns": [
+      {
+        "name": "nudge one rect, then hide a leaf and show everything",
+        "ops": [
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_bystander"
+            ]
+          },
+          {
+            "op": "move_selection",
+            "dx": 5.0,
+            "dy": 0.0
+          },
+          {
+            "op": "select_by_ids",
+            "ids": [
+              "r_front"
+            ]
+          },
+          {
+            "op": "hide_selection"
+          },
+          {
+            "op": "show_all"
+          }
+        ]
+      }
+    ],
+    "expected_violations": {
+      "rust": [],
+      "swift": []
+    }
+  }
+]

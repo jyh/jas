@@ -52,7 +52,7 @@ parameters so a future panel could wire them to sliders.
 ## Selection requirement
 
 Smooth only affects paths in the current selection. With no
-selection, the tool does nothing — matching Illustrator. This
+selection, the tool does nothing — matching the incumbent. This
 makes Smooth a targeted tool rather than a "smooth everything
 the cursor crosses" free-for-all.
 
@@ -63,7 +63,7 @@ to the document so the user sees the geometry update live.
 
 ## Known gaps
 
-- **Cursor ring** — Illustrator draws a visible circle around
+- **Cursor ring** — the incumbent draws a visible circle around
   the cursor showing the smooth radius. Not currently wired,
   though the workspace state already has `SMOOTH_SIZE` available.
 - **Smoothness parameter UI** — SMOOTH_SIZE / SMOOTH_ERROR are

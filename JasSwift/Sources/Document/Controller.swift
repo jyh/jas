@@ -6,6 +6,100 @@ import Foundation
 /// Since Document is immutable (a struct), mutations produce a new
 /// Document that replaces the old one in the Model.
 
+// MARK: - Boolean-result common properties (EDIT_SEMANTICS_FREEZE.md §3.3/§3.6)
+
+/// The non-paint fields a boolean result wears — the Swift stand-in for Rust's
+/// `CommonProps`, which this port has no shared carrier for (§3.5's cross-port
+/// field-vocabulary note). Defaults are exactly `CommonProps::default()` /
+/// `Polygon.init`'s, so "falls to the documented default" is one shape here and
+/// there.
+///
+/// `toolOrigin` is carried but only REPRESENTABLE on a Path result: in Rust it
+/// lives on `CommonProps` for all eleven kinds, in Swift it is a stored
+/// property of `Path` alone. The single-ring (Polygon) arm therefore cannot
+/// hold a unanimous marker. That is the scheduled vocabulary divergence §3.5
+/// names, not something `applyDestructiveBoolean` can fix from the inside.
+struct BooleanCommon {
+    var name: String? = nil
+    var id: String? = nil
+    var opacity: Double = 1.0
+    var transform: Transform? = nil
+    var locked: Bool = false
+    var visibility: Visibility = .preview
+    var blendMode: BlendMode = .normal
+    var mask: Mask? = nil
+    var toolOrigin: String? = nil
+
+    /// The 1→1 survivor arms (SUBTRACT_FRONT / SUBTRACT_BACK / CROP / TRIM, and
+    /// DIVIDE's designated operand): full Theseus preservation, §3.1. Rust's
+    /// twin is `survivor.common().clone()`.
+    init(preserving e: Element) {
+        name = e.name
+        id = e.id
+        opacity = e.opacity
+        transform = e.transform
+        locked = e.isLocked
+        visibility = e.visibility
+        blendMode = e.blendMode
+        mask = e.mask
+        toolOrigin = booleanToolOrigin(e)
+    }
+
+    init() {}
+}
+
+/// `toolOrigin` reader over an `Element`. Path is the only Swift kind that
+/// carries one; see `BooleanCommon`'s note.
+private func booleanToolOrigin(_ e: Element) -> String? {
+    if case .path(let v) = e { return v.toolOrigin }
+    return nil
+}
+
+/// The `BooleanCommon` an N→1 merge product wears, minus its id (the caller
+/// mints that). The exact twin of Rust's `merged_common`
+/// (`jas_dioxus/src/document/controller.rs`).
+///
+/// PAINT rides from `front`: BOOLEAN.md §Operand and paint rules names four
+/// properties — fill, stroke, `opacity`, blend mode — as what a boolean op
+/// SPEAKS TO, and two of them (`opacity`, `blendMode`) live here.
+///
+/// EVERYTHING ELSE follows UNANIMITY: when every source agrees, carrying the
+/// value IS preservation — well-defined, no winner elected — and when they
+/// disagree the fresh element's documented default stands. Nothing geometric
+/// ever breaks the tie; "the frontmost/largest source keeps it" was rejected in
+/// both directions.
+///
+/// `name` follows ASSERTING-SOURCES unanimity (JYH's ratified answer (1)):
+/// unanimity ranges over the sources that ASSERT a name, because absence is not
+/// a competing claim. "hull" + unnamed → "hull"; "hull" + "keel" → the default.
+///
+/// `transform` is carried unanimously and no further. The flattening walk
+/// (`elementToPolygonSet`) contains ZERO transform references, so the result
+/// rings are RAW: a unanimous transform is the only one under which they are
+/// meaningful. What changes is that no operand is elected to donate one.
+func booleanMergedCommon(_ sources: [Element], front: Element) -> BooleanCommon {
+    func unanimous<T: Equatable>(_ get: (Element) -> T) -> T? {
+        guard let first = sources.first.map(get) else { return nil }
+        return sources.allSatisfy { get($0) == first } ? first : nil
+    }
+    var c = BooleanCommon()
+    // Paint, per the ratified four-property rule.
+    c.opacity = front.opacity
+    c.blendMode = front.blendMode
+    if let v = unanimous({ $0.transform }) { c.transform = v }
+    if let v = unanimous({ $0.isLocked }) { c.locked = v }
+    if let v = unanimous({ $0.visibility }) { c.visibility = v }
+    if let v = unanimous({ $0.mask }) { c.mask = v }
+    if let v = unanimous({ booleanToolOrigin($0) }) { c.toolOrigin = v }
+    // ASSERTING-SOURCES: silent sources are not voters.
+    let named = sources.filter { $0.name != nil }
+    if let first = named.first?.name,
+       named.allSatisfy({ $0.name == first }) {
+        c.name = first
+    }
+    return c
+}
+
 public class Controller {
     public let model: Model
 
@@ -25,15 +119,20 @@ public class Controller {
         model.filename = filename
     }
 
+    /// Append a layer. T4: this speaks to `layers` and nothing else, so it goes
+    /// through `Document.replacing`. The inline `Document(...)` it replaced
+    /// passed five of eight fields, and the designated init defaults the rest,
+    /// so a call to THIS METHOD erased the off-canvas symbol masters
+    /// (SYMBOLS.md §6), the Document Setup record and the Print preferences —
+    /// the same failure mode `addElement` below carries a comment about.
+    /// Scoped exactly: no production caller reaches this method today (its only
+    /// callers are tests; the interactive add-layer path is `op_apply`'s
+    /// `wrap_in_layer` / layer-insert arms, and Rust has no `add_layer` on
+    /// Controller at all), so this repair removes a loaded trap rather than a
+    /// user-visible bug.
     public func addLayer(_ layer: Layer) {
         let old = model.document
-        model.editDocument(Document(
-            layers: old.layers + [layer],
-            selectedLayer: old.selectedLayer,
-            selection: old.selection,
-            artboards: old.artboards,
-            artboardOptions: old.artboardOptions
-        ))
+        model.editDocument(old.replacing(layers: old.layers + [layer]))
     }
 
     public func removeLayer(at index: Int) {
@@ -65,25 +164,31 @@ public class Controller {
         let idx = doc.selectedLayer
         let target = doc.layers[idx]
         let childIdx = target.children.count
-        let newLayer = Layer(name: target.name, children: target.children + [element],
-                                opacity: target.opacity, transform: target.transform)
+        // T4: the layer names no part of this edit — the op only appends to it —
+        // so every one of ITS fields comes back unchanged. The inline
+        // `Layer(name:children:opacity:transform:)` this replaced kept four of
+        // eleven, silently erasing the target layer's `id`, `locked`,
+        // `visibility`, `blendMode`, `isolatedBlending`, `knockoutGroup` and
+        // `mask`. Scoped exactly: this is the commit path behind the
+        // `doc.add_element` YAML effect (so every YAML drawing tool), plus
+        // TypeTool, TypeOnPathTool and two path-committing arms in
+        // YamlToolEffects — i.e. it fired on the artist's every shape. Rust
+        // never had the hole: `add_element` appends through
+        // `layers[idx].children_mut()`, so the layer is mutated, not rebuilt.
+        let newLayer = target.withChildren(target.children + [element])
         var layers = doc.layers
         layers[idx] = newLayer
         let es = ElementSelection.all([idx, childIdx])
-        // Preserve every non-layer document field — Document's default
-        // initializer zeros symbols / artboards / artboardOptions /
-        // documentSetup / printPreferences if they aren't passed, so a
-        // shorter call wiped the artboard out from under the user the
-        // moment they drew their first shape. The off-canvas master store
-        // (SYMBOLS.md §6) must survive the same way, so placeInstance /
-        // makeSymbol / createReference don't drop the masters.
-        model.editDocument(Document(layers: layers, symbols: doc.symbols,
-                                  selectedLayer: idx,
-                                  selection: [es],
-                                  artboards: doc.artboards,
-                                  artboardOptions: doc.artboardOptions,
-                                  documentSetup: doc.documentSetup,
-                                  printPreferences: doc.printPreferences))
+        // Preserve every non-layer document field the same structural way:
+        // Document's designated initializer defaults symbols / artboards /
+        // artboardOptions / documentSetup / printPreferences when they aren't
+        // passed, so a shorter call wiped the artboard out from under the user
+        // the moment they drew their first shape. `replacing` forwards
+        // everything not named, so the off-canvas master store (SYMBOLS.md §6)
+        // and the setup/print records survive without a field list to maintain.
+        model.editDocument(doc.replacing(layers: layers,
+                                         selectedLayer: idx,
+                                         selection: [es]))
     }
 
     /// Stamp a stable `id` onto the element at `path` — the lazy
@@ -379,17 +484,12 @@ public class Controller {
         // Only Group / Layer accept new children; on any other root
         // the caller falls back to layer-append.
         guard case .group(let g) = mask.subtreeElement else { return false }
-        let newGroup = Group(
-            children: g.children + [element],
-            opacity: g.opacity,
-            transform: g.transform,
-            locked: g.locked,
-            visibility: g.visibility,
-            blendMode: g.blendMode,
-            isolatedBlending: g.isolatedBlending,
-            knockoutGroup: g.knockoutGroup,
-            mask: g.mask
-        )
+        // T4: the mask's subtree root is a bystander this append rebuilds to
+        // reach its children. The nine-argument literal this replaced looked
+        // exhaustive and still dropped the two fields it never named — the
+        // group's `name` and its `id` — which is precisely why the fix is a
+        // structural one and not a longer list.
+        let newGroup = g.withChildren(g.children + [element])
         let newMask = Mask(
             subtreeElement: .group(newGroup),
             clip: mask.clip,
@@ -746,9 +846,16 @@ public class Controller {
         func lockRecursive(_ elem: Element) -> Element {
             switch elem {
             case .group(let g):
-                return .group(Group(children: g.children.map { lockRecursive($0) },
-                                    opacity: g.opacity, transform: g.transform, locked: true,
-                                    visibility: g.visibility))
+                // T4: locking speaks to `locked`. The Group is the very thing
+                // the artist named, so everything else about it — id, name,
+                // blendMode, mask, isolatedBlending, knockoutGroup — must come
+                // back. The inline five-argument literal this replaced kept
+                // five of eleven fields and DESTROYED the locked group's own
+                // `id`. Rust's `lock_element` is clone-then-mutate and never
+                // had the hole.
+                var v = g.withChildren(g.children.map { lockRecursive($0) })
+                v.locked = true
+                return .group(v)
             default:
                 return elem.withLocked(true)
             }
@@ -789,26 +896,29 @@ public class Controller {
         func unlockChildren(_ elements: [Element]) -> [Element] {
             elements.map { elem in
                 switch elem {
+                // T4: unlocking speaks to `locked`; every other field of every
+                // container this walk rebuilds comes back untouched. The three
+                // inline literals this replaced kept five or six of eleven
+                // fields, so unlock-all destroyed the `id` of EVERY layer and
+                // group in the document (and a Group's `name` besides). Rust's
+                // `unlock_element` is clone-then-mutate and never had the hole.
                 case .group(let g):
-                    let children = unlockChildren(g.children)
-                    return Element.group(Group(children: children, opacity: g.opacity,
-                                              transform: g.transform, locked: false,
-                                              visibility: g.visibility))
+                    var v = g.withChildren(unlockChildren(g.children))
+                    v.locked = false
+                    return Element.group(v)
                 case .layer(let l):
-                    let children = unlockChildren(l.children)
-                    return Element.layer(Layer(name: l.name, children: children,
-                                              opacity: l.opacity, transform: l.transform, locked: false,
-                                              visibility: l.visibility))
+                    var v = l.withChildren(unlockChildren(l.children))
+                    v.locked = false
+                    return Element.layer(v)
                 default:
                     return elem.isLocked ? elem.withLocked(false) : elem
                 }
             }
         }
-        let newLayers = doc.layers.map { layer in
-            let children = unlockChildren(layer.children)
-            return Layer(name: layer.name, children: children,
-                         opacity: layer.opacity, transform: layer.transform, locked: false,
-                         visibility: layer.visibility)
+        let newLayers = doc.layers.map { layer -> Layer in
+            var v = layer.withChildren(unlockChildren(layer.children))
+            v.locked = false
+            return v
         }
         let newDoc = doc.replacing(layers: newLayers, selection: [])
         var newSelection: Selection = []
@@ -852,21 +962,21 @@ public class Controller {
                 newElem = elem.withVisibility(.preview)
                 shownPaths.append(path)
             }
+            // T4: show-all speaks to `visibility`, already written onto
+            // `newElem` above. Rebuilding the container to carry the rewritten
+            // children must change NOTHING else — the two inline literals this
+            // replaced kept five or six of eleven fields, so showing all
+            // destroyed the `id` of every layer and group in the document (and
+            // a Group's `name`). Rust's `show_all_in` is clone-then-mutate.
             switch newElem {
             case .group(let g):
-                let newChildren = g.children.enumerated().map { (i, c) in
+                return .group(g.withChildren(g.children.enumerated().map { (i, c) in
                     showIn(c, path + [i])
-                }
-                return .group(Group(children: newChildren, opacity: g.opacity,
-                                    transform: g.transform, locked: g.locked,
-                                    visibility: g.visibility))
+                }))
             case .layer(let l):
-                let newChildren = l.children.enumerated().map { (i, c) in
+                return .layer(l.withChildren(l.children.enumerated().map { (i, c) in
                     showIn(c, path + [i])
-                }
-                return .layer(Layer(name: l.name, children: newChildren,
-                                    opacity: l.opacity, transform: l.transform, locked: l.locked,
-                                    visibility: l.visibility))
+                }))
             default:
                 return newElem
             }
@@ -911,8 +1021,10 @@ public class Controller {
         let layer = newDoc.layers[layerIdx]
         var newChildren = layer.children
         newChildren.insert(group, at: childIdx)
-        let newLayer = Layer(name: layer.name, children: newChildren,
-                            opacity: layer.opacity, transform: layer.transform)
+        // T4 bystander clause: the layer is rebuilt only to reach its children.
+        // See `addElement` — the same four-of-eleven literal, same seven fields
+        // lost, and the containing layer is the artist's, not this op's.
+        let newLayer = layer.withChildren(newChildren)
         var newLayers = newDoc.layers
         newLayers[layerIdx] = newLayer
         let newSelection: Selection = [ElementSelection.all(insertPath)]
@@ -947,8 +1059,9 @@ public class Controller {
             let layer = newDoc.layers[layerIdx]
             var newChildren = layer.children
             newChildren.insert(contentsOf: children, at: childIdx)
-            let newLayer = Layer(name: layer.name, children: newChildren,
-                                opacity: layer.opacity, transform: layer.transform)
+            // T4 bystander clause: see `addElement`. Same four-of-eleven
+            // literal, same seven fields lost, once per iteration.
+            let newLayer = layer.withChildren(newChildren)
             var newLayers = newDoc.layers
             newLayers[layerIdx] = newLayer
             newDoc = newDoc.replacing(layers: newLayers, selection: [])
@@ -1013,8 +1126,10 @@ public class Controller {
         let layer = newDoc.layers[layerIdx]
         var newChildren = layer.children
         newChildren.insert(compound, at: childIdx)
-        let newLayer = Layer(name: layer.name, children: newChildren,
-                            opacity: layer.opacity, transform: layer.transform)
+        // T4 bystander clause: the layer is rebuilt only to reach its children.
+        // See `addElement` — the same four-of-eleven literal, same seven fields
+        // lost, and the containing layer is the artist's, not this op's.
+        let newLayer = layer.withChildren(newChildren)
         var newLayers = newDoc.layers
         newLayers[layerIdx] = newLayer
         let newSelection: Selection = [ElementSelection.all(insertPath)]
@@ -1060,8 +1175,9 @@ public class Controller {
             let layer = newDoc.layers[layerIdx]
             var newChildren = layer.children
             newChildren.insert(contentsOf: cs.operands, at: childIdx)
-            let newLayer = Layer(name: layer.name, children: newChildren,
-                                opacity: layer.opacity, transform: layer.transform)
+            // T4 bystander clause: see `addElement`. Same four-of-eleven
+            // literal, same seven fields lost, once per iteration.
+            let newLayer = layer.withChildren(newChildren)
             var newLayers = newDoc.layers
             newLayers[layerIdx] = newLayer
             newDoc = newDoc.replacing(layers: newLayers, selection: [])
@@ -1110,8 +1226,9 @@ public class Controller {
             let layer = newDoc.layers[layerIdx]
             var newChildren = layer.children
             newChildren.insert(contentsOf: expanded, at: childIdx)
-            let newLayer = Layer(name: layer.name, children: newChildren,
-                                opacity: layer.opacity, transform: layer.transform)
+            // T4 bystander clause: see `addElement`. Same four-of-eleven
+            // literal, same seven fields lost, once per iteration.
+            let newLayer = layer.withChildren(newChildren)
             var newLayers = newDoc.layers
             newLayers[layerIdx] = newLayer
             newDoc = newDoc.replacing(layers: newLayers, selection: [])
@@ -1167,14 +1284,43 @@ public class Controller {
         let elements = paths.map { doc.getElement($0) }
         let precision = options.precision
 
-        // outputs: one (polygonSet, element-for-paint) pair per fragment.
-        var outputs: [(BoolPolygonSet, Element)] = []
+        // outputs: one (polygonSet, fill, stroke, common) tuple per fragment —
+        // the same shape Rust's `apply_destructive_boolean_minting` builds.
+        var outputs: [(BoolPolygonSet, Fill?, Stroke?, BooleanCommon)] = []
         switch opName {
         case "union", "intersection", "exclude":
             let sets = elements.map { elementToPolygonSet($0, precision: precision) }
             let op: CompoundOperation = opName == "union" ? .union
                 : opName == "intersection" ? .intersection : .exclude
-            outputs.append((applyOperation(op, sets), elements.last!))
+            let front = elements.last!
+            // N → 1. THE REJECTED RULE IN DISGUISE lived on the other side of
+            // this line in Rust (`front.common().clone()` — "the frontmost
+            // source keeps the id", elected by z-order) and as a total DROP
+            // here: this port passed no `id` at all, so a merge of identified
+            // operands produced an identity-less product. Both are failures of
+            // the same clause; identity is preservable exactly when the edit is
+            // one-to-one (the cardinality law), so the product wears a MINTED
+            // id, its paint from the frontmost, and everything else by
+            // unanimity (EDIT_SEMANTICS_FREEZE.md §3.3, §3.6).
+            var common = booleanMergedCommon(elements, front: front)
+            // Identity is minted only when an identity is actually AT STAKE —
+            // i.e. when some operand carried one. Identity in this app is LAZY
+            // (VISION.md §6.2), so a merge of id-less operands kills nothing and
+            // the product takes the fresh element's documented default, `nil`.
+            // Rust's arm is guarded identically.
+            if elements.contains(where: { $0.id != nil }) {
+                var existing = doc.elementIds
+                guard let minted = mintUniqueIds(1, existing: &existing,
+                                                 mint: { generateElementId() })
+                else {
+                    // A failed mint aborts the whole edit — never a
+                    // half-identified merge.
+                    return
+                }
+                common.id = minted[0]
+            }
+            outputs.append((applyOperation(op, sets), front.fill, front.stroke,
+                            common))
         case "subtract_front", "crop":
             let cutter = elementToPolygonSet(elements.last!, precision: precision)
             for survivor in elements.dropLast() {
@@ -1182,13 +1328,17 @@ public class Controller {
                 let res = opName == "crop"
                     ? booleanIntersect(sSet, cutter)
                     : booleanSubtract(sSet, cutter)
-                outputs.append((res, survivor))
+                // 1 → 1: the survivor's identity LIVES (§3.6's survivor row).
+                outputs.append((res, survivor.fill, survivor.stroke,
+                                BooleanCommon(preserving: survivor)))
             }
         case "subtract_back":
             let cutter = elementToPolygonSet(elements.first!, precision: precision)
             for survivor in elements.dropFirst() {
                 let sSet = elementToPolygonSet(survivor, precision: precision)
-                outputs.append((booleanSubtract(sSet, cutter), survivor))
+                outputs.append((booleanSubtract(sSet, cutter),
+                                survivor.fill, survivor.stroke,
+                                BooleanCommon(preserving: survivor)))
             }
         case "divide":
             // Walk operands back-to-front, maintaining a partition
@@ -1212,18 +1362,31 @@ public class Controller {
                 accumulator = newAcc
             }
             for (region, paintIdx) in accumulator {
-                outputs.append((region, elements[paintIdx]))
+                // KNOWN OPEN, and identical in Rust
+                // (`src.common().clone()` at the same arm): DIVIDE is 1 → N
+                // per designated operand, so §3.6's DIVIDE row calls for a
+                // FRESH mint per fragment. Both ports instead copy the
+                // operand's whole common, which repeats its id across every
+                // fragment it was cut into. Deliberately left port-identical
+                // rather than fixed one-sidedly — the repair must land in both
+                // ports in one commit, exactly as the transform-blind class is
+                // scheduled to.
+                let src = elements[paintIdx]
+                outputs.append((region, src.fill, src.stroke,
+                                BooleanCommon(preserving: src)))
             }
         case "trim", "merge":
             let operandSets = elements.map { elementToPolygonSet($0, precision: precision) }
-            var trimmed: [(BoolPolygonSet, Element)] = []
+            var trimmed: [(BoolPolygonSet, Fill?, Stroke?, BooleanCommon)] = []
             for i in 0..<elements.count {
                 var region = operandSets[i]
                 for later in operandSets[(i + 1)...] {
                     region = booleanSubtract(region, later)
                 }
                 if !region.isEmpty {
-                    trimmed.append((region, elements[i]))
+                    // TRIM is 1 → 1 per operand: full preservation.
+                    trimmed.append((region, elements[i].fill, elements[i].stroke,
+                                    BooleanCommon(preserving: elements[i])))
                 }
             }
             if opName == "trim" {
@@ -1232,25 +1395,32 @@ public class Controller {
                 // MERGE: unify touching same-fill survivors. O(N^2)
                 // pass; acceptable for panel-sized selections. The
                 // frontmost contributor wins stroke / common props
-                // on the merged output.
+                // on the merged output — KNOWN OPEN and identical in Rust:
+                // a multi-contributor merge is N → 1, where §3.6 calls for a
+                // fresh mint and unanimity, not a z-order winner. Same
+                // both-ports-at-once repair as the DIVIDE row above.
                 var consumed = [Bool](repeating: false, count: trimmed.count)
                 for i in 0..<trimmed.count {
                     if consumed[i] { continue }
                     consumed[i] = true
                     var merged = trimmed[i].0
-                    var paintSrc = trimmed[i].1
-                    if let fillI = paintSrc.fill {
+                    let fillI = trimmed[i].1
+                    var strokeWinner = trimmed[i].2
+                    var commonWinner = trimmed[i].3
+                    if let fillI = fillI {
                         for j in (i + 1)..<trimmed.count {
                             if consumed[j] { continue }
-                            if let fillJ = trimmed[j].1.fill,
+                            if let fillJ = trimmed[j].1,
                                fillI.color == fillJ.color {
                                 merged = booleanUnion(merged, trimmed[j].0)
-                                paintSrc = trimmed[j].1
+                                // j > i in operand z-order, so j is frontmost.
+                                strokeWinner = trimmed[j].2
+                                commonWinner = trimmed[j].3
                                 consumed[j] = true
                             }
                         }
                     }
-                    outputs.append((merged, paintSrc))
+                    outputs.append((merged, fillI, strokeWinner, commonWinner))
                 }
             }
         default:
@@ -1282,20 +1452,22 @@ public class Controller {
         // operand came out opaque and normal; Rust never had that gap
         // (its rebuild clones the paint source's CommonProps).
         //
-        // NOT paint, and still divergent from Rust: `locked` (written
-        // false here, cloned there) and the identity trio
-        // `name`/`id`/`toolOrigin` plus `mask` (dropped here, cloned
-        // there). BOOLEAN.md's paint rule does not reach them and the
-        // cardinality law (PATH_ERASER_TOOL.md §cardinality law) cuts
-        // both ways across these ops — UNION is N->1 and DIVIDE is
-        // 1->N, where identity dies, while a SUBTRACT_FRONT survivor is
-        // 1->1, where it lives. Banked for a ruling; do not guess it
-        // here. `fillGradient`/`strokeGradient` are dropped by BOTH
-        // ports.
+        // NOT paint: `locked`, `mask` and the identity pair `name`/`id`, plus
+        // the `toolOrigin` capability marker. These used to be written as a
+        // literal `false` / dropped outright here while Rust cloned them, which
+        // was the §3.5 row "Swift boolean rebuild, non-paint fields". They now
+        // ride in `BooleanCommon`, whose value the ARM computed under the
+        // cardinality law: full preservation on a 1→1 survivor (§3.1), fresh
+        // mint + unanimity on an N→1 merge (§3.3).
+        //
+        // `fillGradient`/`strokeGradient` are still dropped by BOTH ports.
+        // §3.6 flags carrying them as an AMENDMENT (it widens BOOLEAN.md's
+        // ratified four-property paint list), so it waits on a ruling and is
+        // not guessed here.
         var newElements: [Element] = []
-        for (ps, paintSrc) in outputs {
+        for (ps, fill, stroke, common) in outputs {
             if opName == "divide" && options.divideRemoveUnpainted
-               && paintSrc.fill == nil && paintSrc.stroke == nil {
+               && fill == nil && stroke == nil {
                 continue
             }
             let kept: [BoolRing] = ps.map { ring in
@@ -1305,15 +1477,20 @@ public class Controller {
             }.filter { $0.count >= 3 }
             if kept.isEmpty { continue }
             if kept.count == 1 {
+                // A Polygon has no `toolOrigin` slot in this port; see
+                // `BooleanCommon`'s note.
                 newElements.append(.polygon(Polygon(
                     points: kept[0],
-                    fill: paintSrc.fill,
-                    stroke: paintSrc.stroke,
-                    opacity: paintSrc.opacity,
-                    transform: paintSrc.transform,
-                    locked: false,
-                    visibility: paintSrc.visibility,
-                    blendMode: paintSrc.blendMode
+                    fill: fill,
+                    stroke: stroke,
+                    opacity: common.opacity,
+                    transform: common.transform,
+                    locked: common.locked,
+                    visibility: common.visibility,
+                    blendMode: common.blendMode,
+                    mask: common.mask,
+                    name: common.name,
+                    id: common.id
                 )))
             } else {
                 var d: [PathCommand] = []
@@ -1324,13 +1501,17 @@ public class Controller {
                 }
                 newElements.append(.path(Path(
                     d: d,
-                    fill: paintSrc.fill,
-                    stroke: paintSrc.stroke,
-                    opacity: paintSrc.opacity,
-                    transform: paintSrc.transform,
-                    locked: false,
-                    visibility: paintSrc.visibility,
-                    blendMode: paintSrc.blendMode,
+                    fill: fill,
+                    stroke: stroke,
+                    opacity: common.opacity,
+                    transform: common.transform,
+                    locked: common.locked,
+                    visibility: common.visibility,
+                    blendMode: common.blendMode,
+                    mask: common.mask,
+                    toolOrigin: common.toolOrigin,
+                    name: common.name,
+                    id: common.id,
                     fillRule: FillRule(boolResultFillRule)
                 )))
             }
@@ -1346,8 +1527,16 @@ public class Controller {
         let layer = newDoc.layers[layerIdx]
         var newChildren = layer.children
         newChildren.insert(contentsOf: newElements, at: childIdx)
-        let newLayer = Layer(name: layer.name, children: newChildren,
-                            opacity: layer.opacity, transform: layer.transform)
+        // T4, THE BYSTANDER CLAUSE: the layer names no part of this edit; the
+        // op only rebuilds it to reach its target, so every one of ITS fields
+        // comes back unchanged. The inline
+        // `Layer(name:children:opacity:transform:)` this replaced kept four of
+        // eleven, silently erasing the layer's `id`, `locked`, `visibility`,
+        // `blendMode`, `isolatedBlending`, `knockoutGroup` and `mask` on EVERY
+        // boolean op — and an inline container rebuild is not a copy API, so no
+        // per-copy-API battery would ever have been written for it (§4.1). Rust
+        // never had the hole: `layers[i].children_mut()` mutates in place.
+        let newLayer = layer.withChildren(newChildren)
         var newLayers = newDoc.layers
         newLayers[layerIdx] = newLayer
         var newSelection: Selection = []

@@ -320,13 +320,28 @@ public struct Document: Equatable {
     }
 
     /// Every element `id` present in this document: the whole layer forest
-    /// (recursing into groups and nested layers) plus the off-canvas symbol
-    /// masters. Id-less elements contribute nothing.
+    /// (recursing into groups and nested layers, and into the operands a live
+    /// compound shape OWNS) plus the off-canvas symbol masters. Id-less
+    /// elements contribute nothing.
     ///
     /// This is the avoid-set for `mintUniqueIds` at every element-id mint.
     /// Masters ARE included: a master's id is a real element id that instances
     /// target by name, so a canvas element must not be minted onto it. Rust's
     /// `Document::element_ids` is the twin.
+    ///
+    /// A compound's operands are NOT path-addressable tree children (they are
+    /// not reported by `childrenOf`), so the walk matches the live payload
+    /// itself. Of the four `LiveVariant` arms only `compoundShape` owns child
+    /// `Element`s; `reference`, `recorded` and `generated` name their inputs
+    /// by id and own none. The inner switch is exhaustive so a future payload
+    /// that gains owned children forces this decision to be made again rather
+    /// than silently going unwalked.
+    ///
+    /// Deliberately UNLIKE `rebuildIdIndex`, which is operands-opaque on
+    /// purpose (an operand is not a reference resolution target). The two
+    /// walks answer different questions: "what may a reference name?" vs
+    /// "what id is already taken?". Uniqueness spans the whole document
+    /// (REFERENCE_GRAPH.md §2.5), so this one must be wider.
     public var elementIds: Set<String> {
         var out: Set<String> = []
         func walk(_ elem: Element) {
@@ -334,6 +349,11 @@ public struct Document: Equatable {
             switch elem {
             case .group(let g): for c in g.children { walk(c) }
             case .layer(let l): for c in l.children { walk(c) }
+            case .live(let variant):
+                switch variant {
+                case .compoundShape(let cs): for operand in cs.operands { walk(operand) }
+                case .reference, .recorded, .generated: break
+                }
             default: break
             }
         }
@@ -588,12 +608,30 @@ private func childrenOf(_ elem: Element) -> [Element] {
     }
 }
 
+/// Replace a container's children and change NOTHING else.
+///
+/// EDIT_SEMANTICS_FREEZE.md T4, the BYSTANDER CLAUSE: *an edit preserves,
+/// unchanged, every element it does not name — including the containers it
+/// rebuilds to reach its target.* `replaceInGroup` / `removeFromGroup` /
+/// `insertAfterInGroup` rebuild every container on the path down to the element
+/// the caller named, and those containers are bystanders.
+///
+/// This used to be a private twin that rebuilt Layer/Group from FOUR fields,
+/// destroying the container's `id`, `mask`, `blendMode`, `visibility`,
+/// `isolatedBlending`, `knockoutGroup` and a Group's `name` on EVERY nested
+/// element edit in the port — so a hidden group un-hid itself when a shape
+/// inside it moved, and every reference bound to a container's id was orphaned.
+/// It now delegates to `Group.withChildren` / `Layer.withChildren`
+/// (`Geometry/Element.swift`), which forward every field, so there is ONE
+/// children-rebuild body per container kind and the omission is not expressible
+/// twice. Rust needs no twin at all: `replace_element` rewrites the child slot
+/// in place, so the parent's `common` is never reconstructed.
 private func withChildren(_ elem: Element, _ newChildren: [Element]) -> Element {
     switch elem {
     case .group(let g):
-        return .group(Group(children: newChildren, opacity: g.opacity, transform: g.transform, locked: g.locked))
+        return .group(g.withChildren(newChildren))
     case .layer(let l):
-        return .layer(Layer(name: l.name, children: newChildren, opacity: l.opacity, transform: l.transform, locked: l.locked))
+        return .layer(l.withChildren(newChildren))
     default:
         fatalError("Element has no children")
     }

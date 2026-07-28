@@ -58,8 +58,18 @@ private func unhex(_ s: String) -> Data {
 /// To regenerate after an intentional codec change: print
 /// `documentToBinary(donutDoc(rule), compress: false)` as hex and update
 /// BOTH ports.
-private let donutNonZeroHex = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919c07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c000009090"
-private let donutEvenOddHex = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919c07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c001009090"
+private let donutNonZeroHex = "4a4153000200000094919b00c2cb3ff000000000000002c0c0c091dc001107c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00000c0c0c0c000c0c0009090"
+private let donutEvenOddHex = "4a4153000200000094919b00c2cb3ff000000000000002c0c0c091dc001107c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00100c0c0c0c000c0c0009090"
+/// The SAME document as written BEFORE the per-tag common extension
+/// (RULED 2026-07-27) joined the codec: TAG_LAYER carries 8 slots (0x98)
+/// and TAG_PATH 12 (0x9c), with no mode / mask / toolOrigin / strokeBrush
+/// / strokeBrushOverrides tail. These were the pinned literals up to that
+/// commit, kept verbatim -- the tolerant-read contract is only worth
+/// something if it is checked against REAL old bytes rather than bytes the
+/// current writer reconstructed. Shared with Rust's
+/// `DONUT_PRE_EXT_NON_ZERO_HEX` / `DONUT_PRE_EXT_EVEN_ODD_HEX`.
+private let donutPreExtNonZeroHex = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919c07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c000009090"
+private let donutPreExtEvenOddHex = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919c07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c001009090"
 /// The same document as written BEFORE fillRule joined the codec: the
 /// TAG_PATH array header is 0x9b (11 slots) instead of 0x9c (12) and the
 /// trailing tag byte is gone. Kept as a literal so the old-format read
@@ -108,8 +118,8 @@ private let donutPreFillRuleHex = "4a4153000200000094919800c2cb3ff00000000000000
 
 // MARK: - Tolerance of a hostile / corrupt fill-rule slot
 
-/// `donutNonZeroHex` with the fill-rule slot's `00` replaced by
-/// `slotHex`. Built from the PRE-fillRule literal so the splice point is
+/// A PRE-EXTENSION blob (8 layer slots, 12 path slots) with the fill-rule
+/// slot's `00` replaced by `slotHex`. Built from the PRE-fillRule literal so the splice point is
 /// derived from real bytes rather than an index counted by hand: bump the
 /// TAG_PATH array header from 11 slots to 12, then insert the slot just
 /// before the document's trailing `selected_layer` + two empty arrays.
@@ -121,12 +131,37 @@ private func donutWithFillRuleSlot(_ slotHex: String) -> Data {
     return unhex(body + slotHex + tail)
 }
 
-/// The splice is only meaningful if it reproduces the real writer's bytes
-/// when handed the real tag, so check that before trusting the malformed
-/// variants below.
-@Test func fillRuleSlotSpliceMatchesTheWriter() {
-    #expect(hex(donutWithFillRuleSlot("00")) == donutNonZeroHex)
-    #expect(hex(donutWithFillRuleSlot("01")) == donutEvenOddHex)
+/// The splice reproduces the PRE-EXTENSION writer exactly, which is what
+/// makes the tolerance vectors below statements about a format that really
+/// existed on disk rather than about a string we assembled. Twin of Rust's
+/// `fill_rule_slot_splice_matches_the_pre_extension_writer`.
+@Test func fillRuleSlotSpliceMatchesThePreExtensionWriter() {
+    #expect(hex(donutWithFillRuleSlot("00")) == donutPreExtNonZeroHex)
+    #expect(hex(donutWithFillRuleSlot("01")) == donutPreExtEvenOddHex)
+}
+
+/// A pre-extension blob loads with the fill rule it was written with AND the
+/// documented defaults for every extension slot -- the tolerant read checked
+/// against real old bytes, not a reconstruction. Twin of Rust's
+/// `binary_reads_a_pre_extension_blob`.
+@Test func binaryReadsAPreExtensionBlob() throws {
+    for (literal, rule) in [(donutPreExtNonZeroHex, FillRule.nonzero),
+                            (donutPreExtEvenOddHex, FillRule.evenodd)] {
+        let doc = try binaryToDocument(unhex(literal))
+        #expect(firstPathRule(doc) == rule)
+        guard case .path(let p) = doc.layers[0].children[0] else {
+            Issue.record("expected Path")
+            return
+        }
+        #expect(p.blendMode == .normal)
+        #expect(p.mask == nil)
+        #expect(p.toolOrigin == nil)
+        #expect(p.strokeBrush == nil)
+        #expect(p.strokeBrushOverrides == nil)
+        #expect(doc.layers[0].blendMode == .normal)
+        // Geometry, so the rows above are not a statement about a husk.
+        #expect(p.d.count == 8)
+    }
 }
 
 /// A blob whose fill-rule slot is not an integer must read as `.nonzero`,

@@ -246,6 +246,9 @@ set):
      overwrote it with the tool's — a real behaviour change,
      recorded here rather than implied.
 
+> **CLOSED 2026-07-27 — see "## Transform" below.** The stone as it was
+> banked is kept verbatim for the record.
+>
 > **BANKED STONE — THE MERGE PIPELINE IS TRANSFORM-BLIND.** Found by the
 > cardinality round's verify lens, driven in both ports. The match test and the
 > union run on the element's RAW `d` (`path_to_polygon_set(&pe.d)` /
@@ -296,6 +299,87 @@ Non-blob-brush elements interleaved between matches in the
 z-stack stay exactly where they were. The unified element
 occupies only the lowest matching z-slot; higher-z matches are
 removed without disturbing non-matching neighbors.
+
+## Transform
+
+The swept region arrives from the point buffer in **document**
+space. An element's `d` is in the element's **own** space, which
+`common.transform` maps into the document. The merge compares the
+two, so both must be expressed in the same space, and the space is
+the document: every candidate's `d` is pushed through its
+`common.transform` before the overlap test and before the union.
+
+Where the result is written back depends on which arm of the
+cardinality law fires:
+
+- **`n == 1`** — the survivor keeps its own `transform`, so its new
+  `d` is the unified document-space region mapped back through the
+  **inverse** of that matrix. The element does not move; only its
+  outline grows.
+- **`n == 0` and `n >= 2`** — the committed element is
+  transform-less (a fresh blob has no matrix, and the unanimity
+  carry excludes `transform`), so its local space *is* the
+  document and the union is written straight in.
+
+A candidate whose `transform` is **singular** is not a merge
+candidate at all. It collapses to a line or a point on screen, so
+there is nothing to paint into, and the `n == 1` write-back has no
+inverse to use. The sweep commits its own element beside it and
+leaves it untouched.
+
+### What the exclusion of `transform` from the unanimity carry now rests on
+
+The `n >= 2` unanimity rule excludes `transform`, and the reason
+recorded when it was ruled was that carrying a matrix would
+compound this blindness. That justification is spent: the pipeline
+is transform-correct, and the `n >= 2` arm is self-consistent
+(document-space union into a transform-less element). Whether a
+unanimous `transform` should now carry — with `d` re-expressed in
+its space — is **open and unruled**; it is not changed here.
+
+### The erase arm is STILL transform-blind
+
+This section describes `commit_painting` only. `commit_erasing`
+(both ports) still runs `path_to_polygon_set(&pe.d)` /
+`pathToPolygonSet(pe.d)` against the document-space sweep with no
+matrix on either side, and writes the remainder back with the
+source's `transform` intact — the same defect, in the same shape,
+one function down. It is unfixed and no fixture sees it: the
+gesture corpus has no erase-mode case at all.
+
+### Radial and freeform gradients are untouched by this
+
+Nothing in this section moves a gradient. Gradients are resolved
+against the element's own bbox, and a merge changes that bbox; that
+is the split-fragment question, recorded in transcripts/GRADIENT.md, not here.
+
+### What the corpus can see
+
+Three gesture fixtures, all reading the same square:
+
+| fixture | matrix | sweep | result |
+| --- | --- | --- | --- |
+| `blob_transform_no_merge` | `translate(300,300)` | doc y=50, clear of the artwork | two children |
+| `blob_transform_merge` | `translate(300,300)` | doc y=336, across the artwork | one child, `d` in local space |
+| `blob_import_merge` | none | across the artwork | one child |
+
+`blob_transform_merge` is the only one whose merged `d` is written
+**through a matrix**, so it is the only one the inverse write-back can
+be seen through: reverting that step alone fails this vector and
+nothing else in either port. The `assert_only_d_changed` family cannot
+see it at all — it grafts the source's `d` onto the output before
+comparing, so it is exact about attributes and structurally blind to
+geometry.
+
+The two MERGING fixtures also gate `jas:tool-origin` surviving an SVG
+import: the field is not a key of the canonical test JSON, so nothing
+serializes it, and only a merge depends on it. Counted mechanically,
+`grep -rl "jas:tool-origin" test_fixtures/svg` returns three files,
+all added with these fixtures; `blob_transform_no_merge` is the one
+that does NOT depend on the tag, since it yields two children either
+way. `blob_import_merge` is the fixture that caught Swift's
+`normalizeElement` rebuilding an imported Path without it, which left
+every path opened from a file untagged and unmergeable.
 
 ## Erase gesture
 

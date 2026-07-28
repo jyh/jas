@@ -765,6 +765,53 @@ private func childrenGeometricBounds(_ children: [Element]) -> BBox {
     return (minX, minY, maxX - minX, maxY - minY)
 }
 
+/// Translate the selected anchors of a command list by (dx, dy).
+///
+/// Anchor `i` is the i'th non-`closePath` command. Moving an anchor drags the
+/// handles that belong to it: a `moveTo` also carries the FOLLOWING curve's
+/// outgoing handle, and a `curveTo` carries its own incoming handle plus the
+/// next curve's outgoing one. Mirrors Rust `move_path_command_points`
+/// (`jas_dioxus/src/geometry/element.rs`).
+///
+/// Factored out of `moveControlPoints`: the `.path` and `.textPath` arms held
+/// two byte-identical copies of this walk, which is the shape that lets two
+/// arms of one switch drift apart.
+fileprivate func movePathCommandPoints(_ d: [PathCommand], _ kind: SelectionKind,
+                                       dx: Double, dy: Double) -> [PathCommand] {
+    var cmds = d
+    var anchorIdx = 0
+    for ci in 0..<cmds.count {
+        switch cmds[ci] {
+        case .closePath:
+            continue
+        default:
+            break
+        }
+        if kind.contains(anchorIdx) {
+            switch cmds[ci] {
+            case .moveTo(let x, let y):
+                cmds[ci] = .moveTo(x + dx, y + dy)
+                if ci + 1 < cmds.count,
+                   case .curveTo(let x1, let y1, let x2, let y2, let ex, let ey) = cmds[ci + 1] {
+                    cmds[ci + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: ex, y: ey)
+                }
+            case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
+                cmds[ci] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x + dx, y: y + dy)
+                if ci + 1 < cmds.count,
+                   case .curveTo(let nx1, let ny1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
+                    cmds[ci + 1] = .curveTo(x1: nx1 + dx, y1: ny1 + dy, x2: nx2, y2: ny2, x: nx, y: ny)
+                }
+            case .lineTo(let x, let y):
+                cmds[ci] = .lineTo(x + dx, y + dy)
+            default:
+                break
+            }
+        }
+        anchorIdx += 1
+    }
+    return cmds
+}
+
 /// An SVG document element. All elements are immutable value types.
 public enum Element: Equatable {
     /// SVG \<line\>
@@ -883,35 +930,43 @@ public enum Element: Equatable {
             return self
         }
         switch self {
-        // Every shape reconstruction below preserves ALL common props
-        // (name / id / visibility / blendMode / mask / gradients), mirroring
-        // Rust `move_control_points` which clones the element / `common`. A move
-        // must keep the element's stable identity (OP_LOG.md §9 / Fork 4: a
-        // journaled `move_selection` resolves `targets` from the moved element's
-        // `common.id`) — dropping the id here silently broke the second drag
-        // frame's targets and the document's id.
-        case .line(let v):
-            return .line(Line(
-                x1: v.x1 + (kind.contains(0) ? dx : 0),
-                y1: v.y1 + (kind.contains(0) ? dy : 0),
-                x2: v.x2 + (kind.contains(1) ? dx : 0),
-                y2: v.y2 + (kind.contains(1) ? dy : 0),
-                stroke: v.stroke, widthPoints: v.widthPoints,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked,
-                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                strokeGradient: v.strokeGradient, name: v.name, id: v.id))
+        // PRESERVATION (EDIT_SEMANTICS_FREEZE.md §3.1): a control-point drag
+        // speaks to POSITION only, so every same-kind arm below is
+        // clone-then-mutate — the Swift counterpart of Rust
+        // `move_control_points`' `..e.clone()` / `let mut new = e.clone()`.
+        // Field omission is not expressible in that form, which is the point:
+        // this switch previously restated each field by hand and the `.path`
+        // and `.textPath` arms stopped short of ten and twenty fields
+        // respectively while five conforming siblings sat around them.
+        // A move must keep the element's stable identity (OP_LOG.md §9 /
+        // Fork 4: a journaled `move_selection` resolves `targets` from the
+        // moved element's `common.id`) — dropping the id here silently broke
+        // the second drag frame's targets and the document's id.
+        //
+        // The ONE arm that is not clone-then-mutate is Rect's partial-corner
+        // case, which changes the element's REPRESENTATION to Polygon (T1's
+        // representation term). It forwards every field with a counterpart on
+        // Polygon, and its two source-only fields — `rx`/`ry` — have none; see
+        // the note there.
+        case .line(var v):
+            if kind.contains(0) { v.x1 += dx; v.y1 += dy }
+            if kind.contains(1) { v.x2 += dx; v.y2 += dy }
+            return .line(v)
         case .rect(let v):
             if kind.isAll(total: 4) {
-                return .rect(Rect(x: v.x + dx, y: v.y + dy, width: v.width, height: v.height,
-                                     rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                                     opacity: v.opacity, transform: v.transform,
-                                     locked: v.locked,
-                                     visibility: v.visibility, blendMode: v.blendMode,
-                                     mask: v.mask, fillGradient: v.fillGradient,
-                                     strokeGradient: v.strokeGradient,
-                                     name: v.name, id: v.id))
+                var n = v
+                n.x += dx; n.y += dy
+                return .rect(n)
             }
+            // Rect -> Polygon. `rx`/`ry` have no counterpart on Polygon and
+            // are DISCARDED here: a rounded rect's corners come out square.
+            // Rust flattens the rounding into the emitted points instead
+            // (`rounded_rect_corner_runs`, ratified answer (3) of
+            // EDIT_SEMANTICS_FREEZE.md §8), so the two ports diverge on a
+            // ROUNDED rect's corner drag. Closing that needs the corner-run
+            // flattener AND the control-point remap that follows it
+            // (`remap_cp_selection_after_move`, which the drag pipeline must
+            // call between samples) — it is not a change to this arm alone.
             var pts = [(v.x, v.y), (v.x + v.width, v.y),
                        (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
             for i in 0..<4 where kind.contains(i) {
@@ -927,14 +982,9 @@ public enum Element: Equatable {
                                        name: v.name, id: v.id))
         case .circle(let v):
             if kind.isAll(total: 4) {
-                return .circle(Circle(cx: v.cx + dx, cy: v.cy + dy, r: v.r,
-                                         fill: v.fill, stroke: v.stroke,
-                                         opacity: v.opacity, transform: v.transform,
-                                         locked: v.locked,
-                                         visibility: v.visibility, blendMode: v.blendMode,
-                                         mask: v.mask, fillGradient: v.fillGradient,
-                                         strokeGradient: v.strokeGradient,
-                                         name: v.name, id: v.id))
+                var n = v
+                n.cx += dx; n.cy += dy
+                return .circle(n)
             }
             var cps = [(v.cx, v.cy - v.r), (v.cx + v.r, v.cy),
                        (v.cx, v.cy + v.r), (v.cx - v.r, v.cy)]
@@ -943,25 +993,16 @@ public enum Element: Equatable {
             }
             let ncx = (cps[1].0 + cps[3].0) / 2
             let ncy = (cps[0].1 + cps[2].1) / 2
-            let nr = max(abs(cps[1].0 - ncx), abs(cps[0].1 - ncy))
-            return .circle(Circle(cx: ncx, cy: ncy, r: nr,
-                                     fill: v.fill, stroke: v.stroke,
-                                     opacity: v.opacity, transform: v.transform,
-                                     locked: v.locked,
-                                     visibility: v.visibility, blendMode: v.blendMode,
-                                     mask: v.mask, fillGradient: v.fillGradient,
-                                     strokeGradient: v.strokeGradient,
-                                     name: v.name, id: v.id))
+            var nc = v
+            nc.cx = ncx
+            nc.cy = ncy
+            nc.r = max(abs(cps[1].0 - ncx), abs(cps[0].1 - ncy))
+            return .circle(nc)
         case .ellipse(let v):
             if kind.isAll(total: 4) {
-                return .ellipse(Ellipse(cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
-                                           fill: v.fill, stroke: v.stroke,
-                                           opacity: v.opacity, transform: v.transform,
-                                           locked: v.locked,
-                                           visibility: v.visibility, blendMode: v.blendMode,
-                                           mask: v.mask, fillGradient: v.fillGradient,
-                                           strokeGradient: v.strokeGradient,
-                                           name: v.name, id: v.id))
+                var n = v
+                n.cx += dx; n.cy += dy
+                return .ellipse(n)
             }
             var cps = [(v.cx, v.cy - v.ry), (v.cx + v.rx, v.cy),
                        (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
@@ -970,101 +1011,23 @@ public enum Element: Equatable {
             }
             let ncx = (cps[1].0 + cps[3].0) / 2
             let ncy = (cps[0].1 + cps[2].1) / 2
-            return .ellipse(Ellipse(cx: ncx, cy: ncy,
-                                       rx: abs(cps[1].0 - ncx), ry: abs(cps[0].1 - ncy),
-                                       fill: v.fill, stroke: v.stroke,
-                                       opacity: v.opacity, transform: v.transform,
-                                       locked: v.locked,
-                                       visibility: v.visibility, blendMode: v.blendMode,
-                                       mask: v.mask, fillGradient: v.fillGradient,
-                                       strokeGradient: v.strokeGradient,
-                                       name: v.name, id: v.id))
-        case .polygon(let v):
-            let newPoints = v.points.enumerated().map { (i, pt) in
+            var ne = v
+            ne.cx = ncx
+            ne.cy = ncy
+            ne.rx = abs(cps[1].0 - ncx)
+            ne.ry = abs(cps[0].1 - ncy)
+            return .ellipse(ne)
+        case .polygon(var v):
+            v.points = v.points.enumerated().map { (i, pt) in
                 kind.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
             }
-            return .polygon(Polygon(points: newPoints,
-                                       fill: v.fill, stroke: v.stroke,
-                                       opacity: v.opacity, transform: v.transform,
-                                       locked: v.locked,
-                                       visibility: v.visibility, blendMode: v.blendMode,
-                                       mask: v.mask, fillGradient: v.fillGradient,
-                                       strokeGradient: v.strokeGradient,
-                                       name: v.name, id: v.id))
-        case .path(let v):
-            var cmds = v.d
-            var anchorIdx = 0
-            for ci in 0..<cmds.count {
-                switch cmds[ci] {
-                case .closePath:
-                    continue
-                default:
-                    break
-                }
-                if kind.contains(anchorIdx) {
-                    switch cmds[ci] {
-                    case .moveTo(let x, let y):
-                        cmds[ci] = .moveTo(x + dx, y + dy)
-                        if ci + 1 < cmds.count,
-                           case .curveTo(let x1, let y1, let x2, let y2, let ex, let ey) = cmds[ci + 1] {
-                            cmds[ci + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: ex, y: ey)
-                        }
-                    case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
-                        cmds[ci] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x + dx, y: y + dy)
-                        if ci + 1 < cmds.count,
-                           case .curveTo(let nx1, let ny1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
-                            cmds[ci + 1] = .curveTo(x1: nx1 + dx, y1: ny1 + dy, x2: nx2, y2: ny2, x: nx, y: ny)
-                        }
-                    case .lineTo(let x, let y):
-                        cmds[ci] = .lineTo(x + dx, y + dy)
-                    default:
-                        break
-                    }
-                }
-                anchorIdx += 1
-            }
-            return .path(Path(d: cmds, fill: v.fill, stroke: v.stroke,
-                                 widthPoints: v.widthPoints,
-                                 opacity: v.opacity, transform: v.transform,
-                                 locked: v.locked, fillRule: v.fillRule))
-        case .textPath(let v):
-            var cmds = v.d
-            var anchorIdx = 0
-            for ci in 0..<cmds.count {
-                switch cmds[ci] {
-                case .closePath:
-                    continue
-                default:
-                    break
-                }
-                if kind.contains(anchorIdx) {
-                    switch cmds[ci] {
-                    case .moveTo(let x, let y):
-                        cmds[ci] = .moveTo(x + dx, y + dy)
-                        if ci + 1 < cmds.count,
-                           case .curveTo(let x1, let y1, let x2, let y2, let ex, let ey) = cmds[ci + 1] {
-                            cmds[ci + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: ex, y: ey)
-                        }
-                    case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
-                        cmds[ci] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x + dx, y: y + dy)
-                        if ci + 1 < cmds.count,
-                           case .curveTo(let nx1, let ny1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
-                            cmds[ci + 1] = .curveTo(x1: nx1 + dx, y1: ny1 + dy, x2: nx2, y2: ny2, x: nx, y: ny)
-                        }
-                    case .lineTo(let x, let y):
-                        cmds[ci] = .lineTo(x + dx, y + dy)
-                    default:
-                        break
-                    }
-                }
-                anchorIdx += 1
-            }
-            return .textPath(TextPath(d: cmds, content: v.content,
-                                          startOffset: v.startOffset,
-                                          fontFamily: v.fontFamily, fontSize: v.fontSize,
-                                          fill: v.fill, stroke: v.stroke,
-                                          opacity: v.opacity, transform: v.transform,
-                                          locked: v.locked))
+            return .polygon(v)
+        case .path(var v):
+            v.d = movePathCommandPoints(v.d, kind, dx: dx, dy: dy)
+            return .path(v)
+        case .textPath(var v):
+            v.d = movePathCommandPoints(v.d, kind, dx: dx, dy: dy)
+            return .textPath(v)
         case .text:
             // Text resize/move via corner handles. When the whole
             // element is selected (kind=.all, e.g. clicking the
@@ -1093,25 +1056,13 @@ public enum Element: Equatable {
             let newDiag = sqrt((new.0 - opp.0) * (new.0 - opp.0)
                               + (new.1 - opp.1) * (new.1 - opp.1))
             let scale = max(0.1, min(50.0, newDiag / oldDiag))
-            let nx = opp.0 + (v.x - opp.0) * scale
-            let ny = opp.1 + (v.y - opp.1) * scale
-            return .text(Text(
-                x: nx, y: ny, tspans: v.tspans,
-                fontFamily: v.fontFamily, fontSize: v.fontSize * scale,
-                fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                textDecoration: v.textDecoration,
-                textTransform: v.textTransform, fontVariant: v.fontVariant,
-                baselineShift: v.baselineShift, lineHeight: v.lineHeight,
-                letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
-                aaMode: v.aaMode, rotate: v.rotate,
-                horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
-                kerning: v.kerning,
-                width: v.width * scale, height: v.height * scale,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked,
-                visibility: v.visibility, blendMode: v.blendMode,
-                mask: v.mask, name: v.name, id: v.id))
+            var nt = v
+            nt.x = opp.0 + (v.x - opp.0) * scale
+            nt.y = opp.1 + (v.y - opp.1) * scale
+            nt.fontSize = v.fontSize * scale
+            nt.width = v.width * scale
+            nt.height = v.height * scale
+            return .text(nt)
         case .live(.reference(let r)) where kind.isAll(total: 0):
             // A reference has no geometry of its own, so a whole-element
             // move (kind=.all) rides on its transform — the only thing
@@ -1216,67 +1167,18 @@ public enum Element: Equatable {
 
     public func withLocked(_ locked: Bool) -> Element {
         switch self {
-        case .line(let v):
-            return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                              stroke: v.stroke, widthPoints: v.widthPoints,
-                              opacity: v.opacity, transform: v.transform,
-                              locked: locked, visibility: v.visibility))
-        case .rect(let v):
-            return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                              rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: locked,
-                              visibility: v.visibility))
-        case .circle(let v):
-            return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                                  fill: v.fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: locked,
-                                  visibility: v.visibility))
-        case .ellipse(let v):
-            return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                    fill: v.fill, stroke: v.stroke,
-                                    opacity: v.opacity, transform: v.transform, locked: locked,
-                                    visibility: v.visibility))
-        case .polyline(let v):
-            return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
-                                     opacity: v.opacity, transform: v.transform, locked: locked,
-                                     visibility: v.visibility))
-        case .polygon(let v):
-            return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
-                                    opacity: v.opacity, transform: v.transform, locked: locked,
-                                    visibility: v.visibility))
-        case .path(let v):
-            return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
-                              widthPoints: v.widthPoints,
-                              opacity: v.opacity, transform: v.transform, locked: locked,
-                              visibility: v.visibility, fillRule: v.fillRule))
-        case .text(let v):
-            return .text(Text(x: v.x, y: v.y, content: v.content,
-                              fontFamily: v.fontFamily, fontSize: v.fontSize,
-                              fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                              textDecoration: v.textDecoration,
-                              width: v.width, height: v.height,
-                              fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: locked,
-                              visibility: v.visibility))
-        case .textPath(let v):
-            return .textPath(TextPath(d: v.d, content: v.content,
-                                      startOffset: v.startOffset,
-                                      fontFamily: v.fontFamily, fontSize: v.fontSize,
-                                      fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                                      textDecoration: v.textDecoration,
-                                      fill: v.fill, stroke: v.stroke,
-                                      opacity: v.opacity, transform: v.transform, locked: locked,
-                                      visibility: v.visibility))
-        case .group(let v):
-            return .group(Group(children: v.children, opacity: v.opacity,
-                                transform: v.transform, locked: locked,
-                                visibility: v.visibility))
-        case .layer(let v):
-            return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
-                                transform: v.transform, locked: locked,
-                                visibility: v.visibility, id: v.id))
-        case .live(let v):
-            return .live(v.withLocked(locked))
+        case .line(var v): v.locked = locked; return .line(v)
+        case .rect(var v): v.locked = locked; return .rect(v)
+        case .circle(var v): v.locked = locked; return .circle(v)
+        case .ellipse(var v): v.locked = locked; return .ellipse(v)
+        case .polyline(var v): v.locked = locked; return .polyline(v)
+        case .polygon(var v): v.locked = locked; return .polygon(v)
+        case .path(var v): v.locked = locked; return .path(v)
+        case .text(var v): v.locked = locked; return .text(v)
+        case .textPath(var v): v.locked = locked; return .textPath(v)
+        case .group(var v): v.locked = locked; return .group(v)
+        case .layer(var v): v.locked = locked; return .layer(v)
+        case .live(let v): return .live(v.withLocked(locked))
         }
     }
 
@@ -1421,19 +1323,30 @@ public enum Element: Equatable {
     }
 
     /// Return a copy of this element with its stable `id` cleared (set to
-    /// nil) on the element itself AND, for groups/layers, recursively on
-    /// every descendant.
+    /// nil) on the element itself AND recursively on every descendant.
     ///
     /// A DUPLICATED element must not inherit the source's identity — two
-    /// elements cannot share an id — so a copy is born id-less (lazy) and
-    /// mints a fresh id only if/when it later becomes a reference target.
-    /// Used by every duplication path (copy/paste/duplicate). Mirrors the
-    /// reference implementation's `clear_ids`. See the stable-identity
-    /// initiative (VISION.md §6.2).
+    /// elements cannot share an id (REFERENCE_GRAPH.md §2.5), and a duplicate
+    /// that did would be worse than a loud break: a reference to the shared id
+    /// silently REBINDS to whichever element the index walk reaches first
+    /// (transcripts/EDIT_SEMANTICS_FREEZE.md §3.7). So a copy is born id-less
+    /// (lazy) and mints a fresh id only if/when it later becomes a reference
+    /// target; `id: nil` is the documented default T3 allows in place of a
+    /// mint. Mirrors the reference implementation's `clear_ids`. See the
+    /// stable-identity initiative (VISION.md §6.2).
     ///
-    /// Leaf elements (and `.live`, whose id rides inline on each conformer)
-    /// only clear their own id; only `.group`/`.layer` carry children to
-    /// recurse into, matching the reference's `children_mut` (None elsewhere).
+    /// The walk mirrors ``Document/elementIds``: it descends `children` AND a
+    /// compound shape's owned `operands`, which are not `children` at all —
+    /// exactly why that walk carries a separate arm for them. It used to stop
+    /// at a live element's own inline id, so copying a compound shape cleared
+    /// the compound's id and left EVERY OPERAND id duplicated, one level below
+    /// the id this helper exists to clear.
+    ///
+    /// Callers: ``Controller/copySelection(dx:dy:)`` and
+    /// ``Controller/detach(_:)``. NOT the clipboard paste path
+    /// (`EditClipboard.translateElement` is a field-preserving copy, id
+    /// included) — this comment used to claim "every duplication path
+    /// (copy/paste/duplicate)", which was never true of paste.
     public func clearingIds() -> Element {
         switch self {
         case .line(let v): return .line(v.withId(nil))
@@ -1450,11 +1363,21 @@ public enum Element: Equatable {
         case .layer(let v):
             return .layer(v.withId(nil).withChildren(v.children.map { $0.clearingIds() }))
         case .live(let v):
-            // Live elements carry their id inline on each conformer; clear
-            // it like any other element. They expose no uniform children
-            // mutator here (mirroring the reference's `children_mut`
-            // returning None for Live), so operands are not recursed into.
-            return .live(v.withId(nil))
+            // Live elements carry their id inline on each conformer; clear it
+            // like any other element. A compound shape ALSO owns its
+            // `operands`, which are not `children`, so they must be walked
+            // here or they keep the source's ids. The inner switch is
+            // exhaustive so a future payload that gains owned children forces
+            // this decision to be made again rather than silently going
+            // unwalked — the same discipline ``Document/elementIds`` uses.
+            let cleared = v.withId(nil)
+            switch cleared {
+            case .compoundShape(var cs):
+                cs.operands = cs.operands.map { $0.clearingIds() }
+                return .live(.compoundShape(cs))
+            case .reference, .recorded, .generated:
+                return .live(cleared)
+            }
         }
     }
 
@@ -1487,67 +1410,18 @@ public enum Element: Equatable {
     /// Return a copy of this element with its `visibility` replaced.
     public func withVisibility(_ visibility: Visibility) -> Element {
         switch self {
-        case .line(let v):
-            return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                              stroke: v.stroke, widthPoints: v.widthPoints,
-                              opacity: v.opacity, transform: v.transform,
-                              locked: v.locked, visibility: visibility))
-        case .rect(let v):
-            return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                              rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: visibility))
-        case .circle(let v):
-            return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                                  fill: v.fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: visibility))
-        case .ellipse(let v):
-            return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                    fill: v.fill, stroke: v.stroke,
-                                    opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                    visibility: visibility))
-        case .polyline(let v):
-            return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
-                                     opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                     visibility: visibility))
-        case .polygon(let v):
-            return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
-                                    opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                    visibility: visibility))
-        case .path(let v):
-            return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
-                              widthPoints: v.widthPoints,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: visibility, fillRule: v.fillRule))
-        case .text(let v):
-            return .text(Text(x: v.x, y: v.y, content: v.content,
-                              fontFamily: v.fontFamily, fontSize: v.fontSize,
-                              fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                              textDecoration: v.textDecoration,
-                              width: v.width, height: v.height,
-                              fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: visibility))
-        case .textPath(let v):
-            return .textPath(TextPath(d: v.d, content: v.content,
-                                      startOffset: v.startOffset,
-                                      fontFamily: v.fontFamily, fontSize: v.fontSize,
-                                      fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                                      textDecoration: v.textDecoration,
-                                      fill: v.fill, stroke: v.stroke,
-                                      opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                      visibility: visibility))
-        case .group(let v):
-            return .group(Group(children: v.children, opacity: v.opacity,
-                                transform: v.transform, locked: v.locked,
-                                visibility: visibility))
-        case .layer(let v):
-            return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
-                                transform: v.transform, locked: v.locked,
-                                visibility: visibility, id: v.id))
-        case .live(let v):
-            return .live(v.withVisibility(visibility))
+        case .line(var v): v.visibility = visibility; return .line(v)
+        case .rect(var v): v.visibility = visibility; return .rect(v)
+        case .circle(var v): v.visibility = visibility; return .circle(v)
+        case .ellipse(var v): v.visibility = visibility; return .ellipse(v)
+        case .polyline(var v): v.visibility = visibility; return .polyline(v)
+        case .polygon(var v): v.visibility = visibility; return .polygon(v)
+        case .path(var v): v.visibility = visibility; return .path(v)
+        case .text(var v): v.visibility = visibility; return .text(v)
+        case .textPath(var v): v.visibility = visibility; return .textPath(v)
+        case .group(var v): v.visibility = visibility; return .group(v)
+        case .layer(var v): v.visibility = visibility; return .layer(v)
+        case .live(let v): return .live(v.withVisibility(visibility))
         }
     }
 
@@ -1600,116 +1474,50 @@ public enum Element: Equatable {
     /// semantics, mirrored from `translate_element` in
     /// `jas_dioxus/src/geometry/element.rs`).
     public func translated(dx: Double, dy: Double) -> Element {
+        // PRESERVATION (EDIT_SEMANTICS_FREEZE.md §3.1): a translation speaks
+        // to POSITION only, so every arm is clone-then-mutate — the Swift
+        // counterpart of Rust `translate_element`'s `..e.clone()`. These arms
+        // were open-coded rebuilds and three of them stopped short: `.path`
+        // dropped `strokeBrush` / `strokeBrushOverrides` / `toolOrigin`, so
+        // an Align-panel nudge stripped a brushed stroke; `.text` and
+        // `.textPath` each dropped all ELEVEN character-panel fields
+        // (letterSpacing, lineHeight, kerning, …), so nudging styled type
+        // reset its typography.
         switch self {
-        case .line(let v):
-            return .line(Line(
-                x1: v.x1 + dx, y1: v.y1 + dy,
-                x2: v.x2 + dx, y2: v.y2 + dy,
-                stroke: v.stroke, widthPoints: v.widthPoints,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                strokeGradient: v.strokeGradient, name: v.name, id: v.id))
-        case .rect(let v):
-            return .rect(Rect(
-                x: v.x + dx, y: v.y + dy,
-                width: v.width, height: v.height,
-                rx: v.rx, ry: v.ry,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
-        case .circle(let v):
-            return .circle(Circle(
-                cx: v.cx + dx, cy: v.cy + dy, r: v.r,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
-        case .ellipse(let v):
-            return .ellipse(Ellipse(
-                cx: v.cx + dx, cy: v.cy + dy, rx: v.rx, ry: v.ry,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
-        case .polyline(let v):
-            let pts = v.points.map { ($0.0 + dx, $0.1 + dy) }
-            return .polyline(Polyline(
-                points: pts, fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
-        case .polygon(let v):
-            let pts = v.points.map { ($0.0 + dx, $0.1 + dy) }
-            return .polygon(Polygon(
-                points: pts, fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id))
-        case .path(let v):
-            return .path(Path(
-                d: translatePathCommands(v.d, dx: dx, dy: dy),
-                fill: v.fill, stroke: v.stroke,
-                widthPoints: v.widthPoints,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                name: v.name, id: v.id, fillRule: v.fillRule))
-        case .text(let v):
-            return .text(Text(
-                x: v.x + dx, y: v.y + dy, tspans: v.tspans,
-                fontFamily: v.fontFamily, fontSize: v.fontSize,
-                fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                textDecoration: v.textDecoration,
-                width: v.width, height: v.height,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                name: v.name, id: v.id))
-        case .textPath(let v):
-            return .textPath(TextPath(
-                d: translatePathCommands(v.d, dx: dx, dy: dy),
-                tspans: v.tspans, startOffset: v.startOffset,
-                fontFamily: v.fontFamily, fontSize: v.fontSize,
-                fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                textDecoration: v.textDecoration,
-                fill: v.fill, stroke: v.stroke,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode, mask: v.mask,
-                name: v.name, id: v.id))
-        case .group(let v):
-            let kids = v.children.map { $0.translated(dx: dx, dy: dy) }
-            return .group(Group(
-                children: kids, opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode,
-                isolatedBlending: v.isolatedBlending,
-                knockoutGroup: v.knockoutGroup,
-                mask: v.mask, name: v.name, id: v.id))
-        case .layer(let v):
-            let kids = v.children.map { $0.translated(dx: dx, dy: dy) }
-            return .layer(Layer(
-                name: v.name, children: kids,
-                opacity: v.opacity, transform: v.transform,
-                locked: v.locked, visibility: v.visibility,
-                blendMode: v.blendMode,
-                isolatedBlending: v.isolatedBlending,
-                knockoutGroup: v.knockoutGroup,
-                mask: v.mask, id: v.id))
+        case .line(var v):
+            v.x1 += dx; v.y1 += dy
+            v.x2 += dx; v.y2 += dy
+            return .line(v)
+        case .rect(var v):
+            v.x += dx; v.y += dy
+            return .rect(v)
+        case .circle(var v):
+            v.cx += dx; v.cy += dy
+            return .circle(v)
+        case .ellipse(var v):
+            v.cx += dx; v.cy += dy
+            return .ellipse(v)
+        case .polyline(var v):
+            v.points = v.points.map { ($0.0 + dx, $0.1 + dy) }
+            return .polyline(v)
+        case .polygon(var v):
+            v.points = v.points.map { ($0.0 + dx, $0.1 + dy) }
+            return .polygon(v)
+        case .path(var v):
+            v.d = translatePathCommands(v.d, dx: dx, dy: dy)
+            return .path(v)
+        case .text(var v):
+            v.x += dx; v.y += dy
+            return .text(v)
+        case .textPath(var v):
+            v.d = translatePathCommands(v.d, dx: dx, dy: dy)
+            return .textPath(v)
+        case .group(var v):
+            v.children = v.children.map { $0.translated(dx: dx, dy: dy) }
+            return .group(v)
+        case .layer(var v):
+            v.children = v.children.map { $0.translated(dx: dx, dy: dy) }
+            return .layer(v)
         case .live(.reference(let r)):
             // A reference has no geometry of its own to translate; its
             // move rides on its transform (the live render seam applies
@@ -1758,99 +1566,25 @@ public enum Element: Equatable {
     /// helper rebuilt each variant with only geometry+stroke+opacity, dropping
     /// the rest, which diverged from Rust's `transform.unwrap_or_default()`
     /// compose that mutates the common block in place.
+    ///
+    /// It is now clone-then-mutate, so "preserving EVERY other field" is a
+    /// property of the FORM rather than of a list a reader has to check. The
+    /// full-field rebuild it replaced was enumerated as complete — but it was
+    /// the same shape as five arms that were not, and no battery watched it.
+    /// `TransformAndStrokeTheseusTests.swift` watches it now.
     private func withTransformSet(_ t: Transform) -> Element {
         switch self {
-        case .line(let v):
-            return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                              stroke: v.stroke, widthPoints: v.widthPoints,
-                              opacity: v.opacity, transform: t,
-                              locked: v.locked, visibility: v.visibility,
-                              blendMode: v.blendMode, mask: v.mask,
-                              strokeGradient: v.strokeGradient, name: v.name, id: v.id))
-        case .rect(let v):
-            return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                              rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: t, locked: v.locked,
-                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                              fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                              name: v.name, id: v.id))
-        case .circle(let v):
-            return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                                  fill: v.fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: t, locked: v.locked,
-                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                  fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                  name: v.name, id: v.id))
-        case .ellipse(let v):
-            return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                    fill: v.fill, stroke: v.stroke,
-                                    opacity: v.opacity, transform: t, locked: v.locked,
-                                    visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                    name: v.name, id: v.id))
-        case .polyline(let v):
-            return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
-                                     opacity: v.opacity, transform: t, locked: v.locked,
-                                     visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                     fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                     name: v.name, id: v.id))
-        case .polygon(let v):
-            return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
-                                    opacity: v.opacity, transform: t, locked: v.locked,
-                                    visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                    name: v.name, id: v.id))
-        case .path(let v):
-            return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
-                              widthPoints: v.widthPoints,
-                              opacity: v.opacity, transform: t, locked: v.locked,
-                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                              fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                              strokeBrush: v.strokeBrush, strokeBrushOverrides: v.strokeBrushOverrides,
-                              toolOrigin: v.toolOrigin, name: v.name, id: v.id, fillRule: v.fillRule))
-        case .text(let v):
-            return .text(Text(x: v.x, y: v.y, tspans: v.tspans,
-                              fontFamily: v.fontFamily, fontSize: v.fontSize,
-                              fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                              textDecoration: v.textDecoration,
-                              textTransform: v.textTransform, fontVariant: v.fontVariant,
-                              baselineShift: v.baselineShift, lineHeight: v.lineHeight,
-                              letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
-                              aaMode: v.aaMode, rotate: v.rotate,
-                              horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
-                              kerning: v.kerning, width: v.width, height: v.height,
-                              fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: t, locked: v.locked,
-                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                              name: v.name, id: v.id))
-        case .textPath(let v):
-            return .textPath(TextPath(d: v.d, tspans: v.tspans,
-                                      startOffset: v.startOffset,
-                                      fontFamily: v.fontFamily, fontSize: v.fontSize,
-                                      fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                                      textDecoration: v.textDecoration,
-                                      textTransform: v.textTransform, fontVariant: v.fontVariant,
-                                      baselineShift: v.baselineShift, lineHeight: v.lineHeight,
-                                      letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
-                                      aaMode: v.aaMode, rotate: v.rotate,
-                                      horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
-                                      kerning: v.kerning,
-                                      fill: v.fill, stroke: v.stroke,
-                                      opacity: v.opacity, transform: t, locked: v.locked,
-                                      visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                      name: v.name, id: v.id))
-        case .group(let v):
-            return .group(Group(children: v.children, opacity: v.opacity,
-                                transform: t, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode,
-                                isolatedBlending: v.isolatedBlending, knockoutGroup: v.knockoutGroup,
-                                mask: v.mask, name: v.name, id: v.id))
-        case .layer(let v):
-            return .layer(Layer(name: v.name, children: v.children, opacity: v.opacity,
-                                transform: t, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode,
-                                isolatedBlending: v.isolatedBlending, knockoutGroup: v.knockoutGroup,
-                                mask: v.mask, id: v.id))
+        case .line(var v): v.transform = t; return .line(v)
+        case .rect(var v): v.transform = t; return .rect(v)
+        case .circle(var v): v.transform = t; return .circle(v)
+        case .ellipse(var v): v.transform = t; return .ellipse(v)
+        case .polyline(var v): v.transform = t; return .polyline(v)
+        case .polygon(var v): v.transform = t; return .polygon(v)
+        case .path(var v): v.transform = t; return .path(v)
+        case .text(var v): v.transform = t; return .text(v)
+        case .textPath(var v): v.transform = t; return .textPath(v)
+        case .group(var v): v.transform = t; return .group(v)
+        case .layer(var v): v.transform = t; return .layer(v)
         case .live(let v):
             return .live(v.withTransform(t))
         }
@@ -1862,107 +1596,76 @@ public enum Element: Equatable {
     /// `withTransformSet` to the two other common-block scalars.
     func withCommon(transform: Transform? = nil, opacity: Double? = nil,
                     blendMode: BlendMode? = nil) -> Element {
+        // Clone-then-mutate at every arm (EDIT_SEMANTICS_FREEZE.md §3.1): the
+        // three writes are stated once per kind and the other thirty-odd
+        // fields are carried by the copy rather than by a hand-kept list.
         switch self {
-        case .line(let v):
-            return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                              stroke: v.stroke, widthPoints: v.widthPoints,
-                              opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
-                              locked: v.locked, visibility: v.visibility,
-                              blendMode: blendMode ?? v.blendMode, mask: v.mask,
-                              strokeGradient: v.strokeGradient, name: v.name, id: v.id))
-        case .rect(let v):
-            return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                              rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                              opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
-                              locked: v.locked, visibility: v.visibility,
-                              blendMode: blendMode ?? v.blendMode, mask: v.mask,
-                              fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                              name: v.name, id: v.id))
-        case .circle(let v):
-            return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r, fill: v.fill, stroke: v.stroke,
-                                  opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
-                                  locked: v.locked, visibility: v.visibility,
-                                  blendMode: blendMode ?? v.blendMode, mask: v.mask,
-                                  fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                  name: v.name, id: v.id))
-        case .ellipse(let v):
-            return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                    fill: v.fill, stroke: v.stroke,
-                                    opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
-                                    locked: v.locked, visibility: v.visibility,
-                                    blendMode: blendMode ?? v.blendMode, mask: v.mask,
-                                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                    name: v.name, id: v.id))
-        case .polyline(let v):
-            return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
-                                     opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
-                                     locked: v.locked, visibility: v.visibility,
-                                     blendMode: blendMode ?? v.blendMode, mask: v.mask,
-                                     fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                     name: v.name, id: v.id))
-        case .polygon(let v):
-            return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
-                                    opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
-                                    locked: v.locked, visibility: v.visibility,
-                                    blendMode: blendMode ?? v.blendMode, mask: v.mask,
-                                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                    name: v.name, id: v.id))
-        case .path(let v):
-            return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke, widthPoints: v.widthPoints,
-                              opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
-                              locked: v.locked, visibility: v.visibility,
-                              blendMode: blendMode ?? v.blendMode, mask: v.mask,
-                              fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                              strokeBrush: v.strokeBrush, strokeBrushOverrides: v.strokeBrushOverrides,
-                              toolOrigin: v.toolOrigin, name: v.name, id: v.id, fillRule: v.fillRule))
-        case .text(let v):
-            return .text(Text(x: v.x, y: v.y, tspans: v.tspans,
-                              fontFamily: v.fontFamily, fontSize: v.fontSize,
-                              fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                              textDecoration: v.textDecoration,
-                              textTransform: v.textTransform, fontVariant: v.fontVariant,
-                              baselineShift: v.baselineShift, lineHeight: v.lineHeight,
-                              letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
-                              aaMode: v.aaMode, rotate: v.rotate,
-                              horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
-                              kerning: v.kerning, width: v.width, height: v.height,
-                              fill: v.fill, stroke: v.stroke,
-                              opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
-                              locked: v.locked, visibility: v.visibility,
-                              blendMode: blendMode ?? v.blendMode, mask: v.mask,
-                              name: v.name, id: v.id))
-        case .textPath(let v):
-            return .textPath(TextPath(d: v.d, tspans: v.tspans, startOffset: v.startOffset,
-                                      fontFamily: v.fontFamily, fontSize: v.fontSize,
-                                      fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                                      textDecoration: v.textDecoration,
-                                      textTransform: v.textTransform, fontVariant: v.fontVariant,
-                                      baselineShift: v.baselineShift, lineHeight: v.lineHeight,
-                                      letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
-                                      aaMode: v.aaMode, rotate: v.rotate,
-                                      horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
-                                      kerning: v.kerning, fill: v.fill, stroke: v.stroke,
-                                      opacity: opacity ?? v.opacity, transform: transform ?? v.transform,
-                                      locked: v.locked, visibility: v.visibility,
-                                      blendMode: blendMode ?? v.blendMode, mask: v.mask,
-                                      name: v.name, id: v.id))
-        case .group(let v):
-            return .group(Group(children: v.children, opacity: opacity ?? v.opacity,
-                                transform: transform ?? v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: blendMode ?? v.blendMode,
-                                isolatedBlending: v.isolatedBlending, knockoutGroup: v.knockoutGroup,
-                                mask: v.mask, name: v.name, id: v.id))
-        case .layer(let v):
-            return .layer(Layer(name: v.name, children: v.children, opacity: opacity ?? v.opacity,
-                                transform: transform ?? v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: blendMode ?? v.blendMode,
-                                isolatedBlending: v.isolatedBlending, knockoutGroup: v.knockoutGroup,
-                                mask: v.mask, id: v.id))
-        case .live(let v):
-            // Transform is settable on a Live element; opacity / blend have no
-            // LiveElement setter, so leave them unchanged (rare edge case).
-            _ = (opacity, blendMode)
-            if let t = transform { return .live(v.withTransform(t)) }
+        case .line(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .line(v)
+        case .rect(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .rect(v)
+        case .circle(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .circle(v)
+        case .ellipse(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .ellipse(v)
+        case .polyline(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .polyline(v)
+        case .polygon(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .polygon(v)
+        case .path(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .path(v)
+        case .text(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .text(v)
+        case .textPath(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .textPath(v)
+        case .group(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .group(v)
+        case .layer(var v):
+            v.opacity = opacity ?? v.opacity
+            v.transform = transform ?? v.transform
+            v.blendMode = blendMode ?? v.blendMode
+            return .layer(v)
+        case .live(var v):
+            // All three are settable on a Live element — every conformer
+            // STORES `opacity` and `blendMode`, and jas_dioxus writes them
+            // through `common_mut()` at the Properties-panel apply. This arm
+            // used to discard both (`_ = (opacity, blendMode)`, "no
+            // LiveElement setter"), which made an Opacity or Blend Mode edit
+            // over a selected compound shape a SILENT NO-OP in this port
+            // alone. `nil` still means keep, exactly as on the other arms.
+            if let o = opacity { v = v.withOpacity(o) }
+            if let b = blendMode { v = v.withBlendMode(b) }
+            if let t = transform { v = v.withTransform(t) }
             return .live(v)
         }
     }
@@ -1973,147 +1676,83 @@ public enum Element: Equatable {
 /// Return a copy of `element` with the fill replaced. Line has no fill
 /// (returned unchanged). Group and Layer have no fill (returned unchanged).
 /// Return a copy of the element with its `fillGradient` replaced.
-/// Elements that do not support a fill gradient are returned unchanged.
+/// Elements that do not support a fill gradient (Line, Text, TextPath,
+/// Group, Layer, Live) are returned unchanged.
+///
+/// EDIT_SEMANTICS_FREEZE.md §3.1: this is a 1→1 edit that speaks to
+/// `fillGradient` and nothing else, so every other field survives — `name`,
+/// `id`, `toolOrigin`, `strokeBrush`, `strokeBrushOverrides` included. The
+/// clone-then-mutate form is what makes that true structurally rather than by
+/// hand-audit; the open-coded rebuild it replaced passed no `name:`/`id:` at
+/// ANY arm and additionally dropped the Path's brush and tool-origin fields,
+/// so setting a gradient from the Gradient panel destroyed the identity that
+/// references, symbols and the ledger are keyed on. Rust's twin
+/// (`RectElem { fill_gradient: gradient, ..e.clone() }`) always conformed.
 public func withFillGradient(_ element: Element, fillGradient: Gradient?) -> Element {
     switch element {
-    case .rect(let v):
-        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: fillGradient, strokeGradient: v.strokeGradient))
-    case .circle(let v):
-        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                              fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                              fillGradient: fillGradient, strokeGradient: v.strokeGradient))
-    case .ellipse(let v):
-        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                fill: v.fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                fillGradient: fillGradient, strokeGradient: v.strokeGradient))
-    case .polyline(let v):
-        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                  fillGradient: fillGradient, strokeGradient: v.strokeGradient))
-    case .polygon(let v):
-        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                fillGradient: fillGradient, strokeGradient: v.strokeGradient))
-    case .path(let v):
-        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
-                          widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: fillGradient, strokeGradient: v.strokeGradient, fillRule: v.fillRule))
+    case .rect(var v): v.fillGradient = fillGradient; return .rect(v)
+    case .circle(var v): v.fillGradient = fillGradient; return .circle(v)
+    case .ellipse(var v): v.fillGradient = fillGradient; return .ellipse(v)
+    case .polyline(var v): v.fillGradient = fillGradient; return .polyline(v)
+    case .polygon(var v): v.fillGradient = fillGradient; return .polygon(v)
+    case .path(var v): v.fillGradient = fillGradient; return .path(v)
     default:
         return element
     }
 }
 
 /// Return a copy of the element with its `strokeGradient` replaced.
-/// Elements that do not support a stroke gradient are returned unchanged.
+/// Elements that do not support a stroke gradient (Text, TextPath, Group,
+/// Layer, Live) are returned unchanged.
+///
+/// Same clause, same class, same repair as ``withFillGradient(_:strokeGradient:)``
+/// — see its note. Rust's twin is `..e.clone()` at every arm.
 public func withStrokeGradient(_ element: Element, strokeGradient: Gradient?) -> Element {
     switch element {
-    case .line(let v):
-        return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                          stroke: v.stroke, widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          strokeGradient: strokeGradient))
-    case .rect(let v):
-        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: v.fillGradient, strokeGradient: strokeGradient))
-    case .circle(let v):
-        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                              fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                              fillGradient: v.fillGradient, strokeGradient: strokeGradient))
-    case .ellipse(let v):
-        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                fill: v.fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                fillGradient: v.fillGradient, strokeGradient: strokeGradient))
-    case .polyline(let v):
-        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                  fillGradient: v.fillGradient, strokeGradient: strokeGradient))
-    case .polygon(let v):
-        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                fillGradient: v.fillGradient, strokeGradient: strokeGradient))
-    case .path(let v):
-        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
-                          widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: v.fillGradient, strokeGradient: strokeGradient, fillRule: v.fillRule))
+    case .line(var v): v.strokeGradient = strokeGradient; return .line(v)
+    case .rect(var v): v.strokeGradient = strokeGradient; return .rect(v)
+    case .circle(var v): v.strokeGradient = strokeGradient; return .circle(v)
+    case .ellipse(var v): v.strokeGradient = strokeGradient; return .ellipse(v)
+    case .polyline(var v): v.strokeGradient = strokeGradient; return .polyline(v)
+    case .polygon(var v): v.strokeGradient = strokeGradient; return .polygon(v)
+    case .path(var v): v.strokeGradient = strokeGradient; return .path(v)
     default:
         return element
     }
 }
 
+/// EDIT_SEMANTICS_FREEZE.md §3.1 + T1's SHADOWING-FAMILY closure. This edit
+/// speaks to the fill family — `fill` AND the `fillGradient` that shadows it on
+/// the render chain — and to nothing else: `name`, `id`, `mask`, `blendMode`,
+/// `strokeGradient`, `strokeBrush`, `strokeBrushOverrides`, `toolOrigin` and a
+/// text element's tspan RUN STRUCTURE all survive.
+///
+/// The open-coded rebuild this replaced stopped at `visibility:` and dropped
+/// every one of them, so a Colour-panel fill on a named, cited, masked,
+/// brush-stroked path destroyed its identity, and on a Text it collapsed every
+/// run into one (it routed through the `content:` convenience initializer).
+///
+/// NAMED CROSS-PORT DELTA: Rust's `with_fill` is
+/// `RectElem { fill, ..e.clone() }`, which CARRIES `fill_gradient` — so there a
+/// colour pick leaves the gradient shadowing the new colour, and here it
+/// clears it. This port's answer is unchanged by this repair (it always
+/// cleared) and is the one T1's closure states; which port is right is the
+/// §3.6 gradients-as-paint AMENDMENT, a ruling that must land in both ports at
+/// once. Not guessed here.
 public func withFill(_ element: Element, fill: Fill?) -> Element {
     switch element {
     case .line:
         return element
-    case .rect(let v):
-        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                          rx: v.rx, ry: v.ry, fill: fill, stroke: v.stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility))
-    case .circle(let v):
-        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                              fill: fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: v.visibility))
-    case .ellipse(let v):
-        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                fill: fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility))
-    case .polyline(let v):
-        return .polyline(Polyline(points: v.points, fill: fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility))
-    case .polygon(let v):
-        return .polygon(Polygon(points: v.points, fill: fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility))
-    case .path(let v):
-        return .path(Path(d: v.d, fill: fill, stroke: v.stroke,
-                          widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, fillRule: v.fillRule))
-    case .text(let v):
-        return .text(Text(x: v.x, y: v.y, content: v.content,
-                          fontFamily: v.fontFamily, fontSize: v.fontSize,
-                          fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                          textDecoration: v.textDecoration,
-                          width: v.width, height: v.height,
-                          fill: fill, stroke: v.stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility))
-    case .textPath(let v):
-        return .textPath(TextPath(d: v.d, content: v.content,
-                                  startOffset: v.startOffset,
-                                  fontFamily: v.fontFamily, fontSize: v.fontSize,
-                                  fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                                  textDecoration: v.textDecoration,
-                                  fill: fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility))
+    case .rect(var v): v.fill = fill; v.fillGradient = nil; return .rect(v)
+    case .circle(var v): v.fill = fill; v.fillGradient = nil; return .circle(v)
+    case .ellipse(var v): v.fill = fill; v.fillGradient = nil; return .ellipse(v)
+    case .polyline(var v): v.fill = fill; v.fillGradient = nil; return .polyline(v)
+    case .polygon(var v): v.fill = fill; v.fillGradient = nil; return .polygon(v)
+    case .path(var v): v.fill = fill; v.fillGradient = nil; return .path(v)
+    // Text and TextPath carry no gradient in this port, so the fill family is
+    // `fill` alone there.
+    case .text(var v): v.fill = fill; return .text(v)
+    case .textPath(var v): v.fill = fill; return .textPath(v)
     case .group, .layer:
         return element
     case .live(let v):
@@ -2124,86 +1763,18 @@ public func withFill(_ element: Element, fill: Fill?) -> Element {
 /// Return a copy of `element` with the stroke replaced. Group and Layer
 /// have no stroke (returned unchanged).
 public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
+    // Clone-then-mutate at every arm (EDIT_SEMANTICS_FREEZE.md §3.1): this
+    // speaks to `stroke` and nothing else, and the copy carries the rest.
     switch element {
-    case .line(let v):
-        return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                          stroke: stroke, widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform,
-                          locked: v.locked, visibility: v.visibility,
-                          blendMode: v.blendMode, mask: v.mask,
-                          strokeGradient: v.strokeGradient, name: v.name, id: v.id))
-    case .rect(let v):
-        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                          name: v.name, id: v.id))
-    case .circle(let v):
-        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                              fill: v.fill, stroke: stroke,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                              fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                              name: v.name, id: v.id))
-    case .ellipse(let v):
-        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                fill: v.fill, stroke: stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                name: v.name, id: v.id))
-    case .polyline(let v):
-        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                  fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                  name: v.name, id: v.id))
-    case .polygon(let v):
-        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                                name: v.name, id: v.id))
-    case .path(let v):
-        return .path(Path(d: v.d, fill: v.fill, stroke: stroke,
-                          widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                          strokeBrush: v.strokeBrush, strokeBrushOverrides: v.strokeBrushOverrides,
-                          toolOrigin: v.toolOrigin, name: v.name, id: v.id, fillRule: v.fillRule))
-    case .text(let v):
-        return .text(Text(x: v.x, y: v.y, tspans: v.tspans,
-                          fontFamily: v.fontFamily, fontSize: v.fontSize,
-                          fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                          textDecoration: v.textDecoration,
-                          textTransform: v.textTransform, fontVariant: v.fontVariant,
-                          baselineShift: v.baselineShift, lineHeight: v.lineHeight,
-                          letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
-                          aaMode: v.aaMode, rotate: v.rotate,
-                          horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
-                          kerning: v.kerning, width: v.width, height: v.height,
-                          fill: v.fill, stroke: stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                          name: v.name, id: v.id))
-    case .textPath(let v):
-        return .textPath(TextPath(d: v.d, tspans: v.tspans,
-                                  startOffset: v.startOffset,
-                                  fontFamily: v.fontFamily, fontSize: v.fontSize,
-                                  fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                                  textDecoration: v.textDecoration,
-                                  textTransform: v.textTransform, fontVariant: v.fontVariant,
-                                  baselineShift: v.baselineShift, lineHeight: v.lineHeight,
-                                  letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
-                                  aaMode: v.aaMode, rotate: v.rotate,
-                                  horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
-                                  kerning: v.kerning,
-                                  fill: v.fill, stroke: stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                                  name: v.name, id: v.id))
+    case .line(var v): v.stroke = stroke; return .line(v)
+    case .rect(var v): v.stroke = stroke; return .rect(v)
+    case .circle(var v): v.stroke = stroke; return .circle(v)
+    case .ellipse(var v): v.stroke = stroke; return .ellipse(v)
+    case .polyline(var v): v.stroke = stroke; return .polyline(v)
+    case .polygon(var v): v.stroke = stroke; return .polygon(v)
+    case .path(var v): v.stroke = stroke; return .path(v)
+    case .text(var v): v.stroke = stroke; return .text(v)
+    case .textPath(var v): v.stroke = stroke; return .textPath(v)
     case .group, .layer:
         return element
     case .live(let v):
@@ -2349,76 +1920,18 @@ public func selectionHasMask(_ document: Document) -> Bool {
 /// `knockoutGroup`, fills, strokes, and children) are preserved.
 public func withMask(_ element: Element, mask: Mask?) -> Element {
     switch element {
-    case .line(let v):
-        return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                          stroke: v.stroke, widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform,
-                          locked: v.locked, visibility: v.visibility,
-                          blendMode: v.blendMode, mask: mask))
-    case .rect(let v):
-        return .rect(Rect(x: v.x, y: v.y, width: v.width, height: v.height,
-                          rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: mask))
-    case .circle(let v):
-        return .circle(Circle(cx: v.cx, cy: v.cy, r: v.r,
-                              fill: v.fill, stroke: v.stroke,
-                              opacity: v.opacity, transform: v.transform, locked: v.locked,
-                              visibility: v.visibility, blendMode: v.blendMode, mask: mask))
-    case .ellipse(let v):
-        return .ellipse(Ellipse(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry,
-                                fill: v.fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: mask))
-    case .polyline(let v):
-        return .polyline(Polyline(points: v.points, fill: v.fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility, blendMode: v.blendMode, mask: mask))
-    case .polygon(let v):
-        return .polygon(Polygon(points: v.points, fill: v.fill, stroke: v.stroke,
-                                opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                visibility: v.visibility, blendMode: v.blendMode, mask: mask))
-    case .path(let v):
-        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
-                          widthPoints: v.widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: mask, fillRule: v.fillRule))
-    case .text(let v):
-        return .text(Text(x: v.x, y: v.y, content: v.content,
-                          fontFamily: v.fontFamily, fontSize: v.fontSize,
-                          fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                          textDecoration: v.textDecoration,
-                          width: v.width, height: v.height,
-                          fill: v.fill, stroke: v.stroke,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, blendMode: v.blendMode, mask: mask))
-    case .textPath(let v):
-        return .textPath(TextPath(d: v.d, content: v.content,
-                                  startOffset: v.startOffset,
-                                  fontFamily: v.fontFamily, fontSize: v.fontSize,
-                                  fontWeight: v.fontWeight, fontStyle: v.fontStyle,
-                                  textDecoration: v.textDecoration,
-                                  fill: v.fill, stroke: v.stroke,
-                                  opacity: v.opacity, transform: v.transform, locked: v.locked,
-                                  visibility: v.visibility, blendMode: v.blendMode, mask: mask))
-    case .group(let v):
-        return .group(Group(children: v.children,
-                            opacity: v.opacity, transform: v.transform,
-                            locked: v.locked, visibility: v.visibility,
-                            blendMode: v.blendMode,
-                            isolatedBlending: v.isolatedBlending,
-                            knockoutGroup: v.knockoutGroup,
-                            mask: mask))
-    case .layer(let v):
-        return .layer(Layer(name: v.name, children: v.children,
-                            opacity: v.opacity, transform: v.transform,
-                            locked: v.locked, visibility: v.visibility,
-                            blendMode: v.blendMode,
-                            isolatedBlending: v.isolatedBlending,
-                            knockoutGroup: v.knockoutGroup,
-                            mask: mask, id: v.id))
-    case .live(let v):
-        return .live(v.withMask(mask))
+    case .line(var v): v.mask = mask; return .line(v)
+    case .rect(var v): v.mask = mask; return .rect(v)
+    case .circle(var v): v.mask = mask; return .circle(v)
+    case .ellipse(var v): v.mask = mask; return .ellipse(v)
+    case .polyline(var v): v.mask = mask; return .polyline(v)
+    case .polygon(var v): v.mask = mask; return .polygon(v)
+    case .path(var v): v.mask = mask; return .path(v)
+    case .text(var v): v.mask = mask; return .text(v)
+    case .textPath(var v): v.mask = mask; return .textPath(v)
+    case .group(var v): v.mask = mask; return .group(v)
+    case .layer(var v): v.mask = mask; return .layer(v)
+    case .live(let v): return .live(v.withMask(mask))
     }
 }
 
@@ -2426,16 +1939,8 @@ public func withMask(_ element: Element, mask: Mask?) -> Element {
 /// Only Line and Path support width points; others returned unchanged.
 public func withWidthPoints(_ element: Element, widthPoints: [StrokeWidthPoint]) -> Element {
     switch element {
-    case .line(let v):
-        return .line(Line(x1: v.x1, y1: v.y1, x2: v.x2, y2: v.y2,
-                          stroke: v.stroke, widthPoints: widthPoints,
-                          opacity: v.opacity, transform: v.transform,
-                          locked: v.locked, visibility: v.visibility))
-    case .path(let v):
-        return .path(Path(d: v.d, fill: v.fill, stroke: v.stroke,
-                          widthPoints: widthPoints,
-                          opacity: v.opacity, transform: v.transform, locked: v.locked,
-                          visibility: v.visibility, fillRule: v.fillRule))
+    case .line(var v): v.widthPoints = widthPoints; return .line(v)
+    case .path(var v): v.widthPoints = widthPoints; return .path(v)
     default:
         return element
     }
@@ -2686,28 +2191,28 @@ public func convertSmoothToCorner(_ d: [PathCommand], anchorIdx: Int) -> [PathCo
 
 /// SVG \<line\> element.
 public struct Line: Equatable {
-    public let x1: Double, y1: Double, x2: Double, y2: Double
+    public internal(set) var x1: Double, y1: Double, x2: Double, y2: Double
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None means the element
     /// has no id yet, so every existing document remains valid. Where the
     /// tree-path encodes *where* an element sits, the id names *which*
     /// element it is, surviving reorder and edit. Round-trips through
     /// test_json (emitted only when set, so id-less elements stay
     /// byte-identical) and, in a later increment, the SVG `id` attribute.
-    public let id: String?
-    public let stroke: Stroke?
-    public let widthPoints: [StrokeWidthPoint]
-    public let opacity: Double
-    public let transform: Transform?
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
+    public internal(set) var id: String?
+    public internal(set) var stroke: Stroke?
+    public internal(set) var widthPoints: [StrokeWidthPoint]
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
     /// Optional gradient applied to the stroke (in lieu of `stroke.color`).
     /// Phase 1b adds gradient paint per-element. See GRADIENT.md
     /// §Document model.
-    public let strokeGradient: Gradient?
+    public internal(set) var strokeGradient: Gradient?
 
     public init(x1: Double, y1: Double, x2: Double, y2: Double,
                 stroke: Stroke? = nil, widthPoints: [StrokeWidthPoint] = [],
@@ -2739,23 +2244,23 @@ public struct Line: Equatable {
 
 /// SVG \<rect\> element.
 public struct Rect: Equatable {
-    public let x: Double, y: Double, width: Double, height: Double
+    public internal(set) var x: Double, y: Double, width: Double, height: Double
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None = no id yet, so
     /// every existing document remains valid. See `Line.id`.
-    public let id: String?
-    public let rx: Double, ry: Double
-    public let fill: Fill?
-    public let stroke: Stroke?
-    public let opacity: Double
-    public let transform: Transform?
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
-    public let fillGradient: Gradient?
-    public let strokeGradient: Gradient?
+    public internal(set) var id: String?
+    public internal(set) var rx: Double, ry: Double
+    public internal(set) var fill: Fill?
+    public internal(set) var stroke: Stroke?
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
+    public internal(set) var fillGradient: Gradient?
+    public internal(set) var strokeGradient: Gradient?
 
     public init(x: Double, y: Double, width: Double, height: Double,
                 rx: Double = 0, ry: Double = 0,
@@ -2787,22 +2292,22 @@ public struct Rect: Equatable {
 
 /// SVG \<circle\> element.
 public struct Circle: Equatable {
-    public let cx: Double, cy: Double, r: Double
+    public internal(set) var cx: Double, cy: Double, r: Double
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None = no id yet, so
     /// every existing document remains valid. See `Line.id`.
-    public let id: String?
-    public let fill: Fill?
-    public let stroke: Stroke?
-    public let opacity: Double
-    public let transform: Transform?
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
-    public let fillGradient: Gradient?
-    public let strokeGradient: Gradient?
+    public internal(set) var id: String?
+    public internal(set) var fill: Fill?
+    public internal(set) var stroke: Stroke?
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
+    public internal(set) var fillGradient: Gradient?
+    public internal(set) var strokeGradient: Gradient?
 
     public init(cx: Double, cy: Double, r: Double,
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -2832,22 +2337,22 @@ public struct Circle: Equatable {
 
 /// SVG \<ellipse\> element.
 public struct Ellipse: Equatable {
-    public let cx: Double, cy: Double, rx: Double, ry: Double
+    public internal(set) var cx: Double, cy: Double, rx: Double, ry: Double
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None = no id yet, so
     /// every existing document remains valid. See `Line.id`.
-    public let id: String?
-    public let fill: Fill?
-    public let stroke: Stroke?
-    public let opacity: Double
-    public let transform: Transform?
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
-    public let fillGradient: Gradient?
-    public let strokeGradient: Gradient?
+    public internal(set) var id: String?
+    public internal(set) var fill: Fill?
+    public internal(set) var stroke: Stroke?
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
+    public internal(set) var fillGradient: Gradient?
+    public internal(set) var strokeGradient: Gradient?
 
     public init(cx: Double, cy: Double, rx: Double, ry: Double,
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -2877,22 +2382,22 @@ public struct Ellipse: Equatable {
 
 /// SVG \<polyline\> element.
 public struct Polyline: Equatable {
-    public let points: [(Double, Double)]
+    public internal(set) var points: [(Double, Double)]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None = no id yet, so
     /// every existing document remains valid. See `Line.id`.
-    public let id: String?
-    public let fill: Fill?
-    public let stroke: Stroke?
-    public let opacity: Double
-    public let transform: Transform?
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
-    public let fillGradient: Gradient?
-    public let strokeGradient: Gradient?
+    public internal(set) var id: String?
+    public internal(set) var fill: Fill?
+    public internal(set) var stroke: Stroke?
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
+    public internal(set) var fillGradient: Gradient?
+    public internal(set) var strokeGradient: Gradient?
 
     public init(points: [(Double, Double)],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -2935,22 +2440,22 @@ public struct Polyline: Equatable {
 
 /// SVG \<polygon\> element.
 public struct Polygon: Equatable {
-    public let points: [(Double, Double)]
+    public internal(set) var points: [(Double, Double)]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None = no id yet, so
     /// every existing document remains valid. See `Line.id`.
-    public let id: String?
-    public let fill: Fill?
-    public let stroke: Stroke?
-    public let opacity: Double
-    public let transform: Transform?
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
-    public let fillGradient: Gradient?
-    public let strokeGradient: Gradient?
+    public internal(set) var id: String?
+    public internal(set) var fill: Fill?
+    public internal(set) var stroke: Stroke?
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
+    public internal(set) var fillGradient: Gradient?
+    public internal(set) var strokeGradient: Gradient?
 
     public init(points: [(Double, Double)],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -3195,38 +2700,38 @@ extension BoolFillRule {
 }
 
 public struct Path: Equatable {
-    public let d: [PathCommand]
+    public internal(set) var d: [PathCommand]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None = no id yet, so
     /// every existing document remains valid. See `Line.id`.
-    public let id: String?
-    public let fill: Fill?
-    public let stroke: Stroke?
-    public let widthPoints: [StrokeWidthPoint]
-    public let opacity: Double
-    public let transform: Transform?
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
-    public let fillGradient: Gradient?
-    public let strokeGradient: Gradient?
+    public internal(set) var id: String?
+    public internal(set) var fill: Fill?
+    public internal(set) var stroke: Stroke?
+    public internal(set) var widthPoints: [StrokeWidthPoint]
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
+    public internal(set) var fillGradient: Gradient?
+    public internal(set) var strokeGradient: Gradient?
     /// Active-brush reference as "<library_slug>/<brush_slug>", or
     /// nil for a plain native-stroke path. Consumed by the canvas
     /// renderer's brush dispatch (Phase 3.4). See BRUSHES.md
     /// §Stroke styling interaction.
-    public let strokeBrush: String?
+    public internal(set) var strokeBrush: String?
     /// Per-instance brush-parameter overrides as compact JSON
     /// layered over the master brush at render time. See BRUSHES.md
     /// §Panel state.
-    public let strokeBrushOverrides: String?
+    public internal(set) var strokeBrushOverrides: String?
     /// Optional `jas:tool-origin` tag identifying the tool that
     /// produced this element. Blob Brush sets `"blob_brush"` on its
     /// commits so subsequent sweeps can merge / erase into the same
     /// element. Preserved by mutations; optional on export.
     /// See BLOB_BRUSH_TOOL.md §Fill and stroke.
-    public let toolOrigin: String?
+    public internal(set) var toolOrigin: String?
     /// Which fill rule reads this path's subpaths. See `FillRule` and
     /// transcripts/BOOLEAN.md.
     ///
@@ -3241,7 +2746,7 @@ public struct Path: Equatable {
     /// geometry means — `.nonzero` at every such site today except
     /// `Controller.applyDestructiveBoolean`, which stamps
     /// `boolResultFillRule`.
-    public let fillRule: FillRule
+    public internal(set) var fillRule: FillRule
 
     public init(d: [PathCommand],
                 fill: Fill? = nil, stroke: Stroke? = nil,
@@ -3296,39 +2801,39 @@ public struct Path: Equatable {
 /// Rust TextElem shape. Empty string means "omit / inherit default"
 /// per CHARACTER.md's identity-omission rule.
 public struct Text: Equatable {
-    public let x: Double, y: Double
+    public internal(set) var x: Double, y: Double
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None = no id yet, so
     /// every existing document remains valid. See `Line.id`.
-    public let id: String?
-    public let tspans: [Tspan]
-    public let fontFamily: String
-    public let fontSize: Double
-    public let fontWeight: String
-    public let fontStyle: String
-    public let textDecoration: String
-    public let textTransform: String
-    public let fontVariant: String
-    public let baselineShift: String
-    public let lineHeight: String
-    public let letterSpacing: String
-    public let xmlLang: String
-    public let aaMode: String
-    public let rotate: String
-    public let horizontalScale: String
-    public let verticalScale: String
-    public let kerning: String
-    public let width: Double
-    public let height: Double
-    public let fill: Fill?
-    public let stroke: Stroke?
-    public let opacity: Double
-    public let transform: Transform?
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
+    public internal(set) var id: String?
+    public internal(set) var tspans: [Tspan]
+    public internal(set) var fontFamily: String
+    public internal(set) var fontSize: Double
+    public internal(set) var fontWeight: String
+    public internal(set) var fontStyle: String
+    public internal(set) var textDecoration: String
+    public internal(set) var textTransform: String
+    public internal(set) var fontVariant: String
+    public internal(set) var baselineShift: String
+    public internal(set) var lineHeight: String
+    public internal(set) var letterSpacing: String
+    public internal(set) var xmlLang: String
+    public internal(set) var aaMode: String
+    public internal(set) var rotate: String
+    public internal(set) var horizontalScale: String
+    public internal(set) var verticalScale: String
+    public internal(set) var kerning: String
+    public internal(set) var width: Double
+    public internal(set) var height: Double
+    public internal(set) var fill: Fill?
+    public internal(set) var stroke: Stroke?
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
 
     /// Primary tspans-based initializer. Used by canonical JSON /
     /// SVG parsers that have already split the text into tspans.
@@ -3406,6 +2911,13 @@ public struct Text: Equatable {
                   fill: fill, stroke: stroke,
                   opacity: opacity, transform: transform,
                   locked: locked, visibility: visibility,
+                  // blendMode and mask were accepted and then NOT forwarded,
+                  // so `Text(x:y:content:blendMode:mask:)` silently discarded
+                  // both -- the Swift copy-site omission class again. Found by
+                  // the binary codec's per-tag common extension gate
+                  // (BinaryCommonExtensionTests), which drives a blend-moded,
+                  // masked Text through this initializer on the read path.
+                  blendMode: blendMode, mask: mask,
                   name: name, id: id)
     }
 
@@ -3438,42 +2950,25 @@ public struct Text: Equatable {
         }
     }
 
-    /// Return a copy of this Text with the given fields replaced. Used by
-    /// `TextEditSession.applyToDocument` so the field list lives in one
-    /// place.
+    /// Return a copy of this Text with the content replaced by one run. Used
+    /// by `TextEditSession.applyToDocument`; expressed through ``withTspans``
+    /// so there is exactly one preservation site for both.
     public func with(content: String) -> Text {
-        Text(x: x, y: y, content: content,
-             fontFamily: fontFamily, fontSize: fontSize,
-             fontWeight: fontWeight, fontStyle: fontStyle,
-             textDecoration: textDecoration,
-             textTransform: textTransform, fontVariant: fontVariant,
-             baselineShift: baselineShift, lineHeight: lineHeight,
-             letterSpacing: letterSpacing, xmlLang: xmlLang,
-             aaMode: aaMode, rotate: rotate,
-             horizontalScale: horizontalScale, verticalScale: verticalScale,
-             kerning: kerning,
-             width: width, height: height,
-             fill: fill, stroke: stroke,
-             opacity: opacity, transform: transform, locked: locked)
+        withTspans([Tspan(id: 0, content: content)])
     }
 
-    /// Return a copy with the tspans list replaced. Preserves every
-    /// other field. Used by `TextEditSession.applyToDocument` after
-    /// reconciling content so per-range overrides survive.
+    /// Return a copy with the tspans list replaced, preserving every other
+    /// field. Used by `TextEditSession.applyToDocument` after reconciling
+    /// content so per-range overrides survive.
+    ///
+    /// EDIT_SEMANTICS_FREEZE.md §3.1: this was an open-coded rebuild that
+    /// stopped at `locked:`, so committing a text edit destroyed the element's
+    /// `visibility`, `blendMode`, `mask`, `name` and `id` — while its own doc
+    /// comment claimed it preserved everything. Rust's twin is `t.clone()` +
+    /// `new_t.tspans = ...` (tools/text_edit.rs) and always conformed. The
+    /// clone-then-mutate form is what makes the claim true structurally.
     public func withTspans(_ tspans: [Tspan]) -> Text {
-        Text(x: x, y: y, tspans: tspans,
-             fontFamily: fontFamily, fontSize: fontSize,
-             fontWeight: fontWeight, fontStyle: fontStyle,
-             textDecoration: textDecoration,
-             textTransform: textTransform, fontVariant: fontVariant,
-             baselineShift: baselineShift, lineHeight: lineHeight,
-             letterSpacing: letterSpacing, xmlLang: xmlLang,
-             aaMode: aaMode, rotate: rotate,
-             horizontalScale: horizontalScale, verticalScale: verticalScale,
-             kerning: kerning,
-             width: width, height: height,
-             fill: fill, stroke: stroke,
-             opacity: opacity, transform: transform, locked: locked)
+        var v = self; v.tspans = tspans; return v
     }
 
     public var bounds: BBox {
@@ -3502,39 +2997,39 @@ public struct Text: Equatable {
 /// computed, the `content:` initializer wraps in a default tspan.
 /// The 11 new character-panel fields mirror `Text`'s.
 public struct TextPath: Equatable {
-    public let d: [PathCommand]
+    public internal(set) var d: [PathCommand]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None = no id yet, so
     /// every existing document remains valid. See `Line.id`.
-    public let id: String?
-    public let tspans: [Tspan]
-    public let startOffset: Double
-    public let fontFamily: String
-    public let fontSize: Double
-    public let fontWeight: String
-    public let fontStyle: String
-    public let textDecoration: String
-    public let textTransform: String
-    public let fontVariant: String
-    public let baselineShift: String
-    public let lineHeight: String
-    public let letterSpacing: String
-    public let xmlLang: String
-    public let aaMode: String
-    public let rotate: String
-    public let horizontalScale: String
-    public let verticalScale: String
-    public let kerning: String
-    public let fill: Fill?
-    public let stroke: Stroke?
-    public let opacity: Double
-    public let transform: Transform?
+    public internal(set) var id: String?
+    public internal(set) var tspans: [Tspan]
+    public internal(set) var startOffset: Double
+    public internal(set) var fontFamily: String
+    public internal(set) var fontSize: Double
+    public internal(set) var fontWeight: String
+    public internal(set) var fontStyle: String
+    public internal(set) var textDecoration: String
+    public internal(set) var textTransform: String
+    public internal(set) var fontVariant: String
+    public internal(set) var baselineShift: String
+    public internal(set) var lineHeight: String
+    public internal(set) var letterSpacing: String
+    public internal(set) var xmlLang: String
+    public internal(set) var aaMode: String
+    public internal(set) var rotate: String
+    public internal(set) var horizontalScale: String
+    public internal(set) var verticalScale: String
+    public internal(set) var kerning: String
+    public internal(set) var fill: Fill?
+    public internal(set) var stroke: Stroke?
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
 
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
 
     public init(d: [PathCommand], tspans: [Tspan],
                 startOffset: Double = 0.0,
@@ -3608,6 +3103,8 @@ public struct TextPath: Equatable {
                   fill: fill, stroke: stroke,
                   opacity: opacity, transform: transform,
                   locked: locked, visibility: visibility,
+                  // As Text's content initializer: accepted and not forwarded.
+                  blendMode: blendMode, mask: mask,
                   name: name, id: id)
     }
 
@@ -3617,59 +3114,41 @@ public struct TextPath: Equatable {
         return inflateBounds(pathBounds(d), stroke)
     }
 
-    /// Return a copy of this TextPath with `content` replaced.
+    /// Return a copy of this TextPath with the content replaced by one run.
+    /// Expressed through ``withTspans`` so there is one preservation site.
     public func with(content: String) -> TextPath {
-        TextPath(d: d, content: content, startOffset: startOffset,
-                 fontFamily: fontFamily, fontSize: fontSize,
-                 fontWeight: fontWeight, fontStyle: fontStyle,
-                 textDecoration: textDecoration,
-                 textTransform: textTransform, fontVariant: fontVariant,
-                 baselineShift: baselineShift, lineHeight: lineHeight,
-                 letterSpacing: letterSpacing, xmlLang: xmlLang,
-                 aaMode: aaMode, rotate: rotate,
-                 horizontalScale: horizontalScale, verticalScale: verticalScale,
-                 kerning: kerning,
-                 fill: fill, stroke: stroke,
-                 opacity: opacity, transform: transform, locked: locked)
+        withTspans([Tspan(id: 0, content: content)])
     }
 
-    /// Return a copy with the tspans list replaced.
+    /// Return a copy with the tspans list replaced, preserving every other
+    /// field. Same clause and same repair as ``Text/withTspans(_:)`` — see its
+    /// note; the rebuild this replaced dropped `visibility`, `blendMode`,
+    /// `mask`, `name` and `id`.
     public func withTspans(_ tspans: [Tspan]) -> TextPath {
-        TextPath(d: d, tspans: tspans, startOffset: startOffset,
-                 fontFamily: fontFamily, fontSize: fontSize,
-                 fontWeight: fontWeight, fontStyle: fontStyle,
-                 textDecoration: textDecoration,
-                 textTransform: textTransform, fontVariant: fontVariant,
-                 baselineShift: baselineShift, lineHeight: lineHeight,
-                 letterSpacing: letterSpacing, xmlLang: xmlLang,
-                 aaMode: aaMode, rotate: rotate,
-                 horizontalScale: horizontalScale, verticalScale: verticalScale,
-                 kerning: kerning,
-                 fill: fill, stroke: stroke,
-                 opacity: opacity, transform: transform, locked: locked)
+        var v = self; v.tspans = tspans; return v
     }
 }
 
 /// SVG \<g\> element.
 public struct Group: Equatable {
-    public let children: [Element]
+    public internal(set) var children: [Element]
     /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None = no id yet, so
     /// every existing document remains valid. See `Line.id`.
-    public let id: String?
-    public let opacity: Double
-    public let transform: Transform?
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
+    public internal(set) var id: String?
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
     /// Opacity panel "Page Isolated Blending" flag. Storage-only in
     /// Phase 2; renderer support is deferred. Default false.
-    public let isolatedBlending: Bool
+    public internal(set) var isolatedBlending: Bool
     /// Opacity panel "Page Knockout Group" flag. Storage-only in
     /// Phase 2; renderer support is deferred. Default false.
-    public let knockoutGroup: Bool
+    public internal(set) var knockoutGroup: Bool
 
     public init(children: [Element], opacity: Double = 1.0, transform: Transform? = nil,
                 locked: Bool = false,
@@ -3706,22 +3185,22 @@ public struct Group: Equatable {
 /// ``Group``: the user-visible name is `String?` and unnamed layers
 /// fall back to a "Layer N" display label in the layers panel.
 public struct Layer: Equatable {
-    public let name: String?
+    public internal(set) var name: String?
     /// Stable, opaque element identity. Additive: None = no id yet, so
     /// every existing document remains valid. See `Line.id`.
-    public let id: String?
-    public let children: [Element]
-    public let opacity: Double
-    public let transform: Transform?
-    public let locked: Bool
-    public let visibility: Visibility
-    public let blendMode: BlendMode
-    public let mask: Mask?
+    public internal(set) var id: String?
+    public internal(set) var children: [Element]
+    public internal(set) var opacity: Double
+    public internal(set) var transform: Transform?
+    public internal(set) var locked: Bool
+    public internal(set) var visibility: Visibility
+    public internal(set) var blendMode: BlendMode
+    public internal(set) var mask: Mask?
     /// See ``Group/isolatedBlending``. Present on layers so the
     /// document root (a Layer) can carry the flag today.
-    public let isolatedBlending: Bool
+    public internal(set) var isolatedBlending: Bool
     /// See ``Group/knockoutGroup``.
-    public let knockoutGroup: Bool
+    public internal(set) var knockoutGroup: Bool
 
     /// Convenience accessor that returns the empty string when the
     /// layer is unnamed. Most callers should use `name ?? ""` directly,
@@ -3761,149 +3240,85 @@ public struct Layer: Equatable {
 
 // MARK: - Stable-identity helpers
 
-// Per-struct `withId(_:)` reconstructs the value through its full
-// memberwise initializer, preserving EVERY field (name, blendMode, mask,
-// gradients, brush, …) while replacing only `id`. Used by
+// Per-struct `withId(_:)` is clone-then-mutate (`var v = self; v.id = id`),
+// so it replaces only `id` and preservation of every other field is
+// structural rather than a list anyone has to maintain. (The comment here
+// used to describe a full memberwise-initializer rebuild; that stopped being
+// the implementation and the description was left behind.) Used by
 // `Element.clearingIds()` so a duplicated element is born id-less without
 // dropping any other attribute. See the stable-identity initiative.
 
 extension Line {
     public func withId(_ id: String?) -> Line {
-        Line(x1: x1, y1: y1, x2: x2, y2: y2,
-             stroke: stroke, widthPoints: widthPoints,
-             opacity: opacity, transform: transform,
-             locked: locked, visibility: visibility,
-             blendMode: blendMode, mask: mask,
-             strokeGradient: strokeGradient, name: name, id: id)
+        var v = self; v.id = id; return v
     }
 }
 
 extension Rect {
     public func withId(_ id: String?) -> Rect {
-        Rect(x: x, y: y, width: width, height: height, rx: rx, ry: ry,
-             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-             locked: locked, visibility: visibility, blendMode: blendMode,
-             mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
-             name: name, id: id)
+        var v = self; v.id = id; return v
     }
 }
 
 extension Circle {
     public func withId(_ id: String?) -> Circle {
-        Circle(cx: cx, cy: cy, r: r,
-               fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-               locked: locked, visibility: visibility, blendMode: blendMode,
-               mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
-               name: name, id: id)
+        var v = self; v.id = id; return v
     }
 }
 
 extension Ellipse {
     public func withId(_ id: String?) -> Ellipse {
-        Ellipse(cx: cx, cy: cy, rx: rx, ry: ry,
-                fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-                locked: locked, visibility: visibility, blendMode: blendMode,
-                mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
-                name: name, id: id)
+        var v = self; v.id = id; return v
     }
 }
 
 extension Polyline {
     public func withId(_ id: String?) -> Polyline {
-        Polyline(points: points,
-                 fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-                 locked: locked, visibility: visibility, blendMode: blendMode,
-                 mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
-                 name: name, id: id)
+        var v = self; v.id = id; return v
     }
 }
 
 extension Polygon {
     public func withId(_ id: String?) -> Polygon {
-        Polygon(points: points,
-                fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-                locked: locked, visibility: visibility, blendMode: blendMode,
-                mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
-                name: name, id: id)
+        var v = self; v.id = id; return v
     }
 }
 
 extension Path {
     public func withId(_ id: String?) -> Path {
-        Path(d: d, fill: fill, stroke: stroke, widthPoints: widthPoints,
-             opacity: opacity, transform: transform,
-             locked: locked, visibility: visibility, blendMode: blendMode,
-             mask: mask, fillGradient: fillGradient, strokeGradient: strokeGradient,
-             strokeBrush: strokeBrush, strokeBrushOverrides: strokeBrushOverrides,
-             toolOrigin: toolOrigin, name: name, id: id, fillRule: fillRule)
+        var v = self; v.id = id; return v
     }
 }
 
 extension Text {
     public func withId(_ id: String?) -> Text {
-        Text(x: x, y: y, tspans: tspans,
-             fontFamily: fontFamily, fontSize: fontSize,
-             fontWeight: fontWeight, fontStyle: fontStyle,
-             textDecoration: textDecoration,
-             textTransform: textTransform, fontVariant: fontVariant,
-             baselineShift: baselineShift, lineHeight: lineHeight,
-             letterSpacing: letterSpacing, xmlLang: xmlLang,
-             aaMode: aaMode, rotate: rotate,
-             horizontalScale: horizontalScale, verticalScale: verticalScale,
-             kerning: kerning, width: width, height: height,
-             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-             locked: locked, visibility: visibility, blendMode: blendMode,
-             mask: mask, name: name, id: id)
+        var v = self; v.id = id; return v
     }
 }
 
 extension TextPath {
     public func withId(_ id: String?) -> TextPath {
-        TextPath(d: d, tspans: tspans, startOffset: startOffset,
-                 fontFamily: fontFamily, fontSize: fontSize,
-                 fontWeight: fontWeight, fontStyle: fontStyle,
-                 textDecoration: textDecoration,
-                 textTransform: textTransform, fontVariant: fontVariant,
-                 baselineShift: baselineShift, lineHeight: lineHeight,
-                 letterSpacing: letterSpacing, xmlLang: xmlLang,
-                 aaMode: aaMode, rotate: rotate,
-                 horizontalScale: horizontalScale, verticalScale: verticalScale,
-                 kerning: kerning,
-                 fill: fill, stroke: stroke, opacity: opacity, transform: transform,
-                 locked: locked, visibility: visibility, blendMode: blendMode,
-                 mask: mask, name: name, id: id)
+        var v = self; v.id = id; return v
     }
 }
 
 extension Group {
     public func withId(_ id: String?) -> Group {
-        Group(children: children, opacity: opacity, transform: transform,
-              locked: locked, visibility: visibility, blendMode: blendMode,
-              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
-              mask: mask, name: name, id: id)
+        var v = self; v.id = id; return v
     }
 
     public func withChildren(_ children: [Element]) -> Group {
-        Group(children: children, opacity: opacity, transform: transform,
-              locked: locked, visibility: visibility, blendMode: blendMode,
-              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
-              mask: mask, name: name, id: id)
+        var v = self; v.children = children; return v
     }
 }
 
 extension Layer {
     public func withId(_ id: String?) -> Layer {
-        Layer(name: name, children: children, opacity: opacity, transform: transform,
-              locked: locked, visibility: visibility, blendMode: blendMode,
-              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
-              mask: mask, id: id)
+        var v = self; v.id = id; return v
     }
 
     public func withChildren(_ children: [Element]) -> Layer {
-        Layer(name: name, children: children, opacity: opacity, transform: transform,
-              locked: locked, visibility: visibility, blendMode: blendMode,
-              isolatedBlending: isolatedBlending, knockoutGroup: knockoutGroup,
-              mask: mask, id: id)
+        var v = self; v.children = children; return v
     }
 }
 
@@ -3942,7 +3357,15 @@ public func flattenPathCommands(_ d: [PathCommand]) -> [(Double, Double)] {
             }
             cx = x; cy = y
         case .closePath:
-            pts.append(firstPt)
+            // A close before any point has been established is a NO-OP
+            // (S-4, ruled by JYH at the fleet council 2026-07-27: the
+            // artist never means a close-before-anything). Without this
+            // guard the arm appends the still-uninitialised `firstPt`,
+            // putting a phantom vertex at the document origin. Matches
+            // Rust's `flatten_path_commands`. `firstPt` tracks the CURRENT
+            // subpath start, so a close after a point still returns to the
+            // MoveTo -- the guard is on emptiness, nothing else.
+            if !pts.isEmpty { pts.append(firstPt) }
         default:
             if let ep = cmd.endpoint {
                 pts.append(ep)

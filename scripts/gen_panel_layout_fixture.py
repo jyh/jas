@@ -249,12 +249,118 @@ _BV_STROKE = {
     },
 }
 
+# ---------------------------------------------------------------------------
+# LIST-shaped bind values (CORPUS_CENSUS.md 10(c))
+# ---------------------------------------------------------------------------
+#
+# `canon_value` documents the list form as "[" + elements joined by "," + "]",
+# each element canonicalized the same way (so a nested list nests its
+# brackets).  Every list row the four seeds above produce is the SINGLE-element
+# `[lib1:0]`, which exercises neither the separator nor the recursion: changing
+# the join string to ";" in any port leaves all three rows byte-identical.  The
+# three seeds below are the vectors that make those two halves of the contract
+# observable.
+
+# Multi-element, from live-shaped data: three swatches selected across two
+# libraries.  `bind.selected_in` is `panel.selected_swatches` verbatim, so each
+# of the three tiles reports the whole selection and the joined form appears
+# three times.  (The ids are the "lib:index" strings `swatches@two_libraries`
+# already uses, not the `item_type: number` the panel's state block declares --
+# matching the existing vector rather than introducing a second convention.)
+_BV_SWATCHES_MULTI = {
+    "state": {"fill_color": "#ff0000", "stroke_color": None,
+              "fill_on_top": False},
+    "panel": {
+        "open_libraries": [
+            {"id": "lib1", "collapsed": False},
+            {"id": "lib2", "collapsed": True},
+        ],
+        "selected_swatches": ["lib1:0", "lib1:1", "lib2:0"],
+        "recent_colors": [],
+        "thumbnail_size": 16,
+    },
+    "data": {
+        "swatch_libraries": {
+            "lib1": {"name": "Default", "swatches": [
+                {"color": "#ff0000"}, {"color": "#00ff00"},
+            ]},
+            "lib2": {"name": "Grays", "swatches": [
+                {"color": "#808080"},
+            ]},
+        },
+    },
+}
+
+# NESTED, and deliberately SYNTHETIC: no binding in the compiled bundle
+# produces a list of lists today (checked over all 311 declared bind entries:
+# the ones that can evaluate to a list are selected_swatches, selected_brushes,
+# type_filter, panel_selection and element_selection -- all flat -- plus the
+# gradient panel's `stops`, a flat list of OBJECTS, which is excluded for the
+# same key-order reason `element_tree` and `twirl_states` are).  The recursion
+# is nevertheless implemented and documented in all three ports, so this scope
+# feeds `panel.selected_swatches` a list of lists purely to pin it: an inner
+# multi-element list, an EMPTY inner list (which must render as `[]`, not as
+# the empty string a null renders as), and one doubly-nested element.
+_BV_SWATCHES_NESTED = {
+    "state": {"fill_color": None, "stroke_color": None, "fill_on_top": True},
+    "panel": {
+        "open_libraries": [{"id": "lib1", "collapsed": False}],
+        "selected_swatches": [["lib1:0", "lib1:1"], [], ["lib2:0", ["deep"]]],
+        "recent_colors": [],
+        "thumbnail_size": 16,
+    },
+    "data": {
+        "swatch_libraries": {
+            "lib1": {"name": "Default", "swatches": [{"color": "#ff0000"}]},
+        },
+    },
+}
+
+# The layers tree_view, whose `bind` block is the bundle's densest list surface:
+# `element_selection` is a list of PATH values (the reference builds it as
+# `[Value.path(p) for p in canvas_selection]`; over a JSON scope the same values
+# arrive as the `{"__path__": [...]}` marker every port decodes), and
+# `panel_selection` / `type_filter` are lists of strings.  A path INSIDE a list
+# is the one element arm no other vector reaches: `type` "path" occurs zero
+# times in the 225 rows of the four seeds above.
+#
+# `element_tree` and `twirl_states` are left null on purpose -- both are OBJECT
+# bindings, and an object's JSON key order is a known cross-port divergence
+# (census row #50), which `bind_values`' own module docs say no vector may bind
+# until that row closes.  A null there also keeps the tree's row foreach from
+# expanding, so the vector stays 12 rows wide and is about the list forms.
+_BV_LAYERS_LISTS = {
+    "state": {},
+    "panel": {
+        "panel_selection": ["el_a", "el_b", "el_c"],
+        "type_filter": ["path", "text"],
+        "isolation_stack": [],
+        "twirl_states": None,
+        "renaming_element": None,
+        "drag_active": False,
+        "search_query": "",
+    },
+    "active_document": {
+        "element_tree": None,
+        "element_selection": [
+            {"__path__": [0, 1]},
+            {"__path__": [0, 2, 3]},
+            {"__path__": [1]},
+        ],
+        "artboards_panel_selection_ids": [],
+    },
+}
+
 # (case name, compiled panel id, ctx)
 BIND_SEED = [
     ("color@hsb_selected", "color_panel_content", _BV_COLOR_SELECTED),
     ("color@cmyk_no_active_color", "color_panel_content", _BV_COLOR_NONE),
     ("swatches@two_libraries", "swatches_panel_content", _BV_SWATCHES),
     ("stroke@dashed_bevel", "stroke_panel_content", _BV_STROKE),
+    ("swatches@multi_selection", "swatches_panel_content", _BV_SWATCHES_MULTI),
+    ("swatches@nested_selection", "swatches_panel_content",
+     _BV_SWATCHES_NESTED),
+    ("layers@selection_lists", "layers_panel_content", _BV_LAYERS_LISTS),
 ]
 
 

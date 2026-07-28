@@ -76,11 +76,40 @@ fields are added to the Path element:
   but the element **id does not**, because a live document may
   not hold two elements with the same id (`REFERENCE_GRAPH.md`
   §2.5) and nothing on the erase path can mint a fresh one.
-  Minting deterministic per-fragment ids is deferred; so is
-  remapping a linear gradient's stops onto each fragment's own
-  bounding box, so a fragment currently re-fits the whole ramp
-  rather than showing its slice. Both are named in
-  `BOOLEAN.md` §"Does a path EDIT preserve the declared rule?".
+  Each fragment instead wears a FRESH id minted inside the
+  effect.
+
+  A LINEAR gradient's stops are **remapped onto each fragment's
+  own extent** (S-2, ruled 2026-07-26). A gradient carries no
+  position — a linear one is an angle plus stops, resolved
+  against the element's OWN bbox centre and half-diagonal — so
+  a fragment that inherited the parent's stops verbatim re-fit
+  the whole ramp to its smaller box: three fragments of a
+  red-to-blue hull each ran the full red-to-blue. Parent and
+  fragment share the angle, so both project onto the same
+  direction, every parent stop has a well-defined absolute
+  position along it, and re-expressing that position as a
+  fraction of the fragment's span is a plain affine map of
+  `location`. Stops outside `[0, 100]` are clipped, with
+  interpolated colours inserted at the endpoints so the visible
+  ramp is exact. The algorithm is
+  `algorithms::gradient_remap::remap_linear_stops` /
+  `remapLinearStops`, gated by the `gradient_remap`
+  cross-language corpus family.
+
+  **RADIAL is not remapped and re-centres.** Its centre is
+  forced to the bbox centre and the model has nowhere to record
+  an anchor, so a fragment necessarily re-centres; JYH accepted
+  that, and a "gradient anchor" field is banked as a separate
+  stone. **FREEFORM** is unaffected: the painter builds no brush
+  for it. `midpoint_to_next` is carried through unchanged — the
+  painter does not read it today, so a clipped segment's
+  midpoint is not corrected.
+
+  Only the SEVERING arm remaps. A single surviving fragment is
+  the one-element case, which the Ship of Theseus law owns;
+  whether a trimmed-but-whole outline should re-fit its ramp is
+  a separate ruling.
 
 The same law governs the other path edits — delete / insert
 anchor, the anchor-point conversions, Smooth, and the

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 200 100" width="200" height="100">
+  <g inkscape:groupmode="layer" id="stage" inkscape:label="Stage">
+    <g id="cluster" inkscape:label="Cluster">
+      <rect id="alpha" x="0" y="0" width="10" height="10" fill="rgb(255,0,0)" stroke="none"/>
+      <rect id="beta" x="20" y="0" width="10" height="10" fill="rgb(0,0,255)" stroke="none"/>
+    </g>
+  </g>
+</svg>

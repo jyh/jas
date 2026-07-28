@@ -682,8 +682,9 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
         use crate::document::controller::Controller;
 
         // Mint `count` collision-free element ids against every id already in
-        // the document — layer forest plus master store, see
-        // `Document::element_ids` — through THE ONE MINT LOOP.
+        // the document — layer forest, the operands a live compound shape
+        // owns, and the master store; see `Document::element_ids` — through
+        // THE ONE MINT LOOP.
         fn mint(
             model: &crate::document::model::Model,
             count: usize,
@@ -3617,9 +3618,10 @@ fn run_yaml_effect(
 
     // doc.insert_after: { path, element } — PHASE3 §5.5 / OP_LOG.md §9 Phase P4.
     // VALUE-IN-OP: the resolved element is serialized to JSON and carried WHOLE
-    // in the op (replay deserializes and inserts it byte-identically, keeping
-    // whatever id it had). The element comes from a preceding NON-JOURNALED
-    // binder (`doc.clone_at` binds a clone as ctx JSON); only this insert
+    // in the op (replay deserializes and inserts it byte-identically, with
+    // whatever id the JSON carries — which for a duplicate is NONE, because
+    // `clone_at` clears the clone's ids before binding it). The element comes
+    // from a preceding NON-JOURNALED binder (`doc.clone_at`); only this insert
     // journals, so the composite `duplicate_layer_selection` journals as ONE
     // `insert_after` op per duplicate. Routes through the SHARED `op_apply`
     // dispatcher (which calls `apply_insert_element_after`); targets carry the
@@ -4170,7 +4172,22 @@ fn clone_element_at(
 ) -> Option<crate::geometry::element::Element> {
     let tab = st.tabs.get(st.active_tab)?;
     let path_vec = path.to_vec();
-    tab.model.document().get_element(&path_vec).cloned()
+    let mut cloned = tab.model.document().get_element(&path_vec).cloned()?;
+    // A COPY IS BORN ID-LESS. This used to return the clone verbatim, id
+    // included, and its only caller — `duplicate_layer_selection`, via
+    // `doc.insert_after` — put it in the SAME parent while the original
+    // stayed, so duplicating an identified element left two live elements
+    // wearing each id, at every depth (REFERENCE_GRAPH.md §2.5 uniqueness;
+    // the silent-rebinding hazard of transcripts/EDIT_SEMANTICS_FREEZE.md
+    // §3.7). `clear_ids` is `Controller::copy_selection`'s landed rule for
+    // exactly this, reused rather than reinvented.
+    //
+    // The value-in-op contract (OP_LOG.md §9 Phase P4) is untouched: the
+    // insert still carries the WHOLE element as literal JSON and replay still
+    // inserts it byte-identically — the bytes simply no longer carry an id
+    // that belongs to something else.
+    crate::geometry::element::clear_ids(&mut cloned);
+    Some(cloned)
 }
 
 /// Normalize a list of `{__path__:[..]}` marker JSON values (the
@@ -12370,6 +12387,94 @@ mod tests {
         assert_eq!(tab_layer(&st, 0).name(), "A");
         assert_eq!(tab_layer(&st, 1).name(), "A");   // clone
         assert_eq!(tab_layer(&st, 2).name(), "B");
+    }
+
+    /// THE PRESERVATION LAW at `doc.clone_at` — the binder behind the Layers
+    /// panel's Duplicate (workspace/actions.yaml `duplicate_layer_selection`).
+    /// `clone_element_at` returned `get_element(...).cloned()` VERBATIM, id
+    /// included, and `doc.insert_after` put it in the same parent while the
+    /// original stayed, so duplicating an identified layer left TWO live
+    /// elements wearing each id — at every depth, since the clone is deep.
+    /// That breaks REFERENCE_GRAPH.md §2.5's uniqueness invariant and opens
+    /// the silent-rebinding hazard of EDIT_SEMANTICS_FREEZE.md §3.7.
+    ///
+    /// A COPY IS BORN ID-LESS — `Controller::copy_selection`'s landed rule,
+    /// applied here through the same `clear_ids` helper. The value-in-op
+    /// contract is unaffected: the op still carries the WHOLE element as
+    /// literal JSON, so replay inserts byte-identically — the bytes simply no
+    /// longer carry a stolen id.
+    #[test]
+    fn doc_clone_at_does_not_duplicate_ids() {
+        use crate::geometry::element::{
+            CommonProps, Element, LayerElem, RectElem,
+        };
+        use std::rc::Rc;
+        fn ids_with_repeats(e: &Element, out: &mut Vec<String>) {
+            if let Some(id) = e.common().id.as_ref() {
+                out.push(id.clone());
+            }
+            if let Some(children) = e.children() {
+                for c in children { ids_with_repeats(c, out); }
+            }
+        }
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+        ]);
+        // Give layer 0 an id AND an identified child, so the walk has to
+        // descend past the cloned element itself.
+        {
+            let mut doc = st.tabs[st.active_tab].model.document().clone();
+            let Element::Layer(le) = &mut doc.layers[0] else { panic!("layer") };
+            le.common.id = Some("lyr-1".to_string());
+            le.children.push(Rc::new(Element::Rect(RectElem {
+                x: 3.0, y: 4.0, width: 20.0, height: 10.0, rx: 0.0, ry: 0.0,
+                fill: None, stroke: None,
+                common: CommonProps {
+                    id: Some("kid-1".to_string()),
+                    name: Some("hull".to_string()),
+                    ..Default::default()
+                },
+                fill_gradient: None, stroke_gradient: None,
+            })));
+            st.tabs[st.active_tab].model.set_document_for_test(doc);
+        }
+        let eval_ctx = serde_json::json!({});
+        let effects = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({"doc.clone_at": "path(0)", "as": "clone"}),
+            serde_json::json!({"doc.insert_after": {"path": "path(0)", "element": "clone"}}),
+        ];
+        run_yaml_effects(&effects, &eval_ctx, &mut st);
+        let layers = st.tabs[st.active_tab].model.document().layers.clone();
+        assert_eq!(layers.len(), 2, "the duplicate landed");
+        // MANDATORY GEOMETRY PAIRING: the clone really carries the child's
+        // geometry, so this is a real duplicate and not an empty shell.
+        let Element::Layer(copy) = &layers[1] else { panic!("layer") };
+        let Element::Rect(r) = copy.children[0].as_ref() else { panic!("rect") };
+        assert!((r.x - 3.0).abs() < 1e-9 && (r.y - 4.0).abs() < 1e-9
+                && (r.width - 20.0).abs() < 1e-9,
+                "the clone carries the source child's geometry, got {},{} {}x{}",
+                r.x, r.y, r.width, r.height);
+        assert_eq!(r.common.name.as_deref(), Some("hull"),
+                   "everything but identity copies");
+        // The COPY is born id-less, at every depth.
+        assert!(copy.common.id.is_none(),
+                "the clone wears {:?} — still live on the original",
+                copy.common.id);
+        assert!(r.common.id.is_none(),
+                "a NESTED id rode out on the clone: {:?}", r.common.id);
+        // The ORIGINAL is a bystander (T4): untouched, ids included.
+        let Element::Layer(src) = &layers[0] else { panic!("layer") };
+        assert_eq!(src.common.id.as_deref(), Some("lyr-1"));
+        assert_eq!(src.children[0].common().id.as_deref(), Some("kid-1"));
+        // And the document invariant, stated directly.
+        let mut seen = Vec::new();
+        for l in &layers { ids_with_repeats(l, &mut seen); }
+        let mut sorted = seen.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), seen.len(),
+                   "clone_at left a duplicate id in the document: {seen:?}");
     }
 
     #[test]

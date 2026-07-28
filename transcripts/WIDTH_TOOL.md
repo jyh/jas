@@ -2,7 +2,7 @@
 
 We need to revise the following informal text.
 
-The **Width Tool (Shift + W)** is one of Illustrator’s most intuitive features. It allows you to transform a uniform path into a dynamic, variable-width stroke without having to expand the path into a shape.
+The **Width Tool (Shift + W)** is one of the incumbent's most intuitive features. It allows you to transform a uniform path into a dynamic, variable-width stroke without having to expand the path into a shape.
 
 Think of it as a way to "sculpt" your lines, giving them a hand-drawn, calligraphic, or organic feel.
 

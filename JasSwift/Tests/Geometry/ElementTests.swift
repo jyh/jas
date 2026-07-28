@@ -823,3 +823,72 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
     let json = elementJson(elem)
     #expect(!json.contains("\"id\""), "id-less element must not emit id key: \(json)")
 }
+
+// MARK: - S-4: a leading ClosePath is a no-op
+//
+// Ruled by JYH at the fleet council, 2026-07-27: a ClosePath appearing
+// before any point has been established contributes nothing and must not
+// emit a point. These pin `flattenPathCommands`; the same six shapes are
+// gated cross-port by the `leading_close_*` vectors of
+// test_fixtures/algorithms/flatten.json.
+
+/// A path that is nothing but Z flattens to nothing.
+/// Before the guard, the close arm appended the uninitialised subpath
+/// start and this returned [(0, 0)].
+@Test func flattenLeadingCloseAloneEmitsNothing() {
+    #expect(flattenPathCommands([.closePath]).isEmpty)
+}
+
+/// A leading Z contributes nothing, so a following LineTo is the only
+/// point. Before the guard this returned [(0, 0), (5, 5)].
+@Test func flattenLeadingCloseThenLineTo() {
+    let pts = flattenPathCommands([.closePath, .lineTo(5, 5)])
+    #expect(pts.count == 1)
+    #expect(pts.first! == (5, 5))
+}
+
+/// A leading Z in front of a real subpath: the leading close is a no-op,
+/// the trailing close still returns to the MoveTo (4, 1). The MoveTo is
+/// deliberately off the origin so the phantom point differs by value as
+/// well as by count. Before the guard this returned 5 points led by (0, 0).
+@Test func flattenLeadingCloseThenClosedSubpath() {
+    let pts = flattenPathCommands([
+        .closePath, .moveTo(4, 1), .lineTo(14, 1), .lineTo(14, 11), .closePath,
+    ])
+    #expect(pts.count == 4)
+    #expect(pts.map { [$0.0, $0.1] } == [[4, 1], [14, 1], [14, 11], [4, 1]])
+}
+
+/// A leading Z in front of TWO subpaths: each real close still returns to
+/// its OWN subpath start. Before the guard this returned 7 points led by
+/// (0, 0).
+@Test func flattenLeadingCloseMultiSubpath() {
+    let pts = flattenPathCommands([
+        .closePath,
+        .moveTo(3, 2), .lineTo(13, 2), .closePath,
+        .moveTo(23, 2), .lineTo(33, 2), .closePath,
+    ])
+    #expect(pts.map { [$0.0, $0.1] }
+            == [[3, 2], [13, 2], [3, 2], [23, 2], [33, 2], [23, 2]])
+}
+
+/// SCOPE BOUNDARY, and not a discriminator for the leading-close bug --
+/// this already passed before the guard. After M, L a point IS
+/// established, so the ruling does not reach the second Z and it still
+/// emits the subpath start. Guarding the close on last-point-inequality
+/// instead of on emptiness would return 3 points.
+@Test func flattenRedundantTrailingCloseStillEmits() {
+    let pts = flattenPathCommands([
+        .moveTo(2, 3), .lineTo(12, 3), .closePath, .closePath,
+    ])
+    #expect(pts.map { [$0.0, $0.1] } == [[2, 3], [12, 3], [2, 3], [2, 3]])
+}
+
+/// SCOPE BOUNDARY, and likewise not a discriminator for the leading-close
+/// bug. One MoveTo has established a point, so the following Z is not a
+/// leading close and does emit. Requiring two points before closing would
+/// return 1.
+@Test func flattenMoveToThenCloseStillEmits() {
+    let pts = flattenPathCommands([.moveTo(6, 7), .closePath])
+    #expect(pts.map { [$0.0, $0.1] } == [[6, 7], [6, 7]])
+}

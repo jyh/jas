@@ -591,4 +591,44 @@ mod tests {
         let r2 = expand_dashed_stroke(&path, &[12.0, 6.0], true);
         assert_eq!(r1, r2);
     }
+    // S-4: a leading ClosePath is a no-op. Ruled by JYH at the fleet
+    // council, 2026-07-27. A subpath that is nothing but Z establishes
+    // no anchor and produces no dash. Rust already behaved this way when
+    // these were written -- `expand_preserve` and `expand_align` both
+    // guard the cyclic wrap on `!anchors.is_empty()`, and `expand_align`
+    // guards `n_segs` with `saturating_sub` -- so these are regression
+    // pins, not a fix. The live reference raised IndexError on the same
+    // inputs; these are its counterparts.
+
+    #[test]
+    fn leading_close_bare_produces_no_dash_preserve() {
+        assert!(expand_dashed_stroke(&[Z], &[4.0, 2.0], false).is_empty());
+    }
+
+    #[test]
+    fn leading_close_bare_produces_no_dash_align() {
+        assert!(expand_dashed_stroke(&[Z], &[4.0, 2.0], true).is_empty());
+    }
+
+    /// A leading Z is a no-op, not a poison pill: the subpath after it
+    /// still dashes. Asserted as equality against the same path WITHOUT
+    /// the leading Z, so an implementation that bailed out early and
+    /// returned nothing would fail rather than pass vacuously. The
+    /// companion length assertion below keeps the equality non-vacuous.
+    #[test]
+    fn leading_close_does_not_suppress_the_real_subpath() {
+        let real = vec![M { x: 0.0, y: 0.0 }, L { x: 20.0, y: 0.0 }];
+        let with_z = {
+            let mut v = vec![Z];
+            v.extend(real.iter().cloned());
+            v
+        };
+        for align in [false, true] {
+            let a = expand_dashed_stroke(&with_z, &[4.0, 2.0], align);
+            let b = expand_dashed_stroke(&real, &[4.0, 2.0], align);
+            assert_eq!(a, b, "align={align}");
+            assert_eq!(a.len(), 4, "align={align}");
+        }
+    }
+
 }
