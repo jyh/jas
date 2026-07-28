@@ -34,7 +34,7 @@ DEFAULT_OUT = os.path.join(
 
 
 def compile_corpus(src_path):
-    with open(src_path) as f:
+    with open(src_path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     cases = []
     for case in data["tests"]:
@@ -55,7 +55,7 @@ def main():
     out = args[1] if len(args) > 1 else DEFAULT_OUT
     cases = compile_corpus(src)
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w") as f:
+    with open(out, "w", encoding="utf-8", newline="") as f:
         json.dump(cases, f, indent=2, ensure_ascii=False)
         f.write("\n")
 

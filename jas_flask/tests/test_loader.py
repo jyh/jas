@@ -29,7 +29,7 @@ class TestLoadWorkspace:
     def test_load_missing_keys_raises(self, tmp_path):
         from loader import load_workspace
         bad_file = tmp_path / "bad.yaml"
-        bad_file.write_text("version: 1\napp:\n  name: test\n")
+        bad_file.write_text("version: 1\napp:\n  name: test\n", encoding="utf-8", newline="")
         with pytest.raises(ValueError, match="Missing"):
             load_workspace(str(bad_file))
 

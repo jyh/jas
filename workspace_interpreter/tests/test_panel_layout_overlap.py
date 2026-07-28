@@ -53,7 +53,7 @@ def _load_ctx() -> dict:
 
 
 def _panels() -> dict:
-    bundle = json.load(open(os.path.join(_ROOT, "workspace", "workspace.json")))
+    bundle = json.load(open(os.path.join(_ROOT, "workspace", "workspace.json"), encoding="utf-8"))
     return bundle["panels"]
 
 

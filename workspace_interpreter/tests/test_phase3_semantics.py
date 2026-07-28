@@ -560,7 +560,7 @@ class TestNewGroupAction:
         import yaml as yl
         path = os.path.join(os.path.dirname(__file__), "..", "..",
                             "workspace", "actions.yaml")
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return yl.safe_load(f)["actions"][name]
 
     def test_new_group_wraps_panel_selection(self):
@@ -639,7 +639,7 @@ class TestCollectInNewLayerAction:
         import yaml as yl
         path = os.path.join(os.path.dirname(__file__), "..", "..",
                             "workspace", "actions.yaml")
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return yl.safe_load(f)["actions"][name]
 
     def test_collect_panel_selection(self):
@@ -717,7 +717,7 @@ class TestFlattenArtworkAction:
         import yaml as yl
         path = os.path.join(os.path.dirname(__file__), "..", "..",
                             "workspace", "actions.yaml")
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return yl.safe_load(f)["actions"][name]
 
     def test_flatten_unpacks_panel_selected_groups(self):
@@ -750,7 +750,7 @@ class TestEnterIsolationModeAction:
         import yaml as yl
         path = os.path.join(os.path.dirname(__file__), "..", "..",
                             "workspace", "actions.yaml")
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return yl.safe_load(f)["actions"][name]
 
     def test_enter_pushes_path_from_layer_id(self):
@@ -864,7 +864,7 @@ class TestNewLayerAction:
         import yaml as yl
         path = os.path.join(os.path.dirname(__file__), "..", "..",
                             "workspace", "actions.yaml")
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return yl.safe_load(f)["actions"][name]
 
     def test_new_layer_no_selection_appends(self):
@@ -920,7 +920,7 @@ class TestLayerOptionsConfirmAction:
         import yaml as yl
         path = os.path.join(os.path.dirname(__file__), "..", "..",
                             "workspace", "actions.yaml")
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return yl.safe_load(f)["actions"][name]
 
     def test_edit_mode_updates_existing_layer(self):
@@ -1092,7 +1092,7 @@ class TestOpenLayerOptionsAction:
         import yaml as yl
         path = os.path.join(os.path.dirname(__file__), "..", "..",
                             "workspace", "actions.yaml")
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return yl.safe_load(f)["actions"][name]
 
     def test_edit_mode_populates_dialog_from_layer(self):
@@ -1108,7 +1108,7 @@ class TestOpenLayerOptionsAction:
         import yaml as yl
         dialogs_path = os.path.join(os.path.dirname(__file__), "..", "..",
                                      "workspace", "dialogs", "layer_options.yaml")
-        with open(dialogs_path) as f:
+        with open(dialogs_path, encoding="utf-8") as f:
             dialogs = yl.safe_load(f)
         store = StateStore(document=doc)
         ctx = {"param": {"mode": "edit", "layer_id": "0"}}
@@ -1129,7 +1129,7 @@ class TestOpenLayerOptionsAction:
         import yaml as yl
         dialogs_path = os.path.join(os.path.dirname(__file__), "..", "..",
                                      "workspace", "dialogs", "layer_options.yaml")
-        with open(dialogs_path) as f:
+        with open(dialogs_path, encoding="utf-8") as f:
             dialogs = yl.safe_load(f)
         store = StateStore(document=doc)
         ctx = {"param": {"mode": "create", "layer_id": None}}

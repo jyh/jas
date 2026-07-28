@@ -50,7 +50,7 @@ WORKSPACE_JSON = os.path.join(
 
 
 def _load() -> dict:
-    with open(FIXTURE) as f:
+    with open(FIXTURE, encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -229,7 +229,7 @@ class TestTheFallbacksAreTheWorkspaceDefaults:
 
     @classmethod
     def _declared(cls) -> dict:
-        with open(WORKSPACE_JSON) as f:
+        with open(WORKSPACE_JSON, encoding="utf-8") as f:
             state = json.load(f)["panels"]["character_panel_content"]["state"]
         return {k: (v.get("default") if isinstance(v, dict) else v)
                 for k, v in state.items()}

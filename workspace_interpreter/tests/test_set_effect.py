@@ -112,6 +112,6 @@ _ids = [os.path.splitext(os.path.basename(p))[0] for p in _paths]
 
 @pytest.mark.parametrize("fixture_path", _paths, ids=_ids)
 def test_set_effect_fixture(fixture_path: str) -> None:
-    with open(fixture_path) as f:
+    with open(fixture_path, encoding="utf-8") as f:
         fixture = yaml.safe_load(f)
     _run_fixture(fixture)

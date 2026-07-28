@@ -109,12 +109,12 @@ def main() -> int:
                     help="rewrite the golden from the current workspace.json tool_grid")
     args = ap.parse_args()
 
-    workspace = json.loads(_WORKSPACE_JSON.read_text())
+    workspace = json.loads(_WORKSPACE_JSON.read_text(encoding="utf-8"))
     structure = project_toolbar(workspace)
     actual = _canonical(structure) + "\n"
 
     if args.regenerate:
-        _GOLDEN.write_text(actual)
+        _GOLDEN.write_text(actual, encoding="utf-8", newline="")
         print(f"regenerated {_GOLDEN.relative_to(_ROOT)} "
               f"({len(structure['slots'])} slots, "
               f"{structure['total_tools']} tools)")
@@ -142,7 +142,7 @@ def main() -> int:
     if not _GOLDEN.exists():
         print(f"FAIL: golden missing: {_GOLDEN}", file=sys.stderr)
         return 1
-    expected = _GOLDEN.read_text()
+    expected = _GOLDEN.read_text(encoding="utf-8")
     if actual != expected:
         print("FAIL: toolbar structure does not match the golden.\n"
               "  The compiled tool_grid drifted from test_fixtures/expected/"

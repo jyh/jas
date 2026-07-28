@@ -183,7 +183,12 @@ def measure(repo: Path = REPO, patterns: dict = PATTERNS) -> dict:
             excl = spec.get("exclude_pattern")
             if excl:
                 exclude_re = re.compile(excl)
-                files = [f for f in files if not exclude_re.search(str(f))]
+                # as_posix(), not str(): every exclude_pattern here is
+                # "/"-anchored, and str(Path) yields "\" separators on Windows,
+                # so the exclusions silently no-opped there and every count came
+                # back high by exactly the number of files they should have
+                # dropped. No-op on macOS/Linux, where str() is already POSIX.
+                files = [f for f in files if not exclude_re.search(f.as_posix())]
             if spec["kind"] == "files":
                 app_report[cat_name] = len(files)
             elif spec["kind"] == "regex_count":
@@ -252,7 +257,7 @@ def main() -> int:
         BASELINE_PATH.write_text(
             json.dumps(current, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
-        )
+        newline="")
         print(f"Baseline updated: {BASELINE_PATH}", file=sys.stderr)
         if json_out:
             print(json.dumps(current, indent=2, sort_keys=True))

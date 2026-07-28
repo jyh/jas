@@ -136,7 +136,7 @@ def write_new(path: str, content: str) -> None:
                 return
         fail(f"{os.path.relpath(path, REPO_ROOT)} exists with different bytes; "
              "pick a new family name (existing corpus bytes are never modified)")
-    with open(path, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8", newline="") as f:
         f.write(content)
     print(f"ingest: wrote {os.path.relpath(path, REPO_ROOT)}")
 
@@ -230,7 +230,7 @@ def patch_list(source_path: str, marker: str, entry_line: str, close_token: str)
             return False
         insert_at = start + close_at + 1
         text = text[:insert_at] + entry_line + "\n" + text[insert_at:]
-    with open(source_path, "w", encoding="utf-8") as f:
+    with open(source_path, "w", encoding="utf-8", newline="") as f:
         f.write(text)
     return True
 
@@ -349,10 +349,10 @@ def self_test() -> None:
             ],
             "expected_json": "ingest_selftest_1_expected.json",
         }
-        with open(os.path.join(root, "svg", case["setup_svg"]), "w", encoding="utf-8") as f:
+        with open(os.path.join(root, "svg", case["setup_svg"]), "w", encoding="utf-8", newline="") as f:
             f.write(setup_content)
         pre_path = os.path.join(root, "gestures", "pre.json")
-        with open(pre_path, "w", encoding="utf-8") as f:
+        with open(pre_path, "w", encoding="utf-8", newline="") as f:
             json.dump([case], f)
         oracle = mint_goldens("gesture", pre_path)[case["name"]]
         os.remove(pre_path)
@@ -377,7 +377,7 @@ def self_test() -> None:
             }],
         }
         rec_path = os.path.join(tmp, "ingest_selftest.recording.json")
-        with open(rec_path, "w", encoding="utf-8") as f:
+        with open(rec_path, "w", encoding="utf-8", newline="") as f:
             json.dump(env, f)
 
         # Registration is patched against COPIES of both ports' lists.
@@ -413,7 +413,7 @@ def self_test() -> None:
         # An UNFAITHFUL case is refused without --allow-unfaithful.
         env["cases"][0]["fidelity"] = "UNFAITHFUL"
         bad_path = os.path.join(tmp, "bad.recording.json")
-        with open(bad_path, "w", encoding="utf-8") as f:
+        with open(bad_path, "w", encoding="utf-8", newline="") as f:
             json.dump(env, f)
         res = subprocess.run(
             [sys.executable, os.path.abspath(__file__), bad_path,

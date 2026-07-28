@@ -27,7 +27,7 @@ FIXTURE_PATH = os.path.join(
 
 
 def _load_fixture():
-    with open(FIXTURE_PATH) as f:
+    with open(FIXTURE_PATH, encoding="utf-8") as f:
         return json.load(f)
 
 

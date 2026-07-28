@@ -356,7 +356,7 @@ def check_measure_injection():
     for rel, want_count, helper in MEASURE_INJECTION_SITES:
         path = os.path.join(REPO_ROOT, rel)
         try:
-            with open(path) as fh:
+            with open(path, encoding="utf-8") as fh:
                 lines = fh.readlines()
         except OSError as e:
             problems.append(f"{rel}: cannot read harness source ({e})")
@@ -578,7 +578,7 @@ def _without_leading_closes(node):
 def _leading_close_probe_pairs(fixture_path):
     """Returns (doc_is_list, pairs) where each pair is (original, probe,
     paths_touched) for every non-skipped vector that carries path data."""
-    with open(fixture_path) as fh:
+    with open(fixture_path, encoding="utf-8") as fh:
         doc = json.load(fh)
     vectors = doc if isinstance(doc, list) else doc.get("vectors", [])
     pairs = []
@@ -628,7 +628,7 @@ def check_leading_close_invariance(langs, algos, verbose=False):
             combined = [p[0] for p in pairs] + [p[1] for p in pairs]
             probe_doc = combined if is_list else {"vectors": combined}
             probe_path = os.path.join(tmpd, f"{algo}.json")
-            with open(probe_path, "w") as fh:
+            with open(probe_path, "w", encoding="utf-8", newline="") as fh:
                 json.dump(probe_doc, fh)
 
             forwards = algo in LEADING_CLOSE_PATH_OUTPUT
@@ -829,7 +829,7 @@ def main():
             or (isinstance(ref_output[0], dict) and "name" in ref_output[0])
         )
         if strategy in ("tolerance", "exact"):
-            with open(fixture_path) as fh:
+            with open(fixture_path, encoding="utf-8") as fh:
                 fixture_doc = json.load(fh)
             fixture_cases = (fixture_doc if isinstance(fixture_doc, list)
                              else fixture_doc.get("vectors", []))
@@ -870,7 +870,7 @@ def main():
         # app-vs-app comparison is blind to them — wrong-vs-wrong compares
         # green. Only a pinned, hand-derived expectation catches that.
         if strategy in ORACLE_PARTIAL_STRATEGIES:
-            with open(fixture_path) as fh:
+            with open(fixture_path, encoding="utf-8") as fh:
                 fixture_cases = json.load(fh).get("vectors", [])
             gold_tol = tol if tol is not None else 1e-6
             for idx, out_vec in enumerate(ref_output):
@@ -946,7 +946,7 @@ def main():
             )
             fixture_names = []
             if not has_name_wrapper:
-                with open(fixture_path) as fh:
+                with open(fixture_path, encoding="utf-8") as fh:
                     fixture_names = [v.get("name", f"#{i}")
                                      for i, v in enumerate(json.load(fh)["vectors"])]
 

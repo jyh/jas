@@ -54,7 +54,7 @@ def _widget_types(node):
 
 
 def test_every_panel_widget_kind_is_canonical():
-    workspace = json.loads(_WORKSPACE_JSON.read_text())
+    workspace = json.loads(_WORKSPACE_JSON.read_text(encoding="utf-8"))
     panels = workspace["panels"]
 
     offenders = {}
@@ -82,7 +82,7 @@ def test_every_dialog_widget_kind_is_canonical():
     Scale / Shear option dialogs) silently rendered as a placeholder in every
     app for so long. Walking them here closes that gap as data.
     """
-    workspace = json.loads(_WORKSPACE_JSON.read_text())
+    workspace = json.loads(_WORKSPACE_JSON.read_text(encoding="utf-8"))
     dialogs = workspace.get("dialogs", {})
 
     offenders = {}
