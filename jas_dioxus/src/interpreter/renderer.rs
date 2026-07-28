@@ -546,6 +546,72 @@ pub(crate) fn cycle_element_visibility_at(
     new_doc
 }
 
+/// Element-level behavior of the Layers tree LOCK button — the twin of
+/// [`cycle_element_visibility_at`], which the eye button has had factored
+/// out (and unit-tested) all along while the lock button's identical
+/// document work stayed inlined in the Dioxus click handler. Pure: takes a
+/// Document, returns a Document.
+///
+/// Three things happen, in this order:
+///   1. the element's own `locked` flips;
+///   2. locking a CONTAINER materializes `locked = true` onto its direct
+///      children, and unlocking restores whatever `saved_to_restore` holds
+///      (the caller owns that map — it outlives the panel);
+///   3. locking removes the element AND its descendants from the selection,
+///      exactly as `cycle_element_visibility_at` does on Invisible.
+///
+/// Step 3 is not cosmetic: nothing downstream refuses to move or delete a
+/// selected-but-locked element, so a lock that leaves the selection alone
+/// leaves locked content draggable.
+///
+/// Step 2 is the materialization design that `workspace/panels/layers.yaml`
+/// still specifies. If it is repealed in favour of inherited lock, this
+/// function loses its `saved_to_restore` parameter and its middle third;
+/// steps 1 and 3 survive unchanged.
+pub(crate) fn toggle_element_lock_at(
+    doc: &crate::document::document::Document,
+    path: &crate::document::document::ElementPath,
+    saved_to_restore: Option<Vec<bool>>,
+) -> crate::document::document::Document {
+    let Some(elem) = doc.get_element(path) else {
+        return doc.clone();
+    };
+    let was_unlocked = !elem.locked();
+    let is_container = elem.is_group_or_layer();
+
+    let mut new_doc = doc.clone();
+    if let Some(elem) = new_doc.get_element_mut(path) {
+        elem.common_mut().locked = was_unlocked;
+        // When locking a container, also lock all direct children.
+        if is_container && was_unlocked {
+            if let Some(children) = elem.children_mut() {
+                for c in children.iter_mut() {
+                    std::rc::Rc::make_mut(c).common_mut().locked = true;
+                }
+            }
+        }
+    }
+    // Restore saved child lock states on unlock.
+    if let Some(saved) = saved_to_restore {
+        if let Some(elem) = new_doc.get_element_mut(path) {
+            if let Some(children) = elem.children_mut() {
+                for (i, c) in children.iter_mut().enumerate() {
+                    if let Some(&saved_locked) = saved.get(i) {
+                        std::rc::Rc::make_mut(c).common_mut().locked = saved_locked;
+                    }
+                }
+            }
+        }
+    }
+    // Locking an element removes it and its descendants from the selection.
+    if was_unlocked {
+        new_doc
+            .selection
+            .retain(|es| !(es.path == *path || es.path.starts_with(path.as_slice())));
+    }
+    new_doc
+}
+
 pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     // Recorder seam hook (Arc 1 S2, dormant unless armed): records
     // depth-0 dispatches on the action seam / segments an open gesture
@@ -9391,39 +9457,10 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
 
                             if let Some(tab) = st.tab_mut() {
                                 tab.model.begin_txn();
-                                // One clone -> all three lock mutations -> one commit, so the
-                                // whole lock toggle is a single undo step / one index update.
-                                let mut doc = tab.model.document().clone();
-                                if let Some(elem) = doc.get_element_mut(&p) {
-                                    elem.common_mut().locked = was_unlocked;
-                                    // When locking a container, also lock all direct children
-                                    if is_container && was_unlocked {
-                                        if let Some(children) = elem.children_mut() {
-                                            for c in children.iter_mut() {
-                                                std::rc::Rc::make_mut(c).common_mut().locked = true;
-                                            }
-                                        }
-                                    }
-                                }
-                                // Restore saved child lock states on unlock
-                                if let Some(saved) = saved_to_restore {
-                                    if let Some(elem) = doc.get_element_mut(&p) {
-                                        if let Some(children) = elem.children_mut() {
-                                            for (i, c) in children.iter_mut().enumerate() {
-                                                if let Some(&saved_locked) = saved.get(i) {
-                                                    std::rc::Rc::make_mut(c).common_mut().locked = saved_locked;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                // Locking an element removes it and its descendants from selection
-                                if was_unlocked {
-                                    let path = p.clone();
-                                    doc.selection.retain(|es| {
-                                        !(es.path == path || es.path.starts_with(&path))
-                                    });
-                                }
+                                // One transform -> one commit, so the whole lock
+                                // toggle is a single undo step / one index update.
+                                let doc = toggle_element_lock_at(
+                                    tab.model.document(), &p, saved_to_restore);
                                 tab.model.set_document(doc);
                                 tab.model.commit_txn();
                             }
@@ -13572,6 +13609,90 @@ mod tests {
         // Invisible -> Preview.
         let d3 = cycle_element_visibility_at(&d2, &vec![0usize]);
         assert_eq!(d3.get_element(&vec![0usize]).unwrap().visibility(), Visibility::Preview);
+    }
+
+    // ── D5a: the Layers LOCK button prunes the selection ──────────
+    //
+    // SCOPE-effective-locked.md §3, D5a. jas_dioxus dropped the locked
+    // element and its descendants from the selection; JasSwift's closure had
+    // no equivalent, so a locked layer stayed selected there -- and nothing
+    // downstream refuses to move or delete a selected element for being
+    // locked, so that is not cosmetic.
+    //
+    // PER-PORT: the Layers panel is reached through GUI event handlers that
+    // no shared corpus drives, and no shared fixture can seed a locked
+    // document anyway (the SVG codec drops `locked`). The mirror is
+    // JasSwift/Tests/Document/DocumentTests.swift.
+    //
+    // These are REGRESSION PINS for this port -- the red was in Swift.
+
+    /// One layer named "L" holding two rects, with `selection` seeded to
+    /// the whole tree: the layer, and both of its children.
+    fn lock_toggle_doc() -> crate::document::document::Document {
+        use crate::document::document::{Document, ElementSelection};
+        use crate::geometry::element::{CommonProps, RectElem};
+        let rect = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(rect(0.0)), Rc::new(rect(20.0))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![
+                ElementSelection::all(vec![0]),
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+            ],
+            ..Document::default()
+        }
+    }
+
+    #[test]
+    fn toggle_element_lock_at_locks_and_prunes_the_selection() {
+        let doc = lock_toggle_doc();
+        assert_eq!(doc.selection.len(), 3, "control: everything starts selected");
+        let out = toggle_element_lock_at(&doc, &vec![0usize], None);
+        assert!(out.get_element(&vec![0usize]).unwrap().locked(),
+            "the layer itself is locked");
+        assert!(out.selection.is_empty(),
+            "the layer AND both descendants leave the selection");
+    }
+
+    /// Locking a CHILD must prune that child only -- if the prune were
+    /// written as a whole-clear, or matched on the wrong end of the path,
+    /// this is the case that notices.
+    #[test]
+    fn toggle_element_lock_at_prunes_only_the_locked_subtree() {
+        let doc = lock_toggle_doc();
+        let out = toggle_element_lock_at(&doc, &vec![0usize, 0usize], None);
+        let mut paths: Vec<Vec<usize>> =
+            out.selection.iter().map(|es| es.path.clone()).collect();
+        paths.sort();
+        assert_eq!(paths, vec![vec![0], vec![0, 1]]);
+    }
+
+    /// UNlocking must not touch the selection at all -- the prune is keyed
+    /// on the direction of the toggle, not on the button being pressed.
+    #[test]
+    fn toggle_element_lock_at_unlock_leaves_the_selection_alone() {
+        let doc = lock_toggle_doc();
+        let locked = toggle_element_lock_at(&doc, &vec![0usize], None);
+        assert!(locked.selection.is_empty());
+        // Re-select the layer, then unlock it.
+        let mut relocked = locked;
+        relocked.selection =
+            vec![crate::document::document::ElementSelection::all(vec![0usize])];
+        let out = toggle_element_lock_at(&relocked, &vec![0usize], Some(vec![false, false]));
+        assert!(!out.get_element(&vec![0usize]).unwrap().locked());
+        assert_eq!(out.selection.len(), 1, "unlock keeps the selection");
     }
 
     #[test]

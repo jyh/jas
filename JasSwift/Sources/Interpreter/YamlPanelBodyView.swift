@@ -4110,31 +4110,18 @@ struct TreeViewContent: View {
                     let e = model.document.getElement(path)
                     let wasUnlocked = !e.isLocked
                     let isCont = isContainerElem(e)
-                    var doc = model.document
-                    // Save child states when locking a container
+                    // Save child states when locking a container; take them
+                    // back out when unlocking. The map is the view's, the
+                    // document work is Document.togglingElementLock's.
                     if isCont && wasUnlocked, let kids = elementChildrenStatic(e) {
                         savedLockStates[path] = kids.map { $0.isLocked }
                     }
-                    doc = doc.replaceElement(path, with: e.withLocked(wasUnlocked))
-                    // Lock all children when container locked
-                    if isCont && wasUnlocked, let kids = elementChildrenStatic(e) {
-                        for (i, c) in kids.enumerated() {
-                            let cp = path + [i]
-                            doc = doc.replaceElement(cp, with: c.withLocked(true))
-                        }
-                    }
-                    // Restore children on unlock
-                    if isCont && !wasUnlocked, let saved = savedLockStates.removeValue(forKey: path) {
-                        let e2 = doc.getElement(path)
-                        if let kids2 = elementChildrenStatic(e2) {
-                            for (i, c) in kids2.enumerated() where i < saved.count {
-                                let cp = path + [i]
-                                doc = doc.replaceElement(cp, with: c.withLocked(saved[i]))
-                            }
-                        }
-                    }
+                    let saved = (isCont && !wasUnlocked)
+                        ? savedLockStates.removeValue(forKey: path) : nil
                     // Undoable lock toggle: editDocument self-brackets one step.
-                    model.editDocument(doc)
+                    model.editDocument(
+                        model.document.togglingElementLock(
+                            at: path, savedToRestore: saved))
                 }
             // Twirl or gap
             if row.isContainer {

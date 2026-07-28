@@ -75,7 +75,11 @@ where
 pub fn hit_test(x: f64, y: f64) -> Value {
     with_doc(Value::Null, |doc| {
         use crate::geometry::element::Visibility;
-        for (li, layer) in doc.layers.iter().enumerate() {
+        // Top-down over LAYERS too, not just over each layer's children: the
+        // last layer in document order paints last, so it is the one under
+        // the cursor. Mirrors JasSwift `docHitTest` and the live reference
+        // `workspace_interpreter/doc_primitives.hit_test`.
+        for (li, layer) in doc.layers.iter().enumerate().rev() {
             // A locked layer makes its whole subtree non-interactable by
             // inheritance (the lock is NOT materialized onto children); skip
             // it like the invisible case. Mirrors Swift/OCaml/Python.
@@ -146,7 +150,9 @@ pub fn hit_test_deep(x: f64, y: f64) -> Value {
         }
     }
     with_doc(Value::Null, |doc| {
-        for (li, layer) in doc.layers.iter().enumerate() {
+        // Top-down over LAYERS too — see the note in `hit_test`. Mirrors
+        // JasSwift `docHitTestDeep` and the live Python reference.
+        for (li, layer) in doc.layers.iter().enumerate().rev() {
             let layer_vis = layer.visibility();
             // A locked layer's subtree is non-interactable by inheritance
             // (lock is not materialized onto children); skip the whole layer.

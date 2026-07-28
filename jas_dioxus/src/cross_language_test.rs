@@ -994,6 +994,15 @@ mod tests {
         // the second rect (which starts at doc-x 72). No geometry changes; only
         // the selection becomes [{kind:"all", path:[0,0]}].
         "select_click.json",
+        // D4 (SCOPE-effective-locked.md §3): the same click-select, but on a
+        // document whose LAYERS overlap. Every other selection-family vector
+        // is single-layer, where a forward and a reversed layer walk are the
+        // same walk — so the corpus could not see that this port's layer loop
+        // in doc_primitives::hit_test/hit_test_deep was NOT reversed while
+        // Swift's and the live Python reference's both were. Topmost-first is
+        // what hit-testing means, so the press at doc(36,36) — inside both the
+        // Background rect and the Foreground circle — must resolve [1, 0].
+        "select_click_multi_layer.json",
         // Marquee-select (TESTING_STRATEGY.md §5 rec 4): the other half of
         // the selection tool. When on_mousedown hit-tests to NULL (press on
         // empty space, here doc(-10,-10), outside both rects) the tool enters
