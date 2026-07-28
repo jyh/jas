@@ -49,6 +49,7 @@ case "element_evaluated_bounds": results = runElementEvaluatedBounds(activeVecto
 case "flatten":           results = runFlatten(activeVectors)
 case "art_flatten":       results = runArtFlatten(activeVectors)
 case "calligraphic_outline": results = runCalligraphicOutline(activeVectors)
+case "paste_translate":   results = runPasteTranslate(activeVectors)
 case "arrow_trim":        results = runArrowTrim(activeVectors)
 case "gradient_remap":    results = runGradientRemap(activeVectors)
 case "length":            results = runLength(activeVectors)
@@ -164,6 +165,47 @@ func runCalligraphicOutline(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let pts = calligraphicOutline(d, brush)
         let result = pts.map { [$0.0, $0.1] }
         return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Paste Translate (the offset a PASTE applies to each pasted element)
+//
+// `workspace/actions.yaml` §paste: "offset 24 points down and to the right from
+// the original position", against `paste_in_place`'s explicit "no offset". Both
+// ports implement that by translating each pasted element, and until this family
+// NOTHING watched it: `opApply` has no paste verb in either port and no corpus
+// vector pastes anything.
+//
+// This verb deliberately calls the function the PASTE PATH calls, not the
+// tidiest one available: `EditClipboard.translateElement` (invoked by
+// `pasteClipboard`), whose Rust counterpart is `translate_element` at both paste
+// sites in workspace/clipboard.rs. Pointing it at `Element.translated` instead
+// would be a decoy — that function was already correct while the paste path was
+// not.
+//
+// SCOPE, stated: this gates the per-element transform a paste applies. The rest
+// of the paste FLOW is still ungated and still divergent (Rust appends to the
+// selected layer; Swift merges by layer name) — see the manifest's
+// `paste-offset-compound-divergence` row.
+
+func runPasteTranslate(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        let dx = (tc["dx"] as? NSNumber)?.doubleValue ?? 0
+        let dy = (tc["dy"] as? NSNumber)?.doubleValue ?? 0
+        let moved = EditClipboard.translateElement(elem, dx: dx, dy: dy)
+        // Serialized through the SHARED document writer so the comparison sees
+        // every field, not only the coordinates: this helper's group/layer arms
+        // also dropped name, id, visibility, blend mode and mask, which a
+        // coordinate-only result would miss.
+        // The writer's CANONICAL STRING, not a re-parsed object: round-tripping
+        // it through a JSON library normalises `1.0` to `1` in one port and not
+        // the other, which would have been a harness divergence wearing the
+        // costume of a port divergence. This is the same comparison the
+        // operations corpus makes.
+        let doc = Document(layers: [Layer(name: "L0", children: [moved])])
+        return ["name": name, "result": documentToTestJson(doc)]
     }
 }
 

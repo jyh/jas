@@ -51,6 +51,14 @@ ALGORITHMS = {
     # Gated at the public function so the family asserts the ribbon the artist
     # sees rather than an internal.
     "calligraphic_outline": ("tolerance", 1e-9),
+    # The offset a PASTE applies to each pasted element (workspace/actions.yaml
+    # §paste: "offset 24 points down and to the right", against
+    # paste_in_place's explicit "no offset"). EXACT, and the result is the whole
+    # element serialized through the shared document writer rather than a
+    # coordinate list: the divergence this family exists for came in two halves,
+    # a compound shape that did not move AND a group that lost its name, and a
+    # coordinate-only comparison would have seen only the first.
+    "paste_translate":    ("exact", None),
     "arrow_trim":        ("tolerance", 1e-4),
     # LINEAR gradient stop remap onto a split fragment (S-2). EXACT: colours
     # are reported as 8-bit hex (a Swift GradientStop stores its colour as a
