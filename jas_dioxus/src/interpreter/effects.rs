@@ -2871,6 +2871,14 @@ fn evaluate_field_value(
 /// Walk the document layer by layer (including one level of Group
 /// nesting) looking for a Path whose command list has an anchor
 /// within `radius` of `(x, y)`. Returns (element path, command index).
+///
+/// A locked Path is skipped in BOTH positions — as a direct layer child
+/// and as a member of a group. Before S7 (SCOPE-effective-locked.md §4)
+/// only the group's own lock was consulted here, so an anchor could be
+/// dragged out of an element the artist had locked; JasSwift
+/// `findPathAnchorNear` guarded all three positions, and every other
+/// interactive probe in this file and in `doc_primitives` already did
+/// the same.
 fn find_path_anchor_near(
     doc: &crate::document::document::Document,
     x: f64, y: f64, radius: f64,
@@ -2879,6 +2887,9 @@ fn find_path_anchor_near(
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
                 if let Element::Path(pe) = &**child {
+                    if pe.common.locked {
+                        continue;
+                    }
                     if let Some(idx) = anchor_index_near(pe, x, y, radius) {
                         return Some((vec![li, ci], idx));
                     }
@@ -2889,6 +2900,9 @@ fn find_path_anchor_near(
                     }
                     for (gi, gc) in g.children.iter().enumerate() {
                         if let Element::Path(pe) = &**gc {
+                            if pe.common.locked {
+                                continue;
+                            }
                             if let Some(idx) = anchor_index_near(pe, x, y, radius) {
                                 return Some((vec![li, ci, gi], idx));
                             }
@@ -2951,10 +2965,12 @@ fn find_path_handle_near(
         }
         None
     }
+    // Locked Paths are skipped in both positions — see `find_path_anchor_near`.
     for (li, layer) in doc.layers.iter().enumerate() {
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
                 if let Element::Path(pe) = &**child {
+                    if pe.common.locked { continue; }
                     if let Some(r) = check(pe, &[li, ci], x, y, radius) {
                         return Some(r);
                     }
@@ -2963,6 +2979,7 @@ fn find_path_handle_near(
                     if child.common().locked { continue; }
                     for (gi, gc) in g.children.iter().enumerate() {
                         if let Element::Path(pe) = &**gc {
+                            if pe.common.locked { continue; }
                             if let Some(r) = check(pe, &[li, ci, gi], x, y, radius) {
                                 return Some(r);
                             }
@@ -2995,10 +3012,12 @@ fn find_path_anchor_by_cp_index(
         }
         None
     }
+    // Locked Paths are skipped in both positions — see `find_path_anchor_near`.
     for (li, layer) in doc.layers.iter().enumerate() {
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
                 if let Element::Path(pe) = &**child {
+                    if pe.common.locked { continue; }
                     if let Some(r) = check(pe, &[li, ci], x, y, radius) {
                         return Some(r);
                     }
@@ -3007,6 +3026,7 @@ fn find_path_anchor_by_cp_index(
                     if child.common().locked { continue; }
                     for (gi, gc) in g.children.iter().enumerate() {
                         if let Element::Path(pe) = &**gc {
+                            if pe.common.locked { continue; }
                             if let Some(r) = check(pe, &[li, ci, gi], x, y, radius) {
                                 return Some(r);
                             }
@@ -5946,17 +5966,22 @@ fn path_insert_anchor_on_segment_near(
     }
 
     {
+        // Locked Paths are skipped in both positions — see
+        // `find_path_anchor_near`. This is the fourth walker of the S7
+        // family and carried the identical asymmetry.
         let doc = model.document();
         for (li, layer) in doc.layers.iter().enumerate() {
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
                     if let Element::Path(pe) = &**child {
+                        if pe.common.locked { continue; }
                         try_path(&mut best, pe, &[li, ci], x, y);
                     }
                     if let Element::Group(g) = &**child {
                         if child.common().locked { continue; }
                         for (gi, gc) in g.children.iter().enumerate() {
                             if let Element::Path(pe) = &**gc {
+                                if pe.common.locked { continue; }
                                 try_path(&mut best, pe, &[li, ci, gi], x, y);
                             }
                         }
