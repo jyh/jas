@@ -991,20 +991,75 @@ private func preservationVectors(_ raw: String) throws -> [[String: Any]] {
             }
         }
 
-        let pinned = (tc["expected_violations"] as! [String: Any])["swift"] as! [[String: Any]]
-        for (inv, result) in preservationInvariantsFor(tc, before, after) {
-            let pin = pinned.first { ($0["invariant"] as! String) == inv }
-            if pin == nil, let why = result {
-                failures.append("[\(name)] \(inv) VIOLATED: \(why)")
-            } else if let pin, result == nil {
-                failures.append(
-                    "[\(name)] \(inv) is PINNED as a known violation (\(pin["row"] as! String)) but now HOLDS — remove the pin from the vector")
-            }
-        }
+        let rows = (tc["expected_violations"] as! [String: Any])["swift"] as! [[String: Any]]
+        let pinned = rows.map { ($0["invariant"] as! String, $0["row"] as! String) }
+        failures += preservationPinReport(
+            name, pinned, preservationInvariantsFor(tc, before, after))
     }
 
     #expect(failures.isEmpty,
         "preservation invariant gate: \(failures.count) failure(s):\n  \(failures.joined(separator: "\n  "))")
+}
+
+/// Fold one vector's evaluated invariants against its PINS.
+///
+/// Extracted so `preservationPinInversion` can drive it directly. The inversion
+/// arm below — a pinned violation that now HOLDS is a FAILURE — is the
+/// mechanism that stops a pin from rotting into a silent suppression, and it is
+/// exercised ZERO times by the shipped corpus, where every vector declares
+/// `expected_violations: []`. A mechanism no data exercises is one refactor
+/// away from being deleted by accident. Mirrors Rust `preservation_pin_report`.
+private func preservationPinReport(
+    _ name: String, _ pinned: [(String, String)], _ results: [(String, String?)]
+) -> [String] {
+    var failures: [String] = []
+    for (inv, result) in results {
+        let pin = pinned.first { $0.0 == inv }
+        if pin == nil, let why = result {
+            failures.append("[\(name)] \(inv) VIOLATED: \(why)")
+        } else if let pin, result == nil {
+            failures.append(
+                "[\(name)] \(inv) is PINNED as a known violation (\(pin.1)) but now HOLDS — remove the pin from the vector")
+        }
+    }
+    return failures
+}
+
+/// THE PIN INVERSION, as a truth table. Twin of Rust
+/// `preservation_pin_inversion`; the two assert the same four cells with the
+/// same strings, so the ports cannot drift on what a pin MEANS.
+@Test func preservationPinInversion() {
+    let pin = [("bystanders_unchanged", "some/site.swift:1 — the row this pin cites")]
+    let violated: [(String, String?)] =
+        [("bystanders_unchanged", "grp.mask: {...} -> <absent>")]
+    let holds: [(String, String?)] = [("bystanders_unchanged", nil)]
+
+    // 1. UNPINNED + violated → reported as a violation.
+    var out = preservationPinReport("v", [], violated)
+    #expect(out.count == 1, "unpinned violation must be reported: \(out)")
+    #expect(out.first?.contains("bystanders_unchanged VIOLATED") == true, "\(out)")
+
+    // 2. PINNED + violated → silent; the pin is doing its job.
+    #expect(preservationPinReport("v", pin, violated).isEmpty,
+            "a pinned violation that still reproduces must be silent")
+
+    // 3. PINNED + holds → THE INVERSION. Repairing the site reds the gate until
+    //    the pin is deleted.
+    out = preservationPinReport("v", pin, holds)
+    #expect(out.count == 1, "a repaired pinned site must red the gate: \(out)")
+    #expect(out.first?.contains("is PINNED as a known violation") == true
+            && out.first?.contains("but now HOLDS") == true
+            && out.first?.contains("some/site.swift:1") == true,
+            "the inversion must name the pin's own row: \(out)")
+
+    // 4. UNPINNED + holds → silent, the ordinary green case.
+    #expect(preservationPinReport("v", [], holds).isEmpty)
+
+    // 5. A pin on a DIFFERENT invariant does not suppress this one — the match
+    //    is per-invariant, not per-vector.
+    out = preservationPinReport("v", [("id_survival", "elsewhere")],
+                                [("bystanders_unchanged", "boom")])
+    #expect(out.count == 1, "a pin must not suppress a sibling invariant: \(out)")
 }
 
 // MARK: - OP_LOG.md §9 verb33 unification fixtures (P1–P7)

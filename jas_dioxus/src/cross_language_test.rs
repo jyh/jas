@@ -2487,23 +2487,8 @@ mod tests {
                 })
                 .collect();
 
-            for (inv, result) in preservation_invariants_for(tc, &before, &after) {
-                let pin = pinned.iter().find(|(p, _)| p == inv);
-                match (pin, &result) {
-                    // Unpinned invariant that failed — the law is broken here.
-                    (None, Some(why)) => failures.push(format!(
-                        "[{name}] {inv} VIOLATED: {why}"
-                    )),
-                    // Pinned violation that no longer reproduces — the pin is
-                    // stale and must be deleted (this is what stops a pin from
-                    // rotting into a suppression).
-                    (Some((_, row)), None) => failures.push(format!(
-                        "[{name}] {inv} is PINNED as a known violation ({row}) but now \
-                         HOLDS — remove the pin from the vector"
-                    )),
-                    _ => {}
-                }
-            }
+            failures.extend(preservation_pin_report(
+                name, &pinned, preservation_invariants_for(tc, &before, &after)));
         }
 
         assert!(
@@ -2512,6 +2497,85 @@ mod tests {
             failures.len(),
             failures.join("\n  ")
         );
+    }
+
+    /// Fold one vector's evaluated invariants against its PINS.
+    ///
+    /// Extracted so `preservation_pin_inversion` can drive it directly. The
+    /// inversion arm below — a pinned violation that now HOLDS is a FAILURE —
+    /// is the mechanism that stops a pin from rotting into a silent
+    /// suppression, and it is exercised ZERO times by the shipped corpus,
+    /// where every vector declares `expected_violations: []`. A mechanism no
+    /// data exercises is one refactor away from being deleted by accident.
+    fn preservation_pin_report(
+        name: &str,
+        pinned: &[(String, String)],
+        results: Vec<InvResult>,
+    ) -> Vec<String> {
+        let mut failures = Vec::new();
+        for (inv, result) in results {
+            let pin = pinned.iter().find(|(p, _)| p == inv);
+            match (pin, &result) {
+                // Unpinned invariant that failed — the law is broken here.
+                (None, Some(why)) => failures.push(format!("[{name}] {inv} VIOLATED: {why}")),
+                // Pinned violation that no longer reproduces — the pin is
+                // stale and must be deleted (this is what stops a pin from
+                // rotting into a suppression).
+                (Some((_, row)), None) => failures.push(format!(
+                    "[{name}] {inv} is PINNED as a known violation ({row}) but now \
+                     HOLDS — remove the pin from the vector"
+                )),
+                _ => {}
+            }
+        }
+        failures
+    }
+
+    /// THE PIN INVERSION, as a truth table. Twin of Swift
+    /// `preservationPinInversion`; the two assert the same four cells with the
+    /// same strings, so the ports cannot drift on what a pin MEANS.
+    #[test]
+    fn preservation_pin_inversion() {
+        let pin = vec![(
+            "bystanders_unchanged".to_string(),
+            "some/site.rs:1 — the row this pin cites".to_string(),
+        )];
+        let violated: Vec<InvResult> =
+            vec![("bystanders_unchanged", Some("grp.mask: {...} -> <absent>".into()))];
+        let holds: Vec<InvResult> = vec![("bystanders_unchanged", None)];
+
+        // 1. UNPINNED + violated → reported as a violation.
+        let out = preservation_pin_report("v", &[], violated.clone());
+        assert_eq!(out.len(), 1, "unpinned violation must be reported: {out:?}");
+        assert!(out[0].contains("bystanders_unchanged VIOLATED"), "{out:?}");
+
+        // 2. PINNED + violated → silent; the pin is doing its job.
+        assert!(
+            preservation_pin_report("v", &pin, violated).is_empty(),
+            "a pinned violation that still reproduces must be silent"
+        );
+
+        // 3. PINNED + holds → THE INVERSION. Repairing the site reds the gate
+        //    until the pin is deleted.
+        let out = preservation_pin_report("v", &pin, holds.clone());
+        assert_eq!(out.len(), 1, "a repaired pinned site must red the gate: {out:?}");
+        assert!(
+            out[0].contains("is PINNED as a known violation")
+                && out[0].contains("but now HOLDS")
+                && out[0].contains("some/site.rs:1"),
+            "the inversion must name the pin's own row: {out:?}"
+        );
+
+        // 4. UNPINNED + holds → silent, the ordinary green case.
+        assert!(preservation_pin_report("v", &[], holds).is_empty());
+
+        // 5. A pin on a DIFFERENT invariant does not suppress this one — the
+        //    match is per-invariant, not per-vector.
+        let other = vec![("id_survival".to_string(), "elsewhere".to_string())];
+        let out = preservation_pin_report(
+            "v", &other,
+            vec![("bystanders_unchanged", Some("boom".into()))]);
+        assert_eq!(out.len(), 1, "a pin must not suppress a sibling invariant: {out:?}");
     }
 
     /// `OpWorld` trait-level pin for the DOCUMENT world (OP_LOG.md §2 Fork 5 /
