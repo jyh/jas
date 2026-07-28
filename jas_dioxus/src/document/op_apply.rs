@@ -2770,3 +2770,185 @@ mod paste_layer_structure_tests {
         }
     }
 }
+
+/// THE PASTE STACK — `workspace/actions.yaml` §paste, "Repeated pastes stack
+/// with cumulative offsets".
+///
+/// The shared corpus family `test_fixtures/operations/paste_stacking.json`
+/// carries the geometry, in both ports, over one set of goldens. THIS module
+/// carries only what that lane structurally cannot reach, and each test says
+/// which:
+///
+/// 1. **UNDO AND REDO.** The operations runner applies a vector's `history`
+///    AFTER every transaction, so no fixture can paste after an undo; an undo op
+///    embedded inside a transaction would desync the `checkpoint_equivalence`
+///    gate, which replays `journal[0..head]` and never replays history
+///    navigation. So the rule that undo restores the run is pinned HERE and by
+///    the Swift twin (`PasteStackingTests`) over identical vectors — twin
+///    per-port probes, not a shared gate. Stated plainly because it is the one
+///    decision in this wave that no cross-language byte watches.
+/// 2. **THE PER-DOCUMENT LIFETIME.** A fixture builds one `Model`; two open
+///    documents cannot be expressed.
+/// 3. **THE ABORTED TRANSACTION.** No op sequence aborts.
+///
+/// Everything here drives `apply_paste_clipboard_text` — the PRODUCTION entry
+/// point (`workspace::clipboard::clipboard_read_and_paste` and Swift's
+/// `EditClipboard.pasteClipboard` both call it) — rather than the pure body, so
+/// a run implemented only where the corpus can see it would leave these red.
+#[cfg(test)]
+mod paste_stacking_tests {
+    use super::*;
+    use crate::document::document::Document;
+    use crate::geometry::element::{CommonProps, Element, LayerElem};
+
+    /// A one-layer document with nothing in it: every x below is therefore the
+    /// paste offset itself, with no source coordinate to subtract.
+    fn model() -> Model {
+        let doc = Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: Vec::new(),
+                common: CommonProps {
+                    name: Some("Base".to_string()),
+                    ..CommonProps::default()
+                },
+                isolated_blending: false,
+                knockout_group: false,
+            })],
+            selected_layer: 0,
+            selection: Vec::new(),
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    /// A clipboard payload holding one rect at the origin. `A` and `B` differ,
+    /// so they are different payloads for the reset rule.
+    const A: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\">\
+                     <rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" \
+                     fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>";
+    const B: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\">\
+                     <rect x=\"0\" y=\"0\" width=\"20\" height=\"20\" \
+                     fill=\"rgb(0,128,0)\" stroke=\"none\"/></svg>";
+
+    /// x-coordinates of the active layer's children, in order — the whole
+    /// observable of a paste run.
+    fn xs(model: &Model) -> Vec<f64> {
+        match &model.document().layers[0] {
+            Element::Layer(l) => l
+                .children
+                .iter()
+                .map(|c| match &**c {
+                    Element::Rect(r) => r.x,
+                    _ => f64::NAN,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn paste(model: &mut Model, payload: &str) -> bool {
+        apply_paste_clipboard_text(model, Some(payload), 24.0, false)
+    }
+
+    /// The headline requirement, at the production entry point rather than in
+    /// the corpus: three pastes of one payload land at 24, 48, 72. Duplicated
+    /// on purpose — if this module's helpers are wrong, every other test here
+    /// is measuring the wrong thing, and this is the one that says so.
+    #[test]
+    fn three_pastes_of_one_payload_stack_cumulatively() {
+        let mut m = model();
+        for _ in 0..3 {
+            assert!(paste(&mut m, A));
+        }
+        assert_eq!(xs(&m), vec![24.0, 48.0, 72.0]);
+    }
+
+    /// UNDO RESTORES THE RUN. `begin_txn` (inside `edit_document`) captures the
+    /// PRE-paste run and the advance happens after the write, so undoing the
+    /// second paste puts the next one exactly where the undone one was: 48, not
+    /// 72. Anything else leaves a HOLE in the run — a slot the artist can see is
+    /// empty and cannot fill by pasting.
+    ///
+    /// This is the concrete reason the run is NOT app state. A counter that
+    /// outlives the artwork it counts has the same defect the lock save-state
+    /// table was ruled a design flaw for, on the same day.
+    #[test]
+    fn undo_restores_the_run_so_the_next_paste_fills_the_vacated_slot() {
+        let mut m = model();
+        assert!(paste(&mut m, A));
+        assert!(paste(&mut m, A));
+        assert_eq!(xs(&m), vec![24.0, 48.0]);
+        m.undo();
+        assert_eq!(xs(&m), vec![24.0], "undo removed the second paste");
+        assert!(paste(&mut m, A));
+        assert_eq!(
+            xs(&m),
+            vec![24.0, 48.0],
+            "the paste after an undo must REPLACE the undone one at 48, \
+             not skip to 72 and leave 48 empty"
+        );
+    }
+
+    /// REDO is undo's mirror: it restores the run as it stood after the redone
+    /// transaction, so a further paste continues at 72 rather than re-landing
+    /// on 48.
+    #[test]
+    fn redo_restores_the_run_it_had_advanced() {
+        let mut m = model();
+        assert!(paste(&mut m, A));
+        assert!(paste(&mut m, A));
+        m.undo();
+        m.redo();
+        assert_eq!(xs(&m), vec![24.0, 48.0], "redo put the second paste back");
+        assert!(paste(&mut m, A));
+        assert_eq!(xs(&m), vec![24.0, 48.0, 72.0]);
+    }
+
+    /// An ABORTED transaction rolls the run back with the document it rolled
+    /// back: the paste inside it never happened, so the next paste is still the
+    /// second of the run.
+    #[test]
+    fn an_aborted_transaction_rolls_the_run_back() {
+        let mut m = model();
+        assert!(paste(&mut m, A));
+        m.begin_txn();
+        assert!(apply_paste_clipboard_text(&mut m, Some(A), 24.0, false));
+        m.abort_txn();
+        assert_eq!(xs(&m), vec![24.0], "abort removed the second paste");
+        assert!(paste(&mut m, A));
+        assert_eq!(xs(&m), vec![24.0, 48.0], "still the second of the run");
+    }
+
+    /// THE RUN IS PER-DOCUMENT. Pasting the same clipboard into a second open
+    /// document starts at 24 there rather than continuing the first document's
+    /// run — which falls out of living on the `Model`, one per tab, and is the
+    /// reason it does not live in app state.
+    #[test]
+    fn the_run_is_per_document() {
+        let mut a = model();
+        let mut b = model();
+        assert!(paste(&mut a, A));
+        assert!(paste(&mut a, A));
+        assert_eq!(xs(&a), vec![24.0, 48.0]);
+        assert!(paste(&mut b, A));
+        assert_eq!(xs(&b), vec![24.0], "a second document starts its own run");
+    }
+
+    /// The run is a SINGLE SLOT, and this is the corner that buys: a paste of B
+    /// between two pastes of A loses A's count, so the third paste lands back on
+    /// the first. BANKED, NOT RULED — the same limitation a fragment-keyed run
+    /// would have, pinned here so the day a multi-slot run is ruled the byte
+    /// moves.
+    #[test]
+    fn an_intervening_payload_loses_the_first_runs_count() {
+        let mut m = model();
+        assert!(paste(&mut m, A));
+        assert!(paste(&mut m, B));
+        assert!(paste(&mut m, A));
+        assert_eq!(
+            xs(&m),
+            vec![24.0, 24.0, 24.0],
+            "single-slot run: A's count did not survive B"
+        );
+    }
+}

@@ -293,21 +293,26 @@ import Foundation
                 "paste_in_place moved the element to (\(copy.x), \(copy.y)), expected (7, 11)")
     }
 
-    // MARK: - A spec sentence neither port implements
+    // MARK: - A spec sentence neither port implemented — now INVERTED
 
-    /// FOUND WHILE MEASURING Q6, and it is a SHARED defect rather than a
-    /// divergence. `workspace/actions.yaml` §paste (line 186) says "Repeated
-    /// pastes stack with cumulative offsets". Neither port does: paste never
-    /// mutates the clipboard, so every paste of the same payload applies the
-    /// SAME 24pt offset and the second paste lands exactly on the first —
-    /// invisible, the outcome the offset exists to prevent, arrived at by
-    /// pasting twice instead of once.
+    /// FOUND WHILE MEASURING Q6, and it was a SHARED defect rather than a
+    /// divergence. `workspace/actions.yaml` §paste has said "Repeated pastes
+    /// stack with cumulative offsets" since it was written; neither port did,
+    /// so every paste of the same payload applied the SAME 24pt offset and the
+    /// second paste landed exactly on the first — invisible, the outcome the
+    /// offset exists to prevent, arrived at by pasting twice instead of once.
     ///
-    /// Rust has the same shape: `clipboard_read_and_paste` reads `tab.clipboard`
-    /// and never writes it, so its repeated pastes are equally non-cumulative.
-    /// That half is READ, not driven — the sink is unreachable from
-    /// `cargo test --lib` (see `internal_clipboard_confirm_tests`).
-    @Test func repeatedPastesDoNotStackCumulativelyAsTheSpecRequires() {
+    /// **RULED AND FIXED 2026-07-28** (JYH: "follow the spec" — implement the
+    /// stacking, do not amend the sentence). This probe carried the instruction
+    /// "invert this probe if cumulative stacking is ever implemented — do not
+    /// delete it", and that is what happened: it now measures 24 then 48, and
+    /// asserts the two pastes are NOT coincident. Kept here, in the suite that
+    /// found the defect, so the finding and its repair sit together.
+    ///
+    /// The full contract lives in `PasteStackingTests` and in the shared corpus
+    /// family `test_fixtures/operations/paste_stacking.json`, which both ports
+    /// run. This one probe is the original measurement, turned over.
+    @Test func repeatedPastesStackCumulativelyAsTheSpecRequires() {
         let pb = Self.privatePasteboard()
         let doc0 = Document(layers: [Layer(children: [Self.rect(0, 0, id: "r-1")])],
                             selectedLayer: 0, selection: [ElementSelection.all([0, 0])])
@@ -324,12 +329,10 @@ import Foundation
             Issue.record("expected three rects"); return
         }
         #expect(abs(first.x - 24) < Self.svgTol, "first paste at x=\(first.x), expected 24")
-        // TODAY: 24 again, not 48. Invert this probe if cumulative stacking is
-        // ever implemented — do not delete it.
-        #expect(abs(second.x - 24) < Self.svgTol,
-                "second paste at x=\(second.x); TODAY it repeats 24 rather than stacking to 48, so it lands exactly on the first paste")
-        #expect(abs(second.x - first.x) < Self.svgTol,
-                "the two pastes are NOT coincident (\(first.x) vs \(second.x)) — cumulative stacking may have landed")
+        #expect(abs(second.x - 48) < Self.svgTol,
+                "second paste at x=\(second.x), expected 48 — the run is cumulative")
+        #expect(abs(second.x - first.x) > Self.svgTol,
+                "the two pastes are COINCIDENT (\(first.x) vs \(second.x)) — the second is invisible under the first")
     }
 
     // MARK: - Q4: the two points where Rust USED TO consult its internal clipboard
