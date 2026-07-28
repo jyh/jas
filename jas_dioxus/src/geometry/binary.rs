@@ -69,6 +69,156 @@ const CMD_CLOSE_PATH: i64 = 7;
 const FILL_RULE_NON_ZERO: i64 = 0;
 const FILL_RULE_EVEN_ODD: i64 = 1;
 
+// -- The per-tag trailing common extension -----------------------------------
+//
+// RULED 2026-07-27 (transcripts/EDIT_SEMANTICS_FREEZE.md): `common.mode`,
+// `common.mask` and `common.tool_origin` were dropped by this codec -- save as
+// binary, reload, and they were gone -- and `stroke_brush` /
+// `stroke_brush_overrides` with them on Path. A round trip speaks to NOTHING,
+// so under the preservation law it must preserve EVERYTHING.
+//
+// The SHAPE is forced by the layout: `unpack_common` reads FIXED indices 1..6
+// and every variant's payload starts at index 7, so the shared common block
+// cannot be extended once. The three fields it never carried are therefore
+// appended PER ELEMENT TAG, at the tag's own trailing edge, and the arity
+// table below is what the two ports must agree on. `VERSION` STAYS AT 2: the
+// frozen tag-pinned readers reject `version > 2` and index positionally
+// without validating array length (verified on this commit in
+// jas/geometry/binary.py `_unpack_element` and jas_ocaml/lib/geometry/
+// binary.ml `unpack_element`, both of which read fixed indices and ignore
+// trailing slots), so trailing append keeps them able to read what we write --
+// the same reasoning that settled the fill_rule slot-11 decision.
+//
+// JasSwift/Sources/Geometry/Binary.swift mirrors these offsets, and
+// test_fixtures/expected/binary_wire.json pins the resulting arity and BYTES
+// for both ports at once. That byte-level gate is not optional: every other
+// codec gate compares canonical test-JSON strings, and the fields this codec
+// drops are a strict SUBSET of the fields that string oracle also drops, so a
+// one-port slot mismatch here would otherwise land silently (coverage gap
+// `codec-string-oracle-cannot-see-a-dropped-field`).
+
+/// Offset of `common.mode` within a tag's extension block.
+const EXT_MODE: usize = 0;
+/// Offset of `common.mask` within a tag's extension block.
+const EXT_MASK: usize = 1;
+/// Offset of `common.tool_origin` within a tag's extension block.
+const EXT_TOOL_ORIGIN: usize = 2;
+/// Slots in the extension block that EVERY tag carries.
+const COMMON_EXT_LEN: usize = 3;
+/// TAG_PATH only, immediately after the common extension.
+const EXT_STROKE_BRUSH: usize = COMMON_EXT_LEN;
+const EXT_STROKE_BRUSH_OVERRIDES: usize = COMMON_EXT_LEN + 1;
+
+/// Slots a tag carried BEFORE the extension -- equivalently, the index at
+/// which its extension block starts. Mirrored by `tagBaseArity` in JasSwift
+/// and declared as data in test_fixtures/expected/binary_wire.json.
+fn tag_base_arity(tag: i64) -> usize {
+    match tag {
+        TAG_LAYER => 8,
+        TAG_GROUP => 8,
+        TAG_LINE => 13,
+        TAG_RECT => 15,
+        TAG_CIRCLE => 12,
+        TAG_ELLIPSE => 13,
+        TAG_POLYLINE => 10,
+        TAG_POLYGON => 10,
+        TAG_PATH => 12,
+        TAG_TEXT => 20,
+        TAG_TEXT_PATH => 18,
+        TAG_LIVE => 10,
+        // An unknown tag never reaches here: `unpack_element` rejects it
+        // before the extension is read, and `pack_element` is exhaustive.
+        _ => 0,
+    }
+}
+
+/// The wire tag name for an element, for gate messages and for the
+/// `tag_arity` keys of test_fixtures/expected/binary_wire.json. Mirrored by
+/// `elementTagLabel` in JasSwift.
+pub fn element_tag_label(elem: &Element) -> &'static str {
+    match elem {
+        Element::Layer(_) => "layer",
+        Element::Group(_) => "group",
+        Element::Line(_) => "line",
+        Element::Rect(_) => "rect",
+        Element::Circle(_) => "circle",
+        Element::Ellipse(_) => "ellipse",
+        Element::Polyline(_) => "polyline",
+        Element::Polygon(_) => "polygon",
+        Element::Path(_) => "path",
+        Element::Text(_) => "text",
+        Element::TextPath(_) => "text_path",
+        Element::Live(_) => "live",
+    }
+}
+
+/// The number of msgpack slots `pack_element` writes for `elem` -- the arity
+/// the per-tag trailing append is defined against. Read by the shared
+/// byte-level wire gate (test_fixtures/expected/binary_wire.json), whose whole
+/// purpose is that a one-port slot mismatch cannot land silently. Mirrored by
+/// `packedElementSlotCount` in JasSwift.
+pub fn packed_element_slot_count(elem: &Element) -> usize {
+    match pack_element(elem) {
+        Value::Array(slots) => slots.len(),
+        _ => 0,
+    }
+}
+
+/// Decode a lowercase hex string to bytes, for gates that pin a blob as a
+/// literal (the shared byte-level wire gate). Panics on a malformed literal,
+/// which is a fixture bug, not runtime input.
+pub fn unhex_for_tests(s: &str) -> Vec<u8> {
+    (0..s.len() / 2)
+        .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
+            .expect("wire fixture hex must be valid"))
+        .collect()
+}
+
+/// Blend-mode wire tags, in `BlendMode`'s declaration order. Mirrored in
+/// JasSwift; an unrecognized tag reads as `Normal`, the value every document
+/// written before this slot existed was authored with.
+fn blend_mode_tag(m: BlendMode) -> i64 {
+    match m {
+        BlendMode::Normal => 0,
+        BlendMode::Darken => 1,
+        BlendMode::Multiply => 2,
+        BlendMode::ColorBurn => 3,
+        BlendMode::Lighten => 4,
+        BlendMode::Screen => 5,
+        BlendMode::ColorDodge => 6,
+        BlendMode::Overlay => 7,
+        BlendMode::SoftLight => 8,
+        BlendMode::HardLight => 9,
+        BlendMode::Difference => 10,
+        BlendMode::Exclusion => 11,
+        BlendMode::Hue => 12,
+        BlendMode::Saturation => 13,
+        BlendMode::Color => 14,
+        BlendMode::Luminosity => 15,
+    }
+}
+
+fn blend_mode_from_tag(v: Option<&Value>) -> BlendMode {
+    match v.and_then(|v| v.as_i64().or_else(|| v.as_u64().map(|u| u as i64))) {
+        Some(1) => BlendMode::Darken,
+        Some(2) => BlendMode::Multiply,
+        Some(3) => BlendMode::ColorBurn,
+        Some(4) => BlendMode::Lighten,
+        Some(5) => BlendMode::Screen,
+        Some(6) => BlendMode::ColorDodge,
+        Some(7) => BlendMode::Overlay,
+        Some(8) => BlendMode::SoftLight,
+        Some(9) => BlendMode::HardLight,
+        Some(10) => BlendMode::Difference,
+        Some(11) => BlendMode::Exclusion,
+        Some(12) => BlendMode::Hue,
+        Some(13) => BlendMode::Saturation,
+        Some(14) => BlendMode::Color,
+        Some(15) => BlendMode::Luminosity,
+        _ => BlendMode::Normal,
+    }
+}
+
 // Color space tags.
 const SPACE_RGB: i64 = 0;
 const SPACE_HSB: i64 = 1;
@@ -370,67 +520,134 @@ fn pack_common(c: &CommonProps) -> (Value, Value, Value, Value, Value, Value) {
      opt_str(c.name.as_ref()), opt_str(c.id.as_ref()))
 }
 
+/// Pack an opacity mask: `[subtree, clip, invert, disabled, linked,
+/// unlink_transform]`. The subtree is a full nested element, so a masked
+/// element's mask artwork round-trips with all of its own fields.
+fn pack_mask(m: &Option<Box<Mask>>) -> Value {
+    match m {
+        None => vnil(),
+        Some(m) => Value::Array(vec![
+            pack_element(&m.subtree),
+            vbool(m.clip), vbool(m.invert), vbool(m.disabled), vbool(m.linked),
+            pack_transform(&m.unlink_transform),
+        ]),
+    }
+}
+
+/// Inverse of `pack_mask`, tolerant in the same way `unpack_fill_rule` is: an
+/// absent slot, a nil slot, a slot holding something that is not an array, and
+/// an array whose subtree slot is not itself an element array ALL read as "no
+/// mask" rather than erroring or guessing. A short-but-plausible array falls
+/// back to the field defaults (`clip` and `linked` true, matching `Mask`'s own
+/// serde defaults). This is the standing
+/// `malformed_but_decodable_blob_errors_not_panics` contract: on wasm a panic
+/// aborts the module and `save_session` reads localStorage on every startup.
+fn unpack_mask(v: Option<&Value>) -> Result<Option<Box<Mask>>, String> {
+    let arr = match v {
+        Some(Value::Array(arr)) if matches!(arr.first(), Some(Value::Array(_))) => arr,
+        _ => return Ok(None),
+    };
+    let get = |i: usize| arr.get(i).unwrap_or(&Value::Nil);
+    Ok(Some(Box::new(Mask {
+        subtree: Box::new(unpack_element(at(arr, 0)?)?),
+        clip: get(1).as_bool().unwrap_or(true),
+        invert: get(2).as_bool().unwrap_or(false),
+        disabled: get(3).as_bool().unwrap_or(false),
+        linked: get(4).as_bool().unwrap_or(true),
+        unlink_transform: match get(5) {
+            Value::Array(_) => unpack_transform(get(5))?,
+            _ => None,
+        },
+    })))
+}
+
+/// The trailing per-tag extension block: the three `CommonProps` fields the
+/// fixed 1..6 block cannot hold. Written for EVERY tag, always, so a tag's
+/// arity is constant and the shared wire gate can assert it.
+fn pack_common_ext(c: &CommonProps) -> Vec<Value> {
+    vec![
+        vint(blend_mode_tag(c.mode)),
+        pack_mask(&c.mask),
+        opt_str(c.tool_origin.as_ref()),
+    ]
+}
+
 fn pack_element(elem: &Element) -> Value {
+    let mut slots = pack_element_base(elem);
+    // The per-tag trailing common extension (see EXT_* above). Appended here
+    // rather than inside each arm so no tag can be forgotten.
+    slots.extend(pack_common_ext(elem.common()));
+    if let Element::Path(e) = elem {
+        // Path-only, immediately after the common extension.
+        slots.push(opt_str(e.stroke_brush.as_ref()));
+        slots.push(opt_str(e.stroke_brush_overrides.as_ref()));
+    }
+    Value::Array(slots)
+}
+
+/// The tag's slots up to `tag_base_arity(tag)` -- everything the format
+/// carried before the trailing extension.
+fn pack_element_base(elem: &Element) -> Vec<Value> {
     match elem {
         Element::Layer(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let children: Vec<Value> = e.children.iter().map(|c| pack_element(c)).collect();
-            Value::Array(vec![vint(TAG_LAYER), locked, opacity, vis, xform, name, id,
-                              Value::Array(children)])
+            vec![vint(TAG_LAYER), locked, opacity, vis, xform, name, id,
+                              Value::Array(children)]
         }
         Element::Group(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let children: Vec<Value> = e.children.iter().map(|c| pack_element(c)).collect();
-            Value::Array(vec![vint(TAG_GROUP), locked, opacity, vis, xform, name, id,
-                              Value::Array(children)])
+            vec![vint(TAG_GROUP), locked, opacity, vis, xform, name, id,
+                              Value::Array(children)]
         }
         Element::Line(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
-            Value::Array(vec![vint(TAG_LINE), locked, opacity, vis, xform, name, id,
+            vec![vint(TAG_LINE), locked, opacity, vis, xform, name, id,
                               vf64(e.x1), vf64(e.y1), vf64(e.x2), vf64(e.y2),
-                              pack_stroke(&e.stroke), pack_width_points(&e.width_points)])
+                              pack_stroke(&e.stroke), pack_width_points(&e.width_points)]
         }
         Element::Rect(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
-            Value::Array(vec![vint(TAG_RECT), locked, opacity, vis, xform, name, id,
+            vec![vint(TAG_RECT), locked, opacity, vis, xform, name, id,
                               vf64(e.x), vf64(e.y), vf64(e.width), vf64(e.height),
                               vf64(e.rx), vf64(e.ry),
-                              pack_fill(&e.fill), pack_stroke(&e.stroke)])
+                              pack_fill(&e.fill), pack_stroke(&e.stroke)]
         }
         Element::Circle(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
-            Value::Array(vec![vint(TAG_CIRCLE), locked, opacity, vis, xform, name, id,
+            vec![vint(TAG_CIRCLE), locked, opacity, vis, xform, name, id,
                               vf64(e.cx), vf64(e.cy), vf64(e.r),
-                              pack_fill(&e.fill), pack_stroke(&e.stroke)])
+                              pack_fill(&e.fill), pack_stroke(&e.stroke)]
         }
         Element::Ellipse(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
-            Value::Array(vec![vint(TAG_ELLIPSE), locked, opacity, vis, xform, name, id,
+            vec![vint(TAG_ELLIPSE), locked, opacity, vis, xform, name, id,
                               vf64(e.cx), vf64(e.cy), vf64(e.rx), vf64(e.ry),
-                              pack_fill(&e.fill), pack_stroke(&e.stroke)])
+                              pack_fill(&e.fill), pack_stroke(&e.stroke)]
         }
         Element::Polyline(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let points: Vec<Value> = e.points.iter()
                 .map(|(x, y)| Value::Array(vec![vf64(*x), vf64(*y)])).collect();
-            Value::Array(vec![vint(TAG_POLYLINE), locked, opacity, vis, xform, name, id,
-                              Value::Array(points), pack_fill(&e.fill), pack_stroke(&e.stroke)])
+            vec![vint(TAG_POLYLINE), locked, opacity, vis, xform, name, id,
+                              Value::Array(points), pack_fill(&e.fill), pack_stroke(&e.stroke)]
         }
         Element::Polygon(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let points: Vec<Value> = e.points.iter()
                 .map(|(x, y)| Value::Array(vec![vf64(*x), vf64(*y)])).collect();
-            Value::Array(vec![vint(TAG_POLYGON), locked, opacity, vis, xform, name, id,
-                              Value::Array(points), pack_fill(&e.fill), pack_stroke(&e.stroke)])
+            vec![vint(TAG_POLYGON), locked, opacity, vis, xform, name, id,
+                              Value::Array(points), pack_fill(&e.fill), pack_stroke(&e.stroke)]
         }
         Element::Path(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let cmds: Vec<Value> = e.d.iter().map(pack_path_command).collect();
             // fill_rule rides the trailing slot 11 (always written).
-            Value::Array(vec![vint(TAG_PATH), locked, opacity, vis, xform, name, id,
+            vec![vint(TAG_PATH), locked, opacity, vis, xform, name, id,
                               Value::Array(cmds), pack_fill(&e.fill), pack_stroke(&e.stroke),
                               pack_width_points(&e.width_points),
-                              pack_fill_rule(e.fill_rule)])
+                              pack_fill_rule(e.fill_rule)]
         }
         Element::Text(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
@@ -440,26 +657,26 @@ fn pack_element(elem: &Element) -> Value {
             // depends on it. Single no-override tspan blobs are still
             // decodable by old readers via the derived `content`.
             let tspans: Vec<Value> = e.tspans.iter().map(pack_tspan).collect();
-            Value::Array(vec![vint(TAG_TEXT), locked, opacity, vis, xform, name, id,
+            vec![vint(TAG_TEXT), locked, opacity, vis, xform, name, id,
                               vf64(e.x), vf64(e.y), vstr(&e.content()),
                               vstr(&e.font_family), vf64(e.font_size),
                               vstr(&e.font_weight), vstr(&e.font_style),
                               vstr(&e.text_decoration),
                               vf64(e.width), vf64(e.height),
                               pack_fill(&e.fill), pack_stroke(&e.stroke),
-                              Value::Array(tspans)])
+                              Value::Array(tspans)]
         }
         Element::TextPath(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             let cmds: Vec<Value> = e.d.iter().map(pack_path_command).collect();
             let tspans: Vec<Value> = e.tspans.iter().map(pack_tspan).collect();
-            Value::Array(vec![vint(TAG_TEXT_PATH), locked, opacity, vis, xform, name, id,
+            vec![vint(TAG_TEXT_PATH), locked, opacity, vis, xform, name, id,
                               Value::Array(cmds), vstr(&e.content()), vf64(e.start_offset),
                               vstr(&e.font_family), vf64(e.font_size),
                               vstr(&e.font_weight), vstr(&e.font_style),
                               vstr(&e.text_decoration),
                               pack_fill(&e.fill), pack_stroke(&e.stroke),
-                              Value::Array(tspans)])
+                              Value::Array(tspans)]
         }
         Element::Live(v) => match v {
             crate::geometry::live::LiveVariant::CompoundShape(cs) => {
@@ -472,8 +689,8 @@ fn pack_element(elem: &Element) -> Value {
                 };
                 let operands: Vec<Value> = cs.operands.iter().map(|c| pack_element(c)).collect();
                 // [tag, common(1..6), kind(7), operation(8), operands(9)]
-                Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
-                                  vstr("compound_shape"), vstr(op), Value::Array(operands)])
+                vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
+                                  vstr("compound_shape"), vstr(op), Value::Array(operands)]
             }
             crate::geometry::live::LiveVariant::Reference(r) => {
                 let (locked, opacity, vis, xform, name, id) = pack_common(&r.common);
@@ -482,9 +699,9 @@ fn pack_element(elem: &Element) -> Value {
                 // (distinct from common.transform packed at slot 4) rides slot 9
                 // via pack_transform; Nil when None. Old 9-element .bin (no slot
                 // 9) still decode TOLERANTLY to None on the read side.
-                Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
+                vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
                                   vstr("reference"), vstr(&r.target.0),
-                                  pack_transform(&r.transform)])
+                                  pack_transform(&r.transform)]
             }
             crate::geometry::live::LiveVariant::Recorded(rec) => {
                 let (locked, opacity, vis, xform, name, id) = pack_common(&rec.common);
@@ -495,16 +712,16 @@ fn pack_element(elem: &Element) -> Value {
                     &rec.inputs.iter().map(|i| i.0.clone()).collect::<Vec<_>>())
                     .unwrap_or_default();
                 let ops_json = serde_json::to_string(&rec.ops).unwrap_or_default();
-                Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
-                                  vstr("recorded"), vstr(&inputs_json), vstr(&ops_json)])
+                vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
+                                  vstr("recorded"), vstr(&inputs_json), vstr(&ops_json)]
             }
             crate::geometry::live::LiveVariant::Generated(ge) => {
                 let (locked, opacity, vis, xform, name, id) = pack_common(&ge.common);
                 // The concept id + params ride slots 8/9 (params as a canonical
                 // JSON string). [tag, common(1..6), kind(7), concept(8), params(9)].
                 let params_json = serde_json::to_string(&ge.params).unwrap_or_default();
-                Value::Array(vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
-                                  vstr("generated"), vstr(&ge.concept_id), vstr(&params_json)])
+                vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
+                                  vstr("generated"), vstr(&ge.concept_id), vstr(&params_json)]
             }
         },
     }
@@ -761,31 +978,44 @@ fn unpack_path_command(v: &Value) -> Result<PathCommand, String> {
     })
 }
 
-fn unpack_common(arr: &[Value]) -> Result<CommonProps, String> {
+/// Read the shared common block at fixed indices 1..6, plus the tag's
+/// TRAILING extension block at `tag_base_arity(tag)` (mode / mask /
+/// tool_origin). The extension is read TOLERANTLY -- an absent slot yields the
+/// documented default, so a blob written before the extension existed still
+/// loads with exactly the values it was authored with.
+fn unpack_common(arr: &[Value], tag: i64) -> Result<CommonProps, String> {
     let vis = match as_i64(at(arr, 3)?)? {
         0 => Visibility::Invisible,
         1 => Visibility::Outline,
         2 => Visibility::Preview,
         n => return Err(format!("unknown visibility: {}", n)),
     };
+    let base = tag_base_arity(tag);
     Ok(CommonProps {
         locked: as_bool(at(arr, 1)?)?,
         opacity: as_f64(at(arr, 2)?)?,
-        mode: crate::geometry::element::BlendMode::default(),
+        mode: blend_mode_from_tag(arr.get(base + EXT_MODE)),
         visibility: vis,
         transform: unpack_transform(at(arr, 4)?)?,
-        mask: None,
-        tool_origin: None,
+        mask: unpack_mask(arr.get(base + EXT_MASK))?,
+        tool_origin: tolerant_opt_str(arr.get(base + EXT_TOOL_ORIGIN)),
         // v2: name and id ride in the shared common block at indices 5 and 6.
         name: as_opt_str(at(arr, 5)?)?,
         id: as_opt_str(at(arr, 6)?)?,
     })
 }
 
+/// A trailing optional-string slot: absent or nil is `None`, anything that is
+/// not a string is `None` too rather than an error, matching the tolerance the
+/// fill_rule slot established for a malformed-but-decodable blob.
+fn tolerant_opt_str(v: Option<&Value>) -> Option<String> {
+    v.and_then(|v| v.as_str()).map(|s| s.to_string())
+}
+
 fn unpack_element(v: &Value) -> Result<Element, String> {
     let arr = as_array(v)?;
     let tag = as_i64(at(arr, 0)?)?;
-    let common = unpack_common(arr)?;
+    let common = unpack_common(arr, tag)?;
 
     Ok(match tag {
         TAG_LAYER => {
@@ -864,8 +1094,11 @@ fn unpack_element(v: &Value) -> Result<Element, String> {
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
-                stroke_brush: None,
-                stroke_brush_overrides: None,
+                // Path-only trailing slots, after the common extension.
+                stroke_brush: tolerant_opt_str(
+                    arr.get(tag_base_arity(TAG_PATH) + EXT_STROKE_BRUSH)),
+                stroke_brush_overrides: tolerant_opt_str(
+                    arr.get(tag_base_arity(TAG_PATH) + EXT_STROKE_BRUSH_OVERRIDES)),
                 // Trailing slot 11; absent in pre-fill_rule blobs.
                 fill_rule: unpack_fill_rule(arr.get(11)),
             })
@@ -1245,7 +1478,9 @@ mod tests {
             let Value::Array(children) = &layer[7] else { panic!("children not an array") };
             let Value::Array(path) = &children[0] else { panic!("path not an array") };
             assert_eq!(path[0].as_i64(), Some(TAG_PATH));
-            assert_eq!(path.len(), 12, "TAG_PATH should carry 12 slots (fill_rule last)");
+            assert_eq!(path.len(), tag_base_arity(TAG_PATH) + COMMON_EXT_LEN + 2,
+                       "TAG_PATH should carry its base arity (fill_rule last, slot 11) \
+                        plus the trailing common extension and the two brush slots");
             assert_eq!(path[11].as_i64(), Some(want),
                        "fill_rule tag for {rule:?} should be {want}");
         }
@@ -1268,7 +1503,7 @@ mod tests {
         let Value::Array(mut layer) = layers[0].clone() else { panic!() };
         let Value::Array(mut children) = layer[7].clone() else { panic!() };
         let Value::Array(mut path) = children[0].clone() else { panic!() };
-        assert_eq!(path.len(), 12);
+        assert_eq!(path.len(), tag_base_arity(TAG_PATH) + COMMON_EXT_LEN + 2);
         path.truncate(11);
         children[0] = Value::Array(path);
         layer[7] = Value::Array(children);
@@ -1299,8 +1534,17 @@ mod tests {
     /// To regenerate after an intentional codec change: print
     /// `document_to_binary(&donut_doc(rule), false)` as hex and update
     /// BOTH ports.
-    const DONUT_NON_ZERO_HEX: &str = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919c07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c000009090";
-    const DONUT_EVEN_ODD_HEX: &str = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919c07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c001009090";
+    const DONUT_NON_ZERO_HEX: &str = "4a4153000200000094919b00c2cb3ff000000000000002c0c0c091dc001107c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00000c0c0c0c000c0c0009090";
+    const DONUT_EVEN_ODD_HEX: &str = "4a4153000200000094919b00c2cb3ff000000000000002c0c0c091dc001107c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00100c0c0c0c000c0c0009090";
+    /// The SAME document as written BEFORE the per-tag common extension
+    /// (RULED 2026-07-27) joined the codec: TAG_LAYER carries 8 slots (0x98)
+    /// and TAG_PATH 12 (0x9c), with no mode / mask / tool_origin /
+    /// stroke_brush / stroke_brush_overrides tail. These were the pinned
+    /// literals up to that commit, kept verbatim -- the tolerant-read
+    /// contract is only worth something if it is checked against REAL old
+    /// bytes rather than bytes the current writer reconstructed.
+    const DONUT_PRE_EXT_NON_ZERO_HEX: &str = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919c07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c000009090";
+    const DONUT_PRE_EXT_EVEN_ODD_HEX: &str = "4a4153000200000094919800c2cb3ff000000000000002c0c0c0919c07c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c001009090";
     /// The same document as written BEFORE fill_rule joined the codec:
     /// the TAG_PATH array header is 0x9b (11 slots) instead of 0x9c (12)
     /// and the trailing tag byte is gone. Kept as a literal so the
@@ -1318,6 +1562,19 @@ mod tests {
             .collect()
     }
 
+    /// Regeneration helper for the pinned literals above, after an
+    /// INTENTIONAL codec change. Run with:
+    ///   cargo test print_pinned_binary_hex -- --ignored --nocapture
+    /// then paste each line into BOTH ports.
+    #[test]
+    #[ignore]
+    fn print_pinned_binary_hex() {
+        println!("DONUT_NON_ZERO_HEX = {}",
+                 hex(&document_to_binary(&donut_doc(FillRule::NonZero), false)));
+        println!("DONUT_EVEN_ODD_HEX = {}",
+                 hex(&document_to_binary(&donut_doc(FillRule::EvenOdd), false)));
+    }
+
     #[test]
     fn binary_bytes_are_pinned_for_both_fill_rules() {
         assert_eq!(hex(&document_to_binary(&donut_doc(FillRule::NonZero), false)),
@@ -1332,12 +1589,13 @@ mod tests {
         assert_eq!(diffs.len(), 1, "the rule must cost exactly one byte");
     }
 
-    /// `DONUT_NON_ZERO_HEX` with the fill-rule slot's `00` replaced by
-    /// `slot_hex`. Built from the PRE-fill_rule literal so the splice point
-    /// is derived from real bytes rather than an index counted by hand:
-    /// bump the TAG_PATH array header from 11 slots to 12, then insert the
-    /// slot just before the document's trailing `selected_layer` + two
-    /// empty arrays. Twin of JasSwift's `donutWithFillRuleSlot`.
+    /// A PRE-EXTENSION blob (8 layer slots, 12 path slots) with the
+    /// fill-rule slot's `00` replaced by `slot_hex`. Built from the
+    /// PRE-fill_rule literal so the splice point is derived from real bytes
+    /// rather than an index counted by hand: bump the TAG_PATH array header
+    /// from 11 slots to 12, then insert the slot just before the document's
+    /// trailing `selected_layer` + two empty arrays. Twin of JasSwift's
+    /// `donutWithFillRuleSlot`.
     fn donut_with_fill_rule_slot(slot_hex: &str) -> Vec<u8> {
         let tail = "009090";
         let head = DONUT_PRE_FILL_RULE_HEX.replace("919b07", "919c07");
@@ -1345,10 +1603,38 @@ mod tests {
         unhex(&format!("{body}{slot_hex}{tail}"))
     }
 
+    /// The splice reproduces the PRE-EXTENSION writer exactly, which is what
+    /// makes the tolerance vectors below statements about a format that
+    /// really existed on disk rather than about a string we assembled.
     #[test]
-    fn fill_rule_slot_splice_matches_the_writer() {
-        assert_eq!(hex(&donut_with_fill_rule_slot("00")), DONUT_NON_ZERO_HEX);
-        assert_eq!(hex(&donut_with_fill_rule_slot("01")), DONUT_EVEN_ODD_HEX);
+    fn fill_rule_slot_splice_matches_the_pre_extension_writer() {
+        assert_eq!(hex(&donut_with_fill_rule_slot("00")), DONUT_PRE_EXT_NON_ZERO_HEX);
+        assert_eq!(hex(&donut_with_fill_rule_slot("01")), DONUT_PRE_EXT_EVEN_ODD_HEX);
+    }
+
+    /// A pre-extension blob loads with the fill rule it was written with AND
+    /// the documented defaults for every extension slot -- the tolerant read
+    /// checked against real old bytes, not a reconstruction.
+    #[test]
+    fn binary_reads_a_pre_extension_blob() {
+        for (literal, rule) in [(DONUT_PRE_EXT_NON_ZERO_HEX, FillRule::NonZero),
+                                (DONUT_PRE_EXT_EVEN_ODD_HEX, FillRule::EvenOdd)] {
+            let doc = binary_to_document(&unhex(literal))
+                .expect("a pre-extension blob must still load");
+            assert_eq!(first_path_rule(&doc), rule);
+            let p = match &*doc.layers[0].children().unwrap()[0] {
+                Element::Path(p) => p.clone(),
+                other => panic!("expected Path, got {other:?}"),
+            };
+            assert_eq!(p.common.mode, BlendMode::Normal);
+            assert_eq!(p.common.mask, None);
+            assert_eq!(p.common.tool_origin, None);
+            assert_eq!(p.stroke_brush, None);
+            assert_eq!(p.stroke_brush_overrides, None);
+            assert_eq!(doc.layers[0].common().mode, BlendMode::Normal);
+            // Geometry, so the row above is not a statement about a husk.
+            assert_eq!(p.d.len(), 8);
+        }
     }
 
     /// A fill-rule slot that is not the exact EvenOdd integer tag must read
@@ -1379,6 +1665,353 @@ mod tests {
                 other => panic!("expected Path for {label}, got {other:?}"),
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // The per-tag trailing common extension (RULED 2026-07-27, see
+    // transcripts/EDIT_SEMANTICS_FREEZE.md): `common.mode`, `common.mask`
+    // and `common.tool_origin` were dropped by the codec in both ports --
+    // save as binary, reload, gone -- and `stroke_brush` /
+    // `stroke_brush_overrides` with them on Path. A round trip speaks to
+    // NOTHING, so it must preserve EVERYTHING.
+    //
+    // Twins in JasSwift/Tests/Geometry/BinaryCommonExtensionTests.swift.
+    // ------------------------------------------------------------------
+
+    /// A Path carrying every field of the extension at a non-default value.
+    fn ext_path() -> PathElem {
+        PathElem {
+            d: donut_commands(),
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            width_points: vec![],
+            common: CommonProps {
+                mode: BlendMode::Multiply,
+                mask: Some(Box::new(Mask {
+                    subtree: Box::new(Element::Rect(RectElem {
+                        x: 1.0, y: 2.0, width: 3.0, height: 4.0, rx: 0.0, ry: 0.0,
+                        fill: Some(Fill::new(Color::Rgb { r: 1.0, g: 1.0, b: 1.0, a: 1.0 })),
+                        stroke: None,
+                        common: CommonProps::default(),
+                        fill_gradient: None,
+                        stroke_gradient: None,
+                    })),
+                    clip: true,
+                    invert: true,
+                    disabled: false,
+                    linked: false,
+                    unlink_transform: Some(Transform {
+                        a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 9.0, f: 9.0,
+                    }),
+                })),
+                tool_origin: Some("blob_brush".to_string()),
+                ..CommonProps::default()
+            },
+            fill_gradient: None,
+            stroke_gradient: None,
+            fill_rule: FillRule::EvenOdd,
+            stroke_brush: Some("basic/calligraphic_5".to_string()),
+            stroke_brush_overrides: Some("{\"angle\":30}".to_string()),
+        }
+    }
+
+    fn doc_with(elem: Element) -> Document {
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(elem)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Document { layers: vec![layer], selected_layer: 0, ..Document::default() }
+    }
+
+    fn first_child(doc: &Document) -> Element {
+        (*doc.layers[0].children().unwrap()[0]).clone()
+    }
+
+    /// The whole extension, on the one kind that carries all five fields.
+    #[test]
+    fn binary_round_trips_the_path_common_extension() {
+        let before = ext_path();
+        let doc = doc_with(Element::Path(before.clone()));
+        let back = binary_to_document(&document_to_binary(&doc, true)).expect("decode");
+        let after = match first_child(&back) {
+            Element::Path(p) => p,
+            other => panic!("expected Path, got {other:?}"),
+        };
+        assert_eq!(after.common.mode, before.common.mode, "binary dropped common.mode");
+        assert_eq!(after.common.mask, before.common.mask, "binary dropped common.mask");
+        assert_eq!(after.common.tool_origin, before.common.tool_origin,
+                   "binary dropped common.tool_origin");
+        assert_eq!(after.stroke_brush, before.stroke_brush, "binary dropped stroke_brush");
+        assert_eq!(after.stroke_brush_overrides, before.stroke_brush_overrides,
+                   "binary dropped stroke_brush_overrides");
+        // Field-list-free batteries are structurally blind to geometry, so
+        // one GEOMETRY-VALUE assertion rides with the field list.
+        assert_eq!(after.d, before.d, "the extension cost the path its geometry");
+        assert_eq!(after.fill_rule, FillRule::EvenOdd);
+    }
+
+    /// The three common fields belong to EVERY tag, not just Path: the
+    /// extension is per-tag precisely because `unpack_common` reads fixed
+    /// indices. One representative of each tag, each carrying all three.
+    #[test]
+    fn binary_round_trips_the_common_extension_on_every_tag() {
+        let mode = BlendMode::HardLight;
+        let mask = Some(Box::new(Mask {
+            subtree: Box::new(Element::Circle(CircleElem {
+                cx: 1.0, cy: 2.0, r: 3.0,
+                fill: Some(Fill::new(Color::BLACK)),
+                stroke: None,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            })),
+            clip: false,
+            invert: true,
+            disabled: true,
+            linked: false,
+            unlink_transform: None,
+        }));
+        let common = CommonProps {
+            mode,
+            mask: mask.clone(),
+            tool_origin: Some("blob_brush".to_string()),
+            ..CommonProps::default()
+        };
+        for elem in every_tag_elements(&common) {
+            let tag_label = element_tag_label(&elem);
+            let doc = doc_with(elem.clone());
+            let back = binary_to_document(&document_to_binary(&doc, false))
+                .unwrap_or_else(|e| panic!("{tag_label}: decode failed: {e}"));
+            let after = first_child(&back);
+            assert_eq!(after.common().mode, mode, "{tag_label} dropped common.mode");
+            assert_eq!(after.common().mask, mask, "{tag_label} dropped common.mask");
+            assert_eq!(after.common().tool_origin, Some("blob_brush".to_string()),
+                       "{tag_label} dropped common.tool_origin");
+        }
+        // The wrapping Layer carries the extension too -- it is the one tag
+        // the loop above cannot reach as a child.
+        let mut lc = common.clone();
+        lc.name = Some("Layer 1".to_string());
+        let doc = Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![], isolated_blending: false, knockout_group: false, common: lc,
+            })],
+            selected_layer: 0,
+            ..Document::default()
+        };
+        let back = binary_to_document(&document_to_binary(&doc, false)).expect("decode");
+        assert_eq!(back.layers[0].common().mode, mode, "TAG_LAYER dropped common.mode");
+        assert_eq!(back.layers[0].common().mask, mask, "TAG_LAYER dropped common.mask");
+        assert_eq!(back.layers[0].common().tool_origin, Some("blob_brush".to_string()),
+                   "TAG_LAYER dropped common.tool_origin");
+    }
+
+    /// One element per element TAG, each wearing `common`. Group and Layer
+    /// appear as children so the loop reaches every tag except the document
+    /// root (asserted separately).
+    fn every_tag_elements(common: &CommonProps) -> Vec<Element> {
+        use crate::geometry::live::*;
+        vec![
+            Element::Line(LineElem {
+                x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0, stroke: None, width_points: vec![],
+                common: common.clone(), stroke_gradient: None,
+            }),
+            Element::Rect(RectElem {
+                x: 0.0, y: 0.0, width: 1.0, height: 2.0, rx: 0.0, ry: 0.0,
+                fill: None, stroke: None, common: common.clone(),
+                fill_gradient: None, stroke_gradient: None,
+            }),
+            Element::Circle(CircleElem {
+                cx: 0.0, cy: 0.0, r: 1.0, fill: None, stroke: None,
+                common: common.clone(), fill_gradient: None, stroke_gradient: None,
+            }),
+            Element::Ellipse(EllipseElem {
+                cx: 0.0, cy: 0.0, rx: 1.0, ry: 2.0, fill: None, stroke: None,
+                common: common.clone(), fill_gradient: None, stroke_gradient: None,
+            }),
+            Element::Polyline(PolylineElem {
+                points: vec![(0.0, 0.0), (1.0, 1.0)], fill: None, stroke: None,
+                common: common.clone(), fill_gradient: None, stroke_gradient: None,
+            }),
+            Element::Polygon(PolygonElem {
+                points: vec![(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)], fill: None, stroke: None,
+                common: common.clone(), fill_gradient: None, stroke_gradient: None,
+            }),
+            Element::Path(PathElem {
+                d: donut_commands(), fill: None, stroke: None, width_points: vec![],
+                common: common.clone(), fill_gradient: None, stroke_gradient: None,
+                fill_rule: FillRule::NonZero, stroke_brush: None, stroke_brush_overrides: None,
+            }),
+            Element::Text(TextElem::from_string(
+                1.0, 2.0, "hi", "Arial", 12.0, "normal", "normal", "none", 10.0, 12.0,
+                None, None, common.clone())),
+            Element::TextPath(TextPathElem::from_string(
+                donut_commands(), "hi", 0.0, "Arial", 12.0, "normal", "normal", "none",
+                None, None, common.clone())),
+            Element::Group(GroupElem {
+                children: vec![], isolated_blending: false, knockout_group: false,
+                common: common.clone(),
+            }),
+            Element::Live(LiveVariant::CompoundShape(CompoundShape {
+                operation: CompoundOperation::Union, operands: vec![], fill: None, stroke: None,
+                common: common.clone(),
+            })),
+            Element::Live(LiveVariant::Reference(
+                ReferenceElem::new(ElementRef("m1".to_string()), common.clone()))),
+            Element::Live(LiveVariant::Recorded(
+                RecordedElem::new(vec![], vec![], common.clone()))),
+            Element::Live(LiveVariant::Generated(
+                GeneratedElem::new("spiral".to_string(),
+                                   serde_json::Value::Object(Default::default()),
+                                   common.clone()))),
+        ]
+    }
+
+    /// A blob written BEFORE the extension existed has only the tag's base
+    /// arity, and must still load -- the same tolerant-read contract the
+    /// fill_rule slot earned, applied to five more slots at once.
+    #[test]
+    fn binary_without_the_common_extension_still_loads() {
+        let doc = doc_with(Element::Path(ext_path()));
+        let blob = document_to_binary(&doc, false);
+        let mut cursor = &blob[HEADER_SIZE..];
+        let payload = rmpv::decode::read_value(&mut cursor).expect("msgpack");
+        let Value::Array(mut top) = payload else { panic!("payload not an array") };
+        let Value::Array(mut layers) = top[0].clone() else { panic!() };
+        let Value::Array(mut layer) = layers[0].clone() else { panic!() };
+        let Value::Array(mut children) = layer[7].clone() else { panic!() };
+        let Value::Array(mut path) = children[0].clone() else { panic!() };
+        assert_eq!(path.len(), tag_base_arity(TAG_PATH) + COMMON_EXT_LEN + 2,
+                   "TAG_PATH should carry its base arity plus the extension");
+        // Truncate BOTH the path and its enclosing layer back to their
+        // pre-extension arities.
+        path.truncate(tag_base_arity(TAG_PATH));
+        children[0] = Value::Array(path);
+        layer[7] = Value::Array(children);
+        layer.truncate(tag_base_arity(TAG_LAYER));
+        layers[0] = Value::Array(layer);
+        top[0] = Value::Array(layers);
+        let old = binary_to_document(&frame(&Value::Array(top)))
+            .expect("a pre-extension blob must still load");
+        let p = match first_child(&old) {
+            Element::Path(p) => p,
+            other => panic!("expected Path, got {other:?}"),
+        };
+        assert_eq!(p.common.mode, BlendMode::Normal, "an absent mode slot reads as Normal");
+        assert_eq!(p.common.mask, None, "an absent mask slot reads as None");
+        assert_eq!(p.common.tool_origin, None, "an absent tool_origin slot reads as None");
+        assert_eq!(p.stroke_brush, None);
+        assert_eq!(p.stroke_brush_overrides, None);
+        // And the document is otherwise intact, not a default-shaped husk.
+        assert_eq!(p.d.len(), 8, "the old blob lost its geometry");
+        assert_eq!(p.fill_rule, FillRule::EvenOdd, "the old blob lost its fill rule");
+    }
+
+    /// Garbage in any extension slot must read as the documented default
+    /// without panicking -- the standing
+    /// `malformed_but_decodable_blob_errors_not_panics` contract extended to
+    /// the new slots.
+    #[test]
+    fn binary_tolerates_malformed_common_extension_slots() {
+        let doc = doc_with(Element::Path(ext_path()));
+        let blob = document_to_binary(&doc, false);
+        let mut cursor = &blob[HEADER_SIZE..];
+        let payload = rmpv::decode::read_value(&mut cursor).expect("msgpack");
+        let base = tag_base_arity(TAG_PATH);
+        for (label, junk) in [
+            ("a string", Value::String("nope".into())),
+            ("an empty array", Value::Array(vec![])),
+            ("a float", Value::F64(1.5)),
+            ("a bool", Value::Boolean(true)),
+        ] {
+            for slot in base..base + COMMON_EXT_LEN + 2 {
+                let Value::Array(mut top) = payload.clone() else { panic!() };
+                let Value::Array(mut layers) = top[0].clone() else { panic!() };
+                let Value::Array(mut layer) = layers[0].clone() else { panic!() };
+                let Value::Array(mut children) = layer[7].clone() else { panic!() };
+                let Value::Array(mut path) = children[0].clone() else { panic!() };
+                path[slot] = junk.clone();
+                children[0] = Value::Array(path);
+                layer[7] = Value::Array(children);
+                layers[0] = Value::Array(layer);
+                top[0] = Value::Array(layers);
+                let doc = binary_to_document(&frame(&Value::Array(top)))
+                    .unwrap_or_else(|e| panic!("{label} in slot {slot} should still load: {e}"));
+                match first_child(&doc) {
+                    Element::Path(p) => assert_eq!(p.d.len(), 8,
+                        "{label} in slot {slot} lost the geometry"),
+                    other => panic!("expected Path, got {other:?}"),
+                }
+            }
+        }
+    }
+
+    /// Every tspan override field survives the binary codec. This port always
+    /// wrote all 51 slots, so this test was GREEN the day it was written -- it
+    /// exists as the twin of `binaryRoundTripsASaturatedTspan` in
+    /// JasSwift/Tests/Geometry/BinaryTspanTests.swift, which was RED: JasSwift's
+    /// `packTspan` wrote only 22 slots and its `unpackTspan` read only 22, so
+    /// that port dropped 29 tspan fields on a round trip. Found 2026-07-27 by
+    /// the byte-level wire gate. Keeping a twin here is what stops the two
+    /// ports drifting apart at this payload again in the other direction.
+    #[test]
+    fn binary_round_trips_a_saturated_tspan() {
+        use crate::geometry::tspan::Tspan;
+        let before = Tspan {
+            id: 7,
+            content: "hi".to_string(),
+            baseline_shift: Some(1.5), dx: Some(2.5),
+            font_family: Some("Georgia".to_string()), font_size: Some(13.5),
+            font_style: Some("italic".to_string()),
+            font_variant: Some("small-caps".to_string()),
+            font_weight: Some("700".to_string()),
+            jas_aa_mode: Some("crisp".to_string()), jas_fractional_widths: Some(true),
+            jas_kerning_mode: Some("optical".to_string()), jas_no_break: Some(true),
+            jas_role: Some("paragraph".to_string()),
+            jas_left_indent: Some(3.5), jas_right_indent: Some(4.5),
+            jas_hyphenate: Some(true), jas_hanging_punctuation: Some(true),
+            jas_list_style: Some("disc".to_string()),
+            text_align: Some("justify".to_string()),
+            text_align_last: Some("right".to_string()),
+            text_indent: Some(5.5),
+            jas_space_before: Some(6.5), jas_space_after: Some(7.5),
+            jas_word_spacing_min: Some(8.5), jas_word_spacing_desired: Some(9.5),
+            jas_word_spacing_max: Some(10.5),
+            jas_letter_spacing_min: Some(11.5), jas_letter_spacing_desired: Some(12.5),
+            jas_letter_spacing_max: Some(13.5),
+            jas_glyph_scaling_min: Some(14.5), jas_glyph_scaling_desired: Some(15.5),
+            jas_glyph_scaling_max: Some(16.5),
+            jas_auto_leading: Some(17.5),
+            jas_single_word_justify: Some("center".to_string()),
+            jas_hyphenate_min_word: Some(18.5), jas_hyphenate_min_before: Some(19.5),
+            jas_hyphenate_min_after: Some(20.5), jas_hyphenate_limit: Some(21.5),
+            jas_hyphenate_zone: Some(22.5), jas_hyphenate_bias: Some(23.5),
+            jas_hyphenate_capitalized: Some(true),
+            letter_spacing: Some(24.5), line_height: Some(25.5),
+            rotate: Some(26.5), style_name: Some("Heading".to_string()),
+            text_decoration: Some(vec!["underline".to_string(), "overline".to_string()]),
+            text_rendering: Some("geometricPrecision".to_string()),
+            text_transform: Some("uppercase".to_string()),
+            transform: Some(Transform { a: 2.0, b: 0.0, c: 0.0, d: 3.0, e: 5.0, f: 7.0 }),
+            xml_lang: Some("fr".to_string()),
+        };
+        let mut text = TextElem::from_string(
+            1.0, 2.0, "hi", "Arial", 12.0, "normal", "normal", "none", 0.0, 0.0,
+            None, None, CommonProps::default());
+        text.tspans = vec![before.clone()];
+        let doc = doc_with(Element::Text(text));
+        let back = binary_to_document(&document_to_binary(&doc, true)).expect("decode");
+        let t = match first_child(&back) {
+            Element::Text(t) => t,
+            other => panic!("expected Text, got {other:?}"),
+        };
+        assert_eq!(t.tspans.len(), 1);
+        assert_eq!(t.tspans[0], before, "binary dropped at least one tspan field");
+        // Geometry, so a whole-struct comparison is not the only statement.
+        assert_eq!(t.x, 1.0);
+        assert_eq!(t.y, 2.0);
     }
 
     #[test]

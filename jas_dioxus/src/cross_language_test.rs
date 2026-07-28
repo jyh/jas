@@ -5594,6 +5594,192 @@ mod tests {
     }
 
 
+    // ---------------------------------------------------------------
+    // BINARY WIRE -- the byte-level gate
+    //
+    // RULED 2026-07-27 together with the codec's per-tag trailing extension:
+    // every OTHER codec gate compares canonical test-JSON strings, and the
+    // fields the binary codec drops are a strict SUBSET of the fields that
+    // string oracle also drops. So a one-port slot mismatch in `pack_element`
+    // would land SILENTLY -- extending a format whose divergences we cannot
+    // see is not acceptable. Coverage gap
+    // `codec-string-oracle-cannot-see-a-dropped-field` is the record.
+    //
+    // This gate compares BYTES against ONE shared golden
+    // (test_fixtures/expected/binary_wire.json), which is what makes it a
+    // cross-port statement: a port that drifts cannot fix itself by editing
+    // its own literal, because there is no per-port literal to edit. The
+    // fixture also declares the per-tag ARITY the trailing append is defined
+    // against, asserted here through `packed_element_slot_count`.
+    //
+    // Twin: `binaryWire` in JasSwift/Tests/CrossLanguageTests.swift.
+    // ---------------------------------------------------------------
+
+    /// One element per wire tag, in the fixture's `tag_arity` key order.
+    /// Mirrored by `wireTagElements()` in JasSwift. The CONTENT is
+    /// deliberately minimal: arity is a property of the tag, not of the
+    /// values, so a shape with fewer numbers makes the pinned bytes readable.
+    fn wire_tag_elements() -> Vec<crate::geometry::element::Element> {
+        use crate::geometry::element::*;
+        use crate::geometry::live::*;
+        let c = CommonProps::default;
+        vec![
+            Element::Layer(LayerElem { children: vec![], isolated_blending: false,
+                                       knockout_group: false, common: c() }),
+            Element::Group(GroupElem { children: vec![], isolated_blending: false,
+                                       knockout_group: false, common: c() }),
+            Element::Line(LineElem { x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0, stroke: None,
+                                     width_points: vec![], common: c(),
+                                     stroke_gradient: None }),
+            Element::Rect(RectElem { x: 0.0, y: 0.0, width: 1.0, height: 2.0, rx: 0.0, ry: 0.0,
+                                     fill: None, stroke: None, common: c(),
+                                     fill_gradient: None, stroke_gradient: None }),
+            Element::Circle(CircleElem { cx: 0.0, cy: 0.0, r: 1.0, fill: None, stroke: None,
+                                         common: c(), fill_gradient: None,
+                                         stroke_gradient: None }),
+            Element::Ellipse(EllipseElem { cx: 0.0, cy: 0.0, rx: 1.0, ry: 2.0, fill: None,
+                                           stroke: None, common: c(), fill_gradient: None,
+                                           stroke_gradient: None }),
+            Element::Polyline(PolylineElem { points: vec![(0.0, 0.0), (1.0, 1.0)], fill: None,
+                                             stroke: None, common: c(), fill_gradient: None,
+                                             stroke_gradient: None }),
+            Element::Polygon(PolygonElem { points: vec![(0.0, 0.0), (1.0, 1.0), (2.0, 0.0)],
+                                           fill: None, stroke: None, common: c(),
+                                           fill_gradient: None, stroke_gradient: None }),
+            Element::Path(PathElem { d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                                             PathCommand::LineTo { x: 1.0, y: 1.0 }],
+                                     fill: None, stroke: None, width_points: vec![],
+                                     common: c(), fill_gradient: None, stroke_gradient: None,
+                                     fill_rule: FillRule::NonZero, stroke_brush: None,
+                                     stroke_brush_overrides: None }),
+            Element::Text(TextElem::from_string(1.0, 2.0, "hi", "Arial", 12.0, "normal",
+                                                "normal", "none", 10.0, 12.0, None, None, c())),
+            Element::TextPath(TextPathElem::from_string(
+                vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                     PathCommand::LineTo { x: 1.0, y: 1.0 }],
+                "hi", 0.0, "Arial", 12.0, "normal", "normal", "none", None, None, c())),
+            Element::Live(LiveVariant::Reference(
+                ReferenceElem::new(ElementRef("m1".to_string()), c()))),
+        ]
+    }
+
+    /// Every LIVE kind, which all share `tag_arity["live"]`.
+    fn wire_live_elements() -> Vec<crate::geometry::element::Element> {
+        use crate::geometry::element::*;
+        use crate::geometry::live::*;
+        let c = CommonProps::default;
+        vec![
+            Element::Live(LiveVariant::CompoundShape(CompoundShape {
+                operation: CompoundOperation::Union, operands: vec![],
+                fill: None, stroke: None, common: c() })),
+            Element::Live(LiveVariant::Reference(
+                ReferenceElem::new(ElementRef("m1".to_string()), c()))),
+            Element::Live(LiveVariant::Recorded(RecordedElem::new(vec![], vec![], c()))),
+            Element::Live(LiveVariant::Generated(GeneratedElem::new(
+                "spiral".to_string(), serde_json::Value::Object(Default::default()), c()))),
+        ]
+    }
+
+    /// The document a named wire case packs. Mirrored by `wireCaseDocument`
+    /// in JasSwift -- the two constructions ARE the thing being compared, so
+    /// they must stay identical shape for identical shape.
+    fn wire_case_document(name: &str) -> crate::document::document::Document {
+        use crate::document::document::Document;
+        use crate::geometry::element::*;
+        let layer = |kids: Vec<Element>| Element::Layer(LayerElem {
+            children: kids.into_iter().map(std::rc::Rc::new).collect(),
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = |kids: Vec<Element>| Document {
+            layers: vec![layer(kids)], selected_layer: 0, ..Document::default()
+        };
+        match name {
+            // Every non-text, non-live tag at its default, so the arity of
+            // each is visible in the bytes.
+            "shapes_default" => doc(wire_tag_elements().into_iter()
+                .filter(|e| !matches!(e, Element::Text(_) | Element::TextPath(_)
+                                        | Element::Live(_) | Element::Layer(_)))
+                .collect()),
+            // Text and TextPath, split out because the tspan payload is where
+            // the two ports are KNOWN to diverge (see the fixture's
+            // `port_hex`).
+            "text_default" => doc(wire_tag_elements().into_iter()
+                .filter(|e| matches!(e, Element::Text(_) | Element::TextPath(_)))
+                .collect()),
+            "live_default" => doc(wire_live_elements()),
+            // The extension's whole reason for existing, at non-default
+            // values: a masked, blend-moded, tool-tagged, brushed Path.
+            "saturated_extension" => doc(vec![Element::Path(survival_saturated_path())]),
+            other => panic!("binary_wire: unknown case '{other}'"),
+        }
+    }
+
+    fn wire_hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    /// Regeneration helper after an INTENTIONAL codec change. Run with:
+    ///   cargo test print_binary_wire_hex -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn print_binary_wire_hex() {
+        for e in wire_tag_elements() {
+            println!("ARITY {} = {}", crate::geometry::binary::element_tag_label(&e),
+                     crate::geometry::binary::packed_element_slot_count(&e));
+        }
+        for name in ["shapes_default", "text_default", "live_default",
+                     "saturated_extension"] {
+            println!("CASE {} = {}", name,
+                     wire_hex(&document_to_binary(&wire_case_document(name), false)));
+        }
+    }
+
+    #[test]
+    fn binary_wire() {
+        let raw = read_fixture("expected/binary_wire.json");
+        let fx: serde_json::Value = serde_json::from_str(&raw)
+            .expect("binary_wire.json is not valid JSON");
+
+        // (1) ARITY. Every tag's packed slot count is declared as data and
+        // asserted here, so a slot added to one port and not the other cannot
+        // hide behind a compensating change elsewhere in the array.
+        let arity = fx["tag_arity"].as_object().expect("tag_arity object");
+        let mut seen: Vec<String> = Vec::new();
+        for elem in wire_tag_elements().iter().chain(wire_live_elements().iter()) {
+            let label = crate::geometry::binary::element_tag_label(elem);
+            let want = arity.get(label)
+                .unwrap_or_else(|| panic!("binary_wire: tag_arity declares no '{label}'"))
+                .as_u64().expect("tag_arity value is an integer") as usize;
+            let got = crate::geometry::binary::packed_element_slot_count(elem);
+            assert_eq!(got, want,
+                "binary_wire: TAG '{label}' packs {got} slots, the fixture declares {want}");
+            if !seen.iter().any(|s| s == label) { seen.push(label.to_string()); }
+        }
+        assert_eq!(seen.len(), arity.len(),
+            "binary_wire: the gate reaches {} tags, the fixture declares {} -- every tag \
+             must be watched", seen.len(), arity.len());
+
+        // (2) BYTES. One shared golden per case, uncompressed so the pinned
+        // string is the msgpack itself rather than a deflate stream.
+        for case in fx["cases"].as_array().expect("cases array") {
+            let name = case["name"].as_str().expect("case name");
+            let expected = case["port_hex"].get("rust").and_then(|v| v.as_str())
+                .unwrap_or_else(|| case["hex"].as_str().expect("case hex"));
+            let got = wire_hex(&document_to_binary(&wire_case_document(name), false));
+            assert_eq!(got, expected,
+                "binary_wire: case '{name}' bytes changed. If the codec changed on \
+                 PURPOSE, regenerate with `cargo test print_binary_wire_hex -- --ignored \
+                 --nocapture` and update the SHARED fixture, which will red the other \
+                 port until it agrees.");
+            // The bytes must also decode -- a pinned string that no longer
+            // parses would be a green gate over a broken codec.
+            let doc = binary_to_document(&crate::geometry::binary::unhex_for_tests(expected))
+                .unwrap_or_else(|e| panic!("binary_wire: case '{name}' does not decode: {e}"));
+            assert!(!doc.layers.is_empty(), "binary_wire: case '{name}' decoded to no layers");
+        }
+    }
+
     /// A `jas:`-prefixed attribute obliges the root `<svg>` to declare the
     /// namespace: a strict XML parser rejects an undeclared prefix, and it
     /// rejects the WHOLE DOCUMENT, not the attribute. `jas:tool-origin` is the

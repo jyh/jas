@@ -1192,6 +1192,89 @@ BUMP.**
   index 3 for `symbols`, `TAG_LIVE` slot 9 for the instance transform), so the
   mechanism is established, not novel.
 
+### IMPLEMENTED 2026-07-27 — five of the seven, and the gate
+
+**What landed.** A per-tag trailing extension block, exactly as ruled:
+`common.mode` (an integer tag 0..15 in `BlendMode`'s declaration order),
+`common.mask` (`[subtree, clip, invert, disabled, linked, unlink_transform]`,
+where the subtree is a full nested element) and `common.tool_origin` on
+**every** element tag, plus `stroke_brush` and `stroke_brush_overrides` on
+`TAG_PATH`. `VERSION` is still 2. Every slot is always written, so each tag's
+arity is constant and can be asserted. Reads are tolerant: an absent slot, a
+nil slot and a wrong-typed slot all read as the documented default, which is
+the contract the `fill_rule` slot established. One model asymmetry, documented
+rather than papered over: Rust carries `tool_origin` on every element's
+`CommonProps`, JasSwift only on `Path`, so JasSwift writes nil in that slot for
+the other eleven tags — the same shape as its existing `name: nil` for the live
+variants. A value a port cannot hold is a value it cannot lose.
+
+**Verified by measurement, not argument, that the frozen readers survive it.**
+The frozen Python reader (`jas/geometry/binary.py`, read-only, never edited)
+decodes all four new pinned blobs. The frozen OCaml reader was **read, not
+run**: `jas_ocaml/lib/geometry/binary.ml`'s `unpack_element` indexes with
+`List.nth` at fixed positions and validates no length, so trailing slots are
+ignored — stated at reading-strength, deliberately.
+
+**What did NOT land, and why it is banked rather than guessed.**
+`fill_gradient` and `stroke_gradient` are still dropped. The wire mechanism is
+not the obstacle; the two ports' models are. `jas_dioxus`'s
+`GradientStop.color` is a `Color` (f64 channels, rgb/hsb/cmyk, with alpha);
+`JasSwift`'s is a hex `String` — a divergence
+`test_fixtures/algorithms/gradient_remap.json` already records. Measured this
+wave: encoding the stop colour as the codec's existing colour array is lossless
+in Rust but **normalises** the Swift string (`"#ff0000"` returns as
+`"ff0000"`), while encoding it as a hex string is lossless in Swift but
+**discards** a Rust hsb/cmyk stop colour and its alpha. Byte-identity across
+the ports therefore requires a canonical form, and choosing which port
+normalises is an artwork call with a real cost either way. Under the
+adjudication hierarchy that is a ruling, so it is banked with its evidence in
+`test_fixtures/expected/codec_field_survival.json`.
+
+**The gate found a live divergence on its first run — the justification for
+building it, not a bonus.** `jas_dioxus`'s `pack_tspan` writes **fifty-one**
+slots per tspan; `JasSwift`'s `packTspan` writes **twenty-two**, and its
+`unpackTspan` reads only 22. At the commit where this was measured the two
+ports did NOT write the same bytes for any `Text` or `TextPath` — and only that
+much is measured; whether they ever did is a history question nobody drove, and
+the commit message for the gate said "have never", which is wider than the
+evidence. JasSwift's binary codec dropped 29 tspan fields
+on a round trip although its own `Tspan` struct holds every one of them. It was
+invisible for precisely the reason this gate was ruled: the existing codec
+gates compare canonical test-JSON strings, the Python-fixture gate reads
+Python-written bytes, and both ports read trailing slots tolerantly, so each
+round-trips its own blobs and neither notices the other's.
+
+It was **pinned** first, as `port_hex.swift` on the `text_default` case, and
+then **closed in the same wave**: JasSwift's `packTspan` and `unpackTspan` now
+carry Rust's 51 slots in Rust's order, and the pin had to be DELETED for the
+gate to go green again — the pinning discipline doing exactly what it is for.
+Red observed first: `binaryRoundTripsASaturatedTspan` reported all 29 fields
+`nil` before the fix. A Rust twin, `binary_round_trips_a_saturated_tspan`, was
+green the day it was written and is kept so the drift cannot recur in the other
+direction.
+
+**A third finding, same gate.** JasSwift's `Text(x:y:content:…)` and
+`TextPath(d:content:…)` convenience initializers *accepted* `blendMode:` and
+`mask:` and forwarded **neither** to the tspans-bearing init, so both were
+silently discarded at construction — the Swift copy-site omission class again.
+Fixed. A mechanical enumeration of every delegating `public init` in
+`Element.swift`, `LiveElement.swift` and `Tspan.swift` found exactly those two
+sites and no others; the method's blind spots are non-public inits and
+non-delegating rebuild sites, which it does not see.
+
+**Still open in the codec, stated so the next reader does not have to
+re-derive it.** The binary codec also drops, outside this ruling's scope:
+`isolated_blending` and `knockout_group` on **Group** in both ports (and on
+**Layer** in Rust, where JasSwift's `Layer` has no such field at all — a model
+divergence, not a shared codec drop); `fill` and `stroke` on a live
+CompoundShape (both readers hard-code `None`, both writers omit them); and
+eleven `TextElem` / `TextPathElem` fields
+(`text_transform`, `font_variant`, `baseline_shift`, `line_height`,
+`letter_spacing`, `xml_lang`, `aa_mode`, `rotate`, `horizontal_scale`,
+`vertical_scale`, `kerning`). Read from the two writers on this commit, not
+driven. They are shared defects, so no equivalence gate can see them; the byte
+gate cannot either, because both ports omit the same slots.
+
 **RULED with it — the byte-level gate lands at the same time.** Measured by an
 earlier wave: **every codec gate compares canonical test-JSON strings, and the fields
 the binary codec drops are a strict SUBSET of the fields that string oracle also

@@ -3801,6 +3801,143 @@ private func survivalRow(_ before: Path, _ after: Path?) -> [(String, String)] {
     }
 }
 
+// MARK: - Binary wire (the byte-level gate)
+
+// RULED 2026-07-27 together with the codec's per-tag trailing extension: every
+// OTHER codec gate compares canonical test-JSON strings, and the fields the
+// binary codec drops are a strict SUBSET of the fields that string oracle also
+// drops. So a one-port slot mismatch in `packElement` would land SILENTLY --
+// extending a format whose divergences we cannot see is not acceptable.
+//
+// This gate compares BYTES against ONE shared golden
+// (test_fixtures/expected/binary_wire.json), which is what makes it a
+// cross-port statement: a port that drifts cannot fix itself by editing its
+// own literal, because there is no per-port literal to edit.
+//
+// Twin: `binary_wire` in jas_dioxus/src/cross_language_test.rs.
+
+/// One element per wire tag, in the fixture's `tag_arity` key order. Mirrors
+/// `wire_tag_elements()` in Rust. The CONTENT is deliberately minimal: arity
+/// is a property of the tag, not of the values.
+private func wireTagElements() -> [Element] {
+    [
+        .layer(Layer(children: [])),
+        .group(Group(children: [])),
+        .line(Line(x1: 0, y1: 0, x2: 1, y2: 1)),
+        .rect(Rect(x: 0, y: 0, width: 1, height: 2)),
+        .circle(Circle(cx: 0, cy: 0, r: 1)),
+        .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 2)),
+        .polyline(Polyline(points: [(0, 0), (1, 1)])),
+        .polygon(Polygon(points: [(0, 0), (1, 1), (2, 0)])),
+        .path(Path(d: [.moveTo(0, 0), .lineTo(1, 1)], fillRule: .nonzero)),
+        .text(Text(x: 1, y: 2, content: "hi", fontFamily: "Arial", fontSize: 12,
+                   fontWeight: "normal", fontStyle: "normal", textDecoration: "none",
+                   width: 10, height: 12)),
+        .textPath(TextPath(d: [.moveTo(0, 0), .lineTo(1, 1)], content: "hi", startOffset: 0,
+                           fontFamily: "Arial", fontSize: 12, fontWeight: "normal",
+                           fontStyle: "normal", textDecoration: "none")),
+        .live(.reference(ReferenceElem(target: ElementRef("m1")))),
+    ]
+}
+
+/// Every LIVE kind, which all share `tag_arity["live"]`.
+private func wireLiveElements() -> [Element] {
+    [
+        .live(.compoundShape(CompoundShape(operation: .union, operands: []))),
+        .live(.reference(ReferenceElem(target: ElementRef("m1")))),
+        .live(.recorded(RecordedElem(ops: [], inputs: []))),
+        .live(.generated(GeneratedElem(conceptId: "spiral", params: [:]))),
+    ]
+}
+
+/// The document a named wire case packs. Mirrors `wire_case_document` in Rust
+/// -- the two constructions ARE the thing being compared, so they must stay
+/// identical shape for identical shape.
+private func wireCaseDocument(_ name: String) -> Document {
+    func doc(_ kids: [Element]) -> Document {
+        Document(layers: [Layer(children: kids)], selectedLayer: 0)
+    }
+    func isText(_ e: Element) -> Bool {
+        if case .text = e { return true }
+        if case .textPath = e { return true }
+        return false
+    }
+    func isLiveOrLayer(_ e: Element) -> Bool {
+        if case .live = e { return true }
+        if case .layer = e { return true }
+        return false
+    }
+    switch name {
+    case "shapes_default":
+        return doc(wireTagElements().filter { !isText($0) && !isLiveOrLayer($0) })
+    case "text_default":
+        return doc(wireTagElements().filter { isText($0) })
+    case "live_default":
+        return doc(wireLiveElements())
+    case "saturated_extension":
+        return doc([.path(saturatedPath())])
+    default:
+        fatalError("binaryWire: unknown case '\(name)'")
+    }
+}
+
+private func wireHex(_ data: Data) -> String {
+    data.map { String(format: "%02x", $0) }.joined()
+}
+
+private func wireUnhex(_ s: String) -> Data {
+    var out = Data()
+    var i = s.startIndex
+    while i < s.endIndex {
+        let j = s.index(i, offsetBy: 2)
+        out.append(UInt8(s[i..<j], radix: 16)!)
+        i = j
+    }
+    return out
+}
+
+@Test func binaryWire() throws {
+    let raw = readFixture("expected/binary_wire.json")
+    let fx = try JSONSerialization.jsonObject(with: raw.data(using: .utf8)!) as! [String: Any]
+
+    // (1) ARITY. Every tag's packed slot count is declared as data, so a slot
+    // added to one port and not the other cannot hide behind a compensating
+    // change elsewhere in the array.
+    let arity = fx["tag_arity"] as! [String: Int]
+    var seen = Set<String>()
+    for elem in wireTagElements() + wireLiveElements() {
+        let label = elementTagLabel(elem)
+        guard let want = arity[label] else {
+            Issue.record("binaryWire: tag_arity declares no '\(label)'")
+            continue
+        }
+        let got = packedElementSlotCount(elem)
+        #expect(got == want,
+                "binaryWire: TAG '\(label)' packs \(got) slots, the fixture declares \(want)")
+        seen.insert(label)
+    }
+    #expect(seen.count == arity.count,
+            "binaryWire: the gate reaches \(seen.count) tags, the fixture declares \(arity.count) -- every tag must be watched")
+
+    // (2) BYTES. One shared golden per case, uncompressed so the pinned string
+    // is the msgpack itself rather than a deflate stream.
+    for case_ in fx["cases"] as! [[String: Any]] {
+        let name = case_["name"] as! String
+        let portHex = (case_["port_hex"] as? [String: String]) ?? [:]
+        let expected = portHex["swift"] ?? (case_["hex"] as! String)
+        let got = wireHex(documentToBinary(wireCaseDocument(name), compress: false))
+        let pinNote = portHex["swift"] != nil
+            ? " (a port_hex entry pins this case as a live divergence; if it closed, delete the entry)"
+            : ""
+        #expect(got == expected,
+                "binaryWire: case '\(name)' bytes changed.\(pinNote) If the codec changed on PURPOSE, regenerate from the Rust helper and update the SHARED fixture.")
+        // The bytes must also decode -- a pinned string that no longer parses
+        // would be a green gate over a broken codec.
+        let decoded = try binaryToDocument(wireUnhex(expected))
+        #expect(!decoded.layers.isEmpty, "binaryWire: case '\(name)' decoded to no layers")
+    }
+}
+
 /// A `jas:`-prefixed attribute obliges the root `<svg>` to declare the
 /// namespace: Foundation's strict XML parser rejects an undeclared prefix, and
 /// it rejects the WHOLE DOCUMENT, not the attribute. `jas:tool-origin` is the
