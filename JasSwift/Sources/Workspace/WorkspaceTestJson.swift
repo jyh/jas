@@ -272,56 +272,47 @@ package func stateDefaultsJson() -> String {
     return o.build()
 }
 
-// MARK: - Shortcut structure (must match workspace/shortcuts.yaml)
+// MARK: - Shortcut structure (READ FROM workspace/shortcuts.yaml, via the bundle)
 
+/// Canonical JSON for all keyboard shortcuts, in `shortcuts.yaml` order.
+///
+/// SHAPE **AND** BINDINGS. This used to be a hand-transcribed literal list —
+/// a fixture that pinned only the SERIALIZATION SHAPE while claiming in its own
+/// header to "match workspace/shortcuts.yaml". It had drifted: it said
+/// `Ctrl+0 -> fit_in_window` and knew nothing of `Ctrl+Alt+0` or `Ctrl+1`,
+/// while `workspace/shortcuts.yaml` says `Ctrl+0 -> fit_active_artboard`,
+/// `Ctrl+Alt+0 -> fit_all_artboards`, `Ctrl+1 -> zoom_to_actual_size`. A reader
+/// auditing "what does Ctrl+0 do" found two answers, one of them under
+/// `test_fixtures/expected/`, and NO golden pinned the real bindings at all.
+/// Reading the bundle makes the golden a binding golden: the spec and the
+/// fixture can no longer drift apart, because there is only one list.
+/// Mirrors Rust `workspace::test_json::shortcut_structure_json`.
 package func shortcutStructureJson() -> String {
-    let shortcuts: [(String, String, (String, String)?)] = [
-        ("Ctrl+N", "new_document", nil),
-        ("Ctrl+O", "open_file", nil),
-        ("Ctrl+S", "save", nil),
-        ("Ctrl+Shift+S", "save_as", nil),
-        ("Ctrl+Q", "quit", nil),
-        ("Ctrl+Z", "undo", nil),
-        ("Ctrl+Shift+Z", "redo", nil),
-        ("Ctrl+X", "cut", nil),
-        ("Ctrl+C", "copy", nil),
-        ("Ctrl+V", "paste", nil),
-        ("Ctrl+Shift+V", "paste_in_place", nil),
-        ("Ctrl+A", "select_all", nil),
-        ("Delete", "delete_selection", nil),
-        ("Backspace", "delete_selection", nil),
-        ("Ctrl+G", "group", nil),
-        ("Ctrl+Shift+G", "ungroup", nil),
-        ("Ctrl+2", "lock", nil),
-        ("Ctrl+Alt+2", "unlock_all", nil),
-        ("Ctrl+3", "hide_selection", nil),
-        ("Ctrl+Alt+3", "show_all", nil),
-        ("Ctrl+=", "zoom_in", nil),
-        ("Ctrl+-", "zoom_out", nil),
-        ("Ctrl+0", "fit_in_window", nil),
-        ("V", "select_tool", ("tool", "selection")),
-        ("A", "select_tool", ("tool", "partial_selection")),
-        ("P", "select_tool", ("tool", "pen")),
-        ("=", "select_tool", ("tool", "add_anchor")),
-        ("-", "select_tool", ("tool", "delete_anchor")),
-        ("T", "select_tool", ("tool", "type")),
-        ("\\", "select_tool", ("tool", "line")),
-        ("M", "select_tool", ("tool", "rect")),
-        ("N", "select_tool", ("tool", "pencil")),
-        ("Shift+E", "select_tool", ("tool", "path_eraser")),
-        ("Q", "select_tool", ("tool", "lasso")),
-        ("D", "reset_fill_stroke", nil),
-        ("X", "toggle_fill_on_top", nil),
-        ("Shift+X", "swap_fill_stroke", nil),
-    ]
+    let shortcuts = (WorkspaceData.load()?.data["shortcuts"] as? [Any]) ?? []
 
-    let shortcutJsons = shortcuts.map { (key, action, params) -> String in
+    let shortcutJsons = shortcuts.map { entry -> String in
+        let sc = entry as? [String: Any] ?? [:]
         let o = JsonObj()
-        o.str("action", action)
-        o.str("key", key)
-        if let (pk, pv) = params {
+        o.str("action", sc["action"] as? String ?? "")
+        o.str("key", sc["key"] as? String ?? "")
+        if let params = sc["params"] as? [String: Any] {
             let po = JsonObj()
-            po.str(pk, pv)
+            for (pk, pv) in params {
+                if let s = pv as? String {
+                    po.str(pk, s)
+                } else if let n = pv as? NSNumber {
+                    // JSONSerialization hands booleans back as NSNumber too;
+                    // discriminate on the CFNumber type so `true` does not
+                    // serialize as `1.0`.
+                    if CFGetTypeID(n) == CFBooleanGetTypeID() {
+                        po.bool(pk, n.boolValue)
+                    } else {
+                        po.num(pk, n.doubleValue)
+                    }
+                } else {
+                    po.null(pk)
+                }
+            }
             o.raw("params", po.build())
         } else {
             o.null("params")
