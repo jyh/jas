@@ -309,6 +309,55 @@ public struct Document: Equatable {
         return doc
     }
 
+    /// Layers LOCK-button behaviour — the twin of
+    /// ``cyclingElementVisibility(at:)``, which the eye button has had
+    /// factored out (and testable) all along while the lock button's
+    /// identical document work stayed inlined in a SwiftUI closure. Pure.
+    /// Mirrors Rust `renderer.rs` `toggle_element_lock_at`.
+    ///
+    /// Two things happen, in this order:
+    ///   1. the element's own `locked` flips;
+    ///   2. locking a CONTAINER materializes `locked = true` onto its direct
+    ///      children, and unlocking restores whatever `savedToRestore`
+    ///      holds (the caller owns that map).
+    ///
+    /// Step 2 is the materialization design `workspace/panels/layers.yaml`
+    /// still specifies. If it is repealed in favour of inherited lock, this
+    /// method loses `savedToRestore` and its second half; step 1 survives.
+    ///
+    /// This is a lift-and-shift of the SwiftUI closure body, unchanged. It
+    /// is deliberately NOT yet what Rust does — see D5a.
+    public func togglingElementLock(
+        at path: ElementPath, savedToRestore: [Bool]? = nil
+    ) -> Document {
+        guard let e = tryGetElement(path) else { return self }
+        let wasUnlocked = !e.isLocked
+        var doc = replaceElement(path, with: e.withLocked(wasUnlocked))
+        // Lock all direct children when a container is locked.
+        if wasUnlocked, let kids = Document.containerChildren(e) {
+            for (i, c) in kids.enumerated() {
+                doc = doc.replaceElement(path + [i], with: c.withLocked(true))
+            }
+        }
+        // Restore saved child lock states on unlock.
+        if let saved = savedToRestore,
+           let kids = Document.containerChildren(doc.getElement(path)) {
+            for (i, c) in kids.enumerated() where i < saved.count {
+                doc = doc.replaceElement(path + [i], with: c.withLocked(saved[i]))
+            }
+        }
+        return doc
+    }
+
+    /// Direct children of a Group or Layer; nil for anything else.
+    private static func containerChildren(_ elem: Element) -> [Element]? {
+        switch elem {
+        case .group(let g): return g.children
+        case .layer(let l): return l.children
+        default: return nil
+        }
+    }
+
     /// Return the ElementSelection for the given path, or nil.
     public func getElementSelection(_ path: ElementPath) -> ElementSelection? {
         selection.first { $0.path == path }
