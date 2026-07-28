@@ -734,3 +734,41 @@ Three coverage-gap rows updated in `scripts/corpus_manifest.json`:
 `unblock` predicted this fix's shape exactly), and
 `identity-law-duplication-verbs-id-less` (its paste half is now watched, though
 still unfixed).
+
+---
+
+## 9. RULINGS TAKEN AFTER RATIFICATION (the defects this phase surfaced)
+
+### D6 — Swift's `Selection` becomes an ordered array. RULED 2026-07-28.
+> JYH: *"agreed to use vec for swift, with a thought that once we have AI
+> assistance, we may be large selections, but let's deal with it at that point."*
+
+**QUEUED, not yet implemented.**
+
+Swift's `Selection` is a `Set` (`Document.swift:175`); Rust's is a `Vec`
+(`document.rs:207`). Measured: copy emits in per-process hash order — 5 elements,
+10 processes, **10 different orders, document order never once**. This is on the
+SHARED SVG path, not just the internal clipboard.
+
+**Ruled on determinism, not performance.** The z-order of a copied fragment is
+part of the artwork: paste the same selection twice and the stacking can differ.
+Performance does not decide it — membership queries dominate (18 Swift sites, 38
+Rust), but the worst nested scan (`renderer.rs:9488`) is in a **Cmd-click
+handler**, bounded by user interaction rather than frame rate, and Rust already
+builds a local `HashSet` beside it where the cost showed. For realistic selection
+sizes a linear scan over a small array likely beats hashing anyway.
+
+**Deliberately NOT an ordered-set type.** An array-plus-index would keep dedup and
+O(1) lookups, but Swift has no stdlib `OrderedSet`, so it means a dependency or
+~40 lines of our own — and it would diverge from Rust's representation. Identical
+representation in both ports is worth more than the convenience.
+
+**THE MIGRATION HAZARD, named up front:** `Set` gives free deduplication. Rust
+pays for order with manual guards (`if !doc.selection.iter().any(...)` before
+every push). Every Swift insertion site needs the same guard or duplicate
+selections appear. That is the **Swift copy-site omission class**, which has bitten
+this project three times — so the sites must be enumerated BY THE COMPILER, not by
+a human reading. Removing a defaulted initializer parameter is the ratified trick.
+
+**Deferred by JYH, consciously:** large selections under AI assistance may change
+the performance calculus. Revisit then, with data — not before.
