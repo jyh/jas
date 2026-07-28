@@ -129,6 +129,58 @@ private struct PendingTxn {
     var genAtBegin: UInt64
 }
 
+/// THE PASTE RUN — `workspace/actions.yaml` paste, "Repeated pastes stack with
+/// cumulative offsets". A pair: WHAT the run is counting, and HOW MANY offset
+/// pastes of it have landed. The Nth consecutive paste of one payload lands at
+/// `N * baseStep` from the source.
+///
+/// `payload` is the RAW CLIPBOARD STRING — the text a port read off the system
+/// pasteboard, or the `svg` fragment markup the corpus supplies. Keying the run
+/// to the payload rather than to a copy hook is what makes the reset rule hold
+/// without the paste path knowing anything about the pasteboard: a paste whose
+/// payload differs starts a new run, so a copy of DIFFERENT artwork resets the
+/// offset — INCLUDING AN EXTERNAL COPY from another application, which no in-app
+/// hook could see. A copy of the SAME artwork does not reset, because the slot
+/// at `+baseStep` already holds the previous paste and landing a second copy
+/// exactly on top of one is the single outcome the offset exists to prevent.
+///
+/// TWO CONSEQUENCES, both banked rather than ruled: markup differing only in
+/// whitespace is a different payload and restarts the run; and the run is a
+/// SINGLE SLOT, so copying B between two pastes of A loses A's count and the
+/// next A lands back on the first. Both are pinned by probes. Mirrors Rust
+/// `PasteRun`.
+public struct PasteRun: Equatable {
+    /// The clipboard payload this run counts, exactly as the paste path
+    /// received it.
+    public let payload: String
+    /// How many OFFSET pastes of `payload` have landed. Never 0 once set: a run
+    /// is created BY its first paste.
+    public let count: UInt32
+}
+
+/// One undo/redo checkpoint: the document, its paired id index, and the paste
+/// run as it stood at that moment.
+///
+/// A NAMED STRUCT rather than the tuple this used to be, deliberately. Adding
+/// `pasteRun` to a `(Document, IdIndex)` tuple would have compiled at every site
+/// that destructured two elements and silently dropped the third; naming the
+/// fields makes the COMPILER enumerate every site in this file. Same discipline
+/// as the copy-site omission class (EDIT_SEMANTICS_FREEZE.md 3.1), which has
+/// bitten this project five times. Mirrors Rust `Checkpoint`.
+///
+/// The paste run rides HERE, and nowhere else, because that is what makes
+/// undo-then-paste equal redo: `beginTxn` captures the PRE-edit run, so undoing
+/// a paste restores the count that paste incremented and the next paste lands
+/// exactly where the undone one did. A run that outlived the artwork it counts
+/// would leave a HOLE — a slot the artist can see is empty and cannot fill by
+/// pasting — which is the same class of defect as a save-state table whose
+/// lifetime does not match what it describes.
+private struct Checkpoint {
+    let doc: Document
+    let index: IdIndex
+    let pasteRun: PasteRun?
+}
+
 /// Observable model that holds the current document.
 ///
 /// Views register callbacks via onDocumentChanged to be notified
@@ -444,11 +496,75 @@ public class Model: ObservableObject {
     private var listeners: [(Document) -> Void] = []
     /// Undo/redo stacks pair each Document with its id->element index so
     /// undo/redo restore the index in O(1) without a rebuild (TreeDictionary
-    /// copy is O(1) structure sharing). Mirrors Rust's `Vec<(Document,
-    /// IdIndex)>`.
-    private var undoStack: [(Document, IdIndex)] = []
-    private var redoStack: [(Document, IdIndex)] = []
+    /// copy is O(1) structure sharing). Mirrors Rust's `Vec<Checkpoint>`.
+    private var undoStack: [Checkpoint] = []
+    private var redoStack: [Checkpoint] = []
     private let maxUndo = 100
+
+    /// THE PASTE RUN (`workspace/actions.yaml` paste). `nil` until the first
+    /// paste of this session.
+    ///
+    /// It lives HERE — on the Model — and not in `Document`, and not in app
+    /// state. `Model` is per-document in both active ports, so the run is
+    /// per-document for free: pasting the same clipboard into a second open
+    /// document starts at the base step there rather than continuing another
+    /// document's run. It is never serialized by any codec, so it does not
+    /// survive a save — a reopened file has no live clipboard relationship, and
+    /// a paste offset remembered from a previous session would be a lie. And it
+    /// is NOT a `Document` field because `Document` is a value type that many
+    /// sites in Sources rebuild field by field: a new field there is dropped
+    /// silently at every one of them, which is exactly the copy-site omission
+    /// class (EDIT_SEMANTICS_FREEZE.md 3.1). `Model` is a class with one
+    /// instance per document and no copy sites at all.
+    ///
+    /// Undoability is bought EXPLICITLY instead, by carrying it on
+    /// ``Checkpoint`` — the half of "document state" worth having, without the
+    /// half (persistence) that would be wrong.
+    private var pasteRunState: PasteRun?
+
+    /// Capture the current (document, index, paste run) as one ``Checkpoint``.
+    /// THE ONLY place a checkpoint is built, so a future field that must ride
+    /// undo is added in exactly one spot — and, being a named struct, cannot be
+    /// dropped by a destructuring caller. Mirrors Rust `Model::checkpoint`.
+    private func checkpoint() -> Checkpoint {
+        Checkpoint(doc: document, index: idIndex, pasteRun: pasteRunState)
+    }
+
+    /// The effective offset for a paste of `payload` whose BASE STEP is `base`
+    /// (`workspace/actions.yaml` paste). The Nth consecutive paste of one
+    /// payload travels `N * base`.
+    ///
+    /// `base == 0.0` is `paste_in_place`, which is ruled to apply no offset and
+    /// to stay OUTSIDE the run: its copy lands on the source, which is not a run
+    /// slot, so it neither advances the run nor restarts it.
+    ///
+    /// Paired with ``advancePasteRun(_:base:)``, which must be called with the
+    /// same `payload` and `base` after the write lands. The two together are the
+    /// ONLY places the run moves, in either port. Mirrors Rust
+    /// `Model::paste_run_offset`.
+    public func pasteRunOffset(for payload: String, base: Double) -> Double {
+        if base == 0.0 { return 0.0 }
+        return base * Double(pasteRunCount(for: payload) + 1)
+    }
+
+    /// How many consecutive offset pastes of `payload` have already landed — 0
+    /// when the run is empty or is counting something else, which is the reset
+    /// rule in one expression: the run is keyed to WHAT is pasted. Mirrors Rust
+    /// `Model::paste_run_count_for`.
+    public func pasteRunCount(for payload: String) -> UInt32 {
+        guard let r = pasteRunState, r.payload == payload else { return 0 }
+        return r.count
+    }
+
+    /// Record that a paste of `payload` landed. Called ONLY after a paste that
+    /// actually changed the document — a paste that lands nothing must not
+    /// advance the run — and only for a paste that applied an offset, since
+    /// `paste_in_place` (`base == 0.0`) does not participate. Mirrors Rust
+    /// `Model::advance_paste_run`.
+    public func advancePasteRun(_ payload: String, base: Double) {
+        if base == 0.0 { return }
+        pasteRunState = PasteRun(payload: payload, count: pasteRunCount(for: payload) + 1)
+    }
 
     // MARK: - Transaction journal (OP_LOG.md Increment 2, full journal)
     //
@@ -591,8 +707,8 @@ public class Model: ObservableObject {
     public func snapshot() {
         // Pair the index with the document on the stack so undo/redo restore
         // it in O(1) without a rebuild (TreeDictionary copy is O(1) structure
-        // sharing). Mirrors Rust `snapshot` pushing `(document, id_index)`.
-        undoStack.append((document, idIndex))
+        // sharing). Mirrors Rust `snapshot` pushing its `checkpoint()`.
+        undoStack.append(checkpoint())
         if undoStack.count > maxUndo {
             undoStack.removeFirst()
         }
@@ -649,13 +765,18 @@ public class Model: ObservableObject {
         // undo). Mirrors Rust `undo` clearing in_txn / pending_txn.
         inTxn = false
         pendingTxn = nil
-        guard let (prevDoc, prevIndex) = undoStack.popLast() else { return }
-        redoStack.append((document, idIndex))
+        guard let prev = undoStack.popLast() else { return }
+        redoStack.append(checkpoint())
+        // The paste run rides the checkpoint, so undoing a paste restores the
+        // count that paste incremented: the next paste lands exactly where the
+        // undone one did (undo-then-paste == redo), instead of skipping a slot
+        // and leaving a hole the artist cannot fill. Mirrors Rust `undo`.
+        pasteRunState = prev.pasteRun
         // Hand the snapshot-carried index to the setter so its didSet adopts
         // it in O(1) instead of rebuilding (Option B O(1) carry). The
         // refresh-path assert below confirms it still equals a fresh rebuild.
-        restoringIndex = prevIndex
-        document = prevDoc
+        restoringIndex = prev.index
+        document = prev.doc
         assert(idIndex == rebuildIdIndex(document),
                "id index diverged from rebuild after undo")
         // Move the journal cursor back one transaction (OP_LOG.md §5). Only
@@ -669,10 +790,13 @@ public class Model: ObservableObject {
     public func redo() {
         inTxn = false
         pendingTxn = nil
-        guard let (nextDoc, nextIndex) = redoStack.popLast() else { return }
-        undoStack.append((document, idIndex))
-        restoringIndex = nextIndex
-        document = nextDoc
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append(checkpoint())
+        // Mirror of undo: redo restores the run as it stood after the redone
+        // transaction, so a further paste continues rather than re-landing.
+        pasteRunState = next.pasteRun
+        restoringIndex = next.index
+        document = next.doc
         assert(idIndex == rebuildIdIndex(document),
                "id index diverged from rebuild after redo")
         // Advance the journal cursor one transaction (OP_LOG.md §5). On a
@@ -713,7 +837,7 @@ public class Model: ObservableObject {
     /// no-op), so many edits can ride one checkpoint. Mirrors Rust's `begin_txn`.
     public func beginTxn() {
         if inTxn { return }
-        undoStack.append((document, idIndex))
+        undoStack.append(checkpoint())
         if undoStack.count > maxUndo {
             undoStack.removeFirst()
         }
@@ -760,9 +884,9 @@ public class Model: ObservableObject {
         // canonically-invisible field edit keeps it. Mirrors Rust
         // `Model::commit_txn`.
         let genAtBegin = pending?.genAtBegin ?? generation
-        let checkpoint = undoStack.last?.0
+        let checkpointDoc = undoStack.last?.doc
         let noNetChange = generation == genAtBegin
-            || (checkpoint.map {
+            || (checkpointDoc.map {
                 documentToTestJson($0) == documentToTestJson(document)
                     && $0.layers == document.layers
                     && $0.symbols == document.symbols
@@ -981,10 +1105,10 @@ public class Model: ObservableObject {
         // undo step (the no-op rule, extended across the coalesced run). Mirrors
         // the no-op rule's checkpoint byte-compare.
         if mergedDx == 0.0 && mergedDy == 0.0 {
-            let roundTripped = undoStack.last.map {
-                documentToTestJson($0.0) == documentToTestJson(document)
-                    && $0.0.layers == document.layers
-                    && $0.0.symbols == document.symbols
+            let roundTripped = undoStack.last.map { (c: Checkpoint) -> Bool in
+                documentToTestJson(c.doc) == documentToTestJson(document)
+                    && c.doc.layers == document.layers
+                    && c.doc.symbols == document.symbols
             } ?? false
             if roundTripped {
                 opJournal.removeLast()
@@ -1053,8 +1177,8 @@ public class Model: ObservableObject {
         if n < 2 {
             return false
         }
-        let copyOrigin = undoStack[n - 1].0
-        let moveOrigin = undoStack[n - 2].0
+        let copyOrigin = undoStack[n - 1].doc
+        let moveOrigin = undoStack[n - 2].doc
         let roundTripped = documentToTestJson(copyOrigin) == documentToTestJson(moveOrigin)
             && copyOrigin.layers == moveOrigin.layers
             && copyOrigin.symbols == moveOrigin.symbols
@@ -1078,9 +1202,12 @@ public class Model: ObservableObject {
         if !inTxn { return }
         inTxn = false
         pendingTxn = nil
-        if let (doc, index) = undoStack.popLast() {
-            restoringIndex = index
-            document = doc
+        if let chk = undoStack.popLast() {
+            restoringIndex = chk.index
+            document = chk.doc
+            // An abort rolls the paste run back with the document: the aborted
+            // transaction's paste, if any, never happened.
+            pasteRunState = chk.pasteRun
         }
     }
 

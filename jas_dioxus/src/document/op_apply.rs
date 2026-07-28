@@ -988,21 +988,93 @@ pub fn paste_fragment_into(
     Some(new_doc)
 }
 
-/// `paste_fragment_into` against a `Model`, self-bracketing through
-/// `edit_document`. Returns `false` (a no-op that journals nothing) when
-/// nothing was pasted.
-pub fn apply_paste(
+// ── THE PASTE RUN — "Repeated pastes stack with cumulative offsets" ─────────
+//
+// `workspace/actions.yaml` §paste has required that sentence since it was
+// written, and NEITHER active port implemented it: the second paste landed
+// exactly on the first. Both ports were wrong together, so the written
+// requirement governs (JYH, 2026-07-28: "follow the spec").
+//
+// `paste_run_apply` below is THE ONLY PLACE the run moves, in this port. Both
+// model-level paste entry points route through it, so the corpus-only `svg`
+// param and the production `text` param cannot drift apart — a run implemented
+// in one of them would have gone green in half the corpus while production kept
+// pasting on one spot.
+
+/// Apply a paste under the run, and advance the run if it landed.
+///
+/// `payload` is the RAW CLIPBOARD STRING the run is keyed to — see
+/// [`crate::document::model::PasteRun`] for why that, and not a copy hook, is
+/// what makes the reset rule hold. `base` is the BASE STEP (24pt), not the
+/// distance travelled: the Nth consecutive paste of one payload lands at
+/// `N * base` from the source, so three pastes sit at 24, 48, 72 and never on
+/// top of each other. `body` receives the EFFECTIVE offset and answers with the
+/// pasted document, or `None` when there was nothing to paste.
+///
+/// Four decisions, each stated because the spec sentence says only "repeated
+/// pastes stack" and something had to be chosen (the artist-facing prose is in
+/// `actions.yaml` §paste; the corpus family is
+/// `test_fixtures/operations/paste_stacking.json`):
+///
+/// 1. **RESET IS KEYED TO WHAT IS PASTED.** A payload that differs from the one
+///    the run is counting starts a new run. A copy of DIFFERENT artwork
+///    therefore resets it — including an EXTERNAL copy from another
+///    application, which no in-app copy hook could see. A copy of the SAME
+///    artwork does not, because the slot at `+base` already holds the previous
+///    paste. A selection change does NOT reset: paste itself SETS the
+///    selection, so a selection-keyed reset would fire after every paste and
+///    the requirement would be unimplementable — it could never reach step two.
+/// 2. **`paste_in_place` DOES NOT PARTICIPATE.** It passes `base == 0.0` and is
+///    ruled to apply no offset; its copy lands on the source, which is not a run
+///    slot. So it neither advances the run nor restarts it: 24, 0, 48.
+/// 3. **"Paste, Preserving Layers" SHARES THE ONE RUN.** R2 and R3 differ in
+///    WHICH LAYER artwork lands in, never in the offset — `actions.yaml` says
+///    preserving-layers offsets "exactly as plain Paste does". One `base`, one
+///    run, nothing to diverge.
+/// 4. **A PASTE THAT LANDS NOTHING DOES NOT ADVANCE THE RUN.** The early return
+///    below is before any run write, so an empty clipboard leaves it where it
+///    was.
+///
+/// UNDO restores the run (see [`crate::document::model::Model::undo`]): the
+/// `begin_txn` inside `edit_document` captures the PRE-paste run and the advance
+/// below happens after the write, so undoing a paste puts the next one exactly
+/// where the undone one was rather than skipping a slot.
+fn paste_run_apply(
     model: &mut Model,
-    fragment: &[crate::geometry::element::Element],
-    offset: f64,
-    preserve_layers: bool,
+    payload: &str,
+    base: f64,
+    body: impl FnOnce(&crate::document::document::Document, f64)
+        -> Option<crate::document::document::Document>,
 ) -> bool {
-    let Some(new_doc) = paste_fragment_into(model.document(), fragment, offset, preserve_layers)
-    else {
+    let effective = model.paste_run_offset(payload, base);
+    let Some(new_doc) = body(model.document(), effective) else {
         return false;
     };
     model.edit_document(new_doc);
+    model.advance_paste_run(payload, base);
     true
+}
+
+/// `paste_fragment_into` against a `Model`, self-bracketing through
+/// `edit_document` and participating in the paste run. Returns `false` (a no-op
+/// that journals nothing) when nothing was pasted.
+///
+/// Takes the fragment MARKUP rather than a parsed fragment, for two reasons: the
+/// markup is what the run is keyed to (see [`paste_run_apply`]), and moving the
+/// parse in here means the two ports' call sites are identical where they used
+/// to differ in shape (`Vec<Element>` vs `[Element]` mapping). Reached only from
+/// the `svg` op param, which presupposes the SVG branch was already chosen; the
+/// production payload dispatch is [`apply_paste_clipboard_text`].
+pub fn apply_paste(
+    model: &mut Model,
+    svg: &str,
+    offset: f64,
+    preserve_layers: bool,
+) -> bool {
+    paste_run_apply(model, svg, offset, |doc, effective| {
+        let fragment = crate::geometry::svg::svg_to_document(svg).layers;
+        paste_fragment_into(doc, &fragment, effective, preserve_layers)
+    })
 }
 
 // ── WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES ────────────────────────
@@ -1123,21 +1195,30 @@ pub fn paste_clipboard_text_into(
 }
 
 /// `paste_clipboard_text_into` against a `Model`, self-bracketing through
-/// `edit_document`. Returns `false` (a no-op that journals nothing) when there
-/// was nothing on the clipboard to paste. Mirrors `apply_paste`.
+/// `edit_document` and participating in the paste run. Returns `false` (a no-op
+/// that journals nothing) when there was nothing on the clipboard to paste.
+/// Mirrors `apply_paste`.
+///
+/// **THE PRODUCTION ENTRY POINT.** `workspace::clipboard::clipboard_read_and_paste`
+/// and Swift's `EditClipboard.pasteClipboard` both land here, so this is where
+/// the paste run has to reach the artist. The run is keyed to the RAW PAYLOAD —
+/// the same string the port read off the system clipboard — which is exactly the
+/// identity "the same clipboard content" the spec sentence is about.
+///
+/// An UNREADABLE clipboard (`None`) returns before the run is consulted at all:
+/// there is no payload to key on, and nothing to paste.
 pub fn apply_paste_clipboard_text(
     model: &mut Model,
     text: Option<&str>,
     offset: f64,
     preserve_layers: bool,
 ) -> bool {
-    let Some(new_doc) =
-        paste_clipboard_text_into(model.document(), text, offset, preserve_layers)
-    else {
+    let Some(payload) = text else {
         return false;
     };
-    model.edit_document(new_doc);
-    true
+    paste_run_apply(model, payload, offset, |doc, effective| {
+        paste_clipboard_text_into(doc, Some(payload), effective, preserve_layers)
+    })
 }
 
 /// Unpack the Group at `path` (OP_LOG.md §9 Phase P5): extract its children,
@@ -2060,11 +2141,17 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         // to 0.0, which is `paste_in_place`.
         //
         // This arm and `workspace::clipboard::clipboard_read_and_paste` call ONE
-        // body (`apply_paste`), which is the point: LAYER_STRUCTURE.md §5 records
-        // that no corpus vector could reach ANY paste behaviour, so R2/R3 would
-        // have landed unwatched. A verb that re-implemented the paste instead of
-        // routing through the production helper would be a decoy that never goes
-        // red.
+        // body (`apply_paste_clipboard_text`), which is the point:
+        // LAYER_STRUCTURE.md §5 records that no corpus vector could reach ANY
+        // paste behaviour, so R2/R3 would have landed unwatched. A verb that
+        // re-implemented the paste instead of routing through the production
+        // helper would be a decoy that never goes red.
+        //
+        // BOTH params also route through `paste_run_apply`, so the cumulative
+        // offset run (`actions.yaml` §paste) is the same run whichever one a
+        // vector uses. `offset` is therefore the BASE STEP, not the distance
+        // travelled: a vector pasting one payload three times at offset 24 lands
+        // at 24, 48, 72.
         "paste" => {
             let offset = num_field(op, "offset");
             let preserve = op
@@ -2091,8 +2178,7 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
                 let Some(svg) = str_field(op, "svg") else {
                     return Err(req_err(op, "svg"));
                 };
-                let fragment = crate::geometry::svg::svg_to_document(svg).layers;
-                apply_paste(model, &fragment, offset, preserve)
+                apply_paste(model, svg, offset, preserve)
             };
             if !changed {
                 // Benign no-op by the S3 taxonomy: an empty / unreadable

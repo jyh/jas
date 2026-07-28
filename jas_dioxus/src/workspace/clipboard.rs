@@ -32,7 +32,7 @@ use wasm_bindgen::JsCast;
 use super::app_state::{AppState, TabState};
 use crate::document::document::Document;
 use crate::document::model::Model;
-use crate::document::op_apply::paste_clipboard_text_into;
+use crate::document::op_apply::apply_paste_clipboard_text;
 use crate::geometry::element::{CommonProps, LayerElem, Element as GeoElement};
 use crate::geometry::svg::{document_to_svg, svg_to_document};
 use crate::geometry::tspan::Tspan;
@@ -438,23 +438,30 @@ pub(crate) fn clipboard_read_and_paste(
 
         let Some(tab) = st.tab_mut() else { return; };
 
-        // THE WHOLE DECISION, in one call. `paste_clipboard_text_into` takes the
-        // clipboard payload EXACTLY as read — `None` for an unreadable
-        // clipboard, `Some("")` for an empty one — and answers with the pasted
-        // document or nothing.
-        let Some(new_doc) = paste_clipboard_text_into(
-            tab.model.document(),
+        // THE WHOLE DECISION, in one call. `apply_paste_clipboard_text` takes
+        // the clipboard payload EXACTLY as read — `None` for an unreadable
+        // clipboard, `Some("")` for an empty one — and either edits the document
+        // or answers `false`.
+        //
+        // `apply_paste_clipboard_text`, NOT the pure `paste_clipboard_text_into`
+        // it wraps: the CUMULATIVE-OFFSET RUN (`actions.yaml` §paste, "Repeated
+        // pastes stack with cumulative offsets") lives in the Model-level
+        // wrapper, so calling the pure body here would leave the corpus green
+        // while production pasted every copy on the same spot. That is the exact
+        // decoy the `paste` op verb was built to rule out, one layer up.
+        //
+        // One paste = one undo step (OP_LOG.md Increment 1): the wrapper writes
+        // through `edit_document`, which self-brackets — begin captures the
+        // pre-paste document AND the pre-paste run, commit clears redo — exactly
+        // as the explicit bracket here used to.
+        if !apply_paste_clipboard_text(
+            &mut tab.model,
             clipboard_text.as_deref(),
             offset,
             preserve_layers,
-        ) else {
+        ) {
             return;
-        };
-        // One paste = one undo step (OP_LOG.md Increment 1). begin_txn captures
-        // the pre-paste document; commit clears redo.
-        tab.model.begin_txn();
-        tab.model.set_document(new_doc);
-        tab.model.commit_txn();
+        }
         drop(st);
         revision += 1;
     });

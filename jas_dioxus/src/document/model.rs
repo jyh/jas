@@ -134,6 +134,61 @@ pub struct Version {
     pub id_index: IdIndex,
 }
 
+/// THE PASTE RUN — `workspace/actions.yaml` §paste, "Repeated pastes stack with
+/// cumulative offsets". A pair: WHAT the run is counting, and HOW MANY offset
+/// pastes of it have landed. The Nth consecutive paste of one payload lands at
+/// `N * base_step` from the source.
+///
+/// `payload` is the RAW CLIPBOARD STRING — the text a port read off the system
+/// clipboard, or the `svg` fragment markup the corpus supplies. Keying the run
+/// to the payload rather than to a copy hook is what makes the reset rule hold
+/// without the paste path knowing anything about the clipboard: a paste whose
+/// payload differs starts a new run, so a copy of DIFFERENT artwork resets the
+/// offset — INCLUDING AN EXTERNAL COPY from another application, which no in-app
+/// hook could see. A copy of the SAME artwork does not reset, because the slot
+/// at `+base_step` already holds the previous paste and landing a second copy
+/// exactly on top of one is the single outcome the offset exists to prevent.
+///
+/// TWO CONSEQUENCES, both banked rather than ruled: markup differing only in
+/// whitespace is a different payload and restarts the run; and the run is a
+/// SINGLE SLOT, so copying B between two pastes of A loses A's count and the
+/// next A lands back on the first. A fragment-keyed run would have the same
+/// second limitation. Both are pinned by probes.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PasteRun {
+    /// The clipboard payload this run counts, exactly as the paste path
+    /// received it.
+    pub payload: String,
+    /// How many OFFSET pastes of `payload` have landed. Never 0 once set: a run
+    /// is created BY its first paste.
+    pub count: u32,
+}
+
+/// One undo/redo checkpoint: the document, its paired id index, and the paste
+/// run as it stood at that moment.
+///
+/// A NAMED STRUCT rather than the tuple this used to be, deliberately. Adding
+/// `paste_run` to a `(Document, IdIndex)` tuple would have compiled at every
+/// site that destructured two elements and silently dropped the third; naming
+/// the fields makes the COMPILER enumerate every site in this file. Same
+/// discipline as the Swift copy-site omission class (EDIT_SEMANTICS_FREEZE.md
+/// §3.1), which has bitten this project five times — and it is not a Swift-only
+/// hazard.
+///
+/// The paste run rides HERE, and nowhere else, because that is what makes
+/// undo-then-paste equal redo: `begin_txn` captures the PRE-edit run, so undoing
+/// a paste restores the count that paste incremented and the next paste lands
+/// exactly where the undone one did. A run that outlived the artwork it counts
+/// would leave a HOLE — a slot the artist can see is empty and cannot fill by
+/// pasting — which is the same class of defect as a save-state table whose
+/// lifetime does not match what it describes.
+#[derive(Debug, Clone)]
+struct Checkpoint {
+    doc: Document,
+    index: IdIndex,
+    paste_run: Option<PasteRun>,
+}
+
 /// True iff `new` differs from `old` in AT MOST the `selection` field — the
 /// debug-only validation behind [`NonUndoableIntent::Selection`]. `Document`
 /// has no derived `PartialEq`, so every non-selection field is compared
@@ -166,8 +221,27 @@ pub struct Model {
     /// the same reason.
     id_index: IdIndex,
     pub filename: String,
-    undo_stack: Vec<(Document, IdIndex)>,
-    redo_stack: Vec<(Document, IdIndex)>,
+    undo_stack: Vec<Checkpoint>,
+    redo_stack: Vec<Checkpoint>,
+    /// THE PASTE RUN (`workspace/actions.yaml` §paste). `None` until the first
+    /// paste of this session.
+    ///
+    /// It lives HERE — on the Model — and not in `Document`, and not in
+    /// `AppState`. The Model is per-document in both active ports, so the run is
+    /// per-document for free: pasting the same clipboard into a second open
+    /// document starts at the base step there rather than continuing another
+    /// document's run. It is never serialized by any codec, so it does not
+    /// survive a save — a reopened file has no live clipboard relationship, and
+    /// a paste offset remembered from a previous session would be a lie. And it
+    /// is NOT a `Document` field because `Document` is a value type that many
+    /// Swift sites rebuild field by field: a new field there is dropped silently
+    /// at every one of them, which is exactly the copy-site omission class. The
+    /// Model is a single owned value per tab with no copy sites at all.
+    ///
+    /// Undoability is bought EXPLICITLY instead, by carrying it on
+    /// [`Checkpoint`] — the half of "document state" worth having, without the
+    /// half (persistence) that would be wrong.
+    paste_run: Option<PasteRun>,
     generation: u64,
     /// True while an undoable transaction is open (between `begin_txn` and
     /// `commit_txn`). OP_LOG.md Increment 1 consolidates every undoable mutation
@@ -253,6 +327,7 @@ impl Default for Model {
             filename: fresh_filename(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            paste_run: None,
             generation: 0,
             in_txn: false,
             op_journal: Vec::new(),
@@ -289,6 +364,7 @@ impl Model {
             filename: filename.unwrap_or_else(fresh_filename),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            paste_run: None,
             generation: 0,
             in_txn: false,
             op_journal: Vec::new(),
@@ -562,6 +638,61 @@ impl Model {
         self.preview_doc_snapshot.is_some()
     }
 
+    /// Capture the current (document, index, paste run) as one [`Checkpoint`].
+    /// THE ONLY place a checkpoint is built, so a future field that must ride
+    /// undo is added in exactly one spot — and, being a named struct, cannot be
+    /// dropped by a destructuring caller.
+    fn checkpoint(&self) -> Checkpoint {
+        Checkpoint {
+            doc: self.document.clone(),
+            index: self.id_index.clone(),
+            paste_run: self.paste_run.clone(),
+        }
+    }
+
+    /// The effective offset for a paste of `payload` whose BASE STEP is `base`
+    /// (`workspace/actions.yaml` §paste). The Nth consecutive paste of one
+    /// payload travels `N * base`.
+    ///
+    /// `base == 0.0` is `paste_in_place`, which is ruled to apply no offset and
+    /// to stay OUTSIDE the run: its copy lands on the source, which is not a run
+    /// slot, so it neither advances the run nor restarts it.
+    ///
+    /// Paired with [`Model::advance_paste_run`], which must be called with the
+    /// same `payload` and `base` after the write lands. The two together are the
+    /// ONLY places the run moves, in either port.
+    pub fn paste_run_offset(&self, payload: &str, base: f64) -> f64 {
+        if base == 0.0 {
+            return 0.0;
+        }
+        base * f64::from(self.paste_run_count_for(payload) + 1)
+    }
+
+    /// How many consecutive offset pastes of `payload` have already landed — 0
+    /// when the run is empty or is counting something else, which is the reset
+    /// rule in one expression: the run is keyed to WHAT is pasted.
+    pub fn paste_run_count_for(&self, payload: &str) -> u32 {
+        match &self.paste_run {
+            Some(r) if r.payload == payload => r.count,
+            _ => 0,
+        }
+    }
+
+    /// Record that a paste of `payload` landed. Called ONLY after a paste that
+    /// actually changed the document — a paste that lands nothing must not
+    /// advance the run — and only for a paste that applied an offset, since
+    /// `paste_in_place` (`base == 0.0`) does not participate.
+    pub fn advance_paste_run(&mut self, payload: &str, base: f64) {
+        if base == 0.0 {
+            return;
+        }
+        let count = self.paste_run_count_for(payload) + 1;
+        self.paste_run = Some(PasteRun {
+            payload: payload.to_string(),
+            count,
+        });
+    }
+
     /// Push the current document onto the undo stack and clear the redo
     /// stack. Tools should call this exactly once per user-visible action,
     /// before mutating the document. The undo stack is capped at
@@ -569,7 +700,7 @@ impl Model {
     pub fn snapshot(&mut self) {
         // Pair the index with the document on the stack so undo/redo restore
         // it in O(1) without a rebuild (rpds clone is O(1) structure sharing).
-        self.undo_stack.push((self.document.clone(), self.id_index.clone()));
+        self.undo_stack.push(self.checkpoint());
         if self.undo_stack.len() > MAX_UNDO {
             self.undo_stack.remove(0);
         }
@@ -584,10 +715,15 @@ impl Model {
         // undo, so a post-undo edit clears redo via its own commit).
         self.in_txn = false;
         self.pending_txn = None;
-        if let Some((prev_doc, prev_index)) = self.undo_stack.pop() {
-            self.redo_stack.push((self.document.clone(), self.id_index.clone()));
-            self.document = prev_doc;
-            self.id_index = prev_index;
+        if let Some(prev) = self.undo_stack.pop() {
+            self.redo_stack.push(self.checkpoint());
+            self.document = prev.doc;
+            self.id_index = prev.index;
+            // The paste run rides the checkpoint, so undoing a paste restores
+            // the count that paste incremented: the next paste lands exactly
+            // where the undone one did (undo-then-paste == redo), instead of
+            // skipping a slot and leaving a hole the artist cannot fill.
+            self.paste_run = prev.paste_run;
             debug_assert!(
                 self.id_index == rebuild_id_index(&self.document),
                 "id index diverged from rebuild after undo",
@@ -608,10 +744,13 @@ impl Model {
     pub fn redo(&mut self) {
         self.in_txn = false;
         self.pending_txn = None;
-        if let Some((next_doc, next_index)) = self.redo_stack.pop() {
-            self.undo_stack.push((self.document.clone(), self.id_index.clone()));
-            self.document = next_doc;
-            self.id_index = next_index;
+        if let Some(next) = self.redo_stack.pop() {
+            self.undo_stack.push(self.checkpoint());
+            self.document = next.doc;
+            self.id_index = next.index;
+            // Mirror of undo: redo restores the run as it stood after the redone
+            // transaction, so a further paste continues rather than re-landing.
+            self.paste_run = next.paste_run;
             debug_assert!(
                 self.id_index == rebuild_id_index(&self.document),
                 "id index diverged from rebuild after redo",
@@ -760,8 +899,7 @@ impl Model {
         if self.in_txn {
             return;
         }
-        self.undo_stack
-            .push((self.document.clone(), self.id_index.clone()));
+        self.undo_stack.push(self.checkpoint());
         if self.undo_stack.len() > MAX_UNDO {
             self.undo_stack.remove(0);
         }
@@ -817,10 +955,10 @@ impl Model {
             .map(|p| p.gen_at_open)
             .unwrap_or(self.generation);
         let no_net_change = self.generation == gen_at_open
-            || self.undo_stack.last().is_some_and(|(chk, _)| {
-                document_to_test_json(chk) == document_to_test_json(&self.document)
-                    && chk.layers == self.document.layers
-                    && chk.symbols == self.document.symbols
+            || self.undo_stack.last().is_some_and(|c| {
+                document_to_test_json(&c.doc) == document_to_test_json(&self.document)
+                    && c.doc.layers == self.document.layers
+                    && c.doc.symbols == self.document.symbols
             });
         if no_net_change {
             // Drop the no-op checkpoint; leave redo and the journal untouched.
@@ -1038,10 +1176,10 @@ impl Model {
         // checkpoint too, so a round-trip drag leaves NO journal entry and NO
         // undo step (the no-op rule, extended across the coalesced run).
         if merged_dx == 0.0 && merged_dy == 0.0 {
-            let round_tripped = self.undo_stack.last().is_some_and(|(chk, _)| {
-                document_to_test_json(chk) == document_to_test_json(&self.document)
-                    && chk.layers == self.document.layers
-                    && chk.symbols == self.document.symbols
+            let round_tripped = self.undo_stack.last().is_some_and(|c| {
+                document_to_test_json(&c.doc) == document_to_test_json(&self.document)
+                    && c.doc.layers == self.document.layers
+                    && c.doc.symbols == self.document.symbols
             });
             if round_tripped {
                 self.op_journal.pop();
@@ -1106,8 +1244,8 @@ impl Model {
         if n < 2 {
             return false;
         }
-        let copy_origin = &self.undo_stack[n - 1].0;
-        let move_origin = &self.undo_stack[n - 2].0;
+        let copy_origin = &self.undo_stack[n - 1].doc;
+        let move_origin = &self.undo_stack[n - 2].doc;
         let round_tripped = document_to_test_json(copy_origin)
             == document_to_test_json(move_origin)
             && copy_origin.layers == move_origin.layers
@@ -1131,9 +1269,12 @@ impl Model {
     /// rejects after edits were applied through the bracket).
     pub fn abort_txn(&mut self) {
         if self.in_txn {
-            if let Some((doc, index)) = self.undo_stack.pop() {
-                self.document = doc;
-                self.id_index = index;
+            if let Some(chk) = self.undo_stack.pop() {
+                self.document = chk.doc;
+                self.id_index = chk.index;
+                // An abort rolls the paste run back with the document: the
+                // aborted transaction's paste, if any, never happened.
+                self.paste_run = chk.paste_run;
             }
             self.in_txn = false;
             // An aborted transaction was never journaled, so the journal and its

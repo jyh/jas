@@ -971,18 +971,87 @@ public func pasteFragmentInto(
     return doc.replacing(layers: layers, selection: newSelection)
 }
 
-/// `pasteFragmentInto` against a `Model`, self-bracketing through
-/// `editDocument`. Returns `false` (a no-op that journals nothing) when nothing
-/// was pasted. Mirrors Rust `apply_paste`.
+// ── THE PASTE RUN — "Repeated pastes stack with cumulative offsets" ─────────
+//
+// `workspace/actions.yaml` paste has required that sentence since it was
+// written, and NEITHER active port implemented it: the second paste landed
+// exactly on the first. Both ports were wrong together, so the written
+// requirement governs (JYH, 2026-07-28: "follow the spec").
+//
+// `pasteRunApply` below is THE ONLY PLACE the run moves, in this port. Both
+// model-level paste entry points route through it, so the corpus-only `svg`
+// param and the production `text` param cannot drift apart — a run implemented
+// in one of them would have gone green in half the corpus while production kept
+// pasting on one spot.
+
+/// Apply a paste under the run, and advance the run if it landed.
+///
+/// `payload` is the RAW CLIPBOARD STRING the run is keyed to — see ``PasteRun``
+/// for why that, and not a copy hook, is what makes the reset rule hold. `base`
+/// is the BASE STEP (24pt), not the distance travelled: the Nth consecutive
+/// paste of one payload lands at `N * base` from the source, so three pastes sit
+/// at 24, 48, 72 and never on top of each other. `body` receives the EFFECTIVE
+/// offset and answers with the pasted document, or `nil` when there was nothing
+/// to paste.
+///
+/// Four decisions, each stated because the spec sentence says only "repeated
+/// pastes stack" and something had to be chosen (the artist-facing prose is in
+/// `actions.yaml` paste; the corpus family is
+/// `test_fixtures/operations/paste_stacking.json`):
+///
+/// 1. **RESET IS KEYED TO WHAT IS PASTED.** A payload that differs from the one
+///    the run is counting starts a new run. A copy of DIFFERENT artwork
+///    therefore resets it — including an EXTERNAL copy from another
+///    application, which no in-app copy hook could see. A copy of the SAME
+///    artwork does not, because the slot at `+base` already holds the previous
+///    paste. A selection change does NOT reset: paste itself SETS the selection,
+///    so a selection-keyed reset would fire after every paste and the
+///    requirement would be unimplementable — it could never reach step two.
+/// 2. **`paste_in_place` DOES NOT PARTICIPATE.** It passes `base == 0.0` and is
+///    ruled to apply no offset; its copy lands on the source, which is not a run
+///    slot. So it neither advances the run nor restarts it: 24, 0, 48.
+/// 3. **"Paste, Preserving Layers" SHARES THE ONE RUN.** R2 and R3 differ in
+///    WHICH LAYER artwork lands in, never in the offset — `actions.yaml` says
+///    preserving-layers offsets "exactly as plain Paste does". One `base`, one
+///    run, nothing to diverge.
+/// 4. **A PASTE THAT LANDS NOTHING DOES NOT ADVANCE THE RUN.** The early return
+///    below is before any run write, so an empty clipboard leaves it where it
+///    was.
+///
+/// UNDO restores the run (see ``Model/undo()``): the `beginTxn` inside
+/// `editDocument` captures the PRE-paste run and the advance below happens after
+/// the write, so undoing a paste puts the next one exactly where the undone one
+/// was rather than skipping a slot. Mirrors Rust `paste_run_apply`.
+private func pasteRunApply(
+    _ model: Model, payload: String, base: Double,
+    body: (Document, Double) -> Document?
+) -> Bool {
+    let effective = model.pasteRunOffset(for: payload, base: base)
+    guard let newDoc = body(model.document, effective) else { return false }
+    model.editDocument(newDoc)
+    model.advancePasteRun(payload, base: base)
+    return true
+}
+
+/// `pasteFragmentInto` against a `Model`, self-bracketing through `editDocument`
+/// and participating in the paste run. Returns `false` (a no-op that journals
+/// nothing) when nothing was pasted. Mirrors Rust `apply_paste`.
+///
+/// Takes the fragment MARKUP rather than a parsed fragment, for two reasons: the
+/// markup is what the run is keyed to (see `pasteRunApply`), and moving the
+/// parse in here means the two ports' call sites are identical where they used
+/// to differ in shape. Reached only from the `svg` op param, which presupposes
+/// the SVG branch was already chosen; the production payload dispatch is
+/// ``applyPasteClipboardText(_:text:offset:preserveLayers:)``.
 @discardableResult
 public func applyPaste(
-    _ model: Model, fragment: [Element], offset: Double, preserveLayers: Bool
+    _ model: Model, svg: String, offset: Double, preserveLayers: Bool
 ) -> Bool {
-    guard let newDoc = pasteFragmentInto(
-        model.document, fragment: fragment, offset: offset, preserveLayers: preserveLayers)
-    else { return false }
-    model.editDocument(newDoc)
-    return true
+    pasteRunApply(model, payload: svg, base: offset) { doc, effective in
+        let fragment = svgToDocument(svg).layers.map { Element.layer($0) }
+        return pasteFragmentInto(doc, fragment: fragment, offset: effective,
+                                 preserveLayers: preserveLayers)
+    }
 }
 
 // ── WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES ────────────────────────
@@ -1080,18 +1149,27 @@ public func pasteClipboardTextInto(
 }
 
 /// `pasteClipboardTextInto` against a `Model`, self-bracketing through
-/// `editDocument`. Returns `false` (a no-op that journals nothing) when there
-/// was nothing on the clipboard to paste. Mirrors Rust
-/// `apply_paste_clipboard_text`.
+/// `editDocument` and participating in the paste run. Returns `false` (a no-op
+/// that journals nothing) when there was nothing on the clipboard to paste.
+/// Mirrors Rust `apply_paste_clipboard_text`.
+///
+/// **THE PRODUCTION ENTRY POINT.** ``EditClipboard/pasteClipboard(_:offset:pasteboard:preserveLayers:)``
+/// and Rust's `clipboard_read_and_paste` both land here, so this is where the
+/// paste run has to reach the artist. The run is keyed to the RAW PAYLOAD — the
+/// same string the port read off the system pasteboard — which is exactly the
+/// identity "the same clipboard content" the spec sentence is about.
+///
+/// An UNREADABLE pasteboard (`nil`) returns before the run is consulted at all:
+/// there is no payload to key on, and nothing to paste.
 @discardableResult
 public func applyPasteClipboardText(
     _ model: Model, text: String?, offset: Double, preserveLayers: Bool
 ) -> Bool {
-    guard let newDoc = pasteClipboardTextInto(
-        model.document, text: text, offset: offset, preserveLayers: preserveLayers)
-    else { return false }
-    model.editDocument(newDoc)
-    return true
+    guard let payload = text else { return false }
+    return pasteRunApply(model, payload: payload, base: offset) { doc, effective in
+        pasteClipboardTextInto(doc, text: payload, offset: effective,
+                               preserveLayers: preserveLayers)
+    }
 }
 
 /// Unpack the Group at `path`: extract its children, delete the group, and
@@ -1663,10 +1741,16 @@ public func opApply(
     // `svgToDocument`. `preserve_layers` selects R3 over R2 and defaults to
     // false; `offset` defaults to 0.0, which is `paste_in_place`.
     //
-    // This arm and `EditClipboard.pasteClipboard` call ONE body (`applyPaste`),
-    // which is the point: LAYER_STRUCTURE.md §5 records that no corpus vector
-    // could reach ANY paste behaviour in EITHER port, so R2/R3 would have
-    // landed unwatched. A verb that re-implemented the paste would be a decoy.
+    // This arm and `EditClipboard.pasteClipboard` call ONE body
+    // (`applyPasteClipboardText`), which is the point: LAYER_STRUCTURE.md §5
+    // records that no corpus vector could reach ANY paste behaviour in EITHER
+    // port, so R2/R3 would have landed unwatched. A verb that re-implemented the
+    // paste would be a decoy.
+    //
+    // BOTH params also route through `pasteRunApply`, so the cumulative offset
+    // run (`actions.yaml` paste) is the same run whichever one a vector uses.
+    // `offset` is therefore the BASE STEP, not the distance travelled: a vector
+    // pasting one payload three times at offset 24 lands at 24, 48, 72.
     case "paste":
         let offset = numField(op, "offset")
         let preserve = (op["preserve_layers"] as? Bool) ?? false
@@ -1684,8 +1768,7 @@ public func opApply(
                                               offset: offset, preserveLayers: preserve)
         } else {
             guard let svg = strField(op, "svg") else { return reqErr(op, "svg") }
-            let fragment = svgToDocument(svg).layers.map { Element.layer($0) }
-            changed = applyPaste(model, fragment: fragment, offset: offset,
+            changed = applyPaste(model, svg: svg, offset: offset,
                                  preserveLayers: preserve)
         }
         if !changed {
