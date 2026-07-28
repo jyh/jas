@@ -5656,6 +5656,12 @@ mod tests {
     // the string oracle: it would be normalized back to default on the way in
     // and pass, green and vacuous.
     //
+    // NOTE 2026-07-28: the SUBSET claim above was true when written and is NOT
+    // true now -- the preservation wave extended canonical test-JSON to carry
+    // all twelve formerly-dropped fields, so test_json drops NOTHING and binary
+    // drops only fill_gradient / stroke_gradient. The oracle got STRONGER. This
+    // gate stays: it is BYTE-level where the oracle is string-level.
+    //
     // This gate compares at the MODEL level instead (PartialEq on PathElem),
     // which is what lets it see the fields the oracle cannot express. The
     // saturated Path below is mirrored in JasSwift/Tests/CrossLanguageTests

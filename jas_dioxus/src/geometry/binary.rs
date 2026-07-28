@@ -96,6 +96,11 @@ const FILL_RULE_EVEN_ODD: i64 = 1;
 // drops are a strict SUBSET of the fields that string oracle also drops, so a
 // one-port slot mismatch here would otherwise land silently (coverage gap
 // `codec-string-oracle-cannot-see-a-dropped-field`).
+//
+// NOTE 2026-07-28: the SUBSET claim above was true when written and is NOT true
+// now -- canonical test-JSON was extended to carry all twelve formerly-dropped
+// fields, so it drops NOTHING and binary drops only the two gradients. The
+// oracle got STRONGER. This gate stays: BYTE-level, not string-level.
 
 /// Offset of `common.mode` within a tag's extension block.
 const EXT_MODE: usize = 0;

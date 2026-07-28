@@ -3872,6 +3872,12 @@ private func assertKeyTest(_ group: [String: Any]) {
 // would be normalized back to default on the way in and pass, green and
 // vacuous.
 //
+// NOTE 2026-07-28: the SUBSET claim above was true when written and is NOT true
+// now. The preservation wave extended canonical test-JSON to carry all twelve
+// formerly-dropped fields, so test_json drops NOTHING and binary drops only
+// fill_gradient / stroke_gradient. The oracle got STRONGER, not weaker. This
+// gate stays regardless: it is BYTE-level where the oracle is string-level.
+//
 // This gate compares at the MODEL level instead (Equatable on Path), which is
 // what lets it see the fields the oracle cannot express. The saturated Path
 // below is mirrored by `survival_saturated_path` in
