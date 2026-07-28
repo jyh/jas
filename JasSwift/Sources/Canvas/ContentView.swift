@@ -170,6 +170,16 @@ public class WorkspaceState: ObservableObject {
         didSet { adoptAppDefaults() }
     }
     @Published public var selectedTab: UUID?
+    /// Filenames of tabs the last ``restoreSession`` could not read — a
+    /// missing or undecodable `tabN.jasbin`. Empty on a clean restore.
+    ///
+    /// The restore is deliberately best-effort (a corrupt tab costs that tab,
+    /// not the session and not the launch), so without this the loss is silent
+    /// outside the log. Published so the app has something to surface. Reset at
+    /// the top of every ``restoreSession``, so it always describes the last
+    /// call. NOT yet read by any view — the decision of how to present it is
+    /// the app's, and no claim is made here that it is presented.
+    @Published public var sessionRestoreSkipped: [String] = []
     /// The app-global default fill / stroke, owned HERE — above the canvases —
     /// because they are WORKSPACE state, not document state: set a red, hit
     /// File > New, and you expect red (JYH ruling 2026-07-26, COLORTIERS).
@@ -307,7 +317,8 @@ public class WorkspaceState: ObservableObject {
         // convention — so this is the app-layer centering, mirroring Rust's
         // TabState construction (app_state.rs). CanvasSubwindow's first draw
         // re-centers with the real viewport.
-        model.centerViewOnCurrentArtboard()
+        model.centerViewOnCurrentArtboard(
+            artboardsPanelSelection: artboardsPanelSelectionIds(model))
         let entry = CanvasEntry(model: model)
         canvases.append(entry)
         selectedTab = entry.id

@@ -947,8 +947,14 @@ private func makeMarqueeCtrl() -> Controller {
 @Test func promoteToConceptReplacesWithGenerated() {
     // CONCEPTS.md §10: promote replaces a raw element with a Generated instance
     // carrying the fitted params + the placement transform, while preserving the
-    // original element's identity (id). Mirrors Rust
+    // original element's identity (id AND name). Mirrors Rust
     // promote_to_concept_replaces_with_generated.
+    //
+    // The name half is the one this battery could not make until 2026-07-27:
+    // the fixture already carried `name: "my square"` and the assertions
+    // stopped at `id`, so `promoteToConcept`'s hand-listed six-field rebuild
+    // dropped the name and nothing said so. Rust's twin has asserted
+    // `g.common.name == Some("my square")` the whole time.
     let poly = Element.polygon(Polygon(
         points: [(10, 0), (0, 10), (-10, 0), (0, -10)],
         name: "my square", id: "p1"))
@@ -969,6 +975,7 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(g.transform == Transform.translate(5, 7))
     // … and the original identity preserved.
     #expect(g.id == "p1")
+    #expect(g.name == "my square")
 }
 
 @Test func promoteToConceptMissingPathIsNoop() {

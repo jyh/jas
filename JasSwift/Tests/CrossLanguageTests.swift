@@ -87,6 +87,10 @@ private func assertSvgRoundtrip(_ name: String) {
         // on the <use> and round-trips through SVG distinct from the render
         // CTM (the <use transform> attr). (SYMBOLS.md §4 / Fork F2.)
         "reference_instance_transform",
+        // A NAMED compound and a NAMED <use> reference survive the SVG
+        // boundary: the name maps to inkscape:label. Mirrors the Rust
+        // svg_roundtrip_all_fixtures registration.
+        "live_named",
     ]
     for name in names { assertSvgRoundtrip(name) }
 }
@@ -111,6 +115,12 @@ private func assertSvgRoundtrip(_ name: String) {
 @Test func svgParseTransformRotate() { assertSvgParse("transform_rotate") }
 @Test func svgParseMultiLayer() { assertSvgParse("multi_layer") }
 @Test func svgParseComplexDocument() { assertSvgParse("complex_document") }
+/// The SVG READ side of the live-element name, pinned against the shared
+/// golden rather than only against itself: `<g data-jas-live=...
+/// inkscape:label="hull">` and `<use ... inkscape:label="eye"/>` import with
+/// those names, and so do the two named operands. Mirrors Rust's
+/// svg_parse_live_named.
+@Test func svgParseLiveNamed() { assertSvgParse("live_named") }
 /// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
 /// id="dup"; after dedupe the first keeps it and the second has no id.
 @Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
@@ -287,8 +297,16 @@ private func assertJsonRoundtrip(_ name: String) {
         "reference_instance_transform",
         // CONCEPTS.md 3b: a Generated concept-instance (concept id + params)
         // round-trips through test_json byte-identically to the Rust-authored
-        // golden — the cross-language pin for the generated kind.
+        // golden — the cross-language pin for the generated kind. (It was a
+        // one-sided pin until this wave: Rust's list did not carry it.)
         "generated_polygon",
+        // ANY ELEMENT CARRIES A NAME, live kinds included (the name maps to
+        // SVG inkscape:label). live_named names the compound AND the
+        // reference AND both operands; live_named_recipe names the recorded
+        // and generated kinds, which have no SVG read path and so can only be
+        // reached through the JSON/binary lanes. Mirrors the Rust
+        // json_roundtrip_all_expected registration.
+        "live_named", "live_named_recipe",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -328,6 +346,10 @@ private func readFixtureData(_ path: String) -> Data {
         // round-trips through binary distinct from the render CTM (slot 4).
         // (SYMBOLS.md §4 / Fork F2.)
         "reference_instance_transform",
+        // A live element's `name` rides the generic common block at tagLive
+        // slot 5 like every other element's. Both fixtures name their live
+        // elements, so a codec that packed nil there reds.
+        "live_named", "live_named_recipe",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -584,7 +606,7 @@ private func recordedCanonicalDocument() -> Document {
         PrimitiveOp(op: "copy", params: ["from": ["eye"], "dx": 0.0, "dy": 0.0], targets: []),
         PrimitiveOp(op: "translate", params: ["ids": ["$0"], "dx": 50.0, "dy": 0.0], targets: []),
     ]
-    let rec = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], id: "rec")
+    let rec = RecordedElem(ops: recipe, inputs: [ElementRef("eye")], name: nil, id: "rec")
     let layer = Layer(children: [.live(.recorded(rec))])
     return Document(layers: [layer], selectedLayer: 0, selection: [], artboards: [])
 }
@@ -638,6 +660,20 @@ private func recordedCanonicalDocument() -> Document {
 /// one transaction; the gate pins the journal replays to the snapshot-path doc.
 @Test func operationBooleanOps() throws {
     try runOperationFixture("boolean_ops.json")
+}
+
+/// PASTE AND LAYER STRUCTURE (LAYER_STRUCTURE.md R2/R3, ratified 2026-07-28).
+/// Twin of Rust `operation_paste_layers`. §5 of the brief records that
+/// `op_apply` had no `paste` verb in EITHER port, so no fixture could reach any
+/// paste behaviour and both rulings would have landed unwatched.
+///
+/// This family is what deletes Swift's name-matching from the DEFAULT path:
+/// `paste_one_name_match_still_flattens_into_active` pastes a fragment whose
+/// first layer is named "Foreground" — a name the setup document HAS — and
+/// requires both children in the ACTIVE layer anyway. Swift used to append into
+/// the matched layer, so this case was RED before R2 landed.
+@Test func operationPasteLayers() throws {
+    try runOperationFixture("paste_layers.json")
 }
 
 /// `state.boolean_remove_redundant_points` defaults to FALSE
@@ -1033,7 +1069,7 @@ private func runPreservationVector(_ tc: [String: Any]) -> (before: String, afte
     #expect(recordedStrIds(recipe[0].params, "from") == ["eye"])
 
     // Wrap + re-derive against the EDITED source (eye moved to x=100 px).
-    let recorded = RecordedElem(ops: recipe, inputs: inputs.map { ElementRef($0) }, id: "rec")
+    let recorded = RecordedElem(ops: recipe, inputs: inputs.map { ElementRef($0) }, name: nil, id: "rec")
     let editedSvg = svg.replacingOccurrences(of: "x=\"0\" y=\"0\"", with: "x=\"100\" y=\"0\"")
     let editedEl = svgToDocument(editedSvg).getElement([0, 0])
     struct OneResolver: ElementResolver {
@@ -1438,7 +1474,7 @@ private func rederiveRecordedOutput(_ fixture: [String: Any], _ journal: [Transa
     let segment = journal.last!.ops
     let (recipe, inputs) = captureRecipe(segment)
     let recorded = RecordedElem(
-        ops: recipe, inputs: inputs.map { ElementRef($0) }, id: "rec")
+        ops: recipe, inputs: inputs.map { ElementRef($0) }, name: nil, id: "rec")
 
     // Apply the fixture's edit to the source SVG, parse, and resolve the edited
     // element by id. Mirror the effects.rs proof's textual edit (replace
@@ -2750,7 +2786,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 @Test func generatedLiveVariantRoundTripsAndSerializes() throws {
     let ge = GeneratedElem(
         conceptId: "regular_polygon",
-        params: ["sides": 6, "radius": 50],
+        params: ["sides": 6, "radius": 50], name: nil,
         id: "poly1")
     let layer = Layer(name: "Layer", children: [.live(.generated(ge))])
     let doc = Document(layers: [layer], artboards: [])
@@ -2781,7 +2817,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
                 : nil
         }
     }
-    let ge = GeneratedElem(conceptId: "regular_polygon", params: ["sides": 4, "radius": 10])
+    let ge = GeneratedElem(conceptId: "regular_polygon", params: ["sides": 4, "radius": 10], name: nil)
     var visiting = VisitSet()
     let ps = ge.evaluateWith(precision: 1.0, resolver: OneConcept(), visiting: &visiting)
     #expect(ps.count == 1)
@@ -2806,7 +2842,7 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     #expect(resolver.resolveConcept("no_such_concept") == nil)
 
     let ge = GeneratedElem(conceptId: "regular_polygon",
-                           params: ["sides": 4, "radius": 10])
+                           params: ["sides": 4, "radius": 10], name: nil)
     var visiting = VisitSet()
     let ps = ge.evaluateWith(precision: 1.0, resolver: resolver, visiting: &visiting)
     #expect(ps.count == 1)
@@ -3280,6 +3316,16 @@ private let actionFixtures = [
     // `view` and assert the resulting view triple via `expected_view` — a fact
     // NO document golden can see, because view state is not document content.
     "view_state.json",
+    // LAYERSTRUCT R1 (transcripts/LAYER_STRUCTURE.md §3): group always
+    // flattens. Before R1 a selection whose members did not share one parent
+    // was a silent no-op in BOTH ports, and NO fixture anywhere grouped across
+    // parents — so the defect and then the ruling arrived unwatched. These
+    // cases cross two layers, two sibling groups, a layer and a nested group,
+    // and pin the frontmost z-slot placement that `actions.yaml` §group always
+    // specified but neither port implemented. The contiguous same-parent case
+    // stays pinned by `menu_group_two_rects` in menu_object_ops.json, which R1
+    // must leave byte-identical.
+    "group_flatten.json",
 ]
 
 /// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml
@@ -3836,17 +3882,17 @@ private func wireTagElements() -> [Element] {
         .textPath(TextPath(d: [.moveTo(0, 0), .lineTo(1, 1)], content: "hi", startOffset: 0,
                            fontFamily: "Arial", fontSize: 12, fontWeight: "normal",
                            fontStyle: "normal", textDecoration: "none")),
-        .live(.reference(ReferenceElem(target: ElementRef("m1")))),
+        .live(.reference(ReferenceElem(target: ElementRef("m1"), name: nil))),
     ]
 }
 
 /// Every LIVE kind, which all share `tag_arity["live"]`.
 private func wireLiveElements() -> [Element] {
     [
-        .live(.compoundShape(CompoundShape(operation: .union, operands: []))),
-        .live(.reference(ReferenceElem(target: ElementRef("m1")))),
-        .live(.recorded(RecordedElem(ops: [], inputs: []))),
-        .live(.generated(GeneratedElem(conceptId: "spiral", params: [:]))),
+        .live(.compoundShape(CompoundShape(operation: .union, operands: [], name: nil))),
+        .live(.reference(ReferenceElem(target: ElementRef("m1"), name: nil))),
+        .live(.recorded(RecordedElem(ops: [], inputs: [], name: nil))),
+        .live(.generated(GeneratedElem(conceptId: "spiral", params: [:], name: nil))),
     ]
 }
 

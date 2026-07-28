@@ -223,8 +223,12 @@ public class Controller {
             model.editDocument(doc.replaceElement(targetPath, with: target.withId(targetId)))
             resolvedId = targetId
         }
+        // A created reference is a 0 -> 1 BIRTH: it wears no operand's
+        // identity (EDIT_SEMANTICS_FREEZE.md §3.4), so it is born unnamed.
+        // Rust passes `CommonProps { id: Some(ref_id), ..default() }` here,
+        // whose `name` is None.
         let reference = Element.live(.reference(ReferenceElem(
-            target: ElementRef(resolvedId), id: refId)))
+            target: ElementRef(resolvedId), name: nil, id: refId)))
         addElement(reference)
     }
 
@@ -255,8 +259,11 @@ public class Controller {
         // The master carries the resolved id.
         let master = target.withId(resolvedId)
         // The in-place instance targets the master id, with its own refId.
+        // Born unnamed: the NAME rides with the master, which is `target`
+        // itself (only its id is re-stamped). Rust passes a default
+        // `CommonProps` here for the same reason.
         let reference = Element.live(.reference(ReferenceElem(
-            target: ElementRef(resolvedId), id: refId)))
+            target: ElementRef(resolvedId), name: nil, id: refId)))
         // Replace the element in place with the instance, then push the master
         // into the off-canvas store.
         let newDoc = doc.replaceElement(path, with: reference)
@@ -272,8 +279,10 @@ public class Controller {
     /// carries `id = refId`, minted by the initiator. Mirrors Rust
     /// `Controller::place_instance`.
     public func placeInstance(masterId: String, refId: String) {
+        // A placed instance is a 0 -> 1 birth; born unnamed, like Rust's
+        // `place_instance` (default `CommonProps` but for the id).
         let reference = Element.live(.reference(ReferenceElem(
-            target: ElementRef(masterId), id: refId)))
+            target: ElementRef(masterId), name: nil, id: refId)))
         addElement(reference)
     }
 
@@ -282,8 +291,10 @@ public class Controller {
     /// id is minted by the initiator (value-in-op). Mirrors Rust
     /// `Controller::place_concept_instance`.
     public func placeConceptInstance(conceptId: String, params: [String: Any], elemId: String) {
+        // A placed concept instance is a 0 -> 1 birth; born unnamed, like
+        // Rust's `place_concept_instance` (default `CommonProps` but for id).
         let generated = Element.live(.generated(GeneratedElem(
-            conceptId: conceptId, params: params, id: elemId)))
+            conceptId: conceptId, params: params, name: nil, id: elemId)))
         addElement(generated)
     }
 
@@ -350,6 +361,12 @@ public class Controller {
         let generated = GeneratedElem(
             conceptId: conceptId,
             params: params,
+            // PROMOTE is 1 -> 1 and speaks to the GENERATOR, not the identity:
+            // Rust clones the whole `common` here (its own battery is named
+            // "preserving the original element's identity (id/name)"). This
+            // port hand-listed six fields and could not list `name` at all,
+            // so a promoted element silently came back unnamed.
+            name: existing.name,
             id: existing.id,
             transform: transform,
             opacity: opacity,
@@ -446,9 +463,11 @@ public class Controller {
         // New master = clone of the selection, re-id'd to masterId.
         let newMaster = source.withId(masterId)
 
-        // The selection becomes an instance of the redefined master.
+        // The selection becomes an instance of the redefined master. Born
+        // unnamed — the name went to `newMaster`, which is the clone. Rust's
+        // `redefine` passes a default `CommonProps` but for the id.
         let reference = Element.live(.reference(ReferenceElem(
-            target: ElementRef(masterId), id: refId)))
+            target: ElementRef(masterId), name: nil, id: refId)))
         let newDoc = doc.replaceElement(path, with: reference)
         var newSymbols = newDoc.symbols
         newSymbols[masterIdx] = newMaster
@@ -995,40 +1014,153 @@ public class Controller {
         model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
     }
 
-    /// Group the currently selected sibling elements into a new Group.
-    /// Requires at least 2 selected elements that share the same parent.
-    /// After grouping, the selection contains only the new group.
+    /// Group the selected elements into a new Group. **R1 — group ALWAYS
+    /// flattens** (transcripts/LAYER_STRUCTURE.md §3, ratified 2026-07-28).
+    ///
+    /// Every selected element becomes a child of the new Group regardless of
+    /// where it came from — across layers, across sibling groups, at any
+    /// depth. There is no refusal and no silent no-op. This replaced a guard
+    /// that required all selected paths to share one parent prefix; with it,
+    /// Cmd+G on a selection spanning two layers did nothing and said nothing
+    /// (defect D2). The guard was about PARENTS, not layers: a selection
+    /// spanning two different Groups failed identically.
+    ///
+    /// **Why flattening rather than preservation.** A Group is an element and
+    /// its children are its children; there is no representation in which one
+    /// Group's children live in two different parents. Unlike paste there is
+    /// no structure-preserving option to choose between, so this is the
+    /// Preservation Law's *what it cannot preserve it must not guess* clause
+    /// resolved by T3's documented default.
+    ///
+    /// **Placement: the FRONTMOST selected element's parent, at the z-slot
+    /// that element vacates.** Frontmost is the GREATEST path — paths sort
+    /// ascending and the canvas paints layers forward, so a higher index
+    /// paints later and therefore on top. Same rule BOOLEAN.md fixes and
+    /// `makeCompoundShape` already implements with the last operand. Placing
+    /// the group frontmost minimises visual change: it renders roughly where
+    /// the frontmost member already rendered, instead of hurling the selection
+    /// backward past unrelated content.
+    ///
+    /// Note this half of R1 also corrects the SAME-PARENT case. `actions.yaml`
+    /// §group has always said the group "inherits the z-order position of the
+    /// frontmost selected object"; both ports inserted at `paths[0]`, the
+    /// BACKMOST. The two agree only when the selection is contiguous, which is
+    /// why the existing corpus golden never saw it.
+    ///
+    /// **On electing a winner from geometry.** The Preservation Law forbids
+    /// electing an IDENTITY winner from geometry, z-order included, and this
+    /// is deliberately NOT that. Identity here is a FRESH group — a 0 -> 1
+    /// creation under the cardinality law, wearing default properties and
+    /// never a member's id — while z-order is being used for PLACEMENT, which
+    /// is inherently an ordering concern. The surface resemblance will
+    /// otherwise read as a contradiction.
+    ///
+    /// **Emptied source containers are KEPT — both layers and groups.** A
+    /// container the selection drained was never what the edit spoke to; it is
+    /// a bystander (T4), and it carries a name, an id and blend flags that
+    /// deleting would destroy on an unrequested 1 -> 0. This is NOT the orphan
+    /// D3 was fixed for: there a container was emptied by a WRONG insert that
+    /// should have landed inside it, whereas here the emptying is the correct
+    /// consequence of a move the artist asked for.
+    ///
+    /// Twin probes: `Tests/Document/GroupFlattenTests.swift` and the Rust
+    /// `r1_*` tests in `jas_dioxus/src/document/controller.rs`, case for case,
+    /// plus the shared corpus family `test_fixtures/actions/group_flatten.json`.
     public func groupSelection() {
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
-        let paths = doc.selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }
-        guard paths.count >= 2 else { return }
-        // All selected elements must be siblings (same parent prefix)
-        let parent = Array(paths[0].dropLast())
-        guard paths.allSatisfy({ Array($0.dropLast()) == parent }) else { return }
-        // Gather elements in order
-        let elements = paths.map { doc.getElement($0) }
-        // Delete in reverse order
+        // `Selection` is a Set here and a Vec in Rust, so this sort is what
+        // makes the two ports agree on document order at all.
+        let sorted = doc.selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }
+        var paths: [ElementPath] = []
+        for p in sorted where paths.last != p { paths.append(p) }
+        // An ancestor carries its own children, so a selected path that sits
+        // UNDER another selected path is dropped from the move. Without this,
+        // selecting a Group and one of its children would clone the child into
+        // the new group AND leave it inside the cloned subtree: the same
+        // element twice, one live id duplicated.
+        //
+        // UNRULED, and taken as the conservative reading rather than as law:
+        // brief §6 open question 3 (mixed DEPTHS) is not settled, and this is
+        // the sub-case where the naive reading is not merely debatable but
+        // unsafe. Banked for JYH.
+        let roots = paths.filter { p in
+            !paths.contains { q in
+                q != p && p.count > q.count && Array(p.prefix(q.count)) == q
+            }
+        }
+        guard roots.count >= 2 else { return }
+        // Rust resolves each path with `get_element`, which returns None for a
+        // stale path and makes the whole operation a silent no-op. Swift's
+        // `getElement` INDEXES and would trap, so the same staleness that is
+        // quiet in Rust would be a crash here. Check resolvability first.
+        guard roots.allSatisfy({ pathResolves(doc, $0) }) else { return }
+        let elements = roots.map { doc.getElement($0) }
+        // The destination: the FRONTMOST root's own path, with each component
+        // shifted down by the deletions that land EARLIER in that same
+        // container. A deleted path shifts `front[k]` exactly when it is a
+        // direct child of `front[..k]` with a smaller index — deleting a whole
+        // subtree removes one entry from its parent, so every later sibling
+        // (including an ANCESTOR of the frontmost element) slides back one.
+        let front = roots[roots.count - 1]
+        var insertPath = front
+        for k in 0..<front.count {
+            let shift = roots.filter { d in
+                d != front && d.count == k + 1
+                    && Array(d.prefix(k)) == Array(front.prefix(k)) && d[k] < front[k]
+            }.count
+            insertPath[k] -= shift
+        }
+        // Delete the sources in reverse document order (descending paths keep
+        // the remaining indices valid). `deleteElement` recurses.
         var newDoc = doc
-        for path in paths.reversed() {
+        for path in roots.reversed() {
             newDoc = newDoc.deleteElement(path)
         }
-        // Create group and insert at position of first element
+        // The new Group is a fresh 0 -> 1 container: it never wears a member's
+        // identity.
         let group = Element.group(Group(children: elements))
-        let insertPath = paths[0]
-        let layerIdx = insertPath[0]
-        let childIdx = insertPath.count > 1 ? insertPath[1] : 0
-        let layer = newDoc.layers[layerIdx]
-        var newChildren = layer.children
-        newChildren.insert(group, at: childIdx)
-        // T4 bystander clause: the layer is rebuilt only to reach its children.
-        // See `addElement` — the same four-of-eleven literal, same seven fields
-        // lost, and the containing layer is the artist's, not this op's.
-        let newLayer = layer.withChildren(newChildren)
-        var newLayers = newDoc.layers
-        newLayers[layerIdx] = newLayer
+        // Insert at the destination's TRUE depth. This previously read only
+        // `insertPath[1]` and inserted into `layers[insertPath[0]].children`,
+        // discarding every deeper component -- so grouping a selection that
+        // already lived inside a Group placed the new group one level too high
+        // AND left the emptied container behind as an orphan (D3).
+        // `deleteElement` recurses correctly, so the delete and the insert
+        // disagreed about depth inside a single operation. Mirrors Rust's
+        // `insert_element_at`, which recurses on `&path[1..]`.
+        // Gate: Tests/Document/NestedGroupProbeTests.swift, and its Rust twin
+        // `grouping_inside_a_group_stays_inside_that_group`.
+        let parentPath = Array(insertPath.dropLast())
+        let childIdx = insertPath.last ?? 0
+        let inserted = insertElementAtPath(newDoc, parentPath, childIdx, group)
         let newSelection: Selection = [ElementSelection.all(insertPath)]
-        model.editDocument(newDoc.replacing(layers: newLayers, selection: newSelection))
+        model.editDocument(inserted.replacing(selection: newSelection))
+    }
+
+    /// True when every component of `path` addresses a real child, so
+    /// `Document.getElement` will not trap. Rust's `get_element` returns an
+    /// Option and its callers no-op on None; this is the Swift equivalent of
+    /// that check, kept local to the one caller that needs it.
+    private func pathResolves(_ doc: Document, _ path: ElementPath) -> Bool {
+        guard let first = path.first, first >= 0, first < doc.layers.count else { return false }
+        var node: Element = .layer(doc.layers[first])
+        for idx in path.dropFirst() {
+            let kids = groupChildContainer(node)
+            guard idx >= 0, idx < kids.count else { return false }
+            node = kids[idx]
+        }
+        return true
+    }
+
+    /// The children of `elem` if it is a container, else []. Mirrors the same
+    /// container set `Document.getElement` walks.
+    private func groupChildContainer(_ elem: Element) -> [Element] {
+        switch elem {
+        case .group(let g): return g.children
+        case .layer(let l): return l.children
+        case .live(.compoundShape(let c)): return c.operands
+        default: return []
+        }
     }
 
     /// Ungroup all selected Group elements, replacing each with its children.
@@ -1108,6 +1240,11 @@ public class Controller {
         let cs = CompoundShape(
             operation: operation,
             operands: elements,
+            // A compound is a WRAP: 0 -> 1, and a container never wears a
+            // member's identity (EDIT_SEMANTICS_FREEZE.md §3.4). Only the
+            // frontmost operand's PAINT is inherited, which is exactly what
+            // Rust's `make_compound_shape_with_op` copies. So: unnamed.
+            name: nil,
             fill: frontmost.fill,
             stroke: frontmost.stroke,
             opacity: 1.0,

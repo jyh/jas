@@ -35,7 +35,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE_JSON = REPO_ROOT / "workspace" / "workspace.json"
 
-EXPECTED_TOTAL_ACTIONS = 236
+# A deliberate tripwire: it fires whenever the bundle's action count moves, so
+# a new action cannot be added without someone looking at its intent class.
+# 236 -> 237 on 2026-07-28: `paste_preserving_layers`, ruling R3 of
+# transcripts/LAYER_STRUCTURE.md.
+EXPECTED_TOTAL_ACTIONS = 237
 
 # ---------------------------------------------------------------------------
 # The AUTHORED verb -> journaling table.

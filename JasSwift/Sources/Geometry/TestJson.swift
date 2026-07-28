@@ -516,15 +516,18 @@ package func elementJson(_ elem: Element) -> String {
             // the reader had no live arm at all and trapped); now emitted
             // so compound shapes round-trip through test_json.
             o.str("operation", cs.operation.rawValue)
-            // CompoundShape carries a stable id but no name field, so emit
-            // id (only when set) while name stays nil — matching the
-            // reference writer and Rust's common_attrs_no_name.
-            commonFields(o, cs.opacity, cs.transform, cs.locked, cs.visibility, nil, cs.id)
+            // A live element carries its `name` like every other element
+            // (jas_dioxus routes all four kinds through the same
+            // `common_fields`). This used to hand-write a literal `nil` here,
+            // with a comment claiming that matched the Rust writer — it did
+            // not: Rust emitted `"name":"hull"` where this emitted
+            // `"name":null`.
+            commonFields(o, cs.opacity, cs.transform, cs.locked, cs.visibility, cs.name, cs.id)
             let children = cs.operands.map { elementJson($0) }
             o.raw("children", jsonArray(children))
         case .reference(let r):
             o.str("target", r.target.id)
-            commonFields(o, r.opacity, r.transform, r.locked, r.visibility, nil, r.id)
+            commonFields(o, r.opacity, r.transform, r.locked, r.visibility, r.name, r.id)
             // fill/stroke are emitted only when set; in Phase 1 references
             // carry none (paint inheritance default / Fork F2), matching how
             // compound omits its own paint here. (The render CTM `transform` is
@@ -540,10 +543,10 @@ package func elementJson(_ elem: Element) -> String {
             }
         case .recorded(let rec):
             // RECORDED_ELEMENTS.md §8: a recorded element serializes its
-            // common props (id only when set, name nil), plus the input ids
+            // common props (id and name only when set), plus the input ids
             // and the normalized recipe ops, canonicalized so the recorded
             // element serializes byte-identically across apps.
-            commonFields(o, rec.opacity, rec.transform, rec.locked, rec.visibility, nil, rec.id)
+            commonFields(o, rec.opacity, rec.transform, rec.locked, rec.visibility, rec.name, rec.id)
             let inputs = rec.inputs.map { jsonEscapeString($0.id) }
             o.raw("inputs", jsonArray(inputs))
             let ops = rec.ops.map { canonicalRecordedOp($0) }
@@ -552,7 +555,7 @@ package func elementJson(_ elem: Element) -> String {
             // CONCEPTS.md §6: a generated element serializes its common props,
             // the concept id, and the parameter values, canonicalized so it
             // serializes byte-identically across apps.
-            commonFields(o, gen.opacity, gen.transform, gen.locked, gen.visibility, nil, gen.id)
+            commonFields(o, gen.opacity, gen.transform, gen.locked, gen.visibility, gen.name, gen.id)
             o.str("concept", gen.conceptId)
             o.raw("params", canonicalRecordedValue(gen.params))
         }
@@ -1141,7 +1144,7 @@ package func parseElement(_ v: Any?) -> Element {
             let operation = CompoundOperation(rawValue: d["operation"] as? String ?? "union") ?? .union
             let operands = (d["children"] as? [Any] ?? []).map { parseElement($0) }
             return .live(.compoundShape(CompoundShape(
-                operation: operation, operands: operands, id: id,
+                operation: operation, operands: operands, name: name, id: id,
                 opacity: opacity, transform: transform,
                 locked: locked, visibility: visibility)))
         case "reference":
@@ -1150,6 +1153,7 @@ package func parseElement(_ v: Any?) -> Element {
             // `instance_transform` key (absent ⇒ nil / null ⇒ nil).
             return .live(.reference(ReferenceElem(
                 target: target,
+                name: name,
                 id: id,
                 transform: transform,
                 instanceTransform: parseTransform(d["instance_transform"]),
@@ -1164,7 +1168,7 @@ package func parseElement(_ v: Any?) -> Element {
                 .map { ElementRef($0) }
             let ops = (d["ops"] as? [[String: Any]] ?? []).map { parseRecordedOp($0) }
             return .live(.recorded(RecordedElem(
-                ops: ops, inputs: inputs, id: id,
+                ops: ops, inputs: inputs, name: name, id: id,
                 transform: transform, opacity: opacity,
                 locked: locked, visibility: visibility)))
         case "generated":
@@ -1173,7 +1177,7 @@ package func parseElement(_ v: Any?) -> Element {
             let conceptId = d["concept"] as? String ?? ""
             let params = d["params"] as? [String: Any] ?? [:]
             return .live(.generated(GeneratedElem(
-                conceptId: conceptId, params: params, id: id,
+                conceptId: conceptId, params: params, name: name, id: id,
                 transform: transform, opacity: opacity,
                 locked: locked, visibility: visibility)))
         default:

@@ -90,12 +90,60 @@ public extension WorkspaceState {
         }
     }
 
+    /// Decode ONE session tab's blob into a canvas-ready `Document`, or `nil`
+    /// if it cannot be read. This is the fail-soft step: a corrupt tab costs
+    /// that tab, never the launch.
+    ///
+    /// It is a named function rather than an inline `try` inside
+    /// `restoreSession` so that the recovery is testable without touching the
+    /// real session directory — a test that wrote to
+    /// `~/Library/Application Support/Jas/session` would destroy the
+    /// developer's open tabs. Gate:
+    /// Tests/Canvas/SessionRestoreRecoveryTests.swift.
+    ///
+    /// Mirrors Rust's `load_session` (jas_dioxus/src/workspace/session.rs),
+    /// which logs a warning and `continue`s past a tab whose
+    /// `binary_to_document` returns `Err`. That equivalence only became real
+    /// when the Swift decoder stopped trapping: `fatalError` is not catchable,
+    /// so the `do`/`catch` this replaces was recovery that did not exist, and
+    /// one bad byte aborted the app on every cold launch.
+    static func sessionDocument(fromBlob blob: Data) -> Document? {
+        do {
+            var doc = try binaryToDocument(blob)
+            // The binary format predates the artboards feature
+            // and decodes into a doc with `artboards: []`. The
+            // canvas relies on the at-least-one-artboard
+            // invariant; without this, the restored doc shows
+            // no artboard frame. Mirrors the Rust load_session
+            // path which calls ensure_artboards_invariant.
+            let (repaired, _) = ensureArtboardsInvariant(doc.artboards)
+            if repaired.count != doc.artboards.count {
+                doc = Document(
+                    layers: doc.layers,
+                    selectedLayer: doc.selectedLayer,
+                    selection: doc.selection,
+                    artboards: repaired,
+                    artboardOptions: doc.artboardOptions,
+                    documentSetup: doc.documentSetup,
+                    printPreferences: doc.printPreferences
+                )
+            }
+            return doc
+        } catch {
+            NSLog("[session] decode failed: \(error)")
+            return nil
+        }
+    }
+
     /// Reload the session saved by `persistSession`. Returns the
     /// number of tabs restored. Best-effort: any individual tab that
-    /// fails to load is skipped (logged) so a single corrupt blob
-    /// doesn't lose the rest of the session.
+    /// fails to load is skipped (logged, and named in
+    /// ``sessionRestoreSkipped``) so a single corrupt blob doesn't lose the
+    /// rest of the session — and, since `binaryToDocument` throws rather than
+    /// trapping, doesn't abort the launch either.
     @discardableResult
     func restoreSession() -> Int {
+        sessionRestoreSkipped = []
         let dir = Self.sessionDirectory
         let indexURL = dir.appendingPathComponent("index.json")
         guard let data = try? Data(contentsOf: indexURL),
@@ -106,44 +154,30 @@ public extension WorkspaceState {
             return 0
         }
         var loaded: [CanvasEntry] = []
+        var skipped: [String] = []
         for tab in index.tabs {
             let url = dir.appendingPathComponent(tab.binFile)
             guard let blob = try? Data(contentsOf: url) else {
                 NSLog("[session] missing tab blob \(tab.binFile)")
+                skipped.append(tab.filename)
                 continue
             }
-            do {
-                var doc = try binaryToDocument(blob)
-                // The binary format predates the artboards feature
-                // and decodes into a doc with `artboards: []`. The
-                // canvas relies on the at-least-one-artboard
-                // invariant; without this, the restored doc shows
-                // no artboard frame. Mirrors the Rust load_session
-                // path which calls ensure_artboards_invariant.
-                let (repaired, _) = ensureArtboardsInvariant(doc.artboards)
-                if repaired.count != doc.artboards.count {
-                    doc = Document(
-                        layers: doc.layers,
-                        selectedLayer: doc.selectedLayer,
-                        selection: doc.selection,
-                        artboards: repaired,
-                        artboardOptions: doc.artboardOptions,
-                        documentSetup: doc.documentSetup,
-                        printPreferences: doc.printPreferences
-                    )
-                }
-                let model = Model(document: doc, filename: tab.filename)
-                // Center on the active artboard at restore time (default
-                // viewport); Model.init leaves the identity view per the
-                // cross-app convention, so the app layer centers here (mirrors
-                // WorkspaceState.addCanvas + Rust TabState). The canvas first
-                // draw re-centers with the real viewport.
-                model.centerViewOnCurrentArtboard()
-                loaded.append(CanvasEntry(model: model))
-            } catch {
-                NSLog("[session] decode \(tab.binFile) failed: \(error)")
+            guard let doc = Self.sessionDocument(fromBlob: blob) else {
+                NSLog("[session] decode \(tab.binFile) failed; skipping that tab")
+                skipped.append(tab.filename)
+                continue
             }
+            let model = Model(document: doc, filename: tab.filename)
+            // Center on the active artboard at restore time (default
+            // viewport); Model.init leaves the identity view per the
+            // cross-app convention, so the app layer centers here (mirrors
+            // WorkspaceState.addCanvas + Rust TabState). The canvas first
+            // draw re-centers with the real viewport.
+            model.centerViewOnCurrentArtboard(
+                artboardsPanelSelection: artboardsPanelSelectionIds(model))
+            loaded.append(CanvasEntry(model: model))
         }
+        sessionRestoreSkipped = skipped
         guard !loaded.isEmpty else { return 0 }
         // Advance the Untitled-N counter past any restored slot so a later
         // File > New gets a unique name — a restored Untitled-1 plus File > New

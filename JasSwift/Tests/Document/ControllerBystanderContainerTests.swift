@@ -312,7 +312,7 @@ private func overlappingRects() -> [Element] {
 }
 
 private func documentWithCompound() -> Document {
-    let cs = CompoundShape(operation: .union, operands: overlappingRects(),
+    let cs = CompoundShape(operation: .union, operands: overlappingRects(), name: nil,
                            id: "cs1")
     return fullyPopulatedDocument(children: [.live(.compoundShape(cs))],
                                   selection: [ElementSelection.all([1, 0])])

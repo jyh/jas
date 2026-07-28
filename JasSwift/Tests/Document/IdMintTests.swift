@@ -100,17 +100,17 @@ private func withCorpusIdCounter<T>(_ body: () -> T) -> T {
     let operandC = Element.line(Line(x1: 0, y1: 0, x2: 1, y2: 1))
     let compound = Element.live(.compoundShape(CompoundShape(
         operation: .union,
-        operands: [operandA, operandB, operandC],
+        operands: [operandA, operandB, operandC], name: nil,
         id: "cmp")))
 
     // The other three LiveVariant payloads own NO child elements — they name
     // their inputs by id — so each contributes exactly its own id.
     let reference = Element.live(.reference(ReferenceElem(
-        target: ElementRef("op-a"), id: "ref")))
+        target: ElementRef("op-a"), name: nil, id: "ref")))
     let recorded = Element.live(.recorded(RecordedElem(
-        ops: [], inputs: [ElementRef("op-a")], id: "rec")))
+        ops: [], inputs: [ElementRef("op-a")], name: nil, id: "rec")))
     let generated = Element.live(.generated(GeneratedElem(
-        conceptId: "concept", params: [:], id: "gen")))
+        conceptId: "concept", params: [:], name: nil, id: "gen")))
 
     let layer = Layer(name: "L",
                       children: [compound, reference, recorded, generated],

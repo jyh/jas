@@ -167,13 +167,21 @@ pub(crate) fn MenuBarView(
                     }));
                 }
                 "paste" => {
+                    // R2: plain Paste FLATTENS into the active layer.
                     clipboard_read_and_paste(
-                        app_for_menu.clone(), revision_for_menu, PASTE_OFFSET,
+                        app_for_menu.clone(), revision_for_menu, PASTE_OFFSET, false,
                     );
                 }
                 "paste_in_place" => {
                     clipboard_read_and_paste(
-                        app_for_menu.clone(), revision_for_menu, 0.0,
+                        app_for_menu.clone(), revision_for_menu, 0.0, false,
+                    );
+                }
+                // R3: the separate, explicit command. Differs from plain Paste
+                // in layer TARGETING only — same 24pt offset.
+                "paste_preserving_layers" => {
+                    clipboard_read_and_paste(
+                        app_for_menu.clone(), revision_for_menu, PASTE_OFFSET, true,
                     );
                 }
                 "select_all" => {

@@ -310,6 +310,35 @@ private func parseDefaultName(_ name: String) -> Int? {
     return Int(rest)
 }
 
+/// THE `active_document.current_artboard` rule, in one place: the topmost
+/// PANEL-SELECTED artboard, else the first (ARTBOARDS.md §Selection
+/// semantics).
+///
+/// "Topmost" is document order, not click order — the panel lists artboards in
+/// document order, and the workspace expression `active_document
+/// .current_artboard` resolves to the first row in that order carrying the
+/// selection.
+///
+/// WHY IT IS A FUNCTION. The rule was written out inline in more than one
+/// place: `ActiveDocumentView` and the Align panel's artboard reference each
+/// carried their own `first(where:) ?? first`, and other sites reached for a
+/// bare `artboards.first`, which is the same answer only while nothing is
+/// panel-selected. Both inline copies now call here. Mirrors Rust
+/// `document::artboard::current_artboard`.
+///
+/// NOT YET MECHANICALLY GATED. Nothing stops a future site writing the rule
+/// out a third time; the two known copies were found by an adversarial read,
+/// which is the same kind of evidence that let them diverge in the first
+/// place. An earlier revision of this comment claimed every other site used
+/// bare `first` — that was measurably false, and it is recorded here rather
+/// than quietly deleted.
+public func currentArtboard(_ artboards: [Artboard],
+                            selection: [String]) -> Artboard? {
+    let selected = Set(selection)
+    return artboards.first(where: { selected.contains($0.id) })
+        ?? artboards.first
+}
+
 /// Pick the next unused `Artboard N` name. Smallest N not used by
 /// any default-pattern name.
 public func nextArtboardName(_ artboards: [Artboard]) -> String {

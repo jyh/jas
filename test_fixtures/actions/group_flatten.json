@@ -1,0 +1,37 @@
+[
+  {
+    "name": "group_flatten_two_layers",
+    "setup_svg": "multi_layer.svg",
+    "selection": [[0, 0], [1, 0]],
+    "actions": [{ "action": "group", "params": {} }],
+    "expected_json": "group_flatten_two_layers_expected.json"
+  },
+  {
+    "name": "group_flatten_two_groups",
+    "setup_svg": "group_two_clusters.svg",
+    "selection": [[0, 0, 1], [0, 1, 0]],
+    "actions": [{ "action": "group", "params": {} }],
+    "expected_json": "group_flatten_two_groups_expected.json"
+  },
+  {
+    "name": "group_flatten_layer_and_nested_group",
+    "setup_svg": "group_solo_and_cluster.svg",
+    "selection": [[0, 0], [0, 1, 1]],
+    "actions": [{ "action": "group", "params": {} }],
+    "expected_json": "group_flatten_layer_and_nested_group_expected.json"
+  },
+  {
+    "name": "group_flatten_emptied_source_group_survives",
+    "setup_svg": "group_emptied_source.svg",
+    "selection": [[0, 0, 0], [0, 0, 1], [1, 0]],
+    "actions": [{ "action": "group", "params": {} }],
+    "expected_json": "group_flatten_emptied_source_group_survives_expected.json"
+  },
+  {
+    "name": "group_flatten_same_parent_noncontiguous_takes_front_slot",
+    "setup_svg": "group_three_rects.svg",
+    "selection": [[0, 0], [0, 2]],
+    "actions": [{ "action": "group", "params": {} }],
+    "expected_json": "group_flatten_same_parent_noncontiguous_takes_front_slot_expected.json"
+  }
+]

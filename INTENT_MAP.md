@@ -7,7 +7,7 @@
 ## Scope -- read this first
 
 **This map covers the ACTION seam (`dispatch_action`) ONLY**: the
-236 actions in the workspace bundle's `actions` map, plus the
+237 actions in the workspace bundle's `actions` map, plus the
 bundle's declared `native_intercepts`. It is the machine enumeration
 of which actions journal through `op_apply` (the enumeration
 OP_LOG.md's actions.yaml<->op_apply unification prose refers to).
@@ -42,11 +42,11 @@ verb list is in `intent_map.json` under
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
-| `ui-state` | 199 |
+| `ui-state` | 200 |
 | `view` | 6 |
-| **total** | **237** |
+| **total** | **238** |
 
-(The bundle's `actions` map has 236 entries; `native-intercept` entries
+(The bundle's `actions` map has 237 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
 ## Journaling actions (24)
@@ -113,7 +113,7 @@ come additively from `native_intercepts`.)
 
 - `export_to_pdf` -- declared in native_intercepts; no actions-map entry -- handled natively.
 
-## UI-state actions (199)
+## UI-state actions (200)
 
 No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
@@ -143,30 +143,30 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `open_brush_options`, `open_color_picker`, `open_document_setup`, `open_file`,
 `open_layer_options`, `open_paragraph_hyphenation`, `open_paragraph_justification`, `open_print_dialog`,
 `open_swatch_options`, `paintbrush_tool_options_confirm`, `paintbrush_tool_options_reset`, `paragraph_hyphenation_confirm`,
-`paragraph_justification_confirm`, `paste`, `paste_in_place`, `place_concept_instance`,
-`place_instance`, `promote_to_concept`, `quit`, `rearrange_artboards`,
-`redo`, `release_compound_shape`, `remove_tab`, `rename_artboard`,
-`rename_element`, `repeat_boolean_operation`, `reset_align_panel`, `reset_artboards_panel`,
-`reset_boolean_panel`, `reset_fill_stroke`, `reset_magic_wand_panel`, `reset_paragraph_panel`,
-`reset_stroke_profile`, `reset_workspace`, `restore_canvas`, `revert`,
-`revert_workspace`, `rotate_options_reset`, `save`, `save_all_and_close`,
-`save_and_close`, `save_appearance_as`, `save_appearance_confirm`, `save_as`,
-`save_brush_library`, `save_swatch_library`, `save_swatch_library_confirm`, `save_workspace_as`,
-`save_workspace_confirm`, `scale_options_reset`, `scroll_to_selected`, `select_all`,
-`select_all_unused_brushes`, `select_all_unused_swatches`, `set_active_color`, `set_active_color_none`,
-`set_align_to`, `set_arrow_align`, `set_artboard_fill_preset`, `set_artboard_reference_point`,
-`set_brush_thumbnail_size`, `set_brush_view_mode`, `set_color_panel_mode`, `set_concept_param`,
-`set_fill_none`, `set_fill_type_gradient`, `set_fill_type_solid`, `set_layers_search`,
-`set_stroke_align`, `set_stroke_cap`, `set_stroke_join`, `set_stroke_none`,
-`set_stroke_profile`, `set_swatch_thumbnail_size`, `shear_options_reset`, `show_all`,
-`show_panel`, `solo_element_visibility`, `sort_brushes_by_name`, `sort_swatches_by_name`,
-`swap_arrowheads`, `swap_fill_stroke`, `swatch_options_confirm`, `switch_appearance`,
-`switch_workspace`, `symbols_panel_select`, `tile_panes`, `toggle_artboard_chain_link`,
-`toggle_artboard_orientation`, `toggle_brush_category`, `toggle_brush_library_persistent`, `toggle_canvas_maximize`,
-`toggle_dashed_line`, `toggle_dock_collapse`, `toggle_element_lock`, `toggle_element_twirl`,
-`toggle_fill_on_top`, `toggle_hanging_punctuation`, `toggle_layers_type_filter`, `toggle_link_arrowhead_scale`,
-`toggle_pane`, `toggle_panel`, `toggle_use_preview_bounds`, `undo`,
-`ungroup`, `ungroup_all`, `unlock_all`
+`paragraph_justification_confirm`, `paste`, `paste_in_place`, `paste_preserving_layers`,
+`place_concept_instance`, `place_instance`, `promote_to_concept`, `quit`,
+`rearrange_artboards`, `redo`, `release_compound_shape`, `remove_tab`,
+`rename_artboard`, `rename_element`, `repeat_boolean_operation`, `reset_align_panel`,
+`reset_artboards_panel`, `reset_boolean_panel`, `reset_fill_stroke`, `reset_magic_wand_panel`,
+`reset_paragraph_panel`, `reset_stroke_profile`, `reset_workspace`, `restore_canvas`,
+`revert`, `revert_workspace`, `rotate_options_reset`, `save`,
+`save_all_and_close`, `save_and_close`, `save_appearance_as`, `save_appearance_confirm`,
+`save_as`, `save_brush_library`, `save_swatch_library`, `save_swatch_library_confirm`,
+`save_workspace_as`, `save_workspace_confirm`, `scale_options_reset`, `scroll_to_selected`,
+`select_all`, `select_all_unused_brushes`, `select_all_unused_swatches`, `set_active_color`,
+`set_active_color_none`, `set_align_to`, `set_arrow_align`, `set_artboard_fill_preset`,
+`set_artboard_reference_point`, `set_brush_thumbnail_size`, `set_brush_view_mode`, `set_color_panel_mode`,
+`set_concept_param`, `set_fill_none`, `set_fill_type_gradient`, `set_fill_type_solid`,
+`set_layers_search`, `set_stroke_align`, `set_stroke_cap`, `set_stroke_join`,
+`set_stroke_none`, `set_stroke_profile`, `set_swatch_thumbnail_size`, `shear_options_reset`,
+`show_all`, `show_panel`, `solo_element_visibility`, `sort_brushes_by_name`,
+`sort_swatches_by_name`, `swap_arrowheads`, `swap_fill_stroke`, `swatch_options_confirm`,
+`switch_appearance`, `switch_workspace`, `symbols_panel_select`, `tile_panes`,
+`toggle_artboard_chain_link`, `toggle_artboard_orientation`, `toggle_brush_category`, `toggle_brush_library_persistent`,
+`toggle_canvas_maximize`, `toggle_dashed_line`, `toggle_dock_collapse`, `toggle_element_lock`,
+`toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`, `toggle_layers_type_filter`,
+`toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`, `toggle_use_preview_bounds`,
+`undo`, `ungroup`, `ungroup_all`, `unlock_all`
 
 ## Verb -> journaling evidence table
 

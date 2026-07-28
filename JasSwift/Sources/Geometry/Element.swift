@@ -1302,8 +1302,11 @@ public enum Element: Equatable {
     /// The element's user-visible name (`common.name`), or nil when unnamed.
     /// Used by the Symbols panel to label a master row, with a positional
     /// "Symbol N" fallback computed by the view-builder when this is nil.
-    /// Mirrors how Rust reads `common().name`. Live elements (compound /
-    /// reference) carry no name slot, so they return nil here.
+    /// Mirrors how Rust reads `common().name` — for EVERY kind, live ones
+    /// included: each live conformer carries its name inline, exactly as it
+    /// carries its id (see ``LiveVariant/name``). This arm used to return a
+    /// hard `nil`, which is why the Layers panel could not label a compound
+    /// shape the artist had named.
     public var name: String? {
         switch self {
         case .line(let v): return v.name
@@ -1317,8 +1320,31 @@ public enum Element: Equatable {
         case .textPath(let v): return v.name
         case .group(let v): return v.name
         case .layer(let v): return v.name
-        // Live elements carry no name slot (see LiveElement.swift).
-        case .live: return nil
+        // Live elements carry their name inline on each conformer, like
+        // their id (see LiveElement.swift).
+        case .live(let v): return v.name
+        }
+    }
+
+    /// Return a copy of this element with its `name` replaced (pass `nil` to
+    /// clear). The twin of ``withId(_:)``; `.live` stamps its name inline on
+    /// the conformer, so a rename reaches a compound / reference / recorded /
+    /// generated element like any other. Mirrors the reference
+    /// implementation's `common_mut().name = ...`.
+    public func withName(_ name: String?) -> Element {
+        switch self {
+        case .line(var v): v.name = name; return .line(v)
+        case .rect(var v): v.name = name; return .rect(v)
+        case .circle(var v): v.name = name; return .circle(v)
+        case .ellipse(var v): v.name = name; return .ellipse(v)
+        case .polyline(var v): v.name = name; return .polyline(v)
+        case .polygon(var v): v.name = name; return .polygon(v)
+        case .path(var v): v.name = name; return .path(v)
+        case .text(var v): v.name = name; return .text(v)
+        case .textPath(var v): v.name = name; return .textPath(v)
+        case .group(var v): v.name = name; return .group(v)
+        case .layer(var v): v.name = name; return .layer(v)
+        case .live(let v): return .live(v.withName(name))
         }
     }
 

@@ -114,7 +114,11 @@ impl TabState {
         // AppState::sync_viewport_dimensions re-runs centering with
         // the actual canvas size. Per ZOOM_TOOL.md §Document-open
         // behavior.
-        model.center_view_on_current_artboard();
+        //
+        // Empty panel selection, and that is the CORRECT answer rather than a
+        // stand-in: a tab being constructed has no Artboards-panel selection
+        // yet, so `current_artboard` is the first board by its own rule.
+        model.center_view_on_current_artboard(&[]);
         Self {
             model,
             tools,
@@ -2163,6 +2167,10 @@ impl AppState {
         let cw = canvas.client_width() as f64;
         let ch = canvas.client_height() as f64;
         if cw <= 0.0 || ch <= 0.0 { return; }
+        // Cloned before the &mut borrow of self.tabs. Centring resolves
+        // `active_document.current_artboard`, so it needs the Artboards
+        // panel's selection, which lives here on AppState.
+        let panel_selection = self.artboards_panel_selection.clone();
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             let was_default = (tab.model.viewport_w - 888.0).abs() < 0.5
                 && (tab.model.viewport_h - 900.0).abs() < 0.5;
@@ -2173,7 +2181,7 @@ impl AppState {
             // size now that we know it. Per ZOOM_TOOL.md
             // §Document-open behavior.
             if was_default {
-                tab.model.center_view_on_current_artboard();
+                tab.model.center_view_on_current_artboard(&panel_selection);
             }
         }
     }
@@ -2784,16 +2792,10 @@ impl AppState {
                 // at-least-one invariant guarantees artboards[0]
                 // exists; if it somehow doesn't, fall back to the
                 // selection union so the op still moves elements.
-                let selected_set: std::collections::HashSet<&str> = self
-                    .artboards_panel_selection
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect();
-                let current_ab = doc
-                    .artboards
-                    .iter()
-                    .find(|a| selected_set.contains(a.id.as_str()))
-                    .or_else(|| doc.artboards.first());
+                let current_ab = crate::document::artboard::current_artboard(
+                    &doc.artboards,
+                    &self.artboards_panel_selection,
+                );
                 if let Some(ab) = current_ab {
                     aa::AlignReference::Artboard((ab.x, ab.y, ab.width, ab.height))
                 } else {

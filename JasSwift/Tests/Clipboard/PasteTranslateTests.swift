@@ -32,7 +32,7 @@ import Foundation
     @Test func pasteTranslateOffsetsACompoundShapesOperands() {
         let cs = CompoundShape(operation: .union,
                                operands: [richRect(0, 0, "port", "op-back"),
-                                          richRect(5, 0, "starboard", "op-front")],
+                                          richRect(5, 0, "starboard", "op-front")], name: nil,
                                id: "cs-1", opacity: 0.25, transform: nil,
                                locked: false, visibility: .outline,
                                blendMode: .multiply)
@@ -95,7 +95,7 @@ import Foundation
     @Test func pasteInPlaceMovesNothing() {
         let cs = CompoundShape(operation: .union,
                                operands: [richRect(0, 0, "port", "op-back"),
-                                          richRect(5, 0, "starboard", "op-front")],
+                                          richRect(5, 0, "starboard", "op-front")], name: nil,
                                id: "cs-1")
         let same = EditClipboard.translateElement(.live(.compoundShape(cs)), dx: 0, dy: 0)
         guard case .live(.compoundShape(let out)) = same,

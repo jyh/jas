@@ -189,10 +189,16 @@ fn id_attr(id: &Option<String>) -> String {
 /// sub-helper emits nothing for an unset value, so id-/transform-less elements
 /// stay byte-identical to the pre-helper output and the fixtures remain green.
 ///
-/// `name` is intentionally excluded: across all apps the text family and live
-/// elements never emit an `inkscape:label`. The shape writers (line/rect/…) do
-/// emit `name`, but they already inline the full id+name tail correctly and
-/// were never the omission site, so they keep their per-arm calls.
+/// `name` is excluded, and as of 2026-07-27 the only remaining callers are the
+/// TEXT FAMILY (Text / TextPath). That omission is a BANKED GAP, not a rule: a
+/// `<text>` the artist has named exports with no `inkscape:label` and comes
+/// back unnamed, in BOTH active ports (JasSwift's SVG writer calls `nameAttr`
+/// at exactly nine arms — the seven shapes plus group and layer — and text is
+/// not among them). Symmetric, so no port-vs-port gate can see it; see the
+/// `svg-text-family-drops-inkscape-label` row in scripts/corpus_manifest.json.
+///
+/// The LIVE arms used to route through here too, which is why a named compound
+/// survived a save/load in neither port. They now use [`common_attrs`].
 fn common_attrs_no_name(c: &CommonProps) -> String {
     format!(
         "{}{}{}",
@@ -200,6 +206,16 @@ fn common_attrs_no_name(c: &CommonProps) -> String {
         transform_attr(&c.transform),
         id_attr(&c.id),
     )
+}
+
+/// [`common_attrs_no_name`] plus the `inkscape:label` name, for the LIVE
+/// element arms. ANY ELEMENT CARRIES A NAME; a compound / reference /
+/// recorded / generated element is no exception, and this port's SVG READER
+/// already lifted the label into `common.name` generically — only the writer
+/// dropped it. `name_attr` emits nothing for `None`, so an unnamed live
+/// element serializes byte-identically to before and no existing golden moves.
+fn common_attrs(c: &CommonProps) -> String {
+    format!("{}{}", common_attrs_no_name(c), name_attr(&c.name))
 }
 
 fn path_data(commands: &[PathCommand]) -> String {
@@ -559,7 +575,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                     "{}<g data-jas-live=\"compound_shape\" data-jas-operation=\"{}\"{}>",
                     indent,
                     op,
-                    common_attrs_no_name(&cs.common),
+                    common_attrs(&cs.common),
                 )];
                 let child_indent = format!("{}  ", indent);
                 for child in &cs.operands {
@@ -590,7 +606,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                     "{}<use href=\"#{}\"{}{}/>",
                     indent,
                     escape_xml(&r.target.0),
-                    common_attrs_no_name(&r.common),
+                    common_attrs(&r.common),
                     inst_xform,
                 )
             }
@@ -604,7 +620,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                     "{}<g data-jas-live=\"recorded\" data-jas-inputs=\"{}\"{}></g>",
                     indent,
                     escape_xml(&inputs),
-                    common_attrs_no_name(&rec.common),
+                    common_attrs(&rec.common),
                 )
             }
             crate::geometry::live::LiveVariant::Generated(ge) => {
@@ -617,7 +633,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                     indent,
                     escape_xml(&ge.concept_id),
                     escape_xml(&params),
-                    common_attrs_no_name(&ge.common),
+                    common_attrs(&ge.common),
                 )
             }
         },

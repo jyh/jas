@@ -105,6 +105,18 @@ mod tests {
             // (the `instance_transform` key) round-trips through test_json
             // distinct from common.transform (SYMBOLS.md §4 / Fork F2).
             "reference_instance_transform",
+            // CONCEPTS.md 3b: a Generated concept-instance (concept id +
+            // params). JasSwift's jsonRoundtripAllExpected called this "the
+            // cross-language pin for the generated kind" while Rust's list
+            // did not carry it at all — a ONE-SIDED pin wearing a
+            // cross-language label. Registered here so the claim is true.
+            "generated_polygon",
+            // ANY ELEMENT CARRIES A NAME, live kinds included (the name maps
+            // to SVG inkscape:label). live_named names the compound AND the
+            // reference AND both operands; live_named_recipe names the
+            // recorded and the generated kinds, which have no SVG read path
+            // and so can only be reached through the JSON/binary lanes.
+            "live_named", "live_named_recipe",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -148,6 +160,10 @@ mod tests {
             // round-trips through binary distinct from common.transform
             // (SYMBOLS.md §4 / Fork F2).
             "reference_instance_transform",
+            // A live element's `name` rides the generic common block at
+            // TAG_LIVE slot 5 like every other element's. Both fixtures name
+            // their live elements, so a codec that packed nil there reds.
+            "live_named", "live_named_recipe",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -267,10 +283,24 @@ mod tests {
             // data-jas-instance-transform on the <use> and round-trips through
             // SVG distinct from common.transform.
             "reference_instance_transform",
+            // A NAMED compound and a NAMED <use> reference survive the SVG
+            // boundary: the name maps to inkscape:label, which the reader
+            // already lifted into common.name generically while the live
+            // writer arms routed through a name-less attribute tail.
+            "live_named",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
         }
+    }
+
+    /// The SVG READ side of the live-element name, pinned against the shared
+    /// golden rather than only against itself: `<g data-jas-live=...
+    /// inkscape:label="hull">` and `<use ... inkscape:label="eye"/>` import
+    /// with those names, and so do the two named operands.
+    #[test]
+    fn svg_parse_live_named() {
+        assert_svg_parse("live_named");
     }
 
     #[test]
@@ -874,7 +904,8 @@ mod tests {
                          "operations/transform_copy.json",
                          "operations/id_primary_move.json",
                          "operations/id_primary_copy.json",
-                         "operations/boolean_collapse_default.json"] {
+                         "operations/boolean_collapse_default.json",
+                         "operations/paste_layers.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -1315,6 +1346,17 @@ mod tests {
         // via `expected_view` — a fact NO document golden can see, because
         // view state is not document content.
         "view_state.json",
+        // LAYERSTRUCT R1 (transcripts/LAYER_STRUCTURE.md §3): group always
+        // flattens. Before R1 a selection whose members did not share one
+        // parent was a silent no-op in BOTH ports, and NO fixture anywhere
+        // grouped across parents — so the defect and then the ruling arrived
+        // unwatched. These cases cross two layers, two sibling groups, a
+        // layer and a nested group, and pin the frontmost z-slot placement
+        // that `actions.yaml` §group always specified but neither port
+        // implemented. The contiguous same-parent case stays pinned by
+        // `menu_group_two_rects` in menu_object_ops.json, which R1 must leave
+        // byte-identical.
+        "group_flatten.json",
     ];
 
     /// Run an action fixture and return the resulting `AppState`.
@@ -3298,6 +3340,26 @@ mod tests {
     #[test]
     fn operation_boolean_collapse_default() {
         run_operation_fixture("operations/boolean_collapse_default.json");
+    }
+
+    /// PASTE AND LAYER STRUCTURE (LAYER_STRUCTURE.md R2/R3, ratified
+    /// 2026-07-28). The family that did not exist: §5 records that `op_apply`
+    /// had no `paste` verb in either port, so NO fixture could reach ANY paste
+    /// behaviour and both rulings would have landed unwatched.
+    ///
+    /// It pins R2 and R3 over the SAME input rather than describing the
+    /// difference: `paste_one_name_match_still_flattens_into_active` and
+    /// `paste_preserving_one_name_match_appends_and_creates` paste one fragment
+    /// (one layer name matching the document, one not) under each command. The
+    /// first must land BOTH children in the active layer — that is R2 deleting
+    /// Swift's name-matching from the default path — and the second must append
+    /// into the matching layer and CREATE the missing one.
+    ///
+    /// The paste `svg` is VALUE-IN-OP, so the checkpoint_equivalence gate
+    /// replays every case from the op's own params.
+    #[test]
+    fn operation_paste_layers() {
+        run_operation_fixture("operations/paste_layers.json");
     }
 
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*

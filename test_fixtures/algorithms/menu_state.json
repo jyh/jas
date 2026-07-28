@@ -179,7 +179,16 @@
       {
         "path": [
           1,
-          8
+          7
+        ],
+        "action": "paste_preserving_layers",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          9
         ],
         "action": "select_all",
         "enabled": false,
@@ -713,7 +722,16 @@
       {
         "path": [
           1,
-          8
+          7
+        ],
+        "action": "paste_preserving_layers",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          9
         ],
         "action": "select_all",
         "enabled": true,
@@ -1247,7 +1265,16 @@
       {
         "path": [
           1,
-          8
+          7
+        ],
+        "action": "paste_preserving_layers",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          9
         ],
         "action": "select_all",
         "enabled": true,
@@ -1781,7 +1808,16 @@
       {
         "path": [
           1,
-          8
+          7
+        ],
+        "action": "paste_preserving_layers",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          9
         ],
         "action": "select_all",
         "enabled": true,

@@ -572,6 +572,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "paste_preserving_layers": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "place_concept_instance": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1141,7 +1145,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 199,
+      "ui-state": 200,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1195,7 +1199,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 236,
+    "total_actions": 237,
     "verb_table": {
       "always": [
         "doc.copy_selection",

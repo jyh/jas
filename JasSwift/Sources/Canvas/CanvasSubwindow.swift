@@ -1220,7 +1220,9 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         } ?? .identity
         let localToDoc = own.concatenating(ctx.ctm).concatenating(_cullDocToDeviceInv)
         let strokeW = inElem.stroke?.width ?? 0
-        let margin = CGFloat(64.0 + strokeW * 4.0)
+        // A dirty-rect bleed margin in device px; its collision with
+        // max_zoom's current value is a coincidence.
+        let margin = CGFloat(64.0 + strokeW * 4.0) // not-a-viewport-pref
         if !CanvasCull.mayDraw(bounds: inElem.bounds, localToDoc: localToDoc,
                                dirtyDoc: dirty, margin: margin) {
             return
@@ -3029,7 +3031,8 @@ class CanvasNSView: NSView {
                 if model.viewportW != cw { model.viewportW = cw }
                 if model.viewportH != ch { model.viewportH = ch }
                 if wasDefault {
-                    model.centerViewOnCurrentArtboard()
+                    model.centerViewOnCurrentArtboard(
+                        artboardsPanelSelection: artboardsPanelSelectionIds(model))
                 }
             }
         }

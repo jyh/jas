@@ -2,7 +2,7 @@
   {
     "name": "paste_compound_shape_offsets_its_operands",
     "function": "paste_translate",
-    "_comment": "THE DIVERGENCE. Pasting a live COMPOUND SHAPE applied the 24pt offset in Rust and NOT in Swift: Swift's paste helper sent everything that was not a group or a layer to `moveControlPoints`, whose compound arm is a no-op, so the pasted compound landed exactly on top of its source -- invisible, which is the one outcome the offset exists to prevent (workspace/actions.yaml \u00a7paste: 'offset 24 points down and to the right', against paste_in_place's explicit 'no offset'). The operands carry ids and names so the vector also pins that a translation speaks to POSITION only.",
+    "_comment": "THE DIVERGENCE. Pasting a live COMPOUND SHAPE applied the 24pt offset in Rust and NOT in Swift: Swift's paste helper sent everything that was not a group or a layer to `moveControlPoints`, whose compound arm is a no-op, so the pasted compound landed exactly on top of its source -- invisible, which is the one outcome the offset exists to prevent (workspace/actions.yaml §paste: 'offset 24 points down and to the right', against paste_in_place's explicit 'no offset'). The operands carry ids and names so the vector also pins that a translation speaks to POSITION only. THE COMPOUND ITSELF is named too, which it was not when this family landed: Swift's live conformers had no `name` property at all, so a named live element could not be expressed here without the vector reddening for a reason unrelated to its subject. That is fixed, and the name is now part of what a paste must carry.",
     "element": {
       "type": "live",
       "kind": "compound_shape",
@@ -65,11 +65,12 @@
       "transform": null,
       "locked": false,
       "visibility": "outline",
+      "name": "hull",
       "id": "cs-1"
     },
     "dx": 24.0,
     "dy": 24.0,
-    "expected": "{\"layers\":[{\"children\":[{\"children\":[{\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"},\"opacity\":1.0},\"height\":10.0,\"id\":\"op-back\",\"locked\":false,\"name\":\"port\",\"opacity\":0.5,\"rx\":0.0,\"ry\":0.0,\"stroke\":null,\"transform\":null,\"type\":\"rect\",\"visibility\":\"outline\",\"width\":10.0,\"x\":24.0,\"y\":24.0},{\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"},\"opacity\":1.0},\"height\":10.0,\"id\":\"op-front\",\"locked\":false,\"name\":\"starboard\",\"opacity\":0.5,\"rx\":0.0,\"ry\":0.0,\"stroke\":null,\"transform\":null,\"type\":\"rect\",\"visibility\":\"outline\",\"width\":10.0,\"x\":29.0,\"y\":24.0}],\"id\":\"cs-1\",\"kind\":\"compound_shape\",\"locked\":false,\"name\":null,\"opacity\":0.25,\"operation\":\"union\",\"transform\":null,\"type\":\"live\",\"visibility\":\"outline\"}],\"locked\":false,\"name\":\"L0\",\"opacity\":1.0,\"transform\":null,\"type\":\"layer\",\"visibility\":\"preview\"}],\"selected_layer\":0,\"selection\":[]}"
+    "expected": "{\"layers\":[{\"children\":[{\"children\":[{\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"},\"opacity\":1.0},\"height\":10.0,\"id\":\"op-back\",\"locked\":false,\"name\":\"port\",\"opacity\":0.5,\"rx\":0.0,\"ry\":0.0,\"stroke\":null,\"transform\":null,\"type\":\"rect\",\"visibility\":\"outline\",\"width\":10.0,\"x\":24.0,\"y\":24.0},{\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"},\"opacity\":1.0},\"height\":10.0,\"id\":\"op-front\",\"locked\":false,\"name\":\"starboard\",\"opacity\":0.5,\"rx\":0.0,\"ry\":0.0,\"stroke\":null,\"transform\":null,\"type\":\"rect\",\"visibility\":\"outline\",\"width\":10.0,\"x\":29.0,\"y\":24.0}],\"id\":\"cs-1\",\"kind\":\"compound_shape\",\"locked\":false,\"name\":\"hull\",\"opacity\":0.25,\"operation\":\"union\",\"transform\":null,\"type\":\"live\",\"visibility\":\"outline\"}],\"locked\":false,\"name\":\"L0\",\"opacity\":1.0,\"transform\":null,\"type\":\"layer\",\"visibility\":\"preview\"}],\"selected_layer\":0,\"selection\":[]}"
   },
   {
     "name": "paste_named_group_keeps_its_name_and_moves_its_child",
@@ -119,7 +120,7 @@
   {
     "name": "paste_in_place_moves_nothing",
     "function": "paste_translate",
-    "_comment": "The CONTROL, and the boundary the ruling needs: `paste_in_place` is specified as 'no offset', so dx = dy = 0 must leave the element exactly where it was, ids and names included. Green in both ports before and after -- it is here so a fix cannot 'apply the offset' by adding one unconditionally.",
+    "_comment": "The CONTROL, and the boundary the ruling needs: `paste_in_place` is specified as 'no offset', so dx = dy = 0 must leave the element exactly where it was, ids and names included -- the compound's OWN name among them. Green in both ports before and after -- it is here so a fix cannot 'apply the offset' by adding one unconditionally.",
     "element": {
       "type": "live",
       "kind": "compound_shape",
@@ -182,10 +183,46 @@
       "transform": null,
       "locked": false,
       "visibility": "outline",
+      "name": "hull",
       "id": "cs-1"
     },
     "dx": 0.0,
     "dy": 0.0,
-    "expected": "{\"layers\":[{\"children\":[{\"children\":[{\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"},\"opacity\":1.0},\"height\":10.0,\"id\":\"op-back\",\"locked\":false,\"name\":\"port\",\"opacity\":0.5,\"rx\":0.0,\"ry\":0.0,\"stroke\":null,\"transform\":null,\"type\":\"rect\",\"visibility\":\"outline\",\"width\":10.0,\"x\":0.0,\"y\":0.0},{\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"},\"opacity\":1.0},\"height\":10.0,\"id\":\"op-front\",\"locked\":false,\"name\":\"starboard\",\"opacity\":0.5,\"rx\":0.0,\"ry\":0.0,\"stroke\":null,\"transform\":null,\"type\":\"rect\",\"visibility\":\"outline\",\"width\":10.0,\"x\":5.0,\"y\":0.0}],\"id\":\"cs-1\",\"kind\":\"compound_shape\",\"locked\":false,\"name\":null,\"opacity\":0.25,\"operation\":\"union\",\"transform\":null,\"type\":\"live\",\"visibility\":\"outline\"}],\"locked\":false,\"name\":\"L0\",\"opacity\":1.0,\"transform\":null,\"type\":\"layer\",\"visibility\":\"preview\"}],\"selected_layer\":0,\"selection\":[]}"
+    "expected": "{\"layers\":[{\"children\":[{\"children\":[{\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"},\"opacity\":1.0},\"height\":10.0,\"id\":\"op-back\",\"locked\":false,\"name\":\"port\",\"opacity\":0.5,\"rx\":0.0,\"ry\":0.0,\"stroke\":null,\"transform\":null,\"type\":\"rect\",\"visibility\":\"outline\",\"width\":10.0,\"x\":0.0,\"y\":0.0},{\"fill\":{\"color\":{\"a\":1.0,\"b\":0.0,\"g\":0.0,\"r\":1.0,\"space\":\"rgb\"},\"opacity\":1.0},\"height\":10.0,\"id\":\"op-front\",\"locked\":false,\"name\":\"starboard\",\"opacity\":0.5,\"rx\":0.0,\"ry\":0.0,\"stroke\":null,\"transform\":null,\"type\":\"rect\",\"visibility\":\"outline\",\"width\":10.0,\"x\":5.0,\"y\":0.0}],\"id\":\"cs-1\",\"kind\":\"compound_shape\",\"locked\":false,\"name\":\"hull\",\"opacity\":0.25,\"operation\":\"union\",\"transform\":null,\"type\":\"live\",\"visibility\":\"outline\"}],\"locked\":false,\"name\":\"L0\",\"opacity\":1.0,\"transform\":null,\"type\":\"layer\",\"visibility\":\"preview\"}],\"selected_layer\":0,\"selection\":[]}"
+  },
+  {
+    "name": "paste_path_offsets_every_command",
+    "function": "paste_translate",
+    "_comment": "A PATH element, added so the S-4 relational pass has something to probe here: paste_translate's other three vectors carry a compound shape, a group and a rect, so the fixture contained no path-command list at all and the one registered algorithm that TRANSFORMS a path rather than consuming it was unprobed. The golden is hand-derived -- every coordinate is the input's plus 24, and every other field (name, fill, opacity, visibility) is unchanged, which is the whole claim: a paste speaks to POSITION and preserves the rest. The relational pass reads this vector under LEADING_CLOSE_PATH_OUTPUT: a leading ClosePath must be FORWARDED into the result, not dropped, because dropping it would be a transform guessing at what it was asked to preserve.",
+    "element": {
+      "type": "path",
+      "d": [
+        {
+          "cmd": "M",
+          "x": 3.0,
+          "y": 2.0
+        },
+        {
+          "cmd": "L",
+          "x": 13.0,
+          "y": 2.0
+        },
+        {
+          "cmd": "L",
+          "x": 13.0,
+          "y": 9.0
+        }
+      ],
+      "fill": null,
+      "stroke": null,
+      "opacity": 1.0,
+      "transform": null,
+      "locked": false,
+      "visibility": "preview",
+      "name": "the ribbon"
+    },
+    "dx": 24.0,
+    "dy": 24.0,
+    "expected": "{\"layers\":[{\"children\":[{\"d\":[{\"cmd\":\"M\",\"x\":27.0,\"y\":26.0},{\"cmd\":\"L\",\"x\":37.0,\"y\":26.0},{\"cmd\":\"L\",\"x\":37.0,\"y\":33.0}],\"fill\":null,\"locked\":false,\"name\":\"the ribbon\",\"opacity\":1.0,\"stroke\":null,\"transform\":null,\"type\":\"path\",\"visibility\":\"preview\"}],\"locked\":false,\"name\":\"L0\",\"opacity\":1.0,\"transform\":null,\"type\":\"layer\",\"visibility\":\"preview\"}],\"selected_layer\":0,\"selection\":[]}"
   }
 ]

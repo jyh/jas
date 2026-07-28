@@ -6,12 +6,30 @@
 /// Flags bits 0-1: compression method (0=none, 1=raw deflate).
 /// Payload: MessagePack-encoded document using positional arrays.
 ///
-/// Scope: this module is consumed only by cross-language fixture tests
-/// (Tests/CrossLanguageTests.swift). The real save path uses
-/// documentToSvg/svgToDocument; binary disk persistence is deferred
-/// (Sources/Document/Model.swift documents this as Phase 1). The
-/// fatalError sites below are appropriate for fixture parsing where
-/// corrupt input is a test bug, not a runtime concern.
+/// Scope: this module is on the SHIPPING LAUNCH PATH, not just in tests.
+/// `Canvas/Session.swift` writes `documentToBinary` output to
+/// `~/Library/Application Support/Jas/session/tabN.jasbin` on quit and reads
+/// it back with `binaryToDocument`, and `App/JasApp.swift` calls
+/// `restoreSession()` whenever the workspace is empty — i.e. on every cold
+/// launch. (An earlier version of this comment claimed the module was
+/// "consumed only by cross-language fixture tests ... corrupt input is a test
+/// bug, not a runtime concern". That was false as shipped, and the
+/// `fatalError` decode path it licensed meant one bad byte on disk aborted
+/// the application at launch, every launch, uncatchably.)
+///
+/// Therefore: the DECODE path returns errors, never traps. Every read of a
+/// wire value goes through a throwing helper (`asInt`/`asF64`/`asBool`/
+/// `asStr`/`asArray`) or a deliberately tolerant one (`unpackFillRule`,
+/// `blendModeFromTag`, `tolerantOptStr`, `unpackMask`), and every positional
+/// read goes through the bounds-checked `at`. This mirrors jas_dioxus, whose
+/// standing contract `malformed_but_decodable_blob_errors_not_panics` says
+/// the same thing for the same reason (on wasm a panic aborts the module and
+/// `save_session` reads from localStorage on every startup). The whole-decoder
+/// gate is Tests/Geometry/BinaryMalformedBlobTests.swift.
+///
+/// The ENCODE path still uses `fatalError` in two places, deliberately: both
+/// are programmer-error invariants over data this process just built, not
+/// statements about untrusted input. They are marked at their sites.
 
 import Foundation
 import zlib
@@ -47,6 +65,16 @@ private let tagGroup: Int = 10
 // Live elements (REFERENCE_GRAPH.md Phase 2b): one tag for every
 // LiveElement kind, disambiguated by a kind string at index 7.
 private let tagLive: Int = 11
+
+/// Every tag `unpackElement` knows how to read. Checked before ANY positional
+/// read, so an unknown tag from a corrupt file is an error rather than a
+/// bounds-checked walk through slots that mean nothing. Adding a tag means
+/// adding it here, to `tagBaseArity`, and to `unpackElement`'s switch — the
+/// last of which then errors rather than trapping if the other two are missed.
+private let knownTags: Set<Int> = [
+    tagLayer, tagLine, tagRect, tagCircle, tagEllipse, tagPolyline,
+    tagPolygon, tagPath, tagText, tagTextPath, tagGroup, tagLive,
+]
 
 // Fill-rule tags. TAG_PATH slot 11 (see packElement / unpackElement).
 // Trailing-append, like widthPoints (slot 10) before it: a blob written
@@ -109,8 +137,11 @@ private func tagBaseArity(_ tag: Int) -> Int {
     case tagText: return 20
     case tagTextPath: return 18
     case tagLive: return 10
-    // An unknown tag never reaches here: `unpackElement` rejects it before
-    // the extension is read, and `packElement` is exhaustive.
+    // An unknown tag never reaches here: `unpackElement` rejects it against
+    // `knownTags` before the extension is read, and `packElement` is
+    // exhaustive. (That rejection is now actually written; before it was, this
+    // comment described an intention and an unknown tag DID reach here, with
+    // base 0 pointing the extension block at the tag slot.)
     default: return 0
     }
 }
@@ -290,11 +321,30 @@ private func encodeValue(_ v: MsgValue, to buf: inout [UInt8]) {
 
 // MARK: - MessagePack Decoder
 
+/// Maximum msgpack nesting depth. Identical to `rmpv::decode::MAX_DEPTH`, so
+/// the two active ports accept and reject exactly the same blobs.
+///
+/// Without a ceiling, `readValue` recurses once per nested array and a payload
+/// of repeated `0x91` bytes overflows the stack — a SIGSEGV, which no `catch`
+/// can see and which `Session.swift` meets on every cold launch. Measured: an
+/// unbounded reader died at 2,000 levels in a debug test process. Real
+/// documents nest a couple of msgpack levels per group, so this ceiling is
+/// orders of magnitude above any art (gated by
+/// `aDeeplyNestedRealDocumentStillRoundTrips`).
+private let maxMsgpackDepth = 1024
+
 private struct MsgReader {
     let data: [UInt8]
     var pos: Int = 0
+    /// Remaining nesting budget; decremented on entry to every nested read.
+    var depth: Int = maxMsgpackDepth
 
     mutating func readValue() throws -> MsgValue {
+        guard depth > 0 else {
+            throw BinaryError.invalidData("msgpack nesting deeper than \(maxMsgpackDepth)")
+        }
+        depth -= 1
+        defer { depth += 1 }
         guard pos < data.count else { throw BinaryError.truncated }
         let byte = data[pos]; pos += 1
 
@@ -322,7 +372,14 @@ private struct MsgReader {
         case 0xcc: return .int(Int(try readUInt8()))
         case 0xcd: return .int(Int(try readUInt16()))
         case 0xce: return .int(Int(try readUInt32()))
-        case 0xcf: return .int(Int(try readUInt64()))
+        // uint64 above Int.max: WRAP, do not trap. `Int(_:)` is a precondition
+        // failure here ("Not enough bits to represent the passed value"), and
+        // this tag needs no hostile author — any port that writes a large
+        // unsigned value produces it. Rust's rmpv keeps the u64 and `as_i64`
+        // converts with `as`, which wraps; `Int(bitPattern:)` is that same
+        // reinterpretation. A wrapped value is then rejected by whatever slot
+        // it lands in, as an error.
+        case 0xcf: return .int(Int(bitPattern: UInt(try readUInt64())))
 
         // signed ints
         case 0xd0: return .int(Int(Int8(bitPattern: try readUInt8())))
@@ -384,6 +441,18 @@ private struct MsgReader {
     }
 
     private mutating func readArray(_ count: Int) throws -> [MsgValue] {
+        // Validate the length prefix against the input BEFORE allocating.
+        // `count` comes straight off the wire — a `0xdd` prefix carries up to
+        // 2^32-1 — and `reserveCapacity` used to run on it unchecked, so an
+        // 8-byte file could ask for tens of gigabytes. Every msgpack value
+        // costs at least one byte, so an array of N elements needs at least N
+        // bytes of remaining input; anything above that is unsatisfiable and
+        // can never reject a well-formed blob.
+        let remaining = data.count - pos
+        guard count >= 0, count <= remaining else {
+            throw BinaryError.invalidData(
+                "array length \(count) exceeds \(remaining) remaining bytes")
+        }
         var arr = [MsgValue]()
         arr.reserveCapacity(count)
         for _ in 0..<count { arr.append(try readValue()) }
@@ -398,6 +467,12 @@ private func deflateCompress(_ input: [UInt8]) -> [UInt8] {
     // wbits=-15 for raw deflate (no zlib/gzip header)
     guard deflateInit2_(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15, 8,
                         Z_DEFAULT_STRATEGY, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK else {
+        // ENCODE path, deliberately fatal. The arguments are compile-time
+        // constants, so the only ways this fails are a zlib version mismatch
+        // or an allocation failure — neither is data-dependent and neither is
+        // recoverable by a caller. `documentToBinary` is non-throwing on
+        // purpose (a session SAVE that silently produced no bytes would be
+        // worse than a crash). Nothing here reads untrusted input.
         fatalError("deflateInit2_ failed")
     }
     defer { deflateEnd(&stream) }
@@ -420,6 +495,22 @@ private func deflateCompress(_ input: [UInt8]) -> [UInt8] {
 }
 
 private func deflateDecompress(_ input: [UInt8]) throws -> [UInt8] {
+    // DECODE path: every exit below is an error, never a trap.
+    //
+    // An empty payload is a real on-disk case (a file truncated to its 8-byte
+    // header with the deflate flag set) and it is handled here rather than
+    // inside the buffer dance: with `input.count == 0` the output buffer is
+    // also zero-length, and `baseAddress` of an empty buffer is documented as
+    // possibly-nil — `baseAddress!` would then trap. It is measured non-nil on
+    // the current toolchain, so this is a guard against a documented
+    // implementation freedom, not against a live crash.
+    guard !input.isEmpty else { throw BinaryError.decompressFailed }
+    // zlib takes lengths as UInt32. A payload at or above 4 GiB cannot be fed
+    // to it; reject rather than let the conversion trap.
+    guard input.count <= Int(UInt32.max) else {
+        throw BinaryError.invalidData("compressed payload too large: \(input.count) bytes")
+    }
+
     var stream = z_stream()
     // wbits=-15 for raw deflate
     guard inflateInit2_(&stream, -15, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK else {
@@ -431,16 +522,27 @@ private func deflateDecompress(_ input: [UInt8]) throws -> [UInt8] {
     var result: Int32 = Z_OK
 
     try input.withUnsafeBufferPointer { inBuf in
-        stream.next_in = UnsafeMutablePointer(mutating: inBuf.baseAddress!)
+        guard let inBase = inBuf.baseAddress else { throw BinaryError.decompressFailed }
+        stream.next_in = UnsafeMutablePointer(mutating: inBase)
         stream.avail_in = UInt32(input.count)
 
         while result != Z_STREAM_END {
             if stream.avail_out == 0 {
                 let oldCount = output.count
+                // The doubled buffer must stay addressable by zlib's UInt32
+                // lengths. A stream that inflates past 4 GiB is refused rather
+                // than allowed to overflow the conversion below.
+                guard oldCount <= Int(UInt32.max) / 2 else {
+                    throw BinaryError.invalidData(
+                        "decompressed payload exceeds \(Int(UInt32.max)) bytes")
+                }
                 output.append(contentsOf: [UInt8](repeating: 0, count: oldCount))
             }
             try output.withUnsafeMutableBufferPointer { outBuf in
-                stream.next_out = outBuf.baseAddress!.advanced(by: Int(stream.total_out))
+                guard let outBase = outBuf.baseAddress else {
+                    throw BinaryError.decompressFailed
+                }
+                stream.next_out = outBase.advanced(by: Int(stream.total_out))
                 stream.avail_out = UInt32(outBuf.count - Int(stream.total_out))
                 result = inflate(&stream, Z_NO_FLUSH)
                 if result != Z_OK && result != Z_STREAM_END {
@@ -479,17 +581,17 @@ private func optF64(_ o: Double?) -> MsgValue { o.map(vf64) ?? .nil }
 private func optStr(_ o: String?) -> MsgValue { o.map(vstr) ?? .nil }
 private func optBool(_ o: Bool?) -> MsgValue { o.map(vbool) ?? .nil }
 
-private func asOptF64(_ v: MsgValue) -> Double? {
+private func asOptF64(_ v: MsgValue) throws -> Double? {
     if case .nil = v { return nil }
-    return asF64(v)
+    return try asF64(v)
 }
-private func asOptStr(_ v: MsgValue) -> String? {
+private func asOptStr(_ v: MsgValue) throws -> String? {
     if case .nil = v { return nil }
-    return asStr(v)
+    return try asStr(v)
 }
-private func asOptBool(_ v: MsgValue) -> Bool? {
+private func asOptBool(_ v: MsgValue) throws -> Bool? {
     if case .nil = v { return nil }
-    return asBool(v)
+    return try asBool(v)
 }
 
 /// Pack a single Tspan as a compact msgpack array. Mirrors Rust's
@@ -571,32 +673,32 @@ private func packTspan(_ t: Tspan) -> MsgValue {
     ])
 }
 
-private func unpackTspan(_ v: MsgValue) -> Tspan {
-    let arr = asArray(v)
+private func unpackTspan(_ v: MsgValue) throws -> Tspan {
+    let arr = try asArray(v)
     func get(_ i: Int) -> MsgValue { i < arr.count ? arr[i] : .nil }
     // truncatingIfNeeded mirrors Rust's `as u32`, which WRAPS an out-of-range
     // integer where UInt32(_:) is a precondition failure -- a crafted blob with
     // a negative tspan id crashed only here (risk R9).
-    let id = arr.count > 0 ? UInt32(truncatingIfNeeded: asInt(arr[0])) : 0
-    let content = arr.count > 1 ? asStr(arr[1]) : ""
+    let id = arr.count > 0 ? UInt32(truncatingIfNeeded: try asInt(arr[0])) : 0
+    let content = arr.count > 1 ? try asStr(arr[1]) : ""
     let decor: [String]?
     if case .array(let xs) = get(17) {
-        decor = xs.map { asStr($0) }
+        decor = try xs.map { try asStr($0) }
     } else {
         decor = nil
     }
     let transform: Transform?
     if case .array(let xs) = get(20), xs.count >= 6 {
         transform = Transform(
-            a: asF64(xs[0]), b: asF64(xs[1]), c: asF64(xs[2]),
-            d: asF64(xs[3]), e: asF64(xs[4]), f: asF64(xs[5]))
+            a: try asF64(xs[0]), b: try asF64(xs[1]), c: try asF64(xs[2]),
+            d: try asF64(xs[3]), e: try asF64(xs[4]), f: try asF64(xs[5]))
     } else {
         transform = nil
     }
     // NOTE: the argument order below must match `Tspan.init`'s declaration
     // order, not the WIRE order -- Swift enforces the former. The wire order is
     // the `get(n)` indices, which are Rust's slot numbers.
-    return Tspan(
+    return try Tspan(
         id: id, content: content,
         baselineShift: asOptF64(get(2)),
         dx: asOptF64(get(3)),
@@ -654,40 +756,63 @@ private func unpackTspan(_ v: MsgValue) -> Tspan {
 
 // MARK: - Unpack helpers
 
-private func asInt(_ v: MsgValue) -> Int {
+// The read helpers below THROW rather than trap. See this file's header: the
+// decode path runs on every cold launch against a file on disk, so a type
+// mismatch is untrusted input, not a programmer error. Each mirrors the
+// same-named Rust helper, which returns `Result<_, String>` for the same
+// reason.
+
+private func asInt(_ v: MsgValue) throws -> Int {
     guard case .int(let n) = v else {
         // saturatingInt so a non-finite float in this slot cannot take the
-        // process down (risk R9). It does NOT make the decoder panic-free —
-        // every other type mismatch here is still a fatalError, where Rust's
-        // as_i64 returns Err and REJECTS a float outright. That wider contract
-        // gap is banked in transcripts/CORPUS_CENSUS.md §7.1.
+        // process down (risk R9). Kept as-is: Rust's `as_i64` REJECTS a float
+        // outright, so this is a live tolerance difference between the ports
+        // — banked in transcripts/CORPUS_CENSUS.md §7.1 and out of scope here,
+        // which is about trapping versus erroring, not about which values are
+        // accepted.
         if case .float64(let f) = v { return saturatingInt(f) }
-        fatalError("expected int, got \(v)")
+        throw BinaryError.invalidData("expected int, got \(v)")
     }
     return n
 }
 
-private func asF64(_ v: MsgValue) -> Double {
+private func asF64(_ v: MsgValue) throws -> Double {
     switch v {
     case .float64(let f): return f
     case .int(let n): return Double(n)
-    default: fatalError("expected f64, got \(v)")
+    default: throw BinaryError.invalidData("expected f64, got \(v)")
     }
 }
 
-private func asBool(_ v: MsgValue) -> Bool {
-    guard case .bool(let b) = v else { fatalError("expected bool, got \(v)") }
+private func asBool(_ v: MsgValue) throws -> Bool {
+    guard case .bool(let b) = v else {
+        throw BinaryError.invalidData("expected bool, got \(v)")
+    }
     return b
 }
 
-private func asStr(_ v: MsgValue) -> String {
-    guard case .string(let s) = v else { fatalError("expected string, got \(v)") }
+private func asStr(_ v: MsgValue) throws -> String {
+    guard case .string(let s) = v else {
+        throw BinaryError.invalidData("expected string, got \(v)")
+    }
     return s
 }
 
-private func asArray(_ v: MsgValue) -> [MsgValue] {
-    guard case .array(let a) = v else { fatalError("expected array, got \(v)") }
+private func asArray(_ v: MsgValue) throws -> [MsgValue] {
+    guard case .array(let a) = v else {
+        throw BinaryError.invalidData("expected array, got \(v)")
+    }
     return a
+}
+
+/// Bounds-checked positional access, replacing raw `arr[i]` everywhere on the
+/// unpack path so a too-short array yields an error instead of an index trap.
+/// Mirrors Rust's `at`.
+private func at(_ arr: [MsgValue], _ i: Int) throws -> MsgValue {
+    guard i >= 0, i < arr.count else {
+        throw BinaryError.invalidData("index \(i) out of range (len \(arr.count))")
+    }
+    return arr[i]
 }
 
 // MARK: - Pack (Document -> MsgValue)
@@ -809,7 +934,14 @@ private func packMask(_ m: Mask?) -> MsgValue {
 /// absent slot, a nil slot, a slot holding something that is not an array, and
 /// an array whose subtree slot is not itself an element array ALL read as "no
 /// mask" rather than trapping or guessing. Mirrors Rust's `unpack_mask`.
-private func unpackMask(_ v: MsgValue?) -> Mask? {
+///
+/// The tolerance stops at the SHAPE of this slot. Once the slot does hold an
+/// element array, that subtree is decoded like any other element and a
+/// malformed one is an error, not a silently-dropped mask — this is exactly
+/// where a too-short subtree used to reach an index-out-of-range inside
+/// `unpackCommon`, one level below a slot documented as tolerant. Rust's
+/// `unpack_mask` returns `Result` for the same reason.
+private func unpackMask(_ v: MsgValue?) throws -> Mask? {
     guard case .some(.array(let arr)) = v, let first = arr.first,
           case .array = first else { return nil }
     func b(_ i: Int, _ fallback: Bool) -> Bool {
@@ -817,8 +949,12 @@ private func unpackMask(_ v: MsgValue?) -> Mask? {
         return x
     }
     let unlink: Transform?
-    if arr.count > 5, case .array = arr[5] { unlink = unpackTransform(arr[5]) } else { unlink = nil }
-    return Mask(subtreeElement: unpackElement(first),
+    if arr.count > 5, case .array = arr[5] {
+        unlink = try unpackTransform(arr[5])
+    } else {
+        unlink = nil
+    }
+    return Mask(subtreeElement: try unpackElement(first),
                 clip: b(1, true), invert: b(2, false),
                 disabled: b(3, false), linked: b(4, true),
                 unlinkTransform: unlink)
@@ -841,6 +977,11 @@ private func packCommonExt(_ elem: Element) -> [MsgValue] {
 
 private func packElement(_ elem: Element) -> MsgValue {
     guard case .array(var slots) = packElementBase(elem) else {
+        // ENCODE path, deliberately fatal. `packElementBase` is an exhaustive
+        // switch in which every arm returns `.array(...)`, so this is a
+        // compile-time-checkable invariant about code in this file, not a
+        // statement about input. Making it an error would put a `try` on every
+        // caller for a branch no data can reach.
         fatalError("packElementBase must produce an array")
     }
     // The per-tag trailing common extension (see extMode / extMask /
@@ -947,23 +1088,23 @@ private func packElementBase(_ elem: Element) -> MsgValue {
         // compound carries none here), mirroring the test_json live codec.
         switch v {
         case .compoundShape(let cs):
-            // CompoundShape carries a stable id but no name field, so name
-            // packs as nil while id packs through (matching Python's
-            // getattr-based _pack_common). An id-less compound is byte-
-            // identical to before.
+            // A live element's `name` rides the generic common block at slot 5
+            // like every other element's — jas_dioxus packs `pack_common(&cs.common)`
+            // for all four kinds. This used to hand-write a literal `nil`,
+            // which is why a named compound survived a binary save in Rust and
+            // not here. An unnamed compound is byte-identical to before.
             let common = packCommon(locked: cs.locked, opacity: cs.opacity,
                                     visibility: cs.visibility, transform: cs.transform,
-                                    name: nil, id: cs.id)
+                                    name: cs.name, id: cs.id)
             // [tag, common(1..6), kind(7), operation(8), operands(9)]
             let operands: [MsgValue] = cs.operands.map { packElement($0) }
             return .array([vint(tagLive)] + common +
                           [vstr("compound_shape"), vstr(cs.operation.rawValue),
                            .array(operands)])
         case .reference(let r):
-            // ReferenceElem has its own id but no name field (name packs nil).
             let common = packCommon(locked: r.locked, opacity: r.opacity,
                                     visibility: r.visibility, transform: r.transform,
-                                    name: nil, id: r.id)
+                                    name: r.name, id: r.id)
             // [tag, common(1..6), kind(7), target(8), instance_transform(9)]
             // Symbols P4 (SYMBOLS.md §4 / Fork F2): the instance `transform`
             // (distinct from the render CTM packed at slot 4) rides slot 9 via
@@ -973,10 +1114,9 @@ private func packElementBase(_ elem: Element) -> MsgValue {
                           [vstr("reference"), vstr(r.target.id),
                            packTransform(r.instanceTransform)])
         case .recorded(let rec):
-            // RecordedElem has its own id but no name field (name packs nil).
             let common = packCommon(locked: rec.locked, opacity: rec.opacity,
                                     visibility: rec.visibility, transform: rec.transform,
-                                    name: nil, id: rec.id)
+                                    name: rec.name, id: rec.id)
             // The recipe (inputs + ops) rides slots 8/9 as canonical JSON
             // strings (RECORDED_ELEMENTS.md), mirroring the Rust binary codec.
             // [tag, common(1..6), kind(7), inputs-json(8), ops-json(9)].
@@ -986,10 +1126,9 @@ private func packElementBase(_ elem: Element) -> MsgValue {
             return .array([vint(tagLive)] + common +
                           [vstr("recorded"), vstr(inputsJson), vstr(opsJson)])
         case .generated(let gen):
-            // GeneratedElem has its own id but no name field (name packs nil).
             let common = packCommon(locked: gen.locked, opacity: gen.opacity,
                                     visibility: gen.visibility, transform: gen.transform,
-                                    name: nil, id: gen.id)
+                                    name: gen.name, id: gen.id)
             // The concept id + params ride slots 8/9 as canonical JSON strings
             // (CONCEPTS.md), mirroring the Rust binary codec.
             // [tag, common(1..6), kind(7), concept(8), params-json(9)].
@@ -1032,86 +1171,93 @@ private func packDocument(_ doc: Document) -> MsgValue {
 
 // MARK: - Unpack (MsgValue -> Document)
 
-private func unpackColor(_ v: MsgValue) -> Color {
-    let arr = asArray(v)
-    let space = asInt(arr[0])
+private func unpackColor(_ v: MsgValue) throws -> Color {
+    let arr = try asArray(v)
+    let space = try asInt(at(arr, 0))
     switch space {
-    case spaceRgb: return .rgb(r: asF64(arr[1]), g: asF64(arr[2]), b: asF64(arr[3]), a: asF64(arr[5]))
-    case spaceHsb: return .hsb(h: asF64(arr[1]), s: asF64(arr[2]), b: asF64(arr[3]), a: asF64(arr[5]))
-    case spaceCmyk: return .cmyk(c: asF64(arr[1]), m: asF64(arr[2]), y: asF64(arr[3]), k: asF64(arr[4]), a: asF64(arr[5]))
-    default: fatalError("unknown color space: \(space)")
+    case spaceRgb: return .rgb(r: try asF64(at(arr, 1)), g: try asF64(at(arr, 2)),
+                               b: try asF64(at(arr, 3)), a: try asF64(at(arr, 5)))
+    case spaceHsb: return .hsb(h: try asF64(at(arr, 1)), s: try asF64(at(arr, 2)),
+                               b: try asF64(at(arr, 3)), a: try asF64(at(arr, 5)))
+    case spaceCmyk: return .cmyk(c: try asF64(at(arr, 1)), m: try asF64(at(arr, 2)),
+                                 y: try asF64(at(arr, 3)), k: try asF64(at(arr, 4)),
+                                 a: try asF64(at(arr, 5)))
+    default: throw BinaryError.invalidData("unknown color space: \(space)")
     }
 }
 
-private func unpackFill(_ v: MsgValue) -> Fill? {
+private func unpackFill(_ v: MsgValue) throws -> Fill? {
     if case .nil = v { return nil }
-    let arr = asArray(v)
-    return Fill(color: unpackColor(arr[0]), opacity: asF64(arr[1]))
+    let arr = try asArray(v)
+    return Fill(color: try unpackColor(at(arr, 0)), opacity: try asF64(at(arr, 1)))
 }
 
-private func unpackStroke(_ v: MsgValue) -> Stroke? {
+private func unpackStroke(_ v: MsgValue) throws -> Stroke? {
     if case .nil = v { return nil }
-    let arr = asArray(v)
-    let cap: LineCap = switch asInt(arr[2]) { case 0: .butt; case 1: .round; case 2: .square; default: .butt }
-    let join: LineJoin = switch asInt(arr[3]) { case 0: .miter; case 1: .round; case 2: .bevel; default: .miter }
+    let arr = try asArray(v)
+    let cap: LineCap = switch try asInt(at(arr, 2)) { case 0: .butt; case 1: .round; case 2: .square; default: .butt }
+    let join: LineJoin = switch try asInt(at(arr, 3)) { case 0: .miter; case 1: .round; case 2: .bevel; default: .miter }
     // Extended fields (backward compatible: old files have 5 elements)
     if arr.count > 5 {
-        let miterLimit = asF64(arr[5])
-        let align: StrokeAlign = switch asInt(arr[6]) { case 1: .inside; case 2: .outside; default: .center }
-        let dashPattern = asArray(arr[7]).map { asF64($0) }
-        let startArrow = Arrowhead(fromString: asStr(arr[8]))
-        let endArrow = Arrowhead(fromString: asStr(arr[9]))
-        let startArrowScale = asF64(arr[10])
-        let endArrowScale = asF64(arr[11])
-        let arrowAlign: ArrowAlign = switch asInt(arr[12]) { case 1: .centerAtEnd; default: .tipAtEnd }
+        let miterLimit = try asF64(at(arr, 5))
+        let align: StrokeAlign = switch try asInt(at(arr, 6)) { case 1: .inside; case 2: .outside; default: .center }
+        let dashPattern = try asArray(at(arr, 7)).map { try asF64($0) }
+        let startArrow = Arrowhead(fromString: try asStr(at(arr, 8)))
+        let endArrow = Arrowhead(fromString: try asStr(at(arr, 9)))
+        let startArrowScale = try asF64(at(arr, 10))
+        let endArrowScale = try asF64(at(arr, 11))
+        let arrowAlign: ArrowAlign = switch try asInt(at(arr, 12)) { case 1: .centerAtEnd; default: .tipAtEnd }
         // Element 13: dash_align_anchors (added later — backward
         // compatible with older files that had 13 elements).
-        let dashAlignAnchors = arr.count > 13 ? asBool(arr[13]) : false
-        return Stroke(color: unpackColor(arr[0]), width: asF64(arr[1]), linecap: cap, linejoin: join,
+        let dashAlignAnchors = arr.count > 13 ? try asBool(arr[13]) : false
+        return Stroke(color: try unpackColor(at(arr, 0)), width: try asF64(at(arr, 1)),
+                      linecap: cap, linejoin: join,
                       miterLimit: miterLimit, align: align, dashPattern: dashPattern,
                       dashAlignAnchors: dashAlignAnchors,
                       startArrow: startArrow, endArrow: endArrow,
                       startArrowScale: startArrowScale, endArrowScale: endArrowScale,
-                      arrowAlign: arrowAlign, opacity: asF64(arr[4]))
+                      arrowAlign: arrowAlign, opacity: try asF64(at(arr, 4)))
     }
-    return Stroke(color: unpackColor(arr[0]), width: asF64(arr[1]), linecap: cap, linejoin: join, opacity: asF64(arr[4]))
+    return Stroke(color: try unpackColor(at(arr, 0)), width: try asF64(at(arr, 1)),
+                  linecap: cap, linejoin: join, opacity: try asF64(at(arr, 4)))
 }
 
-private func unpackWidthPoints(_ v: MsgValue) -> [StrokeWidthPoint] {
+private func unpackWidthPoints(_ v: MsgValue) throws -> [StrokeWidthPoint] {
     if case .nil = v { return [] }
-    return asArray(v).map { p in
-        let a = asArray(p)
-        return StrokeWidthPoint(t: asF64(a[0]), widthLeft: asF64(a[1]), widthRight: asF64(a[2]))
+    return try asArray(v).map { p in
+        let a = try asArray(p)
+        return StrokeWidthPoint(t: try asF64(at(a, 0)), widthLeft: try asF64(at(a, 1)),
+                                widthRight: try asF64(at(a, 2)))
     }
 }
 
-private func unpackTransform(_ v: MsgValue) -> Transform? {
+private func unpackTransform(_ v: MsgValue) throws -> Transform? {
     if case .nil = v { return nil }
-    let arr = asArray(v)
-    return Transform(a: asF64(arr[0]), b: asF64(arr[1]), c: asF64(arr[2]),
-                     d: asF64(arr[3]), e: asF64(arr[4]), f: asF64(arr[5]))
+    let arr = try asArray(v)
+    return Transform(a: try asF64(at(arr, 0)), b: try asF64(at(arr, 1)), c: try asF64(at(arr, 2)),
+                     d: try asF64(at(arr, 3)), e: try asF64(at(arr, 4)), f: try asF64(at(arr, 5)))
 }
 
-private func unpackPathCommand(_ v: MsgValue) -> PathCommand {
-    let arr = asArray(v)
-    let tag = asInt(arr[0])
+private func unpackPathCommand(_ v: MsgValue) throws -> PathCommand {
+    let arr = try asArray(v)
+    let tag = try asInt(at(arr, 0))
     switch tag {
-    case cmdMoveTo: return .moveTo(asF64(arr[1]), asF64(arr[2]))
-    case cmdLineTo: return .lineTo(asF64(arr[1]), asF64(arr[2]))
-    case cmdCurveTo: return .curveTo(x1: asF64(arr[1]), y1: asF64(arr[2]),
-                                     x2: asF64(arr[3]), y2: asF64(arr[4]),
-                                     x: asF64(arr[5]), y: asF64(arr[6]))
-    case cmdSmoothCurveTo: return .smoothCurveTo(x2: asF64(arr[1]), y2: asF64(arr[2]),
-                                                 x: asF64(arr[3]), y: asF64(arr[4]))
-    case cmdQuadTo: return .quadTo(x1: asF64(arr[1]), y1: asF64(arr[2]),
-                                   x: asF64(arr[3]), y: asF64(arr[4]))
-    case cmdSmoothQuadTo: return .smoothQuadTo(asF64(arr[1]), asF64(arr[2]))
-    case cmdArcTo: return .arcTo(rx: asF64(arr[1]), ry: asF64(arr[2]),
-                                 rotation: asF64(arr[3]),
-                                 largeArc: asBool(arr[4]), sweep: asBool(arr[5]),
-                                 x: asF64(arr[6]), y: asF64(arr[7]))
+    case cmdMoveTo: return .moveTo(try asF64(at(arr, 1)), try asF64(at(arr, 2)))
+    case cmdLineTo: return .lineTo(try asF64(at(arr, 1)), try asF64(at(arr, 2)))
+    case cmdCurveTo: return .curveTo(x1: try asF64(at(arr, 1)), y1: try asF64(at(arr, 2)),
+                                     x2: try asF64(at(arr, 3)), y2: try asF64(at(arr, 4)),
+                                     x: try asF64(at(arr, 5)), y: try asF64(at(arr, 6)))
+    case cmdSmoothCurveTo: return .smoothCurveTo(x2: try asF64(at(arr, 1)), y2: try asF64(at(arr, 2)),
+                                                 x: try asF64(at(arr, 3)), y: try asF64(at(arr, 4)))
+    case cmdQuadTo: return .quadTo(x1: try asF64(at(arr, 1)), y1: try asF64(at(arr, 2)),
+                                   x: try asF64(at(arr, 3)), y: try asF64(at(arr, 4)))
+    case cmdSmoothQuadTo: return .smoothQuadTo(try asF64(at(arr, 1)), try asF64(at(arr, 2)))
+    case cmdArcTo: return .arcTo(rx: try asF64(at(arr, 1)), ry: try asF64(at(arr, 2)),
+                                 rotation: try asF64(at(arr, 3)),
+                                 largeArc: try asBool(at(arr, 4)), sweep: try asBool(at(arr, 5)),
+                                 x: try asF64(at(arr, 6)), y: try asF64(at(arr, 7)))
     case cmdClosePath: return .closePath
-    default: fatalError("unknown path command tag: \(tag)")
+    default: throw BinaryError.invalidData("unknown path command tag: \(tag)")
     }
 }
 
@@ -1119,90 +1265,102 @@ private func unpackPathCommand(_ v: MsgValue) -> PathCommand {
 /// 1..6 (locked, opacity, visibility, transform, name, id). The
 /// type-specific payload begins at index 7. Mirrors Rust's
 /// `unpack_common` / Python's `_unpack_common`.
-private func unpackCommon(_ arr: [MsgValue]) -> (Bool, Double, Visibility, Transform?, String?, String?) {
-    let vis: Visibility = switch asInt(arr[3]) { case 0: .invisible; case 1: .outline; default: .preview }
-    return (asBool(arr[1]), asF64(arr[2]), vis, unpackTransform(arr[4]),
-            asOptStr(arr[5]), asOptStr(arr[6]))
+private func unpackCommon(_ arr: [MsgValue]) throws -> (Bool, Double, Visibility, Transform?, String?, String?) {
+    let vis: Visibility = switch try asInt(at(arr, 3)) { case 0: .invisible; case 1: .outline; default: .preview }
+    return (try asBool(at(arr, 1)), try asF64(at(arr, 2)), vis, try unpackTransform(at(arr, 4)),
+            try asOptStr(at(arr, 5)), try asOptStr(at(arr, 6)))
 }
 
 /// Read the tag's TRAILING extension block at `tagBaseArity(tag)`. Read
 /// TOLERANTLY -- an absent slot yields the documented default, so a blob
 /// written before the extension existed still loads with exactly the values it
 /// was authored with. Mirrors the extension half of Rust's `unpack_common`.
-private func unpackCommonExt(_ arr: [MsgValue], _ tag: Int) -> (BlendMode, Mask?, String?) {
+private func unpackCommonExt(_ arr: [MsgValue], _ tag: Int) throws -> (BlendMode, Mask?, String?) {
     let base = tagBaseArity(tag)
     func slot(_ off: Int) -> MsgValue? {
         let i = base + off
         return i < arr.count ? arr[i] : nil
     }
     return (blendModeFromTag(slot(extMode)),
-            unpackMask(slot(extMask)),
+            try unpackMask(slot(extMask)),
             tolerantOptStr(slot(extToolOrigin)))
 }
 
-private func unpackElement(_ v: MsgValue) -> Element {
-    let arr = asArray(v)
-    let tag = asInt(arr[0])
-    let (locked, opacity, vis, xform, name, id) = unpackCommon(arr)
-    let (mode, mask, toolOrigin) = unpackCommonExt(arr, tag)
+private func unpackElement(_ v: MsgValue) throws -> Element {
+    let arr = try asArray(v)
+    let tag = try asInt(at(arr, 0))
+    // Reject an unknown tag BEFORE reading anything positional. Two reasons:
+    // `tagBaseArity` returns 0 for an unknown tag, so `unpackCommonExt` would
+    // otherwise read the extension block starting at the tag slot itself and
+    // could recurse into `unpackMask` on unrelated data; and `tagBaseArity`'s
+    // own comment asserts this rejection happens here, which was not true
+    // until it was written down.
+    guard knownTags.contains(tag) else {
+        throw BinaryError.invalidData("unknown element tag: \(tag)")
+    }
+    let (locked, opacity, vis, xform, name, id) = try unpackCommon(arr)
+    let (mode, mask, toolOrigin) = try unpackCommonExt(arr, tag)
     // Type-specific payload begins at index 7 (after the common block); the
     // trailing extension begins at tagBaseArity(tag).
 
     switch tag {
     case tagLayer:
-        let children = asArray(arr[7]).map { unpackElement($0) }
+        let children = try asArray(at(arr, 7)).map { try unpackElement($0) }
         return .layer(Layer(name: name, children: children, opacity: opacity,
                             transform: xform, locked: locked, visibility: vis,
                             blendMode: mode, mask: mask, id: id))
     case tagGroup:
-        let children = asArray(arr[7]).map { unpackElement($0) }
+        let children = try asArray(at(arr, 7)).map { try unpackElement($0) }
         return .group(Group(children: children, opacity: opacity,
                             transform: xform, locked: locked, visibility: vis,
                             blendMode: mode, mask: mask, name: name, id: id))
     case tagLine:
-        let wp = arr.count > 12 ? unpackWidthPoints(arr[12]) : []
-        return .line(Line(x1: asF64(arr[7]), y1: asF64(arr[8]),
-                          x2: asF64(arr[9]), y2: asF64(arr[10]),
-                          stroke: unpackStroke(arr[11]), widthPoints: wp,
+        let wp = arr.count > 12 ? try unpackWidthPoints(arr[12]) : []
+        return .line(Line(x1: try asF64(at(arr, 7)), y1: try asF64(at(arr, 8)),
+                          x2: try asF64(at(arr, 9)), y2: try asF64(at(arr, 10)),
+                          stroke: try unpackStroke(at(arr, 11)), widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
                           blendMode: mode, mask: mask,
                           name: name, id: id))
     case tagRect:
-        return .rect(Rect(x: asF64(arr[7]), y: asF64(arr[8]),
-                          width: asF64(arr[9]), height: asF64(arr[10]),
-                          rx: asF64(arr[11]), ry: asF64(arr[12]),
-                          fill: unpackFill(arr[13]), stroke: unpackStroke(arr[14]),
+        return .rect(Rect(x: try asF64(at(arr, 7)), y: try asF64(at(arr, 8)),
+                          width: try asF64(at(arr, 9)), height: try asF64(at(arr, 10)),
+                          rx: try asF64(at(arr, 11)), ry: try asF64(at(arr, 12)),
+                          fill: try unpackFill(at(arr, 13)), stroke: try unpackStroke(at(arr, 14)),
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
                           blendMode: mode, mask: mask,
                           name: name, id: id))
     case tagCircle:
-        return .circle(Circle(cx: asF64(arr[7]), cy: asF64(arr[8]), r: asF64(arr[9]),
-                              fill: unpackFill(arr[10]), stroke: unpackStroke(arr[11]),
+        return .circle(Circle(cx: try asF64(at(arr, 7)), cy: try asF64(at(arr, 8)),
+                              r: try asF64(at(arr, 9)),
+                              fill: try unpackFill(at(arr, 10)), stroke: try unpackStroke(at(arr, 11)),
                               opacity: opacity, transform: xform, locked: locked, visibility: vis,
                               blendMode: mode, mask: mask,
                               name: name, id: id))
     case tagEllipse:
-        return .ellipse(Ellipse(cx: asF64(arr[7]), cy: asF64(arr[8]),
-                                rx: asF64(arr[9]), ry: asF64(arr[10]),
-                                fill: unpackFill(arr[11]), stroke: unpackStroke(arr[12]),
+        return .ellipse(Ellipse(cx: try asF64(at(arr, 7)), cy: try asF64(at(arr, 8)),
+                                rx: try asF64(at(arr, 9)), ry: try asF64(at(arr, 10)),
+                                fill: try unpackFill(at(arr, 11)), stroke: try unpackStroke(at(arr, 12)),
                                 opacity: opacity, transform: xform, locked: locked, visibility: vis,
                                 blendMode: mode, mask: mask,
                                 name: name, id: id))
     case tagPolyline:
-        let points = asArray(arr[7]).map { (asF64(asArray($0)[0]), asF64(asArray($0)[1])) }
-        return .polyline(Polyline(points: points, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
+        let points = try unpackPoints(at(arr, 7))
+        return .polyline(Polyline(points: points, fill: try unpackFill(at(arr, 8)),
+                                  stroke: try unpackStroke(at(arr, 9)),
                                   opacity: opacity, transform: xform, locked: locked, visibility: vis,
                                   blendMode: mode, mask: mask,
                                   name: name, id: id))
     case tagPolygon:
-        let points = asArray(arr[7]).map { (asF64(asArray($0)[0]), asF64(asArray($0)[1])) }
-        return .polygon(Polygon(points: points, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
+        let points = try unpackPoints(at(arr, 7))
+        return .polygon(Polygon(points: points, fill: try unpackFill(at(arr, 8)),
+                                stroke: try unpackStroke(at(arr, 9)),
                                 opacity: opacity, transform: xform, locked: locked, visibility: vis,
                                 blendMode: mode, mask: mask,
                                 name: name, id: id))
     case tagPath:
-        let cmds = asArray(arr[7]).map { unpackPathCommand($0) }
-        let wp = arr.count > 10 ? unpackWidthPoints(arr[10]) : []
+        let cmds = try asArray(at(arr, 7)).map { try unpackPathCommand($0) }
+        let wp = arr.count > 10 ? try unpackWidthPoints(arr[10]) : []
         // Trailing slot 11; absent in pre-fillRule blobs.
         let rule = unpackFillRule(arr.count > 11 ? arr[11] : nil)
         let base = tagBaseArity(tagPath)
@@ -1210,7 +1368,8 @@ private func unpackElement(_ v: MsgValue) -> Element {
             let i = base + off
             return i < arr.count ? arr[i] : nil
         }
-        return .path(Path(d: cmds, fill: unpackFill(arr[8]), stroke: unpackStroke(arr[9]),
+        return .path(Path(d: cmds, fill: try unpackFill(at(arr, 8)),
+                          stroke: try unpackStroke(at(arr, 9)),
                           widthPoints: wp,
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
                           blendMode: mode, mask: mask,
@@ -1225,74 +1384,79 @@ private func unpackElement(_ v: MsgValue) -> Element {
         // init so the common block (name/id/visibility/transform)
         // survives — `withTspans` does not carry those through.
         if arr.count > 19, case .array(let ts) = arr[19], !ts.isEmpty {
-            return .text(Text(x: asF64(arr[7]), y: asF64(arr[8]),
-                              tspans: ts.map { unpackTspan($0) },
-                              fontFamily: asStr(arr[10]), fontSize: asF64(arr[11]),
-                              fontWeight: asStr(arr[12]), fontStyle: asStr(arr[13]),
-                              textDecoration: asStr(arr[14]),
-                              width: asF64(arr[15]), height: asF64(arr[16]),
-                              fill: unpackFill(arr[17]), stroke: unpackStroke(arr[18]),
+            return .text(Text(x: try asF64(at(arr, 7)), y: try asF64(at(arr, 8)),
+                              tspans: try ts.map { try unpackTspan($0) },
+                              fontFamily: try asStr(at(arr, 10)), fontSize: try asF64(at(arr, 11)),
+                              fontWeight: try asStr(at(arr, 12)), fontStyle: try asStr(at(arr, 13)),
+                              textDecoration: try asStr(at(arr, 14)),
+                              width: try asF64(at(arr, 15)), height: try asF64(at(arr, 16)),
+                              fill: try unpackFill(at(arr, 17)), stroke: try unpackStroke(at(arr, 18)),
                               opacity: opacity, transform: xform, locked: locked, visibility: vis,
                               blendMode: mode, mask: mask,
                               name: name, id: id))
         }
-        return .text(Text(x: asF64(arr[7]), y: asF64(arr[8]), content: asStr(arr[9]),
-                          fontFamily: asStr(arr[10]), fontSize: asF64(arr[11]),
-                          fontWeight: asStr(arr[12]), fontStyle: asStr(arr[13]),
-                          textDecoration: asStr(arr[14]),
-                          width: asF64(arr[15]), height: asF64(arr[16]),
-                          fill: unpackFill(arr[17]), stroke: unpackStroke(arr[18]),
+        return .text(Text(x: try asF64(at(arr, 7)), y: try asF64(at(arr, 8)),
+                          content: try asStr(at(arr, 9)),
+                          fontFamily: try asStr(at(arr, 10)), fontSize: try asF64(at(arr, 11)),
+                          fontWeight: try asStr(at(arr, 12)), fontStyle: try asStr(at(arr, 13)),
+                          textDecoration: try asStr(at(arr, 14)),
+                          width: try asF64(at(arr, 15)), height: try asF64(at(arr, 16)),
+                          fill: try unpackFill(at(arr, 17)), stroke: try unpackStroke(at(arr, 18)),
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
                           blendMode: mode, mask: mask,
                           name: name, id: id))
     case tagTextPath:
-        let cmds = asArray(arr[7]).map { unpackPathCommand($0) }
+        let cmds = try asArray(at(arr, 7)).map { try unpackPathCommand($0) }
         if arr.count > 17, case .array(let ts) = arr[17], !ts.isEmpty {
-            return .textPath(TextPath(d: cmds, tspans: ts.map { unpackTspan($0) },
-                                      startOffset: asF64(arr[9]),
-                                      fontFamily: asStr(arr[10]), fontSize: asF64(arr[11]),
-                                      fontWeight: asStr(arr[12]), fontStyle: asStr(arr[13]),
-                                      textDecoration: asStr(arr[14]),
-                                      fill: unpackFill(arr[15]), stroke: unpackStroke(arr[16]),
+            return .textPath(TextPath(d: cmds, tspans: try ts.map { try unpackTspan($0) },
+                                      startOffset: try asF64(at(arr, 9)),
+                                      fontFamily: try asStr(at(arr, 10)), fontSize: try asF64(at(arr, 11)),
+                                      fontWeight: try asStr(at(arr, 12)), fontStyle: try asStr(at(arr, 13)),
+                                      textDecoration: try asStr(at(arr, 14)),
+                                      fill: try unpackFill(at(arr, 15)), stroke: try unpackStroke(at(arr, 16)),
                                       opacity: opacity, transform: xform, locked: locked, visibility: vis,
                                       blendMode: mode, mask: mask,
                                       name: name, id: id))
         }
-        return .textPath(TextPath(d: cmds, content: asStr(arr[8]), startOffset: asF64(arr[9]),
-                                  fontFamily: asStr(arr[10]), fontSize: asF64(arr[11]),
-                                  fontWeight: asStr(arr[12]), fontStyle: asStr(arr[13]),
-                                  textDecoration: asStr(arr[14]),
-                                  fill: unpackFill(arr[15]), stroke: unpackStroke(arr[16]),
+        return .textPath(TextPath(d: cmds, content: try asStr(at(arr, 8)),
+                                  startOffset: try asF64(at(arr, 9)),
+                                  fontFamily: try asStr(at(arr, 10)), fontSize: try asF64(at(arr, 11)),
+                                  fontWeight: try asStr(at(arr, 12)), fontStyle: try asStr(at(arr, 13)),
+                                  textDecoration: try asStr(at(arr, 14)),
+                                  fill: try unpackFill(at(arr, 15)), stroke: try unpackStroke(at(arr, 16)),
                                   opacity: opacity, transform: xform, locked: locked, visibility: vis,
                                   blendMode: mode, mask: mask,
                                   name: name, id: id))
     case tagLive:
         // Live elements (REFERENCE_GRAPH.md Phase 2b): dispatch on the
         // kind string at index 7, mirroring the test_json live reader.
-        let kind = asStr(arr[7])
+        let kind = try asStr(at(arr, 7))
         switch kind {
         case "compound_shape":
             // Unknown operation strings default to union, matching the
-            // Rust / Python readers. CompoundShape carries a stable id but
-            // no name slot, so id passes through while name is dropped
-            // (paint is nil in Phase 1).
-            let operation = CompoundOperation(rawValue: asStr(arr[8])) ?? .union
-            let operands = asArray(arr[9]).map { unpackElement($0) }
+            // Rust / Python readers. `name` and `id` both come out of the
+            // generic common block (paint is nil in Phase 1); the reader used
+            // to drop `name` on the floor because there was nowhere to put it.
+            // Reads go through `at(...)` so a short array is an error, not a
+            // trap -- the two halves of this line landed in separate waves.
+            let operation = CompoundOperation(rawValue: try asStr(at(arr, 8))) ?? .union
+            let operands = try asArray(at(arr, 9)).map { try unpackElement($0) }
             return .live(.compoundShape(CompoundShape(
-                operation: operation, operands: operands, id: id,
+                operation: operation, operands: operands, name: name, id: id,
                 opacity: opacity, transform: xform,
                 locked: locked, visibility: vis,
                 blendMode: mode, mask: mask)))
         case "reference":
             // ReferenceElem is a first-class element with its own id; it
             // takes the full common block (target at index 8, paint nil).
-            let target = ElementRef(asStr(arr[8]))
+            let target = ElementRef(try asStr(at(arr, 8)))
             // Symbols P4: the instance `transform` rides slot 9, read
             // TOLERANTLY so existing 9-element .bin (no slot 9) decode to nil
             // (SYMBOLS.md §4 / Fork F2).
-            let instanceXform = arr.count > 9 ? unpackTransform(arr[9]) : nil
+            let instanceXform = arr.count > 9 ? try unpackTransform(arr[9]) : nil
             return .live(.reference(ReferenceElem(
                 target: target,
+                name: name,
                 id: id,
                 transform: xform,
                 instanceTransform: instanceXform,
@@ -1301,30 +1465,44 @@ private func unpackElement(_ v: MsgValue) -> Element {
         case "recorded":
             // Decode the recipe from the two JSON strings packed at slots 8/9
             // (RECORDED_ELEMENTS.md), mirroring the Rust binary codec.
-            let inputsJson = asStr(arr[8])
-            let opsJson = asStr(arr[9])
+            let inputsJson = try asStr(at(arr, 8))
+            let opsJson = try asStr(at(arr, 9))
             let inputs = decodeRecordedInputs(inputsJson)
             let ops = decodeRecordedOps(opsJson)
             return .live(.recorded(RecordedElem(
-                ops: ops, inputs: inputs, id: id,
+                ops: ops, inputs: inputs, name: name, id: id,
                 transform: xform, opacity: opacity,
                 locked: locked, visibility: vis,
                 blendMode: mode, mask: mask)))
         case "generated":
             // Decode the concept id + params from slots 8/9 (CONCEPTS.md),
             // mirroring the Rust binary codec.
-            let conceptId = asStr(arr[8])
-            let paramsJson = asStr(arr[9])
+            let conceptId = try asStr(at(arr, 8))
+            let paramsJson = try asStr(at(arr, 9))
             let params = (try? JSONSerialization.jsonObject(
                 with: Data(paramsJson.utf8))) as? [String: Any] ?? [:]
             return .live(.generated(GeneratedElem(
-                conceptId: conceptId, params: params, id: id,
+                conceptId: conceptId, params: params, name: name, id: id,
                 transform: xform, opacity: opacity,
                 locked: locked, visibility: vis,
                 blendMode: mode, mask: mask)))
-        default: fatalError("unknown live kind: \(kind)")
+        default: throw BinaryError.invalidData("unknown live kind: \(kind)")
         }
-    default: fatalError("unknown element tag: \(tag)")
+    default:
+        // Unreachable: `knownTags` was checked at the top. Kept as an error
+        // rather than a `fatalError` so a future tag added to `knownTags` but
+        // not to this switch cannot become a launch abort.
+        throw BinaryError.invalidData("unhandled element tag: \(tag)")
+    }
+}
+
+/// A polyline/polygon point list: an array of 2-element coordinate arrays.
+/// Extracted so the bounds check is written once instead of inline in two
+/// nested `map` closures, where `asArray($0)[0]` was an index trap.
+private func unpackPoints(_ v: MsgValue) throws -> [(Double, Double)] {
+    try asArray(v).map { p in
+        let a = try asArray(p)
+        return (try asF64(at(a, 0)), try asF64(at(a, 1)))
     }
 }
 
@@ -1354,18 +1532,18 @@ private func decodeRecordedOps(_ json: String) -> [PrimitiveOp] {
     }
 }
 
-private func unpackSelection(_ v: MsgValue) -> Selection {
-    let arr = asArray(v)
+private func unpackSelection(_ v: MsgValue) throws -> Selection {
+    let arr = try asArray(v)
     var entries = Set<ElementSelection>()
     for item in arr {
-        let itemArr = asArray(item)
-        let path: ElementPath = asArray(itemArr[0]).map { asInt($0) }
+        let itemArr = try asArray(item)
+        let path: ElementPath = try asArray(at(itemArr, 0)).map { try asInt($0) }
         let kind: SelectionKind
-        if case .int(0) = itemArr[1] {
+        if case .int(0) = try at(itemArr, 1) {
             kind = .all
         } else {
-            let kindArr = asArray(itemArr[1])
-            let cps = SortedCps(kindArr.dropFirst().map { asInt($0) })
+            let kindArr = try asArray(at(itemArr, 1))
+            let cps = SortedCps(try kindArr.dropFirst().map { try asInt($0) })
             kind = .partial(cps)
         }
         entries.insert(ElementSelection(path: path, kind: kind))
@@ -1373,21 +1551,23 @@ private func unpackSelection(_ v: MsgValue) -> Selection {
     return entries
 }
 
-private func unpackDocument(_ v: MsgValue) -> Document {
-    let arr = asArray(v)
-    let layers: [Layer] = asArray(arr[0]).map { elem in
-        if case .layer(let l) = unpackElement(elem) { return l }
-        fatalError("expected layer element")
+private func unpackDocument(_ v: MsgValue) throws -> Document {
+    let arr = try asArray(v)
+    let layers: [Layer] = try asArray(at(arr, 0)).map { elem in
+        guard case .layer(let l) = try unpackElement(elem) else {
+            throw BinaryError.invalidData("expected a layer element at the document root")
+        }
+        return l
     }
-    let selectedLayer = asInt(arr[1])
-    let selection = unpackSelection(arr[2])
+    let selectedLayer = try asInt(at(arr, 1))
+    let selection = try unpackSelection(at(arr, 2))
     // Symbols (master store): a trailing element array at index 3. TOLERANT of
     // its absence — existing .bin fixtures predate symbols and decode to an
     // empty store (arr.count <= 3). Present-but-empty arrays decode the same,
     // so empty-symbols docs round-trip unchanged.
     let symbols: [Element]
     if arr.count > 3, case .array(let xs) = arr[3] {
-        symbols = xs.map { unpackElement($0) }
+        symbols = try xs.map { try unpackElement($0) }
     } else {
         symbols = []
     }
@@ -1500,5 +1680,5 @@ package func binaryToDocument(_ data: Data) throws -> Document {
 
     var reader = MsgReader(data: raw)
     let value = try reader.readValue()
-    return unpackDocument(value)
+    return try unpackDocument(value)
 }

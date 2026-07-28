@@ -3363,6 +3363,7 @@ private func evalNumber(_ arg: Any?, store: StateStore, ctx: [String: Any]) -> D
 /// preferences.viewport.* — mirrors read_pref_number in
 /// jas_dioxus/src/interpreter/effects.rs.
 internal func readPrefNumber(_ key: String, default defaultValue: Double) -> Double {
+    if let overridden = ViewportPrefOverride.values[key] { return overridden }
     guard let ws = WorkspaceData.load() else { return defaultValue }
     if let prefs = ws.data["preferences"] as? [String: Any],
        let viewport = prefs["viewport"] as? [String: Any],
@@ -3370,6 +3371,27 @@ internal func readPrefNumber(_ key: String, default defaultValue: Double) -> Dou
         return n.doubleValue
     }
     return defaultValue
+}
+
+/// TEST-ONLY seam: move a `preferences.viewport.*` value and watch the
+/// behaviour follow.
+///
+/// WHY IT EXISTS. `preferences.viewport.*` today holds exactly the numbers the
+/// code used to hardcode (zoom_step 1.2, min / max zoom 0.1 / 64.0,
+/// fit_padding_px 20). So a test asserting "the fit used padding 20" cannot
+/// tell a route that READS the preference from one that repeats the literal —
+/// they agree by coincidence, which is the whole failure class the 2026-07-27
+/// zoom wave was chasing. The tie only breaks by MOVING the preference. The
+/// bundle is a `static let` parse cached for the process lifetime, so a test
+/// cannot edit it; this stands in for that edit.
+///
+/// A task local, not a global: `swift-testing` runs tests concurrently, and a
+/// task local is scoped to the task that binds it, so one test's override is
+/// invisible to every other. `withValue` restores on exit, including when the
+/// body throws. Empty in production — one dictionary lookup on a value that is
+/// always `[:]`. Mirrors Rust's `#[cfg(test)]` `ViewportPrefOverride`.
+public enum ViewportPrefOverride {
+    @TaskLocal public static var values: [String: Double] = [:]
 }
 
 /// Read a numeric tool.zoom.<key> from the eval context. Used by

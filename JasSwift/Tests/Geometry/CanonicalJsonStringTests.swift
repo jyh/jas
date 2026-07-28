@@ -191,7 +191,7 @@ struct CanonicalJsonStringTests {
     /// SITE: `elementJson`'s recorded arm, the `inputs` id list.
     @Test func recordedInputIdsAreJsonEscaped() {
         let elem = Element.live(.recorded(RecordedElem(
-            ops: [], inputs: [ElementRef(Self.escapeProbe)])))
+            ops: [], inputs: [ElementRef(Self.escapeProbe)], name: nil)))
         let json = elementJson(elem)
         #expect(json.contains("\"inputs\":[\(Self.escapeProbeJson)]"),
                 "recorded input id not escaped in: \(json)")
@@ -212,7 +212,7 @@ struct CanonicalJsonStringTests {
             ops: [PrimitiveOp(op: "translate",
                               params: [Self.escapeProbe: true],
                               targets: [])],
-            inputs: [])))
+            inputs: [], name: nil)))
         let json = elementJson(elem)
         #expect(json.contains("\"params\":{\(Self.escapeProbeJson):true}"),
                 "recipe param key not escaped in: \(json)")
@@ -224,7 +224,7 @@ struct CanonicalJsonStringTests {
         let elem = Element.live(.recorded(RecordedElem(
             ops: [PrimitiveOp(op: "translate", params: [:],
                               targets: [Self.escapeProbe])],
-            inputs: [])))
+            inputs: [], name: nil)))
         let json = elementJson(elem)
         #expect(json.contains("\"targets\":[\(Self.escapeProbeJson)]"),
                 "recorded op target not escaped in: \(json)")
@@ -235,7 +235,7 @@ struct CanonicalJsonStringTests {
     @Test func recordedOpNameIsJsonEscaped() {
         let elem = Element.live(.recorded(RecordedElem(
             ops: [PrimitiveOp(op: Self.escapeProbe, params: [:], targets: [])],
-            inputs: [])))
+            inputs: [], name: nil)))
         let json = elementJson(elem)
         #expect(json.contains("\"op\":\(Self.escapeProbeJson)"),
                 "recorded op name not escaped in: \(json)")

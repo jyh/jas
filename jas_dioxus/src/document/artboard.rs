@@ -260,6 +260,40 @@ fn parse_default_name(name: &str) -> Option<u32> {
     rest.parse::<u32>().ok()
 }
 
+/// THE `active_document.current_artboard` rule, in one place: the topmost
+/// PANEL-SELECTED artboard, else the first (ARTBOARDS.md §Selection
+/// semantics).
+///
+/// "Topmost" is document order, not click order — the panel lists artboards in
+/// document order, and the workspace expression `active_document
+/// .current_artboard` resolves to the first row in that order carrying the
+/// selection.
+///
+/// WHY IT IS A FUNCTION. The rule was written out inline in more than one
+/// place: the renderer's active-document payload and the Align panel's
+/// artboard reference each carried their own `.find(..).or_else(..)`, and
+/// other sites reached for a bare `artboards.first()`, which is the same
+/// answer only while nothing is panel-selected. Both inline copies now call
+/// here. Mirrors Swift `currentArtboard(_:selection:)`.
+///
+/// NOT YET MECHANICALLY GATED. Nothing stops a future site writing the rule
+/// out a third time; the two known copies were found by an adversarial read,
+/// which is the same kind of evidence that let them diverge in the first
+/// place. An earlier revision of this comment claimed every other site used
+/// bare `first()` — that was measurably false, and it is recorded here rather
+/// than quietly deleted.
+pub fn current_artboard<'a>(
+    artboards: &'a [Artboard],
+    panel_selection: &[String],
+) -> Option<&'a Artboard> {
+    let sel: std::collections::HashSet<&str> =
+        panel_selection.iter().map(|s| s.as_str()).collect();
+    artboards
+        .iter()
+        .find(|a| sel.contains(a.id.as_str()))
+        .or_else(|| artboards.first())
+}
+
 /// Pick the next unused ``Artboard N`` name.
 pub fn next_artboard_name(artboards: &[Artboard]) -> String {
     let mut used: std::collections::HashSet<u32> = std::collections::HashSet::new();

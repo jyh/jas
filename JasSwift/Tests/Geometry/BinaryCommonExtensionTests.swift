@@ -76,11 +76,11 @@ private func everyTagElements(mode: BlendMode, mask: Mask?) -> [Element] {
         .text(Text(x: 1, y: 2, content: "hi", blendMode: mode, mask: mask)),
         .textPath(TextPath(d: extDonutCommands(), content: "hi", blendMode: mode, mask: mask)),
         .group(Group(children: [], blendMode: mode, mask: mask)),
-        .live(.compoundShape(CompoundShape(operation: .union, operands: [],
+        .live(.compoundShape(CompoundShape(operation: .union, operands: [], name: nil,
                                            blendMode: mode, mask: mask))),
-        .live(.reference(ReferenceElem(target: ElementRef("m1"), blendMode: mode, mask: mask))),
-        .live(.recorded(RecordedElem(ops: [], inputs: [], blendMode: mode, mask: mask))),
-        .live(.generated(GeneratedElem(conceptId: "spiral", params: [:],
+        .live(.reference(ReferenceElem(target: ElementRef("m1"), name: nil, blendMode: mode, mask: mask))),
+        .live(.recorded(RecordedElem(ops: [], inputs: [], name: nil, blendMode: mode, mask: mask))),
+        .live(.generated(GeneratedElem(conceptId: "spiral", params: [:], name: nil,
                                        blendMode: mode, mask: mask))),
     ]
 }

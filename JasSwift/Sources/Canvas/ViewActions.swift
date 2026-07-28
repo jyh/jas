@@ -66,10 +66,20 @@ public enum ViewActions {
     /// call sites get that rule for free; none of them reached for the selection
     /// before, so Cmd+0 fitted the first board however the panel stood.
     public static func dispatch(_ name: String, model: Model) {
-        let abSel = (model.stateStore
-                        .getPanelState(artboardsPanelScope)["artboards_panel_selection"]
-                        as? [Any])?.compactMap { $0 as? String } ?? []
         LayersPanel.dispatchYamlAction(name, model: model,
-                                       artboardsPanelSelection: abSel)
+                                       artboardsPanelSelection:
+                                           artboardsPanelSelectionIds(model))
     }
+}
+
+/// The Artboards panel's selected ids, read off the model's own state store.
+///
+/// Hoisted out of ``ViewActions/dispatch`` because centring at document-open
+/// needs the same answer: `Model.centerViewOnCurrentArtboard` resolves
+/// `active_document.current_artboard`, and every one of its call sites used to
+/// get `artboards.first` instead for want of two lines of store lookup.
+public func artboardsPanelSelectionIds(_ model: Model) -> [String] {
+    (model.stateStore
+        .getPanelState(artboardsPanelScope)["artboards_panel_selection"]
+        as? [Any])?.compactMap { $0 as? String } ?? []
 }
