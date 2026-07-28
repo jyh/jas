@@ -3,6 +3,12 @@ PySide6
 pytest
 absl-py
 pyyaml
+# workspace_interpreter/validator.py's REAL JSON Schema path. Without this
+# the module silently falls back to _validate_minimal, a hand-rolled subset
+# that ignores $ref, oneOf, pattern, minimum and exclusiveMinimum -- see
+# transcripts/VALIDATOR_TRIAGE.md. Not optional: the fallback's existence is
+# under review (validator phase parts 2-3), the strong path is not.
+jsonschema
 msgpack
 flask
 reportlab
