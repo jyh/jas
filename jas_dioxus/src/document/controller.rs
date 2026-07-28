@@ -793,11 +793,14 @@ impl Controller {
             if layer_vis == Visibility::Invisible {
                 continue;
             }
-            if doc.effective_locked(&vec![li]) {
-                continue;
-            }
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
+                    // ONE read, deliberately: `effective_locked` on the CHILD
+                    // path already folds in the layer's own flag, so a
+                    // layer-level short-circuit above this loop would be
+                    // redundant — and a redundant guard is one no mutation can
+                    // turn red, which is how a guard rots. Measured: with both
+                    // present, reverting EITHER left the whole suite green.
                     if doc.effective_locked(&vec![li, ci]) {
                         continue;
                     }
@@ -2830,6 +2833,14 @@ fn select_flat(
         // RULED 2026-07-28), so the guard has to be an ancestor-aware read at
         // every level rather than a flag on each element. Mirrors the hit_test
         // path and JasSwift `selectFlat`.
+        //
+        // HONEST NOTE ON WHAT IS WATCHED. This walk is three levels deep, and
+        // the layer guard below is the one that enforces at levels 1 and 2:
+        // under it, `effective_locked` at those depths is ALGEBRAICALLY the
+        // element's own flag, so those two reads are expressive rather than
+        // behavioural and no mutation can turn them red (measured: reverting
+        // either to `.locked()` leaves the whole suite green). The GRANDCHILD
+        // read further down is the behavioural change, and it does red.
         if doc.effective_locked(&vec![li]) || layer_vis == Visibility::Invisible {
             continue;
         }

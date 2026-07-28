@@ -580,6 +580,15 @@ public class Controller {
             // read at every level rather than a flag on each element. Mirrors
             // this port's own `docHitTest` / `docHitTestDeep` and jas_dioxus
             // `select_flat`.
+            //
+            // HONEST NOTE ON WHAT IS WATCHED. This walk is three levels deep,
+            // and the layer guard on this line is the one that enforces at
+            // levels 1 and 2: under it, `effectiveLocked` at those depths is
+            // ALGEBRAICALLY the element's own flag, so those two reads are
+            // expressive rather than behavioural and no mutation can turn them
+            // red (measured: reverting either to `.isLocked` leaves the whole
+            // suite green). The GRANDCHILD read below is the behavioural
+            // change, and it does red.
             if doc.effectiveLocked([li]) || layerVis == .invisible { continue }
             for (ci, child) in layer.children.enumerated() {
                 if doc.effectiveLocked([li, ci]) { continue }
