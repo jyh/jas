@@ -724,6 +724,28 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("paste_clipboard_text.json")
 }
 
+/// REPEATED PASTES STACK WITH CUMULATIVE OFFSETS — `workspace/actions.yaml`
+/// paste, a sentence the spec has carried since it was written and which
+/// NEITHER active port implemented: the second paste landed exactly on the
+/// first. Both ports were wrong together, so the written requirement governs
+/// (JYH, 2026-07-28: "follow the spec"). Twin of Rust `operation_paste_stacking`.
+///
+/// The family pins the three run positions (36 / 60 / 84 in document space) and
+/// the four decisions the sentence leaves open — reset keyed to the PAYLOAD,
+/// `paste_in_place` outside the run, preserving-layers sharing the one run, and
+/// a paste that lands nothing not advancing it.
+///
+/// `paste_clipboard_text_payload_stacks_too` is the one that matters most:
+/// `text` is the raw clipboard payload, which is what production reads in both
+/// ports, so a run implemented on the corpus-only `svg` param alone would still
+/// leave the artist pasting on one spot.
+///
+/// UNDO is NOT reachable from here (the runner applies `history` after every
+/// transaction) and is pinned by ``PasteStackingTests`` and its Rust twin.
+@Test func operationPasteStacking() throws {
+    try runOperationFixture("paste_stacking.json")
+}
+
 /// `state.boolean_remove_redundant_points` defaults to FALSE
 /// (`workspace/state.yaml`), so the collinear-collapse pass does NOT run on a
 /// default boolean. Two rects overlapping in x with the same y-extent: the

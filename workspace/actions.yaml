@@ -186,6 +186,30 @@ actions:
       objects become the new selection. Repeated pastes stack with cumulative
       offsets.
 
+      STACKING, in full, because "cumulative" has to mean something exact. The
+      Nth paste of one clipboard lands 24 x N points down and to the right of
+      the original, so pasting the same thing three times gives three copies at
+      24, 48 and 72 rather than three copies on one spot. The run is counted
+      against WHAT IS ON THE CLIPBOARD, not against any record of copying: copy
+      something DIFFERENT and the next paste starts a fresh run at 24 — which is
+      also what happens when the new thing was copied in another application,
+      where this one has no way to notice a copy at all. Copy the SAME artwork
+      again and the run CONTINUES, because the 24 slot is already occupied and
+      landing a second copy exactly on top of the first is the one outcome the
+      offset exists to prevent. Changing the selection does not restart the run
+      either; a paste sets the selection itself, so a run that restarted on a
+      selection change could never reach its second step.
+
+      Three more things the run does not do. "Paste In Place" stands outside it
+      entirely — it neither advances the run nor restarts it, so pasting, then
+      pasting in place, then pasting again gives 24, then the original position,
+      then 48. A paste that puts nothing on the canvas — an empty clipboard —
+      leaves the run exactly where it was. And undoing a paste puts the run back
+      too, so the next paste lands where the undone one did instead of skipping
+      its slot and leaving a visible gap. The run belongs to the document it
+      counts in: a second open document has its own, and none of them survive
+      closing and reopening a file, where the clipboard they counted is gone.
+
       Every pasted object lands in the ACTIVE layer, no matter what layer it
       came from. If the clipboard holds a fragment whose own layers are named,
       those names are ignored and the fragment is flattened into the one active
@@ -235,6 +259,11 @@ actions:
       Paste does. The two commands differ only in WHICH layer each object lands
       in. The pasted objects become the new selection.
 
+      Because they differ only in that, the two commands share ONE cumulative
+      run: pasting and then pasting-preserving-layers gives 24 and then 48, not
+      24 twice. The offset never depends on which of the two the artist reached
+      for, nor on whether the layer a paste lands in had to be created.
+
       Each named layer in the fragment is matched by name against the layers of
       the active document. When a layer of that name already exists, the
       fragment's objects are APPENDED to it, on top of whatever it already
@@ -275,6 +304,11 @@ actions:
       any other text becomes a text object — placed at the origin with its
       baseline one line below, since there is no offset — and an empty or
       unreadable clipboard does nothing at all.
+
+      This command stands OUTSIDE plain Paste's cumulative run. It lands on the
+      original position, which is not one of the run's slots, so it neither
+      advances the run nor restarts it: paste, paste in place, paste puts copies
+      at 24, at the original, and at 48.
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"

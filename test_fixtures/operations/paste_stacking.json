@@ -1,0 +1,393 @@
+[
+  {
+    "_doc": [
+      "REPEATED PASTES STACK WITH CUMULATIVE OFFSETS \u2014 workspace/actions.yaml",
+      "paste has required that sentence since it was written, and NEITHER ACTIVE",
+      "PORT implemented it: the second paste landed exactly on the first, which is",
+      "the single outcome the offset exists to prevent, arrived at by pasting twice",
+      "instead of once. Both ports were wrong TOGETHER, so this is a tier-1 spec",
+      "violation and not a divergence: the written requirement governs, and JYH",
+      "ruled 2026-07-28 'follow the spec' \u2014 implement the stacking, do not amend",
+      "the sentence.",
+      "",
+      "WHAT `offset` MEANS IN THIS OP. It is the BASE STEP, not the distance",
+      "travelled. The Nth consecutive paste of one payload lands at N * offset from",
+      "the source, so three pastes at base 24 sit at 24, 48, 72. `paste_in_place`",
+      "passes 0 and is outside the run entirely.",
+      "",
+      "COORDINATES. multi_layer.svg is a 96px viewBox, and the SVG codec converts",
+      "px to pt (x0.75), so the pasted 16x16 rect at (16,16) is a 12x12 rect at",
+      "(12,12) in DOCUMENT space. The offset is applied in document space, on top:",
+      "a first paste lands at 12+24 = 36, a second at 12+48 = 60, a third at",
+      "12+72 = 84. Those three numbers are the whole family.",
+      "",
+      "HOW THE GOLDENS WERE DERIVED, because it is what makes these vectors RED ON",
+      "ARRIVAL rather than a port agreeing with itself. Under the PRE-RULING code",
+      "`offset` was the literal distance a paste travelled, so a throwaway",
+      "derivation fixture pasting the same payload at EXPLICIT offsets 24 / 48 / 72",
+      "produced exactly the documents cumulative stacking must produce from",
+      "REPEATED base-24 pastes. Those documents are these goldens. The vectors",
+      "below then ask for the same documents from a DIFFERENT op sequence \u2014 the",
+      "repeated base-24 one \u2014 which is the sequence that did not work. The",
+      "derivation fixture is deleted; re-derive by writing it again.",
+      "",
+      "THE FOUR DECISIONS the spec sentence leaves open, each pinned by a vector",
+      "here and written as artist-facing prose in workspace/actions.yaml:",
+      "  1. RESET IS KEYED TO WHAT IS PASTED, not to a copy hook. A payload that",
+      "     differs from the one the run is counting starts a new run at the base",
+      "     step \u2014 so a copy of DIFFERENT artwork resets the offset, including an",
+      "     EXTERNAL copy from another application that no in-app hook could see,",
+      "     and a copy of the SAME artwork does not, because the first slot is",
+      "     already occupied. A selection-keyed reset was rejected with a proof:",
+      "     paste SETS the selection, so it could never reach step two.",
+      "  2. `paste_in_place` DOES NOT PARTICIPATE. It neither advances the run nor",
+      "     restarts it: 24, 0, 48.",
+      "  3. `paste_preserving_layers` SHARES THE ONE RUN. The two commands differ",
+      "     in WHICH LAYER artwork lands in, never in the offset.",
+      "  4. A PASTE THAT LANDS NOTHING DOES NOT ADVANCE THE RUN.",
+      "",
+      "THE PAYLOAD IS THE KEY, and it is the RAW STRING \u2014 the `text` the port read",
+      "off the system clipboard, or the `svg` fragment markup. Two consequences",
+      "worth stating: markup that differs only in whitespace is a DIFFERENT payload",
+      "and restarts the run, and the run is a SINGLE SLOT, so copying B between two",
+      "pastes of A loses A's count and the next A lands back on the first one.",
+      "Both are conservative and both are banked, not ruled.",
+      "",
+      "WHAT THIS FAMILY CANNOT REACH, stated rather than implied: UNDO. The",
+      "operations runner applies `history` AFTER every transaction, so no fixture",
+      "can paste after an undo, and an embedded undo op inside a txn would desync",
+      "the checkpoint_equivalence gate (which replays journal[0..head] and never",
+      "replays history navigation). Undo/redo restoring the run is pinned by TWIN",
+      "PER-PORT probes instead \u2014 jas_dioxus op_apply::paste_stacking_tests and",
+      "JasSwift PasteStackingTests \u2014 over identical vectors. That is a weaker watch",
+      "than a shared golden and is named as such."
+    ],
+    "name": "paste_stacking_family_setup_is_two_named_layers_background_and_foreground",
+    "setup_svg": "multi_layer.svg",
+    "txns": [],
+    "expected_json": "paste_doc_noop_expected.json"
+  },
+  {
+    "_doc": [
+      "THE HEADLINE REQUIREMENT. The same payload pasted twice at base 24 lands",
+      "at 36 and then 60. Before the fix both landed at 36 \u2014 one rect exactly",
+      "on top of the other, which reads on screen as a paste that did nothing."
+    ],
+    "name": "paste_twice_stacks_24_then_48",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_twice_stacks_24_then_48_expected.json"
+  },
+  {
+    "_doc": [
+      "The run is CUMULATIVE, not a one-shot doubling. A third paste must land",
+      "at 84, which separates 'multiply by the run position' from 'add 24 once",
+      "more if this is not the first paste' \u2014 a mutation that satisfies the",
+      "two-paste case with a fixed second step fails here."
+    ],
+    "name": "paste_three_times_stacks_24_48_72",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_three_times_stacks_24_48_72_expected.json"
+  },
+  {
+    "_doc": [
+      "DECISION 1 \u2014 reset is keyed to WHAT IS PASTED. Two pastes of payload A",
+      "(36, 60), then two of a DIFFERENT payload B, which must restart at the",
+      "base step: B's rect sits at (24,0) in document space, so it lands at",
+      "(48,24) and then (72,48). This is what makes an EXTERNAL copy reset the",
+      "run without the paste path owning a copy hook."
+    ],
+    "name": "paste_a_new_payload_restarts_the_stack",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"32\" y=\"0\" width=\"8\" height=\"8\" fill=\"rgb(0,128,0)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"32\" y=\"0\" width=\"8\" height=\"8\" fill=\"rgb(0,128,0)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_a_new_payload_restarts_the_stack_expected.json"
+  },
+  {
+    "_doc": [
+      "DECISION 2 \u2014 `paste_in_place` neither advances the run nor restarts it.",
+      "Interleaved between two ordinary pastes it lands on the source (12,12)",
+      "and the paste after it lands at 60, NOT back at 36 (which a reset would",
+      "give) and NOT at 84 (which participation would give). Three outcomes,",
+      "one vector, so no mutation satisfies it by accident."
+    ],
+    "name": "paste_in_place_neither_advances_nor_resets_the_stack",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste_in_place",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 0.0
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_in_place_neither_advances_nor_resets_the_stack_expected.json"
+  },
+  {
+    "_doc": [
+      "DECISION 3 \u2014 'Paste, Preserving Layers' shares the ONE run. Plain Paste",
+      "then preserving-layers over the SAME payload: the fragment layer is",
+      "unnamed, so preserve mode degenerates to plain Paste and the geometry is",
+      "byte-identical to `paste_twice_stacks_24_then_48`. Pinned BY FILE",
+      "IDENTITY \u2014 this vector points at that vector's own golden \u2014 so a second",
+      "run behind `preserve_layers` could not stay agreeing with it."
+    ],
+    "name": "paste_preserving_layers_shares_the_one_stack",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0,
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_twice_stacks_24_then_48_expected.json"
+  },
+  {
+    "_doc": [
+      "Decision 3 again, on the branch where R3 actually bites: a NAMED",
+      "fragment layer. The first preserving paste CREATES layer 'Imported' and",
+      "lands its child at 36; the second MATCHES that layer and appends at 60.",
+      "So the run advances across a layer creation, and the offset is not",
+      "quietly re-based when the target layer changes."
+    ],
+    "name": "paste_preserving_named_layer_stacks_in_the_created_layer",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Imported\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></g></svg>",
+            "offset": 24.0,
+            "preserve_layers": true
+          }
+        ]
+      },
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Imported\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></g></svg>",
+            "offset": 24.0,
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_preserving_named_layer_stacks_in_the_created_layer_expected.json"
+  },
+  {
+    "_doc": [
+      "THE PRODUCTION PATH. `text` carries the RAW CLIPBOARD PAYLOAD (D4/D5),",
+      "which is what BOTH ports' real paste actually reads \u2014 the `svg` param is",
+      "corpus-only. A non-SVG payload becomes a Text element at (offset,",
+      "offset+16), so two pastes put it at (24,40) and (48,64). Without this",
+      "vector the run could be implemented on the `svg` param alone and every",
+      "other case here would still pass while production pasted on one spot."
+    ],
+    "name": "paste_clipboard_text_payload_stacks_too",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "text": "hello from another app",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "text": "hello from another app",
+            "offset": 24.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_clipboard_text_payload_stacks_too_expected.json"
+  },
+  {
+    "_doc": [
+      "DECISION 4 \u2014 a paste that lands NOTHING does not advance the run. The",
+      "empty string is a readable-but-empty clipboard (D5), a no-op; the paste",
+      "after it must still be the SECOND of the run at 60, not the third at 84.",
+      "Pinned by file identity against `paste_twice_stacks_24_then_48`."
+    ],
+    "name": "a_paste_that_lands_nothing_does_not_advance_the_stack",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "text": "",
+            "offset": 24.0
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_twice_stacks_24_then_48_expected.json"
+  }
+]

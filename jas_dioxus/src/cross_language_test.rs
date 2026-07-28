@@ -3632,6 +3632,32 @@ mod tests {
         run_operation_fixture("operations/paste_clipboard_text.json");
     }
 
+    /// REPEATED PASTES STACK WITH CUMULATIVE OFFSETS — `workspace/actions.yaml`
+    /// §paste, a sentence the spec has carried since it was written and which
+    /// NEITHER active port implemented: the second paste landed exactly on the
+    /// first. Both ports were wrong together, so the written requirement
+    /// governs (JYH, 2026-07-28: "follow the spec").
+    ///
+    /// The family pins the three run positions (36 / 60 / 84 in document space)
+    /// and the four decisions the sentence leaves open — reset keyed to the
+    /// PAYLOAD, `paste_in_place` outside the run, preserving-layers sharing the
+    /// one run, and a paste that lands nothing not advancing it. Two of its
+    /// vectors point at ANOTHER vector's golden by file identity rather than
+    /// carrying a second copy.
+    ///
+    /// `paste_clipboard_text_payload_stacks_too` is the one that matters most:
+    /// `text` is the raw clipboard payload, which is what production reads in
+    /// both ports, so a run implemented on the corpus-only `svg` param alone
+    /// would still leave the artist pasting on one spot.
+    ///
+    /// UNDO is NOT reachable from here (the runner applies `history` after every
+    /// transaction) and is pinned by `op_apply::paste_stacking_tests` and its
+    /// Swift twin instead.
+    #[test]
+    fn operation_paste_stacking() {
+        run_operation_fixture("operations/paste_stacking.json");
+    }
+
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*
     /// print-config verbs journal real ops through `op_apply`. The fixtures span
     /// all four target structs (document_setup, print_preferences root,
