@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 96 96" width="96" height="96">
+  <defs>
+    <rect x="0" y="0" width="8" height="8" fill="rgb(1,2,3)" stroke="none" id="m1" jas:locked="true"/>
+  </defs>
+  <g inkscape:groupmode="layer" inkscape:label="Kinds" jas:locked="true">
+    <line x1="0" y1="0" x2="8" y2="8" stroke="rgb(0,0,0)" jas:locked="true"/>
+    <rect x="0" y="8" width="8" height="8" fill="rgb(255,0,0)" stroke="none" jas:locked="true"/>
+    <circle cx="4" cy="20" r="4" fill="rgb(0,255,0)" stroke="none" jas:locked="true"/>
+    <ellipse cx="4" cy="30" rx="4" ry="2" fill="rgb(0,0,255)" stroke="none" jas:locked="true"/>
+    <polyline points="0,36 8,36 8,44" fill="none" stroke="rgb(0,0,0)" jas:locked="true"/>
+    <polygon points="0,48 8,48 4,56" fill="rgb(255,255,0)" stroke="none" jas:locked="true"/>
+    <path d="M 0 60 L 8 68 Z" fill="rgb(0,255,255)" stroke="none" jas:locked="true"/>
+    <text x="0" y="76" fill="rgb(0,0,0)" stroke="none" font-family="sans-serif" font-size="8" jas:locked="true">A</text>
+    <text fill="rgb(0,0,0)" stroke="none" font-family="sans-serif" font-size="8" jas:locked="true"><textPath path="M0,84 L8,84">B</textPath></text>
+    <g inkscape:label="Locked Group" jas:locked="true">
+      <rect x="16" y="0" width="8" height="8" fill="rgb(128,128,128)" stroke="none"/>
+    </g>
+    <use href="#m1" id="i1" jas:locked="true"/>
+    <g data-jas-live="compound_shape" data-jas-operation="union" id="c1" jas:locked="true">
+      <rect x="32" y="0" width="8" height="8" fill="rgb(10,20,30)" stroke="none"/>
+      <rect x="36" y="4" width="8" height="8" fill="rgb(10,20,30)" stroke="none"/>
+    </g>
+  </g>
+  <g inkscape:label="Promoted Locked Group" jas:locked="true">
+    <rect x="64" y="0" width="8" height="8" fill="rgb(9,9,9)" stroke="none"/>
+  </g>
+</svg>

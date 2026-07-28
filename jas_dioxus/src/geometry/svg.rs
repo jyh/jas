@@ -167,16 +167,44 @@ fn tool_origin_attr(origin: &Option<String>) -> String {
     }
 }
 
-/// Standard SVG `id` attribute for an element's stable identity.
-/// Emitted ONLY when the id is set (Some/non-empty) so id-less
-/// elements serialize byte-identically to before — keeping the SVG
-/// fixtures and cross-language test_json comparison green. Mirrors
-/// `name_attr` (the inkscape:label writer) right next to it.
-fn id_attr(id: &Option<String>) -> String {
-    match id {
+/// The standard SVG `id` attribute for an element's stable identity, followed
+/// by the workspace-private `jas:locked` flag.
+///
+/// `id` is emitted ONLY when set (Some/non-empty) and `jas:locked` ONLY when
+/// true, so an id-less unlocked element serializes byte-identically to before —
+/// keeping the SVG fixtures and the cross-language test_json comparison green.
+/// Measured when `jas:locked` was added (LOCKSVG, 2026-07-28): 0 of the
+/// elements across the 60 SVG fixtures carry `locked = true`, so the
+/// conditional attribute moved ZERO goldens. Same convention as
+/// `fill-rule="evenodd"`, `data-jas-dash-align-anchors` and the five arrowhead
+/// attributes.
+///
+/// WHY THE TWO FIELDS SHARE ONE HELPER, and it is not tidiness. `element_svg`
+/// hand-inlines its attribute lists in sixteen arms, so an attribute added
+/// per-arm is added SIXTEEN TIMES and a missed arm is a silent drop that no
+/// compiler can see — the omission class `common_attrs_no_name` was created to
+/// close for opacity/transform/id, and the one JasSwift keeps re-learning
+/// (`project_swift_copy_site_omission_class`). `id_attr` was already called by
+/// EVERY arm, so widening its signature makes the COMPILER enumerate the
+/// sixteen sites instead of a human. Mirrors JasSwift's `idLockAttrs`.
+///
+/// `urn:jas:1` is the namespace, not `sodipodi:insensitive` or `data-locked`:
+/// it is where the sibling CommonProps field `tool_origin` already lives
+/// (`jas:tool-origin`, written below and read by `parse_common`), and JasSwift
+/// declares `xmlns:jas` by matching the ` jas:` PREFIX in its emitted body, so
+/// a new `jas:`-namespaced attribute is covered by that guard automatically.
+/// An attribute in any other prefix would need its own declaration trigger, and
+/// forgetting one makes Foundation reject the WHOLE document.
+fn id_lock_attrs(id: &Option<String>, locked: bool) -> String {
+    let id_part = match id {
         None => String::new(),
         Some(s) if s.is_empty() => String::new(),
         Some(s) => format!(" id=\"{}\"", escape_xml(s)),
+    };
+    if locked {
+        format!("{} jas:locked=\"true\"", id_part)
+    } else {
+        id_part
     }
 }
 
@@ -204,7 +232,7 @@ fn common_attrs_no_name(c: &CommonProps) -> String {
         "{}{}{}",
         opacity_attr(c.opacity),
         transform_attr(&c.transform),
-        id_attr(&c.id),
+        id_lock_attrs(&c.id, c.locked),
     )
 }
 
@@ -288,7 +316,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity),
                 transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -307,7 +335,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 rxy,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -318,7 +346,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.r)),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -329,7 +357,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.rx)), fmt(px(e.ry)),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -343,7 +371,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 indent, ps,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -357,7 +385,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 indent, ps,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -373,7 +401,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke), fr_attr,
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
                 tool_origin_attr(&e.common.tool_origin),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -537,7 +565,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             // a Layer from a named Group (both carry inkscape:label).
             let mut lines = vec![format!(
                 "{}<g inkscape:groupmode=\"layer\"{}{}{}{}>",
-                indent, id_attr(&e.common.id), name_attr(&e.common.name),
+                indent, id_lock_attrs(&e.common.id, e.common.locked), name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
             )];
             let child_indent = format!("{}  ", indent);
@@ -550,7 +578,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
         Element::Group(e) => {
             let mut lines = vec![format!(
                 "{}<g{}{}{}{}>",
-                indent, id_attr(&e.common.id), name_attr(&e.common.name),
+                indent, id_lock_attrs(&e.common.id, e.common.locked), name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
             )];
             let child_indent = format!("{}  ", indent);
@@ -1347,7 +1375,14 @@ fn parse_common(node: &XmlNode) -> CommonProps {
         opacity: parse_opacity(node),
         mode: crate::geometry::element::BlendMode::default(),
         transform: parse_transform(node),
-        locked: false,
+        // LOCKSVG (2026-07-28): the workspace-private lock flag, written by
+        // `id_lock_attrs` above. It was hard-coded `false` here from the day
+        // this function was written, which is why locking a layer, saving and
+        // reopening lost the protection entirely — and why every SVG-seeded
+        // fixture in the shared corpus was blind to lock as a precondition.
+        // Only the exact string "true" locks: a foreign or malformed value
+        // must not silently protect artwork the artist never protected.
+        locked: node.attrs.get("jas:locked").map(|v| v == "true").unwrap_or(false),
         visibility: crate::geometry::element::Visibility::default(),
         mask: None,
         tool_origin: node.attrs.get("jas:tool-origin").cloned(),

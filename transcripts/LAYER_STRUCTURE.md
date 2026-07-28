@@ -1172,3 +1172,98 @@ omission class again), and **Rust iterates layers in the wrong z-order in
 hit-testing**, where Swift, the Python reference and Rust's own inner loops all
 agree against it. Also measured: **Align's documented lock rule is unimplemented**
 — `align.rs` mentions `locked` on two lines and both are comments.
+
+### 13.1 STONE 1 LANDED — `jas:locked`, the prerequisite (2026-07-28)
+
+The prerequisite above is closed. `common.locked` now survives an SVG round trip
+in **both** active ports, so the shared conformance corpus can finally start a
+case from a locked document and the ruling becomes gateable.
+
+**The spelling, and the reasoning that picked it.** ` jas:locked="true"`, in the
+`urn:jas:1` namespace, written immediately after the element's `id`.
+
+The scope left this open (its Q5) between `sodipodi:insensitive` and
+`data-locked`. Both were rejected:
+
+* The precedent is the **sibling `CommonProps` field**. `tool_origin` is written
+  `jas:tool-origin` by both ports and read by both, in the same namespace,
+  emitted only when set (`svg.rs` `tool_origin_attr` / `parse_common`;
+  `Svg.swift` the `<path>` arm and `parseElement`). The five arrowhead
+  attributes (`jas:start-arrow` and friends) are the same shape. `locked` is a
+  `CommonProps` field, so it belongs where its siblings live.
+* `sodipodi:insensitive` carries a **measured hazard**, not merely a different
+  taste. JasSwift decides whether to declare `xmlns:jas` by matching the
+  ` jas:` PREFIX in its emitted body — a guard written *after* an undeclared
+  prefix made Foundation reject a WHOLE document and the artwork came back
+  empty. A `jas:`-namespaced attribute inherits that guard for free. A
+  `sodipodi:`-namespaced one would need `needsSodipodi` widened (it is
+  currently `needsNamedview` alone), and forgetting that re-opens exactly the
+  hole the guard was built to close.
+* `data-locked` is already shipped in **jas_flask** (`svg_io.mjs:96,225`) but
+  only for leaf shapes — `:144` and `:156` hard-code `locked: false` for `<g>`,
+  so it cannot express a locked layer at all. Adopting it would import a
+  spelling that does not cover the case the ruling is about.
+
+**Written only when true, so golden churn is zero** — measured, not assumed: 0
+of the elements across the 60 SVG fixtures carry `locked = true`, and no shipped
+golden moved. Same conditional-key convention as `fill-rule="evenodd"`. Only the
+exact string `"true"` locks on read; a foreign or malformed value must not
+silently protect artwork the artist never protected.
+
+**The copy-site omission class, handled by making the COMPILER enumerate.** Both
+ports hand-inline their attribute lists per element kind (16 arms in Rust, 15 in
+Swift). Every arm in both ports already called `id_attr` / `idAttr`, so that
+helper took a REQUIRED `locked` argument and became `id_lock_attrs` /
+`idLockAttrs`; the compilers then listed the sites — 10 in Rust, 15 in Swift —
+and neither would build until every one was answered. On the read side Rust
+already funnels every kind through one `parse_common`; Swift's reader builds
+fourteen different structs, so it applies `Element.withLocked` once at
+`parseElement`, whose own switch the compiler checks for exhaustiveness over all
+twelve cases.
+
+**A second defect, found by the census fixture and repaired.** JasSwift promotes
+a top-level bare `<g>` to a Layer by rebuilding it field by field, where Rust
+carries `common: g.common.clone()` and loses nothing. `locked` is threaded now.
+The fields still dropped there — `visibility`, `blendMode`, `mask`,
+`isolatedBlending`, `knockoutGroup` — are a REAL divergence from Rust that no
+SVG gate can see, because none of them survives an SVG round trip in either port
+either. Named in a comment at the site; `isolatedBlending` / `knockoutGroup` are
+already the standing coverage gap `container-blend-fields-survive-no-codec`.
+
+**THE REFERENCE CANNOT ADJUDICATE THIS, and that is a standing fact about lock
+persistence, not a gap this stone left.** `workspace_interpreter/` has **no SVG
+codec at all** — measured: `svg` appears in four files and every occurrence is
+prose in a comment. It *does* model lock (`common.locked` on its document dicts,
+read by `doc_primitives._child_is_locked` and reachable from expressions as
+`element_at(path(0)).common.locked`), so it can adjudicate lock SEMANTICS and
+already prunes locked subtrees in `hit_test`. It cannot adjudicate lock
+PERSISTENCE, in this or any codec. For Stone 4 that is fine: enforcement is
+semantics. It is recorded here so no later wave mistakes the reference's silence
+for agreement.
+
+**What is gated.** `common.locked` is now a watched row of
+`test_fixtures/expected/codec_field_survival.json` in all three codec columns
+(it was absent, which is why the drop was structurally invisible even though the
+saturated Path the gate round-trips has carried `locked: true` since the file was
+written). Two new SVG fixtures — `locked_layer_and_element.svg` (the semantic
+vector: a locked LAYER whose children carry no flag of their own, plus a locked
+ELEMENT inside an unlocked layer) and `locked_all_kinds.svg` (the writer-arm
+census) — are registered in four lanes per port plus the cross-language
+commutativity driver, whose OFF-DIAGONAL cells are what prove the two ports
+agree on the spelling rather than each agreeing with itself.
+
+**BANKED, not decided** — each needs JYH, and none blocks Stone 4:
+
+1. **Interop read.** Should the readers ALSO accept `sodipodi:insensitive`, so a
+   layer locked in Inkscape opens locked here? There is precedent for a
+   dual-spelling read (`name` accepts `inkscape:label` OR a `<title>` child),
+   and it is one line per port — but it is a second decision that Q5 owns, and
+   both ports must move together.
+2. **jas_flask.** It still writes and reads `data-locked` on leaf shapes only,
+   so a locked rect saved by the flask renderer still loses its lock in the
+   active ports and vice versa. Flask is the non-gating reference renderer, so
+   this is a divergence by policy rather than a defect — but it is a divergence.
+3. **The frozen ports.** `jas_ocaml/lib/geometry/svg.ml:1038` and the Python Qt
+   app still parse `locked = false` unconditionally. Correct per the freeze; the
+   consequence is that a file saved by an active port and reopened in a frozen
+   one silently unlocks. Stated, not fixed.
