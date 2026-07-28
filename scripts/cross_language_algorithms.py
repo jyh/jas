@@ -13,11 +13,13 @@ Usage:
 """
 
 import argparse
+import copy
 import json
 import math
 import os
 import subprocess
 import sys
+import tempfile
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(REPO_ROOT, "test_fixtures", "algorithms")
@@ -442,6 +444,269 @@ def check_json_string_escapers():
 
 
 # ---------------------------------------------------------------
+# The RELATIONAL S-4 gate: a leading ClosePath contributes nothing
+# ---------------------------------------------------------------
+#
+# S-4 (JYH, fleet council 2026-07-27): "a ClosePath before any point has been
+# established contributes nothing." That is a ruling about a SHAPE OF CODE, and
+# the tree honours it in four separate first-subpath walkers through four
+# hand-written guards of two different forms — `out.is_empty()` where the
+# accumulator holds vertices, a `has_current` / `hasCurrent` flag where it holds
+# samples a bare MoveTo does not emit. Two of those four were WRONG until
+# 2026-07-27, in BOTH PORTS IDENTICALLY, which is precisely the class a
+# port-vs-port comparison is structurally blind to: wrong-vs-wrong compares
+# green. The value families that now watch them (`art_flatten`,
+# `calligraphic_outline`) each cover only the inputs their vectors name, and
+# nothing forced a FIFTH walker to choose either guard form.
+#
+# This pass is the mechanism that does. It is RELATIONAL, not value-pinned:
+# for every registered algorithm, it takes each fixture vector that carries
+# path data, manufactures a probe by prepending one ClosePath to every path in
+# it, and asserts the algorithm's answer does not move. No new golden is
+# written, S-4 is stated once, and — the point — an algorithm registered
+# tomorrow is probed the day it lands, from the ordinary vectors its own author
+# wrote for other reasons. Measured: with both 2026-07-27 guards reverted, the
+# vectors that catch the defect here are the ones named
+# `art_second_moveto_ends_the_first_subpath` (`d` = M L M L, containing no
+# ClosePath at all) and `callig_line_no_leading_close` — neither was written as
+# a leading-close test. That is the property a value family cannot have.
+#
+# It also compares the PROBE outputs across ports, so the two hand-written
+# guards cannot drift apart at the leading close without a red.
+
+LEADING_CLOSE_PROBE_SUFFIX = "::leading_close"
+
+# Keys whose contents are GOLDEN, not input: never probed. `arrow_trim`'s
+# `expected` is itself a path-command list, so a walk that did not skip these
+# would mutate the answer alongside the question and compare green forever.
+LEADING_CLOSE_GOLDEN_KEYS = ("expected", "translations")
+
+# Registered algorithms that consume NO path, with the reason. Required so the
+# classification is TOTAL over ALGORITHMS: an algorithm that yields no probe and
+# is not listed here is a FAILURE telling its author to decide which it is. That
+# is the forcing function the class was missing — a new path-consuming algorithm
+# whose fixture happens to carry no path vector cannot pass silently. The list
+# is also policed in reverse: if a fixture named here starts carrying path data,
+# the stale entry is reported.
+LEADING_CLOSE_NO_PATH_INPUT = {
+    "measure": "unit conversion of a scalar; no geometry at all",
+    "gradient_remap": "gradient stops + two bboxes; the fragment is a rect",
+    "length": "unit-aware string parse/format of a scalar",
+    "color_convert": "colour channels only",
+    "path_project": "raw point + segment/cubic coordinate args, not a command list",
+    "number_commit": "a widget's commit rule over a string",
+    "boolean": "polygon RINGS (already-flattened point lists), not path commands",
+    "boolean_normalize": "polygon rings, as `boolean`",
+    "polygon_metrics": "polygon rings, as `boolean`",
+    "fit_curve": "an input POINT list; the curve is the output",
+    "shape_recognize": "an input point list, as `fit_curve`",
+    "planar": "polylines (point lists), not path commands",
+    "text_layout": "a string plus a width",
+    "text_layout_paragraph": "a string plus paragraph attributes",
+    "align": "rect bounds only",
+}
+
+# Algorithms whose OUTPUT is a path (or a document containing one) rather than
+# an answer derived from one. For these the S-4-honouring behaviour is not
+# invariance but FORWARDING: the leading ClosePath must be carried through
+# unchanged, because a transform that speaks to position must preserve the
+# command list it did not speak to (the Preservation Law) — dropping the close
+# would be the bug. So the assertion is `strip_one_leading_close(probe) ==
+# original` AND `probe != original`: a positive claim that the close really was
+# carried, not a licence to differ. An entry that stops being needed is
+# reported as a failure, so it cannot sit here pretending.
+LEADING_CLOSE_PATH_OUTPUT = {
+    "paste_translate": "the result is the pasted element serialized whole, so "
+                       "the leading ClosePath is preserved in `d` — as the "
+                       "Preservation Law requires of a transform that speaks "
+                       "only to position",
+}
+
+
+def _is_path_command_list(v):
+    """A path-command list as every fixture spells one: a non-empty list of
+    objects each carrying a `cmd`."""
+    return (isinstance(v, list) and len(v) > 0
+            and all(isinstance(e, dict) and "cmd" in e for e in v))
+
+
+def _with_leading_close(node):
+    """Deep copy of `node` with one ClosePath prepended to EVERY path-command
+    list reachable through non-golden keys. Returns (copy, paths_touched)."""
+    if _is_path_command_list(node):
+        return ([{"cmd": "Z"}] + copy.deepcopy(node), 1)
+    if isinstance(node, dict):
+        out, n = {}, 0
+        for k, v in node.items():
+            if k in LEADING_CLOSE_GOLDEN_KEYS or k.startswith("_"):
+                out[k] = copy.deepcopy(v)
+                continue
+            out[k], c = _with_leading_close(v)
+            n += c
+        return (out, n)
+    if isinstance(node, list):
+        out, n = [], 0
+        for v in node:
+            nv, c = _with_leading_close(v)
+            out.append(nv)
+            n += c
+        return (out, n)
+    return (copy.deepcopy(node), 0)
+
+
+def _without_leading_closes(node):
+    """The exact inverse of `_with_leading_close`, for the path-OUTPUT form:
+    drop one leading ClosePath from every path-command list in a result. A
+    result that is the document writer's canonical STRING (paste_translate) is
+    handled textually on the same rule — a `Z` that is FIRST inside an array."""
+    if isinstance(node, str):
+        return node.replace('[{"cmd":"Z"},', '[').replace('[{"cmd":"Z"}]', '[]')
+    if _is_path_command_list(node):
+        if node[0].get("cmd") == "Z":
+            return copy.deepcopy(node[1:])
+        return copy.deepcopy(node)
+    if isinstance(node, dict):
+        return {k: _without_leading_closes(v) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_without_leading_closes(v) for v in node]
+    return copy.deepcopy(node)
+
+
+def _leading_close_probe_pairs(fixture_path):
+    """Returns (doc_is_list, pairs) where each pair is (original, probe,
+    paths_touched) for every non-skipped vector that carries path data."""
+    with open(fixture_path) as fh:
+        doc = json.load(fh)
+    vectors = doc if isinstance(doc, list) else doc.get("vectors", [])
+    pairs = []
+    for v in vectors:
+        if not isinstance(v, dict) or v.get("_skip"):
+            continue
+        probe, n = _with_leading_close(v)
+        if n == 0:
+            continue
+        probe["name"] = str(v.get("name", "?")) + LEADING_CLOSE_PROBE_SUFFIX
+        pairs.append((v, probe, n))
+    return (isinstance(doc, list), pairs)
+
+
+def check_leading_close_invariance(langs, algos, verbose=False):
+    """Run the S-4 relational pass. Returns (passed, failed, errors); prints
+    its own FAIL / EXEMPT lines so a red names the algorithm and the vector."""
+    passed = failed = errors = 0
+    ref_lang = langs[0]
+    with tempfile.TemporaryDirectory(prefix="s4-leading-close-") as tmpd:
+        for algo in algos:
+            strategy, tol = ALGORITHMS[algo]
+            fixture_path = os.path.join(FIXTURES_DIR, f"{algo}.json")
+            if not os.path.exists(fixture_path):
+                continue  # the main loop already reports a missing fixture
+            is_list, pairs = _leading_close_probe_pairs(fixture_path)
+
+            # The classification must be total, and self-policing both ways.
+            if not pairs:
+                if algo in LEADING_CLOSE_NO_PATH_INPUT:
+                    continue
+                print(f"  FAIL: s4/leading-close {algo} [yields no probe and is "
+                      f"not classified: if it consumes a path, give its fixture "
+                      f"a path vector; if it does not, say so in "
+                      f"LEADING_CLOSE_NO_PATH_INPUT with the reason]")
+                failed += 1
+                continue
+            if algo in LEADING_CLOSE_NO_PATH_INPUT:
+                print(f"  FAIL: s4/leading-close {algo} [classified as taking no "
+                      f"path, but its fixture now carries {len(pairs)} path "
+                      f"vector(s): delete the stale "
+                      f"LEADING_CLOSE_NO_PATH_INPUT entry]")
+                failed += 1
+                continue
+
+            k = len(pairs)
+            combined = [p[0] for p in pairs] + [p[1] for p in pairs]
+            probe_doc = combined if is_list else {"vectors": combined}
+            probe_path = os.path.join(tmpd, f"{algo}.json")
+            with open(probe_path, "w") as fh:
+                json.dump(probe_doc, fh)
+
+            forwards = algo in LEADING_CLOSE_PATH_OUTPUT
+            outputs = {}
+            for lang in langs:
+                if (lang, algo) in SKIP_LANG_ALGO:
+                    continue
+                try:
+                    outputs[lang] = json.loads(LANGUAGES[lang](algo, probe_path))
+                except Exception as e:
+                    print(f"  ERROR: s4/leading-close {algo} {lang}: {e}")
+                    errors += 1
+            for lang, out in outputs.items():
+                if len(out) != 2 * k:
+                    print(f"  FAIL: s4/leading-close {algo} {lang} [emitted "
+                          f"{len(out)} results for {2 * k} vectors]")
+                    failed += 1
+                    continue
+                if not all(isinstance(r, dict) and "name" in r and "result" in r
+                           for r in out):
+                    print(f"  FAIL: s4/leading-close {algo} {lang} [results are "
+                          f"not {{name, result}} objects, so the probe cannot be "
+                          f"paired with its original — teach this pass that "
+                          f"shape rather than dropping the algorithm]")
+                    failed += 1
+                    continue
+                for i in range(k):
+                    orig, probe = out[i], out[k + i]
+                    name = orig["name"]
+                    if forwards:
+                        stripped = {"result":
+                                    _without_leading_closes(probe["result"])}
+                        ok = compare(strategy, orig, stripped, tol)
+                        if ok and compare(strategy, orig, probe, tol):
+                            print(f"  FAIL: s4/leading-close {algo}/{name} "
+                                  f"[{lang}: listed in "
+                                  f"LEADING_CLOSE_PATH_OUTPUT, but the leading "
+                                  f"ClosePath is NOT carried into the output. "
+                                  f"Either {lang} DROPPED it — a transform "
+                                  f"guessing at what it was asked to preserve, "
+                                  f"which is the bug this form exists to catch "
+                                  f"— or the algorithm stopped returning a path "
+                                  f"and the entry is stale. Fix the port, or "
+                                  f"delete the entry]")
+                            failed += 1
+                            continue
+                    else:
+                        ok = compare(strategy, orig, probe, tol)
+                    if ok:
+                        passed += 1
+                    else:
+                        how = ("output does not forward the leading ClosePath "
+                               "unchanged" if forwards
+                               else "a leading ClosePath changed the answer")
+                        print(f"  FAIL: s4/leading-close {algo}/{name} "
+                              f"[{lang}: {how} — S-4 says it contributes "
+                              f"nothing]")
+                        if verbose:
+                            print(f"    stripped: "
+                                  f"{json.dumps(orig['result'], sort_keys=True)[:200]}")
+                            print(f"    leading Z: "
+                                  f"{json.dumps(probe['result'], sort_keys=True)[:200]}")
+                        failed += 1
+                # The two ports' guards are hand-written and of two different
+                # forms; compare the PROBE answers directly so they cannot
+                # drift apart at the leading close with no golden moving.
+                if lang != ref_lang and ref_lang in outputs \
+                        and len(outputs[ref_lang]) == 2 * k:
+                    for i in range(k, 2 * k):
+                        rv, lv = outputs[ref_lang][i], out[i]
+                        if compare(strategy, rv, lv, tol):
+                            passed += 1
+                        else:
+                            print(f"  FAIL: s4/leading-close {algo}/"
+                                  f"{rv['name']} [{ref_lang} vs {lang}: the two "
+                                  f"S-4 guards disagree]")
+                            failed += 1
+    return (passed, failed, errors)
+
+
+# ---------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------
 
@@ -485,6 +750,21 @@ def main():
     for problem in check_json_string_escapers():
         print(f"  FAIL: port/json-string-escaper {problem}")
         failed += 1
+
+    # The RELATIONAL S-4 pass (see check_leading_close_invariance): asserts a
+    # leading ClosePath changes no answer, for every registered algorithm whose
+    # fixture carries path data — including algorithms added after this was
+    # written. Runs before the value families so a class violation is reported
+    # as one rather than as a scatter of unrelated vector mismatches.
+    #
+    # Merge note: these counts are neither oracle checks nor port-vs-port
+    # comparisons — they are RELATIONAL. If the summary ever splits those two
+    # apart, this is a third bucket, not a member of either.
+    s4_passed, s4_failed, s4_errors = check_leading_close_invariance(
+        langs, algos, args.verbose)
+    passed += s4_passed
+    failed += s4_failed
+    errors += s4_errors
 
     for algo in algos:
         strategy, tol = ALGORITHMS[algo]
