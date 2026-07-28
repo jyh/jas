@@ -493,7 +493,7 @@ private func asOptBool(_ v: MsgValue) -> Bool? {
 }
 
 /// Pack a single Tspan as a compact msgpack array. Mirrors Rust's
-/// `pack_tspan` — 22 fields in the same order.
+/// `pack_tspan` — 51 fields in the same order.
 private func packTspan(_ t: Tspan) -> MsgValue {
     let decor: MsgValue
     if let members = t.textDecoration {
@@ -533,6 +533,41 @@ private func packTspan(_ t: Tspan) -> MsgValue {
         optStr(t.textTransform),
         transform,
         optStr(t.xmlLang),
+        // Slots 22..50, appended 2026-07-27. This writer stopped at 22 while
+        // Rust's `pack_tspan` wrote 51, so the two ports had never produced the
+        // same bytes for any Text or TextPath and this port lost 29 fields on a
+        // round trip. Found by the byte-level wire gate
+        // (test_fixtures/expected/binary_wire.json). The ORDER below is Rust's,
+        // slot for slot -- that is the whole contract.
+        optStr(t.jasRole),
+        optF64(t.jasLeftIndent),
+        optF64(t.jasRightIndent),
+        optBool(t.jasHyphenate),
+        optBool(t.jasHangingPunctuation),
+        optStr(t.jasListStyle),
+        optStr(t.textAlign),
+        optStr(t.textAlignLast),
+        optF64(t.textIndent),
+        optF64(t.jasSpaceBefore),
+        optF64(t.jasSpaceAfter),
+        optF64(t.jasWordSpacingMin),
+        optF64(t.jasWordSpacingDesired),
+        optF64(t.jasWordSpacingMax),
+        optF64(t.jasLetterSpacingMin),
+        optF64(t.jasLetterSpacingDesired),
+        optF64(t.jasLetterSpacingMax),
+        optF64(t.jasGlyphScalingMin),
+        optF64(t.jasGlyphScalingDesired),
+        optF64(t.jasGlyphScalingMax),
+        optF64(t.jasAutoLeading),
+        optStr(t.jasSingleWordJustify),
+        optF64(t.jasHyphenateMinWord),
+        optF64(t.jasHyphenateMinBefore),
+        optF64(t.jasHyphenateMinAfter),
+        optF64(t.jasHyphenateLimit),
+        optF64(t.jasHyphenateZone),
+        optF64(t.jasHyphenateBias),
+        optBool(t.jasHyphenateCapitalized),
     ])
 }
 
@@ -558,6 +593,9 @@ private func unpackTspan(_ v: MsgValue) -> Tspan {
     } else {
         transform = nil
     }
+    // NOTE: the argument order below must match `Tspan.init`'s declaration
+    // order, not the WIRE order -- Swift enforces the former. The wire order is
+    // the `get(n)` indices, which are Rust's slot numbers.
     return Tspan(
         id: id, content: content,
         baselineShift: asOptF64(get(2)),
@@ -571,6 +609,38 @@ private func unpackTspan(_ v: MsgValue) -> Tspan {
         jasFractionalWidths: asOptBool(get(10)),
         jasKerningMode: asOptStr(get(11)),
         jasNoBreak: asOptBool(get(12)),
+        // Slots 22..50 (see packTspan). `get` is already tolerant of a short
+        // array, so a pre-2026-07-27 blob -- including every .bin the frozen
+        // Python writer produced -- still reads with these fields nil.
+        jasRole: asOptStr(get(22)),
+        jasLeftIndent: asOptF64(get(23)),
+        jasRightIndent: asOptF64(get(24)),
+        jasHyphenate: asOptBool(get(25)),
+        jasHangingPunctuation: asOptBool(get(26)),
+        jasListStyle: asOptStr(get(27)),
+        textAlign: asOptStr(get(28)),
+        textAlignLast: asOptStr(get(29)),
+        textIndent: asOptF64(get(30)),
+        jasSpaceBefore: asOptF64(get(31)),
+        jasSpaceAfter: asOptF64(get(32)),
+        jasWordSpacingMin: asOptF64(get(33)),
+        jasWordSpacingDesired: asOptF64(get(34)),
+        jasWordSpacingMax: asOptF64(get(35)),
+        jasLetterSpacingMin: asOptF64(get(36)),
+        jasLetterSpacingDesired: asOptF64(get(37)),
+        jasLetterSpacingMax: asOptF64(get(38)),
+        jasGlyphScalingMin: asOptF64(get(39)),
+        jasGlyphScalingDesired: asOptF64(get(40)),
+        jasGlyphScalingMax: asOptF64(get(41)),
+        jasAutoLeading: asOptF64(get(42)),
+        jasSingleWordJustify: asOptStr(get(43)),
+        jasHyphenateMinWord: asOptF64(get(44)),
+        jasHyphenateMinBefore: asOptF64(get(45)),
+        jasHyphenateMinAfter: asOptF64(get(46)),
+        jasHyphenateLimit: asOptF64(get(47)),
+        jasHyphenateZone: asOptF64(get(48)),
+        jasHyphenateBias: asOptF64(get(49)),
+        jasHyphenateCapitalized: asOptBool(get(50)),
         letterSpacing: asOptF64(get(13)),
         lineHeight: asOptF64(get(14)),
         rotate: asOptF64(get(15)),

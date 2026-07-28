@@ -1948,6 +1948,72 @@ mod tests {
         }
     }
 
+    /// Every tspan override field survives the binary codec. This port always
+    /// wrote all 51 slots, so this test was GREEN the day it was written -- it
+    /// exists as the twin of `binaryRoundTripsASaturatedTspan` in
+    /// JasSwift/Tests/Geometry/BinaryTspanTests.swift, which was RED: JasSwift's
+    /// `packTspan` wrote only 22 slots and its `unpackTspan` read only 22, so
+    /// that port dropped 29 tspan fields on a round trip. Found 2026-07-27 by
+    /// the byte-level wire gate. Keeping a twin here is what stops the two
+    /// ports drifting apart at this payload again in the other direction.
+    #[test]
+    fn binary_round_trips_a_saturated_tspan() {
+        use crate::geometry::tspan::Tspan;
+        let before = Tspan {
+            id: 7,
+            content: "hi".to_string(),
+            baseline_shift: Some(1.5), dx: Some(2.5),
+            font_family: Some("Georgia".to_string()), font_size: Some(13.5),
+            font_style: Some("italic".to_string()),
+            font_variant: Some("small-caps".to_string()),
+            font_weight: Some("700".to_string()),
+            jas_aa_mode: Some("crisp".to_string()), jas_fractional_widths: Some(true),
+            jas_kerning_mode: Some("optical".to_string()), jas_no_break: Some(true),
+            jas_role: Some("paragraph".to_string()),
+            jas_left_indent: Some(3.5), jas_right_indent: Some(4.5),
+            jas_hyphenate: Some(true), jas_hanging_punctuation: Some(true),
+            jas_list_style: Some("disc".to_string()),
+            text_align: Some("justify".to_string()),
+            text_align_last: Some("right".to_string()),
+            text_indent: Some(5.5),
+            jas_space_before: Some(6.5), jas_space_after: Some(7.5),
+            jas_word_spacing_min: Some(8.5), jas_word_spacing_desired: Some(9.5),
+            jas_word_spacing_max: Some(10.5),
+            jas_letter_spacing_min: Some(11.5), jas_letter_spacing_desired: Some(12.5),
+            jas_letter_spacing_max: Some(13.5),
+            jas_glyph_scaling_min: Some(14.5), jas_glyph_scaling_desired: Some(15.5),
+            jas_glyph_scaling_max: Some(16.5),
+            jas_auto_leading: Some(17.5),
+            jas_single_word_justify: Some("center".to_string()),
+            jas_hyphenate_min_word: Some(18.5), jas_hyphenate_min_before: Some(19.5),
+            jas_hyphenate_min_after: Some(20.5), jas_hyphenate_limit: Some(21.5),
+            jas_hyphenate_zone: Some(22.5), jas_hyphenate_bias: Some(23.5),
+            jas_hyphenate_capitalized: Some(true),
+            letter_spacing: Some(24.5), line_height: Some(25.5),
+            rotate: Some(26.5), style_name: Some("Heading".to_string()),
+            text_decoration: Some(vec!["underline".to_string(), "overline".to_string()]),
+            text_rendering: Some("geometricPrecision".to_string()),
+            text_transform: Some("uppercase".to_string()),
+            transform: Some(Transform { a: 2.0, b: 0.0, c: 0.0, d: 3.0, e: 5.0, f: 7.0 }),
+            xml_lang: Some("fr".to_string()),
+        };
+        let mut text = TextElem::from_string(
+            1.0, 2.0, "hi", "Arial", 12.0, "normal", "normal", "none", 0.0, 0.0,
+            None, None, CommonProps::default());
+        text.tspans = vec![before.clone()];
+        let doc = doc_with(Element::Text(text));
+        let back = binary_to_document(&document_to_binary(&doc, true)).expect("decode");
+        let t = match first_child(&back) {
+            Element::Text(t) => t,
+            other => panic!("expected Text, got {other:?}"),
+        };
+        assert_eq!(t.tspans.len(), 1);
+        assert_eq!(t.tspans[0], before, "binary dropped at least one tspan field");
+        // Geometry, so a whole-struct comparison is not the only statement.
+        assert_eq!(t.x, 1.0);
+        assert_eq!(t.y, 2.0);
+    }
+
     #[test]
     fn binary_reads_a_pre_fill_rule_blob() {
         let doc = binary_to_document(&unhex(DONUT_PRE_FILL_RULE_HEX))

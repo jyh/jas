@@ -1239,9 +1239,16 @@ on a round trip although its own `Tspan` struct holds every one of them. It was
 invisible for precisely the reason this gate was ruled: the existing codec
 gates compare canonical test-JSON strings, the Python-fixture gate reads
 Python-written bytes, and both ports read trailing slots tolerantly, so each
-round-trips its own blobs and neither notices the other's. It is **pinned**, not
-fixed, as `port_hex.swift` on the `text_default` case; closing it deletes the
-entry, so it cannot rot into a silent suppression.
+round-trips its own blobs and neither notices the other's.
+
+It was **pinned** first, as `port_hex.swift` on the `text_default` case, and
+then **closed in the same wave**: JasSwift's `packTspan` and `unpackTspan` now
+carry Rust's 51 slots in Rust's order, and the pin had to be DELETED for the
+gate to go green again — the pinning discipline doing exactly what it is for.
+Red observed first: `binaryRoundTripsASaturatedTspan` reported all 29 fields
+`nil` before the fix. A Rust twin, `binary_round_trips_a_saturated_tspan`, was
+green the day it was written and is kept so the drift cannot recur in the other
+direction.
 
 **A third finding, same gate.** JasSwift's `Text(x:y:content:…)` and
 `TextPath(d:content:…)` convenience initializers *accepted* `blendMode:` and
