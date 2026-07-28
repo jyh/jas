@@ -823,15 +823,33 @@ private func preservationInvariantsFor(
 /// brush's commit arms are a YAML effect with NO `opApply` verb, so an op-only
 /// gate is structurally blind to them, the same shape of blindness §4.1 records
 /// for per-copy-API batteries. Mirrors Rust `preservation_invariants`.
+/// The setup document a vector names, through whichever of the two doors it
+/// declares.
+///
+/// `setup_svg` is the corpus-wide default. `setup_test_json` exists because the
+/// SVG codec has NO counterpart for a mask, a blend mode or a stroke alignment
+/// and no port writes a jas: extension for the gradients, the stroke brush or
+/// the width profile (the `svg` column of
+/// test_fixtures/expected/codec_field_survival.json) — so a corpus whose only
+/// door is SVG can never place those on a BYSTANDER, which is exactly the class
+/// EDIT_SEMANTICS_FREEZE.md T4 exists to watch. The canonical test JSON carries
+/// all twelve, so it is the door that can express the setup the law needs.
+/// Mirrors Rust `setup_document`.
+private func preservationSetupDocument(_ tc: [String: Any]) -> Document {
+    if let name = tc["setup_test_json"] as? String {
+        return testJsonToDocument(readFixture("expected/\(name)"))
+    }
+    return svgToDocument(readFixture("svg/\(tc["setup_svg"] as! String)"))
+}
+
 private func runPreservationVector(_ tc: [String: Any]) -> (before: String, after: String) {
-    let svg = readFixture("svg/\(tc["setup_svg"] as! String)")
-    let beforeJson = documentToTestJson(svgToDocument(svg))
+    let beforeJson = documentToTestJson(preservationSetupDocument(tc))
 
     if tc["events"] != nil {
         return (beforeJson, documentToTestJson(runGestureModel(tc).document))
     }
 
-    let model = Model(document: svgToDocument(svg))
+    let model = Model(document: preservationSetupDocument(tc))
     let controller = Controller(model: model)
     if let txns = tc["txns"] as? [[String: Any]] {
         for txn in txns {
@@ -852,11 +870,46 @@ private func runPreservationVector(_ tc: [String: Any]) -> (before: String, afte
     return (beforeJson, documentToTestJson(model.document))
 }
 
+/// Read the corpus file and return its vectors, refusing any shape that would
+/// let an EMPTIED corpus pass.
+///
+/// Measured on 2026-07-28: with the file rewritten to `[]` this test passed in
+/// 0.001s, and so did its Rust twin and both script gates — the loop below has
+/// nothing to iterate and every assertion inside it is skipped rather than
+/// failed. The floor is declared by the corpus itself (`min_vectors`) so it
+/// lives in ONE place instead of as a magic number in four, and the bare-array
+/// form is REFUSED rather than tolerated, because a tolerant reader would
+/// accept `[]` again. Mirrors Rust `preservation_vectors`.
+private func preservationVectors(_ raw: String) throws -> [[String: Any]] {
+    let root = try JSONSerialization.jsonObject(
+        with: raw.data(using: .utf8)!, options: [])
+    guard let obj = root as? [String: Any] else {
+        Issue.record("""
+            the preservation corpus's top level must be an OBJECT carrying \
+            'min_vectors' and 'vectors' — a bare array cannot declare its own \
+            floor, which is how emptying it to `[]` turned all four gates green
+            """)
+        return []
+    }
+    guard let min = obj["min_vectors"] as? Int, min >= 1 else {
+        Issue.record("the preservation corpus must declare an integer 'min_vectors' >= 1 — a floor of zero is not a floor")
+        return []
+    }
+    guard let vectors = obj["vectors"] as? [[String: Any]] else {
+        Issue.record("the preservation corpus must carry a 'vectors' array")
+        return []
+    }
+    guard vectors.count >= min else {
+        Issue.record("preservation corpus declares min_vectors=\(min) but carries \(vectors.count) — vectors were removed without lowering the floor the corpus states about itself")
+        return []
+    }
+    return vectors
+}
+
 /// THE DOCUMENT-LEVEL INVARIANT GATE. Mirrors Rust `preservation_invariants`.
 @Test func preservationInvariants() throws {
     let raw = readFixture("preservation/preservation_invariants.json")
-    let vectors = try JSONSerialization.jsonObject(
-        with: raw.data(using: .utf8)!, options: []) as! [[String: Any]]
+    let vectors = try preservationVectors(raw)
     var failures: [String] = []
 
     for tc in vectors {
@@ -876,6 +929,46 @@ private func runPreservationVector(_ tc: [String: Any]) -> (before: String, afte
         }
         #expect(before.ids.contains(where: { !named.contains($0) }),
             "preservation vector '\(name)' has no bystander — T4 is unwatchable here")
+
+        // `bystander_fields_present` (optional) is the DOCUMENT-LEVEL form of
+        // §3.1's anti-vacuity guard: "every battery asserts its fixture differs
+        // from the default in every non-subject field, because a rich fixture
+        // that silently decays to defaults passes on nothing".
+        // `bystanders_unchanged` compares before against after, so a setup that
+        // lost its mask on the way IN would compare two identical mask-less
+        // snapshots and pass. Naming a field here asserts the BEFORE snapshot
+        // really carries it.
+        //
+        // A dotted name `a.b` means: top-level key `a` is present and its
+        // canonical JSON value contains the key `b` — the shape that reaches
+        // the four stroke fields, which live inside the `stroke` value rather
+        // than beside it. Mirrors Rust's arm in
+        // `assert_preservation_not_vacuous`.
+        if let present = tc["bystander_fields_present"] as? [String: [String]] {
+            for (id, keys) in present.sorted(by: { $0.key < $1.key }) {
+                #expect(!named.contains(id),
+                    "preservation vector '\(name)' lists '\(id)' under bystander_fields_present, but the vector NAMES it — a subject is not a bystander")
+                guard let attrs = before.attrs[id] else {
+                    Issue.record("preservation vector '\(name)' names bystander '\(id)', which is absent from the loaded setup document")
+                    continue
+                }
+                for key in keys {
+                    if let dot = key.firstIndex(of: ".") {
+                        let outer = String(key[key.startIndex..<dot])
+                        let inner = String(key[key.index(after: dot)...])
+                        guard let v = attrs[outer] else {
+                            Issue.record("preservation vector '\(name)': bystander '\(id)' has no '\(outer)' at all, so '\(key)' cannot be carried")
+                            continue
+                        }
+                        #expect(v.contains("\"\(inner)\":"),
+                            "preservation vector '\(name)': bystander '\(id)' was declared to carry '\(key)', but its '\(outer)' is \(v) — the fixture decayed to defaults")
+                    } else {
+                        #expect(attrs[key] != nil,
+                            "preservation vector '\(name)': bystander '\(id)' was declared to carry '\(key)', but the loaded setup does not — the fixture decayed to defaults and every invariant over that field is vacuous")
+                    }
+                }
+            }
+        }
 
         // `must_change` (optional) turns `speaks_to` from a PERMISSION into a
         // CLAIM. `subject_fields_only` only forbids differences OUTSIDE
@@ -898,20 +991,75 @@ private func runPreservationVector(_ tc: [String: Any]) -> (before: String, afte
             }
         }
 
-        let pinned = (tc["expected_violations"] as! [String: Any])["swift"] as! [[String: Any]]
-        for (inv, result) in preservationInvariantsFor(tc, before, after) {
-            let pin = pinned.first { ($0["invariant"] as! String) == inv }
-            if pin == nil, let why = result {
-                failures.append("[\(name)] \(inv) VIOLATED: \(why)")
-            } else if let pin, result == nil {
-                failures.append(
-                    "[\(name)] \(inv) is PINNED as a known violation (\(pin["row"] as! String)) but now HOLDS — remove the pin from the vector")
-            }
-        }
+        let rows = (tc["expected_violations"] as! [String: Any])["swift"] as! [[String: Any]]
+        let pinned = rows.map { ($0["invariant"] as! String, $0["row"] as! String) }
+        failures += preservationPinReport(
+            name, pinned, preservationInvariantsFor(tc, before, after))
     }
 
     #expect(failures.isEmpty,
         "preservation invariant gate: \(failures.count) failure(s):\n  \(failures.joined(separator: "\n  "))")
+}
+
+/// Fold one vector's evaluated invariants against its PINS.
+///
+/// Extracted so `preservationPinInversion` can drive it directly. The inversion
+/// arm below — a pinned violation that now HOLDS is a FAILURE — is the
+/// mechanism that stops a pin from rotting into a silent suppression, and it is
+/// exercised ZERO times by the shipped corpus, where every vector declares
+/// `expected_violations: []`. A mechanism no data exercises is one refactor
+/// away from being deleted by accident. Mirrors Rust `preservation_pin_report`.
+private func preservationPinReport(
+    _ name: String, _ pinned: [(String, String)], _ results: [(String, String?)]
+) -> [String] {
+    var failures: [String] = []
+    for (inv, result) in results {
+        let pin = pinned.first { $0.0 == inv }
+        if pin == nil, let why = result {
+            failures.append("[\(name)] \(inv) VIOLATED: \(why)")
+        } else if let pin, result == nil {
+            failures.append(
+                "[\(name)] \(inv) is PINNED as a known violation (\(pin.1)) but now HOLDS — remove the pin from the vector")
+        }
+    }
+    return failures
+}
+
+/// THE PIN INVERSION, as a truth table. Twin of Rust
+/// `preservation_pin_inversion`; the two assert the same four cells with the
+/// same strings, so the ports cannot drift on what a pin MEANS.
+@Test func preservationPinInversion() {
+    let pin = [("bystanders_unchanged", "some/site.swift:1 — the row this pin cites")]
+    let violated: [(String, String?)] =
+        [("bystanders_unchanged", "grp.mask: {...} -> <absent>")]
+    let holds: [(String, String?)] = [("bystanders_unchanged", nil)]
+
+    // 1. UNPINNED + violated → reported as a violation.
+    var out = preservationPinReport("v", [], violated)
+    #expect(out.count == 1, "unpinned violation must be reported: \(out)")
+    #expect(out.first?.contains("bystanders_unchanged VIOLATED") == true, "\(out)")
+
+    // 2. PINNED + violated → silent; the pin is doing its job.
+    #expect(preservationPinReport("v", pin, violated).isEmpty,
+            "a pinned violation that still reproduces must be silent")
+
+    // 3. PINNED + holds → THE INVERSION. Repairing the site reds the gate until
+    //    the pin is deleted.
+    out = preservationPinReport("v", pin, holds)
+    #expect(out.count == 1, "a repaired pinned site must red the gate: \(out)")
+    #expect(out.first?.contains("is PINNED as a known violation") == true
+            && out.first?.contains("but now HOLDS") == true
+            && out.first?.contains("some/site.swift:1") == true,
+            "the inversion must name the pin's own row: \(out)")
+
+    // 4. UNPINNED + holds → silent, the ordinary green case.
+    #expect(preservationPinReport("v", [], holds).isEmpty)
+
+    // 5. A pin on a DIFFERENT invariant does not suppress this one — the match
+    //    is per-invariant, not per-vector.
+    out = preservationPinReport("v", [("id_survival", "elsewhere")],
+                                [("bystanders_unchanged", "boom")])
+    #expect(out.count == 1, "a pin must not suppress a sibling invariant: \(out)")
 }
 
 // MARK: - OP_LOG.md §9 verb33 unification fixtures (P1–P7)

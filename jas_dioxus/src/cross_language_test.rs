@@ -748,8 +748,34 @@ mod tests {
     ///     ops like `select_rect`, whose selection IS serialized state per §7,
     ///     are captured); an embedded `snapshot` op opens its own boundaries.
     fn run_operation_model(tc: &serde_json::Value) -> Model {
-        let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
-        let doc = svg_to_document(&setup_svg);
+        run_operation_model_from(setup_document(tc), tc)
+    }
+
+    /// The setup document a vector names, through whichever of the two doors
+    /// it declares.
+    ///
+    /// `setup_svg` is the corpus-wide default. `setup_test_json` exists
+    /// because the SVG codec has NO counterpart for a mask, a blend mode or a
+    /// stroke alignment and no port writes a jas: extension for the gradients,
+    /// the stroke brush or the width profile (the `svg` column of
+    /// test_fixtures/expected/codec_field_survival.json) — so a corpus whose
+    /// only door is SVG can never place those on a BYSTANDER, which is exactly
+    /// the class EDIT_SEMANTICS_FREEZE.md T4 exists to watch. The canonical
+    /// test JSON carries all twelve, so it is the door that can express the
+    /// setup the law needs.
+    fn setup_document(tc: &serde_json::Value) -> crate::document::document::Document {
+        if let Some(name) = tc.get("setup_test_json").and_then(|v| v.as_str()) {
+            test_json_to_document(&read_fixture(&format!("expected/{name}")))
+        } else {
+            svg_to_document(&read_fixture(&format!(
+                "svg/{}", tc["setup_svg"].as_str().unwrap())))
+        }
+    }
+
+    fn run_operation_model_from(
+        doc: crate::document::document::Document,
+        tc: &serde_json::Value,
+    ) -> Model {
         let mut model = Model::new(doc, None);
 
         if let Some(txns) = tc.get("txns").and_then(|v| v.as_array()) {
@@ -2290,6 +2316,61 @@ mod tests {
             "preservation vector '{name}' has no bystander — T4 is unwatchable here"
         );
 
+        // `bystander_fields_present` (optional) is the DOCUMENT-LEVEL form of
+        // §3.1's anti-vacuity guard: "every battery asserts its fixture
+        // differs from the default in every non-subject field, because a rich
+        // fixture that silently decays to defaults passes on nothing".
+        // `bystanders_unchanged` compares before against after, so a setup
+        // that lost its mask on the way IN would compare two identical
+        // mask-less snapshots and pass. Naming a field here asserts the
+        // BEFORE snapshot really carries it.
+        //
+        // A dotted name `a.b` means: top-level key `a` is present and its
+        // canonical JSON value contains the key `b` — the shape that reaches
+        // the four stroke fields, which live inside the `stroke` value rather
+        // than beside it. The two ports implement the identical rule.
+        if let Some(map) = tc.get("bystander_fields_present").and_then(|v| v.as_object()) {
+            let named: Vec<String> = str_list(tc, "subject_ids")
+                .into_iter()
+                .chain(str_list(tc, "consumed_ids"))
+                .collect();
+            for (id, keys) in map {
+                assert!(
+                    !named.contains(id),
+                    "preservation vector '{name}' lists '{id}' under \
+                     bystander_fields_present, but the vector NAMES it — a \
+                     subject is not a bystander"
+                );
+                let attrs = before.attrs.get(id).unwrap_or_else(|| panic!(
+                    "preservation vector '{name}' names bystander '{id}', which \
+                     is absent from the loaded setup document"));
+                let obj = attrs.as_object().expect("an element attribute object");
+                for key in keys.as_array().expect("an array of field names") {
+                    let key = key.as_str().expect("field names are strings");
+                    match key.split_once('.') {
+                        None => assert!(
+                            obj.contains_key(key),
+                            "preservation vector '{name}': bystander '{id}' was \
+                             declared to carry '{key}', but the loaded setup does \
+                             not — the fixture decayed to defaults and every \
+                             invariant over that field is vacuous"),
+                        Some((outer, inner)) => {
+                            let v = obj.get(outer).unwrap_or_else(|| panic!(
+                                "preservation vector '{name}': bystander '{id}' \
+                                 has no '{outer}' at all, so '{key}' cannot be \
+                                 carried"));
+                            assert!(
+                                crate::geometry::test_json::canonical_json_value(v)
+                                    .contains(&format!("\"{inner}\":")),
+                                "preservation vector '{name}': bystander '{id}' \
+                                 was declared to carry '{key}', but its '{outer}' \
+                                 is {v} — the fixture decayed to defaults");
+                        }
+                    }
+                }
+            }
+        }
+
         // `must_change` (optional) turns `speaks_to` from a PERMISSION into a
         // CLAIM. `subject_fields_only` only forbids differences OUTSIDE
         // `speaks_to`, so listing a key there makes the gate blind to it: an
@@ -2323,19 +2404,56 @@ mod tests {
     /// THE DOCUMENT-LEVEL INVARIANT GATE. Runs every
     /// `test_fixtures/preservation/*.json` vector through the production op
     /// dispatcher and asserts the six invariants over the whole document.
+    /// Read the corpus file and return its vectors, refusing any shape that
+    /// would let an EMPTIED corpus pass.
+    ///
+    /// Measured on 2026-07-28: with the file rewritten to `[]` this test
+    /// printed `ok` in 0.00s, and so did its Swift twin and both script
+    /// gates — the loop below has nothing to iterate and every assertion
+    /// inside it is skipped rather than failed. The floor is declared by the
+    /// corpus itself (`min_vectors`) so it lives in ONE place instead of as a
+    /// magic number in four, and the bare-array form is REFUSED rather than
+    /// tolerated, because a tolerant reader would accept `[]` again.
+    fn preservation_vectors(json_str: &str) -> Vec<serde_json::Value> {
+        let root: serde_json::Value = serde_json::from_str(json_str)
+            .expect("preservation_invariants.json parses");
+        let obj = root.as_object().expect(
+            "the preservation corpus's top level must be an OBJECT carrying \
+             'min_vectors' and 'vectors' — a bare array cannot declare its own \
+             floor, which is how emptying it to `[]` turned all four gates green",
+        );
+        let min = obj
+            .get("min_vectors")
+            .and_then(|v| v.as_u64())
+            .expect("the preservation corpus must declare 'min_vectors'")
+            as usize;
+        assert!(min >= 1, "min_vectors must be at least 1 — a floor of zero is not a floor");
+        let vectors = obj
+            .get("vectors")
+            .and_then(|v| v.as_array())
+            .expect("the preservation corpus must carry a 'vectors' array")
+            .clone();
+        assert!(
+            vectors.len() >= min,
+            "preservation corpus declares min_vectors={min} but carries {} — \
+             vectors were removed without lowering the floor the corpus states \
+             about itself",
+            vectors.len()
+        );
+        vectors
+    }
+
     #[test]
     fn preservation_invariants() {
         let json_str = read_fixture("preservation/preservation_invariants.json");
-        let tests: serde_json::Value = serde_json::from_str(&json_str)
-            .expect("preservation_invariants.json parses");
+        let tests = preservation_vectors(&json_str);
         let mut failures: Vec<String> = Vec::new();
 
-        for tc in tests.as_array().expect("an array of vectors") {
+        for tc in &tests {
             let name = tc["name"].as_str().expect("a name");
 
             // BEFORE: the setup document, loaded and serialized with no ops.
-            let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
-            let before_model = Model::new(svg_to_document(&setup_svg), None);
+            let before_model = Model::new(setup_document(tc), None);
             let before_json = <DocumentOps as OpWorld>::to_test_json(&before_model);
 
             // AFTER. A vector drives its edit through ONE of two production
@@ -2369,23 +2487,8 @@ mod tests {
                 })
                 .collect();
 
-            for (inv, result) in preservation_invariants_for(tc, &before, &after) {
-                let pin = pinned.iter().find(|(p, _)| p == inv);
-                match (pin, &result) {
-                    // Unpinned invariant that failed — the law is broken here.
-                    (None, Some(why)) => failures.push(format!(
-                        "[{name}] {inv} VIOLATED: {why}"
-                    )),
-                    // Pinned violation that no longer reproduces — the pin is
-                    // stale and must be deleted (this is what stops a pin from
-                    // rotting into a suppression).
-                    (Some((_, row)), None) => failures.push(format!(
-                        "[{name}] {inv} is PINNED as a known violation ({row}) but now \
-                         HOLDS — remove the pin from the vector"
-                    )),
-                    _ => {}
-                }
-            }
+            failures.extend(preservation_pin_report(
+                name, &pinned, preservation_invariants_for(tc, &before, &after)));
         }
 
         assert!(
@@ -2394,6 +2497,85 @@ mod tests {
             failures.len(),
             failures.join("\n  ")
         );
+    }
+
+    /// Fold one vector's evaluated invariants against its PINS.
+    ///
+    /// Extracted so `preservation_pin_inversion` can drive it directly. The
+    /// inversion arm below — a pinned violation that now HOLDS is a FAILURE —
+    /// is the mechanism that stops a pin from rotting into a silent
+    /// suppression, and it is exercised ZERO times by the shipped corpus,
+    /// where every vector declares `expected_violations: []`. A mechanism no
+    /// data exercises is one refactor away from being deleted by accident.
+    fn preservation_pin_report(
+        name: &str,
+        pinned: &[(String, String)],
+        results: Vec<InvResult>,
+    ) -> Vec<String> {
+        let mut failures = Vec::new();
+        for (inv, result) in results {
+            let pin = pinned.iter().find(|(p, _)| p == inv);
+            match (pin, &result) {
+                // Unpinned invariant that failed — the law is broken here.
+                (None, Some(why)) => failures.push(format!("[{name}] {inv} VIOLATED: {why}")),
+                // Pinned violation that no longer reproduces — the pin is
+                // stale and must be deleted (this is what stops a pin from
+                // rotting into a suppression).
+                (Some((_, row)), None) => failures.push(format!(
+                    "[{name}] {inv} is PINNED as a known violation ({row}) but now \
+                     HOLDS — remove the pin from the vector"
+                )),
+                _ => {}
+            }
+        }
+        failures
+    }
+
+    /// THE PIN INVERSION, as a truth table. Twin of Swift
+    /// `preservationPinInversion`; the two assert the same four cells with the
+    /// same strings, so the ports cannot drift on what a pin MEANS.
+    #[test]
+    fn preservation_pin_inversion() {
+        let pin = vec![(
+            "bystanders_unchanged".to_string(),
+            "some/site.rs:1 — the row this pin cites".to_string(),
+        )];
+        let violated: Vec<InvResult> =
+            vec![("bystanders_unchanged", Some("grp.mask: {...} -> <absent>".into()))];
+        let holds: Vec<InvResult> = vec![("bystanders_unchanged", None)];
+
+        // 1. UNPINNED + violated → reported as a violation.
+        let out = preservation_pin_report("v", &[], violated.clone());
+        assert_eq!(out.len(), 1, "unpinned violation must be reported: {out:?}");
+        assert!(out[0].contains("bystanders_unchanged VIOLATED"), "{out:?}");
+
+        // 2. PINNED + violated → silent; the pin is doing its job.
+        assert!(
+            preservation_pin_report("v", &pin, violated).is_empty(),
+            "a pinned violation that still reproduces must be silent"
+        );
+
+        // 3. PINNED + holds → THE INVERSION. Repairing the site reds the gate
+        //    until the pin is deleted.
+        let out = preservation_pin_report("v", &pin, holds.clone());
+        assert_eq!(out.len(), 1, "a repaired pinned site must red the gate: {out:?}");
+        assert!(
+            out[0].contains("is PINNED as a known violation")
+                && out[0].contains("but now HOLDS")
+                && out[0].contains("some/site.rs:1"),
+            "the inversion must name the pin's own row: {out:?}"
+        );
+
+        // 4. UNPINNED + holds → silent, the ordinary green case.
+        assert!(preservation_pin_report("v", &[], holds).is_empty());
+
+        // 5. A pin on a DIFFERENT invariant does not suppress this one — the
+        //    match is per-invariant, not per-vector.
+        let other = vec![("id_survival".to_string(), "elsewhere".to_string())];
+        let out = preservation_pin_report(
+            "v", &other,
+            vec![("bystanders_unchanged", Some("boom".into()))]);
+        assert_eq!(out.len(), 1, "a pin must not suppress a sibling invariant: {out:?}");
     }
 
     /// `OpWorld` trait-level pin for the DOCUMENT world (OP_LOG.md §2 Fork 5 /

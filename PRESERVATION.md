@@ -23,16 +23,32 @@ says where it still cannot.
 
 | Piece | Path |
 |---|---|
-| Vectors | `test_fixtures/preservation/preservation_invariants.json` |
-| Setup documents | `test_fixtures/svg/preservation_nested_attrs.svg`, `test_fixtures/svg/preservation_compound_operand_ids.svg` |
-| Rust gate | `jas_dioxus/src/cross_language_test.rs` — `preservation_invariants` |
-| Swift gate | `JasSwift/Tests/CrossLanguageTests.swift` — `preservationInvariants` |
-| Data/anti-vacuity gate | `scripts/check_preservation_corpus.py` (CI: workspace-json-fresh lane) |
-| Family registration | `scripts/corpus_manifest.json` → `test_fixtures/preservation` |
+| Vectors | `test_fixtures/preservation/preservation_invariants.json` (an OBJECT: `min_vectors` + `vectors`) |
+| Setup documents, SVG | `test_fixtures/svg/preservation_nested_attrs.svg`, `preservation_blob_attrs.svg`, `preservation_compound_operand_ids.svg` |
+| Setup document, test JSON | `test_fixtures/expected/preservation_saturated_bystanders.json` |
+| Rust gate | `jas_dioxus/src/cross_language_test.rs` — `preservation_invariants`, `preservation_pin_inversion` |
+| Swift gate | `JasSwift/Tests/CrossLanguageTests.swift` — `preservationInvariants`, `preservationPinInversion` |
+| Data/anti-vacuity gate | `scripts/check_preservation_corpus.py` (+ `--self-test`) (CI: workspace-json-fresh lane) |
+| Family registration + FLOOR | `scripts/corpus_manifest.json` → `test_fixtures/preservation`; `VECTOR_FLOOR_FAMILIES` in `scripts/check_corpus_manifest.py` |
 
 Both port gates run the vectors through the production `op_apply` dispatcher —
 the same path the operations corpus uses — so nothing here is a test-only
 mutation route.
+
+### 1.1 The two setup doors
+
+A vector declares exactly ONE of `setup_svg` or `setup_test_json`.
+
+`setup_test_json` exists because the SVG codec has **no counterpart** for a
+mask, a blend mode or a stroke alignment, and neither port writes a `jas:`
+extension for the two gradients, the stroke brush or the width profile (the
+`svg` column of `test_fixtures/expected/codec_field_survival.json`).
+`preservation_nested_attrs.svg` says so in its own header. A corpus whose only
+door is SVG therefore **cannot place a mask or a blend mode on a bystander** —
+which is exactly the class T4 exists to watch. The canonical test JSON carries
+all of them (§7), so it is the door that can express the setup the law needs.
+Pairing `setup_test_json` with `events` is refused: the gesture runner takes SVG
+text and would silently run against the wrong document.
 
 ## 2. The six invariants
 
@@ -63,6 +79,18 @@ so a pin can never rot into a silent suppression. Every pin must name a known
 invariant and state both its site (`row`) and why (`note`) — enforced by
 `check_preservation_corpus.py` (V5).
 
+**The inversion has its own self-test, because the corpus exercises it zero
+times.** Measured on this commit: all 13 shipped vectors declare
+`expected_violations: {"rust": [], "swift": []}`, so the "PINNED … but now
+HOLDS" arm never runs on a green build. `preservation_pin_inversion` /
+`preservationPinInversion` drive the fold directly over a five-cell truth table
+(unpinned+violated, pinned+violated, pinned+holds, unpinned+holds, and a pin on
+a *different* invariant not suppressing this one). Mutation-proved: deleting the
+inversion arm reds **only** that test — `2756 passed; 1 failed` in Rust, 2 issues
+inside one Swift test — everything else, the corpus gate included, stays green.
+That number is the finding: before the self-test, deleting the mechanism cost
+nothing anywhere in either suite.
+
 ## 4. Anti-vacuity
 
 The campaign's standing finding is that a family can be registered, green, and
@@ -70,18 +98,65 @@ gating nothing (`scripts/corpus_manifest.json`'s own `_coverage_gaps_doc` makes
 the same point about `known_gaps` sitting at `[]` while eight real gaps went
 unrecorded). Guards, split between the data gate and the runtime gates:
 
-- **V1** every id a vector names exists in the setup SVG (data)
+- **V1** every id a vector names exists in the setup (data)
 - **V2** at least one **container** bystander exists, or T4 is unwatchable (data)
 - **V3** the ops include a non-selection verb, so the document actually changes (data)
 - **V4** a one-to-one subject declares a non-empty `speaks_to` (data)
 - **V5** every pin names a known invariant and states site + reason (data)
+- **V7** every `bystander_fields_present` row names an id the setup defines and
+  the vector does **not** name — a subject is not a bystander (data)
 - runtime: the edit must change the document byte-wise; every named id must
   exist in the **loaded** document; at least one bystander must remain
+- runtime: every `must_change` key really is rewritten, and every
+  `bystander_fields_present` field really is carried by the **loaded** setup
+
+### 4.1 The FLOOR — added 2026-07-28, after the hole was measured
+
+Every guard above is a guard *on a vector*, so a corpus with **no** vectors
+satisfied all of them vacuously. Measured on the base commit with the file
+rewritten to `[]`:
+
+```
+scripts/check_preservation_corpus.py   ->  "OK (0 vectors, 1 file(s))"  rc=0
+scripts/check_corpus_manifest.py       ->  rc=0   (the DIRECTORY is non-empty)
+cargo test --lib preservation_invariants   ->  ok, 1 passed, 0.00s
+swift test --filter preservationInvariants ->  passed, 0.001s
+```
+
+Four gates over the law, all green over zero vectors. Deleting the file or the
+directory was caught; **emptying it was not.** So the corpus file declares
+`min_vectors` in its own header and all four readers refuse a file carrying
+fewer. The count is a fact the corpus states about itself rather than a magic
+number in four places, and lowering it is a visible edit to the header instead
+of an invisible deletion of data. The bare-array form is REFUSED rather than
+tolerated — a tolerant reader would accept `[]` again.
+
+Both script gates carry a `--self-test` that pins the floor's red over synthetic
+corpora (empty array, below-floor, zero floor, no floor) **and** asserts the
+shipped corpus passes, so neither ships a rule the real data violates.
+
+### 4.2 `bystander_fields_present` — anti-vacuity for the setup
+
+`bystanders_unchanged` compares *before* against *after*, so a setup that lost
+its mask **on the way in** would compare two identical mask-less snapshots and
+pass, green and vacuous — the document-level twin of the failure §3.1 of the
+freeze guards against per-battery. Naming a field under
+`bystander_fields_present` asserts the BEFORE snapshot really carries it. A
+dotted name `a.b` means "top-level key `a` exists and its canonical JSON value
+contains the key `b`", which is what reaches the four stroke fields. Both ports
+implement the identical rule.
 
 ## 5. What the gate sees today — measured
 
 Green means the gate holds the clause in that port; **PINNED** means the gate
 reproduces a real violation and holds it pinned.
+
+> **The PINNED cells below describe an earlier state of the corpus.** Counted on
+> this commit: 13 vectors, **0** of them carrying a non-empty
+> `expected_violations` for either port. The rows are kept as the record of what
+> this gate found when those sites were open; the repairs they drove are why the
+> pins are gone. §3's self-test is what keeps the mechanism alive now that no
+> data exercises it.
 
 | §3.5 row | Rust | Swift |
 |---|---|---|
@@ -171,3 +246,55 @@ Recorded as machine-checked rows in `scripts/corpus_manifest.json`
   demotion and the boolean result's dropped non-paint fields are invisible.
 
 Each row states its own re-runnable evidence and its unblock.
+
+## 7. The codec ceiling — what the gate could not see until 2026-07-28
+
+`bystanders_unchanged` and `subject_fields_only` range over exactly the keys the
+canonical test JSON emits. Anything the codec drops is invisible to the law **by
+construction** — not a gap in the corpus, a gap in the oracle.
+
+Measured, and it is the `test_json` column of
+`test_fixtures/expected/codec_field_survival.json`: **twelve** element fields
+were DROPPED — `common.mask`, `common.mode`, `common.tool_origin`,
+`fill_gradient`, `stroke.align`, `stroke.dash_align_anchors`,
+`stroke.dash_pattern`, `stroke.miter_limit`, `stroke_brush`,
+`stroke_brush_overrides`, `stroke_gradient`, `width_points`. The reader was the
+other half: `parse_stroke` built every `Stroke` with `miter_limit: 10.0`,
+`align: Center` and an all-zero dash array, and `parse_common` wrote
+`mask: None` and the default blend mode. So an edit that destroyed a
+**bystander's** mask, blend mode, dash pattern, stroke brush, width profile or
+either gradient produced byte-identical canonical JSON, and this gate stayed
+green.
+
+All twelve are now carried, writer and reader, in both ports
+(`extended_element_fields` / `extendedElementFields`), emitted conditionally on
+being non-default so an element carrying none of them serializes
+byte-identically to before. Mutation-proved 24 of 24: each writer emission
+reverted individually in each port turned its own matrix cell PRESERVED →
+DROPPED with zero collateral cells.
+
+`move_nested_rect_keeps_a_masked_group_and_a_saturated_path` is the vector that
+uses the new reach. Two mutation results worth keeping, because they are the
+class this gate exists for:
+
+```
+# Swift, the historic bug verbatim — the edit-path container rebuild
+# (Document.swift) clears the group's mask:
+bystanders_unchanged VIOLATED: grp_masked.mask: {"clip":true,"disabled":false,
+  "invert":true,"linked":false,"subtree":{…"id":"msk_rect"…},
+  "unlink_transform":{…}} -> <absent>
+
+# Either port — a container rebuild that hand-restates a sibling's stroke:
+bystanders_unchanged VIOLATED: p_dashed.stroke: {"align":"inside",…,
+  "dash_align_anchors":true,"dash_pattern":[3,1.5,6,0.75],…} -> (a bare stroke)
+```
+
+Each reds **one** vector: the twelve older ones cannot see either, because their
+SVG setups cannot hold the fields.
+
+**Still outside the ceiling, banked and named:** the five arrowhead fields
+(`start_arrow`, `end_arrow`, both scales, `arrow_align`) are the same shape of
+blindness and are absent from the matrix's own `fields` list, so nothing
+measures them in **any** codec. Unblock is one edit: add the five rows to
+`codec_field_survival.json`, let the gate measure all three codecs, and close
+whichever then read DROPPED.

@@ -6,15 +6,23 @@
     "WHY THIS FILE EXISTS. Every codec gate in this repository (SVG parse, SVG",
     "round-trip, canonical test-JSON round-trip, binary round-trip) compares",
     "`document_to_test_json` STRINGS before and after. That catches a dropped field",
-    "perfectly -- but only for fields the canonical test-JSON itself emits. Measured",
-    "on this commit by round-tripping one saturated Path through all three codecs in",
-    "both ports: the set of fields the BINARY codec drops is a strict SUBSET of the",
-    "set the canonical test-JSON drops. So no fixture, however saturated, can",
-    "red-light a single one of the binary codec's drops through the existing gates.",
-    "The corpus census's prescription (§5.4: 'one maximal fixture per element",
-    "type') is therefore NOT EXECUTABLE against the string oracle -- a saturated",
-    "fixture would be normalized back to default on the way in and pass, green and",
-    "vacuous.",
+    "perfectly -- but only for fields the canonical test-JSON itself emits, so the",
+    "test_json column below is not one column among three: it is the CEILING on",
+    "what any string-oracle gate in this repository can see at all.",
+    "",
+    "HISTORY, because the ceiling moved and the reasoning is what justifies the",
+    "repair. Until 2026-07-28 twelve of the thirteen rows below read DROPPED for",
+    "test_json, and the set of fields the BINARY codec dropped was a strict SUBSET",
+    "of that set -- so no fixture, however saturated, could red-light a single one",
+    "of the binary codec's drops through the existing gates, and the corpus",
+    "census's prescription (5.4: 'one maximal fixture per element type') was NOT",
+    "EXECUTABLE against the string oracle. Worse, THE PRESERVATION LAW's primary",
+    "gate (transcripts/EDIT_SEMANTICS_FREEZE.md 4.1) snapshots this same codec, so",
+    "an edit that destroyed a BYSTANDER's mask, blend mode, dash pattern, stroke",
+    "brush, width profile or either gradient was invisible to the law BY",
+    "CONSTRUCTION. All twelve are now carried, writer and reader, in both ports;",
+    "the ceiling is the whole matrix and the remaining DROPPED cells are real",
+    "codec gaps rather than artefacts of the oracle.",
     "",
     "SINCE 2026-07-27 this family has a companion that watches a different",
     "thing: test_fixtures/expected/binary_wire.json pins the binary codec's",
@@ -52,31 +60,76 @@
     "`classification` is prose analysis and is NOT machine-asserted; only",
     "`survival` and `port_overrides` are."
   ],
-
   "saturated_path": {
     "_doc": "The element both ports construct in code. Recorded here so the two mirrors can be diffed against one statement of intent; it is NOT parsed by either gate (the canonical test-JSON cannot express most of these keys -- that is the whole point).",
     "d": "M 0 0 L 10 10 Z",
-    "fill": { "color": "hsb(120, 0.5, 0.6, 0.8)", "opacity": 0.6 },
+    "fill": {
+      "color": "hsb(120, 0.5, 0.6, 0.8)",
+      "opacity": 0.6
+    },
     "stroke": {
-      "color": "cmyk(0.1, 0.2, 0.3, 0.4, 0.9)", "width": 4.5,
-      "linecap": "round", "linejoin": "bevel", "miter_limit": 7.5,
-      "align": "inside", "dash_pattern": [3, 1.5, 6, 0.75], "dash_align_anchors": true,
-      "start_arrow": "closed_arrow", "end_arrow": "circle",
-      "start_arrow_scale": 150, "end_arrow_scale": 75,
-      "arrow_align": "center_at_end", "opacity": 0.75
+      "color": "cmyk(0.1, 0.2, 0.3, 0.4, 0.9)",
+      "width": 4.5,
+      "linecap": "round",
+      "linejoin": "bevel",
+      "miter_limit": 7.5,
+      "align": "inside",
+      "dash_pattern": [
+        3,
+        1.5,
+        6,
+        0.75
+      ],
+      "dash_align_anchors": true,
+      "start_arrow": "closed_arrow",
+      "end_arrow": "circle",
+      "start_arrow_scale": 150,
+      "end_arrow_scale": 75,
+      "arrow_align": "center_at_end",
+      "opacity": 0.75
     },
     "width_points": [
-      { "t": 0.0, "width_left": 1.0, "width_right": 2.0 },
-      { "t": 1.0, "width_left": 3.0, "width_right": 4.0 }
+      {
+        "t": 0.0,
+        "width_left": 1.0,
+        "width_right": 2.0
+      },
+      {
+        "t": 1.0,
+        "width_left": 3.0,
+        "width_right": 4.0
+      }
     ],
     "common": {
-      "opacity": 0.5, "mode": "multiply", "locked": true, "visibility": "outline",
-      "transform": { "a": 2, "b": 0, "c": 0, "d": 3, "e": 5, "f": 7 },
-      "tool_origin": "blob_brush", "name": "name_path", "id": "id_path",
+      "opacity": 0.5,
+      "mode": "multiply",
+      "locked": true,
+      "visibility": "outline",
+      "transform": {
+        "a": 2,
+        "b": 0,
+        "c": 0,
+        "d": 3,
+        "e": 5,
+        "f": 7
+      },
+      "tool_origin": "blob_brush",
+      "name": "name_path",
+      "id": "id_path",
       "mask": {
         "subtree": "rect(1, 2, 3x4, fill #ffffff)",
-        "clip": true, "invert": true, "disabled": false, "linked": false,
-        "unlink_transform": { "a": 1, "b": 0, "c": 0, "d": 1, "e": 9, "f": 9 }
+        "clip": true,
+        "invert": true,
+        "disabled": false,
+        "linked": false,
+        "unlink_transform": {
+          "a": 1,
+          "b": 0,
+          "c": 0,
+          "d": 1,
+          "e": 9,
+          "f": 9
+        }
       }
     },
     "fill_gradient": "radial, angle 45, aspect 200, smooth, dither, along-stroke, 2 stops",
@@ -85,7 +138,6 @@
     "stroke_brush": "basic/calligraphic_5",
     "stroke_brush_overrides": "{\"angle\":30}"
   },
-
   "fields": [
     "common.mask",
     "common.mode",
@@ -101,22 +153,21 @@
     "stroke_gradient",
     "width_points"
   ],
-
   "survival": {
     "test_json": {
-      "common.mask": "DROPPED",
-      "common.mode": "DROPPED",
-      "common.tool_origin": "DROPPED",
-      "fill_gradient": "DROPPED",
+      "common.mask": "PRESERVED",
+      "common.mode": "PRESERVED",
+      "common.tool_origin": "PRESERVED",
+      "fill_gradient": "PRESERVED",
       "fill_rule": "PRESERVED",
-      "stroke.align": "DROPPED",
-      "stroke.dash_align_anchors": "DROPPED",
-      "stroke.dash_pattern": "DROPPED",
-      "stroke.miter_limit": "DROPPED",
-      "stroke_brush": "DROPPED",
-      "stroke_brush_overrides": "DROPPED",
-      "stroke_gradient": "DROPPED",
-      "width_points": "DROPPED"
+      "stroke.align": "PRESERVED",
+      "stroke.dash_align_anchors": "PRESERVED",
+      "stroke.dash_pattern": "PRESERVED",
+      "stroke.miter_limit": "PRESERVED",
+      "stroke_brush": "PRESERVED",
+      "stroke_brush_overrides": "PRESERVED",
+      "stroke_gradient": "PRESERVED",
+      "width_points": "PRESERVED"
     },
     "binary": {
       "common.mask": "PRESERVED",
@@ -149,16 +200,16 @@
       "width_points": "DROPPED"
     }
   },
-
   "port_overrides": {
     "_doc": "A cell where the two ports MEASURABLY DISAGREE today. The `survival` value above is what both ports must reach; a port listed here is asserted to produce the stated OTHER value, so closing the divergence turns this gate red until the entry is deleted. Empty is the goal state.",
     "entries": []
   },
-
   "classification": {
     "test_json": {
-      "_all_dropped": "REPRESENTABLE_BUT_DROPPED. The canonical test-JSON is a hand-built object writer that already emits nested objects (`transform`, `fill`, `stroke`, `tspans`) and already emits keys CONDITIONALLY on non-default (`id`, and `fill_rule` -- the one PRESERVED row here, written only when `evenodd`). Nothing about the format prevents any of these keys; the writer simply has none. THIS IS THE BLINDNESS MECHANISM: every codec gate compares test-JSON strings, so each DROPPED row here makes the corresponding row in `binary` and `svg` unreachable by any fixture. The binary codec's dropped set is a strict SUBSET of this one.",
-      "fill_rule": "PRESERVED -- written at jas_dioxus/src/geometry/test_json.rs `o.str_val(\"fill_rule\", \"evenodd\")` and mirrored in JasSwift/Sources/Geometry/TestJson.swift. It is the proof that the conditional-key mechanism works and generalises."
+      "_all_preserved": "CLOSED 2026-07-28. The canonical test-JSON is a hand-built object writer that already emitted nested objects (`transform`, `fill`, `stroke`, `tspans`) and already emitted keys CONDITIONALLY on non-default (`id`, and `fill_rule` -- written only when `evenodd`). Nothing about the format ever prevented any of these keys; the writer simply had none and the reader hard-coded them away (jas_dioxus/src/geometry/test_json.rs `parse_stroke` built every Stroke with miter_limit 10.0 / align Center / an all-zero dash array, and `parse_common` wrote mask: None and mode: default). WHAT LANDED: `extended_element_fields` / `extendedElementFields` in the two ports' test_json writers, emitting all twelve conditionally on non-default so an element carrying none of them serializes byte-identically to before, plus the matching reader pass. GOLDEN CHURN, stated: 12 shipped goldens moved, and every one of them gained a key that had always been in the model and never in the JSON -- 7 blob gesture goldens gained `tool_origin`, 4 set_attr_on_selection goldens gained `stroke_brush` / `stroke_brush_overrides`, and this file is the twelfth. Nothing else in either corpus moved, which is the conditional-emission convention doing its job.",
+      "fill_rule": "PRESERVED -- written at jas_dioxus/src/geometry/test_json.rs `o.str_val(\"fill_rule\", \"evenodd\")` and mirrored in JasSwift/Sources/Geometry/TestJson.swift. It is the proof that the conditional-key mechanism works and generalises.",
+      "_gradient_stop_colour": "A CROSS-PORT MODEL DIVERGENCE the wire form does NOT resolve, recorded so it cannot be mistaken for a codec bug. jas_dioxus's GradientStop.color is a `Color` (f64 channels, rgb/hsb/cmyk, with alpha); JasSwift's is a hex `String`. The canonical test-JSON writes the stop colour as this file's shared colour OBJECT, which is lossless for every value EITHER port can hold -- but a shared fixture can still only carry a stop colour JasSwift can express, because JasSwift's reader converts the object back to hex. The BINARY codec's two gradient rows are blocked on the same fork and remain banked; see `classification.binary.fill_gradient`.",
+      "_arrowheads_are_not_watched": "A GAP THIS FAMILY DOES NOT WATCH, named so it is not mistaken for coverage. `stroke.start_arrow`, `stroke.end_arrow`, `stroke.start_arrow_scale`, `stroke.end_arrow_scale` and `stroke.arrow_align` are absent from the `fields` list above, so no cell measures them in ANY codec. The canonical test-JSON still drops all five; the binary codec carries them (pack_stroke is complete); the SVG codec was not measured. They are the same shape of blindness this wave closed for align / dash_pattern / dash_align_anchors / miter_limit. UNBLOCK: add the five rows here, let the gate measure all three codecs, and close whichever then read DROPPED."
     },
     "binary": {
       "_all_dropped": "SUPERSEDED for five of the seven, 2026-07-27. History, because the reasoning is what justified the repair: the binary codec is msgpack over per-tag positional arrays and had been EXTENDED TWICE by appending slots (the `symbols` master store at document index 3, tolerated via `arr.get(3)`; the live-element instance transform at TAG_LIVE slot 9), so the seven fields were omitted, not unrepresentable -- `pack_common` carried 6 of CommonProps' 9 fields and `mode`, `mask` and `tool_origin` were hard-coded to defaults on the unpack side. Live consequence: apply a brush or set a blend mode, relaunch, and the setting was gone. WHAT LANDED: a per-tag TRAILING EXTENSION (RULED 2026-07-27, transcripts/EDIT_SEMANTICS_FREEZE.md) carrying mode / mask / tool_origin on every tag and stroke_brush / stroke_brush_overrides on TAG_PATH, with `VERSION` still 2 and tolerant reads. The two gradients are NOT closed -- see `fill_gradient` below.",
