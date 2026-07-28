@@ -452,7 +452,7 @@ def self_test() -> int:
     with tempfile.TemporaryDirectory(prefix="preservation_selftest_") as root:
         for body, label, needle in cases:
             path = os.path.join(root, "case.json")
-            with open(path, "w", encoding="utf-8") as f:
+            with open(path, "w", encoding="utf-8", newline="") as f:
                 f.write(body)
             _, _, errs = load_corpus_file(path)
             check(any(needle in e for e in errs), label)
