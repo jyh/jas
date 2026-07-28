@@ -396,20 +396,31 @@ private func expectDecodeError(_ label: String, _ blob: Data,
 // converts with `as`, which WRAPS. The blob need not even be hostile: any
 // port that writes a large unsigned id produces one.
 
-@Test func oversizedUnsignedIntegersErrorNotTrap() {
-    let cases: [(String, MP)] = [
-        ("selectedLayer is u64 max", .arr([.arr([]), .uint64(UInt64.max), .arr([])])),
-        ("selectedLayer is Int.max + 1", .arr([.arr([]), .uint64(UInt64(Int.max) + 1), .arr([])])),
-        ("an element tag is u64 max", docWith([.arr([.uint64(UInt64.max)] + okCommon + [.nul])])),
-        ("a visibility slot is u64 max",
-         docWith([.arr([.int(tLayer), .bool(false), .f64(1), .uint64(UInt64.max), .nul, .nul, .nul, .arr([])])])),
-    ]
-    // These must not TRAP. Whether they Err or decode to a wrapped value is a
-    // separate question; the contract under test is "no trap". A wrapped tag
-    // and a wrapped selectedLayer are both rejected downstream anyway, so an
-    // error is what actually comes back — but the assertion that matters is
-    // that this function RETURNS.
-    for (label, payload) in cases { expectDecodeError(label, frame(payload)) }
+@Test func oversizedUnsignedIntegersWrapInsteadOfTrapping() throws {
+    // An element tag that wraps to -1 is not a known tag, so it is REJECTED —
+    // the same outcome the plain `9999` tag gets, reached through the wrap.
+    expectDecodeError("an element tag is u64 max",
+                      frame(docWith([.arr([.uint64(UInt64.max)] + okCommon + [.nul])])))
+
+    // The other two slots ACCEPT the wrapped value rather than erroring,
+    // exactly as Rust does: rmpv keeps the u64 and `as_i64().or_else(as_u64)`
+    // converts with `as`, which wraps. Pinned as values so a future change to
+    // clamping-instead-of-wrapping is a visible divergence, not a silent one.
+    let sel = try binaryToDocument(frame(.arr([.arr([]), .uint64(UInt64.max), .arr([])])))
+    #expect(sel.selectedLayer == -1, "u64 max in the selectedLayer slot must wrap, as Rust's `as` does")
+
+    let sel2 = try binaryToDocument(frame(.arr([.arr([]), .uint64(UInt64(Int.max) + 1), .arr([])])))
+    #expect(sel2.selectedLayer == Int.min, "Int.max + 1 must wrap to Int.min")
+
+    // A visibility tag outside 0/1 falls to the documented default.
+    let vis = try binaryToDocument(frame(docWith([
+        .arr([.int(tLayer), .bool(false), .f64(1), .uint64(UInt64.max),
+              .nul, .nul, .nul, .arr([])])])))
+    #expect(vis.layers[0].children.count == 1)
+    guard case .layer(let inner) = vis.layers[0].children[0] else {
+        Issue.record("expected a nested layer"); return
+    }
+    #expect(inner.visibility == .preview, "an out-of-range visibility tag reads as .preview")
 }
 
 // MARK: - 10. Length prefixes must be validated against remaining input
@@ -468,6 +479,97 @@ private func expectDecodeError(_ label: String, _ blob: Data,
     // this pins that it stays validated.
     let strBomb: [UInt8] = [0xdb, 0xFF, 0xFF, 0xFF, 0xFF, 0x41]
     expectDecodeError("str32 claiming 2^32-1 bytes", frame(.rawBytes(strBomb)))
+}
+
+// MARK: - 10b. Nesting depth must be bounded
+//
+// `readValue` recurses once per nested array with no depth limit, so a payload
+// of N repeated `0x91` (fixarray of 1) bytes recurses N deep. A ~100 KB file of
+// them overflows the stack, which is a SIGSEGV — not catchable, not even by the
+// `do`/`catch` in `Session.swift`, and reached on every cold launch.
+//
+// Rust does not have this hole: rmpv threads a `depth` counter through
+// `read_value_inner` and returns `Error::DepthLimitExceeded` past
+// `rmpv::decode::MAX_DEPTH == 1024`. Swift uses the SAME limit so the two ports
+// accept and reject the same blobs.
+
+/// Run `body` on a thread with an explicitly large stack and return its result.
+///
+/// Needed because the ceiling can only be OBSERVED by reaching it, and reaching
+/// level 1024 costs ~1024 frame pairs. Swift Testing runs each `@Test` on a
+/// concurrency cooperative thread whose stack is small — measured here: this
+/// decoder survives 250 levels there and dies at 400. The shipping caller is
+/// `restoreSession()` from SwiftUI `.onAppear`, i.e. the MAIN thread with an
+/// 8 MB stack, which this 16 MB test thread stands in for.
+///
+/// STATED BLIND SPOT: the ceiling bounds recursion, it does not make the reader
+/// constant-stack. A caller that decodes on a small-stack cooperative thread
+/// can still overflow BELOW the ceiling. Closing that would take an iterative
+/// reader with an explicit work stack; it is not done here, and no claim is
+/// made that it is.
+private func onBigStack<T>(_ body: @escaping () -> T) -> T {
+    var result: T?
+    let thread = Thread { result = body() }
+    thread.stackSize = 16 << 20
+    thread.start()
+    while result == nil { usleep(200) }
+    return result!
+}
+
+@Test func deeplyNestedArraysErrorInsteadOfOverflowingTheStack() {
+    let outcomes: [(String, Bool)] = onBigStack {
+        var out: [(String, Bool)] = []
+        // Past the ceiling: rejected.
+        for n in [1_025, 5_000, 100_000] {
+            let nested = [UInt8](repeating: 0x91, count: n) + [0xc0]
+            let threw = (try? binaryToDocument(frame(.rawBytes(nested)))) == nil
+            out.append(("\(n) nested arrays", threw))
+        }
+        // Inside the ceiling: msgpack parses, then the DOCUMENT shape is wrong,
+        // so it still errors — but it is not the depth ceiling that rejects it.
+        // The point of the row is that the ceiling did not fire early.
+        for n in [500, 1_000] {
+            let nested = [UInt8](repeating: 0x91, count: n) + [0xc0]
+            var msg = ""
+            do { _ = try binaryToDocument(frame(.rawBytes(nested))) }
+            catch { msg = "\(error)" }
+            out.append(("\(n) nested arrays rejected for depth", msg.contains("nesting deeper")))
+        }
+        return out
+    }
+    for (label, threw) in outcomes.prefix(3) {
+        #expect(threw, "\(label) must be rejected by the depth ceiling, not overflow the stack")
+    }
+    for (label, hitCeiling) in outcomes.suffix(2) {
+        #expect(!hitCeiling, "\(label): the ceiling fired inside its own limit")
+    }
+}
+
+/// Real documents nest far below the ceiling, and must be unaffected: a Layer
+/// holding a Group holding a Group ... costs only a couple of msgpack levels
+/// per step. This pins that the depth ceiling does not reject legitimate art.
+///
+/// The chain is 10 deep, not 50, for a reason worth stating rather than hiding.
+/// `unpackElement` recurses per nested ELEMENT, and its debug frame is large:
+/// measured on this toolchain, a swift-testing task (a small-stack concurrency
+/// cooperative thread) overflows at 15 nested groups — roughly 34 KB of stack
+/// per level. That limit is PRE-EXISTING and unchanged by the throwing
+/// conversion: the same probe against the unmodified decoder dies at the same
+/// 15. It is a function of the caller's stack, not of the input alone — the
+/// shipping caller is the main thread with 8 MB — so it is recorded here as a
+/// known bound rather than asserted away. Closing it would take an iterative
+/// unpacker; that is not done here.
+@Test func aNestedRealDocumentStillRoundTrips() throws {
+    var elem = Element.rect(Rect(x: 0, y: 0, width: 1, height: 1))
+    for _ in 0..<10 { elem = .group(Group(children: [elem])) }
+    let doc = Document(layers: [Layer(name: "deep", children: [elem])], selectedLayer: 0)
+    let back = try binaryToDocument(documentToBinary(doc, compress: false))
+    var depth = 0
+    var cursor = back.layers[0].children[0]
+    while case .group(let g) = cursor, let first = g.children.first {
+        depth += 1; cursor = first
+    }
+    #expect(depth == 10, "a 10-deep group chain must survive the codec, got \(depth)")
 }
 
 // MARK: - 11. Header and compression framing
