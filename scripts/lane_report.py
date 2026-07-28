@@ -213,7 +213,30 @@ class LaneReport:
         return f"{word} " + ", ".join(f"`{l}`" for l in lanes)
 
     @property
+    def contradiction(self) -> str | None:
+        """A count that cannot be true given the lanes.
+
+        The self-test proves the RENDERING; it cannot see a runner miscounting
+        (see the docstring's blind spots). This is the one runner-level lie it
+        can catch from here: comparisons cannot happen without a lane to
+        compare against. It fires, for instance, if a runner ever classifies
+        its own diagonal (a port checked against itself) as cross-language.
+        """
+        if self.comparison_checks and not self.lanes.comparison:
+            return (f"{self.comparison_checks} comparison check(s) counted, but "
+                    f"this run has NO comparison lane -- the runner is counting "
+                    f"something that cannot be a cross-language comparison")
+        return None
+
+    @property
     def verdict(self) -> str:
+        if self.contradiction:
+            # Measured: without this, a runner that counted its own diagonal as
+            # cross-language printed "FAIL: IMPOSSIBLE COUNT" and then a last
+            # line reading "VERDICT: CROSS-LANGUAGE -- 14 comparison(s)
+            # performed (rust vs )". The last line must never out-claim the
+            # failure above it.
+            return "IMPOSSIBLE"
         if self.comparison_checks:
             return "CROSS-LANGUAGE"
         if self.oracle_checks:
@@ -254,6 +277,10 @@ class LaneReport:
             lines.append("  active ports that did not take part: " + "; ".join(
                 f"{p} ({why})" for p, why in self.unexercised))
 
+        if self.contradiction:
+            lines.extend(["", RULE,
+                          f"!!! FAIL: IMPOSSIBLE COUNT -- {self.contradiction}",
+                          RULE])
         if self.comparison_checks == 0:
             lines.extend(self._zero_comparison_banner())
         elif self.silent_lanes:
@@ -311,6 +338,9 @@ class LaneReport:
         ]
 
     def _verdict_tail(self) -> str:
+        if self.verdict == "IMPOSSIBLE":
+            return (f"{self.contradiction}. No claim can be read off this run "
+                    f"until the runner's bookkeeping is fixed.")
         if self.verdict == "CROSS-LANGUAGE":
             tail = (f"{self.comparison_checks} cross-language comparison(s) "
                     f"performed ({self.lanes.reference} vs "
@@ -335,7 +365,7 @@ class LaneReport:
             print(line)
 
     def exit_code(self) -> int:
-        if self.total_failed or self.errors:
+        if self.total_failed or self.errors or self.contradiction:
             return EXIT_FAILED
         if self.verdict == "VACUOUS":
             # A run that checked nothing must never exit 0, flag or no flag.
@@ -540,14 +570,32 @@ def self_test() -> int:
           "and must be reported as its own kind")
     check(f_.exit_code() == EXIT_FAILED, f"(F) exit {f_.exit_code()}")
 
+    # --- CASE G: an impossible count (a runner classifying its own
+    # diagonal as cross-language) must be caught, not printed as evidence ---
+    g = LaneReport(title="Cross-language commutativity", scope="14 fixtures",
+                   lanes=one, oracle_passed=0, comparison_passed=14)
+    rg = _read_like_a_skimmer(g.render())
+    check("IMPOSSIBLE COUNT" in rg["text"],
+          "(G) comparisons without a comparison lane must be called impossible")
+    check(g.exit_code() == EXIT_FAILED,
+          f"(G) an impossible count must exit 1, got {g.exit_code()}")
+    check("CROSS-LANGUAGE" not in rg["last"],
+          f"(G) the last line must not out-claim the failure above it: "
+          f"{rg['last']!r}")
+    check("IMPOSSIBLE" in rg["last"], f"(G) verdict: {rg['last']!r}")
+    check(LaneReport(title="t", scope="s", lanes=two,
+                     comparison_passed=14).contradiction is None,
+          "(G) a real comparison lane must not trip the invariant")
+
     if bad:
         print("lane-report SELF-TEST: FAILED")
         for msg in bad:
             print(f"  {msg}")
         return 1
-    print("lane-report SELF-TEST: OK (6 report cases, 13 lane-arithmetic cases; "
+    print("lane-report SELF-TEST: OK (7 report cases, 13 lane-arithmetic cases; "
           "oracle/comparison split, zero-comparison banner, silent-lane warning, "
-          "verdict line and all four exit paths proven)")
+          "impossible-count invariant, verdict line and all four exit paths "
+          "proven)")
     return 0
 
 
