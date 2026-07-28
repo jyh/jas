@@ -1648,9 +1648,30 @@ public func svgToDocument(_ svg: String) -> Document {
             case .layer(let l):
                 layers.append(l)
             case .group(let g):
+                // Promote a top-level <g> to a layer. Layer and Group carry
+                // the SAME eleven stored properties, and Rust's twin
+                // (`svg.rs` `Element::Group(g) =>` arm) clones `g.common`
+                // wholesale plus both opacity flags — so every one of the
+                // eleven must cross here or the two ports disagree about what
+                // an SVG means. The list this replaced named FIVE, silently
+                // dropping `locked`, `visibility`, `blendMode`, `mask`,
+                // `isolatedBlending` and `knockoutGroup` on the way in: a live
+                // cross-port divergence, not just a Swift-internal loss.
+                //
+                // This is a cross-TYPE conversion, so an explicit list is
+                // unavoidable; it is written to read `g.<field>` so
+                // `scripts/check_swift_copy_sites.py` counts it — 11 of 11
+                // today, and a twelfth field ON LAYER turns it RED (measured).
+                // A twelfth field on GROUP alone does NOT, because the gate
+                // counts a construction against the type being CONSTRUCTED;
+                // that asymmetry is the honest limit of this particular watch.
                 layers.append(Layer(name: g.name, children: g.children,
-                                        opacity: g.opacity, transform: g.transform,
-                                        id: g.id))
+                                    opacity: g.opacity, transform: g.transform,
+                                    locked: g.locked, visibility: g.visibility,
+                                    blendMode: g.blendMode,
+                                    isolatedBlending: g.isolatedBlending,
+                                    knockoutGroup: g.knockoutGroup,
+                                    mask: g.mask, id: g.id))
             default:
                 // If the last layer is a nameless wrapper (created by
                 // this same loop on a previous bare element), append
@@ -1658,9 +1679,14 @@ public func svgToDocument(_ svg: String) -> Document {
                 if layers.isEmpty || layers.last!.name != nil {
                     layers.append(Layer(children: [elem]))
                 } else {
-                    let last = layers.removeLast()
-                    layers.append(Layer(name: last.name, children: last.children + [elem],
-                                            opacity: last.opacity, transform: last.transform))
+                    // Clone-then-mutate, mirroring Rust's `le.children.push`.
+                    // The remove/rebuild this replaced named 4 of 11 fields;
+                    // it happened to be harmless only because this branch is
+                    // reached solely for a wrapper THIS loop just built with
+                    // defaults — a property no one was watching.
+                    let lastIdx = layers.count - 1
+                    layers[lastIdx] = layers[lastIdx]
+                        .withChildren(layers[lastIdx].children + [elem])
                 }
             }
         }

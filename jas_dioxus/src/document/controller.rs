@@ -6896,3 +6896,269 @@ mod preservation_law_tests {
     }
 }
 
+
+/// UNGROUP ALL MUST PRESERVE WHAT IT DOES NOT SPEAK TO — the Rust twin of
+/// Swift's `UngroupAllPreservationTests`, case for case.
+///
+/// Rust has never carried the defect these gate (`(**child).clone()` and
+/// `new_doc.layers = new_layers` mutate in place, and every attribute lives in
+/// ONE `CommonProps` that clones wholesale), so these probes are written GREEN.
+/// That is deliberate and it is the point: the shared ACTION corpus case
+/// `menu_ungroup_all_nested` is STRUCTURALLY BLIND to everything at issue here
+/// — its `expected_json` carries no `symbols`, no `artboards`, no
+/// `document_setup`, no `print_preferences`, and its one layer has no `id`, no
+/// blend mode and no mask. So the corpus could not have caught Swift's loss and
+/// cannot catch a future Rust regression either. These probes are the only
+/// thing that watches the Rust side, exactly as the Swift suite is the only
+/// thing that watches Swift, and they assert BY VALUE for the same reason.
+#[cfg(test)]
+mod ungroup_all_preservation_tests {
+    use super::*;
+    use crate::document::artboard::{Artboard, ArtboardOptions};
+    use crate::document::document_setup::DocumentSetup;
+    use crate::document::print_preferences::PrintPreferences;
+    use crate::geometry::element::{
+        BlendMode, Color, CommonProps, Fill, GroupElem, LayerElem, Mask, RectElem,
+        Visibility,
+    };
+    use std::rc::Rc;
+
+    fn rect(x: f64) -> Element {
+        Element::Rect(RectElem {
+            x,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            rx: 0.0,
+            ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        })
+    }
+
+    fn a_mask() -> Mask {
+        Mask {
+            subtree: Box::new(rect(0.0)),
+            clip: false,
+            invert: true,
+            disabled: false,
+            linked: true,
+            unlink_transform: None,
+        }
+    }
+
+    /// An unlocked group with a rect inside — GUARANTEES `changed == true`.
+    fn nest() -> Element {
+        Element::Group(GroupElem {
+            children: vec![Rc::new(rect(1.0))],
+            common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        })
+    }
+
+    fn named_layer(name: &str, children: Vec<Element>) -> Element {
+        Element::Layer(LayerElem {
+            children: children.into_iter().map(Rc::new).collect(),
+            common: CommonProps {
+                name: Some(name.to_string()),
+                ..CommonProps::default()
+            },
+            isolated_blending: false,
+            knockout_group: false,
+        })
+    }
+
+    /// Twin of `documentLevelStateSurvivesUngroupAll`.
+    #[test]
+    fn document_level_state_survives_ungroup_all() {
+        let mut master = rect(3.0);
+        master.common_mut().id = Some("master-1".to_string());
+        let board = Artboard {
+            id: "ab-keep".to_string(),
+            name: "Board Keep".to_string(),
+            x: 11.0,
+            y: 22.0,
+            width: 333.0,
+            height: 444.0,
+            show_center_mark: true,
+            ..Artboard::default_with_id("ab-keep".to_string())
+        };
+        let mut setup = DocumentSetup::default();
+        setup.bleed_top = 9.0;
+        setup.show_images_outline = true;
+        let mut prefs = PrintPreferences::default();
+        prefs.preset_name = "Proof Sheet".to_string();
+        prefs.copies = 7;
+        let doc = Document {
+            layers: vec![
+                named_layer("Base", vec![rect(0.0)]),
+                named_layer("Nested", vec![nest()]),
+            ],
+            symbols: vec![master],
+            selected_layer: 1,
+            artboards: vec![board],
+            artboard_options: ArtboardOptions {
+                fade_region_outside_artboard: false,
+                update_while_dragging: false,
+            },
+            document_setup: setup,
+            print_preferences: prefs,
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::ungroup_all(&mut model);
+        let out = model.document();
+
+        // The operation really ran (guard against a vacuous pass).
+        assert_eq!(out.layers[1].children().unwrap().len(), 1);
+        assert!(matches!(
+            &*out.layers[1].children().unwrap()[0],
+            Element::Rect(_)
+        ));
+
+        assert_eq!(out.artboards.len(), 1);
+        assert_eq!(out.artboards[0].id, "ab-keep");
+        assert_eq!(out.artboards[0].name, "Board Keep");
+        assert_eq!(out.artboards[0].x, 11.0);
+        assert_eq!(out.artboards[0].width, 333.0);
+        assert!(out.artboards[0].show_center_mark);
+        assert!(!out.artboard_options.fade_region_outside_artboard);
+        assert!(!out.artboard_options.update_while_dragging);
+        assert_eq!(out.document_setup.bleed_top, 9.0);
+        assert!(out.document_setup.show_images_outline);
+        assert_eq!(out.print_preferences.preset_name, "Proof Sheet");
+        assert_eq!(out.print_preferences.copies, 7);
+        assert_eq!(out.symbols.len(), 1);
+        assert_eq!(out.symbols[0].common().id.as_deref(), Some("master-1"));
+        assert_eq!(out.selected_layer, 1);
+        assert!(out.selection.is_empty());
+    }
+
+    /// Twin of `lockedGroupKeepsEveryAttribute`.
+    #[test]
+    fn locked_group_keeps_every_attribute() {
+        let keeper = Element::Group(GroupElem {
+            children: vec![Rc::new(nest()), Rc::new(rect(50.0))],
+            common: CommonProps {
+                opacity: 0.5,
+                mode: BlendMode::Multiply,
+                transform: None,
+                locked: true,
+                visibility: Visibility::Outline,
+                mask: Some(Box::new(a_mask())),
+                name: Some("Keeper".to_string()),
+                id: Some("g-keep".to_string()),
+                ..CommonProps::default()
+            },
+            isolated_blending: true,
+            knockout_group: true,
+        });
+        let doc = Document {
+            layers: vec![named_layer("L", vec![keeper])],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::ungroup_all(&mut model);
+        let out = model.document();
+
+        let kept = &*out.layers[0].children().unwrap()[0];
+        let Element::Group(g) = kept else {
+            panic!("the locked group was not kept")
+        };
+        // Its children WERE flattened — the operation ran.
+        assert_eq!(g.children.len(), 2);
+        assert!(g.children.iter().all(|c| matches!(&**c, Element::Rect(_))));
+
+        assert_eq!(g.common.name.as_deref(), Some("Keeper"));
+        assert_eq!(g.common.id.as_deref(), Some("g-keep"));
+        assert!(g.common.locked);
+        assert_eq!(g.common.opacity, 0.5);
+        assert_eq!(g.common.visibility, Visibility::Outline);
+        assert_eq!(g.common.mode, BlendMode::Multiply);
+        assert!(g.isolated_blending);
+        assert!(g.knockout_group);
+        assert!(g.common.mask.is_some());
+        assert!(!g.common.mask.as_ref().unwrap().clip);
+        assert!(g.common.mask.as_ref().unwrap().invert);
+    }
+
+    /// Twin of `layerKeepsEveryAttribute`.
+    #[test]
+    fn layer_keeps_every_attribute() {
+        let doc = Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![Rc::new(nest())],
+                common: CommonProps {
+                    opacity: 0.25,
+                    mode: BlendMode::Screen,
+                    locked: false,
+                    visibility: Visibility::Outline,
+                    mask: Some(Box::new(a_mask())),
+                    name: Some("Styled".to_string()),
+                    id: Some("lay-keep".to_string()),
+                    ..CommonProps::default()
+                },
+                isolated_blending: true,
+                knockout_group: true,
+            })],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::ungroup_all(&mut model);
+        let out = model.document();
+
+        let Element::Layer(l) = &out.layers[0] else {
+            panic!("layer")
+        };
+        // The operation ran.
+        assert_eq!(l.children.len(), 1);
+        assert!(matches!(&*l.children[0], Element::Rect(_)));
+
+        assert_eq!(l.common.name.as_deref(), Some("Styled"));
+        assert_eq!(l.common.id.as_deref(), Some("lay-keep"));
+        assert_eq!(l.common.opacity, 0.25);
+        assert_eq!(l.common.visibility, Visibility::Outline);
+        assert_eq!(l.common.mode, BlendMode::Screen);
+        assert!(l.isolated_blending);
+        assert!(l.knockout_group);
+        assert!(l.common.mask.is_some());
+        assert!(!l.common.locked);
+    }
+
+    /// Twin of `lockedLayerStaysLocked`.
+    ///
+    /// Also pins a fact worth a ruling: a locked LAYER does not protect its
+    /// contents. `flatten` is applied to every layer with no lock check, so an
+    /// unlocked group inside a locked layer is dissolved anyway — the same in
+    /// both ports. If lock becomes INHERITED, this assertion is what moves.
+    #[test]
+    fn locked_layer_stays_locked() {
+        let doc = Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![Rc::new(nest())],
+                common: CommonProps {
+                    locked: true,
+                    name: Some("Locked".to_string()),
+                    ..CommonProps::default()
+                },
+                isolated_blending: false,
+                knockout_group: false,
+            })],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::ungroup_all(&mut model);
+        let out = model.document();
+        assert!(out.layers[0].locked());
+        assert_eq!(out.layers[0].children().unwrap().len(), 1);
+        // Today: the group inside a LOCKED layer is dissolved anyway.
+        assert!(matches!(
+            &*out.layers[0].children().unwrap()[0],
+            Element::Rect(_)
+        ));
+    }
+}
