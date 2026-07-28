@@ -662,6 +662,20 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("boolean_ops.json")
 }
 
+/// PASTE AND LAYER STRUCTURE (LAYER_STRUCTURE.md R2/R3, ratified 2026-07-28).
+/// Twin of Rust `operation_paste_layers`. §5 of the brief records that
+/// `op_apply` had no `paste` verb in EITHER port, so no fixture could reach any
+/// paste behaviour and both rulings would have landed unwatched.
+///
+/// This family is what deletes Swift's name-matching from the DEFAULT path:
+/// `paste_one_name_match_still_flattens_into_active` pastes a fragment whose
+/// first layer is named "Foreground" — a name the setup document HAS — and
+/// requires both children in the ACTIVE layer anyway. Swift used to append into
+/// the matched layer, so this case was RED before R2 landed.
+@Test func operationPasteLayers() throws {
+    try runOperationFixture("paste_layers.json")
+}
+
 /// `state.boolean_remove_redundant_points` defaults to FALSE
 /// (`workspace/state.yaml`), so the collinear-collapse pass does NOT run on a
 /// default boolean. Two rects overlapping in x with the same y-extent: the

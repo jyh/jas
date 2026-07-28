@@ -223,7 +223,7 @@
       ]
     },
     "paste": {
-      "description": "Paste objects from the clipboard into the active document, offset 24 points down and to the right from the original position. The pasted objects become the new selection. Repeated pastes stack with cumulative offsets. Disabled when no document is open.\n",
+      "description": "Paste objects from the clipboard into the active document, offset 24 points down and to the right from the original position. The pasted objects become the new selection. Repeated pastes stack with cumulative offsets.\nEvery pasted object lands in the ACTIVE layer, no matter what layer it came from. If the clipboard holds a fragment whose own layers are named, those names are ignored and the fragment is flattened into the one active layer: where artwork lands must never depend on an invisible property of where it came from, and renaming a layer must never change where a paste lands. To bring a fragment's layer structure across instead, use \"Paste, Preserving Layers\", which is a separate command precisely so that the choice is always the artist's and never a remembered mode.\nA layer that is locked or hidden is still a valid paste target and is pasted into unchanged; the pasted artwork simply inherits that layer's state, so a paste into a hidden layer will not appear until the layer is shown. Pasted objects keep the ids they were copied with. Disabled when no document is open.\n",
       "category": "edit",
       "tier": 3,
       "enabled_when": "state.tab_count > 0",
@@ -233,8 +233,19 @@
         }
       ]
     },
+    "paste_preserving_layers": {
+      "description": "Paste objects from the clipboard while keeping the layer structure the fragment carries, offset 24 points down and to the right exactly as plain Paste does. The two commands differ only in WHICH layer each object lands in. The pasted objects become the new selection.\nEach named layer in the fragment is matched by name against the layers of the active document. When a layer of that name already exists, the fragment's objects are APPENDED to it, on top of whatever it already holds. When no layer of that name exists, the layer is CREATED, taking the fragment's name exactly as written, and added above the document's existing layers. Two fragment layers sharing one name land together in a single layer rather than creating two layers of the same name.\nObjects the fragment does not file under a named layer \u2014 anything copied from within this application, which travels as one unnamed layer, and any loose object in a pasted file \u2014 have no name to preserve, so they land in the ACTIVE layer just as plain Paste would put them. This command therefore does its real work on artwork imported from elsewhere, which is where foreign layer structure exists to be preserved in the first place.\nA matching layer that is locked or hidden is appended to unchanged: the paste neither refuses nor unlocks nor reveals it. Pasted objects keep the ids they were copied with. Disabled when no document is open.\n",
+      "category": "edit",
+      "tier": 3,
+      "enabled_when": "state.tab_count > 0",
+      "effects": [
+        {
+          "log": "paste_preserving_layers: offset 24pt"
+        }
+      ]
+    },
     "paste_in_place": {
-      "description": "Paste objects from the clipboard at their original coordinates (no offset). Useful for pasting objects into the same position in a different document or layer. The pasted objects become the new selection.\n",
+      "description": "Paste objects from the clipboard at their original coordinates (no offset). Useful for pasting objects into the same position in a different document or layer. The pasted objects become the new selection. Layer targeting is plain Paste's: everything lands in the ACTIVE layer, and any layer names the fragment carries are ignored.\n",
       "category": "edit",
       "tier": 3,
       "enabled_when": "state.tab_count > 0",
@@ -8264,6 +8275,12 @@
           "label": "Paste in &Place",
           "action": "paste_in_place",
           "shortcut": "Ctrl+Shift+V",
+          "enabled_when": "state.tab_count > 0"
+        },
+        {
+          "id": "menu_paste_preserving_layers",
+          "label": "Paste, Preserving &Layers",
+          "action": "paste_preserving_layers",
           "enabled_when": "state.tab_count > 0"
         },
         "separator",
