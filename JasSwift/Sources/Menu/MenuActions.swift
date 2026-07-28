@@ -40,6 +40,25 @@ enum MenuActions {
     /// groups are kept, but their children are still flattened). No-op (no undo
     /// step) when nothing changed. Undoable: editDocument self-brackets one undo
     /// step.
+    ///
+    /// PRESERVATION. Ungroup All speaks to group NESTING and to the selection.
+    /// Everything else — a kept locked group's name, id, mask, blend mode and
+    /// opacity flags; every layer's own attributes; the document's symbols,
+    /// artboards, artboard options, Document Setup and print preferences — is a
+    /// bystander and comes back untouched. That is structural here, not a
+    /// checklist: the three writes below are clone-then-mutate
+    /// (``Group/withChildren(_:)``, ``Layer/withChildren(_:)``,
+    /// ``Document/replacing(layers:symbols:selectedLayer:selection:artboards:artboardOptions:documentSetup:printPreferences:)``),
+    /// so there is no field list that can fall behind the structs.
+    ///
+    /// This body used to rebuild all three through their memberwise
+    /// initializers naming 4 of 11, 5 of 11 and 3 of 8 fields — the Swift
+    /// copy-site omission class (EDIT_SEMANTICS_FREEZE.md §3.1), landing at a
+    /// shipping menu action. Ungroup All DELETED every artboard and reset the
+    /// Print dialog; a kept locked group lost its name, id and mask. Rust never
+    /// had the defect (`(**child).clone()` / `new_doc.layers = new_layers`,
+    /// `controller.rs:2348,2376` — the same in-place shape). Gated by
+    /// `UngroupAllPreservationTests`, which asserts BY VALUE.
     static func ungroupAll(_ model: Model) {
         let doc = model.document
         var changed = false
@@ -53,10 +72,7 @@ enum MenuActions {
                     result.append(contentsOf: flatten(g.children))
                 case .group(let g):
                     // Locked group: recurse into children but keep the group
-                    let newChildren = flatten(g.children)
-                    result.append(.group(Group(children: newChildren,
-                                               opacity: g.opacity, transform: g.transform,
-                                               locked: g.locked)))
+                    result.append(.group(g.withChildren(flatten(g.children))))
                 default:
                     result.append(child)
                 }
@@ -64,16 +80,10 @@ enum MenuActions {
             return result
         }
 
-        let newLayers = doc.layers.map { layer in
-            let newChildren = flatten(layer.children)
-            return Layer(name: layer.name, children: newChildren,
-                         opacity: layer.opacity, transform: layer.transform,
-                         locked: layer.locked)
-        }
+        let newLayers = doc.layers.map { $0.withChildren(flatten($0.children)) }
         guard changed else { return }
         // Undoable: editDocument self-brackets one undo step.
-        model.editDocument(Document(layers: newLayers,
-                                  selectedLayer: doc.selectedLayer, selection: []))
+        model.editDocument(doc.replacing(layers: newLayers, selection: []))
     }
 
     /// Lock the current selection under ONE undo step.
