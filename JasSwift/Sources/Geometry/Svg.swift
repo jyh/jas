@@ -1737,9 +1737,20 @@ public func svgToDocument(_ svg: String) -> Document {
                 if layers.isEmpty || layers.last!.name != nil {
                     layers.append(Layer(children: [elem]))
                 } else {
-                    let last = layers.removeLast()
-                    layers.append(Layer(name: last.name, children: last.children + [elem],
-                                            opacity: last.opacity, transform: last.transform))
+                    // Clone-then-mutate, mirroring Rust's `le.children.push`.
+                    // The remove/rebuild this replaced named 4 of Layer's 11
+                    // stored properties, dropping id, locked, visibility,
+                    // blendMode, mask, isolatedBlending and knockoutGroup.
+                    //
+                    // It was harmless in practice ONLY because this branch is
+                    // reached solely for a wrapper THIS loop just built with
+                    // defaults -- a property nobody was watching, and not one
+                    // the code states. `scripts/check_swift_copy_sites.py`
+                    // watches it now, which is how it was caught: the gate went
+                    // red at 4/11 and named every missing field.
+                    let lastIdx = layers.count - 1
+                    layers[lastIdx] = layers[lastIdx]
+                        .withChildren(layers[lastIdx].children + [elem])
                 }
             }
         }
