@@ -793,9 +793,16 @@ assertions in the goldens.
    the first draft's blanket exclusion was wrong by exactly that much.
 4. **Clipboard and cross-document copies.** Copies are born id-less by the
    `clear_ids` doctrine — a copy is a creation, not an edit of the source.
-   (Attack-tested: both ports' clear-id paths are field-preserving —
-   in-place mutation in Rust, the preserving `withId(nil)`/`withChildren`
-   struct methods in Swift; the exclusion is real, not a hole.)
+   (Attack-tested for FIELDS, and that is all it was: both ports' clear-id
+   paths are field-preserving — in-place mutation in Rust, the preserving
+   `withId(nil)`/`withChildren` struct methods in Swift. NOT attack-tested
+   for IDENTITY, which is the property this exclusion actually turns on.
+   Measured false after ratification: both walks stopped at `children`, so
+   a copied COMPOUND SHAPE was born id-less at the top and id-DUPLICATING
+   underneath — a compound's `operands` are not `children`. Repaired in
+   both ports; §7.3's clipboard/duplicate entry carries the measurement,
+   the enforcement lesson, and what the corpus still cannot see. PASTE was
+   never one of these clear-id paths in either port, and still is not.)
 5. **Collaboration/merge-conflict semantics.** `targets` is additive
    metadata; multi-author identity is deferred with Fork 4.
 6. **Which fragment is "the ship."** Deliberately and permanently outside
@@ -1054,6 +1061,30 @@ four adversarial passes is stronger evidence than a law nobody attacked:
   not one of these paths in either port (`clipboard_read_and_paste` /
   `EditClipboard.translateElement` copy the id verbatim) — both ports'
   doc comments used to claim it was, and both have been struck.
+  **THE WALK IS NOW SYMMETRIC AND RE-DERIVED**, arm for arm, against the
+  document's own id walk on this commit: `Document::element_ids` (Rust)
+  and `Document.elementIds` (Swift) each descend `children` plus exactly
+  one non-`children` owner — `CompoundShape.operands` — and the other
+  three `LiveVariant` payloads (`Reference`, `Recorded`, `Generated`) own
+  no sub-elements; both clear-id walks now match that shape, with the
+  Swift inner switch left exhaustive so a fifth payload cannot be added
+  silently. Stated blind spot: the mirroring is asserted by reading four
+  functions, so a FUTURE owner added to one walk and not the other is
+  caught only by tier 1 below, not by this sentence.
+  **AND THE LESSON, which outlives the repair.** This bullet is an entry
+  in the gauntlet's own audit list, and the gauntlet's own audit list had
+  a hole in it — one the law was partly ratified on the strength of. The
+  audit asked "does either clear-id helper drop a field?", read both, and
+  answered no, correctly. It did not ask whether the helpers' WALK reached
+  everything the document's id walk reaches, and `Element::children()`
+  does not expose a compound's operands. That is the argument for §4's
+  **tier 1 — the document-level invariant gate — being PRIMARY rather than
+  first among four**: recomputing the id multiset over the whole document
+  cannot be talked past by a reviewer who read the right function and
+  asked the wrong question, whereas an audit line can, and did. A reader
+  who trusts this list *because* JYH ratified it should trust each line
+  exactly as far as the mechanism behind it — and this line's mechanism
+  was a reading.
 - **The `orphaned_references` call-site audit was exact** — five non-test
   sites per port, symmetric; extending the seam is bounded work, not a
   from-scratch build.
