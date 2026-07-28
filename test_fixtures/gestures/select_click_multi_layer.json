@@ -1,0 +1,13 @@
+[
+  {
+    "_doc": "D4 (SCOPE-effective-locked.md §3): hit-test LAYER z-order. Every hit-test in this project is topmost-first -- the inner children loops all iterate reversed, because the last-drawn element is the one under the cursor. The LAYER loop must obey the same rule, and Swift (DocPrimitives.swift) and the live Python reference (workspace_interpreter/doc_primitives.py) both reverse it. Rust did not, so on any document whose layers overlap it returned the BOTTOM layer's element. Every other selection-family gesture vector is single-layer, where a forward and a reversed layer walk are the same walk -- so nothing in the corpus could see it. multi_layer.svg is the discriminating shape: layer 0 'Background' is a 72x72 rect covering doc (0,0)-(72,72) and layer 1 'Foreground' is a circle at doc (36,36) r=18. The press at doc (36,36) is inside BOTH. Topmost-first means the Foreground circle: [1, 0]. A forward layer walk yields [0, 0].",
+    "name": "select_click_topmost_layer",
+    "setup_svg": "multi_layer.svg",
+    "tool": "selection",
+    "events": [
+      {"kind": "press", "x": 36, "y": 36},
+      {"kind": "release", "x": 36, "y": 36}
+    ],
+    "expected_json": "select_click_multi_layer_expected.json"
+  }
+]

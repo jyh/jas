@@ -2888,6 +2888,13 @@ private let gestureFixtures = [
     // doc-space hit_test (which element is under the point) — the cross-app
     // hit-test parity gate. Click center of rect0 -> path [0,0].
     "select_click.json",
+    // D4 (SCOPE-effective-locked.md §3): click-select on a document whose
+    // LAYERS overlap. Every other selection-family vector is single-layer,
+    // where a forward and a reversed layer walk are the same walk. This port
+    // and the live Python reference already walk layers reversed; Rust did
+    // not. Press at doc(36,36) is inside both the Background rect and the
+    // Foreground circle; topmost-first means [1, 0].
+    "select_click_multi_layer.json",
     // Marquee-select (§5 rec 4): press on EMPTY space (hit_test==null) enters
     // marquee mode; mouseup commits doc.select_in_rect over the normalized
     // marquee bounds. Drag encloses both rects -> [0,0]+[0,1].
