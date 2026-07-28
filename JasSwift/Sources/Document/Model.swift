@@ -521,12 +521,31 @@ public class Model: ObservableObject {
 
     /// Center the canvas view on the current artboard using the
     /// stored viewportW / viewportH. If the artboard fits at the
-    /// current zoom, set pan to center it; otherwise apply
-    /// fit-inside semantics with 20px screen-space padding.
+    /// current zoom, set pan to center it; otherwise fall through to
+    /// `fit_active_artboard` semantics (which DOES write zoomLevel).
     /// Per ZOOM_TOOL.md §Document-open behavior.
+    ///
+    /// `artboardsPanelSelection` is the Artboards panel's selected ids — what
+    /// `active_document.current_artboard` resolves against (ARTBOARDS.md
+    /// §Selection semantics). It is a REQUIRED parameter rather than a
+    /// defaulted one: this method used to reach for `document.artboards.first`,
+    /// which is the same answer only while nothing is panel-selected, and a
+    /// default would let a call site silently keep the old behaviour. Callers
+    /// read it with `artboardsPanelSelectionIds(model)`; pass `[]` only where
+    /// there genuinely is no panel yet.
+    ///
+    /// NO LOCAL COPIES OF THE VIEWPORT PREFERENCES. The fit branch delegates to
+    /// `fitRectIntoViewport` — the same primitive `doc.zoom.fit_rect` and
+    /// `fit_active_artboard` run — which reads `min_zoom` / `max_zoom` from the
+    /// workspace, and takes its padding from `fit_padding_px`. It previously
+    /// carried `let pad = 20.0` and `min(max(zFit, 0.1), 64.0)`: literal copies
+    /// that agreed with `workspace/preferences.yaml` only because the shipped
+    /// values happen to be those numbers. Mirrors Rust
+    /// `Model::center_view_on_current_artboard`.
     public func centerViewOnCurrentArtboard(artboardsPanelSelection: [String]) {
-        _ = artboardsPanelSelection
-        guard let ab = document.artboards.first else { return }
+        guard let ab = currentArtboard(document.artboards,
+                                       selection: artboardsPanelSelection)
+        else { return }
         guard viewportW > 0, viewportH > 0 else { return }
         let abW = Double(ab.width)
         let abH = Double(ab.height)
@@ -538,16 +557,9 @@ public class Model: ObservableObject {
             viewOffsetX = viewportW / 2.0 - (abX + abW / 2.0) * zoomLevel
             viewOffsetY = viewportH / 2.0 - (abY + abH / 2.0) * zoomLevel
         } else {
-            let pad = 20.0
-            let availW = viewportW - 2.0 * pad
-            let availH = viewportH - 2.0 * pad
-            if availW > 0, availH > 0 {
-                let zFit = min(availW / abW, availH / abH)
-                let zClamped = min(max(zFit, 0.1), 64.0)
-                zoomLevel = zClamped
-                viewOffsetX = viewportW / 2.0 - (abX + abW / 2.0) * zClamped
-                viewOffsetY = viewportH / 2.0 - (abY + abH / 2.0) * zClamped
-            }
+            fitRectIntoViewport(
+                model: self, x: abX, y: abY, w: abW, h: abH,
+                padding: readPrefNumber("fit_padding_px", default: 20.0))
         }
     }
 
