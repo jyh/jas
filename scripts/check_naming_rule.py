@@ -12,11 +12,81 @@ only because a pre-push audit happened to grep for it. A rule that depends on
 everyone remembering it is not a rule; it is a hope. Eleven spec documents were
 swept the same day. This gate is what stops the twelfth from appearing.
 
-SCOPE: git-tracked text files. Tracking is the honest definition of "what this
-project authors" -- it excludes build trees and vendored dependencies by
-construction rather than by a hand-maintained skip list, which is the kind of
-list that rots. (Measured: `jas_ocaml/_build/` and `jas_flask/.venv/` between
-them hold dozens of matches and not one line of them was written here.)
+SCOPE: every git-tracked file whose CONTENT is text. Nothing is skipped on its
+name -- no extension whitelist, no size cap, no exception for generated files.
+Tracking is the honest definition of "what this project authors": it excludes
+build trees and vendored dependencies by construction rather than by a
+hand-maintained skip list, which is the kind of list that rots. (Measured:
+`jas_ocaml/_build/` and `jas_flask/.venv/` between them hold dozens of matches
+and not one line of them was written here.)
+
+  TEXT means: no NUL byte, and the bytes decode as UTF-8. Judged over the WHOLE
+  file, never a prefix -- measured, and this is why. The `assets/icons/*.ai`
+  artwork sources are PDF containers whose first NUL byte lands at offset
+  379756, so an 8 KB NUL sniff calls them TEXT; they are recognised as binary
+  only because they fail to decode as UTF-8, at byte 9. Across the 1896 tracked
+  files those two criteria disagree on exactly those two files. An 8 KB prefix
+  and the whole file agree today (1830 text either way) -- the whole file is
+  used regardless, because it has to be read to be scanned and a prefix is a
+  guess.
+
+  Files skipped as binary are PRINTED, grouped by suffix, on a passing run: 61
+  today (.png 35, .bin 21, .ico 2, .ai 2, .icns 1). A skip nobody can see is
+  precisely how this gate's scope came to be wrong in the first place.
+
+  This replaced a 24-suffix WHITELIST whose docstring described it as excluding
+  binary assets. Censused: it silently skipped 39 tracked text files, among
+  them BUILD, MODULE.bazel, .bazelrc, LICENSE, Package.resolved,
+  requirements.txt.lock, a 341 KB results .csv and 8 .gitignore files. 16 of
+  those were outside the exempt trees and are now scanned; the count went 1342
+  -> 1358. A new kind of text file is now in scope BY DEFAULT rather than by
+  someone remembering to add a suffix.
+
+  COST, measured on this tree (1896 files, 37.8 MB, 489,326 lines scanned):
+  298 ms, against 217 ms for the narrower predecessor. A size cap was
+  considered and REJECTED: the largest file in scope is the 1.4 MB generated
+  `workspace/workspace.json`, which is exactly where a violation authored in a
+  `workspace/*.yaml` would surface.
+
+HOW A NAME IS RECOGNISED: as an identifier SEGMENT, case-insensitively. Every
+run of [A-Za-z0-9_] is split on underscores, on CamelCase humps and on
+letter/digit transitions, and a segment that IS a banned word is the violation.
+Plain prose spellings fall out of the same rule, because spaces, hyphens and
+punctuation end a run.
+
+  This replaced a word-boundary pattern that returned False for every natural
+  code spelling. Measured, on all of: <Vendor>RGB1998, to<Vendor>RGB(),
+  <Product>Importer, <vendor>_rgb, <VENDOR>_RGB, <product>_compat. The old
+  docstring conceded only "deliberate obfuscation" -- but CamelCase and
+  snake_case are not obfuscation, they are how a word is written in code, in
+  the one gate whose whole job is reading code. The segment rule is a strict
+  superset of the word-boundary rule: if a word is bounded by non-word
+  characters then the run IS the word, so the segment is the word.
+
+  Being exact about the evidence, because that is this file's whole point: NO
+  identifier-spelled violation exists in the tree today. The frozen ports do
+  carry a colour-profile string, but with a SPACE in it, so the old pattern
+  already saw it -- what holds it back is exemption class 3, not the pattern.
+  This change closes a class the old rule could not have seen IF it appeared;
+  it did not uncover a live breach. What it did find is 16 formerly unscanned
+  text files, listed above, which were also clean.
+
+  FALSE POSITIVES, and what they cost. Both banned words are ordinary English
+  in another sense -- one names a sun-dried mud brick, the other a person who
+  draws. The segment rule flags those uses too, and that is a deliberate trade:
+    * a false positive costs one line marker or one rephrase, paid by the
+      author of the line, at the moment they write it, with file:line printed
+      -- the cheapest moment available;
+    * a miss costs what already happened once: a naming breach live on a public
+      repository for an unknown length of time;
+    * `article/`, the one tree where prose about people who draw is likely, is
+      exempt already.
+  Measured over the whole tree with every exemption switched off, the segment
+  rule adds exactly 3 lines beyond the word-boundary rule -- all 3 inside
+  `article/`, all 3 the same BibTeX citation key. Zero false positives in live
+  code or docs today. Derived forms are not flagged by construction:
+  "illustration", "illustrated", "illustrative" and "illustrators" are
+  different segments, and the self-test pins that they stay clean.
 
 FOUR EXEMPTION CLASSES, each deliberate:
 
@@ -50,17 +120,38 @@ FOUR EXEMPTION CLASSES, each deliberate:
 WHAT THIS CHECK DELIBERATELY CANNOT SEE -- stated because a gate whose blind
 spots are unknown invites a claim wider than its evidence:
 
-  * BINARY ASSETS. `assets/icons/*.ai` (the icon artwork sources) and the
-    exported PNGs carry the vendor's name inside XMP format metadata -- an
-    `xmlns` namespace URI and a `CreatorTool` field. That metadata is not
-    authored prose and cannot be removed without corrupting the file, so
-    binaries are out of scope by suffix. The separate question of whether
-    proprietary-format artwork sources belong in a public repository is a
-    provenance decision for JYH, not a naming-rule matter.
+  * BINARY CONTENT. Re-censused 2026-07-27 over all 40 tracked PNGs: 10 contain
+    the vendor token, 0 contain the product token, and 0 carry a `CreatorTool`
+    field of any kind. Every one of the 37 vendor matches is an XMP namespace
+    URI in the vendor's own domain, inside an iTXt chunk -- ISO-standard
+    metadata emitted by a screenshot tool, not authored prose, and not
+    removable without breaking the standard.
+    (An earlier version of this docstring asserted that these PNGs carry "a
+    `CreatorTool` field". They do not, and the claim had never been measured.
+    It is recorded here rather than quietly deleted, because a gate's own
+    self-description is the worst place in a repository for a claim wider than
+    its evidence, and this file is meant to be the house's example of the
+    opposite.)
+    The two `.ai` artwork sources DO carry both tokens as prose inside their
+    XMP packets -- 32 and 37 matches respectively. They remain out of scope as
+    binary containers. Whether proprietary-format artwork sources belong in a
+    public repository at all is a provenance decision for JYH, not a
+    naming-rule matter.
     (`.svg` IS in scope: an SVG exported from that product embeds a plain-text
     `Generator:` comment, which is both readable prose and safe to delete.)
-  * WORD-BOUNDARY EVASION. Deliberate obfuscation ("A d o b e") passes. This
-    gate stops forgetting, not intent.
+  * A SEPARATOR-FREE RUN. A banned word fused to another word in a single case
+    -- <VENDOR>RGB, <vendor>rgb -- is one segment and is not flagged. Splitting
+    inside a same-case run would need a dictionary, and a dictionary would
+    start flagging ordinary words.
+  * DERIVED FORMS. The plural of the product word is ordinary English for
+    people who draw, and is deliberately not flagged; see the trade above.
+  * DELIBERATE OBFUSCATION. Spaced-out letters, string concatenation, encoding.
+    This gate stops forgetting, not intent.
+  * NON-UTF-8 TEXT. A Latin-1 or UTF-16 prose file would be classified binary
+    and skipped. Measured: zero such files today -- every tracked NUL-free file
+    decodes as UTF-8 except the two `.ai` containers, which are binary by
+    intent. The binary-skip line printed on a passing run is what would expose
+    a new one.
   * UNTRACKED FILES. By construction -- and this bit once: while THIS file was
     itself untracked it passed the gate it defines, because its own pattern
     line was invisible to it. The line now carries a marker.
@@ -74,17 +165,25 @@ import re
 import subprocess
 import sys
 
-BANNED = re.compile(r"\b(adobe|illustrator)\b", re.IGNORECASE)  # naming-rule-exempt: the pattern must spell what it forbids
+BANNED_TOKENS = frozenset({"adobe", "illustrator"})  # naming-rule-exempt: the rule must spell what it forbids
+
+# A run of identifier characters, and the segments inside one. Splitting a run
+# into segments is what lets the rule see a name that is spelled the way code
+# spells names -- see "HOW A NAME IS RECOGNISED" in the module docstring.
+IDENT_RUN = re.compile(r"[A-Za-z0-9_]+")
+SEGMENT = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z]+|[a-z]+|[0-9]+")
+
+# Cheap necessary condition, to keep the split off the 99.99% of lines that
+# cannot match. SOUND because a segment equal to a token is, letter for letter,
+# a substring of the line -- so no substring, no segment. DERIVED from
+# BANNED_TOKENS on purpose (unlike the test fixtures, which are spelled out):
+# a hand-written copy would silently stop covering a token added later.
+# Measured over the 489,326 lines this gate reads: 884 ms without it, 240 ms
+# with it, same 21 lines found.
+_PREFILTER = re.compile("|".join(sorted(BANNED_TOKENS)), re.IGNORECASE)
 
 # Line-scoped escape hatch; see exemption class 4.
 MARKER = "naming-rule-exempt"
-
-# Text we author. Binary assets are out of scope -- see the blind-spot note.
-SUFFIXES = {
-    ".rs", ".swift", ".py", ".ml", ".mli", ".yaml", ".yml", ".json",
-    ".md", ".txt", ".html", ".css", ".js", ".mjs", ".ts", ".toml", ".sh",
-    ".bib", ".svg", ".xml", ".plist", ".cfg", ".ini", ".rst",
-}
 
 EXEMPT_FILES = {
     "transcripts/TRANSCRIPT.md",   # class 1 -- the archive
@@ -102,6 +201,30 @@ def tracked_files(root: pathlib.Path) -> list[str]:
         cwd=root, capture_output=True, text=True, check=True,
     ).stdout
     return [p for p in out.split("\0") if p]
+
+
+def banned_segment(line: str) -> str | None:
+    """Return the offending identifier segment in `line`, or None.
+
+    Every maximal run of `[A-Za-z0-9_]` is split into segments -- on
+    underscores, on CamelCase humps, and on letter/digit transitions -- and a
+    segment that IS one of the banned words (any case) is the violation.
+    Punctuation, spaces and hyphens end a run, so the plain prose spellings
+    fall out of the same rule rather than needing a second one.
+
+    The underscore split needs no code of its own: no SEGMENT alternative can
+    match `_`, so `finditer` steps over it. An explicit `.split("_")` was
+    written here first and then removed -- mutation testing showed deleting it
+    changed no result, which is the definition of a line that is not doing
+    anything.
+    """
+    if not _PREFILTER.search(line):
+        return None
+    for run in IDENT_RUN.finditer(line):
+        for seg in SEGMENT.finditer(run.group(0)):
+            if seg.group(0).lower() in BANNED_TOKENS:
+                return seg.group(0)
+    return None
 
 
 def decode_if_text(data: bytes) -> str | None:
@@ -131,8 +254,7 @@ def scan(rels, read):
     scanned = 0
 
     for rel in rels:
-        if pathlib.PurePosixPath(rel).suffix not in SUFFIXES:
-            continue
+        # NOTHING is skipped on its name. Scope is decided by content below.
         if rel in EXEMPT_FILES or rel.startswith(EXEMPT_PREFIXES):
             continue
         try:
@@ -145,12 +267,13 @@ def scan(rels, read):
             continue
         scanned += 1
         for n, line in enumerate(text.splitlines(), 1):
-            if not BANNED.search(line):
+            seg = banned_segment(line)
+            if seg is None:
                 continue
             if MARKER in line:
                 exempted.append(f"  {rel}:{n}")
                 continue
-            hits.append(f"  {rel}:{n}: {line.strip()[:110]}")
+            hits.append(f"  {rel}:{n}: [{seg}] {line.strip()[:110]}")
 
     return hits, exempted, scanned, skipped_binary
 
@@ -314,6 +437,16 @@ def main() -> int:
     print(f"naming-rule gate: OK ({scanned} tracked text files scanned)")
     print("  exempt trees: transcripts/TRANSCRIPT.md (archive), article/ (prose),")
     print("                jas_ocaml/ + jas/ (frozen at five-port-parity)")
+    if skipped_binary:
+        # Every skip is REPORTED. A file leaving scope because its bytes are
+        # binary is a decision, and a decision nobody can see is the failure
+        # mode that made this gate's own scope wrong in the first place.
+        by_suffix: dict[str, int] = {}
+        for rel in skipped_binary:
+            key = pathlib.PurePosixPath(rel).suffix.lower() or "(no suffix)"
+            by_suffix[key] = by_suffix.get(key, 0) + 1
+        shape = ", ".join(f"{k} ({n})" for k, n in sorted(by_suffix.items()))
+        print(f"  {len(skipped_binary)} file(s) skipped as binary by content: {shape}")
     if exempted:
         # Grouped by file, not line by line: most of them are this script's own
         # test fixtures, and a wall of line numbers hides the signal that

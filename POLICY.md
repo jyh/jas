@@ -143,7 +143,12 @@ documentation. Preferred term: "vector illustration application"
 This applies to all 5 apps, all docs, all test fixtures.
 
 **Enforced by `scripts/check_naming_rule.py`**, which scans every
-git-tracked text file and runs in CI. The rule went silently broken
+git-tracked text file and runs in CI. "Text" is decided from the
+file's content -- no NUL byte, and valid UTF-8 -- never from its name,
+so a new kind of text file is in scope by default; the banned names are
+matched as identifier segments, so `CamelCase` and `snake_case`
+spellings are caught too. Files skipped as binary are printed on every
+passing run. The rule went silently broken
 on public `main` for an unknown period -- 18 occurrences across 9
 files, found on 2026-07-27 only because a pre-push audit happened to
 grep for it. A rule that depends on everyone remembering it is not a
