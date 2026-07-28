@@ -1267,3 +1267,109 @@ agree on the spelling rather than each agreeing with itself.
    app still parse `locked = false` unconditionally. Correct per the freeze; the
    consequence is that a file saved by an active port and reopened in a frozen
    one silently unlocks. Stated, not fixed.
+
+## 14. REPEATED PASTES STACK WITH CUMULATIVE OFFSETS. RULED 2026-07-28.
+
+> JYH: *"follow the spec."*
+
+`workspace/actions.yaml` §paste has carried the sentence **"Repeated pastes
+stack with cumulative offsets"** since it was written. Neither active port
+implemented it: the second paste landed exactly on the first — invisible, the
+one outcome the offset exists to prevent, arrived at by pasting twice instead of
+once. Both ports were wrong TOGETHER, so this was never a divergence needing
+adjudication. The written requirement governs: implement the stacking, do not
+amend the sentence.
+
+### 14.1 The four decisions the sentence leaves open
+
+The spec says "cumulative" and stops. Four things had to be chosen, and all four
+are now artist-facing prose in `actions.yaml` (§paste, §paste_preserving_layers,
+§paste_in_place) as well as code:
+
+1. **RESET IS KEYED TO WHAT IS PASTED, not to a copy hook.** A paste whose
+   payload differs from the one the run is counting starts a new run. This is
+   what makes an EXTERNAL copy — from another application — reset the offset,
+   which no in-app copy hook could ever see. Re-copying the SAME artwork does
+   NOT reset: the first slot already holds the previous paste. A
+   SELECTION-keyed reset was considered and rejected with a proof, not a
+   preference: paste SETS the selection, so a selection-keyed reset would fire
+   after every paste and the run could never reach step two.
+2. **`paste_in_place` DOES NOT PARTICIPATE.** It lands on the source, which is
+   not a run slot, so it neither advances the run nor restarts it: 24, 0, 48.
+3. **"Paste, Preserving Layers" SHARES THE ONE RUN.** The two commands differ in
+   WHICH LAYER artwork lands in, never in the offset — §9's ruling, applied.
+4. **A PASTE THAT LANDS NOTHING DOES NOT ADVANCE THE RUN.**
+
+### 14.2 The run is keyed to the RAW CLIPBOARD PAYLOAD
+
+`Model.paste_run` / `Model.pasteRunState` holds `(payload, count)` where
+`payload` is the raw string — the text a port read off the system clipboard, or
+the `svg` fragment markup the corpus supplies. It is offset-independent, it is
+what both op params already carry, it costs a string compare rather than a deep
+element compare, and "the same clipboard content" is exactly what the spec
+sentence is about.
+
+TWO CONSEQUENCES, BANKED AND PROBED, NOT RULED:
+
+- Markup differing only in whitespace is a DIFFERENT payload and restarts the
+  run. Conservative: the artist's clipboard did change.
+- The run is a SINGLE SLOT. Copying B between two pastes of A loses A's count,
+  so the next A lands back on the first. A fragment-keyed run would have the
+  same limitation. Pinned by `an_intervening_payload_loses_the_first_runs_count`
+  in both ports, so the day a multi-slot run is ruled, a byte moves.
+
+### 14.3 Where it lives, and the lifetime argument
+
+Per-document, session-lived, never serialized, undoable — on the `Model`.
+
+- **NOT `Document`.** It is a value type that many Swift sites rebuild field by
+  field, so a new field there is dropped silently at every one of them (the
+  copy-site omission class, found five times). It would also survive a save, and
+  a paste offset remembered from a previous session is a lie: the clipboard it
+  counted is gone.
+- **NOT app state.** §13's lock save-state table was ruled a design flaw the
+  same day for living somewhere whose lifetime does not match what it describes.
+  A counter that outlives the artwork it counts is the same defect: undo the
+  second paste and the third would skip to 72, leaving 48 empty — a slot the
+  artist can see and cannot fill.
+
+Undoability is bought EXPLICITLY. The `(Document, IdIndex)` undo/redo tuple
+became a NAMED `Checkpoint` struct carrying the run, so the COMPILER enumerated
+all 13 sites in Rust and all 11 in Swift rather than letting a two-element
+destructure silently drop a third field. `begin_txn` captures the PRE-paste run,
+so undo-then-paste is exactly redo; abort rolls it back too.
+
+### 14.4 One place the run moves
+
+`paste_run_apply` / `pasteRunApply`. Both model-level entry points route through
+it: `apply_paste` (the corpus-only `svg` param) and `apply_paste_clipboard_text`
+(the `text` param, which is what BOTH ports' production paste reads after §12).
+Measured: a run implemented on `svg` alone leaves ONE corpus vector red and
+every per-port probe green, which is precisely the decoy shape.
+
+Rust's production path was REROUTED as part of this: `clipboard_read_and_paste`
+called the pure `paste_clipboard_text_into` and bracketed by hand, which would
+have left the run unreachable from the artist. Swift's `EditClipboard.pasteClipboard`
+already routed through the model-level function and needed no change.
+
+### 14.5 What is watched, and what is not
+
+WATCHED: `test_fixtures/operations/paste_stacking.json`, 9 vectors over shared
+goldens in both ports, plus twin per-port probes for undo, redo, abort and the
+per-document lifetime — which the operations runner structurally cannot reach,
+because it applies `history` AFTER every transaction and an undo op embedded in
+a transaction would desync the `checkpoint_equivalence` gate.
+
+NOT WATCHED, and MEASURED rather than asserted: **Rust's production wire.**
+Replacing the clipboard payload in `clipboard_read_and_paste` with `None` — so
+production pastes nothing at all — leaves all 2784 `cargo test --lib` tests
+GREEN. The same mutation in Swift (`EditClipboard.pasteClipboard` reading `nil`)
+reddens 19 issues across 14 tests, including both stacking wire probes. This is
+the pre-existing `rust-clipboard-read-unreachable-from-cargo-test` gap in
+`scripts/corpus_manifest.json`, unchanged by this wave and now covering the
+paste run as well: the read still sits in a `spawn_local` closure over an
+`Rc<RefCell<AppState>>` and a Dioxus `Signal`. The two ports are watched to
+DIFFERENT depths here and only the shallower depth is common.
+
+ALSO NOT WATCHED: no GUI was driven in either port. Nobody has seen a second
+paste land at 48 on screen.
