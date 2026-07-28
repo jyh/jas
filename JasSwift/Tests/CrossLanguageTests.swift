@@ -4032,8 +4032,28 @@ private func saturatedPath() -> Path {
     )
 }
 
+/// The attribute-SATURATED Group: the container half of this gate.
+/// `isolatedBlending` and `knockoutGroup` live on Group and Layer ONLY, so a
+/// saturated Path cannot reach them and the fixture's `fields` list held no
+/// container field at all until 2026-07-28. Mirrors
+/// `survival_saturated_group()` in Rust.
+///
+/// It carries a child on purpose: an EMPTY container is a shape a codec can
+/// legitimately drop, which would confuse a structural loss with a field loss.
+private func saturatedGroup() -> Group {
+    Group(children: [.rect(Rect(x: 30, y: 40, width: 5, height: 6,
+                                fill: Fill(color: Color(r: 1, g: 1, b: 1))))],
+          isolatedBlending: true, knockoutGroup: true,
+          name: "name_group", id: "id_group")
+}
+
 private func survivalDoc() -> Document {
-    Document(rawLayers: [Layer(name: "Layer 1", children: [.path(saturatedPath())])],
+    // The enclosing Layer is saturated too: Group and Layer are watched
+    // SEPARATELY because every codec in both ports has a distinct construction
+    // site per kind, so one can be repaired and the other missed.
+    Document(rawLayers: [Layer(name: "Layer 1",
+                               children: [.path(saturatedPath()), .group(saturatedGroup())],
+                               isolatedBlending: true, knockoutGroup: true)],
              rawSelectedLayer: 0, rawSelection: [], rawArtboards: [],
              rawArtboardOptions: .default)
 }
@@ -4044,11 +4064,33 @@ private func survivalFirstPath(_ d: Document) -> Path? {
     return nil
 }
 
+private func survivalFirstLayer(_ d: Document) -> Layer? { d.layers.first }
+
+private func survivalFirstGroup(_ d: Document) -> Group? {
+    guard let l = d.layers.first else { return nil }
+    for e in l.children { if case .group(let g) = e { return g } }
+    return nil
+}
+
 /// PRESERVED / DROPPED for each watched field of `after` against `before`.
 /// The key order matches the Rust `survival_row` vector.
-private func survivalRow(_ before: Path, _ after: Path?) -> [(String, String)] {
-    guard let a = after else {
+///
+/// Takes the whole DOCUMENT on each side rather than the Path alone, because
+/// four of the watched fields are container fields that no leaf can carry.
+private func survivalRow(_ beforeDoc: Document, _ afterDoc: Document) -> [(String, String)] {
+    guard let before = survivalFirstPath(beforeDoc), let a = survivalFirstPath(afterDoc) else {
         Issue.record("codecFieldSurvival: the saturated Path did not survive the round trip AT ALL")
+        return []
+    }
+    // The two containers. A missing one is a STRUCTURAL loss, not a field loss,
+    // so it is reported as such rather than as four DROPPED rows that would
+    // invite the reader to fix the wrong thing.
+    guard let bl = survivalFirstLayer(beforeDoc), let al = survivalFirstLayer(afterDoc) else {
+        Issue.record("codecFieldSurvival: the saturated Layer did not survive the round trip AT ALL")
+        return []
+    }
+    guard let bg = survivalFirstGroup(beforeDoc), let ag = survivalFirstGroup(afterDoc) else {
+        Issue.record("codecFieldSurvival: the saturated Group did not survive the round trip AT ALL")
         return []
     }
     func s(_ ok: Bool) -> String { ok ? "PRESERVED" : "DROPPED" }
@@ -4059,6 +4101,10 @@ private func survivalRow(_ before: Path, _ after: Path?) -> [(String, String)] {
         ("common.tool_origin", s(a.toolOrigin == before.toolOrigin)),
         ("fill_gradient", s(a.fillGradient == before.fillGradient)),
         ("fill_rule", s(a.fillRule == before.fillRule)),
+        ("group.isolated_blending", s(ag.isolatedBlending == bg.isolatedBlending)),
+        ("group.knockout_group", s(ag.knockoutGroup == bg.knockoutGroup)),
+        ("layer.isolated_blending", s(al.isolatedBlending == bl.isolatedBlending)),
+        ("layer.knockout_group", s(al.knockoutGroup == bl.knockoutGroup)),
         ("stroke.align", s(a.stroke?.align == before.stroke?.align)),
         ("stroke.dash_align_anchors", s(a.stroke?.dashAlignAnchors == before.stroke?.dashAlignAnchors)),
         // The ACTIVE slice, not the fixed six-slot array: the two ports store
@@ -4082,14 +4128,13 @@ private func survivalRow(_ before: Path, _ after: Path?) -> [(String, String)] {
     let overrides = (fx["port_overrides"] as! [String: Any])["entries"] as! [[String: Any]]
 
     let doc = survivalDoc()
-    let before = survivalFirstPath(doc)!
 
     let viaJson = testJsonToDocument(documentToTestJson(doc))
     let viaBin = try binaryToDocument(documentToBinary(doc, compress: false))
     let viaSvg = svgToDocument(documentToSvg(doc))
 
     for (codec, rt) in [("test_json", viaJson), ("binary", viaBin), ("svg", viaSvg)] {
-        let got = survivalRow(before, survivalFirstPath(rt))
+        let got = survivalRow(doc, rt)
         #expect(got.count == fields.count,
                 "codecFieldSurvival: the gate watches \(got.count) fields, the fixture declares \(fields.count)")
         for (field, actual) in got {

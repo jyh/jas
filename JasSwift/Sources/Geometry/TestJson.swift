@@ -336,6 +336,15 @@ private func extendedElementFields(_ o: JsonObj, _ elem: Element) {
         if let b = p.strokeBrush { o.str("stroke_brush", b) }
         if let b = p.strokeBrushOverrides { o.str("stroke_brush_overrides", b) }
     }
+    // The two CONTAINER-only flags (Opacity panel, transcripts/OPACITY.md
+    // §Group). They live on Group and Layer and nowhere else, so they are
+    // written here rather than beside the eleven common keys — and, like every
+    // key above, only when true, which is what keeps every shipped golden
+    // (whose containers are all false) byte-identical. Mirrors the tail of
+    // Rust `extended_element_fields`.
+    let flags = containerBlendFlags(elem)
+    if flags.isolatedBlending { o.bool("isolated_blending", true) }
+    if flags.knockoutGroup { o.bool("knockout_group", true) }
 }
 
 private func linecapStr(_ lc: LineCap) -> String {
@@ -1080,6 +1089,14 @@ private func applyExtendedElementFields(_ elem: Element, _ d: [String: Any]) -> 
             e = .path(p)
         }
     }
+    // The container-only flags. The `group` / `layer` arms of `parseElement`
+    // still take the initializer defaults, exactly as `parseCommon` leaves the
+    // blend mode alone: this post-pass is the ONE place either flag is read,
+    // so a new container kind cannot silently miss it, and it routes through a
+    // clone-then-mutate helper so no copy site is created.
+    e = withContainerBlendFlags(e,
+                                isolatedBlending: d["isolated_blending"] as? Bool ?? false,
+                                knockoutGroup: d["knockout_group"] as? Bool ?? false)
     return e
 }
 

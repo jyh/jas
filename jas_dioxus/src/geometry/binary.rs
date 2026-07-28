@@ -113,6 +113,14 @@ const COMMON_EXT_LEN: usize = 3;
 /// TAG_PATH only, immediately after the common extension.
 const EXT_STROKE_BRUSH: usize = COMMON_EXT_LEN;
 const EXT_STROKE_BRUSH_OVERRIDES: usize = COMMON_EXT_LEN + 1;
+/// TAG_LAYER / TAG_GROUP only, immediately after the common extension. These
+/// share their OFFSETS with the two TAG_PATH slots above, which is safe and
+/// deliberate: the offset is read only inside the arm for its own tag, and a
+/// tag carries either the container pair or the path pair, never both. Written
+/// unconditionally for both container tags, so each tag's arity stays constant
+/// and the shared wire gate can assert it.
+const EXT_ISOLATED_BLENDING: usize = COMMON_EXT_LEN;
+const EXT_KNOCKOUT_GROUP: usize = COMMON_EXT_LEN + 1;
 
 /// Slots a tag carried BEFORE the extension -- equivalently, the index at
 /// which its extension block starts. Mirrored by `tagBaseArity` in JasSwift
@@ -587,7 +595,29 @@ fn pack_element(elem: &Element) -> Value {
         slots.push(opt_str(e.stroke_brush.as_ref()));
         slots.push(opt_str(e.stroke_brush_overrides.as_ref()));
     }
+    // Container-only, immediately after the common extension. Before this the
+    // codec dropped both flags outright: set knockout on a group, save,
+    // relaunch, and the setting was gone (coverage gap
+    // `container-blend-fields-survive-no-codec`). Appended, VERSION still 2,
+    // read tolerantly, exactly as the 2026-07-27 common extension was.
+    match elem {
+        Element::Group(e) => {
+            slots.push(vbool(e.isolated_blending));
+            slots.push(vbool(e.knockout_group));
+        }
+        Element::Layer(e) => {
+            slots.push(vbool(e.isolated_blending));
+            slots.push(vbool(e.knockout_group));
+        }
+        _ => {}
+    }
     Value::Array(slots)
+}
+
+/// A trailing boolean slot: absent, nil or anything that is not a boolean
+/// reads as `false`, matching the tolerance `tolerant_opt_str` established.
+fn tolerant_bool(v: Option<&Value>) -> bool {
+    v.and_then(|v| v.as_bool()).unwrap_or(false)
 }
 
 /// The tag's slots up to `tag_base_arity(tag)` -- everything the format
@@ -1026,12 +1056,24 @@ fn unpack_element(v: &Value) -> Result<Element, String> {
         TAG_LAYER => {
             let children: Vec<Rc<Element>> = as_array(at(arr, 7)?)?.iter()
                 .map(|c| Ok(Rc::new(unpack_element(c)?))).collect::<Result<Vec<_>, String>>()?;
-            Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false })
+            let base = tag_base_arity(TAG_LAYER);
+            Element::Layer(LayerElem {
+                children,
+                common,
+                isolated_blending: tolerant_bool(arr.get(base + EXT_ISOLATED_BLENDING)),
+                knockout_group: tolerant_bool(arr.get(base + EXT_KNOCKOUT_GROUP)),
+            })
         }
         TAG_GROUP => {
             let children: Vec<Rc<Element>> = as_array(at(arr, 7)?)?.iter()
                 .map(|c| Ok(Rc::new(unpack_element(c)?))).collect::<Result<Vec<_>, String>>()?;
-            Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false })
+            let base = tag_base_arity(TAG_GROUP);
+            Element::Group(GroupElem {
+                children,
+                common,
+                isolated_blending: tolerant_bool(arr.get(base + EXT_ISOLATED_BLENDING)),
+                knockout_group: tolerant_bool(arr.get(base + EXT_KNOCKOUT_GROUP)),
+            })
         }
         TAG_LINE => Element::Line(LineElem {
             x1: as_f64(at(arr, 7)?)?, y1: as_f64(at(arr, 8)?)?,
@@ -1553,8 +1595,8 @@ mod tests {
     /// To regenerate after an intentional codec change: print
     /// `document_to_binary(&donut_doc(rule), false)` as hex and update
     /// BOTH ports.
-    const DONUT_NON_ZERO_HEX: &str = "4a4153000200000094919b00c2cb3ff000000000000002c0c0c091dc001107c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00000c0c0c0c000c0c0009090";
-    const DONUT_EVEN_ODD_HEX: &str = "4a4153000200000094919b00c2cb3ff000000000000002c0c0c091dc001107c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00100c0c0c0c000c0c0009090";
+    const DONUT_NON_ZERO_HEX: &str = "4a4153000200000094919d00c2cb3ff000000000000002c0c0c091dc001107c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00000c0c0c0c000c0c0c2c2009090";
+    const DONUT_EVEN_ODD_HEX: &str = "4a4153000200000094919d00c2cb3ff000000000000002c0c0c091dc001107c2cb3ff000000000000002c0c0c0989300cb0000000000000000cb00000000000000009301cb4059000000000000cb00000000000000009301cb4059000000000000cb405900000000000091079300cb4039000000000000cb40390000000000009301cb4052c00000000000cb40390000000000009301cb4052c00000000000cb4052c000000000009107929600cb0000000000000000cb0000000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c00100c0c0c0c000c0c0c2c2009090";
     /// The SAME document as written BEFORE the per-tag common extension
     /// (RULED 2026-07-27) joined the codec: TAG_LAYER carries 8 slots (0x98)
     /// and TAG_PATH 12 (0x9c), with no mode / mask / tool_origin /

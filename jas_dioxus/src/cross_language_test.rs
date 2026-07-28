@@ -5899,16 +5899,52 @@ mod tests {
         }
     }
 
+    /// The attribute-SATURATED Group: the container half of this gate.
+    /// `isolated_blending` and `knockout_group` live on Group and Layer ONLY,
+    /// so a saturated Path cannot reach them and the fixture's `fields` list
+    /// held no container field at all until 2026-07-28. Mirrored by
+    /// `saturatedGroup()` in JasSwift.
+    ///
+    /// It carries a child on purpose: an EMPTY container is a shape a codec
+    /// can legitimately drop, which would confuse a structural loss with a
+    /// field loss.
+    fn survival_saturated_group() -> crate::geometry::element::GroupElem {
+        use crate::geometry::element::*;
+        let mut gc = CommonProps::default();
+        gc.name = Some("name_group".to_string());
+        gc.id = Some("id_group".to_string());
+        GroupElem {
+            children: vec![std::rc::Rc::new(Element::Rect(RectElem {
+                x: 30.0, y: 40.0, width: 5.0, height: 6.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::Rgb { r: 1.0, g: 1.0, b: 1.0, a: 1.0 })),
+                stroke: None,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            }))],
+            common: gc,
+            isolated_blending: true,
+            knockout_group: true,
+        }
+    }
+
     fn survival_doc() -> crate::document::document::Document {
         use crate::geometry::element::*;
         let mut d = crate::document::document::Document::default();
         let mut lc = CommonProps::default();
         lc.name = Some("Layer 1".to_string());
+        // The enclosing Layer is saturated too: Group and Layer are watched
+        // SEPARATELY because every codec in both ports has a distinct
+        // construction site per kind, so one can be repaired and the other
+        // missed.
         d.layers = vec![Element::Layer(LayerElem {
-            children: vec![std::rc::Rc::new(Element::Path(survival_saturated_path()))],
+            children: vec![
+                std::rc::Rc::new(Element::Path(survival_saturated_path())),
+                std::rc::Rc::new(Element::Group(survival_saturated_group())),
+            ],
             common: lc,
-            isolated_blending: false,
-            knockout_group: false,
+            isolated_blending: true,
+            knockout_group: true,
         })];
         d
     }
@@ -5921,16 +5957,53 @@ mod tests {
         match kids.first()?.as_ref() { Element::Path(p) => Some(p.clone()), _ => None }
     }
 
+    fn survival_first_layer(
+        d: &crate::document::document::Document,
+    ) -> Option<crate::geometry::element::LayerElem> {
+        use crate::geometry::element::Element;
+        match d.layers.first()? { Element::Layer(e) => Some(e.clone()), _ => None }
+    }
+
+    fn survival_first_group(
+        d: &crate::document::document::Document,
+    ) -> Option<crate::geometry::element::GroupElem> {
+        use crate::geometry::element::Element;
+        let kids = match d.layers.first()? { Element::Layer(e) => &e.children, _ => return None };
+        kids.iter().find_map(|c| match c.as_ref() {
+            Element::Group(g) => Some(g.clone()),
+            _ => None,
+        })
+    }
+
     /// PRESERVED / DROPPED for each watched field of `after` against `before`.
+    ///
+    /// Takes the whole DOCUMENT on each side rather than the Path alone,
+    /// because four of the watched fields are container fields that no leaf
+    /// can carry.
     fn survival_row(
-        before: &crate::geometry::element::PathElem,
-        after: Option<&crate::geometry::element::PathElem>,
+        before_doc: &crate::document::document::Document,
+        after_doc: &crate::document::document::Document,
     ) -> Vec<(&'static str, &'static str)> {
-        let a = match after {
+        let before = survival_first_path(before_doc)
+            .expect("the saturated doc has a Path");
+        let before = &before;
+        let a = match survival_first_path(after_doc) {
             Some(a) => a,
             None => panic!("codec_field_survival: the saturated Path did not survive the \
                             round trip AT ALL -- every field row below is meaningless"),
         };
+        let a = &a;
+        // The two containers. A missing one is a STRUCTURAL loss, not a field
+        // loss, so it panics rather than reporting DROPPED four times and
+        // inviting the reader to fix the wrong thing.
+        let bl = survival_first_layer(before_doc).expect("the saturated doc has a Layer");
+        let al = survival_first_layer(after_doc).unwrap_or_else(|| panic!(
+            "codec_field_survival: the saturated Layer did not survive the round trip \
+             AT ALL -- the layer.* rows below would be meaningless"));
+        let bg = survival_first_group(before_doc).expect("the saturated doc has a Group");
+        let ag = survival_first_group(after_doc).unwrap_or_else(|| panic!(
+            "codec_field_survival: the saturated Group did not survive the round trip \
+             AT ALL -- the group.* rows below would be meaningless"));
         let s = |ok: bool| if ok { "PRESERVED" } else { "DROPPED" };
         vec![
             ("common.locked", s(a.common.locked == before.common.locked)),
@@ -5939,6 +6012,10 @@ mod tests {
             ("common.tool_origin", s(a.common.tool_origin == before.common.tool_origin)),
             ("fill_gradient", s(a.fill_gradient == before.fill_gradient)),
             ("fill_rule", s(a.fill_rule == before.fill_rule)),
+            ("group.isolated_blending", s(ag.isolated_blending == bg.isolated_blending)),
+            ("group.knockout_group", s(ag.knockout_group == bg.knockout_group)),
+            ("layer.isolated_blending", s(al.isolated_blending == bl.isolated_blending)),
+            ("layer.knockout_group", s(al.knockout_group == bl.knockout_group)),
             ("stroke.align", s(a.stroke.map(|x| x.align) == before.stroke.map(|x| x.align))),
             ("stroke.dash_align_anchors",
              s(a.stroke.map(|x| x.dash_align_anchors) == before.stroke.map(|x| x.dash_align_anchors))),
@@ -5966,7 +6043,6 @@ mod tests {
         assert!(!fields.is_empty(), "codec_field_survival: the field list is empty");
 
         let doc = survival_doc();
-        let before = survival_first_path(&doc).expect("saturated doc has a Path");
 
         let via_json = test_json_to_document(&document_to_test_json(&doc));
         let via_bin = binary_to_document(&document_to_binary(&doc, false))
@@ -5974,7 +6050,7 @@ mod tests {
         let via_svg = svg_to_document(&document_to_svg(&doc));
 
         for (codec, rt) in [("test_json", &via_json), ("binary", &via_bin), ("svg", &via_svg)] {
-            let got = survival_row(&before, survival_first_path(rt).as_ref());
+            let got = survival_row(&doc, rt);
             assert_eq!(got.len(), fields.len(),
                 "codec_field_survival: the gate watches {} fields, the fixture declares {}",
                 got.len(), fields.len());
