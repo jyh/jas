@@ -31,7 +31,7 @@ BUNDLE = os.path.join(REPO_ROOT, "workspace", "workspace.json")
 
 
 def _bundle_panels() -> dict:
-    with open(BUNDLE) as f:
+    with open(BUNDLE, encoding="utf-8") as f:
         return json.load(f)["panels"]
 
 
@@ -172,7 +172,7 @@ def test_canon_foreach_resolves_the_per_item_scope():
 # --------------------------------------------------------------------------
 
 def test_fixture_is_fresh():
-    with open(FIXTURE) as f:
+    with open(FIXTURE, encoding="utf-8") as f:
         cases = json.load(f)
     panels = _bundle_panels()
     assert cases, "the corpus must not be empty"
@@ -189,7 +189,7 @@ def test_fixture_covers_the_four_expression_shapes():
     """The family's stated scope: a colour swatch, a numeric field with units,
     a conditional `visible`, and a `foreach`. Asserted so shrinking the corpus
     to a shape it no longer covers reddens here rather than passing quietly."""
-    with open(FIXTURE) as f:
+    with open(FIXTURE, encoding="utf-8") as f:
         cases = json.load(f)
     panels = _bundle_panels()
     rows = [r for tc in cases

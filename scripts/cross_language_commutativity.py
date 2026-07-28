@@ -166,7 +166,7 @@ def main():
     for name in FIXTURE_NAMES:
         svg_path = os.path.join(FIXTURES_DIR, "svg", f"{name}.svg")
         expected_path = os.path.join(FIXTURES_DIR, "expected", f"{name}.json")
-        with open(expected_path) as f:
+        with open(expected_path, encoding="utf-8") as f:
             expected_json = f.read().strip()
 
         # Step 1: Each language parses the original SVG.

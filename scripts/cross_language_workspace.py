@@ -134,7 +134,7 @@ def assert_all_match(results: dict[str, str], test_name: str,
 
 
 def _golden(fixture_name: str) -> str:
-    with open(os.path.join(FIXTURES_DIR, "expected", f"{fixture_name}.json")) as f:
+    with open(os.path.join(FIXTURES_DIR, "expected", f"{fixture_name}.json"), encoding="utf-8") as f:
         return f.read()
 
 

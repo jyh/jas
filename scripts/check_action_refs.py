@@ -96,9 +96,9 @@ def main() -> int:
     if not _WORKSPACE_JSON.exists():
         print(f"FAIL: {_WORKSPACE_JSON} missing (regenerate the bundle).", file=sys.stderr)
         return 1
-    ws = json.loads(_WORKSPACE_JSON.read_text())
+    ws = json.loads(_WORKSPACE_JSON.read_text(encoding="utf-8"))
     resolvable = _resolvable(ws)
-    baseline = set(json.loads(_BASELINE.read_text()).get("unresolved_actions", []))
+    baseline = set(json.loads(_BASELINE.read_text(encoding="utf-8")).get("unresolved_actions", []))
 
     refs = _collect_menubar(ws) + _collect_panels(ws) + _collect_toolbar(ws)
     dangling = {a: w for (a, w) in refs if a not in resolvable}

@@ -278,7 +278,7 @@ def main():
         "test_fixtures", "algorithms", "color_convert.json")
     if len(sys.argv) > 1:
         out = sys.argv[1]
-    with open(out, "w") as fh:
+    with open(out, "w", encoding="utf-8", newline="") as fh:
         json.dump(doc, fh, indent=2)
         fh.write("\n")
     print("wrote", out)

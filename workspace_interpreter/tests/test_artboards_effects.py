@@ -468,7 +468,7 @@ class TestActiveDocumentView:
 class TestDefaultSeededFixture:
     @pytest.fixture
     def fixture_data(self) -> dict:
-        with open(FIXTURE_PATH) as f:
+        with open(FIXTURE_PATH, encoding="utf-8") as f:
             return json.load(f)
 
     def _normalize(self, doc: dict) -> dict:
@@ -674,7 +674,7 @@ _ACTIONS_PATH = os.path.join(
 
 
 def _load_actions() -> dict:
-    with open(_ACTIONS_PATH) as f:
+    with open(_ACTIONS_PATH, encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return data.get("actions", {})
 
@@ -1158,7 +1158,7 @@ def _load_dialogs() -> dict:
     for fname in sorted(os.listdir(path)):
         if not fname.endswith(".yaml"):
             continue
-        with open(os.path.join(path, fname)) as f:
+        with open(os.path.join(path, fname), encoding="utf-8") as f:
             data = yaml.safe_load(f)
         if isinstance(data, dict):
             dialogs.update(data)
@@ -1376,7 +1376,7 @@ class TestPhase1DeferralsPanelYaml:
         path = os.path.join(
             _WORKSPACE_PATH, "panels", "artboards.yaml",
         )
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             return yaml.safe_load(f)
 
     def test_menu_convert_grayed(self, panel):

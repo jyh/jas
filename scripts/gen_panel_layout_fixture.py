@@ -365,7 +365,7 @@ BIND_SEED = [
 
 
 def main() -> int:
-    bundle = json.load(open(os.path.join(ROOT, "workspace", "workspace.json")))
+    bundle = json.load(open(os.path.join(ROOT, "workspace", "workspace.json"), encoding="utf-8"))
     panels = bundle["panels"]
     cases = []
     for name, panel_id, avail_w, avail_h, ctx in SEED:
@@ -378,7 +378,7 @@ def main() -> int:
             "expected": rects,
         })
     out_path = os.path.join(ROOT, "test_fixtures", "algorithms", "panel_layout.json")
-    with open(out_path, "w") as f:
+    with open(out_path, "w", encoding="utf-8", newline="") as f:
         json.dump(cases, f, indent=2)
         f.write("\n")
     print(f"wrote {len(cases)} cases -> {out_path}")
@@ -396,7 +396,7 @@ def main() -> int:
             "expected": tree,
         })
     wt_path = os.path.join(ROOT, "test_fixtures", "algorithms", "panel_widget_tree.json")
-    with open(wt_path, "w") as f:
+    with open(wt_path, "w", encoding="utf-8", newline="") as f:
         json.dump(wt_cases, f, indent=2)
         f.write("\n")
     print(f"wrote {len(wt_cases)} cases -> {wt_path}")
@@ -411,7 +411,7 @@ def main() -> int:
             "expected": bind_values(panels[panel_id], ctx),
         })
     bv_path = os.path.join(ROOT, "test_fixtures", "algorithms", "panel_bind_values.json")
-    with open(bv_path, "w") as f:
+    with open(bv_path, "w", encoding="utf-8", newline="") as f:
         json.dump(bv_cases, f, indent=2)
         f.write("\n")
     rows = sum(len(c["expected"]) for c in bv_cases)

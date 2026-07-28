@@ -270,7 +270,7 @@ def main() -> None:
         env = json.loads(envelope_json)
         os.makedirs(args.out, exist_ok=True)
         out_path = os.path.join(args.out, f"{family}.recording.json")
-        with open(out_path, "w", encoding="utf-8") as f:
+        with open(out_path, "w", encoding="utf-8", newline="") as f:
             f.write(envelope_json)
         print(f"pilot: fidelity={env.get('fidelity')} cases={len(env.get('cases', []))}")
         for c in env.get("cases", []):
