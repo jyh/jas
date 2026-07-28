@@ -1765,9 +1765,18 @@ public func svgToDocument(_ svg: String) -> Document {
                 if layers.isEmpty || layers.last!.name != nil {
                     layers.append(Layer(children: [elem]))
                 } else {
+                    // CLONE-THEN-MUTATE, not a rebuild. The inline literal
+                    // this replaced named 4 of Layer's 11 stored properties,
+                    // so appending a bare element to the nameless wrapper
+                    // silently reset `id`, `locked`, `visibility`,
+                    // `blendMode`, `mask`, `isolatedBlending` and
+                    // `knockoutGroup` on it — the Swift copy-site omission
+                    // class, and `scripts/check_swift_copy_sites.py` was RED
+                    // on exactly this line. `withChildren` replaces only the
+                    // children, so every other field is preserved
+                    // structurally and there is no list to fall behind.
                     let last = layers.removeLast()
-                    layers.append(Layer(name: last.name, children: last.children + [elem],
-                                            opacity: last.opacity, transform: last.transform))
+                    layers.append(last.withChildren(last.children + [elem]))
                 }
             }
         }
