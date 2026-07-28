@@ -15,7 +15,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install PyYAML
+      # jsonschema is what makes workspace_interpreter/validator.py take its
+      # REAL JSON Schema branch. This lane runs check_workspace_json.sh, which
+      # compiles workspace/ and validates it; without jsonschema installed the
+      # validator silently degrades to the hand-rolled _validate_minimal subset
+      # (transcripts/VALIDATOR_TRIAGE.md). The other PyYAML-only lanes below
+      # compile corpora, not the workspace, and never reach the validator.
+      - run: pip install PyYAML jsonschema
       - run: bash scripts/check_workspace_json.sh
       - run: python scripts/check_menu_structure.py
       - run: python scripts/check_toolbar_structure.py
