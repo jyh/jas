@@ -318,9 +318,14 @@ public struct JasCommands: Commands {
         case "copy":
             copySelection()
         case "paste":
+            // R2: plain Paste FLATTENS into the active layer.
             pasteClipboard(offset: pasteOffset)
         case "paste_in_place":
             pasteClipboard(offset: 0.0)
+        // R3 (LAYER_STRUCTURE.md): the separate, explicit command. Menu-only by
+        // design — see workspace/shortcuts.yaml for why it takes no chord.
+        case "paste_preserving_layers":
+            pasteClipboard(offset: pasteOffset, preserveLayers: true)
         case "select_all":
             selectAll()
         // Object
@@ -634,10 +639,10 @@ public struct JasCommands: Commands {
         }
     }
 
-    private func pasteClipboard(offset: Double) {
+    private func pasteClipboard(offset: Double, preserveLayers: Bool = false) {
         guard let model = model else { return }
         // Shared with the canvas context menu — see ``EditClipboard``.
-        EditClipboard.pasteClipboard(model, offset: offset)
+        EditClipboard.pasteClipboard(model, offset: offset, preserveLayers: preserveLayers)
     }
 
     // The model-pure Object / Edit menu verbs delegate to the shared

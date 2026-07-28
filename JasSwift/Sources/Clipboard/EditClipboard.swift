@@ -34,52 +34,42 @@ public enum EditClipboard {
     }
 
     /// Paste pasteboard contents into the document, translated by `offset` in
-    /// both axes, selecting the pasted elements. SVG payloads merge by layer
-    /// name (falling back to the active layer); plain text becomes a Text
-    /// element. Undoable — `editDocument` self-brackets one undo step. No-op on
-    /// empty pasteboard text.
+    /// both axes, selecting the pasted elements. Undoable — `editDocument`
+    /// self-brackets one undo step. No-op on empty pasteboard text.
+    ///
+    /// `preserveLayers` selects R3 ("Paste, preserving layers") over R2 (plain
+    /// Paste); the whole layer-targeting decision lives in
+    /// ``pasteFragmentInto(_:fragment:offset:preserveLayers:)``. It is a
+    /// PARAMETER with a `false` default, not a stored preference: R3 is an
+    /// explicit command, and a persistent mode that silently changed what Cmd+V
+    /// does would be the very defect R2 rejects.
+    ///
+    /// **R2 landed here as a DELETION.** This function used to merge an SVG
+    /// payload's layers into document layers OF THE SAME NAME, falling back to
+    /// the active layer — so where artwork landed depended on an invisible
+    /// property of where it came from, and renaming a layer changed where paste
+    /// landed. That branch is not deleted from the codebase, it is MOVED: it is
+    /// what `preserveLayers == true` now does, plus the layer creation it always
+    /// lacked. Rust's flatten is the default in both ports.
+    ///
+    /// THIN CALLER, deliberately: everything below the pasteboard read is one
+    /// call. The body it used to hold was unreachable from any corpus fixture
+    /// (LAYER_STRUCTURE.md §5) and is now driven by `paste_layers.json` through
+    /// the `paste` op verb.
     static func pasteClipboard(_ model: Model, offset: Double,
-                               pasteboard: NSPasteboard = .general) {
+                               pasteboard: NSPasteboard = .general,
+                               preserveLayers: Bool = false) {
         guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
         let doc = model.document
         var newSelection: Selection = []
 
         if isSvg(text) {
-            let pastedDoc = svgToDocument(text)
-            var newLayers = doc.layers
-            for pastedLayer in pastedDoc.layers {
-                let children = pastedLayer.children.map { translateElement($0, dx: offset, dy: offset) }
-                guard !children.isEmpty else { continue }
-                // Find matching layer by name
-                var targetIdx: Int?
-                if let pastedName = pastedLayer.name, !pastedName.isEmpty {
-                    for i in 0..<newLayers.count {
-                        if newLayers[i].name == pastedName {
-                            targetIdx = i
-                            break
-                        }
-                    }
-                }
-                let idx = targetIdx ?? doc.selectedLayer
-                // Record paths for pasted elements (appended at end)
-                let base = newLayers[idx].children.count
-                for (j, _) in children.enumerated() {
-                    let path: ElementPath = [idx, base + j]
-                    newSelection.insert(ElementSelection.all(path))
-                }
-                newLayers[idx] = Layer(name: newLayers[idx].name,
-                                          children: newLayers[idx].children + children,
-                                          opacity: newLayers[idx].opacity,
-                                          transform: newLayers[idx].transform)
+            let fragment = svgToDocument(text).layers.map { Element.layer($0) }
+            if let newDoc = pasteFragmentInto(doc, fragment: fragment, offset: offset,
+                                              preserveLayers: preserveLayers) {
+                // Undoable paste: editDocument self-brackets one undo step.
+                model.editDocument(newDoc)
             }
-            // Use `replacing(...)` so artboards / artboardOptions /
-            // documentSetup / printPreferences are preserved. The
-            // designated `Document(layers:...)` initializer's empty
-            // defaults silently drop unset fields — the comment on
-            // `Document.replacing` calls this out as the bug that made
-            // the artboard frame disappear after a selection mutation.
-            // Undoable paste: editDocument self-brackets one undo step.
-            model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
         } else {
             // Plain text: create a Text element
             let elem = Element.text(Text(x: offset, y: offset + 16.0, content: text))
@@ -94,6 +84,32 @@ public enum EditClipboard {
             // Same `replacing(...)` pattern — preserves artboards.
             model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
         }
+    }
+
+    /// R3 — "Paste, preserving layers": the SEPARATE, EXPLICIT command.
+    ///
+    /// Same 24pt offset as plain Paste; it differs in layer TARGETING only. A
+    /// fragment layer whose name matches a document layer appends into that
+    /// layer; a name with no match CREATES the layer. See
+    /// ``pasteFragmentInto(_:fragment:offset:preserveLayers:)`` for the three
+    /// conservative sub-decisions and what remains open.
+    ///
+    /// A thin alias rather than a second implementation, so R2 and R3 can never
+    /// drift apart: the corpus pins both over the same fragment
+    /// (`paste_one_name_match_still_flattens_into_active` vs
+    /// `paste_preserving_one_name_match_appends_and_creates`), and there is only
+    /// one body for that pair to disagree about.
+    ///
+    /// NOTE, and it is the honest limit of this command: an IN-APP copy emits
+    /// ONE UNNAMED layer (``copySelection`` builds `Document(layers: [Layer(children:)])`),
+    /// so there is no name to preserve and this behaves exactly like plain
+    /// Paste. R3 bites on FOREIGN fragments — externally-sourced SVG that names
+    /// its layers — which is the case the ruling was written for. Making it bite
+    /// on in-app copies means changing what COPY emits, which is a separate
+    /// ruling (LAYER_STRUCTURE.md §8.0: the flattening is settled at copy).
+    static func pasteClipboardPreservingLayers(_ model: Model, offset: Double,
+                                               pasteboard: NSPasteboard = .general) {
+        pasteClipboard(model, offset: offset, pasteboard: pasteboard, preserveLayers: true)
     }
 
     /// Cut = reference-aware confirm, then copy to the clipboard, then delete

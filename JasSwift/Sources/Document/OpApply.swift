@@ -848,6 +848,143 @@ func applyWrapInLayer(_ model: Model, _ paths: [ElementPath], _ name: String, _ 
     return (true, targets)
 }
 
+// ── PASTE — R2 and R3 (LAYER_STRUCTURE.md, ratified 2026-07-28) ─────────────
+//
+// ONE paste body, shared by production (`EditClipboard.pasteClipboard` /
+// `pasteClipboardPreservingLayers`) and the `paste` op verb, so the corpus
+// drives the same code the user does. Twin of Rust
+// `op_apply::paste_fragment_into`.
+
+/// One entry of a paste fragment, normalized: an optional LAYER NAME plus the
+/// elements that layer held. A fragment entry that is not a layer has no name.
+///
+/// Swift only ever feeds this from `svgToDocument(...).layers` — it has NO
+/// internal clipboard (LAYER_STRUCTURE.md §8.1 corrected the brief on that
+/// point; `TabState.clipboard` is Rust-only). The bare-element arm exists so
+/// the two ports' bodies stay line-for-line comparable and so a future Swift
+/// element clipboard cannot silently take a different path.
+private func splitFragmentEntry(_ entry: Element) -> (String?, [Element]) {
+    if case .layer(let l) = entry {
+        let name = (l.name?.isEmpty == false) ? l.name : nil
+        return (name, l.children)
+    }
+    return (nil, [entry])
+}
+
+/// Apply a paste to `doc`, returning the new document, or `nil` when nothing
+/// was pasted (an empty fragment, or a document with no layers to paste into).
+/// PURE — no `Model`, no transaction, no pasteboard.
+///
+/// `fragment` is the pasted content's top level. `offset` is applied to every
+/// pasted element in both axes (`paste_in_place` passes 0). The pasted elements
+/// become the returned document's selection.
+///
+/// # `preserveLayers == false` — R2, plain Paste
+///
+/// Every pasted element lands in the ACTIVE layer, regardless of what layer it
+/// came from and regardless of whether the fragment names a layer this document
+/// also has. **This is where Swift's name-matching used to live, and R2 deletes
+/// it from here**: where artwork lands must not depend on an invisible property
+/// of where it came from, and renaming a layer must not change where paste
+/// lands. The behaviour is not lost — it moved to `preserveLayers == true`,
+/// which is the right feature on the right trigger.
+///
+/// # `preserveLayers == true` — R3, "Paste, preserving layers"
+///
+/// A fragment layer with a name **appends into the document layer of the same
+/// name**, and **creates that layer when no such layer exists**. Reached only
+/// from the explicit command — deliberately not a persistent preference, since
+/// a hidden mode that changes what Cmd+V does is the same defect R2 rejects.
+///
+/// Three sub-decisions, each conservative and each BANKED rather than ruled
+/// (LAYER_STRUCTURE.md §6 open questions 1 and 2):
+///
+/// 1. **A created layer takes the fragment's name VERBATIM** — no
+///    disambiguation suffix. Verbatim is what "preserving" means, and a
+///    disambiguated name would make the second paste of the same fragment
+///    create a THIRD layer rather than append. Open question 1 is unresolved.
+/// 2. **A created layer is appended at the END of `layers`** (top of the
+///    z-order), matching `applyWrapInLayer`. Nothing has ruled on placement.
+/// 3. **An UNNAMED fragment layer, and any bare element, falls back to the
+///    ACTIVE layer** — there is no name to preserve or create, so preserve mode
+///    degenerates to R2 for it. This is the case that matters most in practice:
+///    `EditClipboard.copySelection` emits ONE UNNAMED layer, so "Paste,
+///    preserving layers" over an in-app copy behaves exactly like plain Paste.
+///    R3 bites on FOREIGN fragments, which is what the brief's §2 says it is
+///    for.
+///
+/// Matching is against the WORKING layer list, so two fragment layers sharing
+/// one name collapse into a single created layer (the first creates, the second
+/// matches) rather than creating two layers with the same name.
+///
+/// **LOCKED / HIDDEN target layers are appended into unchanged** — no refusal,
+/// no unlock, no reveal. Open question 2; today's answer is pinned rather than
+/// invented. Note that reaching it required a real fix: the old paste rebuilt
+/// the target as `Layer(name:children:opacity:transform:)`, which SILENTLY
+/// DROPPED `locked`, `visibility`, `blendMode`, `mask`, `isolatedBlending`,
+/// `knockoutGroup` and `id` — the Swift copy-site omission class, landing at a
+/// paste. The append below mutates the layer VALUE in place, so there is no
+/// field list to fall behind.
+///
+/// **IDS ARE COPIED VERBATIM** — this body does not mint, matching Rust. Under
+/// the cardinality law a paste is 0→N and should mint fresh; it does not, in
+/// either port, so a pasted element can duplicate a live identity. Deliberately
+/// unchanged here: it is a separate ruling, and `paste_layers.json`'s id case
+/// pins the duplicate into a golden so the day the ruling lands moves a byte.
+public func pasteFragmentInto(
+    _ doc: Document, fragment: [Element], offset: Double, preserveLayers: Bool
+) -> Document? {
+    if doc.layers.isEmpty { return nil }
+    // Hardened like every other read here: an out-of-range `selectedLayer`
+    // clamps rather than trapping on the index.
+    let active = min(max(doc.selectedLayer, 0), doc.layers.count - 1)
+    var layers = doc.layers
+    var newSelection: Selection = []
+
+    for entry in fragment {
+        let (name, children) = splitFragmentEntry(entry)
+        if children.isEmpty { continue }
+        var idx = active
+        if preserveLayers, let n = name {
+            if let found = layers.firstIndex(where: { $0.name == n }) {
+                idx = found
+            } else {
+                layers.append(Layer(name: n, children: []))
+                idx = layers.count - 1
+            }
+        }
+        // FIELD-PRESERVING append: mutate the layer value, never rebuild it
+        // from a hand-written field list (see the doc comment).
+        var target = layers[idx]
+        for child in children {
+            let translated = EditClipboard.translateElement(child, dx: offset, dy: offset)
+            newSelection.insert(ElementSelection.all([idx, target.children.count]))
+            target.children.append(translated)
+        }
+        layers[idx] = target
+    }
+
+    if newSelection.isEmpty { return nil }
+    // `replacing(...)` so artboards / artboardOptions / documentSetup /
+    // printPreferences survive — the designated initializer's empty defaults
+    // silently drop unset fields.
+    return doc.replacing(layers: layers, selection: newSelection)
+}
+
+/// `pasteFragmentInto` against a `Model`, self-bracketing through
+/// `editDocument`. Returns `false` (a no-op that journals nothing) when nothing
+/// was pasted. Mirrors Rust `apply_paste`.
+@discardableResult
+public func applyPaste(
+    _ model: Model, fragment: [Element], offset: Double, preserveLayers: Bool
+) -> Bool {
+    guard let newDoc = pasteFragmentInto(
+        model.document, fragment: fragment, offset: offset, preserveLayers: preserveLayers)
+    else { return false }
+    model.editDocument(newDoc)
+    return true
+}
+
 /// Unpack the Group at `path`: extract its children, delete the group, and
 /// re-insert the children at the vacated position with ascending indices
 /// (children keep their ids). A non-Group target (or absent path) is a no-op.
@@ -1409,6 +1546,32 @@ public func opApply(
             return .missingTarget(id: String(describing: paths))
         }
         targets = t
+    // PASTE (LAYER_STRUCTURE.md R2/R3). VALUE-IN-OP, and it has to be: the
+    // clipboard is EXTERNAL state, so a journaled paste that re-read the
+    // pasteboard on replay would not be a function of the journal. `svg` is
+    // therefore the fragment MARKUP, carried literally — the same string the
+    // production path reads off `NSPasteboard`, parsed by the same
+    // `svgToDocument`. `preserve_layers` selects R3 over R2 and defaults to
+    // false; `offset` defaults to 0.0, which is `paste_in_place`.
+    //
+    // This arm and `EditClipboard.pasteClipboard` call ONE body (`applyPaste`),
+    // which is the point: LAYER_STRUCTURE.md §5 records that no corpus vector
+    // could reach ANY paste behaviour in EITHER port, so R2/R3 would have
+    // landed unwatched. A verb that re-implemented the paste would be a decoy.
+    case "paste":
+        guard let svg = strField(op, "svg") else { return reqErr(op, "svg") }
+        let fragment = svgToDocument(svg).layers.map { Element.layer($0) }
+        let preserve = (op["preserve_layers"] as? Bool) ?? false
+        if !applyPaste(model, fragment: fragment, offset: numField(op, "offset"),
+                       preserveLayers: preserve) {
+            // Benign no-op by the S3 taxonomy: an empty / unparseable fragment
+            // is an empty clipboard, not a missing target.
+            return nil
+        }
+        // `targets` stays EMPTY, matching Rust: paste is not one of the
+        // replay-safe verbs `captureRecipe` consumes, and the ids it would
+        // report are the SOURCE ids copied verbatim. The duplicate is exposed
+        // in the corpus GOLDEN instead.
     case "unpack_group_at":
         guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
         let (changed, t) = applyUnpackGroupAt(model, path)

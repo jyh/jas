@@ -904,7 +904,8 @@ mod tests {
                          "operations/transform_copy.json",
                          "operations/id_primary_move.json",
                          "operations/id_primary_copy.json",
-                         "operations/boolean_collapse_default.json"] {
+                         "operations/boolean_collapse_default.json",
+                         "operations/paste_layers.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -3339,6 +3340,26 @@ mod tests {
     #[test]
     fn operation_boolean_collapse_default() {
         run_operation_fixture("operations/boolean_collapse_default.json");
+    }
+
+    /// PASTE AND LAYER STRUCTURE (LAYER_STRUCTURE.md R2/R3, ratified
+    /// 2026-07-28). The family that did not exist: §5 records that `op_apply`
+    /// had no `paste` verb in either port, so NO fixture could reach ANY paste
+    /// behaviour and both rulings would have landed unwatched.
+    ///
+    /// It pins R2 and R3 over the SAME input rather than describing the
+    /// difference: `paste_one_name_match_still_flattens_into_active` and
+    /// `paste_preserving_one_name_match_appends_and_creates` paste one fragment
+    /// (one layer name matching the document, one not) under each command. The
+    /// first must land BOTH children in the active layer — that is R2 deleting
+    /// Swift's name-matching from the default path — and the second must append
+    /// into the matching layer and CREATE the missing one.
+    ///
+    /// The paste `svg` is VALUE-IN-OP, so the checkpoint_equivalence gate
+    /// replays every case from the op's own params.
+    #[test]
+    fn operation_paste_layers() {
+        run_operation_fixture("operations/paste_layers.json");
     }
 
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*

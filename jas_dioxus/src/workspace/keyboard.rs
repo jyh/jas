@@ -234,6 +234,7 @@ pub(crate) fn make_keydown_handler(
                     app_for_keys.clone(),
                     revision_for_keys,
                     0.0,
+                    false,
                 );
                 return;
             }
@@ -397,10 +398,13 @@ pub(crate) fn make_keydown_handler(
                 evt.prevent_default();
                 let offset = if mods.shift() { 0.0 } else { PASTE_OFFSET };
                 // Try async clipboard read first, fall back to internal
+                // R2: the keyboard paste is always the FLATTENING one. R3 is
+                // menu-only by design (see workspace/shortcuts.yaml).
                 clipboard_read_and_paste(
                     app_for_keys.clone(),
                     revision_for_keys,
                     offset,
+                    false,
                 );
             }
             Key::Character(ref c) if (c == "a" || c == "A") && cmd => {

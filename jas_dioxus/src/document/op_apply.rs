@@ -834,6 +834,177 @@ pub fn apply_wrap_in_layer(
     (true, targets)
 }
 
+// ── PASTE — R2 and R3 (LAYER_STRUCTURE.md, ratified 2026-07-28) ─────────────
+//
+// ONE paste body, shared by production (`workspace::clipboard`) and the
+// `paste` op verb, so the corpus drives the same code the user does. Before
+// this the paste sink lived inside `clipboard_read_and_paste`'s `spawn_local`
+// closure over an `Rc<RefCell<AppState>>` and a Dioxus `Signal`, unreachable
+// from `cargo test --lib` — LAYER_STRUCTURE.md §8.4 named that gap explicitly.
+// Lifting the body out is what closes it; the closure is now a thin caller.
+
+/// One entry of a paste fragment, normalized: an optional LAYER NAME plus the
+/// elements that layer held. A fragment entry that is not a layer (a bare
+/// element from an internal-clipboard payload) has no name.
+///
+/// This normalization is the whole reason one body can serve both paste
+/// sources. `svg_to_document(text).layers` yields `Element::Layer` entries
+/// (named or not); `TabState.clipboard` yields bare elements. Both become the
+/// same shape here, so R2/R3 cannot diverge between the two paths.
+fn split_fragment_entry(
+    entry: &crate::geometry::element::Element,
+) -> (Option<String>, Vec<crate::geometry::element::Element>) {
+    use crate::geometry::element::Element;
+    match entry {
+        Element::Layer(l) => {
+            let name = l.common.name.as_deref().filter(|n| !n.is_empty()).map(String::from);
+            (name, l.children.iter().map(|rc| (**rc).clone()).collect())
+        }
+        other => (None, vec![other.clone()]),
+    }
+}
+
+/// Apply a paste to `doc`, returning the new document, or `None` when nothing
+/// was pasted (an empty fragment, or a document with no layers to paste into).
+/// PURE — no `Model`, no transaction, no signal.
+///
+/// `fragment` is the pasted content's top level: layers for an SVG payload,
+/// bare elements for an internal-clipboard payload. `offset` is applied to
+/// every pasted element in both axes (`paste_in_place` passes 0). The pasted
+/// elements become the returned document's selection, in fragment order.
+///
+/// # `preserve_layers == false` — R2, plain Paste
+///
+/// Every pasted element lands in the ACTIVE layer, regardless of what layer it
+/// came from and regardless of whether the fragment names a layer this document
+/// also has. This is Rust's pre-ruling behaviour promoted to canon: where
+/// artwork lands must not depend on an invisible property of where it came
+/// from, and renaming a layer must not change where paste lands. Swift's
+/// name-matching used to fire HERE and no longer does.
+///
+/// # `preserve_layers == true` — R3, "Paste, preserving layers"
+///
+/// A fragment layer with a name **appends into the document layer of the same
+/// name**, and **creates that layer when no such layer exists**. Reached only
+/// from the explicit command — deliberately not a persistent preference, since
+/// a hidden mode that changes what Cmd+V does is the same defect R2 rejects.
+///
+/// Three sub-decisions, each conservative and each BANKED rather than ruled
+/// (LAYER_STRUCTURE.md §6 open questions 1 and 2):
+///
+/// 1. **A created layer takes the fragment's name VERBATIM** — no
+///    disambiguation suffix. Verbatim is what "preserving" means, and a
+///    disambiguated name would make the second paste of the same fragment
+///    create a THIRD layer rather than append. Open question 1 is unresolved:
+///    two documents' "Layer 1" can mean different things and this fuses them.
+/// 2. **A created layer is appended at the END of `layers`** (top of the
+///    z-order), matching `apply_wrap_in_layer`. Nothing has ruled on placement.
+/// 3. **An UNNAMED fragment layer, and any bare element, falls back to the
+///    ACTIVE layer** — there is no name to preserve or create, so preserve mode
+///    degenerates to R2 for it. This is the case that matters most in practice:
+///    an in-app copy emits an unnamed layer in both ports (LAYER_STRUCTURE.md
+///    §8.1), so "Paste, preserving layers" over an in-app copy behaves exactly
+///    like plain Paste. R3 bites on FOREIGN fragments, which is what §2 says it
+///    is for.
+///
+/// Matching is against the WORKING document, so two fragment layers sharing one
+/// name collapse into a single created layer (the first creates, the second
+/// matches) rather than creating two layers with the same name.
+///
+/// **LOCKED / HIDDEN target layers are appended into unchanged** — no refusal,
+/// no unlock, no visibility change. Open question 2 in the brief; today's
+/// behaviour (Swift's name-match branch never checked either flag) is pinned
+/// rather than invented, and the corpus records it so a future ruling moves a
+/// visible byte.
+///
+/// **IDS ARE COPIED VERBATIM** — this body does not mint. Under the cardinality
+/// law a paste is 0→N and should mint fresh; it does not, in either port, so a
+/// pasted element can duplicate a live identity. Deliberately unchanged here:
+/// it is a separate ruling. The `paste` op verb makes it GATEABLE for the first
+/// time — `paste_layers.json`'s id case pins the duplicate into a golden, so
+/// the day the ruling lands the byte moves.
+pub fn paste_fragment_into(
+    doc: &crate::document::document::Document,
+    fragment: &[crate::geometry::element::Element],
+    offset: f64,
+    preserve_layers: bool,
+) -> Option<crate::document::document::Document> {
+    use crate::document::document::ElementSelection;
+    use crate::geometry::element::{translate_element, CommonProps, Element, LayerElem};
+    if doc.layers.is_empty() {
+        return None;
+    }
+    // Hardened like every other param read here: an out-of-range
+    // `selected_layer` clamps rather than panicking.
+    let active = doc.selected_layer.min(doc.layers.len() - 1);
+    let mut new_doc = doc.clone();
+    let mut new_selection: Vec<ElementSelection> = Vec::new();
+
+    for entry in fragment {
+        let (name, children) = split_fragment_entry(entry);
+        if children.is_empty() {
+            continue;
+        }
+        let idx = match (preserve_layers, name) {
+            (true, Some(n)) => {
+                // Match against the WORKING document (see the doc comment).
+                let found = new_doc.layers.iter().position(|l| match l {
+                    Element::Layer(le) => le.name() == n,
+                    _ => false,
+                });
+                match found {
+                    Some(i) => i,
+                    None => {
+                        new_doc.layers.push(Element::Layer(LayerElem {
+                            children: Vec::new(),
+                            common: CommonProps {
+                                name: Some(n),
+                                ..CommonProps::default()
+                            },
+                            isolated_blending: false,
+                            knockout_group: false,
+                        }));
+                        new_doc.layers.len() - 1
+                    }
+                }
+            }
+            _ => active,
+        };
+        for child in &children {
+            let translated = translate_element(child, offset, offset);
+            let Some(kids) = new_doc.layers[idx].children_mut() else {
+                continue;
+            };
+            let at = kids.len();
+            kids.push(std::rc::Rc::new(translated));
+            new_selection.push(ElementSelection::all(vec![idx, at]));
+        }
+    }
+
+    if new_selection.is_empty() {
+        return None;
+    }
+    new_doc.selection = new_selection;
+    Some(new_doc)
+}
+
+/// `paste_fragment_into` against a `Model`, self-bracketing through
+/// `edit_document`. Returns `false` (a no-op that journals nothing) when
+/// nothing was pasted.
+pub fn apply_paste(
+    model: &mut Model,
+    fragment: &[crate::geometry::element::Element],
+    offset: f64,
+    preserve_layers: bool,
+) -> bool {
+    let Some(new_doc) = paste_fragment_into(model.document(), fragment, offset, preserve_layers)
+    else {
+        return false;
+    };
+    model.edit_document(new_doc);
+    true
+}
+
 /// Unpack the Group at `path` (OP_LOG.md §9 Phase P5): extract its children,
 /// delete the group, and re-insert the children at the vacated position with
 /// ascending indices (children keep their ids — NO minting). Self-bracketing
@@ -1744,6 +1915,43 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             }
             targets = t;
         }
+        // PASTE (LAYER_STRUCTURE.md R2/R3). VALUE-IN-OP, and it has to be: the
+        // clipboard is EXTERNAL state, so a journaled paste that re-read the
+        // clipboard on replay would not be a function of the journal. `svg` is
+        // therefore the fragment MARKUP, carried literally — the same string the
+        // production path reads off the system clipboard, parsed by the same
+        // `svg_to_document`. `preserve_layers` selects R3 over R2 and defaults to
+        // false, so a payload that omits it means plain Paste. `offset` defaults
+        // to 0.0, which is `paste_in_place`.
+        //
+        // This arm and `workspace::clipboard::clipboard_read_and_paste` call ONE
+        // body (`apply_paste`), which is the point: LAYER_STRUCTURE.md §5 records
+        // that no corpus vector could reach ANY paste behaviour, so R2/R3 would
+        // have landed unwatched. A verb that re-implemented the paste instead of
+        // routing through the production helper would be a decoy that never goes
+        // red.
+        "paste" => {
+            let Some(svg) = str_field(op, "svg") else {
+                return Err(req_err(op, "svg"));
+            };
+            let fragment = crate::geometry::svg::svg_to_document(svg).layers;
+            let offset = num_field(op, "offset");
+            let preserve = op
+                .get("preserve_layers")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !apply_paste(model, &fragment, offset, preserve) {
+                // Benign no-op by the S3 taxonomy: an empty / unparseable
+                // fragment is an empty clipboard, not a missing target.
+                return Ok(());
+            }
+            // `targets` stays EMPTY. Paste is not one of the replay-safe verbs
+            // `capture_recipe` consumes, and the ids it would report are the
+            // SOURCE ids copied verbatim (see `paste_fragment_into`) — reporting
+            // duplicated identities as this op's targets would bake the id defect
+            // into the recipe layer. The duplicate is exposed in the corpus
+            // GOLDEN instead, where a ruling can move a visible byte.
+        }
         "unpack_group_at" => {
             let Some(path) = parse_path(op.get("path")) else {
                 return Err(req_err(op, "path"));
@@ -2063,4 +2271,248 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         targets,
     });
     Ok(())
+}
+
+/// PASTE AND LAYER STRUCTURE — the cases the shared corpus CANNOT reach.
+///
+/// `test_fixtures/operations/paste_layers.json` is the primary gate for R2/R3
+/// and it is cross-language. These probes exist for exactly two shapes that
+/// family cannot express, and each says which:
+///
+/// 1. **LOCKED and HIDDEN target layers** (LAYER_STRUCTURE.md §6 open question
+///    2). Every corpus case is seeded from a `setup_svg`, and the SVG codec does
+///    not persist `locked` AT ALL — a layer parsed from SVG is always unlocked.
+///    So the corpus is structurally blind to the locked case, and these probes
+///    build the document directly instead.
+/// 2. **A BARE-ELEMENT fragment** — the internal-clipboard payload shape
+///    (`TabState.clipboard: Vec<Element>`, Rust-only per LAYER_STRUCTURE.md
+///    §8.1). The `paste` op verb feeds `svg_to_document(...).layers`, which is
+///    always layers, so the corpus only ever exercises the SVG shape. This is
+///    the second half of "both the SVG path and the internal path must obey
+///    R2/R3".
+///
+/// Every probe asserts VALUES (layer names, child counts, geometry), never
+/// whole-struct equality — a field-list-free comparison is structurally blind
+/// to geometry.
+#[cfg(test)]
+mod paste_layer_structure_tests {
+    use super::*;
+    use crate::document::document::Document;
+    use crate::geometry::element::{
+        Color, CommonProps, Element, Fill, LayerElem, RectElem, Visibility,
+    };
+    use std::rc::Rc;
+
+    fn rect(x: f64, y: f64) -> Element {
+        Element::Rect(RectElem {
+            x,
+            y,
+            width: 10.0,
+            height: 10.0,
+            rx: 0.0,
+            ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        })
+    }
+
+    fn layer(name: &str, children: Vec<Element>, common: CommonProps) -> Element {
+        Element::Layer(LayerElem {
+            children: children.into_iter().map(Rc::new).collect(),
+            common: CommonProps {
+                name: Some(name.to_string()),
+                ..common
+            },
+            isolated_blending: false,
+            knockout_group: false,
+        })
+    }
+
+    /// Document: `Base` (one rect at origin, active) + a second layer the
+    /// caller styles.
+    fn doc_with(second: Element) -> Document {
+        Document {
+            layers: vec![
+                layer("Base", vec![rect(0.0, 0.0)], CommonProps::default()),
+                second,
+            ],
+            selected_layer: 0,
+            selection: Vec::new(),
+            ..Document::default()
+        }
+    }
+
+    fn kids(doc: &Document, i: usize) -> Vec<(f64, f64)> {
+        match &doc.layers[i] {
+            Element::Layer(l) => l
+                .children
+                .iter()
+                .map(|c| match &**c {
+                    Element::Rect(r) => (r.x, r.y),
+                    _ => (f64::NAN, f64::NAN),
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn layer_names(doc: &Document) -> Vec<String> {
+        doc.layers
+            .iter()
+            .map(|l| match l {
+                Element::Layer(le) => le.name().to_string(),
+                _ => "<not-a-layer>".into(),
+            })
+            .collect()
+    }
+
+    /// OPEN QUESTION 2, pinned CONSERVATIVELY, not ruled.
+    /// Append into a LOCKED matching layer SUCCEEDS, and the layer stays locked.
+    /// Neither port ever checked either flag on the paste path, so this pins
+    /// today's answer rather than inventing one. If JYH rules that a locked
+    /// layer must refuse (or must unlock), this probe is the thing that will go
+    /// red and say so.
+    #[test]
+    fn preserve_appends_into_a_locked_matching_layer_and_leaves_it_locked() {
+        let doc = doc_with(layer(
+            "Sky",
+            vec![rect(5.0, 5.0)],
+            CommonProps {
+                locked: true,
+                ..CommonProps::default()
+            },
+        ));
+        let fragment = vec![layer("Sky", vec![rect(1.0, 2.0)], CommonProps::default())];
+        let out = paste_fragment_into(&doc, &fragment, 24.0, true).expect("pasted");
+        assert_eq!(layer_names(&out), vec!["Base", "Sky"], "no layer created");
+        assert_eq!(
+            kids(&out, 1),
+            vec![(5.0, 5.0), (25.0, 26.0)],
+            "the locked layer should have gained the offset rect"
+        );
+        let still_locked = match &out.layers[1] {
+            Element::Layer(l) => l.common.locked,
+            _ => false,
+        };
+        assert!(still_locked, "paste silently UNLOCKED the target layer");
+        assert_eq!(out.selection.len(), 1);
+        assert_eq!(out.selection[0].path, vec![1, 1]);
+    }
+
+    /// OPEN QUESTION 2's other half: an INVISIBLE matching layer is appended
+    /// into and stays invisible — so the pasted artwork is immediately hidden.
+    /// Conservative, banked, and deliberately visible here because "the paste
+    /// appeared to do nothing" is the user-facing shape of this answer.
+    #[test]
+    fn preserve_appends_into_a_hidden_matching_layer_and_leaves_it_hidden() {
+        let doc = doc_with(layer(
+            "Sky",
+            vec![],
+            CommonProps {
+                visibility: Visibility::Invisible,
+                ..CommonProps::default()
+            },
+        ));
+        let fragment = vec![layer("Sky", vec![rect(1.0, 2.0)], CommonProps::default())];
+        let out = paste_fragment_into(&doc, &fragment, 0.0, true).expect("pasted");
+        assert_eq!(layer_names(&out), vec!["Base", "Sky"], "no layer created");
+        assert_eq!(kids(&out, 1), vec![(1.0, 2.0)]);
+        let hidden = match &out.layers[1] {
+            Element::Layer(l) => l.common.visibility,
+            _ => Visibility::Preview,
+        };
+        assert_eq!(
+            hidden,
+            Visibility::Invisible,
+            "paste silently REVEALED the target layer"
+        );
+    }
+
+    /// THE INTERNAL-CLIPBOARD SHAPE. `TabState.clipboard` is `Vec<Element>` —
+    /// bare elements with nowhere to record a layer (LAYER_STRUCTURE.md §8.1),
+    /// so the flattening is already total at COPY. Under R3 there is nothing to
+    /// preserve, and the fragment must land in the ACTIVE layer exactly as under
+    /// R2. Both commands over the same input, so the "no difference here" claim
+    /// is pinned rather than described.
+    #[test]
+    fn a_bare_element_fragment_lands_in_the_active_layer_under_both_commands() {
+        let doc = doc_with(layer("Sky", vec![], CommonProps::default()));
+        let fragment = vec![rect(1.0, 2.0), rect(3.0, 4.0)];
+        for preserve in [false, true] {
+            let out = paste_fragment_into(&doc, &fragment, 24.0, preserve)
+                .unwrap_or_else(|| panic!("nothing pasted (preserve={preserve})"));
+            assert_eq!(
+                layer_names(&out),
+                vec!["Base", "Sky"],
+                "preserve={preserve}: a bare element must never create a layer"
+            );
+            assert_eq!(
+                kids(&out, 0),
+                vec![(0.0, 0.0), (25.0, 26.0), (27.0, 28.0)],
+                "preserve={preserve}: both bare elements belong in the active layer"
+            );
+            assert!(kids(&out, 1).is_empty(), "preserve={preserve}");
+        }
+    }
+
+    /// R2, stated as its own probe over the shape the corpus also covers, so a
+    /// reader of this module sees the ruling and not only its exceptions: a
+    /// fragment layer whose name MATCHES a document layer still lands in the
+    /// ACTIVE layer under plain Paste.
+    #[test]
+    fn plain_paste_ignores_a_matching_layer_name_entirely() {
+        let doc = doc_with(layer("Sky", vec![], CommonProps::default()));
+        let fragment = vec![layer("Sky", vec![rect(1.0, 2.0)], CommonProps::default())];
+        let out = paste_fragment_into(&doc, &fragment, 24.0, false).expect("pasted");
+        assert_eq!(
+            kids(&out, 0),
+            vec![(0.0, 0.0), (25.0, 26.0)],
+            "plain Paste must land in the ACTIVE layer, name match or not"
+        );
+        assert!(
+            kids(&out, 1).is_empty(),
+            "plain Paste reached the name-matched layer — that is the branch R2 deletes"
+        );
+    }
+
+    /// Degenerate inputs return `None` so the caller journals nothing and opens
+    /// no transaction. An empty clipboard must not cost an undo step.
+    #[test]
+    fn nothing_to_paste_returns_none() {
+        let doc = doc_with(layer("Sky", vec![], CommonProps::default()));
+        assert!(
+            paste_fragment_into(&doc, &[], 24.0, false).is_none(),
+            "empty fragment"
+        );
+        // A fragment layer with no children contributes nothing.
+        let empty_layer = vec![layer("Sky", vec![], CommonProps::default())];
+        assert!(
+            paste_fragment_into(&doc, &empty_layer, 24.0, true).is_none(),
+            "an empty fragment layer must not create a layer either"
+        );
+        // A layerless document has nowhere to put anything.
+        let no_layers = Document {
+            layers: Vec::new(),
+            ..Document::default()
+        };
+        assert!(
+            paste_fragment_into(&no_layers, &[rect(0.0, 0.0)], 0.0, false).is_none(),
+            "layerless document"
+        );
+    }
+
+    /// Hardening, matching every other param read in this module: an
+    /// out-of-range `selected_layer` clamps to the last layer instead of
+    /// panicking on the index.
+    #[test]
+    fn an_out_of_range_selected_layer_clamps_rather_than_panicking() {
+        let mut doc = doc_with(layer("Sky", vec![], CommonProps::default()));
+        doc.selected_layer = 99;
+        let out = paste_fragment_into(&doc, &[rect(1.0, 2.0)], 0.0, false).expect("pasted");
+        assert_eq!(kids(&out, 1), vec![(1.0, 2.0)], "clamped to the last layer");
+        assert_eq!(out.selection[0].path, vec![1, 0]);
+    }
 }

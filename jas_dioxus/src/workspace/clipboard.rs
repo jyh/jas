@@ -31,9 +31,9 @@ use wasm_bindgen::JsCast;
 
 use super::app_state::{AppState, TabState};
 use crate::document::document::Document;
-use crate::document::document::ElementSelection;
 use crate::document::model::Model;
-use crate::geometry::element::{translate_element, CommonProps, LayerElem, Element as GeoElement};
+use crate::document::op_apply::paste_fragment_into;
+use crate::geometry::element::{CommonProps, LayerElem, Element as GeoElement};
 use crate::geometry::svg::{document_to_svg, svg_to_document};
 use crate::geometry::tspan::Tspan;
 
@@ -149,7 +149,11 @@ mod rich_clipboard_tests {
 #[cfg(test)]
 mod internal_clipboard_confirm_tests {
     use super::*;
-    use crate::document::document::Document;
+    use crate::document::document::{Document, ElementSelection};
+    // `translate_element` moved out of the module-level imports when the paste
+    // sink became a thin caller (it is `paste_fragment_into`'s business now);
+    // these probes still drive it directly, so they import it themselves.
+    use crate::geometry::element::translate_element;
     use crate::geometry::element::{
         Color, CommonProps, Element, Fill, LayerElem, RectElem,
     };
@@ -351,8 +355,29 @@ pub(crate) fn clipboard_write(text: String) {
     }
 }
 
-/// Read text from the system clipboard, then call the callback with it.
-pub(crate) fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision: Signal<u64>, offset: f64) {
+/// Read text from the system clipboard and paste it into the active tab.
+///
+/// `offset` is applied to every pasted element in both axes (`paste_in_place`
+/// passes 0). `preserve_layers` selects R3 ("Paste, preserving layers") over R2
+/// (plain Paste) — see [`crate::document::op_apply::paste_fragment_into`], which
+/// holds the whole layer-targeting decision. It is a PARAMETER, not a stored
+/// preference: R3 is an explicit command, and a persistent mode that silently
+/// changed what Cmd+V does would be the very defect R2 rejects.
+///
+/// THIN CALLER, deliberately. Everything below the clipboard read is a lookup
+/// plus one call to `paste_fragment_into`. LAYER_STRUCTURE.md §8.4 named this
+/// function's tail as an unreachable gap — `spawn_local` over an
+/// `Rc<RefCell<AppState>>` and a Dioxus `Signal` cannot be driven from
+/// `cargo test --lib` — so the twenty lines that decided where pasted artwork
+/// lands were asserted on a READING. They are gone from here; what remains is
+/// wiring, and the decision now sits in a pure function the `paste` op verb
+/// drives from the shared corpus.
+pub(crate) fn clipboard_read_and_paste(
+    app: Rc<RefCell<AppState>>,
+    mut revision: Signal<u64>,
+    offset: f64,
+    preserve_layers: bool,
+) {
     wasm_bindgen_futures::spawn_local(async move {
         let clipboard_text = async {
             let window = web_sys::window()?;
@@ -390,31 +415,18 @@ pub(crate) fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision:
         if let Some(text) = &clipboard_text {
             let trimmed = text.trim();
             if trimmed.starts_with("<?xml") || trimmed.starts_with("<svg") {
-                let pasted_doc = svg_to_document(text);
-                let mut doc = tab.model.document().clone();
-                let idx = doc.selected_layer;
-                let mut new_selection = Vec::new();
-                let base = doc.layers[idx].children().map_or(0, |c| c.len());
-                let mut j = 0;
-                for layer in &pasted_doc.layers {
-                    if let Some(children) = layer.children() {
-                        for child in children {
-                            let translated = translate_element(child, offset, offset);
-                            let path = vec![idx, base + j];
-                            new_selection.push(ElementSelection::all(path));
-                            if let Some(layer_children) = doc.layers[idx].children_mut() {
-                                layer_children.push(Rc::new(translated));
-                            }
-                            j += 1;
-                        }
-                    }
-                }
-                if j > 0 {
-                    doc.selection = new_selection;
+                // SVG payload: the fragment's top level IS its layers, so R3 has
+                // names to work with. This is the path an ordinary in-app
+                // copy/paste takes in BOTH ports (LAYER_STRUCTURE.md §8.0), and
+                // the only path Swift has.
+                let fragment = svg_to_document(text).layers;
+                if let Some(new_doc) =
+                    paste_fragment_into(tab.model.document(), &fragment, offset, preserve_layers)
+                {
                     // One paste = one undo step (OP_LOG.md Increment 1). begin_txn
                     // captures the pre-paste document; commit clears redo.
                     tab.model.begin_txn();
-                    tab.model.set_document(doc);
+                    tab.model.set_document(new_doc);
                     tab.model.commit_txn();
                     drop(st);
                     revision += 1;
@@ -423,26 +435,28 @@ pub(crate) fn clipboard_read_and_paste(app: Rc<RefCell<AppState>>, mut revision:
             }
         }
 
-        // Fall back to internal clipboard
+        // Fall back to the internal clipboard — a Rust-only construct, reached
+        // only when the system clipboard is unreadable or holds non-SVG text
+        // (LAYER_STRUCTURE.md §8.3, D4/D5: that fallback is itself a live
+        // divergence from Swift and is BANKED for a ruling, not touched here).
+        // Its payload is BARE ELEMENTS: `Vec<Element>` has nowhere to record a
+        // layer, so the flattening is already total at COPY and no paste-side
+        // mode can undo it. `paste_fragment_into` normalizes a bare element to
+        // "no layer name", which makes preserve mode degenerate to R2 here —
+        // correctly, since there is nothing to preserve.
         if tab.clipboard.is_empty() {
             return;
         }
-        let mut doc = tab.model.document().clone();
-        let idx = doc.selected_layer;
-        let mut new_selection = Vec::new();
-        let base = doc.layers[idx].children().map_or(0, |c| c.len());
-        for (j, elem) in tab.clipboard.iter().enumerate() {
-            let translated = translate_element(elem, offset, offset);
-            let path = vec![idx, base + j];
-            new_selection.push(ElementSelection::all(path));
-            if let Some(children) = doc.layers[idx].children_mut() {
-                children.push(Rc::new(translated));
-            }
-        }
-        doc.selection = new_selection;
+        let fragment = std::mem::take(&mut tab.clipboard);
+        let pasted =
+            paste_fragment_into(tab.model.document(), &fragment, offset, preserve_layers);
+        tab.clipboard = fragment;
+        let Some(new_doc) = pasted else {
+            return;
+        };
         // One paste = one undo step (OP_LOG.md Increment 1).
         tab.model.begin_txn();
-        tab.model.set_document(doc);
+        tab.model.set_document(new_doc);
         tab.model.commit_txn();
         drop(st);
         revision += 1;

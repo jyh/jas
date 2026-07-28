@@ -13,6 +13,13 @@ shortcuts:
   - { key: "Ctrl+C",       action: copy }
   - { key: "Ctrl+V",       action: paste }
   - { key: "Ctrl+Shift+V", action: paste_in_place }
+  # paste_preserving_layers is deliberately MENU-ONLY (workspace/menubar.yaml).
+  # The two obvious chords are taken: Ctrl+Shift+V is paste_in_place and Ctrl+V
+  # is paste. Every remaining V combination is either a modifier stack no artist
+  # would reach for mid-gesture or a collision risk with the platform, and
+  # inventing one would trade a real collision for a saved menu trip. The
+  # command is also, by ruling, the deliberate one — the case for a chord is
+  # weakest exactly where the command is meant to be chosen consciously.
   - { key: "Ctrl+A",       action: select_all }
   - { key: "Delete",       action: delete_selection }
   - { key: "Backspace",    action: delete_selection }

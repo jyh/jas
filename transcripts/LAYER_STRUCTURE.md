@@ -163,6 +163,10 @@ Rust's current behaviour becomes canonical. Swift's name-matching is REMOVED fro
 the default path. Where artwork lands must not depend on an invisible property of
 where it came from.
 
+> **IMPLEMENTED 2026-07-28 — see §9.** Both ports, with the `paste` op verb and a
+> 12-case cross-language family §5 said had to be built first. Swift went **10 of
+> 12 RED** before the change.
+
 ### R3 — "Paste, preserving layers" is a separate, explicit command
 Creates a layer when the fragment names one that does not exist; **appends into
 the existing layer when the name matches** (JYH, 2026-07-28 — this settles the
@@ -170,6 +174,12 @@ open question the brief raised).
 
 *Deliberately NOT a persistent preference.* A hidden mode that changes what Cmd+V
 does is the same defect R2 rejects: invisible state deciding where artwork goes.
+
+> **IMPLEMENTED 2026-07-28 — see §9.** Menu-only, no chord, reason recorded in
+> `shortcuts.yaml`. **Its honest limit, from §8.0:** an in-app copy emits an
+> UNNAMED layer in both ports, so over an in-app copy this command behaves
+> exactly like plain Paste. It bites on FOREIGN fragments, which is the case §2
+> argued it was for.
 
 ---
 
@@ -468,3 +478,259 @@ same unreachability as the sink, one level up.
    its own work order.
 3. **D7: implement cumulative paste stacking, or amend the spec sentence?**
    Both ports are silent on it today, so nothing regresses either way.
+
+---
+
+## 9. R2 AND R3, IMPLEMENTED — and the gate that had to be built first
+
+**Lands the two paste rulings of §3.** R1 (group) is NOT in this pass.
+
+### 9.0 The headline
+
+R2 and R3 are implemented in both active ports, and — the part that matters —
+they are **watched**. §5 recorded that `op_apply` had no `paste` verb in either
+port, so *no fixture could reach any paste behaviour* and both rulings would have
+landed completely unwatched. That is fixed first and the rulings ride on it.
+
+**Swift's name-matching was not deleted, it was MOVED.** Plain Paste is Rust's
+flatten in both ports; the name-matching is what "Paste, Preserving Layers" now
+does, plus the layer creation it always lacked. Each port had implemented half
+the answer, and both halves survive.
+
+### 9.1 The machinery, built first
+
+| piece | Rust | Swift |
+|---|---|---|
+| pure body | `op_apply::paste_fragment_into` | `pasteFragmentInto` (`OpApply.swift`) |
+| `Model` wrapper | `op_apply::apply_paste` | `applyPaste` |
+| op verb | `"paste"` arm in `op_apply` | `case "paste"` in `opApply` |
+| production caller | `clipboard_read_and_paste` (now thin) | `EditClipboard.pasteClipboard` (now thin) |
+| R3 command | `"paste_preserving_layers"` menu arm | `EditClipboard.pasteClipboardPreservingLayers` |
+
+**The op verb routes through the PRODUCTION body.** A verb that re-implemented
+the paste would be a decoy that never goes red; mutation M6 below severs the
+routing and the family reds immediately, which is the evidence that it does not.
+
+`paste` is **VALUE-IN-OP** — the fragment markup travels in the op as `svg`.
+It has to: the clipboard is EXTERNAL state, so a journaled paste that re-read the
+clipboard on replay would not be a function of the journal. Every case therefore
+also passes the `checkpoint_equivalence` gate, which replays the op from its own
+params.
+
+**§8.4's NAMED GAP IS CLOSED.** That section recorded Rust's paste sink as
+unreachable from `cargo test --lib` — `spawn_local` over an `Rc<RefCell<AppState>>`
+and a Dioxus `Signal` — so the twenty lines deciding where pasted artwork lands
+were asserted on a *reading*. Those lines no longer live there. What remains in
+the closure is the clipboard read plus one call.
+
+The fragment is normalized to `(optional layer name, elements)` per entry, so the
+**SVG path and the internal-clipboard path run the same body** and cannot
+diverge. A bare element (Rust's `TabState.clipboard` payload) has no name, so
+preserve mode degenerates to R2 for it — correctly, since there is nothing to
+preserve.
+
+### 9.2 The corpus family
+
+`test_fixtures/operations/paste_layers.json` — 12 cases, both ports, goldens
+shared. Setup is `multi_layer.svg` (layers "Background" and "Foreground",
+Background active).
+
+It **pins the R2/R3 difference over one input rather than describing it**:
+`paste_one_name_match_still_flattens_into_active` and
+`paste_preserving_one_name_match_appends_and_creates` carry a **byte-identical**
+`svg` — a fragment whose first layer is named "Foreground", a name the document
+HAS, and whose second is "Sky", which it does not — and differ only in
+`preserve_layers`. The first requires both children in the ACTIVE layer (R2); the
+second requires the append into "Foreground" AND the creation of "Sky" (R3).
+
+`paste_preserving_unnamed_fragment_layer_falls_back_to_active` and
+`paste_single_unnamed_layer_flattens_into_active` point at the **same golden
+file**, so "preserve degenerates to R2 for an unnamed layer" is pinned by file
+identity rather than by two goldens that could drift apart.
+
+### 9.3 RED FIRST — measured, in Swift
+
+The family and its goldens were authored and generated from Rust, then run
+against Swift **before any Swift change**:
+
+> **10 of 12 cases FAILED.** The two that passed are the two no-op cases
+> (`paste_family_setup_...` and `paste_empty_fragment_is_a_benign_noop`), which
+> pass because Swift's unknown-verb path leaves the document unchanged — so the
+> family DISCRIMINATES rather than being uniformly red.
+
+After R2/R3 landed in Swift: **12 of 12 green.**
+
+Rust's implementation preceded its family, so Rust's evidence is mutation proof,
+not red-first. That difference is stated rather than smoothed over.
+
+### 9.4 Mutation proof — every cause reverted INDIVIDUALLY
+
+Production restored and verified byte-clean (`git diff --stat` purely additive)
+after every one.
+
+| # | port | mutation | RED observed |
+|---|---|---|---|
+| M1 | Rust | R3 preserve branch neutered | 3 failed — locked probe `left: [(5.0, 5.0)]  right: [(5.0, 5.0), (25.0, 26.0)]` |
+| M2 | Rust | match but never CREATE | 1 failed — layers `['Background','Foreground','Sky','Ground']` → `['Background','Foreground']`, counts `[1,1,1,1]` → `[3,1]` |
+| M3 | Rust | name-match on the DEFAULT path (undo R2) | 2 failed — `plain Paste must land in the ACTIVE layer, name match or not`, `left: [(0.0, 0.0)]  right: [(0.0, 0.0), (25.0, 26.0)]` |
+| M4 | Rust | offset forced to 0 | 4 failed — **and the three zero-offset probes correctly stayed GREEN** |
+| M5 | Rust | match the ORIGINAL doc, not the working one | 1 failed — `[('Sky', 2)]` → `[('Sky', 1), ('Sky', 1)]`, two layers of one name |
+| M6 | Rust | verb no longer routes through `apply_paste` | 1 failed immediately — **the verb is not a decoy** |
+| M7 | Swift | R3 preserve branch neutered | 3 probes + 3 corpus preserve cases failed |
+| M8 | Swift | the OLD field-list `Layer` rebuild restored | 3 probes failed — `id → nil` (want `"lyr-sky"`), `visibility → .preview` (want `.invisible`), and the locked assertion. **The corpus family stayed GREEN.** |
+| M9 | Swift | match but never CREATE | 4 corpus cases failed; the probes, which all match, stayed GREEN |
+
+**M4 and M9 are the useful splits**: they show the offset's two halves, and R3's
+match-half and create-half, are separable, so a repair cannot satisfy one by
+breaking the other.
+
+**M8 is the most important row in this table**, for two reasons, below.
+
+### 9.5 A defect found while implementing, and repaired: Swift's paste dropped layer fields
+
+Swift's old paste rebuilt the target layer as
+`Layer(name:children:opacity:transform:)` — a hand-written four-field list
+against a struct with twelve. So **pasting into a layer silently discarded its
+`locked`, `visibility`, `blendMode`, `mask`, `isolatedBlending`, `knockoutGroup`
+and `id`.** Pasting into a locked layer UNLOCKED it; pasting into a hidden layer
+REVEALED it; pasting into an identified layer DESTROYED its identity. This is the
+Swift copy-site omission class (EDIT_SEMANTICS_FREEZE.md §3.1), landing at a
+paste, and it shipped on main. It is a Preservation Law violation on its face: an
+edit must preserve what it does not speak to, and a paste does not speak to
+whether the target layer is locked.
+
+The repair is the shape that cannot drift again: the new body **mutates the layer
+value in place**, so there is no field list to fall behind. Measured by M8, which
+restores the old rebuild verbatim and reds exactly those assertions.
+
+Rust never had this defect (`children_mut()` mutates in place).
+
+### 9.6 The blind spot M8 exposes, stated plainly
+
+**Under M8 the shared cross-language corpus family stayed GREEN while three
+in-port probes went RED.** That is not a footnote, it is the honest strength of
+this pass's gating: every corpus case is seeded from a `setup_svg`, and **the SVG
+codec does not persist `locked` at all**, so a layer parsed from SVG is always
+unlocked, visible and id-less. The corpus is *structurally blind* to the entire
+locked / hidden / layer-id question.
+
+What watches it is per-port probes only — Rust
+`op_apply::paste_layer_structure_tests`, Swift `PasteLayerStructureTests` — which
+is a weaker watch than a shared golden, because the two ports can fail
+differently without any single file moving. **The class is OPEN to that extent.**
+Closing it needs `locked` in the SVG codec (or another seeding route), which is
+its own work order.
+
+The same probes carry the bare-element fragment shape, for the same reason: the
+op verb feeds `svg_to_document(...).layers`, which is always layers.
+
+### 9.7 What R3 cannot do, and it follows from §8.0
+
+§8.0 found that **the flattening is settled at COPY, not at paste**. That result
+constrains this one, and the constraint is real rather than theoretical:
+
+> **"Paste, Preserving Layers" over an IN-APP copy behaves exactly like plain
+> Paste, in both ports.** Rust's copy payload is a `Vec<Element>` with nowhere to
+> record a layer; Swift's `copySelection` emits ONE UNNAMED layer. Either way
+> there is no name to preserve, so R3 has nothing to work with.
+
+R3 bites on **foreign** fragments — externally-sourced SVG that names its layers
+— which is exactly the case §2 argued it was for ("with paste the artist is
+importing FOREIGN structure"). So the ruling is delivered as ruled. But anyone
+expecting Cmd+C / "Paste preserving layers" inside one document to round-trip
+layer structure will not get it, and **no paste-side change can give it to
+them**. That needs a ruling on whether an in-app COPY should carry layer
+identity, which touches Rust's five copy sites and Swift's one.
+
+### 9.8 The spec
+
+* `workspace/actions.yaml` §paste — was silent on layer targeting (§8.4 noted the
+  vacuum). It now states that everything lands in the ACTIVE layer, that a
+  fragment's layer names are ignored, why, and where to go instead. It also
+  states the locked/hidden and id behaviours.
+* `workspace/actions.yaml` §paste_preserving_layers — NEW, comprehensive.
+* `workspace/actions.yaml` §paste_in_place — gained one sentence: its layer
+  targeting is plain Paste's.
+* `workspace/menubar.yaml` — Edit menu gains "Paste, Preserving &Layers".
+* `workspace/shortcuts.yaml` — **no binding**, with the reason recorded in the
+  file: Ctrl+V and Ctrl+Shift+V are taken, every remaining V combination is
+  either unreachable mid-gesture or a platform-collision risk, and the case for a
+  chord is weakest exactly where the command is meant to be chosen consciously.
+
+**One sentence was deliberately NOT touched.** §paste still says *"Repeated
+pastes stack with cumulative offsets."* §8.3's D7 measured that no port
+implements it (second paste lands at x=24, not 48). Removing the sentence would
+decide a question that is BANKED for JYH (§8.6 item 3), so it stays.
+
+`workspace/workspace.json` regenerated.
+
+**A gate caught the menu change, which is worth recording as a good sign:**
+`algorithm_menu_state_vectors` went red on the new Edit-menu item.
+`test_fixtures/algorithms/menu_state.json` was regenerated **from the reference
+interpreter** (`workspace_interpreter/menu_state.py`), not from either port — a
+golden regenerated from a port it gates would agree with itself. The delta was
+then verified mechanically to be exactly one new row per vector plus
+`select_all` shifting `[1,8]` → `[1,9]`, with `enabled` correctly following
+`state.tab_count > 0` (False in `no_document`, True in the other three).
+
+### 9.9 BANKED — no ruling invented
+
+1. **IDS. The verb DOES expose it.** `paste_duplicates_the_source_id_verbatim` is
+   a cross-language golden in which **two live elements carry the id `rect-1`** —
+   the source and its paste. Under the cardinality law a paste is 0→N and should
+   mint fresh; it does not, in either port. Deliberately unchanged: a separate
+   ruling. The golden is what will move the day it lands. The paste op's
+   `targets` list is left EMPTY on purpose, so duplicated identities are not
+   baked into the recipe layer as though legitimate.
+2. **OPEN QUESTION 1 — a created layer's name.** Taken VERBATIM, no
+   disambiguation, and placed at the END of the layer list. Verbatim is what
+   "preserving" means, and a disambiguated name would make the second paste of
+   one fragment create a THIRD layer rather than append. The risk §6 named — two
+   documents' "Layer 1" being fused — is real and unaddressed. Conservative,
+   commented at both bodies, pinned by
+   `paste_preserving_multi_layer_no_name_match_creates_both_layers`.
+3. **OPEN QUESTION 2 — locked and hidden targets.** Append SUCCEEDS; the layer is
+   neither unlocked nor revealed nor refused. This pins what the ports did rather
+   than inventing an answer. Note the user-facing consequence, which is why it
+   wants a ruling: **a paste into a hidden layer is invisible, so the command
+   looks like it did nothing.**
+4. **D4/D5 from §8.6 remain unsettled and R2 has now landed on top of them.**
+   §8.6 recommended settling them BEFORE R2 because R2 rewrites the same
+   function. It was not settled, and R2 was implemented anyway per the work
+   order. The rewrite is **behaviour-preserving** for both: Rust still falls back
+   to `tab.clipboard` on non-SVG text and on an unreadable clipboard, and Swift
+   still builds a Text element / no-ops. So nothing was foreclosed — but the
+   divergence is still live and still unwatched by any gate.
+
+### 9.10 What was NOT done
+
+* **R1 (group) is untouched.** This pass is the two paste rulings only.
+* **No GUI was driven.** The menu item and both ports' call sites are wired and
+  compile; nobody has watched a paste happen on screen. §7's first blind spot
+  stands.
+* **`jas_flask` and the frozen ports were not examined**, per the freeze.
+* **The reference interpreter has no clipboard code at all**, so it could not
+  arbitrate R2/R3 — it arbitrated only the menu golden. The corpus family is
+  Rust-vs-Swift.
+* **`paste_in_place` has no preserving twin.** The corpus pins
+  `paste_in_place_preserving_layers_applies_no_offset` through the op verb, so
+  the combination is gated, but no menu command reaches it.
+
+### 9.11 Gates
+
+| gate | before this pass | after |
+|---|---|---|
+| `cargo test --lib` | 2741 passed / 0 failed / 18 ignored | **2748** passed / 0 failed / 18 ignored |
+| `swift test` | 2778 tests / 21 suites | **2786** tests / 22 suites |
+| `pytest workspace_interpreter/` | 1268 passed | 1268 passed |
+| `cross_language_algorithms.py` | 1086 (465+396+225) | 1086 (465+396+225) |
+| `check_corpus_manifest.py` | 26 families / 457 files / 31 gaps | 26 / **468** / 31 |
+| `check_naming_rule.py` | OK | OK (+ `--self-test` OK, 22 cases) |
+| `check_workspace_json.sh` | up to date | up to date |
+
+Three coverage-gap rows updated in `scripts/corpus_manifest.json`:
+`paste-flow-layer-targeting-divergence` (RESOLVED),
+`paste-offset-compound-divergence` (its remaining OPEN half closes — that row's
+`unblock` predicted this fix's shape exactly), and
+`identity-law-duplication-verbs-id-less` (its paste half is now watched, though
+still unfixed).
