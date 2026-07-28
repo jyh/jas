@@ -117,6 +117,10 @@ mod tests {
             // recorded and the generated kinds, which have no SVG read path
             // and so can only be reached through the JSON/binary lanes.
             "live_named", "live_named_recipe",
+            // LOCKSVG: the two lock goldens pin the canonical-JSON lane too,
+            // so a `locked` regression in test_json cannot hide behind the SVG
+            // lane being the one under repair.
+            "locked_layer_and_element", "locked_all_kinds",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -164,6 +168,10 @@ mod tests {
             // TAG_LIVE slot 5 like every other element's. Both fixtures name
             // their live elements, so a codec that packed nil there reds.
             "live_named", "live_named_recipe",
+            // LOCKSVG: `common.locked` rides pack_common slot 1 and always
+            // did; these two goldens make that a MEASUREMENT rather than an
+            // assumption, on a document where the flag is actually true.
+            "locked_layer_and_element", "locked_all_kinds",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -247,6 +255,8 @@ mod tests {
             // `transform` field (emitted as `instance_transform`) is set,
             // distinct from common.transform.
             "reference_instance_transform",
+            // LOCKSVG: `common.locked` across the SVG boundary.
+            "locked_layer_and_element", "locked_all_kinds",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -288,6 +298,11 @@ mod tests {
             // already lifted into common.name generically while the live
             // writer arms routed through a name-less attribute tail.
             "live_named",
+            // LOCKSVG: the WRITE side. `assert_svg_parse` above pins the
+            // reader; only a round trip can catch a writer arm that drops
+            // `jas:locked`, because the reader would then read a file that
+            // never carried it and agree with itself.
+            "locked_layer_and_element", "locked_all_kinds",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
@@ -409,6 +424,51 @@ mod tests {
     #[test]
     fn svg_parse_complex_document() {
         assert_svg_parse("complex_document");
+    }
+
+    // ---------------------------------------------------------------
+    // LOCKSVG — `common.locked` survives the SVG boundary.
+    //
+    // Until 2026-07-28 it did not, in EITHER active port: this port's
+    // `parse_common` hard-coded `locked: false` and had no writer at all;
+    // JasSwift's Svg.swift contained zero occurrences of `locked`,
+    // case-insensitive. Lock a layer, save, reopen — the protection was gone.
+    // Every fixture in the shared corpus is SVG-seeded, so the corpus was
+    // STRUCTURALLY BLIND to lock as a precondition and could gate nothing
+    // about it (jas_dioxus/src/document/op_apply.rs said so in a doc comment).
+    //
+    // The spelling is ` jas:locked="true"` in the `urn:jas:1` namespace, the
+    // same namespace and the same written-only-when-non-default shape as the
+    // sibling CommonProps field `jas:tool-origin`.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn svg_parse_locked_layer_and_element() {
+        // The SEMANTIC vector, and the one the inherited-lock ruling
+        // (transcripts/LAYER_STRUCTURE.md §13) needs to exist before it can be
+        // gated at all: a LOCKED LAYER whose children carry no lock flag of
+        // their own (inheritance, NOT materialization — the children stay
+        // `locked: false` in the golden), plus a LOCKED ELEMENT sitting inside
+        // an UNLOCKED layer.
+        assert_svg_parse("locked_layer_and_element");
+    }
+
+    #[test]
+    fn svg_parse_locked_all_kinds() {
+        // The WRITER-ARM CENSUS. One locked instance of every element kind
+        // that has an SVG read path — line, rect, circle, ellipse, polyline,
+        // polygon, path, text, text-on-path, group, layer, <use> reference,
+        // compound shape — plus a <defs> symbol master and a top-level bare
+        // <g> that the importer PROMOTES to a Layer (that promotion rebuilds
+        // the container field by field in JasSwift, which is exactly where the
+        // Swift copy-site omission class strikes). A writer arm that forgets
+        // the attribute cannot hide behind a sibling arm that remembers it.
+        //
+        // NOT covered, stated rather than implied: the `recorded` and
+        // `generated` live kinds, which NEITHER port can read back from SVG at
+        // all (they import as plain Groups), so no round-trip fixture can
+        // watch their writer arms.
+        assert_svg_parse("locked_all_kinds");
     }
 
     #[test]
@@ -5792,6 +5852,7 @@ mod tests {
         };
         let s = |ok: bool| if ok { "PRESERVED" } else { "DROPPED" };
         vec![
+            ("common.locked", s(a.common.locked == before.common.locked)),
             ("common.mask", s(a.common.mask == before.common.mask)),
             ("common.mode", s(a.common.mode == before.common.mode)),
             ("common.tool_origin", s(a.common.tool_origin == before.common.tool_origin)),

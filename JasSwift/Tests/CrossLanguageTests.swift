@@ -91,6 +91,12 @@ private func assertSvgRoundtrip(_ name: String) {
         // boundary: the name maps to inkscape:label. Mirrors the Rust
         // svg_roundtrip_all_fixtures registration.
         "live_named",
+        // LOCKSVG: the WRITE side of `common.locked`. `assertSvgParse` pins
+        // the reader; only a round trip can catch a writer arm that drops
+        // `jas:locked`, because the reader would then read a file that never
+        // carried it and agree with itself. Mirrors the Rust
+        // svg_roundtrip_all_fixtures registration.
+        "locked_layer_and_element", "locked_all_kinds",
     ]
     for name in names { assertSvgRoundtrip(name) }
 }
@@ -121,6 +127,24 @@ private func assertSvgRoundtrip(_ name: String) {
 /// those names, and so do the two named operands. Mirrors Rust's
 /// svg_parse_live_named.
 @Test func svgParseLiveNamed() { assertSvgParse("live_named") }
+/// LOCKSVG — the SEMANTIC lock vector, and the one the inherited-lock ruling
+/// (transcripts/LAYER_STRUCTURE.md §13) needed to exist before it could be
+/// gated at all: a LOCKED LAYER whose children carry no lock flag of their own
+/// (inheritance, NOT materialization — the children stay `locked: false` in the
+/// golden), plus a LOCKED ELEMENT inside an UNLOCKED layer. Until 2026-07-28
+/// this port's Svg.swift contained ZERO occurrences of `locked`,
+/// case-insensitive, so lock a layer, save, reopen and the protection was gone.
+/// Mirrors Rust's svg_parse_locked_layer_and_element.
+@Test func svgParseLockedLayerAndElement() { assertSvgParse("locked_layer_and_element") }
+/// LOCKSVG — the WRITER-ARM CENSUS. One locked instance of every element kind
+/// with an SVG read path (line, rect, circle, ellipse, polyline, polygon, path,
+/// text, text-on-path, group, layer, <use> reference, compound shape), plus a
+/// <defs> symbol master and a top-level bare <g> the importer PROMOTES to a
+/// Layer — that promotion rebuilds the container field by field in this port,
+/// which is exactly where the Swift copy-site omission class strikes. NOT
+/// covered, stated rather than implied: `recorded` and `generated`, which
+/// neither port can read back from SVG at all.
+@Test func svgParseLockedAllKinds() { assertSvgParse("locked_all_kinds") }
 /// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
 /// id="dup"; after dedupe the first keeps it and the second has no id.
 @Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
@@ -307,6 +331,10 @@ private func assertJsonRoundtrip(_ name: String) {
         // reached through the JSON/binary lanes. Mirrors the Rust
         // json_roundtrip_all_expected registration.
         "live_named", "live_named_recipe",
+        // LOCKSVG: the two lock goldens pin the canonical-JSON lane too, so a
+        // `locked` regression in test_json cannot hide behind the SVG lane
+        // being the one under repair.
+        "locked_layer_and_element", "locked_all_kinds",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -350,6 +378,10 @@ private func readFixtureData(_ path: String) -> Data {
         // slot 5 like every other element's. Both fixtures name their live
         // elements, so a codec that packed nil there reds.
         "live_named", "live_named_recipe",
+        // LOCKSVG: `common.locked` rides packCommon slot 1 and always did;
+        // these two goldens make that a MEASUREMENT rather than an assumption,
+        // on a document where the flag is actually true.
+        "locked_layer_and_element", "locked_all_kinds",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -3955,6 +3987,7 @@ private func survivalRow(_ before: Path, _ after: Path?) -> [(String, String)] {
     }
     func s(_ ok: Bool) -> String { ok ? "PRESERVED" : "DROPPED" }
     return [
+        ("common.locked", s(a.locked == before.locked)),
         ("common.mask", s(a.mask == before.mask)),
         ("common.mode", s(a.blendMode == before.blendMode)),
         ("common.tool_origin", s(a.toolOrigin == before.toolOrigin)),
