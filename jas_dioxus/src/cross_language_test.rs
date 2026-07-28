@@ -1462,7 +1462,7 @@ mod tests {
         // Swift skipped it. Deliberately groupless in the open layer: Select
         // All's group-expansion difference (SCOPE-effective-locked.md D2 / Q2)
         // is UNRULED and would red here for a reason that is not about lock.
-        "lock_inheritance_select_all.json",
+        "lock_inheritance_actions.json",
     ];
 
     /// Run an action fixture and return the resulting `AppState`.
@@ -3673,7 +3673,7 @@ mod tests {
     /// action, no gesture reached it.
     ///
     /// The `toggle_element_lock` verb this family added routes through the SAME
-    /// pure `toggle_element_lock_at` the panel calls, so it gates the panel's
+    /// pure `Document::toggling_element_lock` the panel calls, so it gates the panel's
     /// behaviour rather than duplicating it.
     #[test]
     fn operation_lock_toggle_no_materialization() {

@@ -3567,7 +3567,7 @@ private let actionFixtures = [
     // skipped it. Deliberately groupless in the open layer: Select All's
     // group-expansion difference (SCOPE-effective-locked.md D2 / Q2) is
     // UNRULED and would red here for a reason that is not about lock.
-    "lock_inheritance_select_all.json",
+    "lock_inheritance_actions.json",
 ]
 
 /// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml

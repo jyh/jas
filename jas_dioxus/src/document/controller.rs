@@ -2342,22 +2342,36 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
-    /// Ungroup all unlocked Group elements in the entire document.
+    /// Ungroup all unlocked Group elements in the entire document, where
+    /// "unlocked" is INHERITED (transcripts/LAYER_STRUCTURE.md §13): a Group
+    /// inside a locked layer or a locked group is left alone, structure
+    /// included, exactly as one with its own flag set is.
     pub fn ungroup_all(model: &mut Model) {
         let doc = model.document().clone();
         let mut changed = false;
 
-        fn flatten(children: &[Rc<Element>], changed: &mut bool) -> Vec<Rc<Element>> {
+        // `ancestor_locked` is the INHERITED half of the lock read
+        // (transcripts/LAYER_STRUCTURE.md §13): a Group survives when its own
+        // flag is set OR when anything it sits inside is locked. This is the
+        // same `effective_locked` fold, threaded through a walk that already
+        // has the ancestors in hand. It is NOT a new guard — `ungroup_all`
+        // always read lock; §13 changed what the word means.
+        fn flatten(
+            children: &[Rc<Element>],
+            ancestor_locked: bool,
+            changed: &mut bool,
+        ) -> Vec<Rc<Element>> {
             let mut result = Vec::new();
             for child in children {
-                if child.is_group() && !child.locked() {
+                let locked = ancestor_locked || child.locked();
+                if child.is_group() && !locked {
                     *changed = true;
                     let inner = child.children().unwrap_or(&[]);
-                    result.extend(flatten(inner, changed));
+                    result.extend(flatten(inner, locked, changed));
                 } else if child.is_group() {
                     // Locked group: recurse into children but keep the group
                     let inner = child.children().unwrap_or(&[]);
-                    let new_children = flatten(inner, changed);
+                    let new_children = flatten(inner, locked, changed);
                     let mut new_group = (**child).clone();
                     if let Some(gc) = new_group.children_mut() {
                         *gc = new_children;
@@ -2375,7 +2389,7 @@ impl Controller {
             .iter()
             .map(|layer| {
                 let children = layer.children().unwrap_or(&[]);
-                let new_children = flatten(children, &mut changed);
+                let new_children = flatten(children, layer.locked(), &mut changed);
                 let mut new_layer = layer.clone();
                 if let Some(lc) = new_layer.children_mut() {
                     *lc = new_children;
@@ -7089,9 +7103,16 @@ mod ungroup_all_preservation_tests {
         let Element::Group(g) = kept else {
             panic!("the locked group was not kept")
         };
-        // Its children WERE flattened — the operation ran.
+        // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): the kept group's
+        // CONTENTS are locked too, so the nested group inside it survives as a
+        // group. Before the ruling this asserted the opposite — the inner
+        // group was dissolved while its locked parent was kept, which is the
+        // one-level-deep reading inheritance replaces. `layer_keeps_every_
+        // attribute` above is the positive control that ungroup_all still runs.
         assert_eq!(g.children.len(), 2);
-        assert!(g.children.iter().all(|c| matches!(&**c, Element::Rect(_))));
+        assert!(matches!(&*g.children[0], Element::Group(_)),
+            "a group inside a LOCKED group is locked, so it is left alone");
+        assert!(matches!(&*g.children[1], Element::Rect(_)));
 
         assert_eq!(g.common.name.as_deref(), Some("Keeper"));
         assert_eq!(g.common.id.as_deref(), Some("g-keep"));
@@ -7151,10 +7172,11 @@ mod ungroup_all_preservation_tests {
 
     /// Twin of `lockedLayerStaysLocked`.
     ///
-    /// Also pins a fact worth a ruling: a locked LAYER does not protect its
-    /// contents. `flatten` is applied to every layer with no lock check, so an
-    /// unlocked group inside a locked layer is dissolved anyway — the same in
-    /// both ports. If lock becomes INHERITED, this assertion is what moves.
+    /// The fact this test was written to pin — that a locked LAYER did NOT
+    /// protect its contents, so an unlocked group inside one was dissolved
+    /// anyway — was banked with the note "if lock becomes INHERITED, this
+    /// assertion is what moves". It became inherited (JYH, 2026-07-28,
+    /// transcripts/LAYER_STRUCTURE.md §13), and it moved.
     #[test]
     fn locked_layer_stays_locked() {
         let doc = Document {
@@ -7175,10 +7197,10 @@ mod ungroup_all_preservation_tests {
         let out = model.document();
         assert!(out.layers[0].locked());
         assert_eq!(out.layers[0].children().unwrap().len(), 1);
-        // Today: the group inside a LOCKED layer is dissolved anyway.
+        // The group inside a LOCKED layer is left alone, structure included.
         assert!(matches!(
             &*out.layers[0].children().unwrap()[0],
-            Element::Rect(_)
+            Element::Group(_)
         ));
     }
 }

@@ -441,6 +441,53 @@ impl Document {
         locked
     }
 
+    /// Element-level behavior of the Layers tree LOCK button. Pure: takes a
+    /// Document, returns a Document. The twin of `cycle_element_visibility_at`
+    /// (still in the web-gated `interpreter::renderer`, where this lived until
+    /// LOCKINHERIT; it moved here because it is document logic with no UI in
+    /// it, `op_apply` must reach it in a `--no-default-features` build, and
+    /// JasSwift's twin `Document.togglingElementLock(at:)` was already a
+    /// Document method — so the move is toward parity, not away. The
+    /// VISIBILITY half is still on the wrong side of that line; banked).
+    ///
+    /// Two things happen, in this order:
+    ///   1. the element's own `locked` flips — and ONLY the element's own, at
+    ///      any depth. A container's lock reaches its contents by INHERITANCE
+    ///      ([`Self::effective_locked`]), never by being written onto them;
+    ///   2. locking removes the element AND its descendants from the selection,
+    ///      exactly as `cycle_element_visibility_at` does on Invisible.
+    ///
+    /// Step 2 is not cosmetic: nothing downstream refuses to move or delete a
+    /// selected-but-locked element, so a lock that leaves the selection alone
+    /// leaves locked content draggable.
+    ///
+    /// The MATERIALIZATION that used to sit between the two — writing
+    /// `locked = true` onto every direct child and restoring a caller-owned
+    /// table of prior states on unlock — was REPEALED by
+    /// transcripts/LAYER_STRUCTURE.md §13 (RULED 2026-07-28). It cannot coexist
+    /// with inheritance: kept together they double-apply, and the children end
+    /// up carrying flags an artist never set, which then survive into the saved
+    /// file. The `saved_to_restore` parameter went with it, and so did
+    /// `AppState.layers_saved_lock_states` and JasSwift's `savedLockStates`.
+    pub fn toggling_element_lock(&self, path: &ElementPath) -> Self {
+        let Some(elem) = self.get_element(path) else {
+            return self.clone();
+        };
+        let was_unlocked = !elem.locked();
+
+        let mut new_doc = self.clone();
+        if let Some(elem) = new_doc.get_element_mut(path) {
+            elem.common_mut().locked = was_unlocked;
+        }
+        // Locking an element removes it and its descendants from the selection.
+        if was_unlocked {
+            new_doc
+                .selection
+                .retain(|es| !(es.path == *path || es.path.starts_with(path.as_slice())));
+        }
+        new_doc
+    }
+
     /// Return a new Document with the element at path replaced.
     pub fn replace_element(&self, path: &ElementPath, new_elem: Element) -> Self {
         let mut doc = self.clone();
@@ -901,5 +948,148 @@ mod tests {
         let part = SelectionKind::Partial(SortedCps::from_iter([2usize, 0]));
         let v2: Vec<usize> = part.to_sorted(99).iter().collect();
         assert_eq!(v2, vec![0, 2]);
+    }
+
+    // ── D5a: the Layers LOCK button prunes the selection ──────────
+    //
+    // SCOPE-effective-locked.md §3, D5a. jas_dioxus dropped the locked
+    // element and its descendants from the selection; JasSwift's closure had
+    // no equivalent, so a locked layer stayed selected there -- and nothing
+    // downstream refuses to move or delete a selected element for being
+    // locked, so that is not cosmetic.
+    //
+    // PER-PORT: the Layers panel is reached through GUI event handlers that
+    // no shared corpus drives, and no shared fixture can seed a locked
+    // document anyway (the SVG codec drops `locked`). The mirror is
+    // JasSwift/Tests/Document/DocumentTests.swift.
+    //
+    // These are REGRESSION PINS for this port -- the red was in Swift.
+
+    /// One layer named "L" holding two rects, with `selection` seeded to
+    /// the whole tree: the layer, and both of its children.
+    fn lock_toggle_doc() -> Document {
+        let rect = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(rect(0.0)), Rc::new(rect(20.0))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![
+                ElementSelection::all(vec![0]),
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+            ],
+            ..Document::default()
+        }
+    }
+
+    #[test]
+    fn toggling_element_lock_locks_and_prunes_the_selection() {
+        let doc = lock_toggle_doc();
+        assert_eq!(doc.selection.len(), 3, "control: everything starts selected");
+        let out = doc.toggling_element_lock(&vec![0usize]);
+        assert!(out.get_element(&vec![0usize]).unwrap().locked(),
+            "the layer itself is locked");
+        assert!(out.selection.is_empty(),
+            "the layer AND both descendants leave the selection");
+    }
+
+    /// Locking a CHILD must prune that child only -- if the prune were
+    /// written as a whole-clear, or matched on the wrong end of the path,
+    /// this is the case that notices.
+    #[test]
+    fn toggling_element_lock_prunes_only_the_locked_subtree() {
+        let doc = lock_toggle_doc();
+        let out = doc.toggling_element_lock(&vec![0usize, 0usize]);
+        let mut paths: Vec<Vec<usize>> =
+            out.selection.iter().map(|es| es.path.clone()).collect();
+        paths.sort();
+        assert_eq!(paths, vec![vec![0], vec![0, 1]]);
+    }
+
+    /// UNlocking must not touch the selection at all -- the prune is keyed
+    /// on the direction of the toggle, not on the button being pressed.
+    #[test]
+    fn toggling_element_lock_unlock_leaves_the_selection_alone() {
+        let doc = lock_toggle_doc();
+        let locked = doc.toggling_element_lock(&vec![0usize]);
+        assert!(locked.selection.is_empty());
+        // Re-select the layer, then unlock it.
+        let mut relocked = locked;
+        relocked.selection =
+            vec![ElementSelection::all(vec![0usize])];
+        let out = relocked.toggling_element_lock(&vec![0usize]);
+        assert!(!out.get_element(&vec![0usize]).unwrap().locked());
+        assert_eq!(out.selection.len(), 1, "unlock keeps the selection");
+    }
+
+    /// MATERIALIZATION IS REPEALED (transcripts/LAYER_STRUCTURE.md §13, RULED
+    /// 2026-07-28). Locking a CONTAINER writes the container's own flag and
+    /// nothing else -- the contents are protected by
+    /// `Document::effective_locked` reading down the path, not by flags an
+    /// artist never set. The shared corpus family
+    /// `test_fixtures/operations/lock_toggle_no_materialization.json` is the
+    /// cross-language gate; this is the same fact at the pure function.
+    #[test]
+    fn toggling_element_lock_does_not_materialize_onto_children() {
+        let out = lock_toggle_doc().toggling_element_lock(&vec![0usize]);
+        assert!(out.get_element(&vec![0usize]).unwrap().locked());
+        assert!(!out.get_element(&vec![0usize, 0usize]).unwrap().locked());
+        assert!(!out.get_element(&vec![0usize, 1usize]).unwrap().locked());
+        // ...and the children are protected anyway, by inheritance.
+        assert!(out.effective_locked(&vec![0usize, 0usize]));
+        assert!(out.effective_locked(&vec![0usize, 1usize]));
+    }
+
+    /// A round trip through the lock button leaves the document where it
+    /// started. Before the repeal it was LOSSY: the lock wrote `locked = true`
+    /// onto both children and the unlock -- with no restore table to consult --
+    /// left them locked while the container itself opened.
+    #[test]
+    fn toggling_element_lock_round_trip_leaves_children_untouched() {
+        let once = lock_toggle_doc().toggling_element_lock(&vec![0usize]);
+        let out = once.toggling_element_lock(&vec![0usize]);
+        assert!(!out.get_element(&vec![0usize]).unwrap().locked());
+        assert!(!out.get_element(&vec![0usize, 0usize]).unwrap().locked());
+        assert!(!out.get_element(&vec![0usize, 1usize]).unwrap().locked());
+    }
+
+    /// `Document::effective_locked` ORs down the path, mirroring
+    /// `Document::effective_visibility`. A child CANNOT be unlocked inside a
+    /// locked parent -- JYH ruled that expressiveness loss explicitly
+    /// (transcripts/LAYER_STRUCTURE.md §13), so there is no escape hatch to
+    /// test for; what IS tested is that the OR is total and that an
+    /// unresolvable path is not reported as locked.
+    #[test]
+    fn effective_locked_ors_down_the_path() {
+        let doc = lock_toggle_doc();
+        assert!(!doc.effective_locked(&vec![0usize]));
+        assert!(!doc.effective_locked(&vec![0usize, 0usize]));
+        // Own flag on the LEAF.
+        let leaf_locked = doc.toggling_element_lock(&vec![0usize, 1usize]);
+        assert!(!leaf_locked.effective_locked(&vec![0usize, 0usize]));
+        assert!(leaf_locked.effective_locked(&vec![0usize, 1usize]));
+        assert!(!leaf_locked.effective_locked(&vec![0usize]));
+        // Own flag on the CONTAINER reaches both children.
+        let layer_locked = doc.toggling_element_lock(&vec![0usize]);
+        assert!(layer_locked.effective_locked(&vec![0usize]));
+        assert!(layer_locked.effective_locked(&vec![0usize, 0usize]));
+        assert!(layer_locked.effective_locked(&vec![0usize, 1usize]));
+        // Addresses that name no artwork are not locked.
+        assert!(!doc.effective_locked(&vec![]));
+        assert!(!layer_locked.effective_locked(&vec![7usize]));
+        assert!(
+            layer_locked.effective_locked(&vec![0usize, 9usize]),
+            "an out-of-range CHILD index still inherits what the walk already saw"
+        );
     }
 }

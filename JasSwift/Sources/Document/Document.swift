@@ -315,41 +315,31 @@ public struct Document: Equatable {
     /// identical document work stayed inlined in a SwiftUI closure. Pure.
     /// Mirrors Rust `renderer.rs` `toggle_element_lock_at`.
     ///
-    /// Three things happen, in this order:
-    ///   1. the element's own `locked` flips;
-    ///   2. locking a CONTAINER materializes `locked = true` onto its direct
-    ///      children, and unlocking restores whatever `savedToRestore`
-    ///      holds (the caller owns that map);
-    ///   3. locking removes the element AND its descendants from the
+    /// Two things happen, in this order:
+    ///   1. the element's own `locked` flips — and ONLY the element's own, at
+    ///      any depth. A container's lock reaches its contents by INHERITANCE
+    ///      (``effectiveLocked(_:)``), never by being written onto them;
+    ///   2. locking removes the element AND its descendants from the
     ///      selection, exactly as ``cyclingElementVisibility(at:)`` does
     ///      when an element becomes `.invisible`.
     ///
-    /// Step 3 is not cosmetic: nothing downstream refuses to move or delete
+    /// Step 2 is not cosmetic: nothing downstream refuses to move or delete
     /// a selected element for being locked, so a lock that left the
     /// selection alone left locked content draggable (D5a).
     ///
-    /// Step 2 is the materialization design `workspace/panels/layers.yaml`
-    /// still specifies. If it is repealed in favour of inherited lock, this
-    /// method loses `savedToRestore` and its middle third; 1 and 3 survive.
-    public func togglingElementLock(
-        at path: ElementPath, savedToRestore: [Bool]? = nil
-    ) -> Document {
+    /// The MATERIALIZATION that used to sit between the two — writing
+    /// `locked = true` onto every direct child and restoring a caller-owned
+    /// table of prior states on unlock — was REPEALED by
+    /// transcripts/LAYER_STRUCTURE.md §13 (RULED 2026-07-28). It cannot
+    /// coexist with inheritance: kept together they double-apply, and the
+    /// children end up carrying flags an artist never set, which then survive
+    /// into the saved file. The `savedToRestore` parameter went with it, and
+    /// so did `YamlPanelBodyView.savedLockStates` and jas_dioxus's
+    /// `AppState.layers_saved_lock_states`.
+    public func togglingElementLock(at path: ElementPath) -> Document {
         guard let e = tryGetElement(path) else { return self }
         let wasUnlocked = !e.isLocked
-        var doc = replaceElement(path, with: e.withLocked(wasUnlocked))
-        // Lock all direct children when a container is locked.
-        if wasUnlocked, let kids = Document.containerChildren(e) {
-            for (i, c) in kids.enumerated() {
-                doc = doc.replaceElement(path + [i], with: c.withLocked(true))
-            }
-        }
-        // Restore saved child lock states on unlock.
-        if let saved = savedToRestore,
-           let kids = Document.containerChildren(doc.getElement(path)) {
-            for (i, c) in kids.enumerated() where i < saved.count {
-                doc = doc.replaceElement(path + [i], with: c.withLocked(saved[i]))
-            }
-        }
+        let doc = replaceElement(path, with: e.withLocked(wasUnlocked))
         // Locking an element removes it and its descendants from selection.
         if wasUnlocked {
             let filtered = doc.selection.filter {
@@ -358,15 +348,6 @@ public struct Document: Equatable {
             return doc.replacing(selection: filtered)
         }
         return doc
-    }
-
-    /// Direct children of a Group or Layer; nil for anything else.
-    private static func containerChildren(_ elem: Element) -> [Element]? {
-        switch elem {
-        case .group(let g): return g.children
-        case .layer(let l): return l.children
-        default: return nil
-        }
     }
 
     /// Return the ElementSelection for the given path, or nil.

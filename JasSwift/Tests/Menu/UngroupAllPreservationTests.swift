@@ -35,6 +35,11 @@ struct UngroupAllPreservationTests {
         return false
     }
 
+    private func isGroup(_ e: Element) -> Bool {
+        if case .group = e { return true }
+        return false
+    }
+
     /// A group nest that GUARANTEES `changed == true`: an unlocked group with a
     /// rect inside. Ungroup All must flatten it away.
     private var nest: Element {
@@ -153,9 +158,16 @@ struct UngroupAllPreservationTests {
             Issue.record("the locked group was not kept")
             return
         }
-        // Its children WERE flattened — the operation ran.
+        // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): the kept group's
+        // CONTENTS are locked too, so the nested group inside it survives as a
+        // group. Before the ruling this asserted the opposite — the inner group
+        // was dissolved while its locked parent was kept, which is the
+        // one-level-deep reading inheritance replaces. `layerKeepsEveryAttribute`
+        // is the positive control that ungroupAll still runs.
         #expect(g.children.count == 2)
-        #expect(g.children.allSatisfy(isRect))
+        #expect(isGroup(g.children[0]),
+                "a group inside a LOCKED group is locked, so it is left alone")
+        #expect(isRect(g.children[1]))
 
         // Everything else, by value.
         #expect(g.name == "Keeper")
@@ -218,13 +230,12 @@ struct UngroupAllPreservationTests {
     /// carry — this probe stays GREEN across the repair and proves the repair
     /// did not trade one dropped field for another.
     ///
-    /// It also PINS A FACT WORTH A RULING, rather than leaving it unmeasured:
-    /// a locked LAYER does NOT protect its contents. `flatten` is applied to
-    /// every layer with no lock check at all, so the unlocked group inside a
-    /// locked layer is dissolved — in BOTH ports (Rust's twin
-    /// `locked_layer_stays_locked` asserts the same). If lock becomes
-    /// INHERITED, this assertion is what has to move, and it is written so the
-    /// move is visible instead of silent.
+    /// The fact it was written to pin — that a locked LAYER did NOT protect
+    /// its contents, so the unlocked group inside one was dissolved anyway —
+    /// was banked with the note "if lock becomes INHERITED, this assertion is
+    /// what has to move, and it is written so the move is visible instead of
+    /// silent". It became inherited (JYH, 2026-07-28,
+    /// transcripts/LAYER_STRUCTURE.md §13), and it moved.
     @Test func lockedLayerStaysLocked() {
         let model = Model(document: Document(
             layers: [Layer(name: "Locked", children: [nest], locked: true)],
@@ -232,7 +243,7 @@ struct UngroupAllPreservationTests {
         MenuActions.ungroupAll(model)
         #expect(model.document.layers[0].locked == true)
         #expect(model.document.layers[0].children.count == 1)
-        // Today: the group inside a LOCKED layer is dissolved anyway.
-        #expect(isRect(model.document.layers[0].children[0]))
+        // The group inside a LOCKED layer is left alone, structure included.
+        #expect(isGroup(model.document.layers[0].children[0]))
     }
 }

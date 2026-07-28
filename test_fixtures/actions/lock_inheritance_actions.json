@@ -39,5 +39,37 @@
       }
     ],
     "expected_json": "select_all_skips_a_locked_layers_whole_subtree_expected.json"
+  },
+  {
+    "_doc": [
+      "UNGROUP ALL AND INHERITED LOCK — SCOPE-effective-locked.md Q7,",
+      "answered by DIRECT APPLICATION of §13 rather than by a new ruling.",
+      "`actions.yaml` §ungroup_all already read lock; §13 changes what the",
+      "word MEANS, so the read follows. This is NOT the unruled Q3 (whether",
+      "an operation should refuse to act on a SELECTED locked element) —",
+      "no new guard is added anywhere; an existing one now reads down the",
+      "path instead of at one node.",
+      "",
+      "THE DOCUMENT (locked_inheritance.svg):",
+      "  [0]   Layer 'Locked Layer'  jas:locked",
+      "  [0,1]    group 'Inner Group' own flag FALSE — survives by ancestry",
+      "  [1]   Layer 'Open Layer'",
+      "  [1,1]    group 'Locked Group' jas:locked — survives by its own flag",
+      "  [1,3]    group 'Mixed Group'  unlocked — FLATTENED",
+      "",
+      "The Mixed Group is the positive control: without it this case would",
+      "be satisfied by an ungroup_all that had stopped working. Its locked",
+      "member [1,3,0] is carried out of the group unchanged — ungroup speaks",
+      "to structure, not to lock."
+    ],
+    "name": "ungroup_all_leaves_a_locked_layers_groups_alone",
+    "setup_svg": "locked_inheritance.svg",
+    "actions": [
+      {
+        "action": "ungroup_all",
+        "params": {}
+      }
+    ],
+    "expected_json": "ungroup_all_leaves_a_locked_layers_groups_alone_expected.json"
   }
 ]

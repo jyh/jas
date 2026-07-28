@@ -2149,7 +2149,7 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         // behind a Dioxus click handler and a SwiftUI closure, so NO shared
         // fixture could reach it and the materialization design it implemented
         // was watched by nothing cross-language. The verb routes through the
-        // SAME pure `toggle_element_lock_at` the panel calls.
+        // SAME pure `Document::toggling_element_lock` the panel calls.
         "toggle_element_lock" => {
             let Some(path) = parse_path(op.get("path")) else {
                 return Err(req_err(op, "path"));
@@ -2157,8 +2157,7 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             if model.document().get_element(&path).is_none() {
                 return Err(OpError::MissingTarget { id: format!("{path:?}") });
             }
-            let new_doc = crate::interpreter::renderer::toggle_element_lock_at(
-                model.document(), &path, None);
+            let new_doc = model.document().toggling_element_lock(&path);
             model.edit_document(new_doc);
         }
         "lock_selection" => {

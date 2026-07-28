@@ -189,7 +189,62 @@ private func lockToggleDoc() -> Document {
     let locked = lockToggleDoc().togglingElementLock(at: [0])
     #expect(locked.selection.isEmpty)
     let reselected = locked.replacing(selection: [ElementSelection.all([0])])
-    let out = reselected.togglingElementLock(at: [0], savedToRestore: [false, false])
+    let out = reselected.togglingElementLock(at: [0])
     #expect(!out.getElement([0]).isLocked)
     #expect(out.selection.count == 1)
+}
+
+/// MATERIALIZATION IS REPEALED (transcripts/LAYER_STRUCTURE.md §13, RULED
+/// 2026-07-28). Locking a CONTAINER writes the container's own flag and
+/// nothing else — the contents are protected by ``Document.effectiveLocked``
+/// reading down the path, not by flags an artist never set. The shared corpus
+/// family `test_fixtures/operations/lock_toggle_no_materialization.json` is
+/// the cross-language gate; this is the same fact at the pure function.
+@Test func togglingElementLockDoesNotMaterializeOntoChildren() {
+    let out = lockToggleDoc().togglingElementLock(at: [0])
+    #expect(out.getElement([0]).isLocked)
+    #expect(!out.getElement([0, 0]).isLocked)
+    #expect(!out.getElement([0, 1]).isLocked)
+    // ...and the children are protected anyway, by inheritance.
+    #expect(out.effectiveLocked([0, 0]))
+    #expect(out.effectiveLocked([0, 1]))
+}
+
+/// A round trip through the lock button leaves the document where it started.
+/// Before the repeal it was LOSSY: the lock wrote `locked = true` onto both
+/// children and the unlock — with no restore table to consult — left them
+/// locked while the container itself opened.
+@Test func togglingElementLockRoundTripLeavesChildrenUntouched() {
+    let out = lockToggleDoc().togglingElementLock(at: [0])
+        .togglingElementLock(at: [0])
+    #expect(!out.getElement([0]).isLocked)
+    #expect(!out.getElement([0, 0]).isLocked)
+    #expect(!out.getElement([0, 1]).isLocked)
+}
+
+/// ``Document.effectiveLocked`` ORs down the path, mirroring
+/// ``Document.effectiveVisibility``. A child CANNOT be unlocked inside a
+/// locked parent — JYH ruled that expressiveness loss explicitly
+/// (transcripts/LAYER_STRUCTURE.md §13), so there is no escape hatch to test
+/// for; what IS tested is that the OR is total and that an unresolvable path
+/// is not reported as locked.
+@Test func effectiveLockedOrsDownThePath() {
+    let doc = lockToggleDoc()
+    #expect(!doc.effectiveLocked([0]))
+    #expect(!doc.effectiveLocked([0, 0]))
+    // Own flag on the LEAF.
+    let leafLocked = doc.togglingElementLock(at: [0, 1])
+    #expect(!leafLocked.effectiveLocked([0, 0]))
+    #expect(leafLocked.effectiveLocked([0, 1]))
+    #expect(!leafLocked.effectiveLocked([0]))
+    // Own flag on the CONTAINER reaches both children.
+    let layerLocked = doc.togglingElementLock(at: [0])
+    #expect(layerLocked.effectiveLocked([0]))
+    #expect(layerLocked.effectiveLocked([0, 0]))
+    #expect(layerLocked.effectiveLocked([0, 1]))
+    // Addresses that name no artwork are not locked.
+    #expect(!doc.effectiveLocked([]))
+    #expect(!layerLocked.effectiveLocked([7]))
+    #expect(layerLocked.effectiveLocked([0, 9]),
+            "an out-of-range CHILD index still inherits what the walk already saw")
 }
