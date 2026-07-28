@@ -676,6 +676,22 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("paste_layers.json")
 }
 
+/// WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES — D4/D5, ratified
+/// 2026-07-28 (Swift is canon; Rust drops its internal-clipboard fallback).
+/// Twin of Rust `operation_paste_clipboard_text`.
+///
+/// `paste_layers.json` carries the fragment MARKUP in `svg`, which presupposes
+/// the SVG branch was already chosen. This family carries the RAW CLIPBOARD
+/// PAYLOAD in `text` — before any branch is chosen — so it is the only thing
+/// that can watch the DISPATCH: text becomes a Text element, an empty or
+/// unreadable clipboard is a no-op, and an SVG payload still reaches the shared
+/// paste body. `paste_clipboard_svg_payload_through_text_equals_the_svg_param`
+/// points at `paste_layers.json`'s OWN golden file, so the `text` param cannot
+/// be a second copy of the paste body.
+@Test func operationPasteClipboardText() throws {
+    try runOperationFixture("paste_clipboard_text.json")
+}
+
 /// `state.boolean_remove_redundant_points` defaults to FALSE
 /// (`workspace/state.yaml`), so the collinear-collapse pass does NOT run on a
 /// default boolean. Two rects overlapping in x with the same y-extent: the

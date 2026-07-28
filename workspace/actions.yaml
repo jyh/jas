@@ -198,8 +198,31 @@ actions:
       A layer that is locked or hidden is still a valid paste target and is
       pasted into unchanged; the pasted artwork simply inherits that layer's
       state, so a paste into a hidden layer will not appear until the layer is
-      shown. Pasted objects keep the ids they were copied with. Disabled when no
-      document is open.
+      shown. Pasting also leaves the target layer itself exactly as it was — its
+      lock, its visibility, its name and its identity are none of a paste's
+      business. Pasted objects keep the ids they were copied with. Disabled when
+      no document is open.
+
+      WHAT PASTE ACTS ON is whatever the system clipboard holds at the moment
+      the command runs, and nothing else. There is no hidden second clipboard
+      inside the application, and a paste never resurrects an earlier copy. Three
+      kinds of clipboard content, decided in this order:
+
+      A drawing — content that begins with an SVG document or an XML declaration,
+      after any leading blank space — is read as artwork and pasted as described
+      above. This is what an in-application Copy puts on the clipboard, so
+      copying and pasting inside the application takes this route.
+
+      Any other text — a sentence copied from a word processor, a snippet of web
+      page markup, a filename — is pasted as a TEXT OBJECT holding exactly that
+      text, placed at the paste offset with its baseline one line below, in the
+      active layer, and selected. Text the artist copied is text the artist gets:
+      it is never silently discarded in favour of something they copied earlier,
+      and text that merely looks like markup is not mistaken for a drawing.
+
+      An empty clipboard, or a clipboard the application cannot read at all, does
+      nothing whatsoever: no object appears, the selection is untouched, and no
+      undo step is recorded. Nothing on the clipboard means nothing to paste.
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"
@@ -229,7 +252,13 @@ actions:
 
       A matching layer that is locked or hidden is appended to unchanged: the
       paste neither refuses nor unlocks nor reveals it. Pasted objects keep the
-      ids they were copied with. Disabled when no document is open.
+      ids they were copied with.
+
+      This command reads the same three kinds of clipboard content plain Paste
+      reads, and treats the last two identically to it: plain text becomes a text
+      object in the active layer, since text carries no layer structure to
+      preserve, and an empty or unreadable clipboard does nothing at all.
+      Disabled when no document is open.
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"
@@ -242,6 +271,10 @@ actions:
       different document or layer. The pasted objects become the new
       selection. Layer targeting is plain Paste's: everything lands in the
       ACTIVE layer, and any layer names the fragment carries are ignored.
+      Clipboard handling is plain Paste's too: a drawing is pasted as artwork,
+      any other text becomes a text object — placed at the origin with its
+      baseline one line below, since there is no offset — and an empty or
+      unreadable clipboard does nothing at all.
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"

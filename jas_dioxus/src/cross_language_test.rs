@@ -3544,6 +3544,25 @@ mod tests {
         run_operation_fixture("operations/paste_layers.json");
     }
 
+    /// WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES — D4/D5, ratified
+    /// 2026-07-28 (Swift is canon; Rust drops its internal-clipboard fallback).
+    ///
+    /// `paste_layers.json` carries the fragment MARKUP in `svg`, which
+    /// presupposes the SVG branch was already chosen. This family carries the
+    /// RAW CLIPBOARD PAYLOAD in `text` — before any branch is chosen — so it is
+    /// the only thing that can watch the DISPATCH: text becomes a Text element,
+    /// an empty or unreadable clipboard is a no-op, and an SVG payload still
+    /// reaches the shared paste body.
+    ///
+    /// It is NOT a parallel path.
+    /// `paste_clipboard_svg_payload_through_text_equals_the_svg_param` points at
+    /// `paste_layers.json`'s OWN golden file, so a second copy of the paste body
+    /// behind the `text` param could not stay agreeing with it.
+    #[test]
+    fn operation_paste_clipboard_text() {
+        run_operation_fixture("operations/paste_clipboard_text.json");
+    }
+
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*
     /// print-config verbs journal real ops through `op_apply`. The fixtures span
     /// all four target structs (document_setup, print_preferences root,

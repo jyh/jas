@@ -12,7 +12,6 @@ use super::clipboard::{
 // SaveAsDialog import removed — workspace save-as now uses YAML dialog system
 use super::theme::*;
 use crate::document::controller::Controller;
-use crate::geometry::element::Element as GeoElement;
 use crate::geometry::svg::document_to_svg;
 use crate::panels::panel_menu_state::{MenuBarState, PanelMenuState};
 use crate::tools::tool::PASTE_OFFSET;
@@ -115,18 +114,12 @@ pub(crate) fn MenuBarView(
                     if orphan_count == 0 {
                         (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                             if st.tab().is_none() { return; }
+                            // Copy to the SYSTEM clipboard (the only clipboard —
+                            // D4/D5, see `TabState`), then delete.
                             if let Some(svg) = selection_to_svg(st) {
                                 clipboard_write(svg);
                             }
-                            let elements: Vec<GeoElement> = {
-                                let Some(tab) = st.tab() else { return; };
-                                let doc = tab.model.document();
-                                doc.selection.iter()
-                                    .filter_map(|es| doc.get_element(&es.path).cloned())
-                                    .collect()
-                            };
                             let Some(tab) = st.tab_mut() else { return; };
-                            tab.clipboard = elements;
                             crate::document::op_apply::journal_delete_selection(
                                 &mut tab.model, "cut_selection");
                         }));
@@ -152,18 +145,11 @@ pub(crate) fn MenuBarView(
                 "copy" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.tab().is_none() { return; }
+                        // The SYSTEM clipboard is the only clipboard (D4/D5 —
+                        // see `TabState`).
                         if let Some(svg) = selection_to_svg(st) {
                             clipboard_write(svg);
                         }
-                        let elements: Vec<GeoElement> = {
-                            let Some(tab) = st.tab() else { return; };
-                            let doc = tab.model.document();
-                            doc.selection.iter()
-                                .filter_map(|es| doc.get_element(&es.path).cloned())
-                                .collect()
-                        };
-                        let Some(tab) = st.tab_mut() else { return; };
-                        tab.clipboard = elements;
                     }));
                 }
                 "paste" => {

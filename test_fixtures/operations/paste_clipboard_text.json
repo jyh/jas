@@ -1,0 +1,243 @@
+[
+  {
+    "_doc": [
+      "WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES — D4 and D5,",
+      "ratified 2026-07-28: SWIFT IS CANON, Rust drops its internal-clipboard",
+      "fallback.",
+      "",
+      "THE DIVERGENCE THIS FAMILY EXISTS TO CLOSE (LAYER_STRUCTURE.md 8.3):",
+      "  D4  non-SVG text on the clipboard. Rust skipped the SVG branch and",
+      "      pasted `tab.clipboard` — STALE INTERNAL ARTWORK the artist did not",
+      "      copy — while silently discarding the text they did. Swift built a",
+      "      Text element. Same gesture, two entirely different documents.",
+      "  D5  an empty or unreadable clipboard. Rust pasted the internal buffer;",
+      "      Swift no-opped.",
+      "Both are ruling R2 one level up: INVISIBLE STATE DECIDING WHAT THE ARTIST",
+      "GETS. Paste acts on what the clipboard HOLDS, and an empty clipboard",
+      "means there is nothing to paste.",
+      "",
+      "THE `text` PARAM vs THE `svg` PARAM. `paste_layers.json` carries the",
+      "fragment MARKUP in `svg`, which presupposes the SVG branch was already",
+      "chosen. `text` carries the RAW CLIPBOARD PAYLOAD — the string the port",
+      "reads off the system clipboard, before any branch is chosen — so this",
+      "family is the only thing that can watch the DISPATCH. It is not a",
+      "parallel path: `text` routes through the same `paste_fragment_into` /",
+      "`pasteFragmentInto` body for an SVG payload, which is exactly what",
+      "`paste_clipboard_svg_payload_through_text_equals_the_svg_param` pins by",
+      "pointing at paste_layers.json's OWN golden file.",
+      "  JSON null in `text` means UNREADABLE (the clipboard read itself",
+      "  failed): Rust's `Option<String>` from the JS promise, Swift's nil from",
+      "  `NSPasteboard.string(forType:)`. The empty string means READABLE BUT",
+      "  EMPTY. They are different states and both must no-op.",
+      "",
+      "GOLDENS WERE HAND-AUTHORED FROM THE ENCODING, NOT GENERATED FROM A PORT,",
+      "so the first run of this family was a real red in BOTH ports rather than",
+      "a port agreeing with itself. The Text element is Swift's canon verbatim:",
+      "Text(x: offset, y: offset + 16, content: text) with every other",
+      "parameter defaulted — sans-serif 16pt, normal/normal/none, NO FILL, no",
+      "stroke, unnamed, id-less, appended to the ACTIVE layer and selected.",
+      "",
+      "WHAT THIS FAMILY CANNOT REACH, stated rather than implied: the WIRE from",
+      "the real system clipboard into that dispatch. Swift's is injectable and",
+      "is driven end-to-end by ClipboardTextPasteTests; Rust's still sits in a",
+      "`spawn_local` closure over an Rc<RefCell<AppState>> and a Dioxus Signal",
+      "and is NOT reachable from `cargo test --lib`. What IS reachable in Rust",
+      "is every line below the clipboard read, because the dispatch was lifted",
+      "into `paste_clipboard_text_into`.",
+      "",
+      "BANKED, NOT DECIDED HERE: the canon Text element has fill = null (SVG's",
+      "implicit black), and whitespace-only text still becomes a Text element",
+      "because the guard tests byte-emptiness, not trimmed-emptiness. Both are",
+      "Swift's behaviour pinned as ruled, not invented."
+    ],
+    "name": "paste_clipboard_family_setup_is_two_named_layers_background_and_foreground",
+    "setup_svg": "multi_layer.svg",
+    "txns": [],
+    "expected_json": "paste_doc_noop_expected.json"
+  },
+  {
+    "_doc": [
+      "D4, THE HEADLINE CASE. Plain text from another application. It becomes a",
+      "Text element holding that text. Before the ruling Rust produced the",
+      "setup document plus a COPY OF THE LAST IN-APP SELECTION here."
+    ],
+    "name": "paste_clipboard_plain_text_becomes_a_text_element",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          { "op": "paste", "text": "hello from another app", "offset": 24.0 }
+        ]
+      }
+    ],
+    "expected_json": "paste_clipboard_plain_text_expected.json"
+  },
+  {
+    "_doc": [
+      "Preserve mode degenerates to plain Paste for a text payload — there is",
+      "no layer name to preserve. Pinned by pointing at the SAME GOLDEN FILE as",
+      "the case above rather than by two goldens that could drift apart."
+    ],
+    "name": "paste_clipboard_plain_text_preserving_layers_is_the_same_text_element",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "text": "hello from another app",
+            "offset": 24.0,
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_clipboard_plain_text_expected.json"
+  },
+  {
+    "_doc": [
+      "paste_in_place over text: no offset, so the element lands at x = 0 and",
+      "y = 16 (the baseline is offset + 16 in Swift's canon). Separates the two",
+      "halves of the offset, so a mutation that forces one cannot satisfy both."
+    ],
+    "name": "paste_in_place_clipboard_plain_text_lands_at_the_origin",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste_in_place",
+        "ops": [
+          { "op": "paste", "text": "hello from another app", "offset": 0.0 }
+        ]
+      }
+    ],
+    "expected_json": "paste_clipboard_plain_text_in_place_expected.json"
+  },
+  {
+    "_doc": [
+      "THE DISCRIMINATOR FOR THE SVG PREDICATE. Angle brackets are not enough:",
+      "the payload must start with <svg or <?xml. HTML copied from a browser",
+      "arrives looking like this and must become text, not a parse attempt."
+    ],
+    "name": "paste_clipboard_markup_that_is_not_svg_is_still_text",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          { "op": "paste", "text": "<b>not svg</b>", "offset": 24.0 }
+        ]
+      }
+    ],
+    "expected_json": "paste_clipboard_markup_that_is_not_svg_expected.json"
+  },
+  {
+    "_doc": [
+      "The empty guard tests BYTE-emptiness, not trimmed-emptiness, so three",
+      "spaces are a paste and produce a Text element holding three spaces.",
+      "Swift's behaviour pinned as ruled; banked, not decided here."
+    ],
+    "name": "paste_clipboard_whitespace_only_text_is_still_a_text_element",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      { "name": "paste", "ops": [ { "op": "paste", "text": "   ", "offset": 24.0 } ] }
+    ],
+    "expected_json": "paste_clipboard_whitespace_only_text_expected.json"
+  },
+  {
+    "_doc": [
+      "D5, HALF ONE. Readable but empty. Nothing on the clipboard means nothing",
+      "to paste — the document is untouched, in both ports. Rust used to append",
+      "the internal buffer here."
+    ],
+    "name": "paste_clipboard_empty_text_is_a_noop",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      { "name": "paste", "ops": [ { "op": "paste", "text": "", "offset": 24.0 } ] }
+    ],
+    "expected_json": "paste_doc_noop_expected.json"
+  },
+  {
+    "_doc": [
+      "D5, HALF TWO. The clipboard READ ITSELF FAILED — JSON null, distinct",
+      "from the empty string above. Same answer: nothing to paste."
+    ],
+    "name": "paste_clipboard_unreadable_is_a_noop",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      { "name": "paste", "ops": [ { "op": "paste", "text": null, "offset": 24.0 } ] }
+    ],
+    "expected_json": "paste_doc_noop_expected.json"
+  },
+  {
+    "_doc": [
+      "NO REGRESSION, AND IT IS PINNED BY FILE IDENTITY. The byte-identical SVG",
+      "payload that paste_layers.json feeds through the `svg` param is fed here",
+      "through `text`, and both point at ONE golden file. If the dispatch ever",
+      "stopped routing an SVG payload into the shared paste body — or routed it",
+      "into a second copy of that body — this case and its twin would have to",
+      "disagree, and they cannot, because there is only one file."
+    ],
+    "name": "paste_clipboard_svg_payload_through_text_equals_the_svg_param",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "text": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_single_unnamed_layer_flattens_into_active_expected.json"
+  },
+  {
+    "_doc": [
+      "The OTHER half of the SVG predicate — a payload that starts with the XML",
+      "declaration. Without this case a mutation deleting the <?xml arm would",
+      "go unseen. Same shared golden: the document must be identical."
+    ],
+    "name": "paste_clipboard_xml_declaration_payload_takes_the_svg_branch",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_single_unnamed_layer_flattens_into_active_expected.json"
+  },
+  {
+    "_doc": [
+      "A real clipboard payload often carries leading whitespace. The predicate",
+      "trims before testing the prefix, so this is still SVG — and the PARSER",
+      "must accept the untrimmed string, which is the part a prefix-only test",
+      "would not have caught. Same shared golden."
+    ],
+    "name": "paste_clipboard_svg_with_leading_whitespace_takes_the_svg_branch",
+    "setup_svg": "multi_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "text": "\n   <svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>",
+            "offset": 24.0
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_single_unnamed_layer_flattens_into_active_expected.json"
+  }
+]

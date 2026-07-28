@@ -985,6 +985,115 @@ public func applyPaste(
     return true
 }
 
+// ── WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES ────────────────────────
+// D4 and D5, ratified 2026-07-28: SWIFT IS CANON, Rust drops its
+// internal-clipboard fallback (LAYER_STRUCTURE.md §8.3 / §8.6 item 1).
+//
+// `pasteFragmentInto` above answers "where does this fragment land". The
+// functions below answer the question BEFORE it: given the raw clipboard
+// payload, is there a fragment at all? Swift already answered it correctly —
+// text becomes text, an empty pasteboard is a no-op — but the answer lived
+// INSIDE `EditClipboard.pasteClipboard`, where no fixture could reach it. It is
+// lifted here so the shared corpus family `paste_clipboard_text.json` drives it
+// in both ports through the `paste` verb's `text` param. Mirrors Rust
+// `op_apply::paste_clipboard_text_into`.
+
+/// Does this clipboard payload announce itself as SVG?
+///
+/// Deliberately a PREFIX test on the trimmed payload rather than a parse
+/// attempt: markup copied from a browser (`<b>…</b>`, an HTML fragment) is text
+/// the artist wants as text, and handing it to `svgToDocument` would silently
+/// yield an empty fragment — a paste that looks like it did nothing. The mirror
+/// is Rust `clipboard_text_is_svg`; the corpus pins BOTH accepted prefixes and a
+/// rejected-markup case so neither arm can be dropped unseen.
+public func clipboardTextIsSvg(_ text: String) -> Bool {
+    let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return s.hasPrefix("<?xml") || s.hasPrefix("<svg")
+}
+
+/// Paste a non-SVG clipboard payload as a Text element in the ACTIVE layer.
+///
+/// The element sits at `(offset, offset + 16)` — the baseline is one 16pt line
+/// below the paste origin, so `paste_in_place` puts it at `(0, 16)` — and takes
+/// every other parameter's default. It carries NO FILL (SVG's implicit black);
+/// that is pinned rather than invented, and banked in LAYER_STRUCTURE.md rather
+/// than decided here.
+///
+/// **FIELD-PRESERVING, and that is a REPAIR.** This body used to rebuild the
+/// target as `Layer(name:children:opacity:transform:)` — a hand-written
+/// four-field list against a twelve-field struct — so pasting text into a LOCKED
+/// layer UNLOCKED it, into a HIDDEN layer REVEALED it, and into an IDENTIFIED
+/// layer DESTROYED its identity. That is the Swift copy-site omission class
+/// (EDIT_SEMANTICS_FREEZE.md §3.1), the same defect §9.5 repaired on the SVG
+/// path and left standing here; it shipped on main and is measured red by
+/// `ClipboardTextPasteTests.pasteOfPlainTextPreservesTheTargetLayersOwnFields`.
+/// Mutating the layer VALUE in place is the shape that cannot drift again.
+private func pasteTextElementInto(_ doc: Document, text: String, offset: Double) -> Document? {
+    if doc.layers.isEmpty { return nil }
+    // Same clamp as `pasteFragmentInto`: an out-of-range `selectedLayer` clamps
+    // rather than trapping on the index.
+    let active = min(max(doc.selectedLayer, 0), doc.layers.count - 1)
+    var layers = doc.layers
+    var target = layers[active]
+    let at = target.children.count
+    target.children.append(.text(Text(x: offset, y: offset + 16.0, content: text)))
+    layers[active] = target
+    // `replacing(...)` so artboards / artboardOptions / documentSetup /
+    // printPreferences survive — the designated initializer's empty defaults
+    // silently drop unset fields.
+    return doc.replacing(layers: layers, selection: [ElementSelection.all([active, at])])
+}
+
+/// THE DISPATCH. Given the raw clipboard payload, produce the pasted document —
+/// or `nil` when there is nothing to paste. PURE: no `Model`, no transaction, no
+/// `NSPasteboard`.
+///
+/// `text` is `nil` when the clipboard READ ITSELF FAILED
+/// (`NSPasteboard.string(forType:)` returned nil; Rust's JS promise rejected)
+/// and `""` when the clipboard was readable but empty. **D5 rules both the same
+/// way: nothing to paste.** They are kept as distinct inputs rather than
+/// collapsed at the call site so the corpus can pin each — an empty clipboard
+/// and a broken clipboard are different states, and a future ruling that wants
+/// them to differ has a seam to move.
+///
+/// **D4**: a payload that is not SVG becomes a TEXT ELEMENT holding it. Rust
+/// used to fall back to an internal buffer here and paste stale artwork; that
+/// buffer no longer exists in either port.
+public func pasteClipboardTextInto(
+    _ doc: Document, text: String?, offset: Double, preserveLayers: Bool
+) -> Document? {
+    // D5 — unreadable, and readable-but-empty.
+    guard let text, !text.isEmpty else { return nil }
+    if clipboardTextIsSvg(text) {
+        // The SVG branch is UNCHANGED and routes into the same
+        // `pasteFragmentInto` R2/R3 body the `svg` op param reaches. The corpus
+        // pins that by file identity: the `text` case and the `svg` case share
+        // one golden.
+        let fragment = svgToDocument(text).layers.map { Element.layer($0) }
+        return pasteFragmentInto(doc, fragment: fragment, offset: offset,
+                                 preserveLayers: preserveLayers)
+    }
+    // D4. `preserveLayers` has nothing to bite on — there is no fragment layer,
+    // therefore no name to preserve — so it degenerates to plain Paste, exactly
+    // as an unnamed fragment layer does.
+    return pasteTextElementInto(doc, text: text, offset: offset)
+}
+
+/// `pasteClipboardTextInto` against a `Model`, self-bracketing through
+/// `editDocument`. Returns `false` (a no-op that journals nothing) when there
+/// was nothing on the clipboard to paste. Mirrors Rust
+/// `apply_paste_clipboard_text`.
+@discardableResult
+public func applyPasteClipboardText(
+    _ model: Model, text: String?, offset: Double, preserveLayers: Bool
+) -> Bool {
+    guard let newDoc = pasteClipboardTextInto(
+        model.document, text: text, offset: offset, preserveLayers: preserveLayers)
+    else { return false }
+    model.editDocument(newDoc)
+    return true
+}
+
 /// Unpack the Group at `path`: extract its children, delete the group, and
 /// re-insert the children at the vacated position with ascending indices
 /// (children keep their ids). A non-Group target (or absent path) is a no-op.
@@ -1559,13 +1668,29 @@ public func opApply(
     // could reach ANY paste behaviour in EITHER port, so R2/R3 would have
     // landed unwatched. A verb that re-implemented the paste would be a decoy.
     case "paste":
-        guard let svg = strField(op, "svg") else { return reqErr(op, "svg") }
-        let fragment = svgToDocument(svg).layers.map { Element.layer($0) }
+        let offset = numField(op, "offset")
         let preserve = (op["preserve_layers"] as? Bool) ?? false
-        if !applyPaste(model, fragment: fragment, offset: numField(op, "offset"),
-                       preserveLayers: preserve) {
-            // Benign no-op by the S3 taxonomy: an empty / unparseable fragment
-            // is an empty clipboard, not a missing target.
+        // `text` = the RAW CLIPBOARD PAYLOAD, before any branch is chosen — the
+        // D4/D5 dispatch (`paste_clipboard_text.json`). JSON null (NSNull) means
+        // the clipboard read FAILED; the empty string means it succeeded and was
+        // empty; both are no-ops, and they are distinct inputs so the corpus can
+        // pin each. `svg` = the fragment MARKUP, which presupposes the SVG
+        // branch was already taken (`paste_layers.json`). Not two paths: a
+        // `text` payload that IS SVG lands in the same `pasteFragmentInto` body,
+        // which the two families pin by SHARING one golden file.
+        let changed: Bool
+        if op["text"] != nil {
+            changed = applyPasteClipboardText(model, text: strField(op, "text"),
+                                              offset: offset, preserveLayers: preserve)
+        } else {
+            guard let svg = strField(op, "svg") else { return reqErr(op, "svg") }
+            let fragment = svgToDocument(svg).layers.map { Element.layer($0) }
+            changed = applyPaste(model, fragment: fragment, offset: offset,
+                                 preserveLayers: preserve)
+        }
+        if !changed {
+            // Benign no-op by the S3 taxonomy: an empty / unreadable clipboard,
+            // or an empty / unparseable fragment, is not a missing target.
             return nil
         }
         // `targets` stays EMPTY, matching Rust: paste is not one of the
