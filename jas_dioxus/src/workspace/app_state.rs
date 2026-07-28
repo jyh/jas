@@ -12,7 +12,7 @@ use wasm_bindgen::JsCast;
 use crate::canvas::render;
 use crate::document::controller::Controller;
 use crate::document::model::Model;
-use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign, Element as GeoElement};
+use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign};
 use crate::tools::type_tool::TypeTool;
 use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind};
@@ -59,13 +59,22 @@ pub(crate) struct Act(pub Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>
 /// ``crate::workspace::app_state::EditingTarget``.
 pub(crate) use crate::document::model::EditingTarget;
 
-/// Per-tab state: each tab has its own document, tools, and clipboard.
+/// Per-tab state: each tab has its own document and tools.
 /// View state (zoom_level, view_offset_x, view_offset_y) lives on the
 /// inner Model so doc.zoom.* effects can mutate it directly.
+///
+/// **There is no internal clipboard here, and its absence is a ruling.** This
+/// struct used to carry `clipboard: Vec<Element>`, a Rust-only buffer written by
+/// all five copy sites and read by exactly one place — the fallback in
+/// `workspace::clipboard::clipboard_read_and_paste`. That fallback made a paste
+/// of non-SVG text, or of an empty clipboard, produce STALE INTERNAL ARTWORK
+/// instead of what the system clipboard held (LAYER_STRUCTURE.md §8.3, D4/D5).
+/// JYH ruled 2026-07-28 that Swift — which never had such a buffer — is canon.
+/// Deleting the reader left the field write-only, so the field went too. Copy
+/// now writes the system clipboard and nothing else, in both ports.
 pub(crate) struct TabState {
     pub(crate) model: Model,
     pub(crate) tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
-    pub(crate) clipboard: Vec<GeoElement>,
 }
 
 impl TabState {
@@ -119,11 +128,7 @@ impl TabState {
         // stand-in: a tab being constructed has no Artboards-panel selection
         // yet, so `current_artboard` is the first board by its own rule.
         model.center_view_on_current_artboard(&[]);
-        Self {
-            model,
-            tools,
-            clipboard: Vec::new(),
-        }
+        Self { model, tools }
     }
 }
 

@@ -312,20 +312,13 @@ pub(crate) fn make_keydown_handler(
                 evt.prevent_default();
                 (act.borrow_mut())(Box::new(|st: &mut AppState| {
                     if st.tab().is_none() { return; }
-                    // Write SVG to system clipboard
+                    // The SYSTEM clipboard is the only clipboard (D4/D5,
+                    // ratified 2026-07-28). This site used to also snapshot the
+                    // selection into `TabState.clipboard`; see `TabState` for
+                    // why that buffer is gone.
                     if let Some(svg) = selection_to_svg(st) {
                         clipboard_write(svg);
                     }
-                    // Also update internal clipboard
-                    let elements = {
-                        let Some(tab) = st.tab() else { return; };
-                        let doc = tab.model.document();
-                        doc.selection.iter()
-                            .filter_map(|es| doc.get_element(&es.path).cloned())
-                            .collect::<Vec<_>>()
-                    };
-                    let Some(tab) = st.tab_mut() else { return; };
-                    tab.clipboard = elements;
                 }));
             }
             Key::Character(ref c) if (c == "x" || c == "X") && cmd => {
@@ -361,20 +354,12 @@ pub(crate) fn make_keydown_handler(
                 if orphan_count == 0 {
                     (act.borrow_mut())(Box::new(|st: &mut AppState| {
                         if st.tab().is_none() { return; }
-                        // Write SVG to system clipboard
+                        // Copy to the SYSTEM clipboard (the only clipboard —
+                        // D4/D5, see `TabState`), then delete.
                         if let Some(svg) = selection_to_svg(st) {
                             clipboard_write(svg);
                         }
-                        // Update internal clipboard and delete
-                        let elements = {
-                            let Some(tab) = st.tab() else { return; };
-                            let doc = tab.model.document();
-                            doc.selection.iter()
-                                .filter_map(|es| doc.get_element(&es.path).cloned())
-                                .collect::<Vec<_>>()
-                        };
                         let Some(tab) = st.tab_mut() else { return; };
-                        tab.clipboard = elements;
                         crate::document::op_apply::journal_delete_selection(
                             &mut tab.model, "cut_selection");
                     }));

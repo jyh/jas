@@ -734,3 +734,224 @@ Three coverage-gap rows updated in `scripts/corpus_manifest.json`:
 `unblock` predicted this fix's shape exactly), and
 `identity-law-duplication-verbs-id-less` (its paste half is now watched, though
 still unfixed).
+
+---
+
+## 10. D4 AND D5 — TEXT ON THE CLIPBOARD PASTES AS TEXT
+
+**Closes §8.6 item 1 and §9.9 item 4.** JYH ruled at council 2026-07-28:
+**Swift is canon; Rust drops the internal-clipboard fallback.** D5 was ruled in
+the same breath and in the same direction, and nothing was found that makes the
+empty case differ from the text case, so nothing was banked in its place.
+
+### 10.0 The headline
+
+**The internal clipboard is deleted, not merely bypassed.** `TabState.clipboard`
+had exactly **one reader** — the fallback in `clipboard_read_and_paste` — and
+**five writers**. Removing the reader left the field write-only, so the field
+went with it, and all five copy sites now write the system clipboard and nothing
+else, which is exactly what Swift's single `copySelection` does. That is the
+enumeration the work order asked for, done mechanically:
+
+| site | what it did | what it does |
+|---|---|---|
+| `keyboard.rs` Cmd+C | SVG + `tab.clipboard` | SVG |
+| `keyboard.rs` Cmd+X | SVG + `tab.clipboard` + delete | SVG + delete |
+| `menu_bar.rs` Cut | SVG + `tab.clipboard` + delete | SVG + delete |
+| `menu_bar.rs` Copy | SVG + `tab.clipboard` | SVG |
+| `renderer.rs` `doc.copy_selection_to_clipboard` | SVG + `tab.clipboard` | SVG |
+
+The verifying grep is `grep -rn "\.clipboard" jas_dioxus/src/`: before, five
+writes and one read; after, none.
+
+### 10.1 The machinery, and why it is not a parallel path
+
+The work order said to use the `paste` verb R2/R3 landed, not to build beside
+it. That verb's `svg` param carries **fragment markup**, which presupposes the
+SVG branch was already chosen — so it could not express the D4/D5 question at
+all. It gained a **`text`** param carrying the **raw clipboard payload**, before
+any branch is chosen, and that is the only new surface.
+
+| piece | Rust | Swift |
+|---|---|---|
+| predicate | `op_apply::clipboard_text_is_svg` | `clipboardTextIsSvg` |
+| text branch | `paste_text_element_into` | `pasteTextElementInto` |
+| the dispatch | `paste_clipboard_text_into` | `pasteClipboardTextInto` |
+| `Model` wrapper | `apply_paste_clipboard_text` | `applyPasteClipboardText` |
+| production caller | `clipboard_read_and_paste` (now one call) | `EditClipboard.pasteClipboard` (now one call) |
+
+`text` routes an SVG payload into the **same** `paste_fragment_into` body the
+`svg` param reaches, and that is pinned **by file identity, not by assertion**:
+`paste_clipboard_svg_payload_through_text_equals_the_svg_param` and
+`paste_single_unnamed_layer_flattens_into_active` point at ONE golden file, so a
+second copy of the paste body behind `text` could not stay agreeing with it.
+
+`null` in `text` means **the clipboard read failed**; `""` means **readable and
+empty**. They are kept as distinct inputs rather than collapsed at the call
+site, so the corpus pins each and a future ruling that wants them to differ has
+a seam to move. Both no-op today.
+
+### 10.2 RED FIRST, in BOTH ports at once — and how that was possible
+
+`test_fixtures/operations/paste_clipboard_text.json` (11 cases) was authored
+**and its goldens HAND-AUTHORED from the canonical test-JSON encoding**
+(`jas_dioxus/src/geometry/test_json.rs`, the `Element::Text` arm plus
+`tspan_json` and `common_fields`) rather than generated from a port. That is
+what made a simultaneous two-port red possible: a golden generated from a port
+can only ever red the other one.
+
+> **Rust**: `op 'paste' unexpectedly errored: MissingParam(svg)` — the first case
+> aborts the family.
+> **Swift**: **18 recorded issues across 10 of the 11 cases.** The eleventh is
+> the setup case, which has no `txns` and therefore cannot fail — so the family
+> DISCRIMINATES rather than being uniformly red.
+
+Rust was then implemented and the family went green **without a golden being
+regenerated**: the hand-authored bytes and the implementation's bytes matched
+exactly, first run, all 11 cases. That is a stronger result than a green, and it
+is the only evidence in this brief that the spec and the code were derived
+independently.
+
+### 10.3 A second defect, found and repaired red-first in the same seam
+
+**Swift's plain-text branch dropped the target layer's fields.** It rebuilt the
+layer as `Layer(name:children:opacity:transform:)` — a hand-written four-field
+list against a twelve-field struct — so **pasting text into a locked layer
+UNLOCKED it, into a hidden layer REVEALED it, and into an identified layer
+DESTROYED its identity.** The Swift copy-site omission class
+(EDIT_SEMANTICS_FREEZE.md §3.1) at a paste, and it shipped on main. §9.5
+repaired exactly this shape on the SVG path and left it standing here.
+
+> **Measured before the repair**, by
+> `pasteOfPlainTextPreservesTheTargetLayersOwnFields`:
+> `locked -> false` (want `true`), `visibility -> .preview` (want `.invisible`),
+> `id -> nil` (want `"lyr-sky"`). Three issues.
+
+This had to be repaired rather than banked: Rust's new text branch uses
+`children_mut()` and is field-preserving by construction, so leaving Swift's
+rebuild in place would have **created** a fresh divergence out of the fix for
+this one. The repair is the shape that cannot drift again — the branch mutates
+the layer value in place, so there is no field list to fall behind.
+
+### 10.4 Mutation proof — every cause reverted INDIVIDUALLY
+
+Production restored and verified after every one; the family was re-run green
+between each.
+
+| # | port | mutation | RED observed |
+|---|---|---|---|
+| M1 | Rust | D4 text branch removed | 3 failed — corpus `paste_clipboard_plain_text_becomes_a_text_element`, plus both text probes |
+| M2 | Rust | the `""` guard removed | **1 failed — `paste_clipboard_empty_text_is_a_noop` ONLY**; the unreadable case correctly stayed green |
+| M3 | Rust | the `<?xml` arm of the predicate deleted | **1 failed — `paste_clipboard_xml_declaration_payload_takes_the_svg_branch` ONLY** |
+| M4 | Rust | baseline drop removed (`y = offset`) | 3 failed — `left: (24.0, 24.0)  right: (24.0, 40.0)`; `left: (0.0, 0.0)  right: (0.0, 16.0)` |
+| M5 | Rust | the verb no longer routes through `apply_paste_clipboard_text` | 1 failed immediately — **the `text` param is not a decoy** |
+| M6 | Rust | the text branch appends but does not select | 3 failed — selection `left: 0  right: 1` |
+| M12 | Rust | the unreadable (`text?`) arm removed | **1 failed — `paste_clipboard_unreadable_is_a_noop` ONLY** |
+| M7 | Swift | D4 text branch removed | 11 issues across 5 tests, 5 of them corpus cases |
+| M8 | Swift | the `!isEmpty` half of the guard removed | **2 issues — the empty-STRING probe and one corpus case**; the unreadable probe stayed green |
+| M13 | Swift | the `nil` half of the guard removed | **3 issues — the unreadable probe, the empty-pasteboard probe, one corpus case**; the empty-STRING probe stayed green |
+| M9 | Swift | the OLD field-list `Layer` rebuild restored | 3 issues, exactly the three field assertions — **and the corpus stayed GREEN** |
+| M10 | Swift | `EditClipboard.pasteClipboard` no longer calls the dispatch | **11 issues across 9 tests in 2 suites**, including every pre-existing paste probe — the production wire is real |
+| M11 | Swift | the verb no longer routes through `applyPasteClipboardText` | 8 corpus cases failed |
+
+**M2 / M12 and M8 / M13 are the useful splits**: they show the empty case and
+the unreadable case are separately watched, so neither is riding on the other.
+Without them the two no-op cases would be indistinguishable from vacuous.
+
+**M9 is the most important row**, for the same reason M8 was in §9.4: **under it
+the shared cross-language corpus stayed GREEN while three in-port assertions went
+RED.** §9.6's blind spot, restated with a live example — every corpus case is
+seeded from a `setup_svg` and the SVG codec does not persist `locked` at all, so
+the corpus is structurally blind to the locked / hidden / layer-id question on
+the text branch exactly as it is on the SVG branch. That class remains OPEN and
+is watched by per-port probes only.
+
+### 10.5 What this gate reaches, and what it does NOT
+
+**Reached, in both ports, over shared goldens:** everything from the payload
+string down. Text becomes a Text element at `(offset, offset + 16)` in the
+active layer and becomes the selection; markup that is not SVG stays text;
+whitespace-only text is still text; an empty string and an unreadable clipboard
+each no-op; and all three SVG payload shapes (`<svg`, `<?xml`, leading
+whitespace) route into the shared R2/R3 body.
+
+**Reached in Swift only:** the WIRE. `EditClipboard.pasteClipboard` takes an
+injectable `NSPasteboard`, so `ClipboardTextPasteTests` drives read -> dispatch
+-> document edit end to end (M10 is what proves that is not decorative).
+
+**NOT reached in Rust, and this is the named obstacle the work order
+anticipated:** the clipboard READ. `clipboard_read_and_paste` still reads inside
+a `spawn_local` closure over an `Rc<RefCell<AppState>>` and a Dioxus `Signal`,
+neither constructible outside a Dioxus runtime. The dispatch was lifted OUT of
+that closure — which is what makes everything above reachable — but the read
+itself, the text-editing-session hand-off above it and the `begin_txn`/`commit`
+bracket below it are still asserted on a **reading**. So the two ports are
+watched to different depths and only the shallower depth is common. Recorded as
+the coverage-gap row `rust-clipboard-read-unreachable-from-cargo-test`, with the
+unblock (an injectable reader parameter) stated there.
+
+**Also NOT done:** no GUI was driven in either port; `jas_flask` and the frozen
+ports were not examined; the reference interpreter still has no clipboard code
+at all, so it could not arbitrate — this family, like `paste_layers.json`, is
+Rust-vs-Swift.
+
+### 10.6 §8.5's mutation-proof gap, closed on the way past
+
+§8.5 recorded that `internal_copy_payload_order_is_deterministic_selection_order`
+**reproduced** the copy expression rather than calling it, so a change at any of
+the five copy sites would not have been caught. There is no expression left to
+reproduce: the module is renamed `copy_payload_tests` and both probes now drive
+the production `selection_to_svg` through a real `AppState`, round-tripping the
+payload back through `svg_to_document`. The two D4/D5 characterization probes at
+the end of `InternalClipboardConfirmTests` are deleted — they pinned a
+divergence that no longer exists, and what replaces them makes the ports AGREE
+rather than recording that they do not.
+
+### 10.7 The spec
+
+`workspace/actions.yaml` §paste gains the clipboard-content rule in three
+ordered paragraphs (a drawing, any other text, nothing at all), plus one
+sentence stating that a paste leaves the target layer's own lock, visibility,
+name and identity alone — the sentence §10.3's defect violated.
+§paste_preserving_layers and §paste_in_place each gain the same rule by
+reference. `workspace/workspace.json` regenerated.
+
+**The sentence still NOT touched**: §paste's *"Repeated pastes stack with
+cumulative offsets."* D7 remains banked (§8.6 item 3) and no port implements it.
+
+### 10.8 Gates
+
+| gate | before this pass | after |
+|---|---|---|
+| `cargo test --lib` | 2756 passed / 0 failed / 18 ignored | **2760** passed / 0 failed / 18 ignored |
+| `swift test` | 2794 tests / 23 suites | **2802** tests / 24 suites |
+| `pytest workspace_interpreter/` | 1268 passed | 1268 passed |
+| `cross_language_algorithms.py` | 1086 (465 + 396 + 225) | 1086 (465 + 396 + 225) |
+| `cross_language_commutativity.py` | 28 + 28 oracle | 28 + 28 oracle |
+| `check_corpus_manifest.py` | 26 families / 478 files / 31 gaps | 26 / **483** / **32** |
+| `check_naming_rule.py` | OK, 1392 tracked text files | OK, 1392 (+ `--self-test` OK, 22 cases) |
+| everything else in house law 8 | OK | OK |
+
+The full set was run, not the subset expected to matter: `check_menu_structure`,
+`check_intent_map` (237 actions), `check_toolbar_structure`, `check_action_refs`
+(257 references), `check_panel_goldens`, `check_path_b_exclusions`,
+`genericity_check`, `check_preservation_corpus` (12 vectors),
+`check_corpus_manifest --self-test`, `lane_report --self-test`,
+`check_workspace_json`. **No golden outside the new family moved** — the
+`paste` verb's `svg` arm is untouched, so `paste_layers.json`'s twelve cases and
+`menu_state.json` are byte-identical.
+
+### 10.9 Banked — no ruling invented
+
+1. **The canon Text element carries `fill: null`.** Swift's
+   `Text(x:y:content:)` defaults `fill` to nil, so a pasted text object has no
+   explicit fill and relies on SVG's implicit black. Rust now matches it exactly,
+   because matching Swift is the ruling. Whether a pasted text object should take
+   the current fill (as the Type tool's would) is a real question and this pass
+   did not answer it — the golden is what will move.
+2. **Whitespace-only text is a paste.** The guard tests byte-emptiness, not
+   trimmed-emptiness, so three spaces produce a Text element holding three
+   spaces. Swift's behaviour, pinned rather than invented, with its own corpus
+   case so a ruling moves a visible byte.
+3. **D6 (nondeterministic Swift paste z-order) and D7 (no cumulative paste
+   stacking) are untouched** and remain exactly as §8.6 banked them.

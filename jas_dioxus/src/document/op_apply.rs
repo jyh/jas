@@ -1005,6 +1005,141 @@ pub fn apply_paste(
     true
 }
 
+// ── WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES ────────────────────────
+// D4 and D5, ratified 2026-07-28: SWIFT IS CANON, Rust drops its
+// internal-clipboard fallback (LAYER_STRUCTURE.md §8.3 / §8.6 item 1).
+//
+// `paste_fragment_into` above answers "where does this fragment land". The two
+// functions below answer the question BEFORE it: given the raw clipboard
+// payload, is there a fragment at all? Rust used to answer that question with
+// INVISIBLE STATE — a non-SVG payload fell through to `TabState.clipboard` and
+// re-pasted the last in-app copy, so the artist got artwork they had not
+// copied and lost the text they had. That is ruling R2 one level up, and it is
+// gone: `TabState.clipboard` no longer exists.
+//
+// Lifting the dispatch out of `clipboard_read_and_paste`'s `spawn_local`
+// closure is also what makes it TESTABLE — `test_fixtures/operations/
+// paste_clipboard_text.json` drives these two functions through the `paste`
+// verb's `text` param in both ports.
+
+/// Does this clipboard payload announce itself as SVG?
+///
+/// Deliberately a PREFIX test on the trimmed payload rather than a parse
+/// attempt: markup copied from a browser (`<b>…</b>`, an HTML fragment) is
+/// text the artist wants as text, and handing it to `svg_to_document` would
+/// silently yield an empty fragment — a paste that looks like it did nothing.
+/// The mirror is Swift `clipboardTextIsSvg`; the corpus pins BOTH accepted
+/// prefixes and a rejected-markup case so neither arm can be dropped unseen.
+pub fn clipboard_text_is_svg(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with("<?xml") || trimmed.starts_with("<svg")
+}
+
+/// Paste a non-SVG clipboard payload as a Text element in the ACTIVE layer.
+///
+/// Swift's canon verbatim: the element sits at `(offset, offset + 16)` — the
+/// baseline is one 16pt line below the paste origin, so `paste_in_place` puts
+/// it at `(0, 16)` — and takes every other parameter's default. It carries NO
+/// FILL (SVG's implicit black); that is pinned rather than invented, and
+/// banked in LAYER_STRUCTURE.md rather than decided here.
+///
+/// Field-preserving by construction: it mutates the target layer through
+/// `children_mut()` and never rebuilds it from a field list, which is the shape
+/// §9.5 of the brief had to repair on the SVG path.
+fn paste_text_element_into(
+    doc: &crate::document::document::Document,
+    text: &str,
+    offset: f64,
+) -> Option<crate::document::document::Document> {
+    use crate::document::document::ElementSelection;
+    use crate::geometry::element::{CommonProps, Element, TextElem};
+    if doc.layers.is_empty() {
+        return None;
+    }
+    // Same clamp as `paste_fragment_into`: an out-of-range `selected_layer`
+    // clamps rather than panicking.
+    let active = doc.selected_layer.min(doc.layers.len() - 1);
+    let mut new_doc = doc.clone();
+    let elem = Element::Text(TextElem::from_string(
+        offset,
+        offset + 16.0,
+        text,
+        "sans-serif",
+        16.0,
+        "normal",
+        "normal",
+        "none",
+        0.0,
+        0.0,
+        None,
+        None,
+        CommonProps::default(),
+    ));
+    let kids = new_doc.layers[active].children_mut()?;
+    let at = kids.len();
+    kids.push(std::rc::Rc::new(elem));
+    new_doc.selection = vec![ElementSelection::all(vec![active, at])];
+    Some(new_doc)
+}
+
+/// THE DISPATCH. Given the raw clipboard payload, produce the pasted document
+/// — or `None` when there is nothing to paste. PURE: no `Model`, no
+/// transaction, no `web_sys`, no `AppState`.
+///
+/// `text` is `None` when the clipboard READ ITSELF FAILED (the JS promise
+/// rejected; Swift's `NSPasteboard.string(forType:)` returned nil) and
+/// `Some("")` when the clipboard was readable but empty. **D5 rules both the
+/// same way: nothing to paste.** They are kept as distinct inputs rather than
+/// collapsed at the call site so the corpus can pin each — an empty clipboard
+/// and a broken clipboard are different states, and a future ruling that wants
+/// them to differ has a seam to move.
+///
+/// **D4**: a payload that is not SVG becomes a TEXT ELEMENT holding it. It does
+/// NOT fall back to any internal buffer — that fallback was the whole defect.
+pub fn paste_clipboard_text_into(
+    doc: &crate::document::document::Document,
+    text: Option<&str>,
+    offset: f64,
+    preserve_layers: bool,
+) -> Option<crate::document::document::Document> {
+    // D5 — unreadable, and readable-but-empty.
+    let text = text?;
+    if text.is_empty() {
+        return None;
+    }
+    if clipboard_text_is_svg(text) {
+        // The SVG branch is UNCHANGED and routes into the same
+        // `paste_fragment_into` R2/R3 body the `svg` op param reaches. The
+        // corpus pins that by file identity: the `text` case and the `svg`
+        // case share one golden.
+        let fragment = crate::geometry::svg::svg_to_document(text).layers;
+        paste_fragment_into(doc, &fragment, offset, preserve_layers)
+    } else {
+        // D4. `preserve_layers` has nothing to bite on — there is no fragment
+        // layer, therefore no name to preserve — so it degenerates to plain
+        // Paste, exactly as an unnamed fragment layer does.
+        paste_text_element_into(doc, text, offset)
+    }
+}
+
+/// `paste_clipboard_text_into` against a `Model`, self-bracketing through
+/// `edit_document`. Returns `false` (a no-op that journals nothing) when there
+/// was nothing on the clipboard to paste. Mirrors `apply_paste`.
+pub fn apply_paste_clipboard_text(
+    model: &mut Model,
+    text: Option<&str>,
+    offset: f64,
+    preserve_layers: bool,
+) -> bool {
+    let Some(new_doc) =
+        paste_clipboard_text_into(model.document(), text, offset, preserve_layers)
+    else {
+        return false;
+    };
+    model.edit_document(new_doc);
+    true
+}
+
 /// Unpack the Group at `path` (OP_LOG.md §9 Phase P5): extract its children,
 /// delete the group, and re-insert the children at the vacated position with
 /// ascending indices (children keep their ids — NO minting). Self-bracketing
@@ -1931,18 +2066,38 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         // routing through the production helper would be a decoy that never goes
         // red.
         "paste" => {
-            let Some(svg) = str_field(op, "svg") else {
-                return Err(req_err(op, "svg"));
-            };
-            let fragment = crate::geometry::svg::svg_to_document(svg).layers;
             let offset = num_field(op, "offset");
             let preserve = op
                 .get("preserve_layers")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            if !apply_paste(model, &fragment, offset, preserve) {
-                // Benign no-op by the S3 taxonomy: an empty / unparseable
-                // fragment is an empty clipboard, not a missing target.
+            // `text` = the RAW CLIPBOARD PAYLOAD, before any branch is chosen —
+            // the D4/D5 dispatch (`paste_clipboard_text.json`). JSON null means
+            // the clipboard read FAILED; the empty string means it succeeded and
+            // was empty; both are no-ops, and they are distinct inputs so the
+            // corpus can pin each. `svg` = the fragment MARKUP, which
+            // presupposes the SVG branch was already taken
+            // (`paste_layers.json`). Not two paths: a `text` payload that IS
+            // SVG lands in the same `paste_fragment_into` body, which the two
+            // families pin by SHARING one golden file.
+            let changed = if op.get("text").is_some() {
+                apply_paste_clipboard_text(
+                    model,
+                    op.get("text").and_then(|v| v.as_str()),
+                    offset,
+                    preserve,
+                )
+            } else {
+                let Some(svg) = str_field(op, "svg") else {
+                    return Err(req_err(op, "svg"));
+                };
+                let fragment = crate::geometry::svg::svg_to_document(svg).layers;
+                apply_paste(model, &fragment, offset, preserve)
+            };
+            if !changed {
+                // Benign no-op by the S3 taxonomy: an empty / unreadable
+                // clipboard, or an empty / unparseable fragment, is not a
+                // missing target.
                 return Ok(());
             }
             // `targets` stays EMPTY. Paste is not one of the replay-safe verbs
@@ -2514,5 +2669,104 @@ mod paste_layer_structure_tests {
         let out = paste_fragment_into(&doc, &[rect(1.0, 2.0)], 0.0, false).expect("pasted");
         assert_eq!(kids(&out, 1), vec![(1.0, 2.0)], "clamped to the last layer");
         assert_eq!(out.selection[0].path, vec![1, 0]);
+    }
+
+    // ── D4/D5 — the CLIPBOARD DISPATCH, the shapes the corpus cannot reach ──
+    //
+    // `test_fixtures/operations/paste_clipboard_text.json` is the primary,
+    // cross-language gate: it pins text-becomes-Text, empty and unreadable
+    // no-op, and SVG-still-routes-to-the-shared-body, in both ports over shared
+    // goldens. These probes exist for the three shapes that family CANNOT
+    // express, and each says which.
+
+    /// **THE PRESERVATION LAW ON THE TEXT BRANCH**, and the corpus is
+    /// structurally blind to it: every corpus case is seeded from a `setup_svg`
+    /// and the SVG codec does not persist `locked` at all, so no fixture can
+    /// build a locked, hidden, identified target layer (LAYER_STRUCTURE.md
+    /// §9.6). A text paste does not speak to whether the target layer is locked,
+    /// so it must not change it. Rust satisfies this by construction —
+    /// `children_mut()` mutates the layer value in place — but a port that
+    /// rebuilt the layer from a field list would drop exactly these fields, and
+    /// that is the defect §9.5 had to repair on the SVG path. Swift's twin is
+    /// `pasteOfPlainTextPreservesTheTargetLayersOwnFields`.
+    #[test]
+    fn pasting_text_into_a_locked_hidden_identified_layer_preserves_its_fields() {
+        use crate::geometry::element::Visibility;
+        let target = layer(
+            "Sky",
+            vec![rect(5.0, 5.0)],
+            CommonProps {
+                locked: true,
+                visibility: Visibility::Invisible,
+                id: Some("lyr-sky".into()),
+                ..CommonProps::default()
+            },
+        );
+        let mut doc = doc_with(target);
+        doc.selected_layer = 1;
+        let out = paste_clipboard_text_into(&doc, Some("a note"), 24.0, false)
+            .expect("a text payload pastes");
+        let l = match &out.layers[1] {
+            Element::Layer(l) => l.clone(),
+            other => panic!("expected a Layer, got {other:?}"),
+        };
+        assert_eq!(l.children.len(), 2, "the text element was not appended");
+        assert!(l.common.locked, "the paste silently UNLOCKED the target layer");
+        assert_eq!(
+            l.common.visibility,
+            Visibility::Invisible,
+            "the paste silently REVEALED the target layer"
+        );
+        assert_eq!(
+            l.common.id.as_deref(),
+            Some("lyr-sky"),
+            "the paste DESTROYED the target layer's identity"
+        );
+        assert_eq!(l.name(), "Sky", "the paste dropped the target layer's name");
+        // MANDATORY VALUE ASSERTION on the pasted element itself.
+        match &*l.children[1] {
+            Element::Text(t) => {
+                assert_eq!(t.content(), "a note");
+                assert_eq!((t.x, t.y), (24.0, 40.0), "text baseline is offset + 16");
+            }
+            other => panic!("expected a Text element, got {other:?}"),
+        }
+        assert_eq!(out.selection.len(), 1);
+        assert_eq!(out.selection[0].path, vec![1, 1]);
+    }
+
+    /// A LAYERLESS document has nowhere to put a Text element. The corpus is
+    /// always seeded from an SVG, which always yields at least one layer, so
+    /// only a hand-built document reaches this. `None` means the caller opens no
+    /// transaction — an impossible paste must not cost an undo step.
+    #[test]
+    fn pasting_text_into_a_layerless_document_returns_none() {
+        let no_layers = Document {
+            layers: Vec::new(),
+            ..Document::default()
+        };
+        assert!(
+            paste_clipboard_text_into(&no_layers, Some("hello"), 24.0, false).is_none(),
+            "a layerless document has nowhere to paste text"
+        );
+    }
+
+    /// Hardening, matching `paste_fragment_into`'s clamp: an out-of-range
+    /// `selected_layer` lands the text in the LAST layer rather than panicking
+    /// on the index. Unreachable from the corpus, which cannot author an
+    /// out-of-range selected layer through `setup_svg`.
+    #[test]
+    fn pasting_text_with_an_out_of_range_selected_layer_clamps() {
+        let mut doc = doc_with(layer("Sky", vec![], CommonProps::default()));
+        doc.selected_layer = 99;
+        let out = paste_clipboard_text_into(&doc, Some("x"), 0.0, false).expect("pasted");
+        assert_eq!(out.selection[0].path, vec![1, 0], "clamped to the last layer");
+        match &out.layers[1] {
+            Element::Layer(l) => match &*l.children[0] {
+                Element::Text(t) => assert_eq!((t.x, t.y), (0.0, 16.0)),
+                other => panic!("expected a Text element, got {other:?}"),
+            },
+            other => panic!("expected a Layer, got {other:?}"),
+        }
     }
 }

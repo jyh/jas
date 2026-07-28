@@ -52,38 +52,34 @@ public enum EditClipboard {
     /// what `preserveLayers == true` now does, plus the layer creation it always
     /// lacked. Rust's flatten is the default in both ports.
     ///
+    /// **D4/D5 landed here as a LIFT, not a change of answer** (ratified
+    /// 2026-07-28; Swift is canon). This function used to hold the payload
+    /// dispatch itself — test for SVG, else build a Text element — where no
+    /// fixture could reach it, so Rust was free to answer differently and did:
+    /// it skipped the SVG branch on plain text and pasted `TabState.clipboard`,
+    /// STALE INTERNAL ARTWORK the artist had not copied. The dispatch now lives
+    /// in ``pasteClipboardTextInto(_:text:offset:preserveLayers:)``, which both
+    /// ports call and the shared corpus family `paste_clipboard_text.json`
+    /// drives. Swift's ANSWERS are unchanged; what changed is that they are now
+    /// the only answers.
+    ///
+    /// One defect did change: the plain-text branch rebuilt the target layer
+    /// from a four-field list and silently dropped its `locked`, `visibility`,
+    /// `id`, `blendMode`, `mask`, `isolatedBlending` and `knockoutGroup`. See
+    /// ``pasteClipboardTextInto(_:text:offset:preserveLayers:)``'s text helper.
+    ///
     /// THIN CALLER, deliberately: everything below the pasteboard read is one
-    /// call. The body it used to hold was unreachable from any corpus fixture
-    /// (LAYER_STRUCTURE.md §5) and is now driven by `paste_layers.json` through
-    /// the `paste` op verb.
+    /// call. The pasteboard is injectable, so `ClipboardTextPasteTests` drives
+    /// this whole path end to end — Rust's equivalent read is still inside a
+    /// `spawn_local` closure and is NOT reachable from `cargo test --lib`.
     static func pasteClipboard(_ model: Model, offset: Double,
                                pasteboard: NSPasteboard = .general,
                                preserveLayers: Bool = false) {
-        guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
-        let doc = model.document
-        var newSelection: Selection = []
-
-        if isSvg(text) {
-            let fragment = svgToDocument(text).layers.map { Element.layer($0) }
-            if let newDoc = pasteFragmentInto(doc, fragment: fragment, offset: offset,
-                                              preserveLayers: preserveLayers) {
-                // Undoable paste: editDocument self-brackets one undo step.
-                model.editDocument(newDoc)
-            }
-        } else {
-            // Plain text: create a Text element
-            let elem = Element.text(Text(x: offset, y: offset + 16.0, content: text))
-            let idx = doc.selectedLayer
-            let path: ElementPath = [idx, doc.layers[idx].children.count]
-            newSelection.insert(ElementSelection.all(path))
-            var newLayers = doc.layers
-            newLayers[idx] = Layer(name: newLayers[idx].name,
-                                      children: newLayers[idx].children + [elem],
-                                      opacity: newLayers[idx].opacity,
-                                      transform: newLayers[idx].transform)
-            // Same `replacing(...)` pattern — preserves artboards.
-            model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
-        }
+        // The payload is handed over EXACTLY as read — nil for an unreadable
+        // pasteboard, "" for an empty one. Both are no-ops, decided in one place
+        // rather than by a guard here and a branch there.
+        applyPasteClipboardText(model, text: pasteboard.string(forType: .string),
+                                offset: offset, preserveLayers: preserveLayers)
     }
 
     /// R3 — "Paste, preserving layers": the SEPARATE, EXPLICIT command.
@@ -178,8 +174,8 @@ public enum EditClipboard {
         return elem.translated(dx: dx, dy: dy)
     }
 
-    static func isSvg(_ text: String) -> Bool {
-        let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return s.hasPrefix("<?xml") || s.hasPrefix("<svg")
-    }
+    // `isSvg` moved to `clipboardTextIsSvg` in OpApply.swift with the rest of
+    // the payload dispatch (D4/D5) — a predicate that decides what a paste DOES
+    // belongs with the body that acts on it, and the shared corpus can only see
+    // it there.
 }
