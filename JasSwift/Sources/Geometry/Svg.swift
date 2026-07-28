@@ -1737,9 +1737,16 @@ public func svgToDocument(_ svg: String) -> Document {
                 if layers.isEmpty || layers.last!.name != nil {
                     layers.append(Layer(children: [elem]))
                 } else {
+                    // CLONE-THEN-MUTATE. This was a 4-of-11 rebuild
+                    // (`Layer(name:children:opacity:transform:)`), the same
+                    // copy-site omission class as the paste and Ungroup All
+                    // sites. It is harmless TODAY only because the wrapper it
+                    // appends to was default-constructed by the branch above,
+                    // so the seven fields it dropped were all still defaults —
+                    // an accident of the two branches' order, not a property
+                    // anyone stated. `withChildren` makes it true structurally.
                     let last = layers.removeLast()
-                    layers.append(Layer(name: last.name, children: last.children + [elem],
-                                            opacity: last.opacity, transform: last.transform))
+                    layers.append(last.withChildren(last.children + [elem]))
                 }
             }
         }
