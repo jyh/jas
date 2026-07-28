@@ -73,16 +73,25 @@ description: >
 
   === Locking ===
 
-  Clicking the LOCK_BUTTON toggles the element's lock state. Locked
-  elements cannot be selected or edited on the canvas but remain
+  Clicking the LOCK_BUTTON toggles the element's own lock state.
+  Locked elements cannot be selected or edited on the canvas but remain
   visible. The icon shows lock_locked when locked, lock_unlocked when
   unlocked.
 
-  When locking a container, the container saves each direct child's
-  current lock state, then sets all children to locked. When unlocking
-  a container, each direct child's lock state is restored to the value
-  saved at the time the container was locked. This is per-container:
-  each container remembers only its own direct children's states.
+  LOCK IS INHERITED. A locked layer or group locks everything inside
+  it, at every depth: an element is locked when its own flag is set or
+  when any ancestor's is. Locking a container writes the container's
+  own flag and nothing else — the contents are protected because the
+  application reads the lock down the path, exactly as it reads
+  visibility down the path. Nothing is written onto the children, so
+  unlocking the container has nothing to restore: the contents were
+  never changed, and they come back exactly as the artist left them,
+  including any element that carried a lock of its own.
+
+  An element inside a locked container therefore cannot be individually
+  unlocked. Opening the container is what frees it. This is the same
+  rule visibility has always had — nothing can be visible inside a
+  hidden layer — so there is one rule to learn rather than two.
 
   Locked elements can still be dragged and reparented in the layers
   panel (lock protects content editing, not organizational position).
@@ -142,7 +151,9 @@ description: >
     Layers cannot be dragged into groups.
   - Groups can be dragged into layers and other groups.
   - Leaf elements can be dragged into layers and groups.
-  - Nothing can be dragged into a locked container.
+  - Nothing can be dragged into a locked container, or into anything
+    inside one: a container is locked when its own flag is set or when
+    any ancestor's is.
   - Nothing can be dragged into itself or its own descendants.
   - Every element must live inside a layer; elements cannot be dragged
     to the root level unless they are layers.

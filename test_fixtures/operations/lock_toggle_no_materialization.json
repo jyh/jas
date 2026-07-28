@@ -1,0 +1,136 @@
+[
+  {
+    "_doc": [
+      "MATERIALIZATION IS REPEALED — transcripts/LAYER_STRUCTURE.md §13,",
+      "RULED by JYH 2026-07-28.",
+      "",
+      "WHAT THE SHIPPED SPEC SAID, AND WHY IT HAD TO GO. `workspace/panels/",
+      "layers.yaml` and `workspace/actions.yaml` §toggle_element_lock both",
+      "specified MATERIALIZATION: locking a container SAVED each direct child's",
+      "lock state into transient app state, then WROTE `locked = true` onto",
+      "every one of them, one level deep, and unlocking restored the saved",
+      "values. Meanwhile the Rust comments at controller.rs and",
+      "doc_primitives.rs asserted the OPPOSITE — that the lock is not",
+      "materialized onto children. The spec and the implementation contradicted",
+      "each other IN WRITING, and neither actually protected the contents.",
+      "Inheritance and materialization cannot both stand: kept together they",
+      "DOUBLE-APPLY, and the children end up carrying flags an artist never set.",
+      "",
+      "WHY THIS FAMILY IS NEW MACHINERY. The lock button's document work lived",
+      "only behind a Dioxus click handler and a SwiftUI closure — no op verb, no",
+      "action, no gesture reached it — so `toggle_element_lock` was invisible to",
+      "every shared corpus in this repository, which is how a spec that",
+      "contradicted its own implementation shipped. The `toggle_element_lock` op",
+      "verb added with this family routes through the SAME pure function the",
+      "panel calls (jas_dioxus `toggle_element_lock_at`, JasSwift",
+      "`Document.togglingElementLock`), so it is a gate on the panel's behaviour",
+      "and not a second copy of it.",
+      "",
+      "WHAT SURVIVES THE REPEAL, and is pinned here so it cannot be deleted with",
+      "the rest: locking an element still PRUNES it and its descendants from the",
+      "selection. That is not cosmetic — nothing downstream refuses to move or",
+      "delete a selected element for being locked (SCOPE-effective-locked.md",
+      "§2), so a lock that left the selection alone would leave locked content",
+      "draggable.",
+      "",
+      "WHAT THIS FAMILY CANNOT REACH: the restore-on-unlock BEHAVIOUR being",
+      "deleted was keyed off app-lived state in Rust (`layers_saved_lock_states`)",
+      "and view-lived `@State` in Swift. Neither is document state, so no golden",
+      "here can assert the table is gone — only that unlocking a container",
+      "leaves its children exactly as they were. The tables' deletion is watched",
+      "by the compiler and by the per-port panel tests."
+    ],
+    "name": "lock_toggle_setup_is_one_layer_of_two_rects",
+    "setup_svg": "two_rects.svg",
+    "txns": [],
+    "expected_json": "lock_toggle_noop_expected.json"
+  },
+  {
+    "_doc": "THE HEADLINE. Locking a LAYER writes the layer's own flag and NOTHING ELSE. Before the repeal both children came back locked:true — flags the artist never set, which then survived into the saved file.",
+    "name": "locking_a_layer_writes_only_the_layers_own_flag",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "toggle_element_lock",
+        "ops": [{"op": "toggle_element_lock", "path": [0]}]
+      }
+    ],
+    "expected_json": "lock_toggle_layer_locked_expected.json"
+  },
+  {
+    "_doc": "Lock then unlock returns the document to exactly where it started. Before the repeal the round trip was LOSSY through this seam: the lock wrote locked:true onto both children and the unlock — with no restore table to consult — left them locked while the layer itself opened.",
+    "name": "locking_then_unlocking_a_layer_is_a_round_trip",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "toggle_element_lock",
+        "ops": [{"op": "toggle_element_lock", "path": [0]}]
+      },
+      {
+        "name": "toggle_element_lock",
+        "ops": [{"op": "toggle_element_lock", "path": [0]}]
+      }
+    ],
+    "expected_json": "lock_toggle_noop_expected.json"
+  },
+  {
+    "_doc": "The same rule for a GROUP, one level down. group_nested.svg is layer -> group -> two rects, so this also proves the repeal is about containers and not about layers specifically.",
+    "name": "locking_a_group_writes_only_the_groups_own_flag",
+    "setup_svg": "group_nested.svg",
+    "txns": [
+      {
+        "name": "toggle_element_lock",
+        "ops": [{"op": "toggle_element_lock", "path": [0, 0]}]
+      }
+    ],
+    "expected_json": "lock_toggle_group_locked_expected.json"
+  },
+  {
+    "_doc": "A LEAF has no children to materialize onto, so this case is unchanged by the repeal — it is the control that keeps the fix from being 'stop writing the flag at all'.",
+    "name": "locking_a_leaf_flips_its_own_flag",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "toggle_element_lock",
+        "ops": [{"op": "toggle_element_lock", "path": [0, 1]}]
+      }
+    ],
+    "expected_json": "lock_toggle_leaf_locked_expected.json"
+  },
+  {
+    "_doc": "STEP 3 SURVIVES: locking an element removes it AND its descendants from the selection. The marquee selects both rects, then the LAYER is locked; the selection must come back empty even though the entries named the children, not the layer.",
+    "name": "locking_a_layer_prunes_its_descendants_from_the_selection",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "select_rect",
+        "ops": [{"op": "select_rect", "x": 0, "y": 0, "width": 200, "height": 200, "extend": false}]
+      },
+      {
+        "name": "toggle_element_lock",
+        "ops": [{"op": "toggle_element_lock", "path": [0]}]
+      }
+    ],
+    "expected_json": "lock_toggle_layer_locked_expected.json"
+  },
+  {
+    "_doc": "UNLOCKING does not prune. The rect is selected, locked (which drops it from the selection), then unlocked — and the selection stays empty, because an unlock speaks to the lock flag and to nothing else.",
+    "name": "unlocking_a_leaf_does_not_restore_the_selection",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "select_element",
+        "ops": [{"op": "select_element", "path": [0, 1]}]
+      },
+      {
+        "name": "toggle_element_lock",
+        "ops": [{"op": "toggle_element_lock", "path": [0, 1]}]
+      },
+      {
+        "name": "toggle_element_lock",
+        "ops": [{"op": "toggle_element_lock", "path": [0, 1]}]
+      }
+    ],
+    "expected_json": "lock_toggle_noop_expected.json"
+  }
+]

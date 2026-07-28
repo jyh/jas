@@ -777,6 +777,13 @@ impl Controller {
     }
 
     /// Select all unlocked, visible elements in the document.
+    ///
+    /// "Unlocked" is INHERITED (transcripts/LAYER_STRUCTURE.md §13). This loop
+    /// used to test `child.locked()` and never the LAYER's own flag, so Select
+    /// All swept up the entire contents of a locked layer — while JasSwift's
+    /// `selectAll` (which delegates to `selectFlat`) skipped it. A live
+    /// prime-directive divergence, invisible to the corpus until `jas:locked`
+    /// let a fixture start from a locked document.
     pub fn select_all(model: &mut Model) {
         use crate::geometry::element::Visibility;
         let doc = model.document().clone();
@@ -788,7 +795,13 @@ impl Controller {
             }
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
-                    if child.locked() {
+                    // ONE read, deliberately: `effective_locked` on the CHILD
+                    // path already folds in the layer's own flag, so a
+                    // layer-level short-circuit above this loop would be
+                    // redundant — and a redundant guard is one no mutation can
+                    // turn red, which is how a guard rots. Measured: with both
+                    // present, reverting EITHER left the whole suite green.
+                    if doc.effective_locked(&vec![li, ci]) {
                         continue;
                     }
                     if std::cmp::min(layer_vis, child.visibility()) == Visibility::Invisible {
@@ -853,11 +866,15 @@ impl Controller {
             return;
         }
         let doc = model.document().clone();
-        let elem = match doc.get_element(path) {
-            Some(e) => e,
-            None => return,
-        };
-        if elem.locked() {
+        // A path that names no element selects nothing.
+        if doc.get_element(path).is_none() {
+            return;
+        }
+        // Both reads below are INHERITED down the path. Until LOCKINHERIT the
+        // first one read the element's OWN `locked` flag, one line above an
+        // ancestor-aware visibility read — so a click on a child of a locked
+        // layer selected it. transcripts/LAYER_STRUCTURE.md §13.
+        if doc.effective_locked(path) {
             return;
         }
         if doc.effective_visibility(path) == Visibility::Invisible {
@@ -2328,22 +2345,36 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
-    /// Ungroup all unlocked Group elements in the entire document.
+    /// Ungroup all unlocked Group elements in the entire document, where
+    /// "unlocked" is INHERITED (transcripts/LAYER_STRUCTURE.md §13): a Group
+    /// inside a locked layer or a locked group is left alone, structure
+    /// included, exactly as one with its own flag set is.
     pub fn ungroup_all(model: &mut Model) {
         let doc = model.document().clone();
         let mut changed = false;
 
-        fn flatten(children: &[Rc<Element>], changed: &mut bool) -> Vec<Rc<Element>> {
+        // `ancestor_locked` is the INHERITED half of the lock read
+        // (transcripts/LAYER_STRUCTURE.md §13): a Group survives when its own
+        // flag is set OR when anything it sits inside is locked. This is the
+        // same `effective_locked` fold, threaded through a walk that already
+        // has the ancestors in hand. It is NOT a new guard — `ungroup_all`
+        // always read lock; §13 changed what the word means.
+        fn flatten(
+            children: &[Rc<Element>],
+            ancestor_locked: bool,
+            changed: &mut bool,
+        ) -> Vec<Rc<Element>> {
             let mut result = Vec::new();
             for child in children {
-                if child.is_group() && !child.locked() {
+                let locked = ancestor_locked || child.locked();
+                if child.is_group() && !locked {
                     *changed = true;
                     let inner = child.children().unwrap_or(&[]);
-                    result.extend(flatten(inner, changed));
+                    result.extend(flatten(inner, locked, changed));
                 } else if child.is_group() {
                     // Locked group: recurse into children but keep the group
                     let inner = child.children().unwrap_or(&[]);
-                    let new_children = flatten(inner, changed);
+                    let new_children = flatten(inner, locked, changed);
                     let mut new_group = (**child).clone();
                     if let Some(gc) = new_group.children_mut() {
                         *gc = new_children;
@@ -2361,7 +2392,7 @@ impl Controller {
             .iter()
             .map(|layer| {
                 let children = layer.children().unwrap_or(&[]);
-                let new_children = flatten(children, &mut changed);
+                let new_children = flatten(children, layer.locked(), &mut changed);
                 let mut new_layer = layer.clone();
                 if let Some(lc) = new_layer.children_mut() {
                     *lc = new_children;
@@ -2797,21 +2828,25 @@ fn select_flat(
     let mut entries: Selection = Vec::new();
     for (li, layer) in doc.layers.iter().enumerate() {
         let layer_vis = layer.visibility();
-        // A locked layer's subtree is non-selectable by inheritance (lock is
-        // not materialized onto children); skip the whole layer. Mirrors the
-        // hit_test path, and — since D1 was closed — JasSwift `selectFlat`.
-        // Until then the Swift half of that claim was simply FALSE (its
-        // `selectFlat` checked visibility only), and no gate could see it,
-        // because the shared corpus cannot seed a locked document at all.
-        // The pair is now pinned per-port at both ends (see
-        // `select_rect_skips_a_locked_layer_and_keeps_going` below and
-        // JasSwift `selectRectSkipsALockedLayerAndKeepsGoing`).
-        if layer.locked() || layer_vis == Visibility::Invisible {
+        // A locked layer's subtree is non-selectable by INHERITANCE — lock is
+        // not materialized onto children (transcripts/LAYER_STRUCTURE.md §13,
+        // RULED 2026-07-28), so the guard has to be an ancestor-aware read at
+        // every level rather than a flag on each element. Mirrors the hit_test
+        // path and JasSwift `selectFlat`.
+        //
+        // HONEST NOTE ON WHAT IS WATCHED. This walk is three levels deep, and
+        // the layer guard below is the one that enforces at levels 1 and 2:
+        // under it, `effective_locked` at those depths is ALGEBRAICALLY the
+        // element's own flag, so those two reads are expressive rather than
+        // behavioural and no mutation can turn them red (measured: reverting
+        // either to `.locked()` leaves the whole suite green). The GRANDCHILD
+        // read further down is the behavioural change, and it does red.
+        if doc.effective_locked(&vec![li]) || layer_vis == Visibility::Invisible {
             continue;
         }
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
-                if child.locked() {
+                if doc.effective_locked(&vec![li, ci]) {
                     continue;
                 }
                 let child_vis = std::cmp::min(layer_vis, child.visibility());
@@ -2819,11 +2854,21 @@ fn select_flat(
                     continue;
                 }
                 if child.is_group() {
+                    // A locked grandchild neither TRIGGERS the group selection
+                    // nor JOINS it. Before §13 the predicate ran over every
+                    // grandchild unguarded, so a rubber band that touched only
+                    // a locked member dragged the group and its unlocked
+                    // siblings into the selection with it.
                     if let Some(grandchildren) = child.children()
-                        && grandchildren.iter().any(|gc| predicate(gc))
+                        && grandchildren.iter().enumerate().any(|(gi, gc)| {
+                            !doc.effective_locked(&vec![li, ci, gi]) && predicate(gc)
+                        })
                     {
                         entries.push(ElementSelection::all(vec![li, ci]));
-                        for (gi, _gc) in grandchildren.iter().enumerate() {
+                        for gi in 0..grandchildren.len() {
+                            if doc.effective_locked(&vec![li, ci, gi]) {
+                                continue;
+                            }
                             entries.push(ElementSelection::all(vec![li, ci, gi]));
                         }
                     }
@@ -7069,9 +7114,16 @@ mod ungroup_all_preservation_tests {
         let Element::Group(g) = kept else {
             panic!("the locked group was not kept")
         };
-        // Its children WERE flattened — the operation ran.
+        // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): the kept group's
+        // CONTENTS are locked too, so the nested group inside it survives as a
+        // group. Before the ruling this asserted the opposite — the inner
+        // group was dissolved while its locked parent was kept, which is the
+        // one-level-deep reading inheritance replaces. `layer_keeps_every_
+        // attribute` above is the positive control that ungroup_all still runs.
         assert_eq!(g.children.len(), 2);
-        assert!(g.children.iter().all(|c| matches!(&**c, Element::Rect(_))));
+        assert!(matches!(&*g.children[0], Element::Group(_)),
+            "a group inside a LOCKED group is locked, so it is left alone");
+        assert!(matches!(&*g.children[1], Element::Rect(_)));
 
         assert_eq!(g.common.name.as_deref(), Some("Keeper"));
         assert_eq!(g.common.id.as_deref(), Some("g-keep"));
@@ -7131,10 +7183,11 @@ mod ungroup_all_preservation_tests {
 
     /// Twin of `lockedLayerStaysLocked`.
     ///
-    /// Also pins a fact worth a ruling: a locked LAYER does not protect its
-    /// contents. `flatten` is applied to every layer with no lock check, so an
-    /// unlocked group inside a locked layer is dissolved anyway — the same in
-    /// both ports. If lock becomes INHERITED, this assertion is what moves.
+    /// The fact this test was written to pin — that a locked LAYER did NOT
+    /// protect its contents, so an unlocked group inside one was dissolved
+    /// anyway — was banked with the note "if lock becomes INHERITED, this
+    /// assertion is what moves". It became inherited (JYH, 2026-07-28,
+    /// transcripts/LAYER_STRUCTURE.md §13), and it moved.
     #[test]
     fn locked_layer_stays_locked() {
         let doc = Document {
@@ -7155,10 +7208,10 @@ mod ungroup_all_preservation_tests {
         let out = model.document();
         assert!(out.layers[0].locked());
         assert_eq!(out.layers[0].children().unwrap().len(), 1);
-        // Today: the group inside a LOCKED layer is dissolved anyway.
+        // The group inside a LOCKED layer is left alone, structure included.
         assert!(matches!(
             &*out.layers[0].children().unwrap()[0],
-            Element::Rect(_)
+            Element::Group(_)
         ));
     }
 }

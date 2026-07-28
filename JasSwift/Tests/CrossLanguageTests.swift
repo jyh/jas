@@ -744,6 +744,34 @@ private func recordedCanonicalDocument() -> Document {
 /// transaction) and is pinned by ``PasteStackingTests`` and its Rust twin.
 @Test func operationPasteStacking() throws {
     try runOperationFixture("paste_stacking.json")
+/// LOCK IS INHERITED, NOT MATERIALIZED — transcripts/LAYER_STRUCTURE.md §13
+/// (RULED by JYH 2026-07-28). Twin of Rust `operation_lock_inheritance`.
+///
+/// Drives the two selection seams the ruling names: `select_element` (the
+/// path-addressed click, where the element's OWN `isLocked` was read one line
+/// above an INHERITED `effectiveVisibility`) and `select_rect` (the marquee).
+/// Both op verbs route through the production `Controller` mutators.
+///
+/// This family could not have existed before `jas:locked` landed the same day
+/// (§13.1): every case is seeded from a `setup_svg`, and until then the SVG
+/// codec dropped `common.locked` in both ports, so NO shared fixture anywhere
+/// could start from a locked document.
+@Test func operationLockInheritance() throws {
+    try runOperationFixture("lock_inheritance.json")
+}
+
+/// MATERIALIZATION IS REPEALED — transcripts/LAYER_STRUCTURE.md §13. Twin of
+/// Rust `operation_lock_toggle_no_materialization`.
+///
+/// The shipped spec (`workspace/panels/layers.yaml`, `workspace/actions.yaml`
+/// §toggle_element_lock) said locking a container WRITES `locked = true` onto
+/// each direct child and restores saved states on unlock. Nothing could see it
+/// because the lock button's document work lived only behind a SwiftUI closure
+/// — no op verb, no action, no gesture reached it. The `toggle_element_lock`
+/// verb this family added routes through the SAME pure
+/// `Document.togglingElementLock` the panel calls.
+@Test func operationLockToggleNoMaterialization() throws {
+    try runOperationFixture("lock_toggle_no_materialization.json")
 }
 
 /// `state.boolean_remove_redundant_points` defaults to FALSE
@@ -3551,6 +3579,15 @@ private let actionFixtures = [
     // stays pinned by `menu_group_two_rects` in menu_object_ops.json, which R1
     // must leave byte-identical.
     "group_flatten.json",
+    // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
+    // inherited lock. `actions.yaml` §select_all always said "locked objects
+    // are excluded" without saying WHOSE flag, and the two ports answered
+    // differently — Rust's hand-rolled loop never checked the LAYER's, so
+    // Select All swept up a locked layer's whole contents while this port
+    // skipped it. Deliberately groupless in the open layer: Select All's
+    // group-expansion difference (SCOPE-effective-locked.md D2 / Q2) is
+    // UNRULED and would red here for a reason that is not about lock.
+    "lock_inheritance_actions.json",
 ]
 
 /// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml

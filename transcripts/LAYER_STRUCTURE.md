@@ -1373,3 +1373,144 @@ DIFFERENT depths here and only the shallower depth is common.
 
 ALSO NOT WATCHED: no GUI was driven in either port. Nobody has seen a second
 paste land at 48 on screen.
+### 13.2 STONES 3 AND 4 LANDED — the repeal and `effective_locked` (2026-07-28)
+
+Both stones are ONE semantic change and landed together. Keeping
+materialization while adding inheritance would DOUBLE-APPLY: lock a layer,
+children get written locked, unlock it, and the restore fires against a state
+inheritance had already made meaningless.
+
+**STONE 4 — `effective_locked` / `effectiveLocked.`** ORs `locked` down the
+path, mirroring `effective_visibility` / `effectiveVisibility` line for line
+(`document.rs`, `Document.swift`). Because the fold is an OR there is
+deliberately no escape hatch: a child cannot be unlocked inside a locked
+parent, which is the expressiveness loss ruled explicitly above. An empty or
+unresolvable path is NOT locked — nothing is protected by an address that names
+no artwork.
+
+Wired at three seams per port, and each one had a different defect:
+
+* **`select_element` / `selectElement`** — the smoking gun the scope named. The
+  element's OWN `locked` was read ONE LINE ABOVE an ancestor-aware
+  `effective_visibility` read, so a click on a child of a locked layer selected
+  it, in both ports.
+* **`select_all`** (Rust only; Swift delegates to `selectFlat`) — the
+  hand-rolled layer→child loop tested `child.locked()` and NEVER the layer's,
+  so Select All swept up a locked layer's whole contents. Swift already skipped
+  it. **A live prime-directive divergence, not merely a gap** — and one no gate
+  could see until `jas:locked` let a fixture start from a locked document.
+* **`select_flat` / `selectFlat`** — the layer and child guards became ancestor
+  reads, and the GRANDCHILD acquired a guard it never had: a locked member of
+  an open group no longer TRIGGERS the group selection nor JOINS it. A rubber
+  band that touched only a locked element used to drag the group and its
+  unlocked siblings in with it.
+
+Left alone on purpose: `hit_test` / `hit_test_deep` already prune locked
+subtrees correctly in Rust, Swift AND the Python reference, and
+`select_recursive` / `selectRecursive` already cascade. Nothing there moved.
+
+**STONE 3 — materialization repealed.** `workspace/panels/layers.yaml` and
+`workspace/actions.yaml` §`toggle_element_lock` now state inheritance;
+`§select_all` says whose flag "locked" means; `§ungroup_all` says the same (see
+Q7 below). `AppState.layers_saved_lock_states` (declaration + five construction
+sites) and `YamlPanelBodyView.savedLockStates` are DELETED, and with them the
+`saved_to_restore` / `savedToRestore` parameter. `workspace.json`,
+`intent_map.json` and `INTENT_MAP.md` regenerated.
+
+**THE MACHINERY THAT MADE STONE 3 GATEABLE AT ALL.** The scope listed the
+restore-deletion among the things "that CANNOT be watched by a shared
+cross-language gate", because the lock button's document work lived only behind
+a Dioxus click handler and a SwiftUI closure — no op verb, no action, no
+gesture reached it. That is precisely how a spec which WRITES `locked=true`
+onto every direct child shipped while the Rust comments eight lines away
+asserted the opposite. Two op verbs were added, each routing through the
+PRODUCTION mutator rather than a copy of it:
+
+* `select_element` — the path-addressed click seam
+  (`Controller::select_element` / `Controller.selectElement`), selection-only
+  and non-undoable exactly like `select_rect`.
+* `toggle_element_lock` — the panel lock button's document work, now
+  `Document::toggling_element_lock` / `Document.togglingElementLock`.
+
+Rust's half of that function MOVED out of the web-gated
+`interpreter::renderer` and onto `Document`: it is document logic with no UI in
+it, `op_apply` must reach it in a `--no-default-features` build (the
+cross-language algorithm driver builds that way, and it went red), and Swift's
+twin was already a `Document` method — so the move is toward parity. **BANKED:
+its VISIBILITY twin `cycle_element_visibility_at` is still in `renderer.rs`
+while Swift's `cyclingElementVisibility` is on `Document`. The same move is
+owed, and was not made here because nothing in this wave forced it.**
+
+**RED FIRST, MEASURED, IN BOTH PORTS.** Per-case counts were taken by
+generating each case into a unique throwaway golden, because the Rust runner
+panics at the first mismatch and would otherwise report "1 failure" for any
+number of them.
+
+`test_fixtures/operations/lock_inheritance.json` — **6 of 15 RED in EACH port,
+and the same 6:**
+
+| case | before | ruled |
+|---|---|---|
+| click a child of a locked layer | `[0,0]` | `[]` |
+| click a grandchild of a locked layer | `[0,1]`,`[0,1,0]` | `[]` |
+| click an unlocked group inside a locked layer | `[0,1]` | `[]` |
+| click a child of a locked group | `[1,1]`,`[1,1,0]` | `[]` |
+| marquee over the whole document | 4 entries | 3 |
+| marquee over only a locked member of an open group | 3 entries | `[]` |
+
+`test_fixtures/actions/lock_inheritance_actions.json` — `select_all` RED in
+jas_dioxus, **GREEN in JasSwift**. That asymmetry IS the finding.
+
+`test_fixtures/operations/lock_toggle_no_materialization.json` — **4 of 7 RED
+in each port**: locking a layer, locking a group, the lock→unlock round trip,
+and the selection prune. The round trip is the one that shows the shipped
+design was LOSSY through this seam: the lock wrote flags onto both children and
+the unlock, with no restore table to consult, left them locked while the
+container itself opened.
+
+Final: `cargo test --lib` 2782 (was 2777) · `swift test` 2828 in 26 suites (was
+2823) · pytest 1270 · cross-language 1086 (ORACLE 465 + COMPARISON 396 +
+RELATIONAL 225) · commutativity 32+32 · workspace 8+4 · manifest 26 families /
+504 files / 34 gaps · preservation 13 vectors.
+
+**Q7 ANSWERED BY DIRECT APPLICATION, NOT BY A NEW RULING.** `ungroup_all`
+already READ lock ("except locked ones"); §13 changed what the word MEANS, so
+the read follows: a Group inside a locked layer or a locked group is left
+alone, structure included. No new guard was added anywhere — this is NOT the
+unruled Q3 (whether an operation should refuse to act on a SELECTED locked
+element). A sibling lane had pinned the old behaviour deliberately, with the
+note *"if lock becomes INHERITED, this assertion is what has to move, and it is
+written so the move is visible instead of silent."* It moved, in both ports'
+tests, exactly as that lane intended.
+
+**BANKED — each needs JYH, and none blocked these stones:**
+
+1. **Does a container selection sweep up a locked member?** Clicking the free
+   member of a mixed group still selects the group AND every child, including
+   the locked one. §13 rules on what may be selected by POINTING AT IT, not on
+   what a container selection collects. Pinned by
+   `click_a_free_member_of_a_mixed_group_selects_the_whole_group`, so the day
+   of a ruling is a visible byte change rather than a silent drift.
+2. **The Layers panel's own SELECT_SQUARE ignores lock entirely.** Rust's
+   `on_select_click` (`renderer.rs`) writes `doc.selection` directly with no
+   lock check of any kind — not the element's own, not an ancestor's. Selection
+   from the PANEL is therefore still not gated, in a wave whose whole subject
+   was the selection gate. Not fixed here because it is GUI-only code no corpus
+   drives; it wants a GUI-harness check.
+3. **Q3 remains open and is now the visible next gap.** Move, delete,
+   transform and align still ignore lock — for a DIRECTLY locked element, not
+   just an inherited one — and `align.rs` still mentions `locked` on two
+   comment lines and reads it nowhere.
+4. **`Q4` — the panel icon.** A child of a locked layer now renders
+   `lock_unlocked` (its stored flag) while being unselectable.
+   `runtime_contexts.yaml:243` surfaces the stored value, so the icon and the
+   enforcement disagree. Unchanged by this wave and stated rather than
+   smoothed over.
+
+**WHAT THIS WAVE DID NOT DO.** No GUI was driven in either port: the Layers
+panel lock button, the Dioxus handler and the SwiftUI closure are compile-and-
+corpus findings only. The deleted restore-on-unlock BEHAVIOUR is not directly
+observable by any shared gate — the corpus can prove that unlocking leaves the
+children untouched, which is the same fact from the outside, but the tables'
+disappearance is watched by the compiler alone. And the frozen ports keep the
+materialization design at their tag, correctly.

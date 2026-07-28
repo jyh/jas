@@ -59,20 +59,30 @@ enum MenuActions {
     /// had the defect (`(**child).clone()` / `new_doc.layers = new_layers`,
     /// `controller.rs:2348,2376` — the same in-place shape). Gated by
     /// `UngroupAllPreservationTests`, which asserts BY VALUE.
+    ///
+    /// "Unlocked" is INHERITED (transcripts/LAYER_STRUCTURE.md §13): a Group
+    /// inside a locked layer or a locked group is left alone, structure
+    /// included, exactly as one with its own flag set is.
     static func ungroupAll(_ model: Model) {
         let doc = model.document
         var changed = false
 
-        func flatten(_ children: [Element]) -> [Element] {
+        // `ancestorLocked` is the INHERITED half of the lock read
+        // (transcripts/LAYER_STRUCTURE.md §13): a Group survives when its own
+        // flag is set OR when anything it sits inside is locked. This is the
+        // same `effectiveLocked` fold, threaded through a walk that already has
+        // the ancestors in hand. It is NOT a new guard — `ungroup_all` always
+        // read lock; §13 changed what the word means.
+        func flatten(_ children: [Element], _ ancestorLocked: Bool) -> [Element] {
             var result: [Element] = []
             for child in children {
                 switch child {
-                case .group(let g) where !g.locked:
+                case .group(let g) where !(ancestorLocked || g.locked):
                     changed = true
-                    result.append(contentsOf: flatten(g.children))
+                    result.append(contentsOf: flatten(g.children, false))
                 case .group(let g):
                     // Locked group: recurse into children but keep the group
-                    result.append(.group(g.withChildren(flatten(g.children))))
+                    result.append(.group(g.withChildren(flatten(g.children, true))))
                 default:
                     result.append(child)
                 }
@@ -80,7 +90,7 @@ enum MenuActions {
             return result
         }
 
-        let newLayers = doc.layers.map { $0.withChildren(flatten($0.children)) }
+        let newLayers = doc.layers.map { $0.withChildren(flatten($0.children, $0.locked)) }
         guard changed else { return }
         // Undoable: editDocument self-brackets one undo step.
         model.editDocument(doc.replacing(layers: newLayers, selection: []))

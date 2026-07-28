@@ -317,7 +317,10 @@ actions:
   select_all:
     description: >
       Select all unlocked, visible objects in the active document. Hidden
-      and locked objects are excluded from the selection.
+      and locked objects are excluded from the selection, and "locked"
+      means INHERITED lock: an object is excluded when its own flag is
+      set or when any layer or group it sits inside is locked, at any
+      depth. A locked layer therefore contributes nothing at all.
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"
@@ -400,7 +403,10 @@ actions:
     description: >
       Recursively ungroup every unlocked Group in the document until no
       groups remain (except locked ones). Operates on the entire document,
-      not just the selection.
+      not just the selection. "Locked" is INHERITED lock: a group survives
+      when its own flag is set OR when any layer or group it sits inside is
+      locked, at any depth — a locked layer's contents are left exactly as
+      they are, structure included.
     category: object
     tier: 3
     enabled_when: "state.tab_count > 0"
@@ -1571,12 +1577,19 @@ actions:
 
   toggle_element_lock:
     description: >
-      Toggle the lock state of a single element. When locking a
-      container, the container's direct children's current lock states
-      are saved, then all children are locked. When unlocking a
-      container, each direct child's lock state is restored to its
-      saved value. Locked elements cannot be selected or edited on
-      the canvas, but can be dragged/reparented in the layers panel.
+      Toggle the lock state of a single element, and of that element
+      only. Locking a container writes the container's own flag and
+      nothing else: lock is INHERITED, so a locked layer or group locks
+      everything inside it at every depth without anything being
+      written onto the contents. Unlocking therefore has nothing to
+      restore — the contents were never changed, and they come back
+      exactly as the artist left them, including any element that
+      carried a lock of its own. An element inside a locked container
+      cannot be individually unlocked; opening the container is what
+      frees it. Locked elements cannot be selected or edited on the
+      canvas, but can be dragged/reparented in the layers panel.
+      Locking also removes the element and everything inside it from
+      the current selection.
     category: layers
     tier: 3
     params:

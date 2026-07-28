@@ -3692,7 +3692,6 @@ struct TreeViewContent: View {
     @State private var searchQuery: String = ""
     @State private var isolationStack: [ElementPath] = []
     @State private var soloState: (path: ElementPath, saved: [ElementPath: Visibility])? = nil
-    @State private var savedLockStates: [ElementPath: [Bool]] = [:]
     @State private var hiddenTypes: Set<String> = []
     @State private var showLayerOptionsFor: ElementPath? = nil
     @State private var showFilterMenu: Bool = false
@@ -4107,21 +4106,15 @@ struct TreeViewContent: View {
             SwiftUI.Text(locked ? "\u{1F512}" : "\u{1F513}")
                 .frame(width: 16, height: 16)
                 .onTapGesture {
-                    let e = model.document.getElement(path)
-                    let wasUnlocked = !e.isLocked
-                    let isCont = isContainerElem(e)
-                    // Save child states when locking a container; take them
-                    // back out when unlocking. The map is the view's, the
-                    // document work is Document.togglingElementLock's.
-                    if isCont && wasUnlocked, let kids = elementChildrenStatic(e) {
-                        savedLockStates[path] = kids.map { $0.isLocked }
-                    }
-                    let saved = (isCont && !wasUnlocked)
-                        ? savedLockStates.removeValue(forKey: path) : nil
+                    // The save/restore dance that used to stand here went with
+                    // materialization (transcripts/LAYER_STRUCTURE.md §13): a
+                    // lock now writes ONE flag and reaches the contents by
+                    // inheritance, so there is nothing to remember — and the
+                    // `@State` table it lived in was VIEW-lived, so a later
+                    // unlock after the panel had been torn down silently failed
+                    // to restore anything anyway (D5b).
                     // Undoable lock toggle: editDocument self-brackets one step.
-                    model.editDocument(
-                        model.document.togglingElementLock(
-                            at: path, savedToRestore: saved))
+                    model.editDocument(model.document.togglingElementLock(at: path))
                 }
             // Twirl or gap
             if row.isContainer {
