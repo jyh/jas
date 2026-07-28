@@ -260,11 +260,16 @@ public enum LayersPanel {
                 }
             }
             var newLayers = model.document.layers
-            newLayers[idx] = Layer(
-                name: newName, children: layer.children,
-                opacity: layer.opacity, transform: layer.transform,
-                locked: newLocked, visibility: newVisibility
-            )
+            // Clone-then-mutate the THREE fields this effect speaks to. The
+            // rebuild this replaced named 6 of Layer's 11 stored fields, so
+            // every lock toggle, eye click and panel rename DESTROYED the
+            // layer's `id` (breaking reference resolution, REFERENCE_GRAPH.md
+            // §2.4) along with its blend mode, mask and both opacity flags —
+            // the Swift copy-site omission class. Gated by
+            // `CopySiteOmissionTests.layersPanelDocSetKeepsLayerIdentity`.
+            newLayers[idx] = layer.withName(newName)
+                                  .withLocked(newLocked)
+                                  .withVisibility(newVisibility)
             // .replacing(...) preserves documentSetup / printPreferences
             // — passing them through the designated init silently drops
             // any field not enumerated, which would reset the user's

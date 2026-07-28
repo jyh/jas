@@ -77,10 +77,14 @@ public enum EditClipboard {
             let path: ElementPath = [idx, doc.layers[idx].children.count]
             newSelection.insert(ElementSelection.all(path))
             var newLayers = doc.layers
-            newLayers[idx] = Layer(name: newLayers[idx].name,
-                                      children: newLayers[idx].children + [elem],
-                                      opacity: newLayers[idx].opacity,
-                                      transform: newLayers[idx].transform)
+            // Clone-then-mutate, the same repair the SVG branch already
+            // carries (LAYER_STRUCTURE.md §9.5). The rebuild this replaced
+            // named 4 of Layer's 11 stored fields, so pasting TEXT into a
+            // locked layer UNLOCKED it, into a hidden layer REVEALED it, and
+            // destroyed the layer's `id`. The SVG branch was repaired and this
+            // one was left behind — hence the gate
+            // `CopySiteOmissionTests.plainTextPasteKeepsTargetLayerFields`.
+            newLayers[idx] = newLayers[idx].withChildren(newLayers[idx].children + [elem])
             // Same `replacing(...)` pattern — preserves artboards.
             model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
         }

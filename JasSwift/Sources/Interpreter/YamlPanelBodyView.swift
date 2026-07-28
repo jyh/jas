@@ -4155,9 +4155,12 @@ struct TreeViewContent: View {
                 TextField("", text: $editingName, onCommit: {
                     let e = model.document.getElement(path)
                     if case .layer(let le) = e {
-                        let newLayer = Layer(name: editingName, children: le.children,
-                                             opacity: le.opacity, transform: le.transform,
-                                             locked: le.locked, visibility: le.visibility)
+                        // Clone-then-mutate: a rename speaks to the NAME.
+                        // The rebuild this replaced named 6 of Layer's 11
+                        // stored fields, so renaming a layer destroyed its
+                        // `id`, blend mode, mask and both opacity flags — the
+                        // Swift copy-site omission class.
+                        let newLayer = le.withName(editingName)
                         // Undoable rename: editDocument self-brackets one step.
                         model.editDocument(model.document.replaceElement(path, with: .layer(newLayer)))
                     }
@@ -4377,9 +4380,12 @@ struct TreeViewContent: View {
                 TextField("", text: $editingName, onCommit: {
                     let e = model.document.getElement(path)
                     if case .layer(let le) = e {
-                        let newLayer = Layer(name: editingName, children: le.children,
-                                             opacity: le.opacity, transform: le.transform,
-                                             locked: le.locked, visibility: le.visibility)
+                        // Clone-then-mutate: a rename speaks to the NAME.
+                        // The rebuild this replaced named 6 of Layer's 11
+                        // stored fields, so renaming a layer destroyed its
+                        // `id`, blend mode, mask and both opacity flags — the
+                        // Swift copy-site omission class.
+                        let newLayer = le.withName(editingName)
                         // Undoable rename: editDocument self-brackets one step.
                         model.editDocument(model.document.replaceElement(path, with: .layer(newLayer)))
                     }

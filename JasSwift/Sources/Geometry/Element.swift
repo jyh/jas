@@ -3242,7 +3242,7 @@ public struct Layer: Equatable {
                 knockoutGroup: Bool = false,
                 mask: Mask? = nil,
                 id: String? = nil) {
-        self.name = (name?.isEmpty == true) ? nil : name
+        self.name = Layer.normalizedName(name)
         self.id = id
         self.children = children
         self.opacity = opacity; self.transform = transform
@@ -3339,12 +3339,36 @@ extension Group {
 }
 
 extension Layer {
+    /// The empty layer name means UNNAMED, everywhere. Owned here so the
+    /// memberwise init and ``withName(_:)`` cannot drift apart.
+    static func normalizedName(_ name: String?) -> String? {
+        (name?.isEmpty == true) ? nil : name
+    }
+
     public func withId(_ id: String?) -> Layer {
         var v = self; v.id = id; return v
     }
 
     public func withChildren(_ children: [Element]) -> Layer {
         var v = self; v.children = children; return v
+    }
+
+    /// Clone-then-mutate single-field writes, so a caller that wants to change
+    /// a layer's name / lock / visibility never has to spell out an argument
+    /// list against an 11-field struct. Every such rebuild that existed before
+    /// these was silently dropping `id`, `blendMode`, `mask` and both opacity
+    /// flags (the Swift copy-site omission class); see `CopySiteOmissionTests`
+    /// and `scripts/check_swift_copy_sites.py`.
+    public func withName(_ name: String?) -> Layer {
+        var v = self; v.name = Layer.normalizedName(name); return v
+    }
+
+    public func withLocked(_ locked: Bool) -> Layer {
+        var v = self; v.locked = locked; return v
+    }
+
+    public func withVisibility(_ visibility: Visibility) -> Layer {
+        var v = self; v.visibility = visibility; return v
     }
 }
 
