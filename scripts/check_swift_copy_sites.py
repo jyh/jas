@@ -236,7 +236,7 @@ def scan_text(path: str, src: str, fields_by_type: dict[str, list[str]]) -> list
 
 def load_fields() -> dict[str, list[str]]:
     return {
-        t: stored_properties(p.read_text(), t) for t, p in DECLS.items()
+        t: stored_properties(p.read_text(encoding="utf-8"), t) for t, p in DECLS.items()
     }
 
 
@@ -247,7 +247,7 @@ def run() -> int:
     findings: list[dict] = []
     for path in sorted(SOURCES.rglob("*.swift")):
         rel = str(path.relative_to(REPO))
-        findings += scan_text(rel, path.read_text(), fields_by_type)
+        findings += scan_text(rel, path.read_text(encoding="utf-8"), fields_by_type)
     if not findings:
         print("check_swift_copy_sites: OK — no truncated rebuilds")
         return 0
@@ -347,7 +347,7 @@ def self_test() -> int:
     # truncated field walk (which is exactly how this gate first shipped blind
     # to Document, reading 4 of its 8 fields).
     for t, p in DECLS.items():
-        src = p.read_text()
+        src = p.read_text(encoding="utf-8")
         got = set(real.get(t, []))
         want = set(init_labels(src, t))
         if got != want:
