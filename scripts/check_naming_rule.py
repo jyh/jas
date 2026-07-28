@@ -104,13 +104,30 @@ def tracked_files(root: pathlib.Path) -> list[str]:
     return [p for p in out.split("\0") if p]
 
 
+def decode_if_text(data: bytes) -> str | None:
+    """Decode `data` as text, or return None if it is binary.
+
+    Decided from the CONTENT, over the whole buffer -- never from a prefix and
+    never from the file's name. Binary means: contains a NUL byte, or does not
+    decode as UTF-8.
+    """
+    if b"\x00" in data:
+        return None
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
 def scan(rels, read):
     """Core rule, decoupled from git and the filesystem so it is testable.
 
-    `read(rel)` returns the file's raw BYTES. Returns (hits, exempted, scanned).
+    `read(rel)` returns the file's raw BYTES.
+    Returns (hits, exempted, scanned, skipped_binary).
     """
     hits: list[str] = []
     exempted: list[str] = []
+    skipped_binary: list[str] = []
     scanned = 0
 
     for rel in rels:
@@ -122,7 +139,10 @@ def scan(rels, read):
             data = read(rel)
         except OSError:
             continue
-        text = data.decode("utf-8", errors="replace")
+        text = decode_if_text(data)
+        if text is None:
+            skipped_binary.append(rel)
+            continue
         scanned += 1
         for n, line in enumerate(text.splitlines(), 1):
             if not BANNED.search(line):
@@ -132,7 +152,7 @@ def scan(rels, read):
                 continue
             hits.append(f"  {rel}:{n}: {line.strip()[:110]}")
 
-    return hits, exempted, scanned
+    return hits, exempted, scanned, skipped_binary
 
 
 def self_test() -> int:
@@ -168,7 +188,7 @@ def self_test() -> int:
         # (j) a clean file stays clean
         "docs/clean.md": b"a vector illustration application\n",
     }
-    hits, exempted, scanned = scan(sorted(corpus), corpus.__getitem__)
+    hits, exempted, scanned, skipped_binary = scan(sorted(corpus), corpus.__getitem__)
     got = sorted(h.split(":")[0].strip() for h in hits)
 
     failures = []
@@ -200,7 +220,7 @@ def main() -> int:
         return self_test()
 
     root = pathlib.Path(__file__).resolve().parent.parent
-    hits, exempted, scanned = scan(
+    hits, exempted, scanned, skipped_binary = scan(
         tracked_files(root),
         lambda rel: (root / rel).read_bytes(),
     )
