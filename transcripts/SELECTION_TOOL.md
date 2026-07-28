@@ -53,7 +53,7 @@ even if it's inside a Group. A marquee release runs
 `partial_select_rect` — the same rectangle that Selection
 treats as "whole-element" selects individual control points
 here, matching the behavior of the native Interior Selection
-tool in Illustrator.
+tool in the incumbent.
 
 Useful for editing one object inside a nested group without
 having to ungroup first.

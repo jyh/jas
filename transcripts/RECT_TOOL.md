@@ -55,8 +55,8 @@ other state-level defaults) being set by the user before drawing.
 
 ## Known gaps
 
-- **Shift-constrained square** — Illustrator's rect tool
+- **Shift-constrained square** — the incumbent's rect tool
   constrains to a square when Shift is held. Not currently
   wired; a future revision can add a square-snap primitive.
-- **Alt-from-center draw** — Illustrator's rect tool draws
+- **Alt-from-center draw** — the incumbent's rect tool draws
   centered on the press point when Alt is held. Also not wired.

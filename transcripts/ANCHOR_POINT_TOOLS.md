@@ -42,7 +42,7 @@ implicitly included since `.all` doesn't track specific CPs).
 Partial-with-specific-CPs preservation across insertion is a
 future enhancement.
 
-**Scope:** click-to-insert only. Illustrator also supports
+**Scope:** click-to-insert only. the incumbent also supports
 Alt+click-to-toggle (covered by the Convert tool now) and
 Space+drag-to-reposition the just-inserted anchor; both are
 intentionally omitted from the MVP.
@@ -93,7 +93,7 @@ handle independently.
 
 **No live preview.** The final document state is computed on
 mouseup; the user doesn't see the rearranged handles while
-dragging. Matching Illustrator's live-preview is a follow-up.
+dragging. Matching the incumbent's live-preview is a follow-up.
 
 **State lives on the `anchor_point` tool scope:**
 

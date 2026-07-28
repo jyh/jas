@@ -37,7 +37,7 @@ stroke-dasharray: 4 4; fill: none;`. Renders only while
 
 ## Known gaps
 
-- **Shift-constrained angles** — Illustrator's Line tool
+- **Shift-constrained angles** — the incumbent's Line tool
   snaps to 45° increments when Shift is held. The workspace YAML
   currently ignores Shift; a future revision can add the
   `constrain_angle` primitive pass here.
