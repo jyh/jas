@@ -2911,6 +2911,13 @@ public struct Text: Equatable {
                   fill: fill, stroke: stroke,
                   opacity: opacity, transform: transform,
                   locked: locked, visibility: visibility,
+                  // blendMode and mask were accepted and then NOT forwarded,
+                  // so `Text(x:y:content:blendMode:mask:)` silently discarded
+                  // both -- the Swift copy-site omission class again. Found by
+                  // the binary codec's per-tag common extension gate
+                  // (BinaryCommonExtensionTests), which drives a blend-moded,
+                  // masked Text through this initializer on the read path.
+                  blendMode: blendMode, mask: mask,
                   name: name, id: id)
     }
 
@@ -3096,6 +3103,8 @@ public struct TextPath: Equatable {
                   fill: fill, stroke: stroke,
                   opacity: opacity, transform: transform,
                   locked: locked, visibility: visibility,
+                  // As Text's content initializer: accepted and not forwarded.
+                  blendMode: blendMode, mask: mask,
                   name: name, id: id)
     }
 

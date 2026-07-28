@@ -1,0 +1,104 @@
+{
+  "_doc": [
+    "BINARY WIRE -- the byte-level codec gate, shared by both active ports.",
+    "",
+    "WHY THIS FILE EXISTS. Every OTHER codec gate in this repository compares",
+    "canonical test-JSON STRINGS, and the fields the binary codec drops are a",
+    "strict SUBSET of the fields that string oracle also drops (measured; see",
+    "test_fixtures/expected/codec_field_survival.json and coverage gap",
+    "`codec-string-oracle-cannot-see-a-dropped-field`). So no fixture could",
+    "red-light a binary drop, and a one-port slot mismatch in `pack_element` /",
+    "`packElement` would land SILENTLY. Extending a format whose divergences we",
+    "cannot see is not acceptable, so this gate was RULED to land in the same",
+    "wave as the per-tag trailing extension (2026-07-27, see",
+    "transcripts/EDIT_SEMANTICS_FREEZE.md).",
+    "",
+    "WHAT MAKES IT A CROSS-PORT STATEMENT. There is ONE golden here, not a",
+    "mirrored literal per port. A port that drifts cannot fix itself by editing",
+    "its own copy, because it has no copy: it must move the shared file, which",
+    "immediately reds the other port. That is the property the two mirrored",
+    "DONUT_*_HEX literals in binary.rs / BinaryFillRuleTests.swift did NOT have.",
+    "",
+    "WHAT IT DOES NOT WATCH. It compares what the WRITERS produce for documents",
+    "each port CONSTRUCTS IN CODE (`wire_case_document` in",
+    "jas_dioxus/src/cross_language_test.rs, `wireCaseDocument` in",
+    "JasSwift/Tests/CrossLanguageTests.swift). Those two constructions are part",
+    "of what is being compared, so they must stay shape-for-shape identical; a",
+    "case whose two constructors drift apart would fail loudly, but a case whose",
+    "constructors are BOTH wrong about the intent would pass. It says nothing",
+    "about the READ path beyond the fact that each pinned blob still decodes,",
+    "and nothing about whether a field survives -- that is",
+    "codec_field_survival.json's job. Neither gate subsumes the other.",
+    "",
+    "`tag_arity` -- the number of msgpack slots the writer emits for each",
+    "element tag, asserted through `packed_element_slot_count` /",
+    "`packedElementSlotCount`. The per-tag trailing append is DEFINED against",
+    "these numbers: `unpack_common` reads FIXED indices 1..6 and every variant's",
+    "payload starts at index 7, so the shared common block could not be extended",
+    "once and each tag's extension block begins at the tag's own base arity",
+    "(arity minus the extension). Both ports carry the same `tag_base_arity`",
+    "table; this file is the third, language-neutral copy that makes a drift",
+    "between them visible.",
+    "",
+    "`cases[].hex` -- the UNCOMPRESSED blob, byte for byte, so the pinned string",
+    "is the msgpack itself and not a deflate stream. Regenerate after an",
+    "INTENTIONAL codec change with",
+    "`cargo test print_binary_wire_hex -- --ignored --nocapture` and paste the",
+    "result here; the swift lane then reds until it agrees, which is the point.",
+    "",
+    "`cases[].port_hex` -- a case where the two ports MEASURABLY DISAGREE today.",
+    "`hex` is what both ports must eventually reach; a port named here is",
+    "asserted to produce the stated OTHER bytes, so CLOSING the divergence reds",
+    "this gate until the entry is deleted. A divergence can therefore never rot",
+    "into a silent suppression (the same discipline as `port_overrides` in",
+    "codec_field_survival.json and `expected_violations` in",
+    "test_fixtures/preservation/). Empty is the goal state."
+  ],
+
+  "_tag_arity_doc": "tag -> packed slot count. Base arity (the index the extension block starts at) is this number minus 3, and minus 5 for `path`, which also carries stroke_brush + stroke_brush_overrides. Kept OUTSIDE `tag_arity` so the gate can assert that it reaches every declared key -- a comment inside the map would read as a thirteenth tag.",
+
+  "tag_arity": {
+    "layer": 11,
+    "group": 11,
+    "line": 16,
+    "rect": 18,
+    "circle": 15,
+    "ellipse": 16,
+    "polyline": 13,
+    "polygon": 13,
+    "path": 17,
+    "text": 23,
+    "text_path": 21,
+    "live": 13
+  },
+
+  "cases": [
+    {
+      "name": "shapes_default",
+      "_doc": "One Group, Line, Rect, Circle, Ellipse, Polyline, Polygon and Path at their defaults inside one Layer. Minimal content on purpose: arity is a property of the tag, not of the values, so fewer numbers keeps the bytes readable. Byte-identical in both ports.",
+      "hex": "4a4153000200000094919b00c2cb3ff000000000000002c0c0c0989b0ac2cb3ff000000000000002c0c0c09000c0c0dc001001c2cb3ff000000000000002c0c0c0cb0000000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c0c000c0c0dc001202c2cb3ff000000000000002c0c0c0cb0000000000000000cb0000000000000000cb3ff0000000000000cb4000000000000000cb0000000000000000cb0000000000000000c0c000c0c09f03c2cb3ff000000000000002c0c0c0cb0000000000000000cb0000000000000000cb3ff0000000000000c0c000c0c0dc001004c2cb3ff000000000000002c0c0c0cb0000000000000000cb0000000000000000cb3ff0000000000000cb4000000000000000c0c000c0c09d05c2cb3ff000000000000002c0c0c09292cb0000000000000000cb000000000000000092cb3ff0000000000000cb3ff0000000000000c0c000c0c09d06c2cb3ff000000000000002c0c0c09392cb0000000000000000cb000000000000000092cb3ff0000000000000cb3ff000000000000092cb4000000000000000cb0000000000000000c0c000c0c0dc001107c2cb3ff000000000000002c0c0c0929300cb0000000000000000cb00000000000000009301cb3ff0000000000000cb3ff0000000000000c0c0c00000c0c0c0c000c0c0009090",
+      "port_hex": {}
+    },
+    {
+      "name": "text_default",
+      "_doc": "A default Text and a default TextPath. Split out from `shapes_default` because the TSPAN payload is a MEASURED live divergence -- see `port_hex.swift`, which is the FIRST thing this gate found.",
+      "hex": "4a4153000200000094919b00c2cb3ff000000000000002c0c0c092dc001708c2cb3ff000000000000002c0c0c0cb3ff0000000000000cb4000000000000000a26869a5417269616ccb4028000000000000a66e6f726d616ca66e6f726d616ca46e6f6e65cb4024000000000000cb4028000000000000c0c091dc003300a26869c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c000c0c0dc001509c2cb3ff000000000000002c0c0c0929300cb0000000000000000cb00000000000000009301cb3ff0000000000000cb3ff0000000000000a26869cb0000000000000000a5417269616ccb4028000000000000a66e6f726d616ca66e6f726d616ca46e6f6e65c0c091dc003300a26869c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c000c0c000c0c0009090",
+      "port_hex": {
+        "_doc": "MEASURED 2026-07-27, the moment this gate existed, and PRE-EXISTING -- not introduced by the extension wave. jas_dioxus's `pack_tspan` writes FIFTY-ONE slots per tspan (0x33); JasSwift's `packTspan` writes TWENTY-TWO (0x16) and its `unpackTspan` reads only 22. So the two ports have never written the same bytes for any Text or TextPath, and JasSwift's binary codec drops 29 tspan fields on a round trip (jasRole, jasLeftIndent, jasRightIndent, jasHyphenate, jasHangingPunctuation, jasListStyle, textAlign, textAlignLast, textIndent, jasSpaceBefore, jasSpaceAfter, the three word-spacing, three letter-spacing and three glyph-scaling values, jasAutoLeading, jasSingleWordJustify and the seven hyphenation controls) even though its own `Tspan` struct HOLDS every one of them. Invisible until now for exactly the reason this gate was ruled: `binary_roundtrip_all_expected` / `binaryRoundtripAllExpected` compare canonical test-JSON strings, `binary_read_python_fixtures` reads PYTHON-written bytes, and both ports read trailing slots tolerantly -- so each port round-trips its OWN blobs and neither notices the other's. The repair is Swift-side and mechanical (mirror Rust's field order in packTspan and unpackTspan); it is NOT folded into the extension wave, so that a red here means one thing at a time. When it lands, delete this entry and the case goes byte-identical.",
+        "swift": "4a4153000200000094919b00c2cb3ff000000000000002c0c0c092dc001708c2cb3ff000000000000002c0c0c0cb3ff0000000000000cb4000000000000000a26869a5417269616ccb4028000000000000a66e6f726d616ca66e6f726d616ca46e6f6e65cb4024000000000000cb4028000000000000c0c091dc001600a26869c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c000c0c0dc001509c2cb3ff000000000000002c0c0c0929300cb0000000000000000cb00000000000000009301cb3ff0000000000000cb3ff0000000000000a26869cb0000000000000000a5417269616ccb4028000000000000a66e6f726d616ca66e6f726d616ca46e6f6e65c0c091dc001600a26869c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c000c0c000c0c0009090"
+      }
+    },
+    {
+      "name": "live_default",
+      "_doc": "All four LIVE kinds (compound_shape, reference, recorded, generated), which share one tag and therefore one arity.",
+      "hex": "4a4153000200000094919b00c2cb3ff000000000000002c0c0c0949d0bc2cb3ff000000000000002c0c0c0ae636f6d706f756e645f7368617065a5756e696f6e9000c0c09d0bc2cb3ff000000000000002c0c0c0a97265666572656e6365a26d31c000c0c09d0bc2cb3ff000000000000002c0c0c0a87265636f72646564a25b5da25b5d00c0c09d0bc2cb3ff000000000000002c0c0c0a967656e657261746564a673706972616ca27b7d00c0c000c0c0009090",
+      "port_hex": {}
+    },
+    {
+      "name": "saturated_extension",
+      "_doc": "The extension's whole reason for existing, at non-default values: `codec_field_survival.json`'s saturated Path -- masked, blend-moded, tool-tagged, brushed, even-odd, with a width profile and both arrowheads. The two gradients it also carries are NOT on the wire (banked, see codec_field_survival.json's binary/fill_gradient classification), so this case is byte-identical in both ports today; when the gradient slots land, this is the case whose bytes move.",
+      "hex": "4a4153000200000094919b00c2cb3ff000000000000002c0c0c091dc001107c3cb3fe00000000000000196cb4000000000000000cb0000000000000000cb0000000000000000cb4008000000000000cb4014000000000000cb401c000000000000a96e616d655f70617468a769645f70617468939300cb0000000000000000cb00000000000000009301cb4024000000000000cb40240000000000009107929601cb405e000000000000cb3fe0000000000000cb3fe3333333333333cb0000000000000000cb3fe999999999999acb3fe33333333333339e9602cb3fb999999999999acb3fc999999999999acb3fd3333333333333cb3fd999999999999acb3feccccccccccccdcb40120000000000000102cb3fe8000000000000cb401e0000000000000194cb4008000000000000cb3ff8000000000000cb4018000000000000cb3fe8000000000000ac636c6f7365645f6172726f77a6636972636c65cb4062c00000000000cb4052c0000000000001c39293cb0000000000000000cb3ff0000000000000cb400000000000000093cb3ff0000000000000cb4008000000000000cb4010000000000000010296dc001202c2cb3ff000000000000002c0c0c0cb3ff0000000000000cb4000000000000000cb4008000000000000cb4010000000000000cb0000000000000000cb0000000000000000929600cb3ff0000000000000cb3ff0000000000000cb3ff0000000000000cb0000000000000000cb3ff0000000000000cb3ff0000000000000c000c0c0c3c3c2c296cb3ff0000000000000cb0000000000000000cb0000000000000000cb3ff0000000000000cb4022000000000000cb4022000000000000aa626c6f625f6272757368b462617369632f63616c6c69677261706869635f35ac7b22616e676c65223a33307d00c0c0009090",
+      "port_hex": {}
+    }
+  ]
+}
