@@ -21,18 +21,18 @@ hand-maintained skip list, which is the kind of list that rots. (Measured:
 and not one line of them was written here.)
 
   TEXT means: no NUL byte, and the bytes decode as UTF-8. Judged over the WHOLE
-  file, never a prefix -- measured, and this is why. The `assets/icons/*.ai`
-  artwork sources are PDF containers whose first NUL byte lands at offset
-  379756, so an 8 KB NUL sniff calls them TEXT; they are recognised as binary
-  only because they fail to decode as UTF-8, at byte 9. Across the 1896 tracked
-  files those two criteria disagree on exactly those two files. An 8 KB prefix
-  and the whole file agree today (1830 text either way) -- the whole file is
-  used regardless, because it has to be read to be scanned and a prefix is a
-  guess.
+  file, never a prefix. The rule was chosen against a real counter-example: the
+  `assets/icons/*.ai` artwork sources were PDF containers whose first NUL byte
+  landed at offset 379756, so an 8 KB NUL sniff called them TEXT; they were
+  recognised as binary only because they failed to decode as UTF-8, at byte 9.
+  They were the ONLY two files in the tree on which the two criteria disagreed,
+  and they were deleted 2026-07-28 -- so the whole-file rule now has no live
+  example arguing for it. It is kept anyway: the file has to be read to be
+  scanned, so a prefix buys nothing and is a guess.
 
-  Files skipped as binary are PRINTED, grouped by suffix, on a passing run: 61
-  today (.png 35, .bin 21, .ico 2, .ai 2, .icns 1). A skip nobody can see is
-  precisely how this gate's scope came to be wrong in the first place.
+  Files skipped as binary are PRINTED, grouped by suffix, on a passing run: 56
+  today (.png 32, .bin 21, .ico 2, .icns 1). A skip nobody can see is precisely
+  how this gate's scope came to be wrong in the first place.
 
   This replaced a 24-suffix WHITELIST whose docstring described it as excluding
   binary assets. Censused: it silently skipped 39 tracked text files, among
@@ -120,23 +120,27 @@ FOUR EXEMPTION CLASSES, each deliberate:
 WHAT THIS CHECK DELIBERATELY CANNOT SEE -- stated because a gate whose blind
 spots are unknown invites a claim wider than its evidence:
 
-  * BINARY CONTENT. Re-censused 2026-07-27 over all 40 tracked PNGs: 10 contain
-    the vendor token, 0 contain the product token, and 0 carry a `CreatorTool`
-    field of any kind. Every one of the 37 vendor matches is an XMP namespace
-    URI in the vendor's own domain, inside an iTXt chunk -- ISO-standard
-    metadata emitted by a screenshot tool, not authored prose, and not
-    removable without breaking the standard.
+  * BINARY CONTENT. Re-censused 2026-07-28 after the artwork deletions, over
+    all 37 tracked PNGs (32 reach the binary classifier; the other 5 live in
+    `article/` and are skipped as an exempt tree first): 7 contain the vendor
+    token, 0 contain the product token, and 0 carry a `CreatorTool` field of
+    any kind. Every one of the 27 vendor matches is an XMP namespace URI in the
+    vendor's own domain, inside an iTXt chunk -- ISO-standard metadata emitted
+    by a screenshot tool, not authored prose, and not removable without
+    breaking the standard.
     (An earlier version of this docstring asserted that these PNGs carry "a
     `CreatorTool` field". They do not, and the claim had never been measured.
     It is recorded here rather than quietly deleted, because a gate's own
     self-description is the worst place in a repository for a claim wider than
     its evidence, and this file is meant to be the house's example of the
     opposite.)
-    The two `.ai` artwork sources DO carry both tokens as prose inside their
-    XMP packets -- 32 and 37 matches respectively. They remain out of scope as
-    binary containers. Whether proprietary-format artwork sources belong in a
-    public repository at all is a provenance decision for JYH, not a
-    naming-rule matter.
+    THE ONE REAL EXPOSURE IS NOW GONE. Two `.ai` artwork sources carried both
+    tokens as prose inside their XMP packets -- 32 and 37 matches, 69 in all,
+    invisible to this gate by design. JYH deleted them 2026-07-28 once it was
+    established that the shipping icons are genuine `<path>` SVG (measured: no
+    embedded raster), so the vector sources were editable without them and
+    nothing was lost. The provenance question that hung over them is closed by
+    deletion rather than by exemption.
     (`.svg` IS in scope: an SVG exported from that product embeds a plain-text
     `Generator:` comment, which is both readable prose and safe to delete.)
   * A SEPARATOR-FREE RUN. A banned word fused to another word in a single case
@@ -149,9 +153,9 @@ spots are unknown invites a claim wider than its evidence:
     This gate stops forgetting, not intent.
   * NON-UTF-8 TEXT. A Latin-1 or UTF-16 prose file would be classified binary
     and skipped. Measured: zero such files today -- every tracked NUL-free file
-    decodes as UTF-8 except the two `.ai` containers, which are binary by
-    intent. The binary-skip line printed on a passing run is what would expose
-    a new one.
+    decodes as UTF-8. (Until 2026-07-28 the two `.ai` containers were the sole
+    exception; they are deleted.) The binary-skip line printed on a passing run
+    is what would expose a new one.
   * UNTRACKED FILES. By construction -- and this bit once: while THIS file was
     itself untracked it passed the gate it defines, because its own pattern
     line was invisible to it. The line now carries a marker.
