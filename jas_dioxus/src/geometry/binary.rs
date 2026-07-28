@@ -1357,6 +1357,20 @@ mod tests {
     /// panic aborts the whole module (no catch_unwind), and since save_session
     /// loads from localStorage on every startup, a single corrupt entry would
     /// otherwise brick the app on every load. Regression guard for #8.
+    ///
+    /// Swift's side of this contract is
+    /// JasSwift/Tests/Geometry/BinaryMalformedBlobTests.swift, which covers the
+    /// whole decoder rather than the three cases below. It was written in
+    /// 2026-07-27 after an audit found that JasSwift's decoder TRAPPED (16
+    /// `fatalError` sites, 10 of them on the decode path) where this port
+    /// returns `Err` — and that JasSwift's `Session.swift` reads a
+    /// `tabN.jasbin` from disk on every cold launch, so the divergence was a
+    /// launch abort, not a test-only concern.
+    ///
+    /// Two hardening rules that port needed and this one gets for free from
+    /// rmpv, noted so a hand-rolled reader here would not lose them:
+    /// rmpv does not preallocate on an array length prefix (issue 151), and it
+    /// enforces `rmpv::decode::MAX_DEPTH == 1024`. JasSwift now does both.
     #[test]
     fn malformed_but_decodable_blob_errors_not_panics() {
         // (1) Top-level shape wrong: [0] should be an array of elements.
@@ -1675,7 +1689,18 @@ mod tests {
     // `stroke_brush_overrides` with them on Path. A round trip speaks to
     // NOTHING, so it must preserve EVERYTHING.
     //
-    // Twins in JasSwift/Tests/Geometry/BinaryCommonExtensionTests.swift.
+    // Twins, per test, because this block's tests live in TWO Swift files and
+    // an earlier one-line "Twins in BinaryCommonExtensionTests.swift" named a
+    // file that held no twin of the last two:
+    //
+    //   binary_round_trips_the_path_common_extension
+    //   binary_round_trips_the_common_extension_on_every_tag
+    //       -> JasSwift/Tests/Geometry/BinaryCommonExtensionTests.swift
+    //   binary_without_the_common_extension_still_loads
+    //       -> aPreExtensionBlobStillLoads
+    //   binary_tolerates_malformed_common_extension_slots
+    //       -> toleratedExtensionSlotsStayTolerated
+    //       (both in JasSwift/Tests/Geometry/BinaryMalformedBlobTests.swift)
     // ------------------------------------------------------------------
 
     /// A Path carrying every field of the extension at a non-default value.
