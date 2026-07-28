@@ -676,6 +676,22 @@ fn extended_element_fields(o: &mut JsonObj, elem: &Element) {
             o.str_val("stroke_brush_overrides", b);
         }
     }
+    // The two CONTAINER-only flags (Opacity panel, transcripts/OPACITY.md
+    // §Group). They live on Group and Layer and nowhere else, so they are
+    // written here rather than beside the eleven common keys — and, like every
+    // key above, only when true, which is what keeps every shipped golden
+    // (whose containers are all false) byte-identical.
+    let (iso, ko) = match elem {
+        Element::Group(e) => (e.isolated_blending, e.knockout_group),
+        Element::Layer(e) => (e.isolated_blending, e.knockout_group),
+        _ => (false, false),
+    };
+    if iso {
+        o.bool_val("isolated_blending", true);
+    }
+    if ko {
+        o.bool_val("knockout_group", true);
+    }
 }
 
 fn element_json(elem: &Element) -> String {
@@ -1496,6 +1512,19 @@ fn apply_extended_element_fields(elem: &mut Element, v: &serde_json::Value) {
             e.width_points = wp;
             e.stroke_brush = parse_str_opt(&v["stroke_brush"]);
             e.stroke_brush_overrides = parse_str_opt(&v["stroke_brush_overrides"]);
+        }
+        // The container-only flags. The `group` / `layer` arms of
+        // `parse_element_base` still build with `false`, exactly as
+        // `parse_common` still builds with the default blend mode: this
+        // post-pass is the ONE place either flag is read, so a new container
+        // kind cannot silently miss it.
+        Element::Group(e) => {
+            e.isolated_blending = v["isolated_blending"].as_bool().unwrap_or(false);
+            e.knockout_group = v["knockout_group"].as_bool().unwrap_or(false);
+        }
+        Element::Layer(e) => {
+            e.isolated_blending = v["isolated_blending"].as_bool().unwrap_or(false);
+            e.knockout_group = v["knockout_group"].as_bool().unwrap_or(false);
         }
         _ => {}
     }

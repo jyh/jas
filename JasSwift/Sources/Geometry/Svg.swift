@@ -153,6 +153,27 @@ private func idLockAttrs(_ id: String?, locked: Bool) -> String {
     return s
 }
 
+/// The Opacity panel's two page-level blending flags, as workspace-private
+/// attributes on a `<g>`. Written ONLY when true, so an ordinary group or
+/// layer serializes byte-identically to before and no shipped golden moved.
+///
+/// WHY A `jas:` EXTENSION AND NOT A STANDARD ATTRIBUTE. There is no standard
+/// one. CSS `isolation: isolate` is the nearest thing to isolated blending,
+/// but it is a RENDERING property a jas file would then be promising to
+/// honour, and neither port's renderer implements either flag yet
+/// (transcripts/OPACITY.md marks both `pending_renderer`); knockout groups are
+/// a PDF transparency-group concept with no SVG analogue at all. So this takes
+/// the shape `jas:locked` landed in one day earlier — a workspace-private
+/// boolean in the `urn:jas:1` namespace that `documentToSvg`'s ` jas:` prefix
+/// guard already declares. Mirrors Rust's `container_blend_attrs`.
+private func containerBlendAttrs(_ elem: Element) -> String {
+    let flags = containerBlendFlags(elem)
+    var s = ""
+    if flags.isolatedBlending { s += " jas:isolated-blending=\"true\"" }
+    if flags.knockoutGroup { s += " jas:knockout-group=\"true\"" }
+    return s
+}
+
 private func pathData(_ commands: [PathCommand]) -> String {
     commands.map { cmd in
         switch cmd {
@@ -448,7 +469,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             "\(tpSpaceAttr)>\(tpBody)</textPath></text>"
 
     case .group(let v):
-        var lines = ["\(indent)<g\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
+        var lines = ["\(indent)<g\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(containerBlendAttrs(elem))>"]
         for child in v.children {
             lines.append(elementSvg(child, indent: indent + "  "))
         }
@@ -458,7 +479,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
     case .layer(let v):
         // inkscape:groupmode="layer" lets the parser distinguish a
         // Layer from a named Group (both carry inkscape:label).
-        var lines = ["\(indent)<g inkscape:groupmode=\"layer\"\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
+        var lines = ["\(indent)<g inkscape:groupmode=\"layer\"\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(containerBlendAttrs(elem))>"]
         for child in v.children {
             lines.append(elementSvg(child, indent: indent + "  "))
         }
@@ -1605,13 +1626,20 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
         // a named Group, not a Layer.
         let groupMode = elem.attribute(forName: "groupmode")?.stringValue
                       ?? elem.attribute(forName: "inkscape:groupmode")?.stringValue
+        // The two container-only flags ride workspace-private attributes (see
+        // `containerBlendAttrs`); absent means false, so every pre-existing
+        // file still reads exactly as it was authored.
+        let iso = elem.attribute(forName: "jas:isolated-blending")?.stringValue == "true"
+        let ko = elem.attribute(forName: "jas:knockout-group")?.stringValue == "true"
         if groupMode == "layer" {
             return .layer(Layer(name: name ?? "", children: children,
                                     opacity: opacity, transform: transform,
+                                    isolatedBlending: iso, knockoutGroup: ko,
                                     id: id))
         }
         return .group(Group(children: children,
                                 opacity: opacity, transform: transform,
+                                isolatedBlending: iso, knockoutGroup: ko,
                                 name: name, id: id))
 
     case "use":

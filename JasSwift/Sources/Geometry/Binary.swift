@@ -119,6 +119,14 @@ private let commonExtLen = 3
 /// tagPath only, immediately after the common extension.
 private let extStrokeBrush = commonExtLen
 private let extStrokeBrushOverrides = commonExtLen + 1
+/// tagLayer / tagGroup only, immediately after the common extension. These
+/// share their OFFSETS with the two tagPath slots above, which is safe and
+/// deliberate: the offset is read only inside the arm for its own tag, and a
+/// tag carries either the container pair or the path pair, never both. Written
+/// unconditionally for both container tags, so each tag's arity stays constant
+/// and the shared wire gate can assert it. Mirrors Rust's EXT_* constants.
+private let extIsolatedBlending = commonExtLen
+private let extKnockoutGroup = commonExtLen + 1
 
 /// Slots a tag carried BEFORE the extension -- equivalently, the index at
 /// which its extension block starts. Mirrors Rust's `tag_base_arity` and is
@@ -993,6 +1001,19 @@ private func packElement(_ elem: Element) -> MsgValue {
         slots.append(optStr(e.strokeBrush))
         slots.append(optStr(e.strokeBrushOverrides))
     }
+    // Container-only, immediately after the common extension. Before this the
+    // codec dropped both flags outright: set knockout on a group, save,
+    // relaunch, and the setting was gone (coverage gap
+    // `container-blend-fields-survive-no-codec`). Appended, VERSION still 2,
+    // read tolerantly, exactly as the 2026-07-27 common extension was.
+    switch elem {
+    case .group, .layer:
+        let flags = containerBlendFlags(elem)
+        slots.append(vbool(flags.isolatedBlending))
+        slots.append(vbool(flags.knockoutGroup))
+    default:
+        break
+    }
     return .array(slots)
 }
 
@@ -1286,6 +1307,21 @@ private func unpackCommonExt(_ arr: [MsgValue], _ tag: Int) throws -> (BlendMode
             tolerantOptStr(slot(extToolOrigin)))
 }
 
+/// The two CONTAINER-only extension slots, read TOLERANTLY -- absent, nil or
+/// anything that is not a boolean yields `false`, so a blob written before the
+/// slots existed still loads with exactly the values it was authored with.
+/// Mirrors Rust's `tolerant_bool` reads in the TAG_LAYER / TAG_GROUP arms.
+private func containerFlagSlots(_ arr: [MsgValue], _ tag: Int)
+    -> (isolatedBlending: Bool, knockoutGroup: Bool) {
+    let base = tagBaseArity(tag)
+    func flag(_ off: Int) -> Bool {
+        let i = base + off
+        guard i < arr.count, case .bool(let b) = arr[i] else { return false }
+        return b
+    }
+    return (flag(extIsolatedBlending), flag(extKnockoutGroup))
+}
+
 private func unpackElement(_ v: MsgValue) throws -> Element {
     let arr = try asArray(v)
     let tag = try asInt(at(arr, 0))
@@ -1306,14 +1342,20 @@ private func unpackElement(_ v: MsgValue) throws -> Element {
     switch tag {
     case tagLayer:
         let children = try asArray(at(arr, 7)).map { try unpackElement($0) }
+        let (iso, ko) = containerFlagSlots(arr, tagLayer)
         return .layer(Layer(name: name, children: children, opacity: opacity,
                             transform: xform, locked: locked, visibility: vis,
-                            blendMode: mode, mask: mask, id: id))
+                            blendMode: mode,
+                            isolatedBlending: iso, knockoutGroup: ko,
+                            mask: mask, id: id))
     case tagGroup:
         let children = try asArray(at(arr, 7)).map { try unpackElement($0) }
+        let (iso, ko) = containerFlagSlots(arr, tagGroup)
         return .group(Group(children: children, opacity: opacity,
                             transform: xform, locked: locked, visibility: vis,
-                            blendMode: mode, mask: mask, name: name, id: id))
+                            blendMode: mode,
+                            isolatedBlending: iso, knockoutGroup: ko,
+                            mask: mask, name: name, id: id))
     case tagLine:
         let wp = arr.count > 12 ? try unpackWidthPoints(arr[12]) : []
         return .line(Line(x1: try asF64(at(arr, 7)), y1: try asF64(at(arr, 8)),

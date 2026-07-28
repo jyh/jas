@@ -195,6 +195,33 @@ fn tool_origin_attr(origin: &Option<String>) -> String {
 /// a new `jas:`-namespaced attribute is covered by that guard automatically.
 /// An attribute in any other prefix would need its own declaration trigger, and
 /// forgetting one makes Foundation reject the WHOLE document.
+/// The Opacity panel's two page-level blending flags, as workspace-private
+/// attributes on a `<g>`. Written ONLY when true, so an ordinary group or
+/// layer serializes byte-identically to before and no shipped golden moved
+/// (measured: 0 of the containers across the SVG fixtures carry either flag).
+///
+/// WHY A `jas:` EXTENSION AND NOT A STANDARD ATTRIBUTE. There is no standard
+/// one. CSS `isolation: isolate` is the nearest thing to isolated blending,
+/// but it is a RENDERING property a jas file would then be promising to
+/// honour, and neither port's renderer implements either flag yet
+/// (transcripts/OPACITY.md marks both `pending_renderer`); knockout groups are
+/// a PDF transparency-group concept with no SVG analogue at all. So this is
+/// exactly the shape `jas:locked` landed in one day earlier -- a
+/// workspace-private boolean in the `urn:jas:1` namespace, alongside the
+/// sibling `jas:tool-origin`. Emitting a standard property we do not honour
+/// would be the guess the Preservation Law forbids; dropping the value
+/// silently was the defect. Mirrors JasSwift's `containerBlendAttrs`.
+fn container_blend_attrs(isolated_blending: bool, knockout_group: bool) -> String {
+    let mut s = String::new();
+    if isolated_blending {
+        s.push_str(" jas:isolated-blending=\"true\"");
+    }
+    if knockout_group {
+        s.push_str(" jas:knockout-group=\"true\"");
+    }
+    s
+}
+
 fn id_lock_attrs(id: &Option<String>, locked: bool) -> String {
     let id_part = match id {
         None => String::new(),
@@ -564,9 +591,10 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             // inkscape:groupmode="layer" lets the parser distinguish
             // a Layer from a named Group (both carry inkscape:label).
             let mut lines = vec![format!(
-                "{}<g inkscape:groupmode=\"layer\"{}{}{}{}>",
+                "{}<g inkscape:groupmode=\"layer\"{}{}{}{}{}>",
                 indent, id_lock_attrs(&e.common.id, e.common.locked), name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                container_blend_attrs(e.isolated_blending, e.knockout_group),
             )];
             let child_indent = format!("{}  ", indent);
             for child in &e.children {
@@ -577,9 +605,10 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
         }
         Element::Group(e) => {
             let mut lines = vec![format!(
-                "{}<g{}{}{}{}>",
+                "{}<g{}{}{}{}{}>",
                 indent, id_lock_attrs(&e.common.id, e.common.locked), name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                container_blend_attrs(e.isolated_blending, e.knockout_group),
             )];
             let child_indent = format!("{}  ", indent);
             for child in &e.children {
@@ -1955,10 +1984,19 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             let group_mode = node.attrs.get("inkscape:groupmode").cloned();
             // common.name is already populated from inkscape:label
             // by parse_common; both Layer and Group inherit it from there.
+            // The two container-only flags ride workspace-private attributes
+            // (see `container_blend_attrs`); absent means false, so every
+            // pre-existing file still reads exactly as it was authored.
+            let iso = node.attrs.get("jas:isolated-blending").map(|v| v == "true").unwrap_or(false);
+            let ko = node.attrs.get("jas:knockout-group").map(|v| v == "true").unwrap_or(false);
             if group_mode.as_deref() == Some("layer") {
-                Some(Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false }))
+                Some(Element::Layer(LayerElem {
+                    children, common, isolated_blending: iso, knockout_group: ko,
+                }))
             } else {
-                Some(Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false }))
+                Some(Element::Group(GroupElem {
+                    children, common, isolated_blending: iso, knockout_group: ko,
+                }))
             }
         }
         "use" => {
