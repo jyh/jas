@@ -9,5 +9,16 @@
       {"kind": "release", "x": 36, "y": 36}
     ],
     "expected_json": "select_click_multi_layer_expected.json"
+  },
+  {
+    "_doc": "The same click through the OTHER hit-test primitive. selection.yaml calls hit_test; interior_selection.yaml calls hit_test_deep, and the two are separate functions with separately-written layer loops -- so a gate on one is not a gate on the other. Measured: with only the `selection` case above, reverting the layer .rev() in hit_test_deep alone left the whole cargo suite green. Same document, same press point, same answer [1, 0], because on a document with no groups the deep walk must agree with the flat one.",
+    "name": "interior_select_click_topmost_layer",
+    "setup_svg": "multi_layer.svg",
+    "tool": "interior_selection",
+    "events": [
+      {"kind": "press", "x": 36, "y": 36},
+      {"kind": "release", "x": 36, "y": 36}
+    ],
+    "expected_json": "select_click_multi_layer_expected.json"
   }
 ]
