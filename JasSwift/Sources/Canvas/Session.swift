@@ -138,7 +138,8 @@ public extension WorkspaceState {
                 // cross-app convention, so the app layer centers here (mirrors
                 // WorkspaceState.addCanvas + Rust TabState). The canvas first
                 // draw re-centers with the real viewport.
-                model.centerViewOnCurrentArtboard()
+                model.centerViewOnCurrentArtboard(
+                    artboardsPanelSelection: artboardsPanelSelectionIds(model))
                 loaded.append(CanvasEntry(model: model))
             } catch {
                 NSLog("[session] decode \(tab.binFile) failed: \(error)")

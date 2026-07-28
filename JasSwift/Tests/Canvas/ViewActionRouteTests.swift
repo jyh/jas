@@ -297,26 +297,39 @@ private func expectTriple(_ got: (Double, Double, Double),
     }
 }
 
-/// The three call sites must not re-implement a verb natively. Read as SOURCE
-/// TEXT, because there is no runtime handle on a `private func` in a SwiftUI
-/// view or an AppKit responder — the very fact that made this class invisible.
+/// The View-verb call sites, plus the two files that hold the shared centring
+/// and dispatch seams. Read as SOURCE TEXT, because there is no runtime handle
+/// on a `private func` in a SwiftUI view or an AppKit responder — the very fact
+/// that made this class invisible.
 /// Blind spot, stated: it can only recognise the native entry points that
-/// existed when it was written.
-@Test func viewVerbsHaveNoNativeReimplementation() {
+/// existed when it was written; see
+/// ``viewPreferenceConstantsAreNeverCopiedIntoTheseFiles`` for the guard that
+/// does NOT depend on knowing a name.
+private let viewRouteGuardedFiles = [
+    "Menu/JasCommands.swift",
+    "Canvas/ContentView.swift",
+    "Canvas/CanvasSubwindow.swift",
+    "Canvas/Session.swift",
+    "Canvas/ViewActions.swift",
+    "Document/Model.swift",
+]
+
+private func viewRouteSourcesDir() -> NSString {
     let canvasTestsDir = (#filePath as NSString).deletingLastPathComponent
     let testsDir = (canvasTestsDir as NSString).deletingLastPathComponent
     let jasSwiftDir = (testsDir as NSString).deletingLastPathComponent
-    let sourcesDir = (jasSwiftDir as NSString).appendingPathComponent("Sources")
+    return (jasSwiftDir as NSString).appendingPathComponent("Sources") as NSString
+}
+
+@Test func viewVerbsHaveNoNativeReimplementation() {
+    let sourcesDir = viewRouteSourcesDir()
     let banned = [
         "zoomIn(", "zoomOut(", "zoomToActualSize(",
         "fitActiveArtboard(", "fitAllArtboards(", "fitInWindow(",
         "applyZoomCentered(", "applyZoomAnchored(",
     ]
-    for file in ["Menu/JasCommands.swift",
-                 "Canvas/ContentView.swift",
-                 "Canvas/CanvasSubwindow.swift",
-                 "Document/Model.swift"] {
-        let path = (sourcesDir as NSString).appendingPathComponent(file)
+    for file in viewRouteGuardedFiles {
+        let path = sourcesDir.appendingPathComponent(file)
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
             Issue.record("could not read \(path)")
             continue
@@ -326,4 +339,180 @@ private func expectTriple(_ got: (Double, Double, Double),
             #expect(!text.contains(token), Comment(rawValue: why))
         }
     }
+}
+
+/// THE RESIDUE GUARD, widened past the name check above.
+///
+/// WHY THE NAME CHECK WAS NOT ENOUGH. The 2026-07-27 wave deleted nine native
+/// View-verb reimplementations and left ``viewVerbsHaveNoNativeReimplementation``
+/// behind to stop them regrowing — by NAME. Two survivors were invisible to it,
+/// one per port, because they were not named after a verb:
+/// `Model.centerViewOnCurrentArtboard` carried `let pad = 20.0` and
+/// `min(max(zFit, 0.1), 64.0)` — literal copies of `fit_padding_px`, `min_zoom`
+/// and `max_zoom`. Adding `centerViewOnCurrentArtboard(` to the banned list
+/// would be wrong: that function is legitimate and lives in one of the scanned
+/// files. The class is not "a function with a verb's name" but "a Swift-side
+/// COPY of a viewport preference", so this guard bans the VALUES.
+///
+/// The banned literals are READ FROM `workspace/preferences.yaml` (via the
+/// bundle), not typed here — so the guard tracks the preference file rather
+/// than repeating it, which is the same discipline the expectations above use.
+///
+/// Exempt: lines calling `readPrefNumber` (its `default:` argument legitimately
+/// names the value), comment lines, and lines carrying the explicit marker
+/// `not-a-viewport-pref` for an unrelated number that happens to collide.
+@Test func viewPreferenceConstantsAreNeverCopiedIntoTheseFiles() {
+    let sourcesDir = viewRouteSourcesDir()
+    // Spell each preference the way Swift source would: with a decimal point.
+    // A bare integer spelling ("64", "20") is far too common to ban.
+    let bannedLiterals: [(String, String)] = ["zoom_step", "min_zoom",
+                                              "max_zoom", "fit_padding_px"]
+        .map { ($0, String(format: "%g", pref($0, .nan))) }
+        .map { (name, g) in (name, g.contains(".") ? g : g + ".0") }
+    #expect(!bannedLiterals.contains { $0.1.contains("nan") },
+            "guard: every viewport preference must be readable from the bundle")
+
+    for file in viewRouteGuardedFiles {
+        let path = sourcesDir.appendingPathComponent(file)
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
+            Issue.record("could not read \(path)")
+            continue
+        }
+        for (lineNo, raw) in text.components(separatedBy: "\n").enumerated() {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("//") { continue }
+            if line.contains("readPrefNumber") { continue }
+            if line.contains("not-a-viewport-pref") { continue }
+            for (name, literal) in bannedLiterals {
+                guard let r = line.range(of: literal) else { continue }
+                // Require a real token boundary so "164.0" or "0.15" do not
+                // trip on "64.0" / "0.1".
+                let digits = CharacterSet(charactersIn: "0123456789.")
+                if let before = line[..<r.lowerBound].unicodeScalars.last,
+                   digits.contains(before) { continue }
+                if let after = line[r.upperBound...].unicodeScalars.first,
+                   digits.contains(after) { continue }
+                Issue.record(Comment(rawValue:
+                    "\(file):\(lineNo + 1) writes the literal \(literal), which is the "
+                    + "current value of preferences.viewport.\(name). Read it with "
+                    + "readPrefNumber(\"\(name)\", default:) instead — a copy agrees "
+                    + "with the workspace only until the preference moves, and that "
+                    + "coincidence is exactly what hid the two survivors of the "
+                    + "2026-07-27 zoom wave. If the number is unrelated, append the "
+                    + "marker comment 'not-a-viewport-pref' with a reason.\n"
+                    + "    \(line)"))
+            }
+        }
+    }
+}
+
+// MARK: - F7: the centring the wave's deletion missed
+
+/// `centerViewOnCurrentArtboard` is not named after a View verb, so it survived
+/// the deletion still carrying `let pad = 20.0`, `min(max(zFit, 0.1), 64.0)`
+/// and `document.artboards.first`. The tests below MOVE the preference (or the
+/// selection) and require the behaviour to move with it, so a re-hardcoded
+/// literal reds instead of agreeing by coincidence.
+
+/// Seed: the default Letter artboard (612x792 at the origin) in a viewport too
+/// small to hold it at 100%, so the FIT branch runs.
+///   z = (400 - 2*pad) / 792   (height is the binding axis)
+private func centerFitBranchModel() -> Model {
+    let doc = Document(layers: [Layer(children: [])],
+                       artboards: [Artboard.defaultWithId("ab1")
+                                    .with(x: 0, y: 0, width: 612, height: 792)])
+    let m = Model(document: doc)
+    m.viewportW = 400
+    m.viewportH = 400
+    return m
+}
+
+@Test func centerViewFitBranchFollowsTheFitPaddingPxPreference() {
+    // Guard: with the SHIPPED preference (20) the fit uses 20 — so the
+    // assertion below is about the preference being READ, not about the
+    // formula being different.
+    let shipped = centerFitBranchModel()
+    shipped.centerViewOnCurrentArtboard(artboardsPanelSelection: [])
+    #expect(abs(shipped.zoomLevel - 360.0 / 792.0) < 1e-12,
+            "shipped fit_padding_px 20: z is \(shipped.zoomLevel)")
+
+    // Now MOVE the preference. A route that reads it lands on 200/792; a route
+    // with `let pad = 20.0` lands on 360/792 and reds here.
+    ViewportPrefOverride.$values.withValue(["fit_padding_px": 100.0]) {
+        let m = centerFitBranchModel()
+        m.centerViewOnCurrentArtboard(artboardsPanelSelection: [])
+        #expect(abs(m.zoomLevel - 200.0 / 792.0) < 1e-12,
+                "fit_padding_px moved to 100: z is \(m.zoomLevel), want \(200.0 / 792.0)")
+    }
+}
+
+@Test func centerViewFitBranchFollowsTheMinZoomPreference() {
+    // Unclamped fit zoom is 360/792 ~= 0.4545. Raise min_zoom above it: a route
+    // that reads the preference clamps UP to 1.5; `min(max(zFit, 0.1), 64.0)`
+    // stays at 0.4545 and reds here.
+    ViewportPrefOverride.$values.withValue(["min_zoom": 1.5]) {
+        let m = centerFitBranchModel()
+        m.centerViewOnCurrentArtboard(artboardsPanelSelection: [])
+        #expect(m.zoomLevel == 1.5, "min_zoom moved to 1.5: z is \(m.zoomLevel)")
+    }
+}
+
+@Test func centerViewFitBranchFollowsTheMaxZoomPreference() {
+    // Lower max_zoom below the unclamped fit zoom so the clamp binds from
+    // above. `min(max(zFit, 0.1), 64.0)` never sees 0.25 and reds.
+    ViewportPrefOverride.$values.withValue(["max_zoom": 0.25]) {
+        let m = centerFitBranchModel()
+        m.centerViewOnCurrentArtboard(artboardsPanelSelection: [])
+        #expect(m.zoomLevel == 0.25, "max_zoom moved to 0.25: z is \(m.zoomLevel)")
+    }
+}
+
+@Test func centerViewHonoursThePanelSelectedCurrentArtboard() {
+    // Two boards that both fit at 100% in the default 888x900 viewport, at
+    // rects that cannot coincide numerically. `document.artboards.first` lands
+    // on a measurably different pan from the panel-selected board.
+    func twoBoardModel() -> Model {
+        let doc = Document(
+            layers: [Layer(children: [])],
+            artboards: [
+                Artboard.defaultWithId("ab1")
+                    .with(x: 0, y: 0, width: 612, height: 792),
+                Artboard.defaultWithId("ab2")
+                    .with(x: 200, y: 150, width: 100, height: 50),
+            ])
+        return Model(document: doc)
+    }
+
+    let selected = twoBoardModel()
+    selected.centerViewOnCurrentArtboard(artboardsPanelSelection: ["ab2"])
+    #expect(selected.zoomLevel == 1.0)
+    // ab2 centre (250, 175) in 888x900 → (444 - 250, 450 - 175).
+    #expect(selected.viewOffsetX == 194.0,
+            "panel-selected ab2 must be centred, not artboards.first")
+    #expect(selected.viewOffsetY == 275.0)
+
+    // …and the first board is genuinely a different answer, so the assertion
+    // above is discriminating rather than accidentally satisfied.
+    let unselected = twoBoardModel()
+    unselected.centerViewOnCurrentArtboard(artboardsPanelSelection: [])
+    #expect(unselected.viewOffsetX == 138.0, "no selection → the first board")
+    #expect(unselected.viewOffsetY == 54.0)
+}
+
+/// Rust and Swift must centre identically. Both ports' expectations are the
+/// same arithmetic written out here once; the Rust half lives in
+/// `jas_dioxus/src/document/model.rs` under the same four names.
+@Test func centerViewMatchesTheRustPortsExpectations() {
+    // fit branch, shipped padding: z = (400 - 40)/792
+    let m = centerFitBranchModel()
+    m.centerViewOnCurrentArtboard(artboardsPanelSelection: [])
+    #expect(abs(m.zoomLevel - 0.45454545454545453) < 1e-15)
+    // centre branch, default viewport, first board: (138, 54)
+    let c = Model(document: Document(
+        layers: [Layer(children: [])],
+        artboards: [Artboard.defaultWithId("ab1")
+                     .with(x: 0, y: 0, width: 612, height: 792)]))
+    c.centerViewOnCurrentArtboard(artboardsPanelSelection: [])
+    #expect(c.viewOffsetX == 138.0)
+    #expect(c.viewOffsetY == 54.0)
 }

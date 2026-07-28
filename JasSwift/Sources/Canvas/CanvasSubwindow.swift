@@ -3029,7 +3029,8 @@ class CanvasNSView: NSView {
                 if model.viewportW != cw { model.viewportW = cw }
                 if model.viewportH != ch { model.viewportH = ch }
                 if wasDefault {
-                    model.centerViewOnCurrentArtboard()
+                    model.centerViewOnCurrentArtboard(
+                        artboardsPanelSelection: artboardsPanelSelectionIds(model))
                 }
             }
         }

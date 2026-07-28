@@ -524,7 +524,8 @@ public class Model: ObservableObject {
     /// current zoom, set pan to center it; otherwise apply
     /// fit-inside semantics with 20px screen-space padding.
     /// Per ZOOM_TOOL.md §Document-open behavior.
-    public func centerViewOnCurrentArtboard() {
+    public func centerViewOnCurrentArtboard(artboardsPanelSelection: [String]) {
+        _ = artboardsPanelSelection
         guard let ab = document.artboards.first else { return }
         guard viewportW > 0, viewportH > 0 else { return }
         let abW = Double(ab.width)

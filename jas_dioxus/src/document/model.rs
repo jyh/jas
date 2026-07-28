@@ -315,11 +315,31 @@ impl Model {
     /// stored viewport_w / viewport_h. Per ZOOM_TOOL.md
     /// §Document-open behavior: at zoom_level == 1.0 if the artboard
     /// fits, the artboard's bounding box is centered in the
-    /// viewport. Computes pan only — leaves zoom_level alone (the
-    /// caller should pre-set it). Used at TabState construction and
-    /// the first time the canvas reports its real viewport size.
-    pub fn center_view_on_current_artboard(&mut self, _artboards_panel_selection: &[String]) {
-        let Some(ab) = self.document.artboards.first() else { return; };
+    /// viewport. Otherwise it falls through to `fit_active_artboard`
+    /// semantics (which DOES write zoom_level). Used at TabState
+    /// construction and the first time the canvas reports its real
+    /// viewport size.
+    ///
+    /// `artboards_panel_selection` is the Artboards panel's selected ids —
+    /// what `active_document.current_artboard` resolves against
+    /// (ARTBOARDS.md §Selection semantics). It is a REQUIRED parameter
+    /// rather than a default: this method used to reach for
+    /// `artboards.first()`, which is the same answer only while nothing is
+    /// panel-selected, and a defaulted parameter would let a call site
+    /// silently keep the old behaviour. Pass `&[]` where there genuinely is
+    /// no panel yet (a freshly-constructed tab).
+    ///
+    /// NO LOCAL COPIES OF THE VIEWPORT PREFERENCES. The fit branch delegates
+    /// to `fit_rect_into_viewport` — the same primitive `doc.zoom.fit_rect`
+    /// and `fit_active_artboard` run — which reads `min_zoom` / `max_zoom`
+    /// from the workspace, and takes its padding from `fit_padding_px`. It
+    /// previously carried `let pad = 20.0` and `.clamp(0.1, 64.0)`: literal
+    /// copies that agreed with `workspace/preferences.yaml` only because the
+    /// shipped values happen to be those numbers.
+    pub fn center_view_on_current_artboard(&mut self, artboards_panel_selection: &[String]) {
+        let Some(ab) = crate::document::artboard::current_artboard(
+            &self.document.artboards, artboards_panel_selection,
+        ).cloned() else { return; };
         if self.viewport_w <= 0.0 || self.viewport_h <= 0.0 { return; }
         let z = self.zoom_level;
         // Fit-or-center: if artboard fits at current zoom, center
@@ -329,18 +349,12 @@ impl Model {
             self.view_offset_x = self.viewport_w / 2.0 - (ab.x + ab.width / 2.0) * z;
             self.view_offset_y = self.viewport_h / 2.0 - (ab.y + ab.height / 2.0) * z;
         } else {
-            // fit-inside with default fit_padding_px (20).
-            let pad = 20.0;
-            let avail_w = self.viewport_w - 2.0 * pad;
-            let avail_h = self.viewport_h - 2.0 * pad;
-            if avail_w > 0.0 && avail_h > 0.0 {
-                let z_fit = (avail_w / ab.width).min(avail_h / ab.height).clamp(0.1, 64.0);
-                self.zoom_level = z_fit;
-                self.view_offset_x = self.viewport_w / 2.0
-                    - (ab.x + ab.width / 2.0) * z_fit;
-                self.view_offset_y = self.viewport_h / 2.0
-                    - (ab.y + ab.height / 2.0) * z_fit;
-            }
+            let pad = crate::interpreter::effects::read_pref_number(
+                &serde_json::Value::Null, "fit_padding_px", 20.0,
+            );
+            crate::interpreter::effects::fit_rect_into_viewport(
+                self, ab.x, ab.y, ab.width, ab.height, pad,
+            );
         }
     }
 
