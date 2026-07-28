@@ -1015,8 +1015,48 @@ private func magicWandStateDefaults(_ store: StateStore) {
 
 // MARK: - doc.zoom.* and doc.pan.apply
 
-@Test func docZoomSet() {
+/// doc.zoom.set anchors at the VIEWPORT CENTRE (RULED 2026-07-27,
+/// transcripts/ZOOM_TOOL.md "zoom_to_actual_size RECENTRES"; mirrors Rust's
+/// `test_doc_zoom_set_anchors_at_viewport_center`).
+///
+/// This test used to assert "pan unchanged" and passed, because that is what the
+/// spec said in four places and what the effect did. The requirement underneath
+/// that wording is that the artist keeps looking at the same thing, and holding
+/// view_offset — the DOC ORIGIN's screen position — fixed while the zoom factor
+/// changes by 4x does the opposite: the visible region quadruples around that
+/// point and the artwork walks off the canvas. So the assertion is now the
+/// invariant itself rather than a field's stillness.
+@Test func docZoomSetAnchorsAtViewportCentre() {
     let model = Model()
+    model.viewportW = 800.0
+    model.viewportH = 600.0
+    model.zoomLevel = 4.0
+    // Off-centre pan, so a port that left it alone would be caught.
+    model.viewOffsetX = 94.0
+    model.viewOffsetY = -96.0
+    let docUnderCentreBefore = ((400.0 - 94.0) / 4.0,      // 76.5
+                                (300.0 - (-96.0)) / 4.0)   // 99.0
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.set": ["level": "1.0"]]],
+               ctx: [:], store: store, platformEffects: effects)
+    #expect(model.zoomLevel == 1.0)
+    let docUnderCentreAfter = ((400.0 - model.viewOffsetX) / model.zoomLevel,
+                               (300.0 - model.viewOffsetY) / model.zoomLevel)
+    #expect(abs(docUnderCentreBefore.0 - docUnderCentreAfter.0) < 0.01)
+    #expect(abs(docUnderCentreBefore.1 - docUnderCentreAfter.1) < 0.01)
+    // The concrete triple that invariant implies, so a regression reads as a
+    // number and not only as a broken relation.
+    #expect(model.viewOffsetX == 400.0 - 76.5)
+    #expect(model.viewOffsetY == 300.0 - 99.0)
+}
+
+/// The fallback: with the viewport unmeasured there is no centre to anchor on,
+/// so doc.zoom.set writes the level and leaves the pan literally unchanged.
+@Test func docZoomSetLeavesPanAloneWhenViewportUnmeasured() {
+    let model = Model()
+    model.viewportW = 0.0
+    model.viewportH = 0.0
     model.zoomLevel = 2.5
     model.viewOffsetX = 100.0
     model.viewOffsetY = 50.0
@@ -1025,7 +1065,6 @@ private func magicWandStateDefaults(_ store: StateStore) {
     runEffects([["doc.zoom.set": ["level": "1.0"]]],
                ctx: [:], store: store, platformEffects: effects)
     #expect(model.zoomLevel == 1.0)
-    // Pan unchanged.
     #expect(model.viewOffsetX == 100.0)
     #expect(model.viewOffsetY == 50.0)
 }
@@ -1073,6 +1112,56 @@ private func magicWandStateDefaults(_ store: StateStore) {
     #expect(model.zoomLevel == 2.0)
     #expect(model.viewOffsetX == -200.0)
     #expect(model.viewOffsetY == -150.0)
+}
+
+/// The -1 sentinel means the VIEWPORT CENTRE (RULED 2026-07-27,
+/// transcripts/ZOOM_TOOL.md "the DEFAULT ZOOM ANCHOR is the viewport centre").
+/// This effect used to have no viewport-centre branch at all: `anchorXRaw < 0`
+/// fell through to the doc origin's screen position, and the `viewportW` the
+/// Model carries was never read. Mirrors Rust's doc.zoom.apply arm.
+@Test func docZoomApplyDefaultAnchorIsViewportCentre() {
+    let model = Model()
+    model.viewportW = 800.0
+    model.viewportH = 600.0
+    model.zoomLevel = 2.0
+    model.viewOffsetX = -100.0
+    model.viewOffsetY = -50.0
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.apply": [
+        "factor":   "1.2",
+        "anchor_x": "-1",
+        "anchor_y": "-1",
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    // ax=400 ay=300 ; doc_ax=250 doc_ay=175 ; z=2.4
+    // px = 400 - 250*2.4 = -200 ; py = 300 - 175*2.4 = -120
+    #expect(model.zoomLevel == 2.4)
+    #expect(model.viewOffsetX == -200.0)
+    #expect(model.viewOffsetY == -120.0)
+    // Anchoring at the doc origin's screen position instead would land at
+    // (-120, -60) — the value this port produced before the ruling.
+    #expect(model.viewOffsetX != -120.0)
+}
+
+/// The fallback for the -1 sentinel: with the viewport unmeasured, the anchor is
+/// the doc origin's screen position and the pan does not move.
+@Test func docZoomApplyDefaultAnchorFallsBackWhenViewportUnmeasured() {
+    let model = Model()
+    model.viewportW = 0.0
+    model.viewportH = 0.0
+    model.zoomLevel = 2.0
+    model.viewOffsetX = -100.0
+    model.viewOffsetY = -50.0
+    let store = StateStore()
+    let effects = buildYamlToolEffects(model: model)
+    runEffects([["doc.zoom.apply": [
+        "factor":   "1.2",
+        "anchor_x": "-1",
+        "anchor_y": "-1",
+    ]]], ctx: [:], store: store, platformEffects: effects)
+    #expect(model.zoomLevel == 2.4)
+    #expect(model.viewOffsetX == -100.0)
+    #expect(model.viewOffsetY == -50.0)
 }
 
 @Test func docZoomApplyClampsAtMax() {

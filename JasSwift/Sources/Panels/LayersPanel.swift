@@ -124,6 +124,18 @@ public enum LayersPanel {
               let effects = actionDef["effects"] as? [Any]
         else { return }
 
+        // Merge the action's DECLARED param defaults under the caller's params
+        // BEFORE building the eval ctx, so an effect referencing `param.X`
+        // resolves to the workspace's declared default rather than null->0 when
+        // the caller omits it. Rust's `dispatch_action` has always done this;
+        // this dispatcher did not, and the one place it showed was the biggest:
+        // `zoom_in` / `zoom_out` from the keyboard and the menu pass NO anchor,
+        // so the declared -1 ("anchor at the viewport centre") never arrived and
+        // the zoom threw the artist's view away. See
+        // ``mergeDeclaredParamDefaults`` for the precedence rule and the
+        // three-verb blast radius.
+        let params = mergeDeclaredParamDefaults(params, actionDef: actionDef)
+
         let activeDoc = buildActiveDocumentView(
             model: model,
             layersPanelSelection: panelSelection,
