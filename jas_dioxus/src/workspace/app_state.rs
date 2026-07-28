@@ -4853,6 +4853,83 @@ mod oplog_bracket_tests {
         }
     }
 
+    /// THE PARITY HALF of the Swift repair in
+    /// `JasSwift/Tests/Document/CopySiteOmissionTests.swift`
+    /// (`characterApplyKeepsTextIdentityAndPaint`).
+    ///
+    /// Swift's `Controller.applyTextAttrs` rebuilt `Text` field by field and
+    /// so destroyed the element's name, id, blend mode and mask on every
+    /// Character-panel apply — an `id` loss, i.e. a direct violation of the
+    /// ratified Preservation Law. THIS port never had the defect, because the
+    /// loop below is `let mut new_t = t.clone(); set_character_attrs!(...)`.
+    /// Untested, though, "Rust already conforms" was only an inspection. This
+    /// pins it, so the clone can never quietly become a rebuild here either.
+    ///
+    /// Asserted BY FIELD rather than by comparing whole structs: a whole-struct
+    /// comparison is exactly the check that is blind to this class, because
+    /// both sides would be built the same wrong way.
+    #[test]
+    fn character_panel_apply_preserves_identity_and_paint() {
+        use crate::geometry::element::{BlendMode, Mask, PathCommand, TextPathElem};
+        let common = CommonProps {
+            name: Some("Section title".into()),
+            id: Some("txt-1".into()),
+            mode: BlendMode::Multiply,
+            mask: Some(Box::new(Mask {
+                subtree: Box::new(rect(1.0, 2.0, 3.0, 4.0)),
+                clip: false, invert: false, disabled: false,
+                linked: true, unlink_transform: None,
+            })),
+            ..Default::default()
+        };
+        let text = TextElem::from_string(
+            0.0, 0.0, "Headline", "serif", 12.0,
+            "normal", "normal", "none", 0.0, 0.0,
+            Some(Fill::new(Color::BLACK)), None, common.clone(),
+        );
+        let text_path = TextPathElem::from_string(
+            vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                 PathCommand::LineTo { x: 100.0, y: 0.0 }],
+            "On a path", 0.0, "serif", 12.0,
+            "normal", "normal", "none",
+            Some(Fill::new(Color::BLACK)), None,
+            CommonProps { name: Some("Curved label".into()),
+                          id: Some("tp-1".into()),
+                          mode: BlendMode::Screen,
+                          ..common.clone() },
+        );
+        let mut st = state_with_layer(
+            vec![Element::Text(text), Element::TextPath(text_path)],
+            vec![vec![0, 0], vec![0, 1]],
+        );
+
+        st.character_panel.font_size = 24.0;
+        st.apply_character_panel_to_selection("font_size");
+
+        let doc = st.tab().unwrap().model.document().clone();
+        match doc.get_element(&vec![0, 0]).unwrap() {
+            Element::Text(t) => {
+                // The edit landed, so nothing below is vacuous.
+                assert_eq!(t.font_size, 24.0);
+                assert_eq!(t.common.name.as_deref(), Some("Section title"));
+                assert_eq!(t.common.id.as_deref(), Some("txt-1"));
+                assert_eq!(t.common.mode, BlendMode::Multiply);
+                assert!(t.common.mask.is_some(), "the mask survived the apply");
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+        match doc.get_element(&vec![0, 1]).unwrap() {
+            Element::TextPath(tp) => {
+                assert_eq!(tp.font_size, 24.0);
+                assert_eq!(tp.common.name.as_deref(), Some("Curved label"));
+                assert_eq!(tp.common.id.as_deref(), Some("tp-1"));
+                assert_eq!(tp.common.mode, BlendMode::Screen);
+                assert!(tp.common.mask.is_some(), "the mask survived the apply");
+            }
+            other => panic!("expected TextPath, got {other:?}"),
+        }
+    }
+
     #[test]
     fn boolean_union_with_auto_simplify_is_one_undo_step() {
         // The boolean op and its post-op auto-simplify both join the

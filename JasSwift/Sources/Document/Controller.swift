@@ -2071,70 +2071,70 @@ public class Controller {
 
     /// Apply a character-attribute dict onto a single `Text`, returning
     /// a new value with only the overlapping keys replaced.
+    ///
+    /// CLONE-THEN-MUTATE, and it must stay that way. This was an open-coded
+    /// rebuild naming 27 of `Text`'s 31 stored properties, so every
+    /// Character-panel apply silently destroyed the element's `name`, `id`,
+    /// `blendMode` and `mask` — the Swift copy-site omission class
+    /// (EDIT_SEMANTICS_FREEZE.md §3.1). The `id` loss is a direct violation of
+    /// the Preservation Law: setting a font does not speak to a text element's
+    /// identity. Rust's twin
+    /// (`app_state.rs::apply_character_panel_to_selection`) is
+    /// `let mut new_t = t.clone(); set_character_attrs!(new_t, attrs);` and
+    /// always conformed, so the rebuild was also a live port divergence.
+    ///
+    /// Do NOT repair this shape by adding the four missing arguments — that
+    /// is the repair that has failed twice in this class, because the next new
+    /// field lands right back in the same place. With `var out = t` there is
+    /// no field list left to fall behind. Gated by
+    /// `CopySiteOmissionTests.characterApplyKeepsTextIdentityAndPaint` and
+    /// structurally by `scripts/check_swift_copy_sites.py`.
     private static func applyTextAttrs(_ t: Text, attrs: [String: Any]) -> Text {
-        let ff = (attrs["font_family"] as? String) ?? t.fontFamily
-        let fs = (attrs["font_size"] as? NSNumber)?.doubleValue ?? t.fontSize
-        let fw = (attrs["font_weight"] as? String) ?? t.fontWeight
-        let fst = (attrs["font_style"] as? String) ?? t.fontStyle
-        let td = (attrs["text_decoration"] as? String) ?? t.textDecoration
-        let tt = (attrs["text_transform"] as? String) ?? t.textTransform
-        let fv = (attrs["font_variant"] as? String) ?? t.fontVariant
-        let bs = (attrs["baseline_shift"] as? String) ?? t.baselineShift
-        let lh = (attrs["line_height"] as? String) ?? t.lineHeight
-        let ls = (attrs["letter_spacing"] as? String) ?? t.letterSpacing
-        let lang = (attrs["xml_lang"] as? String) ?? t.xmlLang
-        let aa = (attrs["aa_mode"] as? String) ?? t.aaMode
-        let rotate = (attrs["rotate"] as? String) ?? t.rotate
-        let hscale = (attrs["horizontal_scale"] as? String) ?? t.horizontalScale
-        let vscale = (attrs["vertical_scale"] as? String) ?? t.verticalScale
-        let kern = (attrs["kerning"] as? String) ?? t.kerning
-        return Text(x: t.x, y: t.y, tspans: t.tspans,
-                    fontFamily: ff, fontSize: fs,
-                    fontWeight: fw, fontStyle: fst, textDecoration: td,
-                    textTransform: tt, fontVariant: fv,
-                    baselineShift: bs, lineHeight: lh,
-                    letterSpacing: ls, xmlLang: lang,
-                    aaMode: aa, rotate: rotate,
-                    horizontalScale: hscale, verticalScale: vscale,
-                    kerning: kern,
-                    width: t.width, height: t.height,
-                    fill: t.fill, stroke: t.stroke,
-                    opacity: t.opacity, transform: t.transform,
-                    locked: t.locked, visibility: t.visibility)
+        var out = t
+        out.fontFamily = (attrs["font_family"] as? String) ?? t.fontFamily
+        out.fontSize = (attrs["font_size"] as? NSNumber)?.doubleValue ?? t.fontSize
+        out.fontWeight = (attrs["font_weight"] as? String) ?? t.fontWeight
+        out.fontStyle = (attrs["font_style"] as? String) ?? t.fontStyle
+        out.textDecoration = (attrs["text_decoration"] as? String) ?? t.textDecoration
+        out.textTransform = (attrs["text_transform"] as? String) ?? t.textTransform
+        out.fontVariant = (attrs["font_variant"] as? String) ?? t.fontVariant
+        out.baselineShift = (attrs["baseline_shift"] as? String) ?? t.baselineShift
+        out.lineHeight = (attrs["line_height"] as? String) ?? t.lineHeight
+        out.letterSpacing = (attrs["letter_spacing"] as? String) ?? t.letterSpacing
+        out.xmlLang = (attrs["xml_lang"] as? String) ?? t.xmlLang
+        out.aaMode = (attrs["aa_mode"] as? String) ?? t.aaMode
+        out.rotate = (attrs["rotate"] as? String) ?? t.rotate
+        out.horizontalScale = (attrs["horizontal_scale"] as? String) ?? t.horizontalScale
+        out.verticalScale = (attrs["vertical_scale"] as? String) ?? t.verticalScale
+        out.kerning = (attrs["kerning"] as? String) ?? t.kerning
+        return out
     }
 
     /// Apply a character-attribute dict onto a single `TextPath`,
     /// returning a new value with overlapping keys replaced.
+    ///
+    /// Same clause and same repair as ``applyTextAttrs(_:attrs:)`` — see its
+    /// note. The rebuild this replaced named 25 of `TextPath`'s 29 stored
+    /// properties and lost the identical four.
     private static func applyTextPathAttrs(_ tp: TextPath, attrs: [String: Any]) -> TextPath {
-        let ff = (attrs["font_family"] as? String) ?? tp.fontFamily
-        let fs = (attrs["font_size"] as? NSNumber)?.doubleValue ?? tp.fontSize
-        let fw = (attrs["font_weight"] as? String) ?? tp.fontWeight
-        let fst = (attrs["font_style"] as? String) ?? tp.fontStyle
-        let td = (attrs["text_decoration"] as? String) ?? tp.textDecoration
-        let tt = (attrs["text_transform"] as? String) ?? tp.textTransform
-        let fv = (attrs["font_variant"] as? String) ?? tp.fontVariant
-        let bs = (attrs["baseline_shift"] as? String) ?? tp.baselineShift
-        let lh = (attrs["line_height"] as? String) ?? tp.lineHeight
-        let ls = (attrs["letter_spacing"] as? String) ?? tp.letterSpacing
-        let lang = (attrs["xml_lang"] as? String) ?? tp.xmlLang
-        let aa = (attrs["aa_mode"] as? String) ?? tp.aaMode
-        let rotate = (attrs["rotate"] as? String) ?? tp.rotate
-        let hscale = (attrs["horizontal_scale"] as? String) ?? tp.horizontalScale
-        let vscale = (attrs["vertical_scale"] as? String) ?? tp.verticalScale
-        let kern = (attrs["kerning"] as? String) ?? tp.kerning
-        return TextPath(d: tp.d, tspans: tp.tspans,
-                        startOffset: tp.startOffset,
-                        fontFamily: ff, fontSize: fs,
-                        fontWeight: fw, fontStyle: fst, textDecoration: td,
-                        textTransform: tt, fontVariant: fv,
-                        baselineShift: bs, lineHeight: lh,
-                        letterSpacing: ls, xmlLang: lang,
-                        aaMode: aa, rotate: rotate,
-                        horizontalScale: hscale, verticalScale: vscale,
-                        kerning: kern,
-                        fill: tp.fill, stroke: tp.stroke,
-                        opacity: tp.opacity, transform: tp.transform,
-                        locked: tp.locked, visibility: tp.visibility)
+        var out = tp
+        out.fontFamily = (attrs["font_family"] as? String) ?? tp.fontFamily
+        out.fontSize = (attrs["font_size"] as? NSNumber)?.doubleValue ?? tp.fontSize
+        out.fontWeight = (attrs["font_weight"] as? String) ?? tp.fontWeight
+        out.fontStyle = (attrs["font_style"] as? String) ?? tp.fontStyle
+        out.textDecoration = (attrs["text_decoration"] as? String) ?? tp.textDecoration
+        out.textTransform = (attrs["text_transform"] as? String) ?? tp.textTransform
+        out.fontVariant = (attrs["font_variant"] as? String) ?? tp.fontVariant
+        out.baselineShift = (attrs["baseline_shift"] as? String) ?? tp.baselineShift
+        out.lineHeight = (attrs["line_height"] as? String) ?? tp.lineHeight
+        out.letterSpacing = (attrs["letter_spacing"] as? String) ?? tp.letterSpacing
+        out.xmlLang = (attrs["xml_lang"] as? String) ?? tp.xmlLang
+        out.aaMode = (attrs["aa_mode"] as? String) ?? tp.aaMode
+        out.rotate = (attrs["rotate"] as? String) ?? tp.rotate
+        out.horizontalScale = (attrs["horizontal_scale"] as? String) ?? tp.horizontalScale
+        out.verticalScale = (attrs["vertical_scale"] as? String) ?? tp.verticalScale
+        out.kerning = (attrs["kerning"] as? String) ?? tp.kerning
+        return out
     }
 
     public func setSelectionWidthProfile(_ widthPoints: [StrokeWidthPoint]) {

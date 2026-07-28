@@ -169,4 +169,85 @@ struct CopySiteOmissionTests {
         #expect(ng.knockoutGroup == true)
         #expect(ng.mask?.subtree.count == 1)
     }
+
+    // MARK: - 5. The Character panel destroys the text element's identity
+
+    /// SETTING A FONT UNNAMES THE ELEMENT AND ENDS ITS IDENTITY.
+    ///
+    /// `Controller.applyTextAttrs` rebuilt `Text` naming 27 of its 31 stored
+    /// properties and `applyTextPathAttrs` named 25 of 29; both lost exactly
+    /// `name`, `id`, `blendMode` and `mask`. Rust's twin
+    /// (`app_state.rs::apply_character_panel_to_selection`) is
+    /// `let mut new_t = t.clone(); set_character_attrs!(new_t, attrs);`, so it
+    /// loses nothing — a live prime-directive divergence.
+    ///
+    /// The `id` loss is the sharp end: transcripts/EDIT_SEMANTICS_FREEZE.md
+    /// holds that an edit changes what it speaks to and PRESERVES THE REST, and
+    /// a font size plainly does not speak to a text element's identity. The
+    /// artist-visible half is that a named text element is silently unnamed, a
+    /// masked one loses its mask, and a multiplied one is reset to normal.
+    ///
+    /// The probe drives the REAL production door — the same
+    /// `applyCharacterPanelToSelection(store:controller:edited:)` the panel
+    /// calls, and the exact twin of Rust's entry point — and asserts each
+    /// bystander field BY VALUE. Whole-struct equality would be blind: both
+    /// sides would be built through the same truncated initializer.
+    private func charApplyModel(_ elem: Element) -> Model {
+        let model = Model()
+        model.setDocumentForTest(Document(
+            layers: [Layer(children: [elem])],
+            selectedLayer: 0,
+            selection: [ElementSelection(path: [0, 0])]))
+        return model
+    }
+
+    private func commitFontSize24(_ model: Model) {
+        model.stateStore.initPanel("character_panel_content",
+                                   defaults: ["font_size": 24.0])
+        applyCharacterPanelToSelection(store: model.stateStore,
+                                       controller: Controller(model: model),
+                                       edited: "font_size")
+    }
+
+    @Test func characterApplyKeepsTextIdentityAndPaint() {
+        let mask = Mask(subtreeElement: .circle(Circle(cx: 1, cy: 2, r: 3)))
+        let model = charApplyModel(.text(Text(
+            x: 0, y: 0, content: "Headline",
+            fontFamily: "serif", fontSize: 12,
+            blendMode: .multiply, mask: mask,
+            name: "Section title", id: "txt-1")))
+
+        commitFontSize24(model)
+
+        guard case .text(let t) = model.document.getElement([0, 0]) else {
+            Issue.record("expected a Text at [0,0]"); return
+        }
+        // The edit really happened — otherwise every assertion below is vacuous.
+        #expect(t.fontSize == 24)
+        // ...and it spoke to nothing else.
+        #expect(t.name == "Section title")
+        #expect(t.id == "txt-1")
+        #expect(t.blendMode == .multiply)
+        #expect(t.mask == mask)
+    }
+
+    @Test func characterApplyKeepsTextPathIdentityAndPaint() {
+        let mask = Mask(subtreeElement: .circle(Circle(cx: 4, cy: 5, r: 6)))
+        let model = charApplyModel(.textPath(TextPath(
+            d: [.moveTo(0, 0), .lineTo(100, 0)], content: "On a path",
+            fontFamily: "serif", fontSize: 12,
+            blendMode: .screen, mask: mask,
+            name: "Curved label", id: "tp-1")))
+
+        commitFontSize24(model)
+
+        guard case .textPath(let tp) = model.document.getElement([0, 0]) else {
+            Issue.record("expected a TextPath at [0,0]"); return
+        }
+        #expect(tp.fontSize == 24)
+        #expect(tp.name == "Curved label")
+        #expect(tp.id == "tp-1")
+        #expect(tp.blendMode == .screen)
+        #expect(tp.mask == mask)
+    }
 }
