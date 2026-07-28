@@ -252,6 +252,47 @@ private func expectTriple(_ got: (Double, Double, Double),
                  "fit_in_window (empty document)")
 }
 
+/// F13 — CHARACTERISATION, NOT ENDORSEMENT. **BANKED FOR JYH.**
+///
+/// Both ports test `bounds.w <= 0 || bounds.h <= 0`, so a document holding only
+/// a ZERO-WIDTH shape — a vertical line, a single point — takes the EMPTY arm
+/// and jumps to 100% at the origin instead of fitting the artwork. Both ports
+/// agree, so no equivalence gate can see it; this test and its Rust twin
+/// (`test_doc_zoom_fit_elements_zero_width_shape_is_treated_as_empty_banked`)
+/// make the behaviour VISIBLE so a change to it has to be deliberate.
+///
+/// NOT fixed here: "fit a zero-width shape" needs a ruling, not a guess.
+///   1. w == 0 XOR h == 0 — fit the non-degenerate axis (a 10-unit line then
+///      fills the viewport at zoom 86, clamped to max_zoom 64), or keep 100%
+///      and merely CENTRE on the shape?
+///   2. w == 0 AND h == 0 (a single point) — no zoom is determined at all.
+///   3. `fitRectIntoViewport` carries the same `w <= 0` guard and is shared by
+///      fit_rect / fit_marquee / fit_active_artboard / fit_all_artboards, so
+///      any answer has to say whether it changes those four too.
+@Test func fitInWindowOnAZeroWidthShapeIsTreatedAsEmpty() {
+    // A vertical, un-stroked line at x = 500: real artwork, zero width.
+    let line = Element.line(Line(x1: 500, y1: 100, x2: 500, y2: 400))
+    let doc = Document(
+        layers: [Layer(children: [line])],
+        artboards: [Artboard.defaultWithId("ab1")])
+    let m = Model(document: doc)
+    m.viewportW = vw
+    m.viewportH = vh
+    m.zoomLevel = seedZoom
+    m.viewOffsetX = seedOffX
+    m.viewOffsetY = seedOffY
+    let b = documentBounds(m.document)
+    #expect(b.x == 500 && b.y == 100 && b.w == 0 && b.h == 300,
+            "guard: the line has zero width and real height")
+
+    ViewActions.dispatch("fit_in_window", model: m)
+
+    // TODAY'S ANSWER: the empty arm. The artwork at x = 500 is not even on
+    // screen afterwards — the view is centred on the ORIGIN at 100%.
+    expectTriple(triple(m), (1.0, vw / 2.0, vh / 2.0),
+                 "banked: zero-width artwork takes the EMPTY arm")
+}
+
 // MARK: - The route is the YAML route, not a lookalike
 
 /// Whatever the seam does, it must be what the CORPUS gates. Every verb is

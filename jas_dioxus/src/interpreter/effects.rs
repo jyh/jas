@@ -8699,6 +8699,135 @@ mod tests {
         assert_eq!(model.zoom_level, 64.0);
     }
 
+    // ── F12 / F13: doc.zoom.fit_elements and the degenerate document ─────
+    //
+    // F12: the empty-document arm of `doc.zoom.fit_elements` was gated
+    // SWIFT-ONLY (Tests/Canvas/ViewActionRouteTests.swift,
+    // `viewRouteFitInWindowOnEmptyDocumentCentresAt100Percent`). The Rust arm
+    // could be reverted to a no-op with nothing turning red — on behaviour the
+    // 2026-07-27 wave had just changed. These are its Rust-side coverage.
+
+    /// Run `doc.zoom.fit_elements` with `padding` against `model`.
+    fn run_fit_elements(model: &mut Model, padding: &str) {
+        let mut store = StateStore::new();
+        let effects = vec![serde_json::json!({
+            "doc.zoom.fit_elements": { "padding": padding }
+        })];
+        run_effects(&effects, &serde_json::json!({}), &mut store,
+            Some(model), None, None, None);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_elements_empty_document_is_100_percent_centred() {
+        // The spec's degenerate case: an EMPTY document fits at 100% centred on
+        // the document origin — NOT a no-op leaving whatever view was standing.
+        // Seeded off the identity view so a no-op is distinguishable from the
+        // answer (CORPUS_CENSUS.md §5.7).
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        model.zoom_level = 4.0;
+        model.view_offset_x = -300.0;
+        model.view_offset_y = -200.0;
+        assert_eq!(model.document().bounds(), (0.0, 0.0, 0.0, 0.0),
+            "guard: Model::default()'s document must actually be empty");
+
+        run_fit_elements(&mut model, "20");
+
+        assert_eq!(model.zoom_level, 1.0);
+        assert_eq!(model.view_offset_x, 400.0);
+        assert_eq!(model.view_offset_y, 300.0);
+    }
+
+    #[test]
+    fn test_doc_zoom_fit_elements_non_empty_document_fits_the_bounds() {
+        // The other arm, so the empty-document assertion above is a BRANCH
+        // choice rather than something true of every input. A 200x100 rect at
+        // (0, 0) in an 800x600 viewport with padding 20:
+        //   z = min(760/200, 560/100) = 3.8; centre (100, 50) -> (20, 110).
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        let mut doc = model.document().clone();
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(Element::Rect(RectElem {
+                x: 0.0, y: 0.0, width: 200.0, height: 100.0,
+                rx: 0.0, ry: 0.0, fill: None, stroke: None,
+                common: CommonProps::default(),
+                fill_gradient: None, stroke_gradient: None,
+            }))],
+            common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        })];
+        model.set_document_for_test(doc);
+        assert_eq!(model.document().bounds(), (0.0, 0.0, 200.0, 100.0),
+            "guard: the seeded rect's bounds are its box");
+
+        run_fit_elements(&mut model, "20");
+
+        assert!((model.zoom_level - 3.8).abs() < 1e-12, "z = {}", model.zoom_level);
+        assert!((model.view_offset_x - 20.0).abs() < 1e-12);
+        assert!((model.view_offset_y - 110.0).abs() < 1e-12);
+    }
+
+    /// F13 — CHARACTERISATION, NOT ENDORSEMENT. **BANKED FOR JYH.**
+    ///
+    /// Both ports test `bounds.w <= 0 || bounds.h <= 0`, so a document holding
+    /// only a ZERO-WIDTH shape — a vertical line, a single point — takes the
+    /// EMPTY arm and jumps to 100% at the origin instead of fitting the
+    /// artwork. Both ports agree, so no equivalence gate can see it; this test
+    /// and its Swift twin (`fitInWindowOnAZeroWidthShapeIsTreatedAsEmpty`) make
+    /// the behaviour VISIBLE so a change to it has to be deliberate.
+    ///
+    /// It is NOT fixed here, because "fit a zero-width shape" needs a ruling,
+    /// not a guess (degenerate cases are scheduled, not improvised). The open
+    /// questions:
+    ///   1. w == 0 XOR h == 0 — fit the non-degenerate axis (a 10-unit line
+    ///      then fills the viewport at zoom 86, clamped to max_zoom 64), or
+    ///      keep 100% and merely CENTRE on the shape?
+    ///   2. w == 0 AND h == 0 (a single point) — no zoom is determined at all.
+    ///   3. `fit_rect_into_viewport` carries the same `rect_w <= 0` guard and
+    ///      is shared by fit_rect / fit_marquee / fit_active_artboard /
+    ///      fit_all_artboards, so any answer has to say whether it changes
+    ///      those four too.
+    #[test]
+    fn test_doc_zoom_fit_elements_zero_width_shape_is_treated_as_empty_banked() {
+        let mut model = Model::default();
+        model.viewport_w = 800.0;
+        model.viewport_h = 600.0;
+        model.zoom_level = 4.0;
+        model.view_offset_x = -300.0;
+        model.view_offset_y = -200.0;
+        // A vertical, un-stroked line at x = 500: real artwork, zero width.
+        let mut doc = model.document().clone();
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(Element::Line(LineElem {
+                x1: 500.0, y1: 100.0, x2: 500.0, y2: 400.0,
+                stroke: None,
+                width_points: Vec::new(),
+                common: CommonProps::default(),
+                stroke_gradient: None,
+            }))],
+            common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        })];
+        model.set_document_for_test(doc);
+        let b = model.document().bounds();
+        assert_eq!((b.0, b.1, b.2, b.3), (500.0, 100.0, 0.0, 300.0),
+            "guard: the line has zero width and real height");
+
+        run_fit_elements(&mut model, "20");
+
+        // TODAY'S ANSWER: the empty arm. The artwork at x = 500 is not even on
+        // screen afterwards — the view is centred on the ORIGIN at 100%.
+        assert_eq!(model.zoom_level, 1.0,
+            "banked: zero-width artwork takes the EMPTY arm");
+        assert_eq!(model.view_offset_x, 400.0);
+        assert_eq!(model.view_offset_y, 300.0);
+    }
+
     #[test]
     fn test_doc_zoom_fit_rect_skips_when_viewport_unset() {
         // viewport defaults to 888x900 in Model::default(); set to 0
