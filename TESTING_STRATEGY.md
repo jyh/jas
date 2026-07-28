@@ -42,6 +42,36 @@ A property is verified at the **lowest deterministic layer that can express it**
 screenshot is the instrument of last resort, used only for what no shared artifact can
 encode, and then only **per-app** (an app vs. its own past), never cross-app.
 
+### 1.1 Two kinds of green: ORACLE and COMPARISON
+
+Every cross-language runner performs two different checks, and **their pass counts are
+never added into one number**:
+
+| Kind | What it asserts | What it cannot see |
+|---|---|---|
+| **ORACLE** | the reference lane reproduces a pinned, hand-derived golden | nothing about agreement — one lane is enough to run it |
+| **COMPARISON** | two independent implementations agree | a **shared** bug: wrong-vs-wrong compares green |
+
+Neither subsumes the other, which is why both exist. The failure mode is reporting one as
+the other: a cloud referee replaying this repo on Linux (no Swift) on 2026-07-27 ran
+`--lang rust` and got `410 passed, 0 failed, 0 errors (20 algorithms × 0 comparisons)` —
+**all oracle, zero comparisons**, in a line that reads like a cross-language pass.
+
+`scripts/lane_report.py` is the shared accounting all three runners
+(`cross_language_algorithms.py`, `cross_language_commutativity.py`,
+`cross_language_workspace.py`) now print through. It states both counts every run, names
+the lanes that took part and the ones that did not, raises a banner when the comparison
+count is zero, and ends with a one-line `VERDICT:`. A **single-lane oracle run stays
+legitimate and exits 0** — that is how a machine without Swift certifies that the pinned
+goldens reproduce — but CI passes `--require-comparisons`, which exits 3 unless every
+requested comparison lane actually compared. A run with no checks of either kind exits 3
+always. The rules are self-tested: `python3 scripts/lane_report.py --self-test`.
+
+Note the shapes the two kinds take per runner: a commutativity cell on the **diagonal**
+(one port emits SVG and parses it back) is an oracle, not a comparison; the workspace
+runner compares every lane to the golden, so its lane pairs are established
+*transitively* — sound only because that anchor is exact string equality.
+
 ---
 
 ## 2. Decision A — Canvas sameness = display-list equivalence

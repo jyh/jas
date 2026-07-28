@@ -27,13 +27,28 @@ JSON, so a restricted language set still verifies against the shared golden,
 not merely mutual agreement. Default is the active ports (rust, swift);
 ocaml/python are pinned to the five-port-parity tag and run in their own
 canary lane (POLICY.md).
+
+TWO KINDS OF CELL, COUNTED APART (scripts/lane_report.py, and the same defect
+the algorithm runner carried): a DIAGONAL cell (rust emits, rust parses) is an
+ORACLE check -- one port's serializer composed with its own parser, against the
+golden. Only an OFF-DIAGONAL cell (rust emits, swift parses) compares two
+implementations. With one lane every cell is diagonal, so `--lang rust` performs
+ZERO cross-language comparisons while the old summary reported "14 passed".
+
+NOT COUNTED, deliberately: step 1's parse-the-original-SVG check increments
+nothing on success (it only fails loudly). Its passes are therefore invisible in
+the totals, which understates the oracle evidence rather than overstating it.
 """
 
 import argparse
+import itertools
 import os
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lane_report  # noqa: E402  (sibling module in scripts/)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(REPO_ROOT, "test_fixtures")
@@ -111,6 +126,8 @@ LANGUAGES: dict = {}
 
 def main():
     global LANGUAGES
+    if "--self-test" in sys.argv:
+        sys.exit(lane_report.self_test())
     parser = argparse.ArgumentParser(
         description="Cross-language serialize-parse commutativity test")
     parser.add_argument("--lang",
@@ -119,6 +136,14 @@ def main():
                              "five-port-parity tag and run in their own "
                              "canary lane — see POLICY.md)",
                         default="rust,swift")
+    parser.add_argument("--require-comparisons", action="store_true",
+                        help="Exit non-zero (3) unless every requested "
+                             "comparison lane actually compared (CI passes "
+                             "this; a deliberate single-lane oracle run "
+                             "omits it)")
+    parser.add_argument("--self-test", action="store_true",
+                        help="Check the summary's own reporting rules "
+                             "(scripts/lane_report.py) and exit")
     args = parser.parse_args()
     selected = [l.strip() for l in args.lang.split(",") if l.strip()]
     unknown = [l for l in selected if l not in ALL_LANGUAGES]
@@ -126,10 +151,17 @@ def main():
         print(f"Unknown language(s): {', '.join(unknown)} "
               f"(choose from {', '.join(ALL_LANGUAGES)})", file=sys.stderr)
         sys.exit(2)
-    LANGUAGES = {l: ALL_LANGUAGES[l] for l in selected}
+    lanes = lane_report.Lanes.resolve(selected)
+    LANGUAGES = {l: ALL_LANGUAGES[l] for l in lanes.requested}
 
-    passed = 0
-    failed = 0
+    # Diagonal cells (a port's own serializer + parser vs the golden) are
+    # ORACLE; only off-diagonal cells compare two implementations.
+    oracle_passed = 0
+    oracle_failed = 0
+    compare_passed = 0
+    compare_failed = 0
+    errors = 0
+    per_lane = {l: 0 for l in lanes.comparison}
 
     for name in FIXTURE_NAMES:
         svg_path = os.path.join(FIXTURES_DIR, "svg", f"{name}.svg")
@@ -145,11 +177,11 @@ def main():
                 parse_results[lang] = json_out
                 if json_out != expected_json:
                     print(f"  FAIL: {name} parse by {lang} differs from expected")
-                    failed += 1
+                    oracle_failed += 1
                     continue
             except Exception as e:
                 print(f"  ERROR: {name} parse by {lang}: {e}")
-                failed += 1
+                errors += 1
                 continue
 
         # Step 2: Each language re-serializes to SVG.
@@ -160,6 +192,7 @@ def main():
                 svg_outputs[lang] = svg_out
             except Exception as e:
                 print(f"  ERROR: {name} roundtrip by {lang}: {e}")
+                errors += 1
 
         # Step 3: Cross-language commutativity.
         # For each pair (serializer, parser): parser reads serializer's SVG.
@@ -172,25 +205,54 @@ def main():
                     tmp.write(svg_out)
                     tmp_path = tmp.name
 
+                # A DIAGONAL cell exercises one port only: its serializer
+                # composed with its own parser, anchored to the golden. That is
+                # an oracle, not evidence that two ports agree.
+                cross = ser_lang != par_lang
                 try:
                     json_out = par_runner("parse", tmp_path)
+                    if cross:
+                        for lane in (ser_lang, par_lang):
+                            if lane in per_lane:
+                                per_lane[lane] += 1
                     if json_out != expected_json:
                         print(f"  FAIL: {name} [{ser_lang}→svg→{par_lang}] "
                               f"canonical JSON mismatch")
-                        failed += 1
+                        if cross:
+                            compare_failed += 1
+                        else:
+                            oracle_failed += 1
+                    elif cross:
+                        compare_passed += 1
                     else:
-                        passed += 1
+                        oracle_passed += 1
                 except Exception as e:
                     print(f"  ERROR: {name} [{ser_lang}→svg→{par_lang}]: {e}")
-                    failed += 1
+                    errors += 1
                 finally:
                     os.unlink(tmp_path)
 
-    print(f"\nCross-language commutativity: {passed} passed, {failed} failed "
-          f"({len(FIXTURE_NAMES)} fixtures × {len(LANGUAGES)} serializers × "
-          f"{len(LANGUAGES)} parsers = {len(FIXTURE_NAMES) * len(LANGUAGES)**2} pairs)")
-
-    sys.exit(1 if failed else 0)
+    n_cross = len(list(itertools.permutations(lanes.requested, 2)))
+    report = lane_report.LaneReport(
+        title="Cross-language commutativity",
+        scope=f"{len(FIXTURE_NAMES)} fixtures × {len(LANGUAGES)}² cells "
+              f"= {len(FIXTURE_NAMES) * len(LANGUAGES) ** 2} "
+              f"({len(FIXTURE_NAMES) * n_cross} off-diagonal)",
+        lanes=lanes,
+        oracle_passed=oracle_passed, oracle_failed=oracle_failed,
+        comparison_passed=compare_passed, comparison_failed=compare_failed,
+        errors=errors,
+        oracle_lanes=lanes.requested,
+        oracle_what="on the diagonal: own serializer + own parser, "
+                    "vs the pinned golden",
+        comparison_what="one port's SVG parsed by another, vs the golden "
+                        "(off-diagonal cells)",
+        per_lane_comparisons=per_lane,
+        require_comparisons=args.require_comparisons,
+        unexercised=lane_report.unexercised_active_ports(lanes),
+    )
+    report.print_report()
+    sys.exit(report.exit_code())
 
 
 if __name__ == "__main__":

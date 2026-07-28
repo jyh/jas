@@ -21,6 +21,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lane_report  # noqa: E402  (sibling module in scripts/)
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(REPO_ROOT, "test_fixtures", "algorithms")
 
@@ -711,6 +714,12 @@ def check_leading_close_invariance(langs, algos, verbose=False):
 # ---------------------------------------------------------------
 
 def main():
+    if "--self-test" in sys.argv:
+        # The summary's own gate: see scripts/lane_report.py. Kept on this
+        # script too so the runner and its reporting rules are checkable
+        # together (`... --self-test && ... --lang rust,swift`).
+        sys.exit(lane_report.self_test())
+
     parser = argparse.ArgumentParser(description="Cross-language algorithm tests")
     parser.add_argument("--lang",
                         help="Comma-separated languages (default: the active "
@@ -721,6 +730,15 @@ def main():
     parser.add_argument("--algo", help="Single algorithm to test (default: all)")
     parser.add_argument("--verbose", action="store_true",
                         help="Print raw output on failure")
+    parser.add_argument("--require-comparisons", action="store_true",
+                        help="Exit non-zero (3) unless every requested "
+                             "comparison lane actually compared. CI passes "
+                             "this so the blocking lane cannot silently "
+                             "degrade into an oracle-only run; a deliberate "
+                             "single-lane oracle run omits it.")
+    parser.add_argument("--self-test", action="store_true",
+                        help="Check the summary's own reporting rules "
+                             "(scripts/lane_report.py) and exit")
     args = parser.parse_args()
 
     langs = [l.strip() for l in args.lang.split(",")]
@@ -730,11 +748,21 @@ def main():
             sys.exit(1)
 
     algos = [args.algo] if args.algo else list(ALGORITHMS.keys())
-    ref_lang = langs[0]  # First language is the reference
-    compare_langs = [l for l in langs if l != ref_lang]
+    # Lane arithmetic lives in lane_report so every runner counts the same way
+    # (dedup included: `--lang rust,rust` is an oracle run, not two lanes).
+    lanes = lane_report.Lanes.resolve(langs)
+    ref_lang = lanes.reference
+    compare_langs = list(lanes.comparison)
 
-    passed = 0
-    failed = 0
+    # The two counts are kept apart from here to the summary. Folding them was
+    # the defect: a single-lane run reported its ORACLE passes under a heading
+    # that reads as cross-language agreement.
+    oracle_passed = 0
+    oracle_failed = 0
+    compare_passed = 0
+    compare_failed = 0
+    harness_failed = 0
+    per_lane = {l: 0 for l in compare_langs}
     errors = 0
 
     # Preflight (see check_measure_injection): run before any family, so a
@@ -742,14 +770,14 @@ def main():
     # surfacing later as a mysterious text_layout mismatch.
     for problem in check_measure_injection():
         print(f"  FAIL: harness/measure-unit {problem}")
-        failed += 1
+        harness_failed += 1
 
     # Preflight (see check_json_string_escapers): a second inline escaper is a
     # PORT fault that no family can see, because every fixture string is
     # printable ASCII. Reported here by name for the same reason.
     for problem in check_json_string_escapers():
         print(f"  FAIL: port/json-string-escaper {problem}")
-        failed += 1
+        harness_failed += 1
 
     # The RELATIONAL S-4 pass (see check_leading_close_invariance): asserts a
     # leading ClosePath changes no answer, for every registered algorithm whose
@@ -826,13 +854,13 @@ def main():
                 oracle_ok = (values_close(golden, body, tol) if strategy == "tolerance"
                              else golden == body)
                 if oracle_ok:
-                    passed += 1
+                    oracle_passed += 1
                 else:
                     print(f"  FAIL: {algo}/{name} [oracle: {ref_lang} vs pinned expected]")
                     if args.verbose:
                         print(f"    expected: {json.dumps(golden, sort_keys=True)[:200]}")
                         print(f"    {ref_lang}:   {json.dumps(body, sort_keys=True)[:200]}")
-                    failed += 1
+                    oracle_failed += 1
 
         # Partial-golden oracle for the strategies in
         # ORACLE_PARTIAL_STRATEGIES. Their `expected` blocks pin a SUBSET of
@@ -860,7 +888,7 @@ def main():
                 if case.get(KNOWN_GAP_KEY) and not gap_keys:
                     print(f"  FAIL: {algo}/{name} [has {KNOWN_GAP_KEY} but no "
                           f"{KNOWN_GAP_KEYS_KEY}: say which keys it holds out]")
-                    failed += 1
+                    oracle_failed += 1
                 for key, want in golden.items():
                     if key in gap_keys:
                         # A documented derived-correct golden the ports do
@@ -872,7 +900,7 @@ def main():
                             print(f"  FAIL: {algo}/{name}.{key} [held out as a "
                                   f"known gap but {ref_lang} now reproduces it: "
                                   f"delete the {KNOWN_GAP_KEY} holdout]")
-                            failed += 1
+                            oracle_failed += 1
                         else:
                             print(f"  KNOWN-GAP: {algo}/{name}.{key} "
                                   f"[oracle held out, see {KNOWN_GAP_KEY} in "
@@ -881,23 +909,23 @@ def main():
                     if key not in body:
                         print(f"  FAIL: {algo}/{name} [oracle: {ref_lang} "
                               f"emits no '{key}']")
-                        failed += 1
+                        oracle_failed += 1
                         continue
                     if values_close(want, body[key], gold_tol):
-                        passed += 1
+                        oracle_passed += 1
                     else:
                         print(f"  FAIL: {algo}/{name}.{key} "
                               f"[oracle: {ref_lang} vs pinned expected]")
                         if args.verbose:
                             print(f"    expected: {json.dumps(want)[:200]}")
                             print(f"    {ref_lang}:   {json.dumps(body[key])[:200]}")
-                        failed += 1
+                        oracle_failed += 1
                 for key in gap_keys:
                     if key not in golden:
                         print(f"  FAIL: {algo}/{name} [{KNOWN_GAP_KEYS_KEY} "
                               f"names '{key}', which is not in expected: "
                               f"a stale holdout]")
-                        failed += 1
+                        oracle_failed += 1
 
         # Run each comparison language
         for lang in compare_langs:
@@ -931,7 +959,8 @@ def main():
                     if ref_vec["name"] != lang_vec["name"]:
                         print(f"  FAIL: {algo}/{vec_name} name mismatch "
                               f"({ref_lang}={ref_vec['name']}, {lang}={lang_vec['name']})")
-                        failed += 1
+                        compare_failed += 1
+                        per_lane[lang] = per_lane.get(lang, 0) + 1
                         continue
                     ok = compare(strategy, ref_vec, lang_vec, tol)
                     ref_body = ref_vec["result"]
@@ -943,20 +972,34 @@ def main():
                     ref_body = ref_vec
                     lang_body = lang_vec
 
+                # Counted per lane whatever the outcome: "how many comparisons
+                # did lane X actually perform" is the number that exposes a
+                # lane which errored out of every family.
+                per_lane[lang] = per_lane.get(lang, 0) + 1
                 if ok:
-                    passed += 1
+                    compare_passed += 1
                 else:
                     print(f"  FAIL: {algo}/{vec_name} [{ref_lang} vs {lang}]")
                     if args.verbose:
                         print(f"    {ref_lang}: {json.dumps(ref_body, sort_keys=True)[:200]}")
                         print(f"    {lang}:   {json.dumps(lang_body, sort_keys=True)[:200]}")
-                    failed += 1
+                    compare_failed += 1
 
-    total = passed + failed + errors
-    print(f"\nCross-language algorithms: {passed} passed, {failed} failed, "
-          f"{errors} errors ({len(algos)} algorithms × {len(compare_langs)} comparisons)")
-
-    sys.exit(1 if (failed or errors) else 0)
+    report = lane_report.LaneReport(
+        title="Cross-language algorithms",
+        scope=f"{len(algos)} algorithm" + ("s" if len(algos) != 1 else ""),
+        lanes=lanes,
+        oracle_passed=oracle_passed, oracle_failed=oracle_failed,
+        comparison_passed=compare_passed, comparison_failed=compare_failed,
+        harness_failed=harness_failed, errors=errors,
+        oracle_what="vs the pinned goldens",
+        comparison_what="lane-vs-lane agreement",
+        per_lane_comparisons=per_lane,
+        require_comparisons=args.require_comparisons,
+        unexercised=lane_report.unexercised_active_ports(lanes),
+    )
+    report.print_report()
+    sys.exit(report.exit_code())
 
 
 if __name__ == "__main__":
