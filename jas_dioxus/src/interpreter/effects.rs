@@ -2463,7 +2463,7 @@ fn brush_options_confirm_dispatch(store: &mut StateStore, model: &mut Model) {
 /// Skips the write if the input rectangle is empty, the viewport
 /// is degenerate, or the post-padding viewport is non-positive.
 /// In those cases the existing view state stays unchanged.
-fn fit_rect_into_viewport(
+pub(crate) fn fit_rect_into_viewport(
     model: &mut Model,
     rect_x: f64,
     rect_y: f64,
@@ -2498,7 +2498,11 @@ fn fit_rect_into_viewport(
 /// preferences.viewport.* — the runtime expression evaluator
 /// doesn't currently resolve preferences.* identifiers, so these
 /// effects bypass it and read the workspace data directly.
-fn read_pref_number(_ctx: &serde_json::Value, key: &str, default: f64) -> f64 {
+pub(crate) fn read_pref_number(_ctx: &serde_json::Value, key: &str, default: f64) -> f64 {
+    #[cfg(test)]
+    if let Some(v) = viewport_pref_override(key) {
+        return v;
+    }
     use crate::interpreter::workspace::Workspace;
     let Some(ws) = Workspace::load() else { return default; };
     ws.data()
@@ -2507,6 +2511,66 @@ fn read_pref_number(_ctx: &serde_json::Value, key: &str, default: f64) -> f64 {
         .and_then(|v| v.get(key))
         .and_then(|n| n.as_f64())
         .unwrap_or(default)
+}
+
+// ---------------------------------------------------------------------------
+// TEST-ONLY: move a viewport preference and watch the behaviour follow
+// ---------------------------------------------------------------------------
+//
+// WHY THIS EXISTS. `preferences.viewport.*` today happens to hold exactly the
+// numbers the code used to hardcode (zoom_step 1.2, min/max zoom 0.1/64.0,
+// fit_padding_px 20). So a test that asserts "the fit used padding 20" cannot
+// tell a route that READS the preference from a route that repeats the literal
+// — they agree by coincidence, which is the whole failure class the 2026-07-27
+// zoom wave was chasing. The only way to break the tie is to MOVE the
+// preference and require the behaviour to move with it. The workspace bundle
+// is a compile-time `include_str!` behind a `OnceLock`, so a test cannot edit
+// it; this thread-local stands in for that edit.
+//
+// `#[cfg(test)]` throughout: the release build has neither the branch nor the
+// thread-local. Thread-local (not global) so `cargo test`'s parallel threads
+// cannot see each other's overrides; the guard restores on drop, including on
+// a panicking assertion.
+#[cfg(test)]
+thread_local! {
+    static VIEWPORT_PREF_OVERRIDES: std::cell::RefCell<
+        std::collections::HashMap<String, f64>
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+#[cfg(test)]
+fn viewport_pref_override(key: &str) -> Option<f64> {
+    VIEWPORT_PREF_OVERRIDES.with(|m| m.borrow().get(key).copied())
+}
+
+/// TEST ONLY. Override `preferences.viewport.<key>` for this thread until the
+/// returned guard drops. See the block comment above.
+#[cfg(test)]
+pub(crate) struct ViewportPrefOverride {
+    key: String,
+    previous: Option<f64>,
+}
+
+#[cfg(test)]
+impl ViewportPrefOverride {
+    pub(crate) fn set(key: &str, value: f64) -> Self {
+        let previous = VIEWPORT_PREF_OVERRIDES
+            .with(|m| m.borrow_mut().insert(key.to_string(), value));
+        Self { key: key.to_string(), previous }
+    }
+}
+
+#[cfg(test)]
+impl Drop for ViewportPrefOverride {
+    fn drop(&mut self) {
+        VIEWPORT_PREF_OVERRIDES.with(|m| {
+            let mut m = m.borrow_mut();
+            match self.previous {
+                Some(v) => { m.insert(self.key.clone(), v); }
+                None => { m.remove(&self.key); }
+            }
+        });
+    }
 }
 
 /// Convert viewport-pixel coordinates to document-pixel coordinates

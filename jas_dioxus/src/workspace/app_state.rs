@@ -114,7 +114,7 @@ impl TabState {
         // AppState::sync_viewport_dimensions re-runs centering with
         // the actual canvas size. Per ZOOM_TOOL.md §Document-open
         // behavior.
-        model.center_view_on_current_artboard();
+        model.center_view_on_current_artboard(&[]);
         Self {
             model,
             tools,
@@ -2173,7 +2173,7 @@ impl AppState {
             // size now that we know it. Per ZOOM_TOOL.md
             // §Document-open behavior.
             if was_default {
-                tab.model.center_view_on_current_artboard();
+                tab.model.center_view_on_current_artboard(&[]);
             }
         }
     }

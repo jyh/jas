@@ -318,7 +318,7 @@ impl Model {
     /// viewport. Computes pan only — leaves zoom_level alone (the
     /// caller should pre-set it). Used at TabState construction and
     /// the first time the canvas reports its real viewport size.
-    pub fn center_view_on_current_artboard(&mut self) {
+    pub fn center_view_on_current_artboard(&mut self, _artboards_panel_selection: &[String]) {
         let Some(ab) = self.document.artboards.first() else { return; };
         if self.viewport_w <= 0.0 || self.viewport_h <= 0.0 { return; }
         let z = self.zoom_level;
@@ -1345,7 +1345,7 @@ mod tests {
         //   offset_x = 444 - 306 = 138
         //   offset_y = 450 - 396 = 54
         let mut model = Model::default();
-        model.center_view_on_current_artboard();
+        model.center_view_on_current_artboard(&[]);
         assert_eq!(model.zoom_level, 1.0);
         assert_eq!(model.view_offset_x, 138.0);
         assert_eq!(model.view_offset_y, 54.0);
@@ -1359,11 +1359,127 @@ mod tests {
         let mut model = Model::default();
         model.viewport_w = 400.0;
         model.viewport_h = 400.0;
-        model.center_view_on_current_artboard();
+        model.center_view_on_current_artboard(&[]);
         // zoom is fit-inside with 20px padding:
         // avail = 360, zoom = min(360/612, 360/792) = 0.4545...
         assert!(model.zoom_level < 1.0);
         assert!((model.zoom_level - 360.0/792.0).abs() < 1e-9);
+    }
+
+    // ── F7: the two zoom constants the wave did NOT delete ───────────────
+    //
+    // `center_view_on_current_artboard` survived the 2026-07-27 deletion of the
+    // native View verbs still carrying its own `let pad = 20.0` and
+    // `.clamp(0.1, 64.0)` — literal copies of `preferences.viewport
+    // .fit_padding_px`, `min_zoom` and `max_zoom` — plus `artboards.first()`
+    // where the ruling moved everything else to the CURRENT artboard. Parity
+    // held only because the literals happen to equal the preference defaults:
+    // exactly the "agrees only by coincidence" failure the route tests exist to
+    // expose. The three tests below MOVE the preference (or the selection) and
+    // require the behaviour to move with it, so a re-hardcoded literal reds.
+
+    /// Seed: Model::default()'s Letter artboard (612x792 at the origin) in a
+    /// viewport too small to hold it at 100%, so the FIT branch runs.
+    ///   z = (400 - 2*pad) / 792   (height is the binding axis)
+    fn fit_branch_model() -> Model {
+        let mut model = Model::default();
+        model.viewport_w = 400.0;
+        model.viewport_h = 400.0;
+        model
+    }
+
+    #[test]
+    fn center_view_fit_branch_follows_the_fit_padding_px_preference() {
+        // Guard: with the SHIPPED preference (20) the fit uses 20 — so the
+        // assertion below is about the preference being read, not about the
+        // formula being different.
+        let mut model = fit_branch_model();
+        model.center_view_on_current_artboard(&[]);
+        assert!((model.zoom_level - 360.0 / 792.0).abs() < 1e-12,
+            "shipped fit_padding_px 20: z = {}", model.zoom_level);
+
+        // Now MOVE the preference. A route that reads it lands on 200/792;
+        // a route with `let pad = 20.0` lands on 360/792 and reds here.
+        let _g = crate::interpreter::effects::ViewportPrefOverride
+            ::set("fit_padding_px", 100.0);
+        let mut model = fit_branch_model();
+        model.center_view_on_current_artboard(&[]);
+        assert!((model.zoom_level - 200.0 / 792.0).abs() < 1e-12,
+            "fit_padding_px moved to 100: z = {}, want {}",
+            model.zoom_level, 200.0 / 792.0);
+    }
+
+    #[test]
+    fn center_view_fit_branch_follows_the_min_zoom_preference() {
+        // Unclamped fit zoom is 360/792 ~= 0.4545. Raise min_zoom above it:
+        // a route that reads the preference clamps UP to 1.5; a route with
+        // `.clamp(0.1, 64.0)` stays at 0.4545 and reds here.
+        let _g = crate::interpreter::effects::ViewportPrefOverride
+            ::set("min_zoom", 1.5);
+        let mut model = fit_branch_model();
+        model.center_view_on_current_artboard(&[]);
+        assert_eq!(model.zoom_level, 1.5,
+            "min_zoom moved to 1.5: z = {}", model.zoom_level);
+    }
+
+    #[test]
+    fn center_view_fit_branch_follows_the_max_zoom_preference() {
+        // Lower max_zoom below the unclamped fit zoom (0.4545) so the clamp
+        // binds from above. `.clamp(0.1, 64.0)` never sees 0.25 and reds.
+        let _g = crate::interpreter::effects::ViewportPrefOverride
+            ::set("max_zoom", 0.25);
+        let mut model = fit_branch_model();
+        model.center_view_on_current_artboard(&[]);
+        assert_eq!(model.zoom_level, 0.25,
+            "max_zoom moved to 0.25: z = {}", model.zoom_level);
+    }
+
+    #[test]
+    fn center_view_honours_the_panel_selected_current_artboard() {
+        // Two boards that fit at 100% in the default 888x900 viewport, at
+        // rects that cannot coincide numerically. `ab2` is panel-selected, so
+        // `artboards.first()` lands on a measurably different pan.
+        let mut model = Model::default();
+        let mut ab1 = crate::document::artboard::Artboard
+            ::default_with_id("ab1".to_string());
+        ab1.width = 612.0;
+        ab1.height = 792.0;
+        let mut ab2 = crate::document::artboard::Artboard
+            ::default_with_id("ab2".to_string());
+        ab2.x = 200.0;
+        ab2.y = 150.0;
+        ab2.width = 100.0;
+        ab2.height = 50.0;
+        let mut doc = model.document().clone();
+        doc.artboards = vec![ab1, ab2];
+        model.set_document_for_test(doc);
+
+        model.center_view_on_current_artboard(&["ab2".to_string()]);
+        assert_eq!(model.zoom_level, 1.0);
+        // ab2 centre (250, 175) at 888x900 → (444 - 250, 450 - 175).
+        assert_eq!(model.view_offset_x, 194.0,
+            "panel-selected ab2 must be centred, not artboards.first()");
+        assert_eq!(model.view_offset_y, 275.0);
+
+        // …and the first board is genuinely a different answer, so the
+        // assertion above is discriminating rather than accidentally satisfied.
+        let mut model = Model::default();
+        let mut ab1 = crate::document::artboard::Artboard
+            ::default_with_id("ab1".to_string());
+        ab1.width = 612.0;
+        ab1.height = 792.0;
+        let mut ab2 = crate::document::artboard::Artboard
+            ::default_with_id("ab2".to_string());
+        ab2.x = 200.0;
+        ab2.y = 150.0;
+        ab2.width = 100.0;
+        ab2.height = 50.0;
+        let mut doc = model.document().clone();
+        doc.artboards = vec![ab1, ab2];
+        model.set_document_for_test(doc);
+        model.center_view_on_current_artboard(&[]);
+        assert_eq!(model.view_offset_x, 138.0, "no selection → the first board");
+        assert_eq!(model.view_offset_y, 54.0);
     }
 
     #[test]
@@ -1374,7 +1490,7 @@ mod tests {
         model.zoom_level = 2.0;
         model.view_offset_x = 100.0;
         model.view_offset_y = 50.0;
-        model.center_view_on_current_artboard();
+        model.center_view_on_current_artboard(&[]);
         // No-op: pre-existing values preserved.
         assert_eq!(model.zoom_level, 2.0);
         assert_eq!(model.view_offset_x, 100.0);
@@ -1614,7 +1730,7 @@ mod tests {
         model.begin_txn();
         let mut doc = model.document().clone();
         doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(id_rect("u1")));
-        model.set_document(doc);
+        model.set_document_for_test(doc);
         model.commit_txn();
         assert_eq!(model.id_index(), &rebuild_id_index(model.document()));
         assert!(resolves(&model, "u1"));
