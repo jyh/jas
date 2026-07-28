@@ -574,7 +574,10 @@ public class Controller {
         var selection: Selection = []
         for (li, layer) in doc.layers.enumerated() {
             let layerVis = layer.visibility
-            if layerVis == .invisible { continue }
+            // A locked layer's subtree is non-selectable; skip the whole
+            // layer, like the invisible case. Mirrors this port's own
+            // `docHitTest` / `docHitTestDeep` and jas_dioxus `select_flat`.
+            if layer.locked || layerVis == .invisible { continue }
             for (ci, child) in layer.children.enumerated() {
                 if child.isLocked { continue }
                 let childVis = min(layerVis, child.visibility)

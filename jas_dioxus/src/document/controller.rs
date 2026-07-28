@@ -2799,7 +2799,13 @@ fn select_flat(
         let layer_vis = layer.visibility();
         // A locked layer's subtree is non-selectable by inheritance (lock is
         // not materialized onto children); skip the whole layer. Mirrors the
-        // hit_test path and Swift/OCaml/Python.
+        // hit_test path, and — since D1 was closed — JasSwift `selectFlat`.
+        // Until then the Swift half of that claim was simply FALSE (its
+        // `selectFlat` checked visibility only), and no gate could see it,
+        // because the shared corpus cannot seed a locked document at all.
+        // The pair is now pinned per-port at both ends (see
+        // `select_rect_skips_a_locked_layer_and_keeps_going` below and
+        // JasSwift `selectRectSkipsALockedLayerAndKeepsGoing`).
         if layer.locked() || layer_vis == Visibility::Invisible {
             continue;
         }
