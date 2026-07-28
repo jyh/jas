@@ -2483,9 +2483,8 @@ public func applyAlignOperation(model: Model, store: StateStore, op: String) {
         // loaded document; if the array is empty (pathological),
         // fall back to the selection union so the op still moves
         // elements.
-        let selectedIds = Set((store.getPanel("artboards", "artboards_panel_selection") as? [String]) ?? [])
-        let currentAb = doc.artboards.first(where: { selectedIds.contains($0.id) })
-            ?? doc.artboards.first
+        let selectedIds = (store.getPanel("artboards", "artboards_panel_selection") as? [String]) ?? []
+        let currentAb = currentArtboard(doc.artboards, selection: selectedIds)
         if let ab = currentAb {
             reference = .artboard((ab.x, ab.y, ab.width, ab.height))
         } else {

@@ -2792,16 +2792,10 @@ impl AppState {
                 // at-least-one invariant guarantees artboards[0]
                 // exists; if it somehow doesn't, fall back to the
                 // selection union so the op still moves elements.
-                let selected_set: std::collections::HashSet<&str> = self
-                    .artboards_panel_selection
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect();
-                let current_ab = doc
-                    .artboards
-                    .iter()
-                    .find(|a| selected_set.contains(a.id.as_str()))
-                    .or_else(|| doc.artboards.first());
+                let current_ab = crate::document::artboard::current_artboard(
+                    &doc.artboards,
+                    &self.artboards_panel_selection,
+                );
                 if let Some(ab) = current_ab {
                     aa::AlignReference::Artboard((ab.x, ab.y, ab.width, ab.height))
                 } else {

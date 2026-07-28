@@ -319,11 +319,19 @@ private func parseDefaultName(_ name: String) -> Int? {
 /// .current_artboard` resolves to the first row in that order carrying the
 /// selection.
 ///
-/// WHY IT IS A FUNCTION. It used to be an inline `first(where:) ?? first`
-/// inside `ActiveDocumentView`, so every OTHER site that wanted "the current
-/// artboard" reached for `artboards.first` instead — which is the same answer
-/// only while nothing is panel-selected. Mirrors Rust
+/// WHY IT IS A FUNCTION. The rule was written out inline in more than one
+/// place: `ActiveDocumentView` and the Align panel's artboard reference each
+/// carried their own `first(where:) ?? first`, and other sites reached for a
+/// bare `artboards.first`, which is the same answer only while nothing is
+/// panel-selected. Both inline copies now call here. Mirrors Rust
 /// `document::artboard::current_artboard`.
+///
+/// NOT YET MECHANICALLY GATED. Nothing stops a future site writing the rule
+/// out a third time; the two known copies were found by an adversarial read,
+/// which is the same kind of evidence that let them diverge in the first
+/// place. An earlier revision of this comment claimed every other site used
+/// bare `first` — that was measurably false, and it is recorded here rather
+/// than quietly deleted.
 public func currentArtboard(_ artboards: [Artboard],
                             selection: [String]) -> Artboard? {
     let selected = Set(selection)
