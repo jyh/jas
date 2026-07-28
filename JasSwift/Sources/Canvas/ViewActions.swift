@@ -22,10 +22,8 @@ import Foundation
 /// AppKit responder — which is why the divergence lived this long.
 ///
 /// RULED 2026-07-27 (transcripts/ZOOM_TOOL.md, "Swift's MENU AND KEYBOARD must
-/// route through the YAML pipeline"): the body below must dispatch the YAML
-/// action. It does NOT yet — this revision is the verbatim extraction of the
-/// three native switches into one seam, so ``ViewActionRouteTests`` can show the
-/// divergence as a measured red before the routing changes underneath it.
+/// route through the YAML pipeline"): the body below dispatches the YAML action,
+/// so every user path lands on the effects the action corpus already gates.
 /// The `StateStore` scope the Artboards panel's own state lives in. `set_panel_state
 /// { panel: artboards }` normalises the short workspace name to this content id, and
 /// the panel body renders from it, so it is where `artboards_panel_select` puts the
@@ -57,16 +55,21 @@ public enum ViewActions {
     /// True when `name` is one of the six verbs above.
     public static func owns(_ name: String) -> Bool { names.contains(name) }
 
-    /// Dispatch a View verb against `model`.
+    /// Dispatch a View verb against `model` through the YAML action pipeline —
+    /// the SAME dispatcher `test_fixtures/actions/view_state.json` drives, so the
+    /// gated road and the driven road are one road.
+    ///
+    /// The artboards-panel selection is read off the model's own state store,
+    /// because `fit_active_artboard`'s effect args resolve
+    /// `active_document.current_artboard` — "the topmost panel-selected
+    /// artboard, else the first" (ARTBOARDS.md §Selection semantics). All three
+    /// call sites get that rule for free; none of them reached for the selection
+    /// before, so Cmd+0 fitted the first board however the panel stood.
     public static func dispatch(_ name: String, model: Model) {
-        switch name {
-        case "zoom_in": model.zoomIn()
-        case "zoom_out": model.zoomOut()
-        case "zoom_to_actual_size": model.zoomToActualSize()
-        case "fit_active_artboard": model.fitActiveArtboard()
-        case "fit_all_artboards": model.fitAllArtboards()
-        case "fit_in_window": model.fitInWindow()
-        default: break
-        }
+        let abSel = (model.stateStore
+                        .getPanelState(artboardsPanelScope)["artboards_panel_selection"]
+                        as? [Any])?.compactMap { $0 as? String } ?? []
+        LayersPanel.dispatchYamlAction(name, model: model,
+                                       artboardsPanelSelection: abSel)
     }
 }
