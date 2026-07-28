@@ -296,6 +296,67 @@ DIRECTORY_GLOB_RULES = [
      "workspace/tests/set_effect"),
 ]
 
+# Families whose every .json file must DECLARE ITS OWN FLOOR and meet it.
+#
+# WHY, measured 2026-07-28. This gate asserts a glob directory exists and is
+# non-empty — but a family whose whole payload lives in ONE file is not
+# emptied by deleting the file, it is emptied by rewriting the file's contents
+# to `[]`. That left the preservation family with four gates over it and no
+# gate that could see it: this one saw a non-empty directory, the family's own
+# checker printed `OK (0 vectors, 1 file(s))`, and both ports' gates are `for`
+# loops with no minimum. So each such file states `min_vectors` about itself
+# and every reader — this gate, scripts/check_preservation_corpus.py, and both
+# ports — refuses a file that carries fewer. Adding a family here costs one
+# row; it does NOT need a fifth place to keep the count in step.
+VECTOR_FLOOR_FAMILIES = ["test_fixtures/preservation"]
+
+
+def check_vector_floors(repo_root: str, families: dict) -> list[str]:
+    """Every .json in a VECTOR_FLOOR_FAMILIES family declares `min_vectors`
+    and carries at least that many entries under `vectors`."""
+    errors: list[str] = []
+    for family in VECTOR_FLOOR_FAMILIES:
+        names = [n for n in families.get(family, []) if n.endswith(".json")]
+        if not names:
+            errors.append(
+                f"vector-floor: {family} holds no .json file — the family it "
+                f"declares a floor for has vanished")
+            continue
+        for name in sorted(names):
+            path = os.path.join(repo_root, family, name)
+            try:
+                with open(path, encoding="utf-8") as f:
+                    root = json.load(f)
+            except (OSError, ValueError) as e:
+                errors.append(f"vector-floor: {family}/{name} unreadable: {e}")
+                continue
+            if not isinstance(root, dict):
+                errors.append(
+                    f"vector-floor: {family}/{name} top level is "
+                    f"{type(root).__name__}, not an object declaring "
+                    f"'min_vectors' — a bare array cannot state its own floor, "
+                    f"which is how emptying it to `[]` stayed green")
+                continue
+            n_min = root.get("min_vectors")
+            vectors = root.get("vectors")
+            if not isinstance(n_min, int) or isinstance(n_min, bool) or n_min < 1:
+                errors.append(
+                    f"vector-floor: {family}/{name} declares min_vectors="
+                    f"{n_min!r}; it must be an integer >= 1 (a floor of zero "
+                    f"is not a floor)")
+                continue
+            if not isinstance(vectors, list):
+                errors.append(
+                    f"vector-floor: {family}/{name} has no 'vectors' list")
+                continue
+            if len(vectors) < n_min:
+                errors.append(
+                    f"vector-floor: {family}/{name} declares min_vectors="
+                    f"{n_min} but carries {len(vectors)} — vectors were "
+                    f"removed without lowering the floor the file states "
+                    f"about itself")
+    return errors
+
 
 # ---------------------------------------------------------------------------
 # Extraction machinery
@@ -697,7 +758,7 @@ def run_real() -> int:
     errors, warnings = run_checks(
         REPO_ROOT, manifest, families, claims, DIRECTORY_GLOB_RULES)
     gap_errors, gap_lines = check_coverage_gaps(manifest)
-    errors = errors + gap_errors
+    errors = errors + gap_errors + check_vector_floors(REPO_ROOT, families)
 
     # Printed unconditionally, and BEFORE the verdict: these are the things
     # the gate does not check, and a green run that hid them would be the
@@ -995,6 +1056,42 @@ def self_test() -> int:
         check(proc.returncode == 0 and declared_ids and not unsurfaced,
               f"the real gate SURFACES every declared coverage gap "
               f"(rc={proc.returncode}, unsurfaced={unsurfaced})")
+
+        # 12. THE VECTOR FLOOR. Every case below returned rc=0 from all four
+        # of the preservation family's gates before 2026-07-28, which is the
+        # whole reason the floor exists; none of them can be exercised by the
+        # shipped corpus, so they are pinned here.
+        fam = "test_fixtures/preservation"
+        floor_cases = [
+            ("[]", "an emptied bare array is flagged",
+             "top level is list"),
+            ('{"min_vectors": 12, "vectors": []}',
+             "a corpus below its declared floor is flagged",
+             "declares min_vectors=12 but carries 0"),
+            ('{"min_vectors": 0, "vectors": []}',
+             "a declared floor of zero is flagged", "is not a floor"),
+            ('{"vectors": []}', "a corpus declaring no floor is flagged",
+             "must be an integer >= 1"),
+            ('{"min_vectors": 2, "vectors": [{"name": "a"}, {"name": "b"}]}',
+             "a corpus meeting its declared floor is accepted", None),
+        ]
+        for body, label, needle in floor_cases:
+            _write(root, f"{fam}/vectors.json", body)
+            errs = check_vector_floors(root, {fam: ["vectors.json"]})
+            if needle is None:
+                check(errs == [], f"{label} ({errs})")
+            else:
+                check(any(needle in e for e in errs), label)
+        # And the family vanishing entirely is flagged, not silently skipped.
+        check(any("has vanished" in e
+                  for e in check_vector_floors(root, {fam: []})),
+              "a vector-floor family with no .json file is flagged")
+        # The SHIPPED corpus satisfies its own floor through this gate too —
+        # proving the red without proving the green would let the checker
+        # ship a rule the real corpus violates.
+        real_families = discover_families(REPO_ROOT)
+        check(check_vector_floors(REPO_ROOT, real_families) == [],
+              "the shipped preservation corpus meets its declared floor")
 
     if failures:
         print(f"self-test: {len(failures)} FAILURE(S)")

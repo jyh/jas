@@ -53,8 +53,20 @@ JasSwift/Tests/CrossLanguageTests.swift). A declared violation is asserted to
 FAIL there, so fixing a site turns the gate red until the declaration is
 removed.
 
+THE FLOOR (added 2026-07-28, after an audit measured the hole). Every check
+above is a check ON a vector, so a corpus with NO vectors satisfied all of
+them vacuously: this gate printed `OK (0 vectors, 1 file(s))` and returned 0
+for a file containing `[]`, and so did the other three (both ports' loops are
+bare `for`s, and check_corpus_manifest.py never fires because the DIRECTORY is
+still non-empty). Deleting the file was caught; EMPTYING it was not. Each
+corpus file therefore declares `min_vectors` in its own header and every one
+of the four gates refuses a file carrying fewer — the count is a fact the
+corpus states about itself rather than a magic number in four places, and
+lowering it is a visible edit instead of an invisible deletion.
+
 Usage:
     python3 scripts/check_preservation_corpus.py
+    python3 scripts/check_preservation_corpus.py --self-test
 """
 
 import json
@@ -90,6 +102,47 @@ REQUIRED_KEYS = (
     "name", "doc", "setup_svg", "cardinality", "subject_ids", "speaks_to",
     "consumed_ids", "expected_fresh_ids", "expected_violations",
 )
+
+
+def load_corpus_file(path: str):
+    """Read one corpus file and return `(min_vectors, vectors, errors)`.
+
+    The shape is an OBJECT — `{"min_vectors": N, "vectors": [...]}` — and the
+    bare-array form this family used until 2026-07-28 is REFUSED rather than
+    tolerated, because a tolerant reader would accept `[]` again and re-open
+    exactly the hole `min_vectors` exists to close.
+    """
+    where = os.path.basename(path)
+    with open(path, encoding="utf-8") as f:
+        try:
+            root = json.load(f)
+        except json.JSONDecodeError as e:
+            return 0, [], [f"{where}: bad JSON: {e}"]
+    if not isinstance(root, dict):
+        return 0, [], [
+            f"{where}: top level must be an OBJECT carrying 'min_vectors' and "
+            f"'vectors' (a bare array cannot declare its own floor, which is "
+            f"how an emptied corpus turned all four gates green)"
+        ]
+    errs = []
+    n_min = root.get("min_vectors")
+    if not isinstance(n_min, int) or isinstance(n_min, bool) or n_min < 1:
+        errs.append(
+            f"{where}: 'min_vectors' must be an integer >= 1, got {n_min!r} — "
+            f"a floor of zero is not a floor"
+        )
+        n_min = 0
+    vecs = root.get("vectors")
+    if not isinstance(vecs, list):
+        errs.append(f"{where}: 'vectors' must be a list")
+        return n_min, [], errs
+    if len(vecs) < n_min:
+        errs.append(
+            f"{where}: declares min_vectors={n_min} but carries {len(vecs)} "
+            f"vector(s) — the corpus lost vectors without anyone lowering the "
+            f"floor it states about itself"
+        )
+    return n_min, vecs, errs
 
 
 def svg_ids(svg_text: str) -> set:
@@ -261,16 +314,11 @@ def main() -> int:
     errs = []
     seen_names = set()
     n = 0
+    floor = 0
     for path in files:
-        with open(path, encoding="utf-8") as f:
-            try:
-                vecs = json.load(f)
-            except json.JSONDecodeError as e:
-                errs.append(f"{os.path.basename(path)}: bad JSON: {e}")
-                continue
-        if not isinstance(vecs, list):
-            errs.append(f"{os.path.basename(path)}: top level must be a list")
-            continue
+        n_min, vecs, file_errs = load_corpus_file(path)
+        errs.extend(file_errs)
+        floor += n_min
         for vec in vecs:
             n += 1
             errs.extend(check_vector(path, vec, seen_names))
@@ -280,9 +328,65 @@ def main() -> int:
     if errs:
         print(f"preservation-corpus gate: {len(errs)} problem(s) in {n} vector(s)")
         return 1
-    print(f"preservation-corpus gate: OK ({n} vectors, {len(files)} file(s))")
+    print(f"preservation-corpus gate: OK ({n} vectors, {len(files)} file(s), "
+          f"declared floor {floor})")
+    return 0
+
+
+def self_test() -> int:
+    """Pin the FLOOR's own red, because the floor is the one check here that
+    fires on the ABSENCE of data and so can never be exercised by the shipped
+    corpus. Four shapes, each of which was green before 2026-07-28."""
+    import tempfile
+
+    failures = []
+
+    def check(cond, label):
+        if cond:
+            print(f"  ok: {label}")
+        else:
+            failures.append(label)
+            print(f"  FAIL: {label}")
+
+    cases = [
+        ("[]", "an emptied bare array is refused (the shipped hole)",
+         "top level must be an OBJECT"),
+        ('{"min_vectors": 12, "vectors": []}',
+         "a corpus below its own declared floor is refused",
+         "declares min_vectors=12 but carries 0"),
+        ('{"min_vectors": 0, "vectors": []}',
+         "a floor of zero is refused", "not a floor"),
+        ('{"vectors": []}', "a corpus that declares no floor is refused",
+         "must be an integer >= 1"),
+    ]
+    with tempfile.TemporaryDirectory(prefix="preservation_selftest_") as root:
+        for body, label, needle in cases:
+            path = os.path.join(root, "case.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(body)
+            _, _, errs = load_corpus_file(path)
+            check(any(needle in e for e in errs), label)
+
+        # And the shipped corpus itself passes the floor it declares — a
+        # self-test that only proved the red could pass over a corpus the
+        # real gate rejects.
+        for path in sorted(
+            os.path.join(CORPUS_DIR, f)
+            for f in os.listdir(CORPUS_DIR) if f.endswith(".json")
+        ):
+            n_min, vecs, errs = load_corpus_file(path)
+            check(errs == [] and n_min >= 1 and len(vecs) >= n_min,
+                  f"{os.path.basename(path)} declares a floor of {n_min} and "
+                  f"carries {len(vecs)}")
+
+    if failures:
+        print(f"self-test: {len(failures)} FAILURE(S)")
+        return 1
+    print("self-test: OK")
     return 0
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv[1:]:
+        sys.exit(self_test())
     sys.exit(main())

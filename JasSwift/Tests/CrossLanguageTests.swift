@@ -852,11 +852,46 @@ private func runPreservationVector(_ tc: [String: Any]) -> (before: String, afte
     return (beforeJson, documentToTestJson(model.document))
 }
 
+/// Read the corpus file and return its vectors, refusing any shape that would
+/// let an EMPTIED corpus pass.
+///
+/// Measured on 2026-07-28: with the file rewritten to `[]` this test passed in
+/// 0.001s, and so did its Rust twin and both script gates — the loop below has
+/// nothing to iterate and every assertion inside it is skipped rather than
+/// failed. The floor is declared by the corpus itself (`min_vectors`) so it
+/// lives in ONE place instead of as a magic number in four, and the bare-array
+/// form is REFUSED rather than tolerated, because a tolerant reader would
+/// accept `[]` again. Mirrors Rust `preservation_vectors`.
+private func preservationVectors(_ raw: String) throws -> [[String: Any]] {
+    let root = try JSONSerialization.jsonObject(
+        with: raw.data(using: .utf8)!, options: [])
+    guard let obj = root as? [String: Any] else {
+        Issue.record("""
+            the preservation corpus's top level must be an OBJECT carrying \
+            'min_vectors' and 'vectors' — a bare array cannot declare its own \
+            floor, which is how emptying it to `[]` turned all four gates green
+            """)
+        return []
+    }
+    guard let min = obj["min_vectors"] as? Int, min >= 1 else {
+        Issue.record("the preservation corpus must declare an integer 'min_vectors' >= 1 — a floor of zero is not a floor")
+        return []
+    }
+    guard let vectors = obj["vectors"] as? [[String: Any]] else {
+        Issue.record("the preservation corpus must carry a 'vectors' array")
+        return []
+    }
+    guard vectors.count >= min else {
+        Issue.record("preservation corpus declares min_vectors=\(min) but carries \(vectors.count) — vectors were removed without lowering the floor the corpus states about itself")
+        return []
+    }
+    return vectors
+}
+
 /// THE DOCUMENT-LEVEL INVARIANT GATE. Mirrors Rust `preservation_invariants`.
 @Test func preservationInvariants() throws {
     let raw = readFixture("preservation/preservation_invariants.json")
-    let vectors = try JSONSerialization.jsonObject(
-        with: raw.data(using: .utf8)!, options: []) as! [[String: Any]]
+    let vectors = try preservationVectors(raw)
     var failures: [String] = []
 
     for tc in vectors {

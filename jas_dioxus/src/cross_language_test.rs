@@ -2323,14 +2323,52 @@ mod tests {
     /// THE DOCUMENT-LEVEL INVARIANT GATE. Runs every
     /// `test_fixtures/preservation/*.json` vector through the production op
     /// dispatcher and asserts the six invariants over the whole document.
+    /// Read the corpus file and return its vectors, refusing any shape that
+    /// would let an EMPTIED corpus pass.
+    ///
+    /// Measured on 2026-07-28: with the file rewritten to `[]` this test
+    /// printed `ok` in 0.00s, and so did its Swift twin and both script
+    /// gates — the loop below has nothing to iterate and every assertion
+    /// inside it is skipped rather than failed. The floor is declared by the
+    /// corpus itself (`min_vectors`) so it lives in ONE place instead of as a
+    /// magic number in four, and the bare-array form is REFUSED rather than
+    /// tolerated, because a tolerant reader would accept `[]` again.
+    fn preservation_vectors(json_str: &str) -> Vec<serde_json::Value> {
+        let root: serde_json::Value = serde_json::from_str(json_str)
+            .expect("preservation_invariants.json parses");
+        let obj = root.as_object().expect(
+            "the preservation corpus's top level must be an OBJECT carrying \
+             'min_vectors' and 'vectors' — a bare array cannot declare its own \
+             floor, which is how emptying it to `[]` turned all four gates green",
+        );
+        let min = obj
+            .get("min_vectors")
+            .and_then(|v| v.as_u64())
+            .expect("the preservation corpus must declare 'min_vectors'")
+            as usize;
+        assert!(min >= 1, "min_vectors must be at least 1 — a floor of zero is not a floor");
+        let vectors = obj
+            .get("vectors")
+            .and_then(|v| v.as_array())
+            .expect("the preservation corpus must carry a 'vectors' array")
+            .clone();
+        assert!(
+            vectors.len() >= min,
+            "preservation corpus declares min_vectors={min} but carries {} — \
+             vectors were removed without lowering the floor the corpus states \
+             about itself",
+            vectors.len()
+        );
+        vectors
+    }
+
     #[test]
     fn preservation_invariants() {
         let json_str = read_fixture("preservation/preservation_invariants.json");
-        let tests: serde_json::Value = serde_json::from_str(&json_str)
-            .expect("preservation_invariants.json parses");
+        let tests = preservation_vectors(&json_str);
         let mut failures: Vec<String> = Vec::new();
 
-        for tc in tests.as_array().expect("an array of vectors") {
+        for tc in &tests {
             let name = tc["name"].as_str().expect("a name");
 
             // BEFORE: the setup document, loaded and serialized with no ops.
