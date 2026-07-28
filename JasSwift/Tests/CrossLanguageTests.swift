@@ -3302,6 +3302,16 @@ private let actionFixtures = [
     // `view` and assert the resulting view triple via `expected_view` — a fact
     // NO document golden can see, because view state is not document content.
     "view_state.json",
+    // LAYERSTRUCT R1 (transcripts/LAYER_STRUCTURE.md §3): group always
+    // flattens. Before R1 a selection whose members did not share one parent
+    // was a silent no-op in BOTH ports, and NO fixture anywhere grouped across
+    // parents — so the defect and then the ruling arrived unwatched. These
+    // cases cross two layers, two sibling groups, a layer and a nested group,
+    // and pin the frontmost z-slot placement that `actions.yaml` §group always
+    // specified but neither port implemented. The contiguous same-parent case
+    // stays pinned by `menu_group_two_rects` in menu_object_ops.json, which R1
+    // must leave byte-identical.
+    "group_flatten.json",
 ]
 
 /// Object / Edit menu model-pure verbs are bespoke-native: their actions.yaml

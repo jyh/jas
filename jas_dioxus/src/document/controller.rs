@@ -3010,6 +3010,299 @@ mod tests {
             "outer group should hold exactly the new nested group");
     }
 
+    // ===================================================================
+    // R1 — GROUP ALWAYS FLATTENS (transcripts/LAYER_STRUCTURE.md §3 R1,
+    // ratified 2026-07-28). Twin probes; the Swift twins live in
+    // JasSwift/Tests/Document/GroupFlattenTests.swift, case for case.
+    //
+    // Before R1 both ports carried a SIBLING GUARD that `return`ed when the
+    // selected paths did not share one parent prefix (and did not share one
+    // path LENGTH). Cmd+G across two layers was a silent no-op with no
+    // feedback. R1: no refusal — every selected element becomes a child of
+    // the new Group, which lands at the FRONTMOST selected element's parent,
+    // at the z-slot that element vacates.
+    //
+    // "Frontmost" is fixed by the same rule BOOLEAN.md already uses and
+    // `make_compound_shape_with_op` already implements: paths sorted
+    // ascending, frontmost is `.last()` — the GREATEST path. The canvas
+    // paints `for layer in &doc.layers` forward into Canvas2D, so a higher
+    // index paints later and therefore on top.
+    // ===================================================================
+
+    fn make_layer(name: &str, children: Vec<Element>) -> Element {
+        Element::Layer(LayerElem {
+            children: children.into_iter().map(Rc::new).collect(),
+            common: CommonProps { name: Some(name.to_string()), ..CommonProps::default() },
+            isolated_blending: false,
+            knockout_group: false,
+        })
+    }
+
+    fn group_doc(layers: Vec<Element>, sel: Vec<Vec<usize>>) -> Model {
+        let doc = Document {
+            layers,
+            selected_layer: 0,
+            selection: sel.into_iter().map(ElementSelection::all).collect(),
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    /// R1 case 1 — TWO LAYERS. The selection spans layer 0 and layer 1; the
+    /// old guard refused outright. The new Group lands in the FRONTMOST
+    /// element's layer (layer 1), and layer 0 — emptied by the move — stays,
+    /// per the T4 bystander clause: it is the artist's layer and it was not
+    /// what the edit spoke to.
+    #[test]
+    fn r1_group_across_two_layers_lands_in_the_frontmost_layer() {
+        let rect = make_rect(0.0, 0.0, 10.0, 10.0);
+        let line = make_line(1.0, 1.0, 6.0, 6.0);
+        let mut model = group_doc(
+            vec![
+                make_layer("Background", vec![rect.clone()]),
+                make_layer("Foreground", vec![line.clone()]),
+            ],
+            vec![vec![0, 0], vec![1, 0]],
+        );
+        Controller::group_selection(&mut model);
+        let after = model.document();
+
+        // The emptied source LAYER survives, with its name intact.
+        assert_eq!(after.layers.len(), 2, "both layers must survive the move");
+        assert_eq!(after.layers[0].children().map_or(1, |c| c.len()), 0,
+            "layer 0 gave up its only child and must be left EMPTY, not deleted");
+        assert_eq!(after.layers[0].common().name.as_deref(), Some("Background"),
+            "the emptied bystander layer keeps its name");
+
+        // The group landed in layer 1 at the frontmost element's z-slot.
+        let g = after.get_element(&vec![1, 0]).expect("new group at [1,0]");
+        let kids = g.children().expect("the new element is a container");
+        assert_eq!(kids.len(), 2, "both selected elements became children");
+
+        // Whole-element equality: this is a RELOCATION, not a rebuild.
+        // Paired with explicit VALUE assertions below, because whole-struct
+        // equality is structurally blind to which field carries the geometry.
+        assert_eq!(*kids[0], rect, "the rect moved across whole and unchanged");
+        assert_eq!(*kids[1], line, "the line moved across whole and unchanged");
+        match &*kids[0] {
+            Element::Rect(r) => {
+                assert_eq!((r.x, r.y, r.width, r.height), (0.0, 0.0, 10.0, 10.0),
+                    "the rect's geometry survived the move");
+            }
+            other => panic!("child 0 should still be a Rect, got {other:?}"),
+        }
+        match &*kids[1] {
+            Element::Line(l) => {
+                assert_eq!((l.x1, l.y1, l.x2, l.y2), (1.0, 1.0, 6.0, 6.0),
+                    "the line's geometry survived the move");
+            }
+            other => panic!("child 1 should still be a Line, got {other:?}"),
+        }
+        assert_eq!(sel_paths(&model), vec![vec![1, 0]],
+            "selection becomes the new group");
+    }
+
+    /// R1 case 2 — TWO DIFFERENT GROUPS, one layer. The old guard rejected
+    /// this for exactly the same reason it rejected two layers: the parents
+    /// differ. Nothing about the fix may be phrased in terms of layers.
+    #[test]
+    fn r1_group_across_two_groups_lands_in_the_frontmost_group() {
+        let a = make_rect(0.0, 0.0, 10.0, 10.0);
+        let b = make_rect(20.0, 0.0, 10.0, 10.0);
+        let c = make_rect(40.0, 0.0, 10.0, 10.0);
+        let d = make_rect(60.0, 0.0, 10.0, 10.0);
+        let mut model = group_doc(
+            vec![make_layer("Stage", vec![
+                make_group(vec![a.clone(), b.clone()]),
+                make_group(vec![c.clone(), d.clone()]),
+            ])],
+            // b (in the back group) + c (in the front group).
+            vec![vec![0, 0, 1], vec![0, 1, 0]],
+        );
+        Controller::group_selection(&mut model);
+        let after = model.document();
+
+        let back = after.get_element(&vec![0, 0]).expect("back group survives");
+        assert_eq!(back.children().map_or(0, |c| c.len()), 1,
+            "the back group keeps its remaining child");
+        assert_eq!(*back.children().unwrap()[0], a, "and that child is untouched");
+
+        // The new group is INSIDE the frontmost element's parent (the front
+        // group), at the slot c vacated.
+        let new_g = after.get_element(&vec![0, 1, 0]).expect("new group at [0,1,0]");
+        let kids = new_g.children().expect("new group is a container");
+        assert_eq!(kids.len(), 2, "b and c became the new group's children");
+        assert_eq!(*kids[0], b, "b relocated whole");
+        assert_eq!(*kids[1], c, "c relocated whole");
+        match &*kids[1] {
+            Element::Rect(r) => assert_eq!((r.x, r.width), (40.0, 10.0),
+                "c's geometry survived the cross-parent move"),
+            other => panic!("expected Rect, got {other:?}"),
+        }
+        // d stayed put, one slot along.
+        let front = after.get_element(&vec![0, 1]).expect("front group survives");
+        assert_eq!(*front.children().unwrap()[1], d, "d is still in the front group");
+    }
+
+    /// R1 case 3 — a source GROUP emptied by the move. DECISION (see
+    /// `group_selection`'s comment): an emptied Group is kept, exactly as an
+    /// emptied Layer is. It is a bystander the edit never spoke to, and it
+    /// carries a name, an id and blend flags that deleting would destroy.
+    /// This is NOT D3's orphan: there the container was emptied by a WRONG
+    /// insert; here the emptying is the correct consequence of a requested
+    /// move.
+    #[test]
+    fn r1_a_group_emptied_by_the_move_survives_as_an_empty_group() {
+        let a = make_rect(0.0, 0.0, 10.0, 10.0);
+        let b = make_rect(20.0, 0.0, 10.0, 10.0);
+        let c = make_rect(40.0, 0.0, 10.0, 10.0);
+        let mut model = group_doc(
+            vec![
+                make_layer("Lower", vec![make_group(vec![a.clone(), b.clone()])]),
+                make_layer("Upper", vec![c.clone()]),
+            ],
+            // BOTH children of the group, plus the element in the upper layer.
+            vec![vec![0, 0, 0], vec![0, 0, 1], vec![1, 0]],
+        );
+        Controller::group_selection(&mut model);
+        let after = model.document();
+
+        let src = after.get_element(&vec![0, 0])
+            .expect("the emptied source group is still at [0,0] — not pruned, not orphaned");
+        assert!(src.is_group(), "and it is still a Group");
+        assert_eq!(src.children().map_or(1, |c| c.len()), 0, "with no children left");
+        assert_eq!(after.layers[0].children().map_or(0, |c| c.len()), 1,
+            "the lower layer still holds exactly the emptied group");
+
+        let g = after.get_element(&vec![1, 0]).expect("new group in the upper layer");
+        let kids = g.children().unwrap();
+        assert_eq!(kids.len(), 3, "all three selected elements moved in");
+        assert_eq!((&*kids[0], &*kids[1], &*kids[2]), (&a, &b, &c),
+            "all three relocated whole, in document order");
+    }
+
+    /// R1 case 4 — SAME PARENT, NON-CONTIGUOUS. This case never hit the
+    /// guard, so it is not about flattening at all: it pins the PLACEMENT
+    /// half of R1. `actions.yaml` §group has always said the group "inherits
+    /// the z-order position of the frontmost selected object"; both ports
+    /// inserted at `paths[0]`, the BACKMOST. Select index 0 and index 2 of
+    /// three siblings: the group belongs where index 2 was (after index 0 is
+    /// removed, that is index 1), NOT at index 0.
+    #[test]
+    fn r1_same_parent_group_takes_the_frontmost_z_slot_not_the_backmost() {
+        let a = make_rect(0.0, 0.0, 10.0, 10.0);
+        let b = make_rect(20.0, 0.0, 10.0, 10.0);
+        let c = make_rect(40.0, 0.0, 10.0, 10.0);
+        let mut model = group_doc(
+            vec![make_layer("Stage", vec![a.clone(), b.clone(), c.clone()])],
+            vec![vec![0, 0], vec![0, 2]],
+        );
+        Controller::group_selection(&mut model);
+        let after = model.document();
+
+        let kids = after.layers[0].children().expect("layer children");
+        assert_eq!(kids.len(), 2, "b plus the new group");
+        assert_eq!(*kids[0], b,
+            "b, unselected, keeps the BACK slot — the group must not be inserted under it");
+        assert!(kids[1].is_group(), "the new group takes the frontmost slot");
+        let inner = kids[1].children().unwrap();
+        assert_eq!((&*inner[0], &*inner[1]), (&a, &c), "a and c relocated whole");
+        assert_eq!(sel_paths(&model), vec![vec![0, 1]],
+            "selection follows the group to its real path");
+    }
+
+    /// R1 case 5 — the CONTIGUOUS same-parent case, which is what the
+    /// existing corpus golden `menu_group_two_rects` pins. Frontmost-minus-
+    /// removed-siblings and old-backmost agree here (1 - 1 == 0), so this
+    /// case must be byte-identical before and after R1. It is the regression
+    /// guard on the placement change above.
+    #[test]
+    fn r1_contiguous_same_parent_placement_is_unchanged() {
+        let a = make_rect(0.0, 0.0, 10.0, 10.0);
+        let b = make_rect(20.0, 0.0, 10.0, 10.0);
+        let mut model = group_doc(
+            vec![make_layer("Stage", vec![a.clone(), b.clone()])],
+            vec![vec![0, 0], vec![0, 1]],
+        );
+        Controller::group_selection(&mut model);
+        let after = model.document();
+        let kids = after.layers[0].children().expect("layer children");
+        assert_eq!(kids.len(), 1, "one group replaces the two rects");
+        assert!(kids[0].is_group());
+        assert_eq!(sel_paths(&model), vec![vec![0, 0]], "group at index 0, as before R1");
+    }
+
+    /// R1 case 6 — MIXED DEPTHS. **OPEN QUESTION 3 in the brief; NOT ruled.**
+    /// Selecting a layer-level element and something nested deeper is a shape
+    /// nobody has ruled on. What this pins is the CONSERVATIVE consequence of
+    /// applying R1 literally — the frontmost path is the deep one, so its
+    /// parent (the group) is the destination and the shallow element is
+    /// pulled INTO that group. Recorded so the behaviour is watched and so a
+    /// future ruling changes a RED test rather than discovering silence.
+    #[test]
+    fn r1_mixed_depth_selection_follows_the_frontmost_parent_unruled() {
+        let solo = make_rect(0.0, 0.0, 10.0, 10.0);
+        let alpha = make_rect(20.0, 0.0, 10.0, 10.0);
+        let beta = make_rect(40.0, 0.0, 10.0, 10.0);
+        let mut model = group_doc(
+            vec![make_layer("Stage", vec![
+                solo.clone(),
+                make_group(vec![alpha.clone(), beta.clone()]),
+            ])],
+            vec![vec![0, 0], vec![0, 1, 1]],
+        );
+        Controller::group_selection(&mut model);
+        let after = model.document();
+
+        let kids = after.layers[0].children().expect("layer children");
+        assert_eq!(kids.len(), 1, "solo left the layer; only the cluster remains");
+        let cluster = &kids[0];
+        let cl = cluster.children().unwrap();
+        assert_eq!(cl.len(), 2, "cluster holds alpha and the new group");
+        assert_eq!(*cl[0], alpha, "alpha untouched");
+        let g = &cl[1];
+        assert!(g.is_group(), "the new group landed INSIDE the cluster");
+        let inner = g.children().unwrap();
+        assert_eq!((&*inner[0], &*inner[1]), (&solo, &beta),
+            "solo and beta relocated whole, in document order");
+    }
+
+    /// R1 case 7 — ANCESTOR AND DESCENDANT both selected. Also unruled, and
+    /// the one shape where the naive reading is actively UNSAFE: cloning both
+    /// the container and its child into the new group would put the same
+    /// element in the document twice, duplicating a live id — the exact
+    /// uniqueness break `make_compound_shape_with_op` was fixed for. The
+    /// conservative position: the ancestor carries its children, so a
+    /// selected path with a selected ancestor is dropped from the move.
+    #[test]
+    fn r1_selecting_a_group_and_its_own_child_does_not_duplicate_the_child() {
+        let alpha = make_rect(20.0, 0.0, 10.0, 10.0);
+        let beta = make_rect(40.0, 0.0, 10.0, 10.0);
+        let solo = make_rect(0.0, 0.0, 10.0, 10.0);
+        let mut model = group_doc(
+            vec![make_layer("Stage", vec![
+                solo.clone(),
+                make_group(vec![alpha.clone(), beta.clone()]),
+            ])],
+            // the cluster itself AND its child beta.
+            vec![vec![0, 0], vec![0, 1], vec![0, 1, 1]],
+        );
+        Controller::group_selection(&mut model);
+        let after = model.document();
+
+        let kids = after.layers[0].children().expect("layer children");
+        assert_eq!(kids.len(), 1, "solo and the cluster both moved into one new group");
+        let g = &kids[0];
+        let inner = g.children().unwrap();
+        assert_eq!(inner.len(), 2,
+            "exactly solo + the cluster: beta must NOT appear a second time");
+        assert_eq!(*inner[0], solo, "solo relocated whole");
+        assert!(inner[1].is_group(), "the cluster relocated as a whole subtree");
+        let cl = inner[1].children().unwrap();
+        assert_eq!(cl.len(), 2, "and it still carries BOTH its own children");
+        assert_eq!((&*cl[0], &*cl[1]), (&alpha, &beta), "alpha and beta intact inside it");
+    }
+
     fn setup_model() -> Model {
         let rect = make_rect(0.0, 0.0, 10.0, 10.0);
         let line = make_line(0.0, 0.0, 5.0, 5.0);
