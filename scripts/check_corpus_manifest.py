@@ -166,6 +166,11 @@ def check_coverage_gaps(manifest: dict) -> tuple[list[str], list[str]]:
 DATA_REF_FIELDS = {
     "setup_svg": "test_fixtures/svg",
     "setup": "test_fixtures/expected",
+    # A preservation vector's second setup door: a canonical-test-JSON
+    # document, used where the SVG codec has no counterpart for the attribute
+    # the vector needs on a bystander (mask, blend mode, stroke alignment,
+    # gradients, stroke brush, width profile).
+    "setup_test_json": "test_fixtures/expected",
     "expected_json": "SELF",
     "expected_journal_json": "SELF",
     "expected_document_json": "SELF",

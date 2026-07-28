@@ -823,15 +823,33 @@ private func preservationInvariantsFor(
 /// brush's commit arms are a YAML effect with NO `opApply` verb, so an op-only
 /// gate is structurally blind to them, the same shape of blindness §4.1 records
 /// for per-copy-API batteries. Mirrors Rust `preservation_invariants`.
+/// The setup document a vector names, through whichever of the two doors it
+/// declares.
+///
+/// `setup_svg` is the corpus-wide default. `setup_test_json` exists because the
+/// SVG codec has NO counterpart for a mask, a blend mode or a stroke alignment
+/// and no port writes a jas: extension for the gradients, the stroke brush or
+/// the width profile (the `svg` column of
+/// test_fixtures/expected/codec_field_survival.json) — so a corpus whose only
+/// door is SVG can never place those on a BYSTANDER, which is exactly the class
+/// EDIT_SEMANTICS_FREEZE.md T4 exists to watch. The canonical test JSON carries
+/// all twelve, so it is the door that can express the setup the law needs.
+/// Mirrors Rust `setup_document`.
+private func preservationSetupDocument(_ tc: [String: Any]) -> Document {
+    if let name = tc["setup_test_json"] as? String {
+        return testJsonToDocument(readFixture("expected/\(name)"))
+    }
+    return svgToDocument(readFixture("svg/\(tc["setup_svg"] as! String)"))
+}
+
 private func runPreservationVector(_ tc: [String: Any]) -> (before: String, after: String) {
-    let svg = readFixture("svg/\(tc["setup_svg"] as! String)")
-    let beforeJson = documentToTestJson(svgToDocument(svg))
+    let beforeJson = documentToTestJson(preservationSetupDocument(tc))
 
     if tc["events"] != nil {
         return (beforeJson, documentToTestJson(runGestureModel(tc).document))
     }
 
-    let model = Model(document: svgToDocument(svg))
+    let model = Model(document: preservationSetupDocument(tc))
     let controller = Controller(model: model)
     if let txns = tc["txns"] as? [[String: Any]] {
         for txn in txns {
@@ -911,6 +929,46 @@ private func preservationVectors(_ raw: String) throws -> [[String: Any]] {
         }
         #expect(before.ids.contains(where: { !named.contains($0) }),
             "preservation vector '\(name)' has no bystander — T4 is unwatchable here")
+
+        // `bystander_fields_present` (optional) is the DOCUMENT-LEVEL form of
+        // §3.1's anti-vacuity guard: "every battery asserts its fixture differs
+        // from the default in every non-subject field, because a rich fixture
+        // that silently decays to defaults passes on nothing".
+        // `bystanders_unchanged` compares before against after, so a setup that
+        // lost its mask on the way IN would compare two identical mask-less
+        // snapshots and pass. Naming a field here asserts the BEFORE snapshot
+        // really carries it.
+        //
+        // A dotted name `a.b` means: top-level key `a` is present and its
+        // canonical JSON value contains the key `b` — the shape that reaches
+        // the four stroke fields, which live inside the `stroke` value rather
+        // than beside it. Mirrors Rust's arm in
+        // `assert_preservation_not_vacuous`.
+        if let present = tc["bystander_fields_present"] as? [String: [String]] {
+            for (id, keys) in present.sorted(by: { $0.key < $1.key }) {
+                #expect(!named.contains(id),
+                    "preservation vector '\(name)' lists '\(id)' under bystander_fields_present, but the vector NAMES it — a subject is not a bystander")
+                guard let attrs = before.attrs[id] else {
+                    Issue.record("preservation vector '\(name)' names bystander '\(id)', which is absent from the loaded setup document")
+                    continue
+                }
+                for key in keys {
+                    if let dot = key.firstIndex(of: ".") {
+                        let outer = String(key[key.startIndex..<dot])
+                        let inner = String(key[key.index(after: dot)...])
+                        guard let v = attrs[outer] else {
+                            Issue.record("preservation vector '\(name)': bystander '\(id)' has no '\(outer)' at all, so '\(key)' cannot be carried")
+                            continue
+                        }
+                        #expect(v.contains("\"\(inner)\":"),
+                            "preservation vector '\(name)': bystander '\(id)' was declared to carry '\(key)', but its '\(outer)' is \(v) — the fixture decayed to defaults")
+                    } else {
+                        #expect(attrs[key] != nil,
+                            "preservation vector '\(name)': bystander '\(id)' was declared to carry '\(key)', but the loaded setup does not — the fixture decayed to defaults and every invariant over that field is vacuous")
+                    }
+                }
+            }
+        }
 
         // `must_change` (optional) turns `speaks_to` from a PERMISSION into a
         // CLAIM. `subject_fields_only` only forbids differences OUTSIDE

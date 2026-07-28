@@ -748,8 +748,34 @@ mod tests {
     ///     ops like `select_rect`, whose selection IS serialized state per §7,
     ///     are captured); an embedded `snapshot` op opens its own boundaries.
     fn run_operation_model(tc: &serde_json::Value) -> Model {
-        let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
-        let doc = svg_to_document(&setup_svg);
+        run_operation_model_from(setup_document(tc), tc)
+    }
+
+    /// The setup document a vector names, through whichever of the two doors
+    /// it declares.
+    ///
+    /// `setup_svg` is the corpus-wide default. `setup_test_json` exists
+    /// because the SVG codec has NO counterpart for a mask, a blend mode or a
+    /// stroke alignment and no port writes a jas: extension for the gradients,
+    /// the stroke brush or the width profile (the `svg` column of
+    /// test_fixtures/expected/codec_field_survival.json) — so a corpus whose
+    /// only door is SVG can never place those on a BYSTANDER, which is exactly
+    /// the class EDIT_SEMANTICS_FREEZE.md T4 exists to watch. The canonical
+    /// test JSON carries all twelve, so it is the door that can express the
+    /// setup the law needs.
+    fn setup_document(tc: &serde_json::Value) -> crate::document::document::Document {
+        if let Some(name) = tc.get("setup_test_json").and_then(|v| v.as_str()) {
+            test_json_to_document(&read_fixture(&format!("expected/{name}")))
+        } else {
+            svg_to_document(&read_fixture(&format!(
+                "svg/{}", tc["setup_svg"].as_str().unwrap())))
+        }
+    }
+
+    fn run_operation_model_from(
+        doc: crate::document::document::Document,
+        tc: &serde_json::Value,
+    ) -> Model {
         let mut model = Model::new(doc, None);
 
         if let Some(txns) = tc.get("txns").and_then(|v| v.as_array()) {
@@ -2290,6 +2316,61 @@ mod tests {
             "preservation vector '{name}' has no bystander — T4 is unwatchable here"
         );
 
+        // `bystander_fields_present` (optional) is the DOCUMENT-LEVEL form of
+        // §3.1's anti-vacuity guard: "every battery asserts its fixture
+        // differs from the default in every non-subject field, because a rich
+        // fixture that silently decays to defaults passes on nothing".
+        // `bystanders_unchanged` compares before against after, so a setup
+        // that lost its mask on the way IN would compare two identical
+        // mask-less snapshots and pass. Naming a field here asserts the
+        // BEFORE snapshot really carries it.
+        //
+        // A dotted name `a.b` means: top-level key `a` is present and its
+        // canonical JSON value contains the key `b` — the shape that reaches
+        // the four stroke fields, which live inside the `stroke` value rather
+        // than beside it. The two ports implement the identical rule.
+        if let Some(map) = tc.get("bystander_fields_present").and_then(|v| v.as_object()) {
+            let named: Vec<String> = str_list(tc, "subject_ids")
+                .into_iter()
+                .chain(str_list(tc, "consumed_ids"))
+                .collect();
+            for (id, keys) in map {
+                assert!(
+                    !named.contains(id),
+                    "preservation vector '{name}' lists '{id}' under \
+                     bystander_fields_present, but the vector NAMES it — a \
+                     subject is not a bystander"
+                );
+                let attrs = before.attrs.get(id).unwrap_or_else(|| panic!(
+                    "preservation vector '{name}' names bystander '{id}', which \
+                     is absent from the loaded setup document"));
+                let obj = attrs.as_object().expect("an element attribute object");
+                for key in keys.as_array().expect("an array of field names") {
+                    let key = key.as_str().expect("field names are strings");
+                    match key.split_once('.') {
+                        None => assert!(
+                            obj.contains_key(key),
+                            "preservation vector '{name}': bystander '{id}' was \
+                             declared to carry '{key}', but the loaded setup does \
+                             not — the fixture decayed to defaults and every \
+                             invariant over that field is vacuous"),
+                        Some((outer, inner)) => {
+                            let v = obj.get(outer).unwrap_or_else(|| panic!(
+                                "preservation vector '{name}': bystander '{id}' \
+                                 has no '{outer}' at all, so '{key}' cannot be \
+                                 carried"));
+                            assert!(
+                                crate::geometry::test_json::canonical_json_value(v)
+                                    .contains(&format!("\"{inner}\":")),
+                                "preservation vector '{name}': bystander '{id}' \
+                                 was declared to carry '{key}', but its '{outer}' \
+                                 is {v} — the fixture decayed to defaults");
+                        }
+                    }
+                }
+            }
+        }
+
         // `must_change` (optional) turns `speaks_to` from a PERMISSION into a
         // CLAIM. `subject_fields_only` only forbids differences OUTSIDE
         // `speaks_to`, so listing a key there makes the gate blind to it: an
@@ -2372,8 +2453,7 @@ mod tests {
             let name = tc["name"].as_str().expect("a name");
 
             // BEFORE: the setup document, loaded and serialized with no ops.
-            let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
-            let before_model = Model::new(svg_to_document(&setup_svg), None);
+            let before_model = Model::new(setup_document(tc), None);
             let before_json = <DocumentOps as OpWorld>::to_test_json(&before_model);
 
             // AFTER. A vector drives its edit through ONE of two production

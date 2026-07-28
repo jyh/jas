@@ -99,9 +99,15 @@ SELECTION_ONLY_OPS = {"select_by_ids", "select_rect", "select_all", "deselect"}
 PORTS = ("rust", "swift")
 
 REQUIRED_KEYS = (
-    "name", "doc", "setup_svg", "cardinality", "subject_ids", "speaks_to",
+    "name", "doc", "cardinality", "subject_ids", "speaks_to",
     "consumed_ids", "expected_fresh_ids", "expected_violations",
 )
+
+# Where a `setup_test_json` document lives, relative to test_fixtures/.
+TEST_JSON_SETUP_DIR = os.path.join(FIXTURES, "expected")
+
+# Element types that are CONTAINERS for the V2 bystander rule.
+CONTAINER_TYPES = {"group", "layer"}
 
 
 def load_corpus_file(path: str):
@@ -159,6 +165,35 @@ def svg_container_ids(svg_text: str) -> set:
     return out
 
 
+def test_json_setup_ids(doc) -> tuple:
+    """`(all ids, container ids)` of a canonical-test-JSON setup document.
+
+    The walk descends `layers` / `children` / `symbols` exactly as the two
+    ports' `preservation_walk` does — deliberately NOT into `mask`, whose
+    subtree is artwork belonging to its host element rather than a document
+    element of its own.
+    """
+    ids, containers = set(), set()
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        if "type" in node and isinstance(node.get("id"), str):
+            ids.add(node["id"])
+            if node["type"] in CONTAINER_TYPES:
+                containers.add(node["id"])
+        for key in ("layers", "children", "symbols"):
+            if key in node:
+                walk(node[key])
+
+    walk(doc)
+    return ids, containers
+
+
 def vector_ops(vec: dict) -> list:
     ops = []
     for txn in vec.get("txns", []):
@@ -188,14 +223,47 @@ def check_vector(path: str, vec, seen_names: set) -> list:
     if vec["cardinality"] not in CARDINALITIES:
         errs.append(f"{tag}: unknown cardinality {vec['cardinality']!r}")
 
-    svg_path = os.path.join(SVG_DIR, vec["setup_svg"])
-    if not os.path.exists(svg_path):
-        errs.append(f"{tag}: setup_svg {vec['setup_svg']} does not exist")
+    # A vector declares EXACTLY ONE setup door. `setup_test_json` exists
+    # because the SVG codec has no counterpart for a mask, a blend mode or a
+    # stroke alignment, so a corpus whose only door is SVG cannot place those
+    # on a bystander — the very class T4 exists to watch.
+    doors = [k for k in ("setup_svg", "setup_test_json") if k in vec]
+    if len(doors) != 1:
+        errs.append(
+            f"{tag}: must declare exactly ONE of setup_svg / setup_test_json, "
+            f"declares {doors}"
+        )
         return errs
-    with open(svg_path, encoding="utf-8") as f:
-        svg = f.read()
-    present = svg_ids(svg)
-    containers = svg_container_ids(svg)
+    if "setup_test_json" in vec:
+        setup_name = vec["setup_test_json"]
+        setup_path = os.path.join(TEST_JSON_SETUP_DIR, setup_name)
+        if not os.path.exists(setup_path):
+            errs.append(f"{tag}: setup_test_json {setup_name} does not exist")
+            return errs
+        if "events" in vec:
+            errs.append(
+                f"{tag}: declares BOTH `events` and `setup_test_json` — the "
+                f"gesture runner takes SVG text, so this pairing would silently "
+                f"run against the wrong document (V3)"
+            )
+            return errs
+        with open(setup_path, encoding="utf-8") as f:
+            try:
+                doc = json.load(f)
+            except json.JSONDecodeError as e:
+                errs.append(f"{tag}: setup_test_json {setup_name} is bad JSON: {e}")
+                return errs
+        present, containers = test_json_setup_ids(doc)
+    else:
+        setup_name = vec["setup_svg"]
+        svg_path = os.path.join(SVG_DIR, setup_name)
+        if not os.path.exists(svg_path):
+            errs.append(f"{tag}: setup_svg {setup_name} does not exist")
+            return errs
+        with open(svg_path, encoding="utf-8") as f:
+            svg = f.read()
+        present = svg_ids(svg)
+        containers = svg_container_ids(svg)
 
     named = list(vec["subject_ids"]) + list(vec["consumed_ids"])
 
@@ -203,18 +271,40 @@ def check_vector(path: str, vec, seen_names: set) -> list:
     for eid in named:
         if eid not in present:
             errs.append(
-                f"{tag}: names id {eid!r}, which the setup SVG "
-                f"{vec['setup_svg']} does not define (V1)"
+                f"{tag}: names id {eid!r}, which the setup "
+                f"{setup_name} does not define (V1)"
             )
 
     # V2 — a container bystander must exist.
     bystander_containers = containers - set(named)
     if not bystander_containers:
         errs.append(
-            f"{tag}: no CONTAINER bystander — every `<g>` id in "
-            f"{vec['setup_svg']} is named by this vector, so the T4 "
+            f"{tag}: no CONTAINER bystander — every container id in "
+            f"{setup_name} is named by this vector, so the T4 "
             f"bystander clause is unwatchable here (V2)"
         )
+
+    # V7 — `bystander_fields_present` must be well-formed and must range over
+    # BYSTANDERS. The runtime half (that the loaded setup really carries each
+    # field) lives in the two ports' gates; this half stops a typo'd id from
+    # turning the claim into a no-op.
+    for bid, keys in (vec.get("bystander_fields_present") or {}).items():
+        if bid in named:
+            errs.append(
+                f"{tag}: bystander_fields_present names {bid!r}, which the "
+                f"vector also names as a subject or consumed id — a subject is "
+                f"not a bystander (V7)"
+            )
+        if bid not in present:
+            errs.append(
+                f"{tag}: bystander_fields_present names {bid!r}, which the "
+                f"setup {setup_name} does not define (V7)"
+            )
+        if not isinstance(keys, list) or not keys:
+            errs.append(
+                f"{tag}: bystander_fields_present[{bid!r}] must be a non-empty "
+                f"list of field names (V7)"
+            )
 
     # V3 — the vector must actually edit the document, through whichever of
     # the two drivers it declares.
