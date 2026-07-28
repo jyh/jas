@@ -18,12 +18,23 @@ Usage:
 
 Default is the active ports (rust, swift); ocaml/python are pinned to the
 five-port-parity tag and run in their own canary lane (POLICY.md).
+
+HOW THE TWO COUNTS DIFFER HERE (scripts/lane_report.py). Every lane is compared
+to the golden, never directly to another lane, so each (test, lane) cell is an
+ORACLE check. The cross-language claim is transitive: because the anchor is
+EXACT string equality, k lanes matching the same golden means all k*(k-1)/2 lane
+pairs agree — which is 0 pairs when k is 1. The old summary ("4 passed, 0
+failed") named no lane at all, so a single-lane run and the real two-lane gate
+printed the identical line.
 """
 
 import argparse
 import os
 import subprocess
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import lane_report  # noqa: E402  (sibling module in scripts/)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(REPO_ROOT, "test_fixtures")
@@ -100,10 +111,15 @@ def run_all(args: list[str]) -> dict[str, str]:
 
 def assert_all_match(results: dict[str, str], test_name: str,
                      golden: str | None = None):
-    """Every language must agree; when a golden is given, anchor to it."""
+    """Every language must agree; when a golden is given, anchor to it.
+
+    Returns (ok, matched_langs) — the caller needs the per-lane outcome to
+    count ORACLE cells and the lane pairs they establish transitively.
+    """
     ref_lang = "golden" if golden is not None else LANGUAGES[0]
     ref = golden if golden is not None else results[LANGUAGES[0]]
     ok = True
+    matched = []
     for lang in LANGUAGES:
         if lang == ref_lang:
             continue
@@ -112,7 +128,9 @@ def assert_all_match(results: dict[str, str], test_name: str,
             print(f"    {ref_lang}: {ref[:200]}...")
             print(f"    {lang}: {results[lang][:200]}...")
             ok = False
-    return ok
+        else:
+            matched.append(lang)
+    return ok, matched
 
 
 def _golden(fixture_name: str) -> str:
@@ -122,6 +140,8 @@ def _golden(fixture_name: str) -> str:
 
 def main():
     global LANGUAGES
+    if "--self-test" in sys.argv:
+        sys.exit(lane_report.self_test())
     parser = argparse.ArgumentParser(
         description="Cross-language workspace layout equivalence test")
     parser.add_argument("--lang",
@@ -130,6 +150,13 @@ def main():
                              "five-port-parity tag and run in their own "
                              "canary lane — see POLICY.md)",
                         default="rust,swift")
+    parser.add_argument("--require-comparisons", action="store_true",
+                        help="Exit non-zero (3) unless the run established at "
+                             "least one lane pair (CI passes this; a "
+                             "deliberate single-lane oracle run omits it)")
+    parser.add_argument("--self-test", action="store_true",
+                        help="Check the summary's own reporting rules "
+                             "(scripts/lane_report.py) and exit")
     args = parser.parse_args()
     selected = [l.strip() for l in args.lang.split(",") if l.strip()]
     unknown = [l for l in selected if l not in ALL_LANGUAGES]
@@ -137,45 +164,69 @@ def main():
         print(f"Unknown language(s): {', '.join(unknown)} "
               f"(choose from {', '.join(ALL_LANGUAGES)})", file=sys.stderr)
         sys.exit(2)
-    LANGUAGES = selected
+    lanes = lane_report.Lanes.resolve(selected)
+    LANGUAGES = list(lanes.requested)
 
-    passed = 0
-    failed = 0
+    oracle_passed = 0
+    oracle_failed = 0
+    comparison_passed = 0
+    per_lane = {l: 0 for l in lanes.comparison}
+
+    def account(matched):
+        """One ORACLE check per lane; the pairs those matches establish."""
+        nonlocal oracle_passed, oracle_failed, comparison_passed
+        oracle_passed += len(matched)
+        oracle_failed += len(LANGUAGES) - len(matched)
+        comparison_passed += lane_report.pairs_via_golden(len(matched))
+        for lane in matched:
+            if lane in per_lane:
+                # A lane pairs with every OTHER lane that matched.
+                per_lane[lane] += len(matched) - 1
 
     # Test 1: default layout, anchored to the pinned golden
     print("Test 1: default layout")
     results = run_all(["default"])
-    if assert_all_match(results, "default", golden=_golden("workspace_default")):
+    ok, matched = assert_all_match(results, "default",
+                                   golden=_golden("workspace_default"))
+    if ok:
         print(f"  PASS: {', '.join(LANGUAGES)} match the golden")
-        passed += 1
-    else:
-        failed += 1
+    account(matched)
 
     # Test 2: default layout with panes, anchored to the pinned golden
     print("Test 2: default layout with panes (1200x800)")
     results = run_all(["default_with_panes", "1200", "800"])
-    if assert_all_match(results, "default_with_panes",
-                        golden=_golden("workspace_default_with_panes")):
+    ok, matched = assert_all_match(results, "default_with_panes",
+                                   golden=_golden("workspace_default_with_panes"))
+    if ok:
         print(f"  PASS: {', '.join(LANGUAGES)} match the golden")
-        passed += 1
-    else:
-        failed += 1
+    account(matched)
 
     # Test 3: parse commutativity for each workspace fixture
     for fixture_name in ["workspace_default", "workspace_default_with_panes"]:
         print(f"Test 3: parse commutativity ({fixture_name})")
         fixture_path = os.path.join(FIXTURES_DIR, "expected", f"{fixture_name}.json")
         results = run_all(["parse", fixture_path])
-        if assert_all_match(results, f"parse({fixture_name})",
-                            golden=_golden(fixture_name)):
+        ok, matched = assert_all_match(results, f"parse({fixture_name})",
+                                       golden=_golden(fixture_name))
+        if ok:
             print(f"  PASS: {', '.join(LANGUAGES)} match the golden")
-            passed += 1
-        else:
-            failed += 1
+        account(matched)
 
-    print(f"\n{passed} passed, {failed} failed")
-    if failed > 0:
-        sys.exit(1)
+    report = lane_report.LaneReport(
+        title="Cross-language workspace", scope="4 tests",
+        lanes=lanes,
+        oracle_passed=oracle_passed, oracle_failed=oracle_failed,
+        comparison_passed=comparison_passed,
+        oracle_lanes=lanes.requested,
+        oracle_what="vs the pinned golden, one check per lane per test",
+        comparison_what="lane pairs established transitively through the "
+                        "exact-equality golden",
+        per_lane_comparisons=per_lane,
+        require_comparisons=args.require_comparisons,
+        unexercised=lane_report.unexercised_active_ports(lanes),
+    )
+    report.print_report()
+    sys.exit(report.exit_code())
 
 
 if __name__ == "__main__":

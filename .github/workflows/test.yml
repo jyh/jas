@@ -231,9 +231,20 @@ jobs:
         run: |
           (cd jas_dioxus && cargo build --bins)
           (cd JasSwift && swift build)
+      # Self-test the summary's own reporting rules before trusting a summary
+      # (scripts/lane_report.py). A cloud referee's single-lane replay on
+      # 2026-07-27 showed the old line — "410 passed ... x 0 comparisons" —
+      # reading like a cross-language pass when zero comparisons had run.
+      - name: Self-test the lane-report rules
+        run: python scripts/lane_report.py --self-test
+      # --require-comparisons: this lane is the BLOCKING cross-language gate,
+      # so a run that performed no lane-vs-lane comparison (a lane dropped, a
+      # --lang edited down to one) must exit non-zero here rather than pass as
+      # an oracle run. Single-lane oracle runs stay legitimate WITHOUT the flag
+      # — that is how a Linux box with no Swift checks the pinned goldens.
       - name: Algorithm equivalence
-        run: python scripts/cross_language_algorithms.py --lang rust,swift
+        run: python scripts/cross_language_algorithms.py --lang rust,swift --require-comparisons
       - name: SVG commutativity
-        run: python scripts/cross_language_commutativity.py --lang rust,swift
+        run: python scripts/cross_language_commutativity.py --lang rust,swift --require-comparisons
       - name: Workspace equivalence
-        run: python scripts/cross_language_workspace.py --lang rust,swift
+        run: python scripts/cross_language_workspace.py --lang rust,swift --require-comparisons

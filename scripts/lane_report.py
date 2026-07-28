@@ -168,6 +168,10 @@ class LaneReport:
     errors: int = 0
     oracle_what: str = "vs pinned goldens"
     comparison_what: str = "lane-vs-lane agreement"
+    # Which lanes the oracle checks cover. Usually just the reference lane;
+    # the commutativity runner's diagonal cells cover EVERY lane, and a report
+    # that named only the reference there would understate its own evidence.
+    oracle_lanes: tuple | None = None
     # {lane: comparisons performed}; None when a runner does not track it, in
     # which case the silent-lane check is skipped rather than guessed.
     per_lane_comparisons: dict | None = None
@@ -199,6 +203,16 @@ class LaneReport:
                 if self.per_lane_comparisons.get(l, 0) == 0]
 
     @property
+    def oracle_lane_label(self) -> str:
+        lanes = self.oracle_lanes
+        if lanes is None:
+            lanes = (self.lanes.reference,) if self.lanes.reference else ()
+        if not lanes:
+            return "no lane"
+        word = "lane" if len(lanes) == 1 else "lanes"
+        return f"{word} " + ", ".join(f"`{l}`" for l in lanes)
+
+    @property
     def verdict(self) -> str:
         if self.comparison_checks:
             return "CROSS-LANGUAGE"
@@ -208,14 +222,112 @@ class LaneReport:
 
     # -- output ----------------------------------------------------------
     def render(self) -> list:
-        # STUB (red step): today's behaviour, verbatim from
-        # cross_language_algorithms.py, so the self-test's first run records the
-        # actual defect rather than a hypothetical one.
-        return [
-            f"{self.title}: {self.total_passed} passed, {self.total_failed} "
-            f"failed, {self.errors} errors "
-            f"({self.scope} x {len(self.lanes.comparison)} comparisons)"
+        ref = self.lanes.reference or "(none)"
+        comp = ", ".join(self.lanes.comparison) or "(none)"
+        req = ", ".join(self.lanes.requested) or "(none)"
+
+        # The headline keeps the familiar total -- but only ever as the SUM of
+        # the two kinds, written out. It cannot be skimmed as either one alone.
+        lines = [
+            f"{self.title}: {self.total_passed} checks passed, "
+            f"{self.total_failed} failed, {self.errors} errors "
+            f"= ORACLE {self.oracle_passed} + COMPARISON "
+            f"{self.comparison_passed}  ({self.scope})",
+            f"  ORACLE     {self.oracle_passed} passed, {self.oracle_failed} "
+            f"failed   ({self.oracle_lane_label} {self.oracle_what})",
+            f"  COMPARISON {self.comparison_passed} passed, "
+            f"{self.comparison_failed} failed   ({self.comparison_what}: "
+            + (f"{ref} vs {comp})" if self.lanes.comparison
+               else "NONE PERFORMED -- only one lane in this run)"),
+            f"  lanes requested: {req} | reference: {ref} | "
+            f"comparison lanes: {comp}",
         ]
+        if self.harness_failed:
+            lines.append(f"  harness preflight: {self.harness_failed} failed "
+                         f"(neither an oracle nor a comparison result)")
+        if self.per_lane_comparisons is not None and self.lanes.comparison:
+            per = ", ".join(
+                f"{l}={self.per_lane_comparisons.get(l, 0)}"
+                for l in self.lanes.comparison)
+            lines.append(f"  comparisons performed per lane: {per}")
+        if self.unexercised:
+            lines.append("  active ports that did not take part: " + "; ".join(
+                f"{p} ({why})" for p, why in self.unexercised))
+
+        if self.comparison_checks == 0:
+            lines.extend(self._zero_comparison_banner())
+        elif self.silent_lanes:
+            lines.extend(self._silent_lane_banner())
+
+        lines.append(f"VERDICT: {self.verdict} -- {self._verdict_tail()}")
+        return lines
+
+    def _zero_comparison_banner(self) -> list:
+        unchecked = [p for p, _ in self.unexercised] + list(self.silent_lanes)
+        for lane in self.lanes.comparison:
+            if lane not in unchecked:
+                unchecked.append(lane)
+        detail = []
+        for p, why in self.unexercised:
+            detail.append(f"{p} ({why})")
+        for lane in self.silent_lanes:
+            detail.append(f"{lane} ({SILENT_LANE_HEADLINE})")
+        out = [
+            "",
+            RULE,
+            f"!!! WARNING: {WARN_HEADLINE}",
+            "!!! Nothing in this run shows that two independent "
+            "implementations agree.",
+        ]
+        if self.oracle_checks:
+            out.append(
+                f"!!! What DID run: {self.oracle_checks} ORACLE check(s) -- "
+                f"{self.oracle_lane_label} {self.oracle_what}.")
+            out.append("!!! That is a real result, and a DIFFERENT one. Do not "
+                       "report it as parity.")
+        else:
+            out.append("!!! And no oracle check ran either: this run "
+                       "established NOTHING.")
+        out.append("!!! Unchecked: " + ("; ".join(detail) if detail
+                                        else ", ".join(unchecked) or "(none)"))
+        out.append("!!! For the cross-language gate, run two lanes on a machine "
+                   "that has both")
+        out.append("!!! toolchains, e.g. --lang rust,swift; pass "
+                   "--require-comparisons to make")
+        out.append("!!! a zero-comparison run exit non-zero.")
+        out.append(RULE)
+        return out
+
+    def _silent_lane_banner(self) -> list:
+        return [
+            "",
+            RULE,
+            f"!!! WARNING: lane(s) {SILENT_LANE_HEADLINE}: "
+            f"{', '.join(self.silent_lanes)}",
+            "!!! Their agreement with the reference is UNCHECKED; every "
+            "comparison counted in",
+            "!!! this report came from the other lane(s).",
+            RULE,
+        ]
+
+    def _verdict_tail(self) -> str:
+        if self.verdict == "CROSS-LANGUAGE":
+            tail = (f"{self.comparison_checks} cross-language comparison(s) "
+                    f"performed ({self.lanes.reference} vs "
+                    f"{', '.join(self.lanes.comparison)}), "
+                    f"{self.comparison_passed} passed; plus "
+                    f"{self.oracle_checks} oracle check(s).")
+            if self.silent_lanes:
+                tail += (f" BUT lane(s) {', '.join(self.silent_lanes)} "
+                         f"performed none.")
+            return tail
+        if self.verdict == "ORACLE-ONLY":
+            return (f"0 cross-language comparisons performed; "
+                    f"{self.oracle_checks} oracle check(s), "
+                    f"{self.oracle_passed} passed. This run did NOT check that "
+                    f"any two implementations agree.")
+        return ("0 cross-language comparisons AND 0 oracle checks: this run "
+                "established nothing.")
 
     def print_report(self) -> None:
         print("")
@@ -223,8 +335,15 @@ class LaneReport:
             print(line)
 
     def exit_code(self) -> int:
-        # STUB (red step): today's behaviour -- no notion of a comparison count.
-        return EXIT_FAILED if (self.total_failed or self.errors) else EXIT_OK
+        if self.total_failed or self.errors:
+            return EXIT_FAILED
+        if self.verdict == "VACUOUS":
+            # A run that checked nothing must never exit 0, flag or no flag.
+            return EXIT_NO_COMPARISONS
+        if self.require_comparisons and (self.comparison_checks == 0
+                                         or self.silent_lanes):
+            return EXIT_NO_COMPARISONS
+        return EXIT_OK
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +478,15 @@ def self_test() -> int:
     check(b.exit_code() == EXIT_OK, f"(B) exit {b.exit_code()}")
     check(LaneReport(**{**b.__dict__, "require_comparisons": True}).exit_code()
           == EXIT_OK, "(B) strict mode must pass a real two-lane run")
+    # The ORACLE line must name the lanes its checks actually cover: the
+    # commutativity runner's diagonal cells cover BOTH ports, and a line that
+    # said `rust` alone would understate the run's own evidence.
+    b_all = LaneReport(**{**b.__dict__, "oracle_lanes": ("rust", "swift")})
+    check("lanes `rust`, `swift`" in _read_like_a_skimmer(b_all.render())["text"],
+          "(B) oracle_lanes must widen the ORACLE line's lane label")
+    check("lane `rust`" in rb["text"] and "swift`" not in
+          rb["text"].split("ORACLE")[1].split("\n")[0],
+          "(B) by default the ORACLE line names the reference lane only")
 
     # --- CASE C: lane requested, produced nothing (toolchain broke) ------
     c = LaneReport(title="Cross-language algorithms", scope="24 algorithms",
