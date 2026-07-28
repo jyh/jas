@@ -4,10 +4,24 @@
 into an object, does it also flatten the layers?"** The answer turned out to be
 no — it refuses — and pulling the thread found three defects of one family.
 
-**Status: JYH's position stated below and recorded as the intended rulings; not
-yet ratified.** Nothing here is implemented. What ratifies it is JYH saying so,
-after which the rulings move into `workspace/actions.yaml` and this file becomes
-the reasoning record.
+## RATIFIED 2026-07-28 by JYH, at council
+
+> *"Good writeup, my friend, ratified. Yes we will have to confirm the internal
+> clipboard."*
+
+**R1, R2 and R3 below are LAW.** They move into `workspace/actions.yaml` and the
+active ports implement against them; this file is the reasoning record and the
+place a future reader is owed an explanation.
+
+**One condition rode with the ratification.** JYH accepted §7's stated blind
+spot: only the SVG paste path was read, and **the internal-clipboard path — the
+one in-app copy/paste actually uses most — must be confirmed** before R2 and R3
+are considered implemented. If the internal path turns out to carry layer
+structure differently from the SVG path, that is a finding against this brief,
+and it is to be reported rather than quietly accommodated.
+
+D3 (Swift's depth-losing group insert) was separable and **landed already**, at
+commit `GROUPDEPTH`, with twin probes in both ports.
 
 ---
 
