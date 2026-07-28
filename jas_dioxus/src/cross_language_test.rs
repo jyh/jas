@@ -105,6 +105,18 @@ mod tests {
             // (the `instance_transform` key) round-trips through test_json
             // distinct from common.transform (SYMBOLS.md §4 / Fork F2).
             "reference_instance_transform",
+            // CONCEPTS.md 3b: a Generated concept-instance (concept id +
+            // params). JasSwift's jsonRoundtripAllExpected called this "the
+            // cross-language pin for the generated kind" while Rust's list
+            // did not carry it at all — a ONE-SIDED pin wearing a
+            // cross-language label. Registered here so the claim is true.
+            "generated_polygon",
+            // ANY ELEMENT CARRIES A NAME, live kinds included (the name maps
+            // to SVG inkscape:label). live_named names the compound AND the
+            // reference AND both operands; live_named_recipe names the
+            // recorded and the generated kinds, which have no SVG read path
+            // and so can only be reached through the JSON/binary lanes.
+            "live_named", "live_named_recipe",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -148,6 +160,10 @@ mod tests {
             // round-trips through binary distinct from common.transform
             // (SYMBOLS.md §4 / Fork F2).
             "reference_instance_transform",
+            // A live element's `name` rides the generic common block at
+            // TAG_LIVE slot 5 like every other element's. Both fixtures name
+            // their live elements, so a codec that packed nil there reds.
+            "live_named", "live_named_recipe",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -267,10 +283,24 @@ mod tests {
             // data-jas-instance-transform on the <use> and round-trips through
             // SVG distinct from common.transform.
             "reference_instance_transform",
+            // A NAMED compound and a NAMED <use> reference survive the SVG
+            // boundary: the name maps to inkscape:label, which the reader
+            // already lifted into common.name generically while the live
+            // writer arms routed through a name-less attribute tail.
+            "live_named",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
         }
+    }
+
+    /// The SVG READ side of the live-element name, pinned against the shared
+    /// golden rather than only against itself: `<g data-jas-live=...
+    /// inkscape:label="hull">` and `<use ... inkscape:label="eye"/>` import
+    /// with those names, and so do the two named operands.
+    #[test]
+    fn svg_parse_live_named() {
+        assert_svg_parse("live_named");
     }
 
     #[test]

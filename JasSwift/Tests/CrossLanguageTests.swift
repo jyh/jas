@@ -87,6 +87,10 @@ private func assertSvgRoundtrip(_ name: String) {
         // on the <use> and round-trips through SVG distinct from the render
         // CTM (the <use transform> attr). (SYMBOLS.md §4 / Fork F2.)
         "reference_instance_transform",
+        // A NAMED compound and a NAMED <use> reference survive the SVG
+        // boundary: the name maps to inkscape:label. Mirrors the Rust
+        // svg_roundtrip_all_fixtures registration.
+        "live_named",
     ]
     for name in names { assertSvgRoundtrip(name) }
 }
@@ -111,6 +115,12 @@ private func assertSvgRoundtrip(_ name: String) {
 @Test func svgParseTransformRotate() { assertSvgParse("transform_rotate") }
 @Test func svgParseMultiLayer() { assertSvgParse("multi_layer") }
 @Test func svgParseComplexDocument() { assertSvgParse("complex_document") }
+/// The SVG READ side of the live-element name, pinned against the shared
+/// golden rather than only against itself: `<g data-jas-live=...
+/// inkscape:label="hull">` and `<use ... inkscape:label="eye"/>` import with
+/// those names, and so do the two named operands. Mirrors Rust's
+/// svg_parse_live_named.
+@Test func svgParseLiveNamed() { assertSvgParse("live_named") }
 /// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
 /// id="dup"; after dedupe the first keeps it and the second has no id.
 @Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
@@ -287,8 +297,16 @@ private func assertJsonRoundtrip(_ name: String) {
         "reference_instance_transform",
         // CONCEPTS.md 3b: a Generated concept-instance (concept id + params)
         // round-trips through test_json byte-identically to the Rust-authored
-        // golden — the cross-language pin for the generated kind.
+        // golden — the cross-language pin for the generated kind. (It was a
+        // one-sided pin until this wave: Rust's list did not carry it.)
         "generated_polygon",
+        // ANY ELEMENT CARRIES A NAME, live kinds included (the name maps to
+        // SVG inkscape:label). live_named names the compound AND the
+        // reference AND both operands; live_named_recipe names the recorded
+        // and generated kinds, which have no SVG read path and so can only be
+        // reached through the JSON/binary lanes. Mirrors the Rust
+        // json_roundtrip_all_expected registration.
+        "live_named", "live_named_recipe",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -328,6 +346,10 @@ private func readFixtureData(_ path: String) -> Data {
         // round-trips through binary distinct from the render CTM (slot 4).
         // (SYMBOLS.md §4 / Fork F2.)
         "reference_instance_transform",
+        // A live element's `name` rides the generic common block at tagLive
+        // slot 5 like every other element's. Both fixtures name their live
+        // elements, so a codec that packed nil there reds.
+        "live_named", "live_named_recipe",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
