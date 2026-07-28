@@ -1233,8 +1233,11 @@ adjudication hierarchy that is a ruling, so it is banked with its evidence in
 **The gate found a live divergence on its first run — the justification for
 building it, not a bonus.** `jas_dioxus`'s `pack_tspan` writes **fifty-one**
 slots per tspan; `JasSwift`'s `packTspan` writes **twenty-two**, and its
-`unpackTspan` reads only 22. The two ports have never written the same bytes
-for any `Text` or `TextPath`, and JasSwift's binary codec drops 29 tspan fields
+`unpackTspan` reads only 22. At the commit where this was measured the two
+ports did NOT write the same bytes for any `Text` or `TextPath` — and only that
+much is measured; whether they ever did is a history question nobody drove, and
+the commit message for the gate said "have never", which is wider than the
+evidence. JasSwift's binary codec dropped 29 tspan fields
 on a round trip although its own `Tspan` struct holds every one of them. It was
 invisible for precisely the reason this gate was ruled: the existing codec
 gates compare canonical test-JSON strings, the Python-fixture gate reads

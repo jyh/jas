@@ -7,10 +7,11 @@ import Testing
 /// FOUND BY MEASUREMENT 2026-07-27, by the byte-level wire gate
 /// (test_fixtures/expected/binary_wire.json) on its first run: jas_dioxus's
 /// `pack_tspan` writes FIFTY-ONE slots per tspan and this port's `packTspan`
-/// wrote TWENTY-TWO, with `unpackTspan` reading only 22. The two ports had
-/// therefore never written the same bytes for any Text or TextPath, and this
-/// port's binary codec silently dropped 29 tspan fields on a round trip
-/// although `Tspan` HOLDS every one of them.
+/// wrote TWENTY-TWO, with `unpackTspan` reading only 22. So at that commit the
+/// two ports did NOT write the same bytes for any Text or TextPath -- measured;
+/// whether they ever did is a history question nobody drove -- and this port's
+/// binary codec silently dropped 29 tspan fields on a round trip although
+/// `Tspan` HOLDS every one of them.
 ///
 /// It was invisible to every existing gate for exactly the reason the byte gate
 /// was ruled: `binaryRoundtripAllExpected` compares canonical test-JSON
