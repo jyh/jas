@@ -3528,8 +3528,23 @@ private func elementTypeLabel(_ elem: Element) -> String {
     }
 }
 
-private func elementDisplayName(_ elem: Element) -> (String, Bool) {
-    if case .layer(let le) = elem, let n = le.name, !n.isEmpty {
+/// The Layers-panel row label: the artist's own name when the element has
+/// one, else a `<Type>` bracket placeholder.
+///
+/// EVERY element's name counts, not only a Layer's. This used to pattern-match
+/// `.layer` alone, so a named Rect / Group / Path / Text — and, once live
+/// elements gained a name slot at all, a named Compound Shape — showed
+/// `<Rect>` / `<Compound Shape>` in this port while jas_dioxus showed the
+/// name: `tree_elem_display_name` there has always read `elem.common().name`
+/// generically. The empty-string guard is kept, and it is load-bearing: an
+/// empty name is not a name, and falling through to the bracket label is what
+/// Rust does too.
+/// Internal rather than `private` so `LayersRowLabelTests` can assert its
+/// VALUE directly: the widget-tree panel goldens turned out to be vacuous
+/// here — no golden contains a NAMED non-layer element, so flipping this
+/// function's behaviour moved not one golden byte.
+func elementDisplayName(_ elem: Element) -> (String, Bool) {
+    if let n = elem.name, !n.isEmpty {
         return (n, true)
     }
     return ("<\(elementTypeLabel(elem))>", false)

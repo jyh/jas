@@ -1271,10 +1271,10 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
              fill: Fill(color: Color(r: 0, g: 0, b: 0)), id: id)
     }
     let target = rectAt(0, id: "r1")
-    let reference = ReferenceElem(target: ElementRef("r1"), id: "ref1")
+    let reference = ReferenceElem(target: ElementRef("r1"), name: nil, id: "ref1")
     let compound = CompoundShape(
         operation: .subtractFront,
-        operands: [.rect(rectAt(0)), .rect(rectAt(5))])
+        operands: [.rect(rectAt(0)), .rect(rectAt(5))], name: nil)
     let doc = Document(layers: [Layer(children: [
         .rect(target),
         .live(.reference(reference)),

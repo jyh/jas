@@ -10808,6 +10808,54 @@ mod tests {
     use crate::geometry::element::{Color, Fill, Stroke};
     use crate::workspace::app_state::AppState;
 
+    /// THE LAYERS-PANEL ROW LABEL, pinned as a VALUE in both ports.
+    ///
+    /// This side was already generic over `common().name`; JasSwift's
+    /// `elementDisplayName` pattern-matched `.layer` alone, so a named Rect
+    /// showed `<Rectangle>` there and "hull" here. The widget-tree panel
+    /// goldens could not see it — MEASURED: flipping the Swift function moved
+    /// zero golden bytes, because no golden carries a named non-layer element.
+    /// Twin: `JasSwift/Tests/Panels/LayersRowLabelTests.swift`, which also
+    /// pins the twelve `<Type>` strings against this function's `tree_type_label`.
+    #[test]
+    fn tree_row_label_prefers_the_name_over_the_bracketed_type() {
+        use crate::geometry::element::{CommonProps, Element, RectElem};
+        use crate::geometry::live::{CompoundOperation, CompoundShape, LiveVariant};
+
+        fn rect(name: Option<&str>) -> Element {
+            Element::Rect(RectElem {
+                x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+                fill: None, stroke: None,
+                common: CommonProps {
+                    name: name.map(|s| s.to_string()),
+                    ..CommonProps::default()
+                },
+                fill_gradient: None, stroke_gradient: None,
+            })
+        }
+        fn compound(name: Option<&str>) -> Element {
+            Element::Live(LiveVariant::CompoundShape(CompoundShape {
+                operation: CompoundOperation::Union,
+                operands: vec![], fill: None, stroke: None,
+                common: CommonProps {
+                    name: name.map(|s| s.to_string()),
+                    ..CommonProps::default()
+                },
+            }))
+        }
+
+        assert_eq!(tree_elem_display_name(&rect(Some("hull"))), ("hull".into(), true));
+        assert_eq!(tree_elem_display_name(&compound(Some("prow"))), ("prow".into(), true));
+        // The fallback half, so the rule cannot become "always the name".
+        assert_eq!(tree_elem_display_name(&rect(None)), ("<Rectangle>".into(), false));
+        assert_eq!(
+            tree_elem_display_name(&compound(None)),
+            ("<Compound Shape>".into(), false)
+        );
+        // An EMPTY name is not a name.
+        assert_eq!(tree_elem_display_name(&rect(Some(""))), ("<Rectangle>".into(), false));
+    }
+
     fn make_state_with_colors(fill_hex: &str, stroke_hex: &str) -> AppState {
         let mut st = AppState::new();
         st.app_default_fill = Color::from_hex(fill_hex).map(Fill::new);

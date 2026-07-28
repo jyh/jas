@@ -1378,6 +1378,32 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
                     re.transform = parse_transform_opt(&v["instance_transform"]);
                     Element::Live(crate::geometry::live::LiveVariant::Reference(re))
                 }
+                "recorded" => {
+                    // RECORDED_ELEMENTS.md §8. This arm did not exist until
+                    // 2026-07-27: the writer emitted `"kind":"recorded"` and
+                    // the reader panicked on it, so the codec could WRITE a
+                    // shape it could not READ. Nothing noticed because the
+                    // only recorded fixture (operations/recorded_eye.json) is
+                    // a write-only pin — both ports BUILD the document in
+                    // code and compare the serialization, never parsing one
+                    // back. JasSwift has had all four arms all along.
+                    let inputs = v["inputs"].as_array().unwrap_or(&vec![]).iter()
+                        .filter_map(|i| i.as_str())
+                        .map(|s| crate::geometry::live::ElementRef(s.to_string()))
+                        .collect();
+                    let ops = v["ops"].as_array().unwrap_or(&vec![]).iter()
+                        .map(|o| crate::document::op_log::PrimitiveOp {
+                            op: o["op"].as_str().unwrap_or("").to_string(),
+                            params: o["params"].clone(),
+                            targets: o["targets"].as_array().unwrap_or(&vec![]).iter()
+                                .filter_map(|t| t.as_str().map(|s| s.to_string()))
+                                .collect(),
+                        })
+                        .collect();
+                    Element::Live(crate::geometry::live::LiveVariant::Recorded(
+                        crate::geometry::live::RecordedElem::new(ops, inputs, common),
+                    ))
+                }
                 "generated" => {
                     let concept_id = v["concept"].as_str().unwrap_or("").to_string();
                     let params = v["params"].clone();

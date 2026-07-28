@@ -449,11 +449,16 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             // with its operands as children. The operation attribute lets
             // the reader rebuild a CompoundShape instead of demoting to a
             // plain Group (and losing the operation).
-            // Mirror Rust's common_attrs_no_name: opacity + transform + id,
-            // but NOT name (live elements never emit inkscape:label).
+            // opacity + transform + id + NAME. The name maps to
+            // inkscape:label like every other element's; both ports used to
+            // route the live arms through a name-less attribute tail, so a
+            // named compound came back from a save unnamed EVEN IN RUST,
+            // whose reader lifted the label correctly on the way in.
+            // `nameAttr` emits nothing when the name is nil, so an unnamed
+            // compound is byte-identical to before.
             var lines = ["\(indent)<g data-jas-live=\"compound_shape\"" +
                 " data-jas-operation=\"\(cs.operation.rawValue)\"" +
-                "\(opacityAttr(cs.opacity))\(transformAttr(cs.transform))\(idAttr(cs.id))>"]
+                "\(opacityAttr(cs.opacity))\(transformAttr(cs.transform))\(idAttr(cs.id))\(nameAttr(cs.name))>"]
             for child in cs.operands {
                 lines.append(elementSvg(child, indent: indent + "  "))
             }
@@ -472,18 +477,20 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             // transformAttr, and ONLY when set so existing <use> fixtures stay
             // byte-identical.
             return "\(indent)<use href=\"#\(escapeXml(r.target.id))\"" +
-                "\(opacityAttr(r.opacity))\(transformAttr(r.transform))\(idAttr(r.id))" +
+                "\(opacityAttr(r.opacity))\(transformAttr(r.transform))\(idAttr(r.id))\(nameAttr(r.name))" +
                 "\(instanceTransformAttr(r.instanceTransform))/>"
         case .recorded(let rec):
             // RECORDED_ELEMENTS.md §8: a recorded element exports as a
             // data-jas-live group carrying the recipe's input ids. Full SVG
             // round-trip (the ops) is deferred; no current fixture exercises
-            // it. Mirrors Rust's element_svg recorded arm (common_attrs_no_name
-            // = opacity + transform + id, never name).
+            // it, and NEITHER port has an SVG read path for this group at
+            // all — a `<g data-jas-live="recorded">` imports back as a plain
+            // Group. The name is written anyway, so the write side is not the
+            // thing standing between this kind and a round trip.
             let inputs = rec.inputs.map { $0.id }.joined(separator: ",")
             return "\(indent)<g data-jas-live=\"recorded\"" +
                 " data-jas-inputs=\"\(escapeXml(inputs))\"" +
-                "\(opacityAttr(rec.opacity))\(transformAttr(rec.transform))\(idAttr(rec.id))></g>"
+                "\(opacityAttr(rec.opacity))\(transformAttr(rec.transform))\(idAttr(rec.id))\(nameAttr(rec.name))></g>"
         case .generated(let gen):
             // CONCEPTS.md §6: a generated element exports as a data-jas-live
             // group carrying the concept id + params JSON. Full SVG round-trip
@@ -492,7 +499,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             return "\(indent)<g data-jas-live=\"generated\"" +
                 " data-jas-concept=\"\(escapeXml(gen.conceptId))\"" +
                 " data-jas-params=\"\(escapeXml(params))\"" +
-                "\(opacityAttr(gen.opacity))\(transformAttr(gen.transform))\(idAttr(gen.id))></g>"
+                "\(opacityAttr(gen.opacity))\(transformAttr(gen.transform))\(idAttr(gen.id))\(nameAttr(gen.name))></g>"
         }
     }
 }
@@ -1538,8 +1545,11 @@ private func parseElement(_ node: XMLNode) -> Element? {
         if liveKind == "compound_shape" {
             let opStr = elem.attribute(forName: "data-jas-operation")?.stringValue ?? ""
             let operation = CompoundOperation(rawValue: opStr) ?? .union
+            // `name` came off inkscape:label in the common read above, the
+            // same attribute that names a rect or a group. It used to be
+            // discarded here for want of a slot.
             return .live(.compoundShape(CompoundShape(
-                operation: operation, operands: children, id: id,
+                operation: operation, operands: children, name: name, id: id,
                 opacity: opacity, transform: transform)))
         }
         // Layer detection: only explicit inkscape:groupmode="layer"
@@ -1569,7 +1579,7 @@ private func parseElement(_ node: XMLNode) -> Element? {
         // attr; e/f are px on the wire, pt in the model). Distinct from
         // `transform` (the render CTM, already parsed above).
         return .live(.reference(ReferenceElem(
-            target: ElementRef(target), id: id,
+            target: ElementRef(target), name: name, id: id,
             transform: transform,
             instanceTransform: parseMatrixAttr(elem, "data-jas-instance-transform"),
             opacity: opacity)))

@@ -223,8 +223,12 @@ public class Controller {
             model.editDocument(doc.replaceElement(targetPath, with: target.withId(targetId)))
             resolvedId = targetId
         }
+        // A created reference is a 0 -> 1 BIRTH: it wears no operand's
+        // identity (EDIT_SEMANTICS_FREEZE.md §3.4), so it is born unnamed.
+        // Rust passes `CommonProps { id: Some(ref_id), ..default() }` here,
+        // whose `name` is None.
         let reference = Element.live(.reference(ReferenceElem(
-            target: ElementRef(resolvedId), id: refId)))
+            target: ElementRef(resolvedId), name: nil, id: refId)))
         addElement(reference)
     }
 
@@ -255,8 +259,11 @@ public class Controller {
         // The master carries the resolved id.
         let master = target.withId(resolvedId)
         // The in-place instance targets the master id, with its own refId.
+        // Born unnamed: the NAME rides with the master, which is `target`
+        // itself (only its id is re-stamped). Rust passes a default
+        // `CommonProps` here for the same reason.
         let reference = Element.live(.reference(ReferenceElem(
-            target: ElementRef(resolvedId), id: refId)))
+            target: ElementRef(resolvedId), name: nil, id: refId)))
         // Replace the element in place with the instance, then push the master
         // into the off-canvas store.
         let newDoc = doc.replaceElement(path, with: reference)
@@ -272,8 +279,10 @@ public class Controller {
     /// carries `id = refId`, minted by the initiator. Mirrors Rust
     /// `Controller::place_instance`.
     public func placeInstance(masterId: String, refId: String) {
+        // A placed instance is a 0 -> 1 birth; born unnamed, like Rust's
+        // `place_instance` (default `CommonProps` but for the id).
         let reference = Element.live(.reference(ReferenceElem(
-            target: ElementRef(masterId), id: refId)))
+            target: ElementRef(masterId), name: nil, id: refId)))
         addElement(reference)
     }
 
@@ -282,8 +291,10 @@ public class Controller {
     /// id is minted by the initiator (value-in-op). Mirrors Rust
     /// `Controller::place_concept_instance`.
     public func placeConceptInstance(conceptId: String, params: [String: Any], elemId: String) {
+        // A placed concept instance is a 0 -> 1 birth; born unnamed, like
+        // Rust's `place_concept_instance` (default `CommonProps` but for id).
         let generated = Element.live(.generated(GeneratedElem(
-            conceptId: conceptId, params: params, id: elemId)))
+            conceptId: conceptId, params: params, name: nil, id: elemId)))
         addElement(generated)
     }
 
@@ -350,6 +361,12 @@ public class Controller {
         let generated = GeneratedElem(
             conceptId: conceptId,
             params: params,
+            // PROMOTE is 1 -> 1 and speaks to the GENERATOR, not the identity:
+            // Rust clones the whole `common` here (its own battery is named
+            // "preserving the original element's identity (id/name)"). This
+            // port hand-listed six fields and could not list `name` at all,
+            // so a promoted element silently came back unnamed.
+            name: existing.name,
             id: existing.id,
             transform: transform,
             opacity: opacity,
@@ -446,9 +463,11 @@ public class Controller {
         // New master = clone of the selection, re-id'd to masterId.
         let newMaster = source.withId(masterId)
 
-        // The selection becomes an instance of the redefined master.
+        // The selection becomes an instance of the redefined master. Born
+        // unnamed — the name went to `newMaster`, which is the clone. Rust's
+        // `redefine` passes a default `CommonProps` but for the id.
         let reference = Element.live(.reference(ReferenceElem(
-            target: ElementRef(masterId), id: refId)))
+            target: ElementRef(masterId), name: nil, id: refId)))
         let newDoc = doc.replaceElement(path, with: reference)
         var newSymbols = newDoc.symbols
         newSymbols[masterIdx] = newMaster
@@ -1108,6 +1127,11 @@ public class Controller {
         let cs = CompoundShape(
             operation: operation,
             operands: elements,
+            // A compound is a WRAP: 0 -> 1, and a container never wears a
+            // member's identity (EDIT_SEMANTICS_FREEZE.md §3.4). Only the
+            // frontmost operand's PAINT is inherited, which is exactly what
+            // Rust's `make_compound_shape_with_op` copies. So: unnamed.
+            name: nil,
             fill: frontmost.fill,
             stroke: frontmost.stroke,
             opacity: 1.0,

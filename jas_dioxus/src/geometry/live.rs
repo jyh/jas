@@ -1245,6 +1245,82 @@ mod tests {
     use super::*;
     use crate::geometry::element::RectElem;
 
+    /// ANY ELEMENT CARRIES A NAME, live kinds included: `Element::common()`
+    /// reaches `name` for all four conformers, and `common_mut()` writes it.
+    ///
+    /// This is the port twin of JasSwift's `LiveElementNameTests`, and it is
+    /// here to keep the two ports' batteries symmetric — this side was already
+    /// correct (every conformer holds a whole `CommonProps`), which is exactly
+    /// why the divergence was invisible from inside this port. The shared
+    /// goldens `test_fixtures/expected/live_named{,_recipe}.json` gate the
+    /// codecs; this gates the accessor pair.
+    #[test]
+    fn common_name_reaches_every_live_kind() {
+        use crate::document::op_log::PrimitiveOp;
+        use crate::geometry::element::{CommonProps, Element};
+
+        fn named(n: &str) -> CommonProps {
+            CommonProps { name: Some(n.into()), ..CommonProps::default() }
+        }
+
+        let kinds: Vec<(Element, &str)> = vec![
+            (
+                Element::Live(LiveVariant::CompoundShape(CompoundShape {
+                    operation: CompoundOperation::Union,
+                    operands: vec![],
+                    fill: None,
+                    stroke: None,
+                    common: named("hull"),
+                })),
+                "hull",
+            ),
+            (
+                Element::Live(LiveVariant::Reference(ReferenceElem::new(
+                    ElementRef("op-back".into()),
+                    named("eye"),
+                ))),
+                "eye",
+            ),
+            (
+                Element::Live(LiveVariant::Recorded(RecordedElem::new(
+                    vec![PrimitiveOp {
+                        op: "copy".into(),
+                        params: serde_json::json!({"from": ["src"]}),
+                        targets: vec![],
+                    }],
+                    vec![ElementRef("src".into())],
+                    named("stamp"),
+                ))),
+                "stamp",
+            ),
+            (
+                Element::Live(LiveVariant::Generated(GeneratedElem::new(
+                    "regular_polygon".into(),
+                    serde_json::json!({"sides": 6.0}),
+                    named("gear"),
+                ))),
+                "gear",
+            ),
+        ];
+
+        for (elem, expected) in kinds {
+            assert_eq!(
+                elem.common().name.as_deref(),
+                Some(expected),
+                "common().name did not reach a live element"
+            );
+            // The setter half: a rename must land, and only on the name.
+            let mut renamed = elem.clone();
+            renamed.common_mut().name = Some("keel".into());
+            assert_eq!(renamed.common().name.as_deref(), Some("keel"));
+            let Element::Live(before) = &elem else { unreachable!() };
+            let Element::Live(after) = &renamed else {
+                panic!("a rename changed the element kind")
+            };
+            assert_eq!(after.kind(), before.kind());
+        }
+    }
+
     /// Risk R9 (transcripts/CORPUS_CENSUS.md §7): the two ports' guards here
     /// were not mirror images. `radius <= 0.0` is FALSE for NaN, so a NaN radius
     /// fell through to `nan.ceil().max(8.0) as usize` = 8 while JasSwift's

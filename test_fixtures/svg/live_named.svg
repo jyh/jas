@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" xmlns:jas="urn:jas:1" viewBox="0 0 54 36" width="54" height="36">
+  <g inkscape:groupmode="layer" inkscape:label="Layer">
+    <g data-jas-live="compound_shape" data-jas-operation="union" id="cs1" inkscape:label="hull">
+      <rect x="0" y="0" width="48" height="48" fill="rgb(0,0,0)" stroke="none" id="op1" inkscape:label="port"/>
+
+      <rect x="24" y="0" width="48" height="48" fill="rgb(0,0,0)" stroke="none" id="op2" inkscape:label="starboard"/>
+
+    </g>
+    <use href="#op1" id="ref1" inkscape:label="eye"/>
+  </g>
+</svg>

@@ -12,7 +12,7 @@ private func rectWithId(_ id: String?) -> Element {
 }
 
 private func reference(_ id: String, _ target: String) -> Element {
-    .live(.reference(ReferenceElem(target: ElementRef(target), id: id)))
+    .live(.reference(ReferenceElem(target: ElementRef(target), name: nil, id: id)))
 }
 
 /// Wrap `children` in a single layer named "Layer".
@@ -119,7 +119,7 @@ private func docWithLayer(_ children: [Element]) -> Document {
     let op2 = rectWithId(nil)
     let compound = Element.live(.compoundShape(CompoundShape(
         operation: .subtractFront,
-        operands: [op1, op2],
+        operands: [op1, op2], name: nil,
         id: "cs"
     )))
     let idx = DependencyIndex.build(docWithLayer([compound, reference("r4", "op1")]))
@@ -283,7 +283,7 @@ private func docWithLayer(_ children: [Element]) -> Document {
     let op2 = rectWithId(nil)
     let compound = Element.live(.compoundShape(CompoundShape(
         operation: .subtractFront,
-        operands: [op1, op2],
+        operands: [op1, op2], name: nil,
         id: "cs"
     )))
     let idx = DependencyIndex.build(docWithLayer([
