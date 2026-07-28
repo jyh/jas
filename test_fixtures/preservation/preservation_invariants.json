@@ -20,7 +20,7 @@
     "RAISE min_vectors when you add a vector. It is a floor, not an equality:",
     "adding vectors must never require touching four gates."
   ],
-  "min_vectors": 13,
+  "min_vectors": 14,
   "vectors": [
     {
       "name": "move_nested_rect_is_1to1",
@@ -565,6 +565,68 @@
               "op": "move_selection",
               "dx": 10.0,
               "dy": 0.0
+            }
+          ]
+        }
+      ],
+      "expected_violations": {
+        "rust": [],
+        "swift": []
+      }
+    },
+    {
+      "name": "show_all_keeps_a_knockout_group",
+      "doc": "T4 (the BYSTANDER CLAUSE) over the two CONTAINER-ONLY fields, `isolated_blending` and `knockout_group`. Every other vector in this corpus watches fields a leaf can carry; these two exist only on Group and Layer, so no leaf-shaped vector can reach them, and until 2026-07-28 no codec carried them either -- the law's own gate snapshots canonical test JSON, so an edit that destroyed a group's knockout setting produced byte-identical JSON and passed. `show_all` is chosen as the edit precisely because it walks the WHOLE document resetting `visibility`, rebuilding every container it passes; grp_knockout and lyr_flags are rebuilt while being spoken to about nothing but visibility. A Swift-style field-by-field container rebuild loses both flags exactly there. The hide is applied to a LEAF (r_inside) so show_all is the only container-rebuilding op under test, and hide/show nets to zero -- the r_sibling nudge is the document's one real change, so the run is not byte-identical and the invariants are not vacuous. `bystander_fields_present` makes the setup's saturation a CHECKED claim: before the three codecs carried these flags, the setup decayed to defaults on the way in and this vector red-lit rather than passing on nothing.",
+      "setup_test_json": "preservation_container_blend_flags.json",
+      "cardinality": "one_to_one",
+      "subject_ids": [
+        "r_sibling"
+      ],
+      "speaks_to": [
+        "x",
+        "y"
+      ],
+      "must_change": [
+        "x"
+      ],
+      "consumed_ids": [],
+      "expected_fresh_ids": 0,
+      "bystander_fields_present": {
+        "lyr_flags": [
+          "isolated_blending",
+          "knockout_group"
+        ],
+        "grp_knockout": [
+          "isolated_blending",
+          "knockout_group"
+        ]
+      },
+      "txns": [
+        {
+          "name": "nudge one rect, then hide a leaf inside the knockout group and show everything",
+          "ops": [
+            {
+              "op": "select_by_ids",
+              "ids": [
+                "r_sibling"
+              ]
+            },
+            {
+              "op": "move_selection",
+              "dx": 5.0,
+              "dy": 0.0
+            },
+            {
+              "op": "select_by_ids",
+              "ids": [
+                "r_inside"
+              ]
+            },
+            {
+              "op": "hide_selection"
+            },
+            {
+              "op": "show_all"
             }
           ]
         }
