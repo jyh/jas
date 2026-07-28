@@ -102,9 +102,12 @@ public func buildActiveDocumentView(
             "video_ruler_pixel_aspect_ratio": ab.videoRulerPixelAspectRatio,
         ]
     }
-    let selectedSet = Set(artboardsPanelSelection)
-    let current = m.document.artboards.first(where: { selectedSet.contains($0.id) })
-        ?? m.document.artboards.first
+    // THE shared rule (Document/Artboard.swift `currentArtboard`), not a
+    // second copy of it — this used to be the only place the rule was
+    // written, so every other site that wanted "the current artboard"
+    // reached for `artboards.first`.
+    let current = currentArtboard(m.document.artboards,
+                                  selection: artboardsPanelSelection)
     let currentArtboardJson: [String: Any]
     let currentArtboardId: Any
     if let a = current {

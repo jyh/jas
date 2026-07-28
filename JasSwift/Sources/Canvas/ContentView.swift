@@ -317,7 +317,8 @@ public class WorkspaceState: ObservableObject {
         // convention — so this is the app-layer centering, mirroring Rust's
         // TabState construction (app_state.rs). CanvasSubwindow's first draw
         // re-centers with the real viewport.
-        model.centerViewOnCurrentArtboard()
+        model.centerViewOnCurrentArtboard(
+            artboardsPanelSelection: artboardsPanelSelectionIds(model))
         let entry = CanvasEntry(model: model)
         canvases.append(entry)
         selectedTab = entry.id

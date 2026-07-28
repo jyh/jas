@@ -260,6 +260,32 @@ fn parse_default_name(name: &str) -> Option<u32> {
     rest.parse::<u32>().ok()
 }
 
+/// THE `active_document.current_artboard` rule, in one place: the topmost
+/// PANEL-SELECTED artboard, else the first (ARTBOARDS.md §Selection
+/// semantics).
+///
+/// "Topmost" is document order, not click order — the panel lists artboards in
+/// document order, and the workspace expression `active_document
+/// .current_artboard` resolves to the first row in that order carrying the
+/// selection.
+///
+/// WHY IT IS A FUNCTION. It used to be an inline `.find(..).or_else(..)` inside
+/// the renderer's active-document payload, so every OTHER site that wanted
+/// "the current artboard" reached for `artboards.first()` instead — which is
+/// the same answer only while nothing is panel-selected. Mirrors Swift
+/// `currentArtboard(_:selection:)`.
+pub fn current_artboard<'a>(
+    artboards: &'a [Artboard],
+    panel_selection: &[String],
+) -> Option<&'a Artboard> {
+    let sel: std::collections::HashSet<&str> =
+        panel_selection.iter().map(|s| s.as_str()).collect();
+    artboards
+        .iter()
+        .find(|a| sel.contains(a.id.as_str()))
+        .or_else(|| artboards.first())
+}
+
 /// Pick the next unused ``Artboard N`` name.
 pub fn next_artboard_name(artboards: &[Artboard]) -> String {
     let mut used: std::collections::HashSet<u32> = std::collections::HashSet::new();

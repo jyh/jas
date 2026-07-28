@@ -2729,17 +2729,14 @@ pub(crate) fn build_active_document_view(
             })
         })
         .collect();
-    // current_artboard: topmost panel-selected, else first.
-    let sel_set: std::collections::HashSet<&str> = st
-        .artboards_panel_selection
-        .iter()
-        .map(|s| s.as_str())
-        .collect();
-    let current: Option<&crate::document::artboard::Artboard> = doc
-        .artboards
-        .iter()
-        .find(|a| sel_set.contains(a.id.as_str()))
-        .or_else(|| doc.artboards.first());
+    // current_artboard: topmost panel-selected, else first. THE shared rule
+    // (document::artboard::current_artboard), not a second copy of it — this
+    // used to be the only place the rule was written, so every other site that
+    // wanted "the current artboard" reached for `artboards.first()`.
+    let current: Option<&crate::document::artboard::Artboard> =
+        crate::document::artboard::current_artboard(
+            &doc.artboards, &st.artboards_panel_selection,
+        );
     let current_artboard_json = match current {
         Some(a) => serde_json::json!({
             "id": a.id,

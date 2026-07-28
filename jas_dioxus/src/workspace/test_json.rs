@@ -302,59 +302,48 @@ pub fn state_defaults_json() -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Shortcut structure (must match workspace/shortcuts.yaml)
+// Shortcut structure (READ FROM workspace/shortcuts.yaml, via the bundle)
 // ---------------------------------------------------------------------------
 
-/// Return canonical JSON for all keyboard shortcuts.
+/// Return canonical JSON for all keyboard shortcuts, in `shortcuts.yaml` order.
+///
+/// SHAPE **AND** BINDINGS. This used to be a hand-transcribed literal list —
+/// a fixture that pinned only the SERIALIZATION SHAPE while claiming in its
+/// own header to "match workspace/shortcuts.yaml". It had drifted: it said
+/// `Ctrl+0 -> fit_in_window` and knew nothing of `Ctrl+Alt+0` or `Ctrl+1`,
+/// while `workspace/shortcuts.yaml` says `Ctrl+0 -> fit_active_artboard`,
+/// `Ctrl+Alt+0 -> fit_all_artboards`, `Ctrl+1 -> zoom_to_actual_size`. A
+/// reader auditing "what does Ctrl+0 do" found two answers, one of them under
+/// `test_fixtures/expected/`, and NO golden pinned the real bindings at all.
+/// Reading the bundle makes the golden a binding golden: the spec and the
+/// fixture can no longer drift apart, because there is only one list.
 pub fn shortcut_structure_json() -> String {
-    let shortcuts: &[(&str, &str, Option<(&str, &str)>)] = &[
-        ("Ctrl+N", "new_document", None),
-        ("Ctrl+O", "open_file", None),
-        ("Ctrl+S", "save", None),
-        ("Ctrl+Shift+S", "save_as", None),
-        ("Ctrl+Q", "quit", None),
-        ("Ctrl+Z", "undo", None),
-        ("Ctrl+Shift+Z", "redo", None),
-        ("Ctrl+X", "cut", None),
-        ("Ctrl+C", "copy", None),
-        ("Ctrl+V", "paste", None),
-        ("Ctrl+Shift+V", "paste_in_place", None),
-        ("Ctrl+A", "select_all", None),
-        ("Delete", "delete_selection", None),
-        ("Backspace", "delete_selection", None),
-        ("Ctrl+G", "group", None),
-        ("Ctrl+Shift+G", "ungroup", None),
-        ("Ctrl+2", "lock", None),
-        ("Ctrl+Alt+2", "unlock_all", None),
-        ("Ctrl+3", "hide_selection", None),
-        ("Ctrl+Alt+3", "show_all", None),
-        ("Ctrl+=", "zoom_in", None),
-        ("Ctrl+-", "zoom_out", None),
-        ("Ctrl+0", "fit_in_window", None),
-        ("V", "select_tool", Some(("tool", "selection"))),
-        ("A", "select_tool", Some(("tool", "partial_selection"))),
-        ("P", "select_tool", Some(("tool", "pen"))),
-        ("=", "select_tool", Some(("tool", "add_anchor"))),
-        ("-", "select_tool", Some(("tool", "delete_anchor"))),
-        ("T", "select_tool", Some(("tool", "type"))),
-        ("\\", "select_tool", Some(("tool", "line"))),
-        ("M", "select_tool", Some(("tool", "rect"))),
-        ("N", "select_tool", Some(("tool", "pencil"))),
-        ("Shift+E", "select_tool", Some(("tool", "path_eraser"))),
-        ("Q", "select_tool", Some(("tool", "lasso"))),
-        ("D", "reset_fill_stroke", None),
-        ("X", "toggle_fill_on_top", None),
-        ("Shift+X", "swap_fill_stroke", None),
-    ];
+    let ws = crate::interpreter::workspace::Workspace::load();
+    let empty: Vec<serde_json::Value> = Vec::new();
+    let shortcuts: &[serde_json::Value] = ws
+        .as_ref()
+        .and_then(|w| w.data().get("shortcuts"))
+        .and_then(|v| v.as_array())
+        .map(|v| v.as_slice())
+        .unwrap_or(&empty);
 
-    let shortcut_jsons: Vec<String> = shortcuts.iter().map(|(key, action, params)| {
+    let shortcut_jsons: Vec<String> = shortcuts.iter().map(|sc| {
         let mut o = JsonObj::new();
-        o.str_val("action", action);
-        o.str_val("key", key);
-        match params {
-            Some((pk, pv)) => {
+        o.str_val("action", sc.get("action").and_then(|v| v.as_str()).unwrap_or(""));
+        o.str_val("key", sc.get("key").and_then(|v| v.as_str()).unwrap_or(""));
+        match sc.get("params").and_then(|v| v.as_object()) {
+            Some(params) => {
                 let mut po = JsonObj::new();
-                po.str_val(pk, pv);
+                for (pk, pv) in params {
+                    match pv {
+                        serde_json::Value::String(s) => po.str_val(pk, s),
+                        serde_json::Value::Bool(b) => po.bool_val(pk, *b),
+                        serde_json::Value::Number(n) => {
+                            po.num(pk, n.as_f64().unwrap_or(0.0))
+                        }
+                        _ => po.null(pk),
+                    }
+                }
                 o.raw("params", po.build());
             }
             None => o.null("params"),

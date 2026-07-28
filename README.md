@@ -210,6 +210,22 @@ module and run without any GUI dependency — they exercise the pure
 model, geometry, text layout, SVG, and tool state machines directly,
 so they run in milliseconds.
 
+## Terminology
+
+Two house terms recur in the transcripts, the design notes, and a handful
+of source comments, and are defined here so they are not initialisms
+without a referent:
+
+- **JYH** — Jason Hickey, the project's author and maintainer. Design
+  decisions attributed to JYH (often written as "RULED" or "ratified" with
+  a date) are the maintainer's calls, recorded so a later reader can see
+  *when* a behaviour was chosen and *why*, not just what the code does.
+- **fleet council** — this project's design-review session: a working
+  meeting between the maintainer and the AI pair in which open questions
+  are put, decided, and written down. A comment citing a fleet council is
+  pointing at the transcript where that decision was made, in
+  [`transcripts/`](transcripts/).
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
