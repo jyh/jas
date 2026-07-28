@@ -47,6 +47,8 @@ case "measure":           results = runMeasure(activeVectors)
 case "element_bounds":    results = runElementBounds(activeVectors)
 case "element_evaluated_bounds": results = runElementEvaluatedBounds(activeVectors)
 case "flatten":           results = runFlatten(activeVectors)
+case "art_flatten":       results = runArtFlatten(activeVectors)
+case "calligraphic_outline": results = runCalligraphicOutline(activeVectors)
 case "arrow_trim":        results = runArrowTrim(activeVectors)
 case "gradient_remap":    results = runGradientRemap(activeVectors)
 case "length":            results = runLength(activeVectors)
@@ -115,6 +117,51 @@ func runFlatten(_ vectors: [[String: Any]]) -> [[String: Any]] {
         var d: [PathCommand] = []
         if case .path(let p) = elem { d = p.d }
         let pts = flattenPathCommands(d)
+        let result = pts.map { [$0.0, $0.1] }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Art Flatten (first-subpath flattener behind art-along-path,
+//         pattern-along-path and the bristle brush)
+//
+// A separate verb from `flatten` on purpose: `flattenArtPath` is not a wrapper
+// over `flattenPathCommands`. It walks the first subpath only, dedupes
+// coincident vertices, and samples curves at its own step counts. It had no
+// corpus family at all, which is how a leading-ClosePath bail-out survived in
+// BOTH ports at once (S-4).
+
+func runArtFlatten(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        var d: [PathCommand] = []
+        if case .path(let p) = elem { d = p.d }
+        let pts = flattenArtPath(d)
+        let result = pts.map { [$0.0, $0.1] }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Calligraphic Outline (the Calligraphic brush's variable-width outline)
+//
+// Driven for the same reason as `art_flatten`: its private stroke sampler is a
+// FOURTH first-subpath walker, with its own step counts and its own
+// accumulator, and it carried the same leading-ClosePath bail-out in both
+// ports. Gated at the public function rather than at the sampler so the family
+// asserts what the artist sees (the ribbon), not an internal.
+
+func runCalligraphicOutline(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        var d: [PathCommand] = []
+        if case .path(let p) = elem { d = p.d }
+        let b = tc["brush"] as? [String: Any] ?? [:]
+        let brush = CalligraphicBrush(angle: (b["angle"] as? NSNumber)?.doubleValue ?? 0,
+                                      roundness: (b["roundness"] as? NSNumber)?.doubleValue ?? 100,
+                                      size: (b["size"] as? NSNumber)?.doubleValue ?? 1)
+        let pts = calligraphicOutline(d, brush)
         let result = pts.map { [$0.0, $0.1] }
         return ["name": name, "result": result]
     }

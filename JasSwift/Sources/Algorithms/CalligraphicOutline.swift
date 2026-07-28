@@ -76,23 +76,44 @@ private func sampleStrokePath(_ commands: [PathCommand]) -> [Sample] {
     var cx: Double = 0.0, cy: Double = 0.0
     var sx: Double = 0.0, sy: Double = 0.0
     var started = false
+    // S-4's guard, and it cannot be `out.isEmpty` the way the art flattener's
+    // is: `out` here holds SAMPLES, which a bare moveTo does not emit, so an
+    // empty accumulator does not mean "no current point". This flag is exactly
+    // "a current point has been established", which is what
+    // `flattenPathCommands`' non-empty check means in a walk whose accumulator
+    // holds vertices.
+    var hasCurrent = false
 
     for cmd in commands {
         switch cmd {
         case .moveTo(let x, let y):
             if started { return out }
             cx = x; cy = y; sx = x; sy = y
+            hasCurrent = true
         case .lineTo(let x, let y):
             sampleLine(&out, x0: cx, y0: cy, x1: x, y1: y)
-            cx = x; cy = y; started = true
+            cx = x; cy = y; started = true; hasCurrent = true
         case .curveTo(let x1, let y1, let x2, let y2, let x, let y):
             sampleCubic(&out, x0: cx, y0: cy, x1: x1, y1: y1,
                         x2: x2, y2: y2, x3: x, y3: y)
-            cx = x; cy = y; started = true
+            cx = x; cy = y; started = true; hasCurrent = true
         case .quadTo(let x1, let y1, let x, let y):
             sampleQuadratic(&out, x0: cx, y0: cy, x1: x1, y1: y1, x2: x, y2: y)
-            cx = x; cy = y; started = true
+            cx = x; cy = y; started = true; hasCurrent = true
         case .closePath:
+            // S-4: a LEADING ClosePath is a no-op (JYH, fleet council
+            // 2026-07-27). This is the FOURTH first-subpath walker in the tree
+            // and the second one that got the ruling wrong: without the guard
+            // it returned the still-empty sample list, so the CALLIGRAPHIC
+            // brush -- the Phase-1 default -- drew nothing at all on a path
+            // whose `d` begins with Z. Wrong identically in both ports, so no
+            // equivalence gate could see it; gated now by
+            // test_fixtures/algorithms/calligraphic_outline.json.
+            //
+            // NOT `cx == sx && cy == sy`: at a moveTo-then-Z degenerate subpath
+            // those are equal too, and there the close is REAL -- it ends the
+            // subpath instead of letting the walk run on into the next one.
+            if !hasCurrent { continue }
             if cx != sx || cy != sy {
                 sampleLine(&out, x0: cx, y0: cy, x1: sx, y1: sy)
             }

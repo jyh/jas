@@ -33,6 +33,24 @@ ALGORITHMS = {
     # (measured: a rect with translate(100,50) still reports [0,0,10,10]).
     "element_evaluated_bounds": ("tolerance", 1e-4),
     "flatten":           ("tolerance", 1e-9),
+    # The ART flattener (`art_along_path::flatten` / `flattenArtPath`), which
+    # is a DIFFERENT function from `flatten` above and not a wrapper over it:
+    # it walks the FIRST SUBPATH only, dedupes coincident vertices as it goes,
+    # and samples a cubic at 16 steps and a quad at 12 rather than at the
+    # hit-test flattener's shared FLATTEN_STEPS. Shared by art-along-path,
+    # pattern-along-path and the bristle brush, and driven by NO family until
+    # this one: both ports dropped the whole path on a leading ClosePath,
+    # identically, so no port-vs-port comparison could see it (S-4).
+    "art_flatten":       ("tolerance", 1e-9),
+    # The Calligraphic brush's variable-width outline. A FOURTH first-subpath
+    # walker lives inside it (`sample_stroke_path` / `sampleStrokePath`, private
+    # in both ports) with its own step counts -- 32 cubic / 24 quadratic samples
+    # and a 1pt arc-length interval -- so it is not expressible through
+    # `art_flatten`. It carried the same leading-ClosePath bail-out, identically
+    # in both ports, and the calligraphic brush is the Phase-1 DEFAULT brush.
+    # Gated at the public function so the family asserts the ribbon the artist
+    # sees rather than an internal.
+    "calligraphic_outline": ("tolerance", 1e-9),
     "arrow_trim":        ("tolerance", 1e-4),
     # LINEAR gradient stop remap onto a split fragment (S-2). EXACT: colours
     # are reported as 8-bit hex (a Swift GradientStop stores its colour as a

@@ -72,6 +72,8 @@ fn main() {
         "element_bounds" => run_element_bounds(&vectors),
         "element_evaluated_bounds" => run_element_evaluated_bounds(&vectors),
         "flatten" => run_flatten(&vectors),
+        "art_flatten" => run_art_flatten(&vectors),
+        "calligraphic_outline" => run_calligraphic_outline(&vectors),
         "arrow_trim" => run_arrow_trim(&vectors),
         "gradient_remap" => run_gradient_remap(&vectors),
         "length" => run_length(&vectors),
@@ -250,6 +252,70 @@ fn run_flatten(vectors: &[Value]) -> Vec<Value> {
                 _ => Vec::new(),
             };
             let pts = flatten_path_commands(&d);
+            let result: Vec<Value> = pts.iter().map(|(x, y)| json!([x, y])).collect();
+            json!({"name": name, "result": result})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// art_flatten (the FIRST-SUBPATH flattener behind art-along-path,
+// pattern-along-path and the bristle brush)
+// ---------------------------------------------------------------
+//
+// A separate verb from `flatten` on purpose: `art_along_path::flatten` is not
+// a wrapper over `flatten_path_commands`. It walks the first subpath only,
+// dedupes coincident vertices, and samples curves at its own step counts. It
+// had no corpus family at all, which is how a leading-ClosePath bail-out
+// survived in BOTH ports at once (S-4).
+
+fn run_art_flatten(vectors: &[Value]) -> Vec<Value> {
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem = parse_element(&tc["element"]);
+            let d = match &elem {
+                Element::Path(e) => e.d.clone(),
+                _ => Vec::new(),
+            };
+            let pts = jas_dioxus::algorithms::art_along_path::flatten(&d);
+            let result: Vec<Value> = pts.iter().map(|(x, y)| json!([x, y])).collect();
+            json!({"name": name, "result": result})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// calligraphic_outline (the Calligraphic brush's variable-width outline)
+// ---------------------------------------------------------------
+//
+// Driven for the same reason as `art_flatten`: its private stroke sampler is a
+// FOURTH first-subpath walker, with its own step counts and its own
+// accumulator, and it carried the same leading-ClosePath bail-out in both
+// ports. Gated at the public function rather than at the sampler so the family
+// asserts what the artist sees (the ribbon), not an internal.
+
+fn run_calligraphic_outline(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::calligraphic_outline::{
+        calligraphic_outline, CalligraphicBrush,
+    };
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem = parse_element(&tc["element"]);
+            let d = match &elem {
+                Element::Path(e) => e.d.clone(),
+                _ => Vec::new(),
+            };
+            let b = &tc["brush"];
+            let brush = CalligraphicBrush {
+                angle: b["angle"].as_f64().unwrap_or(0.0),
+                roundness: b["roundness"].as_f64().unwrap_or(100.0),
+                size: b["size"].as_f64().unwrap_or(1.0),
+            };
+            let pts = calligraphic_outline(&d, &brush);
             let result: Vec<Value> = pts.iter().map(|(x, y)| json!([x, y])).collect();
             json!({"name": name, "result": result})
         })

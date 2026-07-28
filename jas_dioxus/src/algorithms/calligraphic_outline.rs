@@ -78,6 +78,13 @@ fn sample_stroke_path(commands: &[PathCommand]) -> Vec<Sample> {
     let mut sx = 0.0_f64;
     let mut sy = 0.0_f64;
     let mut started = false;
+    // S-4's guard, and it cannot be `out.is_empty()` the way the art
+    // flattener's is: `out` here holds SAMPLES, which a bare MoveTo does not
+    // emit, so an empty accumulator does not mean "no current point". This
+    // flag is exactly "a current point has been established", which is what
+    // `flatten_path_commands`' `!pts.is_empty()` means in a walk whose
+    // accumulator holds vertices.
+    let mut has_current = false;
 
     for cmd in commands {
         match cmd {
@@ -89,26 +96,46 @@ fn sample_stroke_path(commands: &[PathCommand]) -> Vec<Sample> {
                 cy = *y;
                 sx = cx;
                 sy = cy;
+                has_current = true;
             }
             PathCommand::LineTo { x, y } => {
                 sample_line(&mut out, cx, cy, *x, *y);
                 cx = *x;
                 cy = *y;
                 started = true;
+                has_current = true;
             }
             PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
                 sample_cubic(&mut out, cx, cy, *x1, *y1, *x2, *y2, *x, *y);
                 cx = *x;
                 cy = *y;
                 started = true;
+                has_current = true;
             }
             PathCommand::QuadTo { x1, y1, x, y } => {
                 sample_quadratic(&mut out, cx, cy, *x1, *y1, *x, *y);
                 cx = *x;
                 cy = *y;
                 started = true;
+                has_current = true;
             }
             PathCommand::ClosePath => {
+                // S-4: a LEADING ClosePath is a no-op (JYH, fleet council
+                // 2026-07-27). This is the FOURTH first-subpath walker in the
+                // tree and the second one that got the ruling wrong: without
+                // the guard it returned the still-empty sample list, so the
+                // CALLIGRAPHIC brush -- the Phase-1 default -- drew nothing at
+                // all on a path whose `d` begins with Z. Wrong identically in
+                // both ports, so no equivalence gate could see it; gated now
+                // by test_fixtures/algorithms/calligraphic_outline.json.
+                //
+                // NOT `cx == sx && cy == sy`: at a MoveTo-then-Z degenerate
+                // subpath those are equal too, and there the close is REAL --
+                // it ends the subpath instead of letting the walk run on into
+                // the next one.
+                if !has_current {
+                    continue;
+                }
                 if cx != sx || cy != sy {
                     sample_line(&mut out, cx, cy, sx, sy);
                 }
@@ -288,5 +315,71 @@ mod tests {
         let min_y = pts.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
         assert!(max_y > 3.0, "outline should reach above curve");
         assert!(min_y < -0.5, "outline should dip below path baseline");
+    }
+
+    // ── S-4: a leading ClosePath is a no-op ──────────────────────────────
+    //
+    // Ruled by JYH at the fleet council, 2026-07-27. `sample_stroke_path` is
+    // the FOURTH first-subpath walker in the tree and the SECOND one that got
+    // the ruling wrong (the art flattener was the first). The consequence here
+    // is louder: Calligraphic is the Phase-1 DEFAULT brush, so a path whose `d`
+    // begins with Z stroked nothing at all. Cross-language pin:
+    // test_fixtures/algorithms/calligraphic_outline.json.
+
+    /// THE CONSEQUENCE, as an equality: a leading Z changes nothing.
+    #[test]
+    fn calligraphic_outline_ignores_a_leading_close() {
+        let brush = CalligraphicBrush { angle: 30.0, roundness: 40.0, size: 6.0 };
+        let with_z = calligraphic_outline(
+            &[PathCommand::ClosePath, move_to(0.0, 0.0), line_to(4.0, 0.0)],
+            &brush,
+        );
+        let without_z =
+            calligraphic_outline(&[move_to(0.0, 0.0), line_to(4.0, 0.0)], &brush);
+        assert_eq!(with_z, without_z, "a leading Z changed the outline");
+        // MANDATORY GEOMETRY PAIRING: equality to a possibly-empty value proves
+        // nothing, so say where the ribbon is. A 4pt horizontal line sampled at
+        // 1pt gives 5 samples, so 10 outline points, and every one of them sits
+        // at a constant offset from the baseline y = 0 (the brush angle is
+        // fixed in screen space and the tangent never turns).
+        assert_eq!(with_z.len(), 10, "5 samples -> 10 outline points");
+        let off = with_z[0].1;
+        assert!(off.abs() > 1.0, "the ribbon must have real width, got {off}");
+        for (i, &(x, y)) in with_z.iter().enumerate() {
+            assert!(
+                (0.0..=4.0).contains(&x),
+                "point {i} left the path's x span: {x}"
+            );
+            assert!(
+                (y.abs() - off.abs()).abs() < 1e-9,
+                "point {i} is not at the constant offset {off}: {y}"
+            );
+        }
+    }
+
+    /// SCOPE BOUNDARY, and why the guard is "a current point has been
+    /// established" and NOT `cx == sx && cy == sy`: at `M(5,5) Z` those
+    /// coordinates are equal exactly as at a leading close, but the close is
+    /// REAL and ends the subpath. A guard on the coordinates would fall through
+    /// and sample the SECOND subpath — this asserts it does not.
+    #[test]
+    fn calligraphic_moveto_then_immediate_close_does_not_sample_the_next_subpath() {
+        let brush = CalligraphicBrush { angle: 30.0, roundness: 40.0, size: 6.0 };
+        let pts = calligraphic_outline(
+            &[
+                move_to(5.0, 5.0),
+                PathCommand::ClosePath,
+                move_to(50.0, 50.0),
+                line_to(54.0, 50.0),
+            ],
+            &brush,
+        );
+        assert!(
+            pts.is_empty(),
+            "a zero-length first subpath outlines to nothing; got {} points \
+             starting at {:?} — the walk ran on into the second subpath",
+            pts.len(),
+            pts.first()
+        );
     }
 }
