@@ -131,6 +131,22 @@ directly comparable. Both modes are measured; the windowed run needed a
 scheduled task inside the logged-on desktop session, because a plain ssh run has
 no desktop and fails with `Invalid surface`.
 
+> ### ⚠ MEMORY CONDITION — these numbers were taken at an overclock
+>
+> **Memory: 2×16 GB DDR5 at 6000 MT/s (EXPO profile ENABLED).** The SPD on these
+> DIMMs declares **4800 MT/s**; the vendor shipped the EXPO profile on, so this
+> table was measured **25% above the JEDEC baseline the machine is rated for.**
+>
+> That profile was disabled on 2026-07-27 after the machine reported three fatal
+> Machine Check Exceptions in one day. **This table is therefore faster than the
+> machine can honestly hold.** It is kept because it is the comparison of record
+> against the Mac and because it is now half of a controlled experiment — see
+> *Results — 2026-07-28, the same machine at JEDEC 4800* below, which re-takes
+> the whole ladder with memory speed as the only variable.
+>
+> The condition is stated here rather than footnoted because it is not a caveat
+> about precision, it is a different machine configuration.
+
 | elements | frame avg (ms) | frame p95 (ms) | encode avg (ms) | **cpu avg (ms)** | fps | **cpu fraction** |
 |---------:|---------------:|---------------:|----------------:|-----------------:|----:|-----------------:|
 | 10,000   | 2.93   | 3.30   | 0.13  | 1.48   | 341.8 | 0.50 |
@@ -142,6 +158,16 @@ no desktop and fails with `Invalid surface`.
 
 File: `results/2026-07-26-rtx5060ti-dx12-offscreen.json`. Re-run four times; frame
 times reproduce within 0.3% (800k within 2%).
+
+> **That 0.3% does not hold at 4800, and it is the load-bearing number for
+> reading any small delta in this document.** Three runs at JEDEC 4800
+> (2026-07-28) spread **1.8% at 10k–100k, 3.4% at 250k, 5.9% at 500k and 3.8% at
+> 800k** — an order of magnitude wider. Whether the noise floor genuinely differs
+> by memory configuration or the 0.3% was optimistic cannot be settled from here:
+> EXPO is disabled, so the four-run 6000 measurement cannot be repeated. What IS
+> settled is that **at 4800 a difference smaller than ~6% at the high end is not
+> a measurement**, and the 4800 tables below are read against that floor rather
+> than against 0.3%.
 
 `cpu avg` is encode **plus** `render_to_texture` — everything the CPU does before
 it hands off and waits — and `cpu fraction` is its share of the frame. Read the
@@ -239,14 +265,95 @@ dual-channel DDR5), and it sets the shape of the whole high end.
 
 ---
 
-## Verdict — against the ratified line
+## Results — 2026-07-28, the same machine at JEDEC 4800 (EXPO disabled)
+
+**Same box, same GPU, same binary, same resolution, same seed. Memory speed is
+the only variable.** That makes this pair a controlled experiment rather than a
+re-measurement, and it is the reason the section is worth its length.
+
+> ### MEMORY CONDITION — stated, as above
+>
+> **2×16 GB DDR5 at 4800 MT/s, the JEDEC baseline the SPD declares. EXPO
+> disabled.** Verified at the time of the run:
+> `ConfiguredClockSpeed = 4800` on both DIMMs.
+>
+> The comparison is clean on the code axis too, and this was checked rather than
+> assumed: the last change to the measured path is `93ec17f` (RIGCPU,
+> 2026-07-26T13:03:28), and **nothing has touched `src/` since**, so the binary
+> that produced both tables is the same code. The 6000-era offscreen file was
+> generated at 13:02:19 — 69 s before that commit — but it already carries the
+> `avg_cpu_ms` / `cpu_fraction` fields RIGCPU introduced, so it was produced by
+> that code uncommitted and committed a minute later.
+
+Offscreen, 3200×2000. `4800` is the **mean of three runs**
+(`results/2026-07-28-rtx5060ti-dx12-offscreen-4800{,-run2,-run3}.json`); `noise`
+is the observed spread across those three, and a delta smaller than its own noise
+column is **not a result**.
+
+| elements | 6000 ms | 4800 ms | Δ frame | noise | real? | encode 6000 | encode 4800 | **Δ encode** |
+|---------:|--------:|--------:|--------:|------:|:-----:|------------:|------------:|-------------:|
+| 10,000   | 2.93   | 3.16   | +8.0% | 1.9% | yes | 0.13  | 0.17  | +33.3%\* |
+| 50,000   | 7.55   | 8.17   | +8.2% | 2.0% | yes | 0.84  | 0.98  | **+16.7%** |
+| 100,000  | 14.28  | 15.09  | +5.6% | 1.8% | yes | 1.65  | 1.91  | **+16.0%** |
+| 250,000  | 46.66  | 48.01  | +2.9% | 3.4% | no  | 3.92  | 4.66  | **+19.0%** |
+| 500,000  | 88.26  | 89.11  | +1.0% | 5.9% | no  | 7.79  | 9.23  | **+18.5%** |
+| 800,000  | 141.25 | 143.72 | +1.7% | 3.8% | no  | 12.87 | 14.84 | **+15.3%** |
+
+\* 10k encode is 0.13 ms against a 0.01 ms reporting resolution; treat it as
+quantisation, not as a 33% effect.
+
+Windowed, 2400×1500, single run
+(`results/2026-07-28-rtx5060ti-dx12-windowed-4800.json`): **100k = 80.1 fps**
+against 83.5 at 6000. Per the windowed caveat above, that mode varies by up to
+12% between runs and three of its six points came out *faster* at the lower
+memory speed — so the windowed table confirms the verdict and **nothing else**.
+Do not read its deltas.
+
+### What this measures: finding #3, now by intervention rather than inference
+
+Finding #3 concluded this workload is CPU- and memory-bandwidth bound. It argued
+that from two instruments that agreed — the pipelining gain solved back to ~80%
+unhideable CPU, and the process-CPU measurement independently reading 0.82. Both
+are inferences from a fixed machine.
+
+Cutting memory bandwidth by **20%** (6000 → 4800) is a *direct* test, and
+`Scene::append` moves with it almost exactly:
+
+**−20% memory bandwidth → +15.3% to +19.0% encode time, flat across the entire
+ladder.**
+
+That is the prediction "encode is a large bandwidth-bound copy" makes, and it is
+now measured rather than reasoned. It also confirms the crossover analysis: the
+Mac's 1.8–2.0× encode win was attributed to unified LPDDR5X bandwidth against
+dual-channel DDR5, and DDR5 bandwidth is exactly what was varied here.
+
+Total CPU per frame rose ~8% at 100k and ~3% at the top (two-run mean), so the
+non-encode CPU work is bandwidth-sensitive too, but far less than encode.
+
+### Why a 20% bandwidth cut costs only ~5% of a frame
+
+Because encode is only **5–13% of frame time** on this machine. A 16% rise in a
+13% component is ~2% of the frame; the rest of the observed low-end delta is the
+rest of the CPU work. Above 250k the effect disappears into a 3.4–5.9% noise
+floor — **not because the machine stopped caring about bandwidth, but because the
+instrument cannot resolve it there.** The encode column, which is measured
+directly rather than by difference, shows the effect is still fully present at
+800k.
+
+**The honest summary for a reader deciding what to trust: the recorded 6000
+numbers are 5–8% optimistic at and below 100k, and within noise above it.**
 
 **PASS_WITH_CAVEATS, now on both platforms.**
 
-- **60fps @ 100k — PASS on Metal and on D3D12, in both modes.** Mac: 79 fps
-  serialized offscreen, 115 fps windowed. kenai: **69.7 fps** serialized offscreen
-  at retina 3200×2000, and **83.5 fps** on the real windowed present path. All four
-  numbers clear the bar; the Mac clears it with more room. Both platforms are
+- **60fps @ 100k — PASS on Metal and on D3D12, in both modes, AND at kenai's
+  honest memory speed.** Mac: 79 fps serialized offscreen, 115 fps windowed.
+  kenai at EXPO 6000: **69.7 fps** serialized offscreen at retina 3200×2000, and
+  **83.5 fps** on the real windowed present path.
+  **kenai re-measured at JEDEC 4800 (2026-07-28), which is what the machine can
+  honestly hold: 66.3 fps offscreen and 80.1 fps windowed — both still PASS.**
+  The offscreen margin narrows from 1.17× to **1.10×**, which is the thinnest
+  number in this document and the one to watch if the scene mix ever gets heavier.
+  All numbers clear the bar; the Mac clears it with more room. Both platforms are
   measured on real hardware (`device_type` = IntegratedGpu / DiscreteGpu), not a
   software rasterizer.
 - **Graceful (non-cliff) degradation — PASS within the reachable range, on both.**

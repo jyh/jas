@@ -1,0 +1,93 @@
+{
+  "machine": "KENAI",
+  "chip": "AMD Ryzen 7 8700F 8-Core Processor",
+  "os": "Windows 11 Home 25H2 (build 26200)",
+  "backend": "dx12",
+  "adapter": "NVIDIA GeForce RTX 5060 Ti",
+  "device_type": "DiscreteGpu",
+  "mode": "windowed",
+  "present_mode": "AutoNoVsync",
+  "antialiasing": "Area",
+  "width": 2400,
+  "height": 1500,
+  "seed": 6971763,
+  "warmup_secs": 2.0,
+  "measure_secs": 8.0,
+  "architecture_note": "Geometry encoded once into a retained vello::Scene per point; per frame a reused outer Scene is reset()+append(inner, camera) — re-encodes the command stream under the camera affine, not the geometry.",
+  "timing_note": "frame_ms = steady-state inter-frame interval (true throughput, GPU-pipelined); encode_ms = Scene::append CPU time",
+  "generated_unix": 1785274646,
+  "points": [
+    {
+      "elements": 10000,
+      "frames": 4568,
+      "avg_encode_ms": 0.14,
+      "p95_encode_ms": 0.17,
+      "avg_cpu_ms": 1.5,
+      "p95_cpu_ms": 1.61,
+      "avg_frame_ms": 1.75,
+      "p95_frame_ms": 1.91,
+      "fps": 570.81,
+      "cpu_fraction": 0.855
+    },
+    {
+      "elements": 50000,
+      "frames": 1182,
+      "avg_encode_ms": 0.98,
+      "p95_encode_ms": 1.07,
+      "avg_cpu_ms": 6.35,
+      "p95_cpu_ms": 6.64,
+      "avg_frame_ms": 6.77,
+      "p95_frame_ms": 7.12,
+      "fps": 147.65,
+      "cpu_fraction": 0.938
+    },
+    {
+      "elements": 100000,
+      "frames": 642,
+      "avg_encode_ms": 1.94,
+      "p95_encode_ms": 2.11,
+      "avg_cpu_ms": 11.95,
+      "p95_cpu_ms": 12.31,
+      "avg_frame_ms": 12.48,
+      "p95_frame_ms": 12.9,
+      "fps": 80.11,
+      "cpu_fraction": 0.957
+    },
+    {
+      "elements": 250000,
+      "frames": 225,
+      "avg_encode_ms": 4.56,
+      "p95_encode_ms": 4.74,
+      "avg_cpu_ms": 35.15,
+      "p95_cpu_ms": 39.64,
+      "avg_frame_ms": 35.79,
+      "p95_frame_ms": 40.24,
+      "fps": 27.94,
+      "cpu_fraction": 0.982
+    },
+    {
+      "elements": 500000,
+      "frames": 102,
+      "avg_encode_ms": 9.28,
+      "p95_encode_ms": 9.67,
+      "avg_cpu_ms": 78.18,
+      "p95_cpu_ms": 79.31,
+      "avg_frame_ms": 78.86,
+      "p95_frame_ms": 79.9,
+      "fps": 12.68,
+      "cpu_fraction": 0.991
+    },
+    {
+      "elements": 800000,
+      "frames": 64,
+      "avg_encode_ms": 15.04,
+      "p95_encode_ms": 15.64,
+      "avg_cpu_ms": 124.95,
+      "p95_cpu_ms": 127.24,
+      "avg_frame_ms": 125.66,
+      "p95_frame_ms": 128.03,
+      "fps": 7.96,
+      "cpu_fraction": 0.994
+    }
+  ]
+}

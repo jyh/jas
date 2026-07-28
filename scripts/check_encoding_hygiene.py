@@ -94,6 +94,27 @@ import sys
 
 MARKER = "encoding-exempt"
 
+# ANTI-VACUITY FLOOR. Measured 2026-07-28: 96 tracked .py files in scope.
+#
+# Without this, `git ls-files` failing, a checkout with no git available, or a
+# run from outside the repo all produce an empty file set, and the gate prints
+# "0 tracked Python files scanned, 0 violations" and EXITS 0 — a green that is
+# indistinguishable from no gate at all. That is precisely the class the
+# 2026-07-28 council packet found in all four preservation gates (F1): a single
+# `[]` in the corpus turned every one of them green simultaneously, because none
+# asserted a minimum. This gate was written the same day and shipped with the
+# same hole; the floor is the fix, and it was added after reading that finding.
+#
+# 50 rather than 96: high enough that an empty or badly truncated scan cannot
+# pass, low enough that deleting genuinely dead scripts does not red the build
+# and tempt someone to lower it. Raise it if the tree grows a lot.
+MIN_TRACKED_FILES = 50
+
+
+def below_floor(n_files):
+    """True when the scan is too small to be believed. See MIN_TRACKED_FILES."""
+    return n_files < MIN_TRACKED_FILES
+
 # Ports FROZEN at tag five-port-parity (POLICY.md). Not swept: honoring the tag
 # outranks platform hygiene in code that is not built here.
 FROZEN_PREFIXES = ("jas/", "jas_ocaml/")
@@ -293,12 +314,26 @@ def self_test():
         if got.get(path):
             failures.append(f"  {path}: expected NO violation, got {got[path]}")
 
+    # THE ANTI-VACUITY FLOOR is itself a class this gate has to get right: a run
+    # that scanned nothing must not read as a run that found nothing.
+    for n, want_rejected in [
+        (0, True),                        # git failed / not a checkout
+        (1, True),                        # a badly truncated scan
+        (MIN_TRACKED_FILES - 1, True),    # just under the line
+        (MIN_TRACKED_FILES, False),       # exactly at it
+        (96, False),                      # the real tree, measured 2026-07-28
+    ]:
+        if below_floor(n) != want_rejected:
+            verb = "reject" if want_rejected else "accept"
+            failures.append(f"  floor: a {n}-file scan should {verb}")
+
     if failures:
         print("SELF-TEST FAILED -- the gate does not detect what it claims:")
         print("\n".join(failures))
         return 1
     print(f"self-test: {len(expected)} fail-classes detected, "
-          f"{len(silent)} silent-classes clean -- gate proven RED where it must be.")
+          f"{len(silent)} silent-classes clean, anti-vacuity floor holds "
+          f"at {MIN_TRACKED_FILES} -- gate proven RED where it must be.")
     return 0
 
 
@@ -308,6 +343,21 @@ def main():
 
     repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
     sources = tracked_python(repo_root)
+
+    # Assert the scan happened at all, BEFORE trusting its silence.
+    if below_floor(len(sources)):
+        print(f"ERROR: scanned only {len(sources)} tracked Python files, below the "
+              f"anti-vacuity floor of {MIN_TRACKED_FILES}.", file=sys.stderr)
+        print(file=sys.stderr)
+        print("This is not a pass. A gate that finds no files reports no violations,", file=sys.stderr)
+        print("which is indistinguishable from a gate that is working. Likely causes:", file=sys.stderr)
+        print("  * git is unavailable, or this is not a git checkout", file=sys.stderr)
+        print("  * run from outside the repository", file=sys.stderr)
+        print("  * a shallow or partial checkout", file=sys.stderr)
+        print(f"If the tree legitimately shrank below {MIN_TRACKED_FILES} files, lower", file=sys.stderr)
+        print("MIN_TRACKED_FILES deliberately and say why.", file=sys.stderr)
+        return 1
+
     violations = scan(sources)
 
     if not violations:
