@@ -94,7 +94,11 @@ public func runYamlActionByName(_ name: String, params: [String: Any], model: Mo
           let effects = actionDef["effects"] as? [Any] else { return }
     let store = model.stateStore
     var ctx: [String: Any] = ws.stateDefaults()
-    ctx["param"] = params
+    // Declared param defaults under the caller's params, same law as the other
+    // two generic dispatchers (``LayersPanel/dispatchYamlAction``, the panel
+    // body's `dispatchYamlAction`) and as Rust's `dispatch_action`. Stated once
+    // in ``mergeDeclaredParamDefaults``.
+    ctx["param"] = mergeDeclaredParamDefaults(params, actionDef: actionDef)
     let dialogs = ws.data["dialogs"] as? [String: Any]
     let platformEffects = alignPlatformEffects(model: model)
     runEffects(effects, ctx: ctx, store: store,

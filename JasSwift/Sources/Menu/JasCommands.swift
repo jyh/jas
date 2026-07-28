@@ -347,19 +347,16 @@ public struct JasCommands: Commands {
             // (the native enabled predicate already gates the menu item).
             guard let model = model else { return }
             ConceptsPanel.dispatch("promote_to_concept", model: model)
-        // View
-        case "zoom_in":
-            model?.zoomIn()
-        case "zoom_out":
-            model?.zoomOut()
-        case "zoom_to_actual_size":
-            model?.zoomToActualSize()
-        case "fit_active_artboard":
-            model?.fitActiveArtboard()
-        case "fit_all_artboards":
-            model?.fitAllArtboards()
-        case "fit_in_window":
-            model?.fitInWindow()
+        // View — the six zoom / fit verbs go through the ONE seam the canvas
+        // keyboard chords and the toolbar double-click also use
+        // (``ViewActions``), so all three surfaces agree with each other and
+        // with the workspace. Each arm used to call a native `Model` method
+        // carrying Swift-side copies of zoom_step / min_zoom / max_zoom /
+        // fit_padding_px (RULED 2026-07-27, transcripts/ZOOM_TOOL.md).
+        case "zoom_in", "zoom_out", "zoom_to_actual_size",
+             "fit_active_artboard", "fit_all_artboards", "fit_in_window":
+            guard let model = model else { return }
+            ViewActions.dispatch(action, model: model)
         // Window
         case "tile_panes":
             guard let ws = workspace else { return }

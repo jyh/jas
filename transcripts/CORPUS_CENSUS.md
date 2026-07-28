@@ -88,9 +88,9 @@ document* > *committed selection/state* > *view* > *crash* (loud) > *latent*.
 | **3** | Boolean output rebuild drops `CommonProps` | `controller.rs:1766` `common: common.clone()` | `Document/Controller.swift:1288` field-by-field | PARTIAL | R8 R6 | set any operand's opacity <100%, then union | **[V-BASE]** opacity forced 1.0, `locked` forced false, blend/mask/name/id/`tool_origin` dropped |
 | **4** | Eyedropper appearance cache: **float enum vs hex string** | `interpreter/effects.rs:5177` serde over `Color` | `Algorithms/Eyedropper.swift:459` `colorToString → c.toHex()` | NONE | R1 R6 R8 | Eyedropper click → Alt+click | **[V-HEAD]** `colorToString` still `c.toHex()` at `:459-460`; loses **alpha + colour-space variant**, and `state.eyedropper_cache.fill.color` is an **object** in Rust, a **string** in Swift |
 | **5** | `segmentsOfElement` has **no `.live` case**; filled polyline goes bbox-only | `algorithms/hit_test.rs:232` (Live arm at `:268`, evaluates rings) | `Algorithms/HitTest.swift:88`, `default:` at **`:115`** | NOT_IN_ROUNDTRIP | R6 R3 | marquee / lasso — everyday | **[V-HEAD]** dispatch arms at HEAD are `.line .rect .polyline .polygon .path default` — no `.live`. Lasso across a donut hole: **selects in Swift, not in Rust**. **CLOSED — both legs; see §9.1(b)** |
-| **6** | `doc.zoom.apply` — the `anchor = -1` "viewport centre" default | `interpreter/effects.rs:1752` (uses `viewport_w/2`) | `Tools/YamlToolEffects.swift:764` `anchorXRaw < 0 ? px : anchorXRaw` | NONE | R6 | any zoom action with default anchors | **[V-HEAD]** line 764 read at HEAD — **no viewport-centre branch**; Swift carries `viewportW` and does not use it |
-| **7** | `doc.zoom.set` — Rust recomputes pan, Swift does not | `effects.rs:1786` | `YamlToolEffects.swift:777` ("pan unchanged") | NONE | R6 R8 | Cmd-1 from 4× | **[V-BASE]** Rust has the fix; Swift is the pre-fix version; **`workspace/actions.yaml:343` still documents the OLD behaviour**, so the reference cannot arbitrate |
-| **8** | Six view actions **bypass the YAML pipeline** in Swift (native `Model` methods, hardcoded constants) | `workspace/keyboard.rs:500`, `menu_bar.rs:422` → actions | `Canvas/ContentView.swift:540`, `Menu/JasCommands.swift:352` → `Model.swift:530-583` | NONE | R6 R8 | View menu, Cmd-+/−/0/1 | **[V-BASE]** `pad = 20.0`, clamp `0.1…64.0` hardcoded; `preferences.viewport.*` moves Rust only; `fitActiveArtboard` uses `artboards.first` vs Rust's `current_artboard`; **the correct Swift effects are dead on the user path** |
+| **6** | `doc.zoom.apply` — the `anchor = -1` "viewport centre" default | `interpreter/effects.rs:1752` (uses `viewport_w/2`) | `Tools/YamlToolEffects.swift:764` `anchorXRaw < 0 ? px : anchorXRaw` | NONE | R6 | any zoom action with default anchors | **[V-HEAD]** line 764 read at HEAD — **no viewport-centre branch**; Swift carries `viewportW` and does not use it. **CLOSED 2026-07-27 (ZOOMPKG) — see the note below** |
+| **7** | `doc.zoom.set` — Rust recomputes pan, Swift does not | `effects.rs:1786` | `YamlToolEffects.swift:777` ("pan unchanged") | NONE | R6 R8 | Cmd-1 from 4× | **[V-BASE]** Rust has the fix; Swift is the pre-fix version; **`workspace/actions.yaml:343` still documents the OLD behaviour**, so the reference cannot arbitrate. **CLOSED 2026-07-27 (ZOOMPKG) — JYH ruled the SPEC wrong; five statements rewritten. See the note below** |
+| **8** | Six view actions **bypass the YAML pipeline** in Swift (native `Model` methods, hardcoded constants) | `workspace/keyboard.rs:500`, `menu_bar.rs:422` → actions | `Canvas/ContentView.swift:540`, `Menu/JasCommands.swift:352` → `Model.swift:530-583` | NONE | R6 R8 | View menu, Cmd-+/−/0/1 | **[V-BASE]** `pad = 20.0`, clamp `0.1…64.0` hardcoded; `preferences.viewport.*` moves Rust only; `fitActiveArtboard` uses `artboards.first` vs Rust's `current_artboard`; **the correct Swift effects are dead on the user path**. **CLOSED 2026-07-27 (ZOOMPKG) — THREE surfaces, not two. See the note below** |
 | **9** | Swift boolean generic dispatcher registers **4 of 9 verbs** | `interpreter/renderer.rs:3094` — all 9 | `Panels/LayersPanel.swift:839` — union, subtract_front, intersection, exclude | NONE | R6 | menu → Pathfinder → Divide/Trim/Merge/Crop | **[V-HEAD]** the 4-pair list read at HEAD `:839-846`; the action corpus drives **this** dispatcher and holds exactly those 4 verbs — gap invisible **by construction** |
 | **10** | `hypot` — libm vs naive `sqrt(dx²+dy²)` | `interpreter/expr_eval.rs:891` `dx.hypot(dy)` | `Interpreter/ExprEval.swift:1361` `(dx*dx+dy*dy).squareRoot()` | PARTIAL | R1 R5 | **every drag** (Line min-length, Pen click-vs-drag) | **[V-HEAD]** both bodies read at HEAD. **[MEASURED]** 1-ULP apart on 423 / 779,961 pairs; `hypot(1e200,1e200)` = 1.41e200 vs **+inf**. Corpus has one case, `hypot(3,4)==5` — the one input that cannot fail |
 | **11** | `grayscale()` / `cmyk()` — saturating cast vs **trapping initialiser** | `expr_eval.rs:600` `.round() as u8` (saturates) | `ExprEval.swift:1148` `UInt8(((1-k/100)*255).rounded())` — **no clamp** | NONE | R7 | panel-driven `k` outside 0–100 | **[V-HEAD]** line 1148 read at HEAD. `grayscale(101)` → `UInt8(-3.0)` → **Swift fatal error**; Rust returns `#000000`. Not a value difference — a **crash vs a clamp** |
@@ -278,6 +278,47 @@ Whichever way it is resolved, the YAML English must change in the same commit or
 > - **#8's fix has an ORDER dependency this row does not state.** Routing Swift's menu/keyboard
 >   through the YAML pipeline today would REGRESS the menu: native `zoomIn` anchors at the viewport
 >   centre (correct), the YAML path in Swift anchors at the top-left corner. #6 first, then #8.
+
+> **ALL THREE ROWS CLOSED — ZOOMPKG, 2026-07-27.** JYH ruled all three the same afternoon and ruled
+> that they land as ONE piece of work, because #6 and #7 fix the effects and #8 is what makes the fix
+> reach the artist: landing #6 and #7 alone turns two gates green while the flagship port still
+> recentres wrongly on every keystroke. The order dependency the VIEWSEED note identified was
+> honoured — the anchor fix precedes the routing inside the same wave. Everything above stands as the
+> record of the pre-fix state; what follows corrects it.
+>
+> - **#6 closed both causes together**, each reverted individually to confirm the corpus sees it. The
+>   declared param-default merge now lives in `JasSwift/Sources/Interpreter/ActionParams.swift`
+>   (applied at all three generic dispatchers, mirroring Rust's single `dispatch_action`), and
+>   `doc.zoom.apply` gained the viewport-centre branch. Reverting one at a time reproduces the two
+>   half-fix triples the ruling predicted, `(-100, -50)` and `(-120, -60)`.
+> - **#7 went AGAINST the written spec.** The VIEWSEED note was right that "by every written rule
+>   Swift is right and Rust diverges", and right to demand a ruling rather than a port fix. The
+>   ruling found the RULE wrong: `view_offset` is the document origin's screen position, so holding
+>   it fixed while zoom changes by 4× multiplies the visible region around the origin and the artwork
+>   leaves the screen. Swift now matches Rust, and **five** written statements were rewritten in the
+>   same wave — not the three this note counted. The fifth is `ZOOM_TOOL_TESTS.md`'s **ZOOM-134
+>   parenthetical**, which presented "whatever was under the viewport center stays approximately
+>   under it" as a CONSEQUENCE of pan-unchanged. That is the sentence Rust's comment was accused of
+>   inventing: someone read the gloss, found it did not follow, and changed the port to match the
+>   gloss instead of the requirement. It is now in `ZOOM_TOOL.md` as the requirement.
+> - **#8 had THREE surfaces, not two.** This row and the coverage-gap row both named
+>   `ContentView` and `JasCommands`; `CanvasSubwindow.runViewAction` — the actual `Cmd+=` / `Cmd+-` /
+>   `Cmd+1` / `Cmd+0` / `Cmd+Alt+0` handler — was missed by both. All three now dispatch through one
+>   seam (`Canvas/ViewActions.swift`) and the six native `Model` methods are deleted. Because no
+>   fixture could reach any of those routes, the work built its own gate,
+>   `JasSwift/Tests/Canvas/ViewActionRouteTests.swift`.
+> - **Two further defects surfaced only by collecting the routes**, neither in any row above:
+>   `fit_in_window` on an EMPTY document was a silent no-op on all three native paths (the native
+>   `fitRect` guarded `w > 0` and returned) where the spec says 100% centred on the origin; and
+>   Swift keeps the artboards panel selection in **two store buckets that cannot see each other**,
+>   which is why the third param-default verb still has no corpus vector. Banked as
+>   `swift-panel-state-map-omits-artboards-selection`.
+> - **The "smallest family" estimate above was close.** It said 8 vectors; the family is 13, and the
+>   two it did not anticipate are the unmeasured-viewport fallbacks (`viewport_w == 0`), which are
+>   the branch a careless recentre fix would divide into. The "one non-default `zoom_step`" vector it
+>   proposed was NOT written: the corpus has no way to vary a preference per case. The route gate
+>   covers that property instead, by recomputing its expectations from the live preference rather
+>   than from a literal.
 
 ---
 
@@ -596,6 +637,16 @@ otherwise — the runners would need a view-state seed. This is a machinery limi
 > `param.anchor_x` arrives as null→0 rather than the declared −1. The `< 0 ? px` fallback the row
 > cites is real but is never reached. Two causes, not one; both recorded in
 > `view-anchor-default-divergence`.
+
+> **RE-MEASURED — ZOOMPKG, 2026-07-27.** Counted mechanically over the parsed fixtures rather than
+> transcribed: **14 of 77** action/gesture driver cases now run off the identity view — 13 in
+> `test_fixtures/actions/view_state.json` and the one zoomed Rect gesture — so **63 still do not**,
+> the same 63 as before: this wave added five view-bearing cases and no coverage anywhere else. (The
+> VIEWSEED note above says "7 vectors" and "9 of the 72"; the file held 8 cases at the time, so that
+> breakdown was already inconsistent with its own total.) Both seeds also accept an explicit **0**
+> for `viewport_w` / `viewport_h`, which is what lets two of the new vectors pin the
+> unmeasured-viewport fallback branches of `doc.zoom.apply` and `doc.zoom.set`. The row stays
+> narrowed, not closed.
 
 **5.8 — The `bind.*` value surface is unpinned in both ports.** `panel_widget_tree` records the
 **sorted key names** of `bind`/`style` and nothing about their values, and deliberately does not

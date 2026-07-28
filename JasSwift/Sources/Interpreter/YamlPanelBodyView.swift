@@ -1348,7 +1348,12 @@ struct YamlElementView: View {
             return
         }
         var ctxWithParams = ctx
-        ctxWithParams["param"] = params
+        // Declared param defaults under the caller's params, same law as the
+        // other two generic dispatchers (``LayersPanel/dispatchYamlAction``,
+        // ``runYamlActionByName``) and as Rust's `dispatch_action`. Stated once
+        // in ``mergeDeclaredParamDefaults``.
+        ctxWithParams["param"] = mergeDeclaredParamDefaults(
+            params, actionDef: actionDef)
         let platformEffects = alignPlatformEffects(model: model)
         // Thread the dialogs catalog so open_dialog effects can
         // resolve their target id (e.g. swatch_options); without

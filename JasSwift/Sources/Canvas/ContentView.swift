@@ -554,20 +554,14 @@ public struct ContentView: View {
     }
 
     /// Dispatch a ``tool_options_action`` view action against the active
-    /// model. Mirrors JasCommands' View-action switch (the same method
-    /// targets the menu's Fit / Zoom commands invoke), so the toolbar
-    /// double-click and the menu stay byte-identical.
+    /// model. Routes through ``ViewActions`` — the same seam the View menu
+    /// (``JasCommands``) and the canvas keyboard chords use, so the toolbar
+    /// double-click cannot drift from either. It used to hold its own switch
+    /// over the six verbs calling native `Model` methods.
     private func dispatchToolOptionsAction(_ name: String) {
         guard let model = workspace.activeModel else { return }
-        switch name {
-        case "zoom_to_actual_size": model.zoomToActualSize()
-        case "fit_active_artboard": model.fitActiveArtboard()
-        case "fit_all_artboards": model.fitAllArtboards()
-        case "fit_in_window": model.fitInWindow()
-        case "zoom_in": model.zoomIn()
-        case "zoom_out": model.zoomOut()
-        default: break
-        }
+        guard ViewActions.owns(name) else { return }
+        ViewActions.dispatch(name, model: model)
     }
 
     private var canvasContent: some View {

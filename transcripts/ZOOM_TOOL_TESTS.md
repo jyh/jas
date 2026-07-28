@@ -423,12 +423,24 @@ These work regardless of which tool is active.
         (12c239f).
 
 - [x] **ZOOM-134** [wired] **P0.** `Cmd+1` jumps to 100%.
-      Do: Zoom in to 4x, then press `Cmd+1`.
-      Expect: Zoom level = 1.0; pan unchanged (so whatever was
-      under the viewport center stays approximately under it).
+      Do: Zoom in to 4x on a recognizable detail, centering that
+      detail in the canvas. Press `Cmd+1`.
+      Expect: Zoom level = 1.0, and that detail is still
+      approximately under the viewport center — the view stays put
+      and only the scale changes. `view_offset_x` / `view_offset_y`
+      DO move, and must: `view_offset` is the document origin's
+      screen position, so holding it fixed at 4x -> 1x would
+      quadruple the visible region around the origin and take the
+      artwork off screen.
       — last: 2026-04-30 (Rust). Required ff4d46d (doc.zoom.set
-        recompute view_offset around viewport center, not literal
-        pan-unchanged).
+        recompute view_offset around viewport center).
+      — This entry read "pan unchanged (so whatever was under the
+        viewport center stays approximately under it)" until
+        2026-07-27, presenting the parenthetical as a CONSEQUENCE of
+        pan-unchanged when it is the opposite. Rewritten to state
+        the requirement, so the next reader does not re-derive the
+        error. Ruled by JYH; reasoning in
+        `transcripts/ZOOM_TOOL.md`.
 
 - [x] **ZOOM-135** [wired] **P2.** Shortcuts work when text input
       doesn't have focus.

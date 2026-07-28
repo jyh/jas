@@ -763,8 +763,24 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let z = model.zoomLevel
         let px = model.viewOffsetX
         let py = model.viewOffsetY
-        let ax = anchorXRaw < 0 ? px : anchorXRaw
-        let ay = anchorYRaw < 0 ? py : anchorYRaw
+        // Default-anchor convention: -1 means the VIEWPORT CENTRE, per
+        // ZOOM_TOOL.md's ruling "the DEFAULT ZOOM ANCHOR is the viewport
+        // centre" (2026-07-27) and matching Rust's arm of the same name.
+        // The Model carries viewportW / viewportH (synced from the canvas
+        // widget), so the centre is computable here; fall back to the doc
+        // origin's screen position ONLY while the viewport is unmeasured.
+        // Before this, `anchorXRaw < 0 ? px : anchorXRaw` had no
+        // viewport-centre branch at all — it carried viewportW and never
+        // read it — and, because the dispatcher did not merge declared
+        // param defaults either, anchorXRaw arrived 0 (null) rather than
+        // the declared -1, so a keyboard/menu zoom anchored at the doc
+        // origin's screen position instead of at what the artist was
+        // looking at. Both causes are fixed together; either alone leaves
+        // the corpus vector zoom_in_default_anchor red.
+        let viewportCx = model.viewportW > 0 ? model.viewportW / 2.0 : px
+        let viewportCy = model.viewportH > 0 ? model.viewportH / 2.0 : py
+        let ax = anchorXRaw < 0 ? viewportCx : anchorXRaw
+        let ay = anchorYRaw < 0 ? viewportCy : anchorYRaw
         let docAx = (ax - px) / z
         let docAy = (ay - py) / z
         let zNew = min(max(z * factor, minZoom), maxZoom)
@@ -774,14 +790,38 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
-    // doc.zoom.set — absolute zoom_level; pan unchanged. Used by
-    // zoom_to_actual_size (level: 1.0).
+    // doc.zoom.set — absolute zoom_level, anchored at the VIEWPORT
+    // CENTRE. Used by zoom_to_actual_size (level: 1.0).
+    //
+    // RULED 2026-07-27 (ZOOM_TOOL.md, "zoom_to_actual_size RECENTRES"):
+    // this recomputes view_offset so the doc point under the viewport
+    // centre stays under it. It used to write zoom_level alone and leave
+    // the pan literally unchanged, which the spec said in four places and
+    // which is the wrong requirement: view_offset is the DOC ORIGIN's
+    // screen position, so holding it fixed while zoom goes 4x -> 1x
+    // quadruples the visible region around that point and the artwork
+    // walks off the canvas. Matches Rust's doc.zoom.set (ff4d46d).
+    //
+    // Falls back to literal pan-unchanged only while the viewport is
+    // unmeasured (viewportW / viewportH still 0, before the canvas widget
+    // reports its size) — there is no centre to anchor on then. zOld != 0
+    // guards the division; the Model never persists a zero zoom.
     effects["doc.zoom.set"] = { spec, ctx, store in
         guard let args = spec as? [String: Any] else { return nil }
         let level = evalNumber(args["level"], store: store, ctx: ctx)
         let minZoom = readPrefNumber("min_zoom", default: 0.1)
         let maxZoom = readPrefNumber("max_zoom", default: 64.0)
-        model.zoomLevel = min(max(level, minZoom), maxZoom)
+        let zOld = model.zoomLevel
+        let zNew = min(max(level, minZoom), maxZoom)
+        if model.viewportW > 0, model.viewportH > 0, zOld != 0 {
+            let cx = model.viewportW / 2.0
+            let cy = model.viewportH / 2.0
+            let docCx = (cx - model.viewOffsetX) / zOld
+            let docCy = (cy - model.viewOffsetY) / zOld
+            model.viewOffsetX = cx - docCx * zNew
+            model.viewOffsetY = cy - docCy * zNew
+        }
+        model.zoomLevel = zNew
         return nil
     }
 
