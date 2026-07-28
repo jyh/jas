@@ -1099,3 +1099,76 @@ The full set was run, not the subset expected to matter: `check_menu_structure`,
    case so a ruling moves a visible byte.
 3. **D6 (nondeterministic Swift paste z-order) and D7 (no cumulative paste
    stacking) are untouched** and remain exactly as §8.6 banked them.
+
+---
+
+## 13. LOCK IS INHERITED, NOT MATERIALIZED. RULED 2026-07-28.
+
+> JYH: *"yes, let's choose inheritance: a locked layer locks everything inside,
+> and those elements cannot be unlocked."*
+
+This settles the fork the scope uncovered. Full costing:
+`seat/fleet/SCOPE-effective-locked.md`.
+
+### What the scope found, and why this was a fork at all
+**The shipped spec already contained a lock-propagation design, and it was the
+opposite one.** `workspace/panels/layers.yaml:81-85` and
+`workspace/actions.yaml:1505-1512` specify **MATERIALIZATION**: locking a
+container WRITES `locked=true` onto each direct child, saving their prior states
+in transient app state for restore on unlock, one level deep. Meanwhile the Rust
+comments at `controller.rs:2800` and `doc_primitives.rs:79` assert the exact
+opposite — *"the lock is NOT materialized onto children."* **The spec and the
+implementation contradicted each other in writing, and neither actually protected
+contents.**
+
+Both designs satisfy the ruling that lock protects contents. They differ in what
+they can EXPRESS:
+
+| | materialization | inheritance (RULED) |
+|---|---|---|
+| child unlocked inside a locked parent | expressible | **not expressible** |
+| depth | one level | whole subtree |
+| restore state | transient, app-lived | none needed |
+| survives save/reload | no (restore table is not in the document) | yes |
+
+### The ruling
+**Inheritance.** `effective_locked(path)` ORs down the path, mirroring
+`effective_visibility`. A locked layer locks everything inside it, at every
+depth, and **those elements cannot be individually unlocked** — JYH ruled the
+expressiveness loss explicitly, not by omission.
+
+Consistent with the visibility precedent: nothing anywhere lets a child be
+visible inside an invisible parent, and lock now behaves the same way. One rule
+to learn instead of two.
+
+### What follows automatically
+* **Materialization is REPEALED** — the two YAML specs are rewritten, and the
+  `layers_saved_lock_states` / `savedLockStates` machinery is deleted. Keeping
+  both would double-apply: lock a layer, children get written locked, unlock it,
+  restore fires against a state inheritance already made meaningless.
+* **R3's locked-layer divert** (JYH's earlier proposal: paste into a new
+  similarly-named layer) now has a real premise, because a locked layer will
+  genuinely refuse content. It remains listed as an open question in the scope —
+  whether it follows automatically or needs its own ruling.
+* Scope stone 3's deleted restore-on-unlock behaviour is observable only through
+  the Layers panel, and panel interaction has no shared corpus, so its removal is
+  watched by the widget-tree snapshot rather than by a behavioural gate. Stated,
+  not smoothed over.
+
+### The prerequisite, and it is not optional
+**`locked` does not survive an SVG round trip in either active port** — Rust
+writes one hardcoded `locked: false` at `svg.rs:1350`, Swift writes nothing. Every
+conformance fixture is SVG-seeded, so **the shared corpus is structurally blind to
+lock** and cannot gate this ruling at all until the codec carries it. That is also
+why the corpus stayed green through the unlock-on-paste bug. Persistence is scope
+stone 1, before enforcement.
+
+### Do first, ruling or not — five live divergences
+The scope found five, all source-confirmed, inside the code this ruling touches.
+Two are worse than the ruling and unrelated to it: **`ungroup_all` in Swift drops
+`symbols`, `artboards`, `artboardOptions`, `documentSetup` and `printPreferences`
+from the Document plus seven fields from every rebuilt Group** (the copy-site
+omission class again), and **Rust iterates layers in the wrong z-order in
+hit-testing**, where Swift, the Python reference and Rust's own inner loops all
+agree against it. Also measured: **Align's documented lock rule is unimplemented**
+— `align.rs` mentions `locked` on two lines and both are comments.
