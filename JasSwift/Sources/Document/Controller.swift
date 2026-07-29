@@ -1891,7 +1891,17 @@ public class Controller {
         if doc.selection.isEmpty { return nil }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withStroke(elem, stroke: f(elem.stroke))
+            // The RECOLOUR path, and it must recurse too. `fillMapped` /
+            // `strokeMapped` read each element's OWN paint and rewrite it, which
+            // is how per-element opacity survives a colour change — and it is
+            // the path the COLOR PANEL actually uses (`applyActiveColorWrite`),
+            // not the stamp-one-value path. Routing only the stamp path left
+            // clicking a swatch with a group selected doing nothing. Found by
+            // JYH clicking it, 2026-07-29.
+            //
+            // The closure reads the LEAF's own paint, so each member is
+            // recoloured individually and keeps its own opacity.
+            let newElem = elem.mapPaintable { withStroke($0, stroke: f($0.stroke)) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         return doc
@@ -1918,7 +1928,7 @@ public class Controller {
         if doc.selection.isEmpty { return nil }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withFill(elem, fill: f(elem.fill))
+            let newElem = elem.mapPaintable { withFill($0, fill: f($0.fill)) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         return doc
@@ -2381,6 +2391,27 @@ public func selectionFillSummary(_ doc: Document) -> FillSummary {
     // guard above owns that — and Rust returns `Uniform(None)` here, so this
     // must too or the ports disagree on an empty group.
     return .uniform(value)
+}
+
+/// The stroke the Stroke panel should DISPLAY for the current selection.
+///
+/// Found by JYH at council 2026-07-29: selecting a group showed 1 pt while both
+/// members carried 5. `strokePanelLiveOverrides` read `doc.selection.first` and
+/// then that element's OWN stroke — nil for a container — and fell through to a
+/// hard-coded 1.0. BOTH ports did it identically, so no cross-language gate saw
+/// it. The eighth consumer of the container-blind premise.
+///
+/// ONLY THE CONTAINER CASE CHANGES. A single leaf and a uniform multi-selection
+/// resolve to the value they always did. A MIXED selection still falls back to
+/// the first element's stroke — the pre-existing lie, deliberately left alone:
+/// showing the tab default instead would be a DIFFERENT lie, not progress, and
+/// the honest answer is `<mixed>`, scoped in transcripts/MIXED_SELECTION.md.
+///
+/// Twin: Rust `selection_stroke_for_panel`.
+public func selectionStrokeForPanel(_ doc: Document) -> Stroke? {
+    if case .uniform(let s?) = selectionStrokeSummary(doc) { return s }
+    guard let first = doc.selection.first else { return nil }
+    return doc.getElement(first.path).stroke
 }
 
 /// Summarize the stroke of all selected elements.

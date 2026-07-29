@@ -1091,8 +1091,22 @@ impl Controller {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
-                let next = f(elem.stroke().cloned());
-                new_doc = new_doc.replace_element(&es.path, with_stroke(elem, next));
+                // The RECOLOUR path, and it must recurse too. `fill_mapped` /
+                // `stroke_mapped` read each element's OWN paint and rewrite it,
+                // which is how per-element opacity survives a colour change --
+                // and it is the path the COLOR PANEL actually uses
+                // (`apply_active_color_write`), not the stamp-one-value path.
+                // Routing only the stamp path left clicking a swatch with a
+                // group selected doing nothing. Found by JYH clicking it,
+                // 2026-07-29.
+                //
+                // The closure reads the LEAF's own paint, so each member is
+                // recoloured individually and keeps its own opacity.
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::map_paintable(
+                        elem, &|leaf| with_stroke(leaf, f(leaf.stroke().cloned()))),
+                );
             }
         }
         new_doc
@@ -1119,8 +1133,11 @@ impl Controller {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
-                let next = f(elem.fill().cloned());
-                new_doc = new_doc.replace_element(&es.path, with_fill(elem, next));
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::map_paintable(
+                        elem, &|leaf| with_fill(leaf, f(leaf.fill().cloned()))),
+                );
             }
         }
         new_doc
@@ -3203,6 +3220,31 @@ pub fn selection_fill_summary(doc: &Document) -> FillSummary {
     FillSummary::Uniform(first.unwrap_or(None))
 }
 
+/// The stroke the Stroke panel should DISPLAY for the current selection.
+///
+/// Found by JYH at council 2026-07-29: selecting a group showed 1 pt while both
+/// members carried 5. The panel override read `doc.selection.first()` and then
+/// that element's OWN stroke -- `None` for a container -- and fell through to a
+/// hard-coded 1.0. Both ports did it identically, so no cross-language gate saw
+/// it. The eighth consumer of the container-blind premise.
+///
+/// ONLY THE CONTAINER CASE CHANGES. A single leaf and a uniform multi-selection
+/// resolve to the value they always did. A MIXED selection still falls back to
+/// the first element's stroke -- the pre-existing lie, deliberately left alone:
+/// showing the tab default instead would be a DIFFERENT lie, not progress, and
+/// the honest answer is `<mixed>`, which needs the widget vocabulary scoped in
+/// transcripts/MIXED_SELECTION.md.
+pub fn selection_stroke_for_panel(doc: &Document) -> Option<Stroke> {
+    match selection_stroke_summary(doc) {
+        StrokeSummary::Uniform(Some(s)) => Some(s),
+        _ => doc
+            .selection
+            .first()
+            .and_then(|es| doc.get_element(&es.path))
+            .and_then(|e| e.stroke().cloned()),
+    }
+}
+
 /// Compute the stroke summary for the current selection.
 pub fn selection_stroke_summary(doc: &Document) -> StrokeSummary {
     if doc.selection.is_empty() {
@@ -4282,6 +4324,54 @@ mod tests {
                            ElementSelection::all(vec![0, 1, 1])];
         assert!(matches!(selection_stroke_summary(&d), StrokeSummary::Mixed),
                 "the container and non-container spellings must agree");
+    }
+
+
+    /// THE STROKE PANEL'S WEIGHT FIELD RESOLVES A CONTAINER.
+    ///
+    /// Found by JYH at council 2026-07-29, clicking a group: the Weight field
+    /// showed 1 pt while both members carried 5. The panel override read
+    /// `doc.selection.first()` and then that element's OWN stroke -- `None` for
+    /// a container -- and fell through to `?? 1.0`. Both ports, identically,
+    /// which is why no cross-language gate saw it.
+    ///
+    /// The summary already recurses into containers (PAINTSUMMARY), so the fix
+    /// is to ASK it. Only the container case changes: a single leaf and a
+    /// uniform multi-selection resolve to the same value they always did, and a
+    /// MIXED selection still falls back to the first element's stroke -- the
+    /// pre-existing lie, left alone until transcripts/MIXED_SELECTION.md is
+    /// answered, because replacing one lie with a different one is not progress.
+    #[test]
+    fn the_weight_override_resolves_a_uniform_container() {
+        use crate::geometry::element::GroupElem;
+        use std::rc::Rc;
+        let mk = |w: f64| Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: Some(Stroke::new(Color::BLACK, w)),
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        });
+        let g = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(5.0)), Rc::new(mk(5.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(g), Rc::new(mk(3.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let mut doc = Document { layers: vec![layer], selected_layer: 0,
+                                 selection: Vec::new(), ..Document::default() };
+
+        // The GROUP: both members are 5, so the panel must say 5.
+        doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        assert_eq!(selection_stroke_for_panel(&doc).map(|s| s.width), Some(5.0),
+                   "a uniform group resolves to its members' common weight");
+
+        // The LEAF, unchanged: this is what already worked.
+        doc.selection = vec![ElementSelection::all(vec![0, 1])];
+        assert_eq!(selection_stroke_for_panel(&doc).map(|s| s.width), Some(3.0),
+                   "a leaf still resolves to its own weight");
     }
 
     #[test]

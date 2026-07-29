@@ -108,6 +108,46 @@ struct PaintRecursionTests {
                 "every leaf carries the brush, including the one two levels down; got \(slugs)")
     }
 
+    /// THE RECOLOUR PATH — the one the COLOR PANEL actually uses.
+    ///
+    /// Found by JYH clicking a swatch with a group selected, 2026-07-29:
+    /// nothing happened. `setSelectionFill` STAMPS one identical fill and was
+    /// routed through mapPaintable; `mapSelectionFill` RECOLOURS each element's
+    /// own fill so per-element opacity survives, and was not. The Color panel's
+    /// `applyActiveColorWrite` calls the second one.
+    ///
+    /// The whole suite above passed with this broken, which is the lesson: the
+    /// tests exercised the path that was fixed, not the path the app uses.
+    ///
+    /// The closure must read the LEAF's own paint — a container's is nil, so
+    /// even the input was wrong before.
+    @Test func theRecolourPathReachesEveryMemberAndKeepsTheirOpacity() {
+        // Members with DIFFERENT fill opacities, so "recolour, preserve
+        // opacity" is distinguishable from "stamp one value".
+        let a = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                  fill: Fill(color: Color(r: 1, g: 0, b: 0, a: 1), opacity: 0.25)))
+        let b = Element.rect(Rect(x: 20, y: 0, width: 10, height: 10,
+                                  fill: Fill(color: Color(r: 0, g: 0, b: 1, a: 1), opacity: 0.75)))
+        let doc = Document(layers: [Layer(name: "L", children: [
+            .group(Group(children: [a, b])),
+        ])])
+        let model = Model(document: doc.replacing(
+            selection: [ElementSelection.all([0, 0])]))
+        let green = Color(r: 0, g: 1, b: 0, a: 1)
+        Controller(model: model).mapSelectionFill { old in
+            old.map { Fill(color: green, opacity: $0.opacity) }
+        }
+
+        guard case .group(let g) = model.document.getElement([0, 0]),
+              case .rect(let ra) = g.children[0], case .rect(let rb) = g.children[1] else {
+            Issue.record("expected a Group of two Rects"); return
+        }
+        #expect(ra.fill?.color == green && rb.fill?.color == green,
+                "both members are recoloured")
+        #expect(ra.fill?.opacity == 0.25 && rb.fill?.opacity == 0.75,
+                "and each KEEPS ITS OWN opacity — got \(ra.fill?.opacity ?? -1) and \(rb.fill?.opacity ?? -1)")
+    }
+
     /// T4 BYSTANDER: the walk REBUILDS every container it passes through, so a
     /// container's own fields must survive. Rebuilding by re-listing fields is
     /// the Swift copy-site omission class — it would drop `id` and `mask` on
@@ -176,5 +216,38 @@ struct ContainerPaintSummaryTests {
             Issue.record("spellings disagree: group=\(viaGroup) members=\(viaMembers)")
             return
         }
+    }
+}
+
+/// THE STROKE PANEL'S WEIGHT FIELD RESOLVES A CONTAINER.
+///
+/// Twin of Rust `the_weight_override_resolves_a_uniform_container`. Found by
+/// JYH at council 2026-07-29, clicking a group: the Weight field read 1 pt
+/// while both members carried 5. `strokePanelLiveOverrides` read
+/// `doc.selection.first` and then that element's OWN stroke — nil for a
+/// container — and fell through to a hard-coded 1.0, in BOTH ports.
+@Suite("Stroke panel weight override")
+struct StrokePanelWeightTests {
+
+    private func rect(_ w: Double) -> Element {
+        .rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0, a: 1), width: w)))
+    }
+
+    private func doc(_ sel: [[Int]]) -> Document {
+        let g = Element.group(Group(children: [rect(5), rect(5)]))
+        let d = Document(layers: [Layer(name: "L", children: [g, rect(3)])])
+        return d.replacing(selection: sel.map { ElementSelection.all($0) })
+    }
+
+    @Test func aUniformGroupResolvesToItsMembersWeight() {
+        #expect(selectionStrokeForPanel(doc([[0, 0]]))?.width == 5,
+                "a uniform group resolves to 5, not a hard-coded 1")
+    }
+
+    /// Unchanged behaviour — this is what already worked, and must keep working.
+    @Test func aLeafStillResolvesToItsOwnWeight() {
+        #expect(selectionStrokeForPanel(doc([[0, 1]]))?.width == 3,
+                "a leaf resolves to its own weight")
     }
 }
