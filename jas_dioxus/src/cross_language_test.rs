@@ -3752,6 +3752,26 @@ mod tests {
         run_operation_fixture("operations/lock_toggle_no_materialization.json");
     }
 
+    /// `Object > Lock` STOPPED MATERIALIZING — transcripts/LAYER_STRUCTURE.md
+    /// §13. The sibling of the family above, and the half of the repeal that
+    /// was left behind: §13 repaired the Layers-panel path
+    /// (`Document::toggling_element_lock`) and `lock_selection` kept a SECOND,
+    /// recursive implementation that stamped `locked = true` onto every
+    /// descendant of a Group.
+    ///
+    /// Worse than a leftover once §13.1 landed `jas:locked`: the stamped flags
+    /// survive save and reload, and under inheritance nothing in the UI can
+    /// clear one of them — the artist opens the parent and the children stay
+    /// locked.
+    ///
+    /// Two of the goldens are the PANEL family's own, by file identity, so the
+    /// gate states the two paths are one behaviour rather than describing the
+    /// answer twice.
+    #[test]
+    fn operation_lock_selection_no_materialization() {
+        run_operation_fixture("operations/lock_selection_no_materialization.json");
+    }
+
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*
     /// print-config verbs journal real ops through `op_apply`. The fixtures span
     /// all four target structs (document_setup, print_preferences root,
