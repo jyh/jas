@@ -8,15 +8,18 @@ import Testing
 /// LAYER_STRUCTURE.md R2/R3 and it is cross-language. This suite exists for
 /// exactly two shapes that family cannot express, and each says which:
 ///
-/// 1. **LOCKED and HIDDEN target layers** (LAYER_STRUCTURE.md §6 open question
-///    2). Every corpus case is seeded from a `setup_svg`, and the SVG codec does
-///    not persist `locked` AT ALL — a layer parsed from SVG is always unlocked.
-///    So the corpus is structurally blind to it, and these probes build the
-///    document directly instead. They also catch a REAL defect the old paste
-///    carried: it rebuilt the target as
-///    `Layer(name:children:opacity:transform:)`, silently dropping `locked`,
-///    `visibility`, `blendMode`, `mask`, `isolatedBlending`, `knockoutGroup`
-///    and `id` — the Swift copy-site omission class, landing at a paste.
+/// 1. **LOCKED and HIDDEN target layers.** This used to read "the corpus is
+///    structurally blind to it, because the SVG codec does not persist `locked`
+///    AT ALL". `jas:locked` (§13.1) retired that on 2026-07-28, the behaviour
+///    was RULED the same day (§15), and
+///    `test_fixtures/operations/paste_locked_layers.json` is now the primary,
+///    CROSS-LANGUAGE gate. These probes are demoted to a per-port second
+///    opinion on the same rules, and they keep the shapes the corpus still
+///    cannot express — a locked SIBLING, and a hidden target seeded directly.
+///    They also catch a REAL defect the old paste carried: it rebuilt the
+///    target as `Layer(name:children:opacity:transform:)`, silently dropping
+///    `locked`, `visibility`, `blendMode`, `mask`, `isolatedBlending`,
+///    `knockoutGroup` and `id` — the Swift copy-site omission class, at a paste.
 /// 2. **A BARE-ELEMENT fragment.** The `paste` op verb feeds
 ///    `svgToDocument(...).layers`, which is always layers, so the corpus only
 ///    ever exercises the SVG shape.
@@ -37,8 +40,15 @@ import Testing
                  selectedLayer: 0, selection: [])
     }
 
+    /// BOUNDS-SAFE on purpose. `#expect` records and CONTINUES, unlike Rust's
+    /// `assert_eq!`, so a probe that indexes a layer a mutant never created
+    /// reds by TRAPPING — which aborts the whole `swift test` process and hides
+    /// every later failure. Measured: mutation M7 of the PASTELOCK wave did
+    /// exactly that. `[]` here is never a legitimate expectation in this suite,
+    /// so the miss still reds; it just reds legibly.
     private func kids(_ doc: Document, _ i: Int) -> [[Double]] {
-        doc.layers[i].children.map { e in
+        guard i >= 0, i < doc.layers.count else { return [] }
+        return doc.layers[i].children.map { e in
             if case .rect(let r) = e { return [r.x, r.y] }
             return [Double.nan, Double.nan]
         }
@@ -48,29 +58,88 @@ import Testing
         doc.layers.map { $0.name ?? "<unnamed>" }
     }
 
-    /// OPEN QUESTION 2, pinned CONSERVATIVELY, not ruled.
-    /// Append into a LOCKED matching layer SUCCEEDS, and the layer stays locked.
-    /// Neither port ever checked either flag on the paste path, so this pins
-    /// today's answer rather than inventing one. If JYH rules that a locked
-    /// layer must refuse (or must unlock), this probe is what goes red.
-    @Test func preserveAppendsIntoALockedMatchingLayerAndLeavesItLocked() {
+    /// RULED 2026-07-28 (§15.2/§15.3): a LOCKED matching layer DIVERTS to a
+    /// numerically suffixed sibling. The fragment named that layer, not the
+    /// artist, so serving the artist's actual intent means creating "Sky 2"
+    /// rather than declining.
+    ///
+    /// This probe used to assert the opposite — it pinned the pre-ruling
+    /// "appends into a locked layer and leaves it locked", and said in as many
+    /// words that a ruling to refuse or unlock would turn it red. It did, and
+    /// this is that turn. Twin of Rust
+    /// `preserve_diverts_from_a_locked_matching_layer_to_a_numeric_sibling`.
+    ///
+    /// What this adds over the shared golden is that the LOCKED layer is left
+    /// byte-untouched, which the golden shows but does not say.
+    @Test func preserveDivertsFromALockedMatchingLayerToANumericSibling() {
         let doc = docWith(Layer(name: "Sky", children: [rect(5, 5)], locked: true))
         let fragment: [Element] = [.layer(Layer(name: "Sky", children: [rect(1, 2)]))]
         let out = pasteFragmentInto(doc, fragment: fragment, offset: 24, preserveLayers: true)
         #expect(out != nil, "nothing pasted")
         guard let out else { return }
-        #expect(layerNames(out) == ["Base", "Sky"], "no layer should have been created")
-        #expect(kids(out, 1) == [[5, 5], [25, 26]],
-                "the locked layer should have gained the offset rect")
-        #expect(out.layers[1].locked, "paste silently UNLOCKED the target layer")
+        #expect(layerNames(out) == ["Base", "Sky", "Sky 2"],
+                "the locked 'Sky' must be diverted around, into a created 'Sky 2'")
+        #expect(kids(out, 1) == [[5, 5]], "the LOCKED layer must be left exactly as it was")
+        #expect(kids(out, 2) == [[25, 26]], "the sibling holds the paste")
+        // Hard guard: see `kids`. Without it a mutant that creates no sibling
+        // traps here and takes the whole run down with it.
+        guard out.layers.count == 3 else {
+            Issue.record("expected three layers, got \(layerNames(out))")
+            return
+        }
+        #expect(out.layers[1].locked, "the divert must not unlock anything")
+        #expect(!out.layers[2].locked, "the created sibling must be open")
         #expect(out.selection.count == 1)
-        #expect(out.selection.first?.path == [1, 1])
+        #expect(out.selection.first?.path == [2, 0])
     }
 
-    /// OPEN QUESTION 2's other half: an INVISIBLE matching layer is appended
-    /// into and stays invisible — so the pasted artwork is immediately hidden.
-    /// Conservative, banked, and deliberately visible here because "the paste
-    /// appeared to do nothing" is the user-facing shape of this answer.
+    /// The SUFFIX WALK stops at an EXISTING open sibling instead of minting a
+    /// third layer — the reason `preservingLayerTarget` is a walk. Twin of Rust
+    /// `preserve_diverts_into_an_existing_open_sibling_rather_than_minting_a_third`.
+    @Test func preserveDivertsIntoAnExistingOpenSiblingRatherThanMintingAThird() {
+        var doc = docWith(Layer(name: "Sky", children: [rect(5, 5)], locked: true))
+        doc = doc.replacing(layers: doc.layers + [Layer(name: "Sky 2", children: [])])
+        let fragment: [Element] = [.layer(Layer(name: "Sky", children: [rect(1, 2)]))]
+        let out = pasteFragmentInto(doc, fragment: fragment, offset: 24, preserveLayers: true)
+        #expect(out != nil, "nothing pasted")
+        guard let out else { return }
+        #expect(layerNames(out) == ["Base", "Sky", "Sky 2"],
+                "no 'Sky 3' may be minted while 'Sky 2' is open")
+        #expect(kids(out, 2) == [[25, 26]])
+        #expect(out.selection.first?.path == [2, 0])
+    }
+
+    /// The walk KEEPS WALKING past a locked sibling: "Sky" and "Sky 2" both
+    /// locked gives "Sky 3" — the case that proves the walk is a loop rather
+    /// than a single `+ 1`. Twin of Rust
+    /// `preserve_walks_past_a_locked_sibling_to_the_next_free_suffix`.
+    @Test func preserveWalksPastALockedSiblingToTheNextFreeSuffix() {
+        var doc = docWith(Layer(name: "Sky", children: [rect(5, 5)], locked: true))
+        doc = doc.replacing(
+            layers: doc.layers + [Layer(name: "Sky 2", children: [], locked: true)])
+        let fragment: [Element] = [.layer(Layer(name: "Sky", children: [rect(1, 2)]))]
+        let out = pasteFragmentInto(doc, fragment: fragment, offset: 0, preserveLayers: true)
+        #expect(out != nil, "nothing pasted")
+        guard let out else { return }
+        #expect(layerNames(out) == ["Base", "Sky", "Sky 2", "Sky 3"])
+        // `#expect` records and CONTINUES, unlike Rust's `assert_eq!`, so the
+        // count is a hard guard: without it a mutant that creates no fourth
+        // layer reds by TRAPPING on the index, which aborts the whole run and
+        // hides every later failure. Measured — M7 did exactly that.
+        guard out.layers.count == 4 else {
+            Issue.record("expected four layers, got \(layerNames(out))")
+            return
+        }
+        #expect(kids(out, 3) == [[1, 2]])
+    }
+
+    /// HIDDEN IS NOT LOCKED — RULED 2026-07-28 (§15.3 item 2). An INVISIBLE
+    /// matching layer is appended into and stays invisible, so the pasted
+    /// artwork is immediately hidden. That is the point: hidden is a visibility
+    /// state, not a protection, and diverting there would manufacture a layer to
+    /// avoid a condition that protects nothing. Deliberately visible here
+    /// because "the paste appeared to do nothing" is the user-facing shape of
+    /// this answer, and the artist unhides.
     @Test func preserveAppendsIntoAHiddenMatchingLayerAndLeavesItHidden() {
         let doc = docWith(Layer(name: "Sky", children: [], visibility: .invisible))
         let fragment: [Element] = [.layer(Layer(name: "Sky", children: [rect(1, 2)]))]

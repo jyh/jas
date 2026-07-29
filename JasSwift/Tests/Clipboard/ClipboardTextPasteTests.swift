@@ -21,11 +21,13 @@ import Foundation
 ///    `spawn_local` closure over an `Rc<RefCell<AppState>>` and a Dioxus
 ///    `Signal`, unreachable from `cargo test --lib`. That asymmetry is stated
 ///    rather than smoothed over.
-/// 2. **Layer fields the SVG codec cannot carry.** Every corpus case is seeded
-///    from a `setup_svg`, and the SVG codec does not persist `locked` at all, so
-///    no fixture can build a locked / hidden / identified target layer
-///    (LAYER_STRUCTURE.md §9.6). Twin of Rust
-///    `pasting_text_into_a_locked_hidden_identified_layer_preserves_its_fields`.
+/// 2. **Layer fields the SVG codec cannot carry.** `visibility` and `id` still
+///    survive no SVG round trip in either port, so no `setup_svg` can build a
+///    hidden / identified target layer. (`locked` USED to be on that list;
+///    `jas:locked`, §13.1, removed it on 2026-07-28, and the locked-target
+///    behaviour is now gated cross-language by
+///    `test_fixtures/operations/paste_locked_layers.json`.) Twin of Rust
+///    `pasting_text_into_a_hidden_identified_layer_preserves_its_fields`.
 @Suite struct ClipboardTextPasteTests {
 
     private static func privatePasteboard() -> NSPasteboard {
@@ -143,20 +145,28 @@ import Foundation
     ///
     /// The repair is the shape that cannot drift again: there is no second body
     /// left, so the text branch inherits `pasteFragmentInto`'s in-place mutation.
-    /// Twin of Rust
-    /// `pasting_text_into_a_locked_hidden_identified_layer_preserves_its_fields`.
+    /// Twin of Rust `pasting_text_into_a_hidden_identified_layer_preserves_its_fields`.
+    ///
+    /// **`locked` LEFT THIS VECTOR ON 2026-07-28, and it is not a weakening.**
+    /// The target used to carry `locked: true` as well. §15 rules that a locked
+    /// ACTIVE layer refuses the paste outright, which preserves strictly more —
+    /// the layer is not touched at all — and that refusal is gated
+    /// cross-language by `paste_locked_layers.json`'s
+    /// `paste_clipboard_text_into_a_locked_active_layer_refuses`, plus the
+    /// end-to-end pasteboard probe below. Keeping `locked` here would have made
+    /// the vector assert the repealed behaviour.
     @Test func pasteOfPlainTextPreservesTheTargetLayersOwnFields() {
         let pb = Self.privatePasteboard()
         pb.clearContents()
         pb.setString("a note", forType: .string)
         let target = Layer(name: "Sky", children: [Self.rect(5, 5, id: "r-sky")],
-                           locked: true, visibility: .invisible, id: "lyr-sky")
+                           visibility: .invisible, id: "lyr-sky")
         let model = Model(document: Document(layers: [target], selectedLayer: 0, selection: []))
         EditClipboard.pasteClipboard(model, offset: 24.0, pasteboard: pb)
 
         let l = model.document.layers[0]
         #expect(l.children.count == 2, "the text element was not appended")
-        #expect(l.locked, "the paste silently UNLOCKED the target layer")
+        #expect(!l.locked, "nothing here should have locked the layer")
         #expect(l.visibility == .invisible, "the paste silently REVEALED the target layer")
         #expect(l.id == "lyr-sky", "the paste DESTROYED the target layer's identity")
         #expect(l.name == "Sky", "the paste dropped the target layer's name")
@@ -166,6 +176,32 @@ import Foundation
         }
         #expect(t.content == "a note")
         #expect(t.x == 24 && t.y == 40)
+    }
+
+    /// A LOCKED ACTIVE LAYER refuses a text paste — driven THROUGH THE REAL
+    /// PASTEBOARD, which is the depth Rust cannot reach at all (see item 1
+    /// above). The corpus pins the pure body; this pins the whole production
+    /// wire, so nothing between the pasteboard read and the document write can
+    /// route around the refusal.
+    ///
+    /// Not merely "no text appeared": the document must come back with the
+    /// layer's own child count untouched, and `canUndo` must still be false —
+    /// a refusal that cost an undo step would be a mutation with a different
+    /// name.
+    @Test func aLockedActiveLayerRefusesAPlainTextPasteThroughThePasteboard() {
+        let pb = Self.privatePasteboard()
+        pb.clearContents()
+        pb.setString("a note", forType: .string)
+        let target = Layer(name: "Sky", children: [Self.rect(5, 5, id: "r-sky")],
+                           locked: true, id: "lyr-sky")
+        let model = Model(document: Document(layers: [target], selectedLayer: 0, selection: []))
+        EditClipboard.pasteClipboard(model, offset: 24.0, pasteboard: pb)
+
+        let l = model.document.layers[0]
+        #expect(l.children.count == 1, "a locked active layer must refuse a text paste")
+        #expect(l.locked, "the refusal must leave the lock alone")
+        #expect(model.document.selection.isEmpty, "a refused paste must not set a selection")
+        #expect(!model.canUndo, "a refused paste must not cost an undo step")
     }
 
     // MARK: - Degenerate documents (pure body, no pasteboard)

@@ -61,11 +61,17 @@ struct CopySiteOmissionTests {
     /// LAYER_STRUCTURE.md §9.5 repaired the SVG paste branch. The PLAIN-TEXT
     /// branch (`EditClipboard.swift`) was left behind with the same defect:
     /// `Layer(name:children:opacity:transform:)`, four of eleven. Pasting text
-    /// into a LOCKED layer UNLOCKED it, into a HIDDEN layer REVEALED it, and
-    /// destroyed the layer's `id`.
+    /// into a HIDDEN layer REVEALED it, dropped its blend mode, and destroyed
+    /// the layer's `id`.
+    ///
+    /// `locked` LEFT THIS VECTOR ON 2026-07-28 (§15): a locked ACTIVE layer now
+    /// refuses a paste outright, which would make this probe assert a refusal
+    /// rather than the field preservation it exists for. The `locked == false`
+    /// assertion below is kept as a live discriminator — if the copy site ever
+    /// starts inventing a lock, this still says so.
     @Test func plainTextPasteKeepsTargetLayerFields() {
         let target = Layer(name: "Target", children: [],
-                           locked: true, visibility: .outline,
+                           visibility: .outline,
                            blendMode: .multiply, id: "lay-1")
         let model = Model(document: Document(layers: [target],
                                              selectedLayer: 0,
@@ -79,7 +85,7 @@ struct CopySiteOmissionTests {
         // The paste happened (guard against a vacuous pass).
         #expect(l.children.count == 1)
         #expect(l.name == "Target")
-        #expect(l.locked == true)
+        #expect(l.locked == false)
         #expect(l.visibility == .outline)
         #expect(l.blendMode == .multiply)
         #expect(l.id == "lay-1")
