@@ -729,7 +729,7 @@ package func elementJson(_ elem: Element) -> String {
 // MARK: - Selection serializer
 
 private func selectionJson(_ sel: [ElementSelection]) -> String {
-    var entries: [(path: [Int], json: String)] = sel.map { es in
+    let entries: [(path: [Int], json: String)] = sel.map { es in
         let o = JsonObj()
         switch es.kind {
         case .all:
@@ -742,13 +742,18 @@ private func selectionJson(_ sel: [ElementSelection]) -> String {
         o.raw("path", "[\(path.joined(separator: ","))]")
         return (es.path, o.build())
     }
-    // Sort by path lexicographically.
-    entries.sort { a, b in
-        for (ai, bi) in zip(a.path, b.path) {
-            if ai != bi { return ai < bi }
-        }
-        return a.path.count < b.path.count
-    }
+    // EMISSION ORDER IS THE SELECTION'S OWN ORDER — deliberately NOT sorted.
+    //
+    // This serializer used to sort by path, and that sort is why the shared
+    // corpus was structurally blind to the D6 defect (LAYER_STRUCTURE.md §10):
+    // `Selection` was a `Set`, so its iteration order was per-process hash
+    // order, and every golden agreed anyway because BOTH ports sorted on the way
+    // out. Selection order is artwork — it decides the z-order of what a copy
+    // emits — so the canonical JSON must show it. Mirrors Rust `selection_json`.
+    //
+    // Dropping the sort also makes a DUPLICATE entry visible: `Selection` is an
+    // ARRAY now, so dedup is a manual guard at every insertion site and a
+    // missing one shows up here as a repeated path.
     let items = entries.map { $0.json }
     return jsonArray(items)
 }

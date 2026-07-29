@@ -2956,6 +2956,14 @@ fn select_recursive(
 ///   `s` against the element's CP count, which we don't have here, so
 ///   we conservatively treat it as `All` (this preserves the
 ///   pre-refactor behavior for the rare mixed case).
+///
+/// ORDER IS PART OF THE RESULT. This used to build two `HashMap`s and iterate
+/// THEM, so with two or more surviving entries the output order was Rust's
+/// per-process `RandomState` hash order — the same defect D6 names in JasSwift
+/// (LAYER_STRUCTURE.md §10), in the port that is supposed to be canonical. It
+/// was invisible because `test_json::selection_json` sorted on the way out.
+/// The maps are now lookup-only; emission walks `current` then `new` IN THEIR
+/// OWN ORDER, so shift-marquee builds a stable selection.
 fn toggle_selection(current: &Selection, new: &Selection) -> Selection {
     let current_by_path: std::collections::HashMap<&Vec<usize>, &ElementSelection> =
         current.iter().map(|es| (&es.path, es)).collect();
@@ -2963,22 +2971,12 @@ fn toggle_selection(current: &Selection, new: &Selection) -> Selection {
         new.iter().map(|es| (&es.path, es)).collect();
 
     let mut result: Selection = Vec::new();
-    // Elements only in current
-    for (path, es) in &current_by_path {
-        if !new_by_path.contains_key(path) {
-            result.push((*es).clone());
-        }
-    }
-    // Elements only in new
-    for (path, es) in &new_by_path {
-        if !current_by_path.contains_key(path) {
-            result.push((*es).clone());
-        }
-    }
-    // Elements in both: XOR.
-    for (path, cur) in &current_by_path {
-        if let Some(nw) = new_by_path.get(path) {
-            match (&cur.kind, &nw.kind) {
+    // Walk CURRENT in its own order: survivors keep their existing z-position
+    // in the selection, and elements present in both are resolved here.
+    for cur in current.iter() {
+        match new_by_path.get(&cur.path) {
+            None => result.push(cur.clone()),
+            Some(nw) => match (&cur.kind, &nw.kind) {
                 (SelectionKind::All, SelectionKind::All) => {
                     // Cancel out — element drops out of the selection.
                 }
@@ -2996,7 +2994,13 @@ fn toggle_selection(current: &Selection, new: &Selection) -> Selection {
                     // pre-refactor behavior for this rare case.
                     result.push(ElementSelection::all(cur.path.clone()));
                 }
-            }
+            },
+        }
+    }
+    // Then NEW in its own order: the newly-hit elements append behind them.
+    for nw in new.iter() {
+        if !current_by_path.contains_key(&nw.path) {
+            result.push(nw.clone());
         }
     }
     result
