@@ -2168,6 +2168,153 @@ is where the byproduct becomes artist-visible.
 
 ---
 
+## 19A. §19, IMPLEMENTED — and the byproduct was worse than an order
+
+### 19A.0 The headline
+
+Implemented in both active ports, gated at three levels, and mutation-proven
+six ways. **But the ruling's premise was wrong in the artist's favour: the
+byproduct paths were not merely mis-ORDERED, they were STALE, and one of them
+named a SOURCE element.**
+
+Duplicating `[0,1]` and `[0,3]`, the descending walk copies d first and records
+`[0,4]`; it then copies b, and *that* insertion pushes everything above `[0,1]`
+up one slot. The recorded `[0,4]` therefore stops naming d's copy (now at
+`[0,5]`) and starts naming **d itself**. So the shipped behaviour was not "the
+clipboard lists the copies backwards" — it was **"the clipboard contains one
+copy and one original"**, and dragging after an Alt-drag duplicate moved one
+copy and one source. Measured on the clipboard, in both ports: payload
+`[30, 16]` where the copies are at x=16 and x=36.
+
+**The same fact that makes the descending walk load-bearing invalidates the
+paths that walk records.** They are one defect seen from two ends, which is why
+the repair is one function: `shift_path_for_insertion` /
+`shiftedPath(_:forInsertionAt:)` rewrites every already-recorded copy path for
+each new insertion, and the §19 sort is then a sort of the RIGHT paths rather
+than a tidy list of the wrong ones.
+
+**Why a sort alone would have passed a weaker gate.** Sorting stale paths gives
+`[[0,2],[0,4]]` — ascending, document order by inspection, and still naming a
+source. Every assertion added here pins ORDER **and** IDENTITY, by path and by
+geometry, for exactly that reason.
+
+### 19A.1 RED FIRST — measured, on the commit before the fix
+
+| gate | red |
+|---|---|
+| Rust `copy_selection_of_two_elements_selects_both_copies_in_document_order` | selection `[[0,4],[0,2]]`, required `[[0,2],[0,5]]` |
+| Rust `a_duplicate_then_copy_emits_the_copies_in_document_order` | **clipboard payload `[30.0, 15.999975]`**, required `[16, 36]` |
+| Swift `copySelectionOfTwoElementsSelectsBothCopiesInDocumentOrder` | selection `[[0,4],[0,2]]`, selected xs `[30.0, 16.0]` |
+| Swift `DuplicateCopyOrderTests.aDuplicateThenCopyEmitsTheCopiesInDocumentOrder` | **clipboard payload `[30, 16]`** |
+| `operation_select_all_top_level` / `operationSelectAllTopLevel` | 2 cases, **both ports, byte-identical actuals** |
+
+### 19A.2 What the gate reaches, and what it does not
+
+**The clipboard half is IN-PORT in each port, not cross-language, and that is a
+limit of the corpus rather than a choice.** `copy_selection` is a shared op
+verb, so the SELECTION is gated cross-language; there is **no copy-to-clipboard
+op verb in either port**, and the corpus's canonical JSON serializes a document,
+not a pasteboard. So:
+
+* Rust `workspace::clipboard::copy_payload_tests` drives the production
+  `selection_to_svg` through a real `AppState`.
+* Swift `JasSwift/Tests/Clipboard/DuplicateCopyOrderTests.swift` drives the
+  production `EditClipboard.copySelection` onto a real (private) `NSPasteboard`.
+
+Both run the production mutator first, so each is the artist's gesture pair end
+to end within its port; what is asserted twice rather than once is that the two
+payloads agree, and the shared selection golden is what holds that together.
+
+### 19A.3 The corpus, and the case that earns its bytes
+
+Two new cases in `test_fixtures/operations/select_all_top_level.json`:
+
+1. `duplicating_a_noncontiguous_pair_selects_both_copies_not_a_source` — new
+   setup `dup_order_four_rects.svg` (four distinctly coloured rects, so identity
+   is legible in the golden rather than inferable from indices). Two elements
+   admit only two orders, so the pre-existing contiguous case cannot tell a SORT
+   from a REVERSAL; this one can.
+2. `duplicating_across_parents_and_depths_rewrites_only_the_paths_that_moved` —
+   duplicates `[0,0]`, `[0,1,2]` and `[1,1]` of this family's own setup. **Four
+   separate mutations red this single case**, which is why it exists: it is the
+   only thing that watches the path-rewrite RULE rather than its outcome on one
+   flat layer.
+
+The pre-existing `copy_of_a_two_element_selection_emits_a_deterministic_order`
+golden moved from `[[0,2],[0,1]]` to `[[0,1],[0,3]]`, and its `_doc` — which
+described the old order as deliberate — is corrected in place rather than left
+to rot.
+
+### 19A.4 Mutation proof — every cause reverted INDIVIDUALLY
+
+Production restored and the suite re-verified green after each.
+
+| # | port | mutation | RED observed |
+|---|---|---|---|
+| M1 | Rust | drop `copy_paths.sort()` | 3 failed — both in-port gates + the corpus family |
+| M2 | Rust | drop the `shift_path_for_insertion` loop | 3 failed — the same three |
+| M2b | Rust | drop the helper's parent-prefix check | 1 failed — the across-parents case |
+| M2c | Rust | weaken the helper's `>=` to `>` | 1 failed — the across-parents case |
+| M3 | Swift | drop `copyPaths.sort` | 7 issues in 3 tests |
+| M4 | Swift | drop the `shiftedPath` map | 6 issues in 3 tests |
+| M4b | Swift | drop the parent-prefix check | 1 issue — the across-parents case |
+| M4c | Swift | weaken `>=` to `>` | 1 issue — the across-parents case |
+
+**M2b and M2c were GREEN on the first attempt** — measured, before the
+across-parents case existed. Under house law a guard no mutation can red is
+deleted; these two are load-bearing for correctness across parents and across
+depths, so the case was written to red them instead. That is the same choice
+§18.1 made and it is recorded here so the reasoning is not re-litigated: the
+rule is *delete the guard or gate it*, never *leave it unwatched*.
+
+### 19A.5 THE PREMISE IS FALSE — a second operation, measured, NOT fixed
+
+§19 states *"Every other selection-producing operation already yields document
+order, so this was the odd one out."* **Surveyed by measurement, not by reading,
+and that is not true.**
+
+> **R3 "Paste, preserving layers" leaves a non-document-order selection, for
+> exactly the §19 byproduct reason.** `paste_fragment_into` appends into each
+> fragment layer's target and records `[idx, at]` as it goes, so the result is in
+> FRAGMENT order. Measured: `multi_layer.svg` (layers Background, Foreground) with
+> a fragment whose layers are `[Foreground, Background]` yields selection
+> **`[[1,1],[0,1]]`**. No existing golden moves, because every shipped preserving
+> case happens to list its fragment layers in ascending document order.
+
+**Deliberately NOT fixed here, and this is a ruling, not an oversight.** §19
+names the duplicate; extending a ruling to an operation it did not name is
+itself a ruling, and this seat has been wrong twice in one day by inference.
+The principle plainly reaches it — a Copy after a paste emits that order, which
+is §19's own artist-visible consequence — but the fix touches `op_apply` and the
+`paste_layers` goldens, which were concurrently in another lane's hands. **Cost
+if ruled: one sort per port plus one corpus case with a reversed fragment.**
+
+Everything else surveyed yields document order: `ungroup_selection` (one layer),
+`show_all`, `group_selection`, `select_all`, and the marquee/toggle paths §18
+repaired. `ungroup_all` and Rust's `unlock_all` clear the selection entirely.
+
+### 19A.6 BANKED — found by the survey, out of scope, needs JYH
+
+1. **`ungroup_selection` across TWO LAYERS is broken in BOTH ports, and broken
+   DIFFERENTLY.** Its `offset` accumulator advances across every ungrouped
+   group regardless of which layer the group lives in, so the second layer's
+   released children are computed at the wrong indices. Measured on two layers
+   holding one two-child group each (four released children):
+   * Rust → `[[0,0],[0,1],[1,1]]` — **three** entries; `[1,0]` is never
+     selected and `[1,2]` is dropped by the `get_element(...).is_some()` guard
+     at `controller.rs:1517`.
+   * Swift → `[[0,0],[0,1],[1,1],[1,2]]` — **four** entries, and `[1,2]` does
+     not exist; `Controller.swift:1298` has no such guard.
+
+   `ungroup` is a shared op verb, so this is corpus-reachable and currently
+   **ungated**. Not order, so not §19; a live divergence at a real seam.
+2. **The same `offset` shape appears in `release_compound_shape`
+   (`controller.rs:1696`) and `expand_compound_shape` (`controller.rs:1852`)**
+   — by INSPECTION, not measured. Three call sites of one wrong idea argue for
+   one shared helper rather than three separate repairs.
+
+---
+
 ## 20. `doc.set_selection` SELECTS ONLY THE NAMED PATHS. RULED 2026-07-28.
 
 > JYH: *"accept recommendation, swift."*

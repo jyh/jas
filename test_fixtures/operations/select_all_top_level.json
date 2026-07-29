@@ -129,6 +129,23 @@
     "expected_json": "select_all_dup_noncontiguous_order_expected.json"
   },
   {
+    "_doc": "§19, ACROSS PARENTS AND ACROSS DEPTHS — the case that makes the path-rewrite RULE watchable rather than just its outcome on one flat layer. Duplicate three things at once in this family's own setup: solo-a at [0,0], t3 at [0,1,2] (the last child of the Trio group), and solo-b at [1,1] (in the OTHER layer). The descending walk copies solo-b, then t3, then solo-a — and that last insertion, at [0,1], is the interesting one: it pushes the Trio group from [0,1] to [0,2], so the copy path already recorded for t3' has to travel from [0,1,3] to [0,2,3], while the copy path recorded for solo-b' must NOT move at all, because it lives under a different parent. Ruled answer [[0,1],[0,2,3],[1,2]] — three copies, document order. FOUR SEPARATE MUTATIONS RED THIS ONE CASE, which is why it is worth its bytes: dropping the sort gives [[1,2],[0,2,3],[0,1]]; dropping the rewrite entirely gives [0,1,3], a path into a rect; rewriting without checking the parent prefix drags solo-b' to [1,3], a slot that does not exist; and weakening the index test from >= to > leaves t3' at [0,1,3] — the boundary case is real precisely because an insertion AT a container's own index moves that whole container and everything under it.",
+    "name": "duplicating_across_parents_and_depths_rewrites_only_the_paths_that_moved",
+    "setup_svg": "select_all_top_level.svg",
+    "txns": [
+      {
+        "name": "duplicate_three_across_the_tree",
+        "ops": [
+          { "op": "add_to_selection", "path": [0, 0] },
+          { "op": "add_to_selection", "path": [0, 1, 2] },
+          { "op": "add_to_selection", "path": [1, 1] },
+          { "op": "copy_selection", "dx": 6.0, "dy": 0.0 }
+        ]
+      }
+    ],
+    "expected_json": "select_all_dup_across_parents_expected.json"
+  },
+  {
     "_doc": "D6 DEDUP. Selection is an ordered array in both ports now, so nothing deduplicates for free: add_to_selection must refuse a path it already holds. This case would go RED with a SECOND {kind:all, path:[0,1]} entry if the guard were dropped from either port — which is exactly the mutation that proves it.",
     "name": "add_to_selection_twice_on_one_path_yields_one_entry",
     "setup_svg": "select_all_top_level.svg",
