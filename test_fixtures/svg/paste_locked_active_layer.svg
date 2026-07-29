@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 96 96" width="96" height="96">
+  <g inkscape:groupmode="layer" inkscape:label="Sky" jas:locked="true">
+    <rect x="0" y="0" width="16" height="16" fill="rgb(0,0,255)" stroke="none"/>
+  </g>
+  <g inkscape:groupmode="layer" inkscape:label="Ground">
+    <rect x="0" y="32" width="16" height="16" fill="rgb(0,128,0)" stroke="none"/>
+  </g>
+</svg>

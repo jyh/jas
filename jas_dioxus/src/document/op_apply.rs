@@ -864,6 +864,90 @@ fn split_fragment_entry(
     }
 }
 
+/// The layer index a paste that targets the ACTIVE layer would land in, or
+/// `None` when it must refuse.
+///
+/// **THE ONE PLACE THE R2 LOCK REFUSAL LIVES IN THIS PORT.** Both bodies that
+/// paste into the active layer call it — [`paste_fragment_into`] (artwork) and
+/// [`paste_text_element_into`] (a plain-text clipboard payload) — so a guard on
+/// one of them could not leave the other open. `paste_clipboard_text_into`
+/// dispatches between exactly those two, and production reaches both.
+///
+/// Two distinct reasons to refuse, deliberately collapsed into one `None`
+/// because both mean "this paste lands nothing": a document with no layers at
+/// all, and — RULED by JYH 2026-07-28, LAYER_STRUCTURE.md §15 — an active layer
+/// that is effectively locked. The clamp for an out-of-range `selected_layer`
+/// is inside
+/// [`crate::document::document::Document::active_layer_locked`].
+///
+/// The twin is JasSwift `activePasteTarget`.
+fn active_paste_target(doc: &crate::document::document::Document) -> Option<usize> {
+    if doc.layers.is_empty() || doc.active_layer_locked() {
+        return None;
+    }
+    Some(doc.selected_layer.min(doc.layers.len() - 1))
+}
+
+/// R3's target layer for a fragment layer named `name`, CREATING it in
+/// `new_doc` when it has to. Never refuses: the fragment chose this target, not
+/// the artist, so a locked one is diverted around rather than declined (§15.2).
+///
+/// The walk, in one sentence: take the first of `name`, `name 2`, `name 3`, …
+/// that either does not exist (create it, verbatim) or exists and is not
+/// effectively locked (append into it).
+///
+/// **WHY A WALK AND NOT A MINT.** JYH ruled the suffix — "Sky" locked ⇒
+/// "Sky 2" — and the precedent named for the shape is
+/// [`crate::document::model::advance_next_untitled_past`], which likewise
+/// finds a free N rather than always adding one. Stopping at an EXISTING open
+/// "Sky 2" instead of minting "Sky 3" is what keeps a repeated paste from
+/// manufacturing a layer per repetition; that is the same proliferation
+/// argument the VERBATIM naming rule above rests on, applied one step along.
+///
+/// It terminates by pigeonhole: every iteration either returns or increments
+/// `n`, and a document with `k` layers can block at most `k` candidate names.
+///
+/// The suffix is the ONE place R3's ratified verbatim naming does not hold, and
+/// §15.3 states it as an exception rather than leaving it silent.
+///
+/// The twin is JasSwift `preservingLayerTarget`.
+fn preserving_layer_target(
+    new_doc: &mut crate::document::document::Document,
+    name: &str,
+) -> usize {
+    use crate::geometry::element::{CommonProps, Element, LayerElem};
+    let mut candidate = name.to_string();
+    let mut n: usize = 1;
+    loop {
+        // Match against the WORKING document (see the doc comment), so two
+        // fragment layers of one name collapse into one target.
+        let found = new_doc.layers.iter().position(|l| match l {
+            Element::Layer(le) => le.name() == candidate,
+            _ => false,
+        });
+        match found {
+            None => {
+                new_doc.layers.push(Element::Layer(LayerElem {
+                    children: Vec::new(),
+                    common: CommonProps {
+                        name: Some(candidate),
+                        ..CommonProps::default()
+                    },
+                    isolated_blending: false,
+                    knockout_group: false,
+                }));
+                return new_doc.layers.len() - 1;
+            }
+            // HIDDEN IS NOT LOCKED: only the lock diverts.
+            Some(i) if !new_doc.effective_locked(&vec![i]) => return i,
+            Some(_) => {
+                n += 1;
+                candidate = format!("{name} {n}");
+            }
+        }
+    }
+}
+
 /// Apply a paste to `doc`, returning the new document, or `None` when nothing
 /// was pasted (an empty fragment, or a document with no layers to paste into).
 /// PURE — no `Model`, no transaction, no signal.
@@ -911,11 +995,32 @@ fn split_fragment_entry(
 /// name collapse into a single created layer (the first creates, the second
 /// matches) rather than creating two layers with the same name.
 ///
-/// **LOCKED / HIDDEN target layers are appended into unchanged** — no refusal,
-/// no unlock, no visibility change. Open question 2 in the brief; today's
-/// behaviour (Swift's name-match branch never checked either flag) is pinned
-/// rather than invented, and the corpus records it so a future ruling moves a
-/// visible byte.
+/// # A LOCKED TARGET — §15, RULED by JYH 2026-07-28
+///
+/// **Refuse when the ARTIST chose the target, divert when the FRAGMENT chose
+/// it.** The two arms above differ in exactly that, so the lock answer differs
+/// with them:
+///
+/// * **R2's target is the ACTIVE layer, which the artist picked.** A locked one
+///   REFUSES — this returns `None`, so nothing lands, nothing is journalled and
+///   the paste run does not advance. Landing the artwork somewhere else would
+///   silently override an explicit choice, which is worse than declining. The
+///   read is [`crate::document::document::Document::active_layer_locked`], the
+///   SAME function the greyed-out menu item reads.
+/// * **R3's target was named by the incoming fragment.** A locked one DIVERTS
+///   to a numerically suffixed sibling — see [`preserving_layer_target`].
+/// * **HIDDEN IS NOT LOCKED**, on either arm. Hidden is a visibility state, not
+///   a protection, so a hidden target is appended into normally and the artist
+///   unhides. Diverting there would manufacture layers to avoid a condition
+///   that protects nothing; the asymmetry is deliberate and is JYH's.
+///
+/// **THE REFUSAL IS WHOLESALE.** A preserving paste whose fragment carries both
+/// a divertible named layer and a loose element bound for the locked active
+/// layer lands NOTHING, rather than landing the half it can. Everything below
+/// mutates a local clone, so any `return None` discards the whole paste
+/// atomically. DECIDED HERE, not ruled: §15 speaks about a paste, not about
+/// half of one, and a partial paste that silently drops content is the failure
+/// mode the whole ruling is written against. Banked in §15 for JYH.
 ///
 /// **IDS ARE COPIED VERBATIM** — this body does not mint. Under the cardinality
 /// law a paste is 0→N and should mint fresh; it does not, in either port, so a
@@ -930,13 +1035,11 @@ pub fn paste_fragment_into(
     preserve_layers: bool,
 ) -> Option<crate::document::document::Document> {
     use crate::document::document::ElementSelection;
-    use crate::geometry::element::{translate_element, CommonProps, Element, LayerElem};
+    use crate::geometry::element::translate_element;
     if doc.layers.is_empty() {
         return None;
     }
-    // Hardened like every other param read here: an out-of-range
-    // `selected_layer` clamps rather than panicking.
-    let active = doc.selected_layer.min(doc.layers.len() - 1);
+    let active = active_paste_target(doc);
     let mut new_doc = doc.clone();
     let mut new_selection: Vec<ElementSelection> = Vec::new();
 
@@ -946,29 +1049,11 @@ pub fn paste_fragment_into(
             continue;
         }
         let idx = match (preserve_layers, name) {
-            (true, Some(n)) => {
-                // Match against the WORKING document (see the doc comment).
-                let found = new_doc.layers.iter().position(|l| match l {
-                    Element::Layer(le) => le.name() == n,
-                    _ => false,
-                });
-                match found {
-                    Some(i) => i,
-                    None => {
-                        new_doc.layers.push(Element::Layer(LayerElem {
-                            children: Vec::new(),
-                            common: CommonProps {
-                                name: Some(n),
-                                ..CommonProps::default()
-                            },
-                            isolated_blending: false,
-                            knockout_group: false,
-                        }));
-                        new_doc.layers.len() - 1
-                    }
-                }
-            }
-            _ => active,
+            (true, Some(n)) => preserving_layer_target(&mut new_doc, &n),
+            // R2's target is the artist's own ACTIVE layer, so a locked one
+            // REFUSES (§15). `new_doc` is a local clone, so this discards the
+            // whole paste — including any sibling an earlier entry created.
+            _ => active?,
         };
         for child in &children {
             let translated = translate_element(child, offset, offset);
@@ -1118,6 +1203,11 @@ pub fn clipboard_text_is_svg(text: &str) -> bool {
 /// Field-preserving by construction: it mutates the target layer through
 /// `children_mut()` and never rebuilds it from a field list, which is the shape
 /// §9.5 of the brief had to repair on the SVG path.
+///
+/// **A LOCKED ACTIVE LAYER REFUSES** (§15), through the same
+/// [`active_paste_target`] the artwork path reads. Text carries no layer
+/// structure to preserve, so `preserve_layers` never diverts it and R2's answer
+/// is the only one available here.
 fn paste_text_element_into(
     doc: &crate::document::document::Document,
     text: &str,
@@ -1125,12 +1215,7 @@ fn paste_text_element_into(
 ) -> Option<crate::document::document::Document> {
     use crate::document::document::ElementSelection;
     use crate::geometry::element::{CommonProps, Element, TextElem};
-    if doc.layers.is_empty() {
-        return None;
-    }
-    // Same clamp as `paste_fragment_into`: an out-of-range `selected_layer`
-    // clamps rather than panicking.
-    let active = doc.selected_layer.min(doc.layers.len() - 1);
+    let active = active_paste_target(doc)?;
     let mut new_doc = doc.clone();
     let elem = Element::Text(TextElem::from_string(
         offset,
@@ -2600,11 +2685,16 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
 /// and it is cross-language. These probes exist for exactly two shapes that
 /// family cannot express, and each says which:
 ///
-/// 1. **LOCKED and HIDDEN target layers** (LAYER_STRUCTURE.md §6 open question
-///    2). Every corpus case is seeded from a `setup_svg`, and the SVG codec does
-///    not persist `locked` AT ALL — a layer parsed from SVG is always unlocked.
-///    So the corpus is structurally blind to the locked case, and these probes
-///    build the document directly instead.
+/// 1. **LOCKED and HIDDEN target layers.** This used to read "the corpus is
+///    structurally blind to the locked case, because the SVG codec does not
+///    persist `locked` AT ALL". `jas:locked` (§13.1) retired that on
+///    2026-07-28, the behaviour was RULED the same day (§15), and
+///    `test_fixtures/operations/paste_locked_layers.json` is now the primary,
+///    CROSS-LANGUAGE gate for it. These probes are demoted to a per-port second
+///    opinion on the same rules, and they keep two things the corpus still
+///    cannot express: a HIDDEN target seeded directly rather than through a
+///    `hide_selection` op, and a locked target that is not reachable from any
+///    fixture document.
 /// 2. **A BARE-ELEMENT fragment** — the internal-clipboard payload shape
 ///    (`TabState.clipboard: Vec<Element>`, Rust-only per LAYER_STRUCTURE.md
 ///    §8.1). The `paste` op verb feeds `svg_to_document(...).layers`, which is
@@ -2690,14 +2780,22 @@ mod paste_layer_structure_tests {
             .collect()
     }
 
-    /// OPEN QUESTION 2, pinned CONSERVATIVELY, not ruled.
-    /// Append into a LOCKED matching layer SUCCEEDS, and the layer stays locked.
-    /// Neither port ever checked either flag on the paste path, so this pins
-    /// today's answer rather than inventing one. If JYH rules that a locked
-    /// layer must refuse (or must unlock), this probe is the thing that will go
-    /// red and say so.
+    /// RULED 2026-07-28 (§15.2/§15.3): a LOCKED matching layer DIVERTS to a
+    /// numerically suffixed sibling. The fragment named that layer, not the
+    /// artist, so serving the artist's actual intent means creating "Sky 2"
+    /// rather than declining.
+    ///
+    /// This probe used to assert the opposite — it pinned the pre-ruling
+    /// "appends into a locked layer and leaves it locked", and said in as many
+    /// words that a ruling to refuse or unlock would turn it red. It did, and
+    /// this is that turn.
+    ///
+    /// The cross-language gate is
+    /// `test_fixtures/operations/paste_locked_layers.json`; what this probe adds
+    /// is that the LOCKED layer is left byte-untouched, which the golden shows
+    /// but does not say.
     #[test]
-    fn preserve_appends_into_a_locked_matching_layer_and_leaves_it_locked() {
+    fn preserve_diverts_from_a_locked_matching_layer_to_a_numeric_sibling() {
         let doc = doc_with(layer(
             "Sky",
             vec![rect(5.0, 5.0)],
@@ -2708,25 +2806,83 @@ mod paste_layer_structure_tests {
         ));
         let fragment = vec![layer("Sky", vec![rect(1.0, 2.0)], CommonProps::default())];
         let out = paste_fragment_into(&doc, &fragment, 24.0, true).expect("pasted");
-        assert_eq!(layer_names(&out), vec!["Base", "Sky"], "no layer created");
+        assert_eq!(
+            layer_names(&out),
+            vec!["Base", "Sky", "Sky 2"],
+            "the locked 'Sky' must be diverted around, into a created 'Sky 2'"
+        );
         assert_eq!(
             kids(&out, 1),
-            vec![(5.0, 5.0), (25.0, 26.0)],
-            "the locked layer should have gained the offset rect"
+            vec![(5.0, 5.0)],
+            "the LOCKED layer must be left exactly as it was"
         );
+        assert_eq!(kids(&out, 2), vec![(25.0, 26.0)], "the sibling holds the paste");
         let still_locked = match &out.layers[1] {
             Element::Layer(l) => l.common.locked,
             _ => false,
         };
-        assert!(still_locked, "paste silently UNLOCKED the target layer");
+        assert!(still_locked, "the divert must not unlock anything");
+        let sibling_locked = match &out.layers[2] {
+            Element::Layer(l) => l.common.locked,
+            _ => true,
+        };
+        assert!(!sibling_locked, "the created sibling must be open");
         assert_eq!(out.selection.len(), 1);
-        assert_eq!(out.selection[0].path, vec![1, 1]);
+        assert_eq!(out.selection[0].path, vec![2, 0]);
     }
 
-    /// OPEN QUESTION 2's other half: an INVISIBLE matching layer is appended
-    /// into and stays invisible — so the pasted artwork is immediately hidden.
-    /// Conservative, banked, and deliberately visible here because "the paste
-    /// appeared to do nothing" is the user-facing shape of this answer.
+    /// The SUFFIX WALK stops at an EXISTING open sibling instead of minting a
+    /// third layer — the reason `preserving_layer_target` is a walk. Not
+    /// reachable as a divert from the corpus in this exact shape (there the
+    /// existing "Sky 2" also carries artwork), and it is the vector a repeated
+    /// paste would hit.
+    #[test]
+    fn preserve_diverts_into_an_existing_open_sibling_rather_than_minting_a_third() {
+        let mut doc = doc_with(layer(
+            "Sky",
+            vec![rect(5.0, 5.0)],
+            CommonProps {
+                locked: true,
+                ..CommonProps::default()
+            },
+        ));
+        doc.layers
+            .push(layer("Sky 2", vec![], CommonProps::default()));
+        let fragment = vec![layer("Sky", vec![rect(1.0, 2.0)], CommonProps::default())];
+        let out = paste_fragment_into(&doc, &fragment, 24.0, true).expect("pasted");
+        assert_eq!(
+            layer_names(&out),
+            vec!["Base", "Sky", "Sky 2"],
+            "no 'Sky 3' may be minted while 'Sky 2' is open"
+        );
+        assert_eq!(kids(&out, 2), vec![(25.0, 26.0)]);
+        assert_eq!(out.selection[0].path, vec![2, 0]);
+    }
+
+    /// The walk KEEPS WALKING past a locked sibling: "Sky" and "Sky 2" both
+    /// locked gives "Sky 3". Unreachable from the corpus, and it is the case
+    /// that proves the walk is a loop rather than a single `+ 1`.
+    #[test]
+    fn preserve_walks_past_a_locked_sibling_to_the_next_free_suffix() {
+        let locked = CommonProps {
+            locked: true,
+            ..CommonProps::default()
+        };
+        let mut doc = doc_with(layer("Sky", vec![rect(5.0, 5.0)], locked.clone()));
+        doc.layers.push(layer("Sky 2", vec![], locked));
+        let fragment = vec![layer("Sky", vec![rect(1.0, 2.0)], CommonProps::default())];
+        let out = paste_fragment_into(&doc, &fragment, 0.0, true).expect("pasted");
+        assert_eq!(layer_names(&out), vec!["Base", "Sky", "Sky 2", "Sky 3"]);
+        assert_eq!(kids(&out, 3), vec![(1.0, 2.0)]);
+    }
+
+    /// HIDDEN IS NOT LOCKED — RULED 2026-07-28 (§15.3 item 2). An INVISIBLE
+    /// matching layer is appended into and stays invisible, so the pasted
+    /// artwork is immediately hidden. That is the point: hidden is a visibility
+    /// state, not a protection, and diverting there would manufacture a layer
+    /// to avoid a condition that protects nothing. Deliberately visible here
+    /// because "the paste appeared to do nothing" is the user-facing shape of
+    /// this answer, and the artist unhides.
     #[test]
     fn preserve_appends_into_a_hidden_matching_layer_and_leaves_it_hidden() {
         let doc = doc_with(layer(
@@ -2845,24 +3001,29 @@ mod paste_layer_structure_tests {
     // goldens. These probes exist for the three shapes that family CANNOT
     // express, and each says which.
 
-    /// **THE PRESERVATION LAW ON THE TEXT BRANCH**, and the corpus is
-    /// structurally blind to it: every corpus case is seeded from a `setup_svg`
-    /// and the SVG codec does not persist `locked` at all, so no fixture can
-    /// build a locked, hidden, identified target layer (LAYER_STRUCTURE.md
-    /// §9.6). A text paste does not speak to whether the target layer is locked,
-    /// so it must not change it. Rust satisfies this by construction —
+    /// **THE PRESERVATION LAW ON THE TEXT BRANCH.** A text paste does not speak
+    /// to whether the target layer is hidden or to what its identity is, so it
+    /// must not change either. Rust satisfies this by construction —
     /// `children_mut()` mutates the layer value in place — but a port that
     /// rebuilt the layer from a field list would drop exactly these fields, and
     /// that is the defect §9.5 had to repair on the SVG path. Swift's twin is
     /// `pasteOfPlainTextPreservesTheTargetLayersOwnFields`.
+    ///
+    /// **`locked` LEFT THIS VECTOR ON 2026-07-28, and it is not a weakening.**
+    /// The target used to carry `locked: true` as well, and the assertion was
+    /// that a paste INTO it preserved the flag. §15 rules that a locked ACTIVE
+    /// layer refuses the paste outright, which preserves strictly more — the
+    /// layer is not touched at all — and that refusal is gated
+    /// cross-language by `paste_locked_layers.json`'s
+    /// `paste_clipboard_text_into_a_locked_active_layer_refuses`. Keeping
+    /// `locked` here would have made the vector assert the repealed behaviour.
     #[test]
-    fn pasting_text_into_a_locked_hidden_identified_layer_preserves_its_fields() {
+    fn pasting_text_into_a_hidden_identified_layer_preserves_its_fields() {
         use crate::geometry::element::Visibility;
         let target = layer(
             "Sky",
             vec![rect(5.0, 5.0)],
             CommonProps {
-                locked: true,
                 visibility: Visibility::Invisible,
                 id: Some("lyr-sky".into()),
                 ..CommonProps::default()
@@ -2877,7 +3038,7 @@ mod paste_layer_structure_tests {
             other => panic!("expected a Layer, got {other:?}"),
         };
         assert_eq!(l.children.len(), 2, "the text element was not appended");
-        assert!(l.common.locked, "the paste silently UNLOCKED the target layer");
+        assert!(!l.common.locked, "nothing here should have locked the layer");
         assert_eq!(
             l.common.visibility,
             Visibility::Invisible,
@@ -2899,6 +3060,38 @@ mod paste_layer_structure_tests {
         }
         assert_eq!(out.selection.len(), 1);
         assert_eq!(out.selection[0].path, vec![1, 1]);
+    }
+
+    /// A LOCKED ACTIVE LAYER refuses a text paste, and the refusal is INHERITED
+    /// — the target here is locked by an ancestor rather than by its own flag,
+    /// which is the shape §13 ruled and which the corpus family cannot reach
+    /// (its locked layers are all top-level and carry their own flag).
+    ///
+    /// Not merely "no text appeared": the WHOLE document must come back
+    /// unchanged, and `None` is what tells the caller not to open a transaction,
+    /// so the refusal costs no undo step either.
+    #[test]
+    fn a_locked_active_layer_refuses_a_text_paste_entirely() {
+        let doc = doc_with(layer(
+            "Sky",
+            vec![rect(5.0, 5.0)],
+            CommonProps {
+                locked: true,
+                ..CommonProps::default()
+            },
+        ));
+        let mut doc = doc;
+        doc.selected_layer = 1;
+        assert!(
+            paste_clipboard_text_into(&doc, Some("a note"), 24.0, false).is_none(),
+            "a locked active layer must refuse a text paste"
+        );
+        // …and preserve mode is not an escape hatch: text carries no layer
+        // structure, so it has nothing to divert to.
+        assert!(
+            paste_clipboard_text_into(&doc, Some("a note"), 24.0, true).is_none(),
+            "preserve mode must not smuggle text past the lock"
+        );
     }
 
     /// A LAYERLESS document has nowhere to put a Text element. The corpus is

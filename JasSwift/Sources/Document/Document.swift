@@ -528,6 +528,32 @@ public struct Document: Equatable {
         return locked
     }
 
+    /// Is the ACTIVE layer — the one plain Paste targets — effectively locked?
+    ///
+    /// RULED by JYH 2026-07-28 (transcripts/LAYER_STRUCTURE.md §15): plain Paste
+    /// REFUSES into a locked active layer, because the artist picked that layer
+    /// explicitly and landing artwork elsewhere would silently override an
+    /// explicit choice.
+    ///
+    /// **THIS IS ONE DEFINITION SERVING TWO CONSUMERS, deliberately.** The
+    /// ENFORCEMENT reads it (`activePasteTarget` in `OpApply.swift`) and so does
+    /// the AFFORDANCE — it is the `active_document.active_layer_locked` menu
+    /// predicate that greys `paste` and `paste_in_place` out
+    /// (`buildMenuContext` in `JasCommands.swift`). A menu that greyed an item
+    /// out on one rule while the code refused on another would be worse than
+    /// either alone, and there is no second rule here to drift to.
+    ///
+    /// A document with NO LAYERS is not locked: there is nothing to protect, and
+    /// paste's own empty-document no-op is a different refusal with a different
+    /// cause. The out-of-range clamp mirrors `pasteFragmentInto`'s.
+    ///
+    /// The twin is jas_dioxus `Document::active_layer_locked`.
+    public var activeLayerLocked: Bool {
+        if layers.isEmpty { return false }
+        let active = min(max(selectedLayer, 0), layers.count - 1)
+        return effectiveLocked([active])
+    }
+
     /// Return a new document with the element at path replaced by newElem.
     public func replaceElement(_ path: ElementPath, with newElem: Element) -> Document {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }

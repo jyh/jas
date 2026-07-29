@@ -728,6 +728,28 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("select_all_top_level.json")
 }
 
+/// PASTE AND A LOCKED TARGET — transcripts/LAYER_STRUCTURE.md §15 (RULED by JYH
+/// 2026-07-28): **refuse when the ARTIST chose the target, divert when the
+/// FRAGMENT chose it.** Twin of Rust `operation_paste_locked_layers`.
+///
+/// Plain Paste targets the ACTIVE layer, so a locked one refuses and the
+/// document is byte-identical; preserving Paste targets a layer the fragment
+/// named, so a locked one diverts to `"Sky" → "Sky 2"`. Hidden is NOT locked and
+/// is appended into normally.
+///
+/// It is the family `paste_layers.json` said it could not be — that file's own
+/// `_doc` records "WHAT THIS FAMILY CANNOT REACH: appending into a LOCKED or
+/// HIDDEN matching layer … no `setup_svg` can produce a locked layer", which
+/// `jas:locked` (§13.1) retired.
+///
+/// EVERY GOLDEN HERE IS IMPLEMENTATION-INDEPENDENT: a refusal points at its own
+/// family's SETUP golden by file identity, and a divert points at a CONTROL case
+/// that pastes a fragment layer literally named "Sky 2" — behaviour this ruling
+/// does not touch. So the family was RED in both ports before either moved.
+@Test func operationPasteLockedLayers() throws {
+    try runOperationFixture("paste_locked_layers.json")
+}
+
 /// WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES — D4/D5, ratified
 /// 2026-07-28 (Swift is canon; Rust drops its internal-clipboard fallback).
 /// Twin of Rust `operation_paste_clipboard_text`.

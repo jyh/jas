@@ -13,7 +13,8 @@
           "can_undo": false,
           "can_redo": false,
           "is_modified": false,
-          "has_filename": false
+          "has_filename": false,
+          "active_layer_locked": false
         },
         "workspace": {
           "has_saved_layout": false
@@ -556,7 +557,8 @@
           "can_undo": false,
           "can_redo": false,
           "is_modified": false,
-          "has_filename": false
+          "has_filename": false,
+          "active_layer_locked": false
         },
         "workspace": {
           "has_saved_layout": false
@@ -1099,7 +1101,8 @@
           "can_undo": true,
           "can_redo": false,
           "is_modified": true,
-          "has_filename": true
+          "has_filename": true,
+          "active_layer_locked": false
         },
         "workspace": {
           "has_saved_layout": true
@@ -1642,7 +1645,8 @@
           "can_undo": true,
           "can_redo": true,
           "is_modified": false,
-          "has_filename": true
+          "has_filename": true,
+          "active_layer_locked": false
         },
         "workspace": {
           "has_saved_layout": false
@@ -1803,6 +1807,550 @@
         ],
         "action": "paste_in_place",
         "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          7
+        ],
+        "action": "paste_preserving_layers",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          9
+        ],
+        "action": "select_all",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          2,
+          0
+        ],
+        "action": "group",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          2,
+          1
+        ],
+        "action": "ungroup",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          2,
+          2
+        ],
+        "action": "ungroup_all",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          2,
+          4
+        ],
+        "action": "lock",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          2,
+          5
+        ],
+        "action": "unlock_all",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          2,
+          7
+        ],
+        "action": "hide_selection",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          2,
+          8
+        ],
+        "action": "show_all",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          2,
+          10
+        ],
+        "action": "make_instance",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          2,
+          11
+        ],
+        "action": "promote_to_concept",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          3,
+          0
+        ],
+        "action": "zoom_in",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          3,
+          1
+        ],
+        "action": "zoom_out",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          3,
+          2
+        ],
+        "action": "zoom_to_actual_size",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          3,
+          3
+        ],
+        "action": "fit_active_artboard",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          3,
+          4
+        ],
+        "action": "fit_all_artboards",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          3,
+          5
+        ],
+        "action": "fit_in_window",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          4,
+          0,
+          0
+        ],
+        "action": "save_workspace_as",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          4,
+          0,
+          2
+        ],
+        "action": "reset_workspace",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          4,
+          0,
+          3
+        ],
+        "action": "revert_workspace",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          4,
+          1,
+          0
+        ],
+        "action": "save_appearance_as",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          4,
+          3
+        ],
+        "action": "tile_panes",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          4,
+          5
+        ],
+        "action": "toggle_pane",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          6
+        ],
+        "action": "toggle_pane",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          8
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          9
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          10
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          11
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          12
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          13
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          14
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          15
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          16
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          17
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          18
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          19
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          20
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          21
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          4,
+          22
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          4,
+          23
+        ],
+        "action": "toggle_panel",
+        "enabled": true,
+        "checked": true
+      }
+    ]
+  },
+  {
+    "name": "two_selected_saved_with_a_locked_active_layer",
+    "function": "menu_state",
+    "args": {
+      "ctx": {
+        "state": {
+          "tab_count": 2
+        },
+        "active_document": {
+          "has_selection": true,
+          "selection_count": 2,
+          "can_undo": true,
+          "can_redo": true,
+          "is_modified": false,
+          "has_filename": true,
+          "active_layer_locked": true
+        },
+        "workspace": {
+          "has_saved_layout": false
+        },
+        "panels": {
+          "artboards": false,
+          "layers": false,
+          "color": true,
+          "swatches": true,
+          "stroke": false,
+          "properties": false,
+          "character": false,
+          "paragraph": false,
+          "align": false,
+          "boolean": false,
+          "magic_wand": false,
+          "opacity": false,
+          "symbols": true,
+          "concepts": true
+        },
+        "panes": {
+          "toolbar": true,
+          "dock": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "new_document",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "open_file",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "save",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "save_as",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "revert",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          6
+        ],
+        "action": "open_document_setup",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "open_print_dialog",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "action": "export_to_pdf",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          10
+        ],
+        "action": "quit",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          0
+        ],
+        "action": "undo",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          1
+        ],
+        "action": "redo",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          3
+        ],
+        "action": "cut",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          4
+        ],
+        "action": "copy",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          5
+        ],
+        "action": "paste",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          1,
+          6
+        ],
+        "action": "paste_in_place",
+        "enabled": false,
         "checked": null
       },
       {

@@ -1599,6 +1599,180 @@ one is small and well-precedented — `active_document.*` already exposes
 bar or transient) on top of the disabled item, for the artist who presses Cmd+V
 without looking at the menu.
 
+### 15.5 Q6 IMPLEMENTED — both ports, red first, 2026-07-28 (PASTELOCK)
+
+**The headline.** Both halves of §15.2/§15.3 are in both active ports and are
+watched by a shared corpus: `paste` refuses into a locked active layer, "Paste,
+Preserving Layers" diverts to `"Sky 2"`, hidden is appended into unchanged, and
+the Edit menu greys the two refusing commands out while the lock stands.
+
+**§15.1 IS NOT IN THIS WAVE.** Q3's general question — where the operation guard
+lives, per-operation or at the write chokepoint — is untouched, and the other
+seven or eight operations the scope named still ignore lock. This is paste only.
+
+#### RED FIRST, in BOTH PORTS at once
+
+`test_fixtures/operations/paste_locked_layers.json`, 18 cases, three SVG-seeded
+setup documents.
+
+> **8 of 18 RED in Rust and 8 in Swift, on exactly the same case names**, before
+> either port moved. The 10 green are the setups, the controls, the anti-blanket
+> vector and all three hidden vectors — so the family DISCRIMINATES rather than
+> being uniformly red. After: 18 of 18 in both.
+
+That simultaneity was possible because **not one golden was generated from the
+behaviour it pins.** Two devices, and the second is the reusable one:
+
+* every REFUSAL points at its own family's SETUP golden **by file identity**, so
+  "the document is unchanged" is asserted against the document itself;
+* every DIVERT points at a **CONTROL** case that pastes a fragment layer
+  literally named `"Sky 2"` into the same setup — behaviour this ruling does not
+  touch. **The divert is therefore pinned as an EQUATION** (diverting from a
+  locked `"Sky"` must produce exactly what naming the sibling outright produces)
+  rather than as a snapshot of the code that implements it. The ten golden files
+  were generated from a REDUCED family holding only the unchanged cases, so
+  today's wrong answers could not be baked in.
+
+This is the family §9.2 said could not exist. `paste_layers.json`'s `_doc` read
+"no `setup_svg` can produce a locked layer" until this wave; `jas:locked`
+(§13.1) landed the same day and retired it. Both that sentence and the corpus
+manifest's `paste-flow-layer-targeting-divergence` row are updated.
+
+#### The three decisions the ruling left open, and how each was taken
+
+1. **The suffix is a WALK, not a mint.** `name`, `name 2`, `name 3`, … — take
+   the first that either does not exist (create it verbatim) or exists and is
+   not locked (append into it). Stopping at an EXISTING open `"Sky 2"` instead
+   of minting `"Sky 3"` is what keeps a repeated paste from manufacturing one
+   layer per repetition, which is the same proliferation argument R3's verbatim
+   naming already rests on. Shape from `advance_next_untitled_past`, as §15.3
+   asked. Terminates by pigeonhole.
+2. **The refusal is WHOLESALE.** A preserving paste carrying both a divertible
+   named layer and a loose element bound for the locked active layer lands
+   NOTHING. §15 speaks about a paste, not half of one, and a partial paste that
+   silently drops content is the failure mode the ruling is written against.
+   **Banked below** — it is a decision, not a ruling.
+3. **`paste_in_place` refuses too.** `actions.yaml` already says "Layer
+   targeting is plain Paste's", so it inherits plain Paste's answer. Not doing
+   this would leave Cmd+Shift+V walking straight past the greyed menu item.
+   Derived, not ruled; **banked below**.
+
+#### Where the guards live — one per port, per concern
+
+| concern | Rust | Swift |
+|---|---|---|
+| is the artist's layer locked | `Document::active_layer_locked` | `Document.activeLayerLocked` |
+| R2 refusal | `op_apply::active_paste_target` | `activePasteTarget` |
+| R3 divert | `op_apply::preserving_layer_target` | `preservingLayerTarget` |
+
+`active_paste_target` is **the one place the R2 refusal lives**, read by both
+bodies that target the active layer — the artwork paste and the plain-text
+paste. A guard on one would have left the other open, and production reaches
+both.
+
+`active_layer_locked` is **one definition with two consumers**: the enforcement
+above, and the `active_document.active_layer_locked` menu predicate. A menu that
+greyed on one rule while the code refused on another would be worse than either
+alone; there is no second rule to drift to.
+
+**One deliberate spelling difference, stated because it is a divergence risk
+even at zero divergence today.** Rust's divert reads
+`effective_locked(&vec![i])` on a Document; Swift's reads `layers[i].locked` on
+the working layer array, because that port's paste body builds a local `[Layer]`
+rather than a working Document. For a TOP-LEVEL layer the two are identical — an
+OR folded down a path of length one — and a paste target is always top-level.
+
+#### Mutation proof — 13 causes, each reverted INDIVIDUALLY
+
+| # | port | mutation | RED observed |
+|---|---|---|---|
+| M1 | Rust | R2 refusal deleted | 2 failed — corpus `plain_paste_into_a_locked_active_layer_refuses_and_changes_nothing` + the inherited-lock text probe |
+| M2 | Rust | R3 divert deleted | 4 failed — corpus divert case + all three divert probes |
+| M3 | Rust | the walk always MINTS | 2 failed — `…_appends_into_the_existing_numeric_sibling` |
+| M4 | Rust | refusal made PARTIAL | **1 failed — ONLY the wholesale case.** The split that proves atomicity is separable from the refusal |
+| M5 | Rust | HIDDEN treated as locked | 2 failed — the hidden corpus case + the hidden probe |
+| M6–M10 | Swift | the same five | 8 / 11 / 5 / 1 / 3 issues, same case names |
+| M11 | YAML | the `enabled_when` term reverted | RED in the SHARED `menu_state` corpus in BOTH ports, plus both live-ctx tests |
+| M12 | Rust | ctx builder stops emitting the key | **RED in ONLY the Rust live-ctx test — the shared corpus stayed GREEN** |
+| M13 | Swift | ctx builder stops emitting the key | **RED in ONLY the Swift live-ctx test, same proof** |
+
+**M5/M10 are why "hidden is not locked" is a floor and not a sentence.**
+**M12/M13 are the load-bearing pair**: they measure that the shared `menu_state`
+corpus, which SEEDS its context, is structurally blind to a port that forgets to
+BUILD the predicate — and a missing key is null, `!null` is true, and paste
+stays enabled, which is silently the pre-ruling behaviour. The per-port live-ctx
+tests are therefore not redundant with the corpus, and that was measured rather
+than argued.
+
+#### Two measurements in §15.4 above that are WRONG, corrected
+
+1. **"`paste` currently declares no `enabled_when`" is false.** It has declared
+   `enabled_when: "state.tab_count > 0"` since 2026-04-12 (`git blame` →
+   `07af52e13`). The lock term is CONJOINED onto it. Written as §15.4 describes,
+   the new predicate would have silently dropped the no-document guard.
+2. **The predicate that greys a menu item lives in `workspace/menubar.yaml`,**
+   not in the action's own `enabled_when` in `workspace/actions.yaml`. The
+   action-level one is real but is not what the menubar compiles from — the
+   first attempt edited only `actions.yaml` and moved zero corpus bytes, which
+   is how this was found. Both are updated now.
+
+#### Probes that pinned the PRE-RULING answer, turned rather than deleted
+
+`preserve_appends_into_a_locked_matching_layer_and_leaves_it_locked` (and its
+Swift twin) said in as many words that a ruling to refuse or unlock would turn
+it red. It did. Three probes lost their `locked: true` target, in both ports,
+because a locked active layer now refuses outright — which preserves strictly
+more than an append that keeps the flag. Each keeps an inverted lock assertion
+as a live discriminator against a copy site that starts INVENTING a lock.
+
+#### A defect in the Swift test suite, found BY the mutation proof
+
+M7's first run did not report failures — it **TRAPPED** with "Index out of
+range" and aborted the whole `swift test` process, so the summary line never
+printed and any later failure would have been invisible. Cause: `#expect`
+records and CONTINUES where Rust's `assert_eq!` panics, so a probe that indexes
+a layer the mutant never created runs off the end. Fixed here for the three
+probes involved (bounds-safe helper plus hard count guards). **This is a
+property of the whole Swift suite, not of these three probes** — any
+`#expect`-then-index probe has it. Banked.
+
+#### BANKED for JYH — decisions taken here that a council may want to revisit
+
+1. **Wholesale vs partial refusal** (decision 2 above). The alternative is to
+   land the divertible named layers and drop the loose elements, which was
+   rejected as silently losing content.
+2. **`paste_in_place` refuses** (decision 3 above). Derived from an existing
+   sentence in `actions.yaml` rather than ruled.
+3. **The ACTIVE MESSAGE was NOT built and nothing was invented for it.** What it
+   would need, MEASURED here rather than assumed — method: case-insensitive grep
+   over each port's non-test sources for `status_bar` / `statusbar` /
+   `status_message` / `toast` / `snackbar` / `notification` / `banner`, and for
+   Swift additionally `NSAlert` / `showMessage`:
+   * **Rust: zero.** The single hit is a doc comment about `state_store` change
+     notifications, which is the reactive-signal sense of the word. There is no
+     status bar, no toast, no transient anything.
+   * **Swift: zero transient surfaces, but SIXTEEN `NSAlert` sites** (chiefly
+     `JasCommands.swift`, plus `LayersPanel.swift` and `ContentView.swift`).
+     A modal alert is the WRONG SHAPE for this: it demands a click for a message
+     that should evaporate, and it is AppKit, which the iOS-readiness doctrine
+     keeps behind thin adapters. It is also Swift-only, so using it would make
+     the two ports diverge on a user-visible behaviour.
+
+   So the honest position is that the message is a **UI SUBSYSTEM** — in Rust it
+   would be built from nothing — not a detail this wave could have added. Three
+   things want settling before any code: the surface and its lifetime; whether a
+   refusal is the ONLY client (a one-client notification system is a liability);
+   and whether it is per-document or per-window.
+
+   **Blind spot of that measurement:** it is a name-based grep. A message
+   surface built under an unguessed name, or one living in a `.rsx`/SwiftUI
+   view without any of those words, would not have been found. No GUI was run.
+4. **The suffix separator is a SPACE** (`"Sky 2"`, matching §15.3's own
+   spelling). A document whose layers are already `"Sky"` and `"Sky 2"` by the
+   artist's own hand will therefore see a paste append into their `"Sky 2"`.
+   That is the walk working as designed, and it is also the one place where a
+   diverted paste lands in a layer the artist made for another purpose.
+
 ---
 
 ## 16. SELECT ALL SELECTS TOP-LEVEL OBJECTS. RULED 2026-07-28 (D2).

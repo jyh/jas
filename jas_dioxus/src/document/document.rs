@@ -441,6 +441,34 @@ impl Document {
         locked
     }
 
+    /// Is the ACTIVE layer — the one plain Paste targets — effectively locked?
+    ///
+    /// RULED by JYH 2026-07-28 (transcripts/LAYER_STRUCTURE.md §15): plain Paste
+    /// REFUSES into a locked active layer, because the artist picked that layer
+    /// explicitly and landing artwork elsewhere would silently override an
+    /// explicit choice.
+    ///
+    /// **THIS IS ONE DEFINITION SERVING TWO CONSUMERS, deliberately.** The
+    /// ENFORCEMENT reads it (`op_apply::active_paste_target`) and so does the
+    /// AFFORDANCE — it is the `active_document.active_layer_locked` menu
+    /// predicate that greys `paste` and `paste_in_place` out
+    /// (`workspace::menu_bar::build_menu_ctx`). A menu that greyed an item out
+    /// on one rule while the code refused on another would be worse than either
+    /// alone, and there is no second rule here to drift to.
+    ///
+    /// A document with NO LAYERS is not locked: there is nothing to protect, and
+    /// paste's own empty-document no-op is a different refusal with a different
+    /// cause. The out-of-range clamp mirrors `paste_fragment_into`'s.
+    ///
+    /// The twin is JasSwift `Document.activeLayerLocked`.
+    pub fn active_layer_locked(&self) -> bool {
+        if self.layers.is_empty() {
+            return false;
+        }
+        let active = self.selected_layer.min(self.layers.len() - 1);
+        self.effective_locked(&vec![active])
+    }
+
     /// Element-level behavior of the Layers tree LOCK button. Pure: takes a
     /// Document, returns a Document. The twin of `cycle_element_visibility_at`
     /// (still in the web-gated `interpreter::renderer`, where this lived until

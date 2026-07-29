@@ -219,13 +219,22 @@ actions:
       Preserving Layers", which is a separate command precisely so that the
       choice is always the artist's and never a remembered mode.
 
-      A layer that is locked or hidden is still a valid paste target and is
-      pasted into unchanged; the pasted artwork simply inherits that layer's
-      state, so a paste into a hidden layer will not appear until the layer is
-      shown. Pasting also leaves the target layer itself exactly as it was — its
-      lock, its visibility, its name and its identity are none of a paste's
-      business. Pasted objects keep the ids they were copied with. Disabled when
-      no document is open.
+      A LOCKED ACTIVE LAYER REFUSES THE PASTE ENTIRELY. Nothing appears, the
+      selection is untouched, and no undo step is recorded — the artist chose
+      that layer, and quietly landing their artwork somewhere else would
+      override an explicit choice, which is worse than declining to act. The
+      refusal is never silent: this command is DISABLED, and greyed out in the
+      Edit menu, for exactly as long as the active layer is locked, so the
+      artist sees the answer before reaching for the keyboard. Unlocking the
+      layer, or making a different layer active, restores it.
+
+      A HIDDEN layer is a different matter and is NOT protected. Hidden is a
+      statement about what is on screen, not about what may be edited, so a
+      hidden active layer is pasted into normally; the artwork simply will not
+      appear until the layer is shown. Pasting leaves the target layer itself
+      exactly as it was in either case — its lock, its visibility, its name and
+      its identity are none of a paste's business. Pasted objects keep the ids
+      they were copied with. Disabled when no document is open.
 
       WHAT PASTE ACTS ON is whatever the system clipboard holds at the moment
       the command runs, and nothing else. There is no hidden second clipboard
@@ -249,7 +258,7 @@ actions:
       undo step is recorded. Nothing on the clipboard means nothing to paste.
     category: edit
     tier: 3
-    enabled_when: "state.tab_count > 0"
+    enabled_when: "state.tab_count > 0 && !active_document.active_layer_locked"
     effects:
       - log: "paste: offset 24pt"
   paste_preserving_layers:
@@ -279,9 +288,37 @@ actions:
       therefore does its real work on artwork imported from elsewhere, which is
       where foreign layer structure exists to be preserved in the first place.
 
-      A matching layer that is locked or hidden is appended to unchanged: the
-      paste neither refuses nor unlocks nor reveals it. Pasted objects keep the
-      ids they were copied with.
+      A matching layer that is LOCKED is not written to, and this command does
+      not refuse either — it DIVERTS. The artwork lands in a sibling layer
+      taking the fragment's name plus a number: a locked "Sky" gives "Sky 2".
+      That is the one place this command's otherwise-verbatim naming does not
+      hold, and it is deliberate. The reasoning is that the artist asked for the
+      fragment's STRUCTURE, not for that particular layer — the layer was named
+      by the incoming artwork, not chosen by the artist — so serving what they
+      actually asked for means putting the artwork beside the locked layer
+      rather than declining to place it at all. Plain Paste refuses in the
+      mirror-image situation for the mirror-image reason: there the artist DID
+      choose the target.
+
+      If the numbered sibling already exists and is itself open, the artwork is
+      APPENDED to it rather than a further layer being made, so pasting the same
+      fragment twice gives one "Sky 2" holding both copies and not a "Sky 2" and
+      a "Sky 3". If the numbered sibling is locked too, the numbering continues
+      past it until an open or unused name is found.
+
+      A matching layer that is merely HIDDEN is appended to unchanged: the paste
+      neither refuses nor diverts nor reveals it, because hidden says what is on
+      screen and not what may be edited. Making a layer to avoid a hidden one
+      would manufacture structure to dodge a condition that protects nothing.
+
+      One case does refuse, and it is plain Paste's rule reaching in: objects the
+      fragment does not file under a named layer land in the ACTIVE layer, so if
+      the active layer is locked the whole paste is declined and nothing at all
+      is placed — not even the named layers that could have been diverted. A
+      paste that quietly dropped half of what was on the clipboard would be
+      worse than one that declines and lets the artist unlock and repeat.
+
+      Pasted objects keep the ids they were copied with.
 
       This command reads the same three kinds of clipboard content plain Paste
       reads, and treats the last two identically to it: plain text becomes a text
@@ -309,9 +346,16 @@ actions:
       original position, which is not one of the run's slots, so it neither
       advances the run nor restarts it: paste, paste in place, paste puts copies
       at 24, at the original, and at 48.
+
+      Because its target is plain Paste's, so is its answer to a LOCKED ACTIVE
+      LAYER: it refuses entirely and is disabled and greyed out for as long as
+      that layer is locked. Pasting in place is a choice about WHERE along the
+      page, never about which layer, so it cannot be a way around a lock the
+      plain command respects. A hidden active layer is pasted into normally,
+      exactly as with plain Paste.
     category: edit
     tier: 3
-    enabled_when: "state.tab_count > 0"
+    enabled_when: "state.tab_count > 0 && !active_document.active_layer_locked"
     effects:
       - log: "paste_in_place: offset 0"
   select_all:

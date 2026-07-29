@@ -1,0 +1,399 @@
+[
+  {
+    "_doc": [
+      "PASTE AND A LOCKED TARGET -- the cross-language family for",
+      "transcripts/LAYER_STRUCTURE.md 15 (RULED by JYH 2026-07-28).",
+      "",
+      "THE PRINCIPLE: refuse when the ARTIST chose the target, divert when the",
+      "FRAGMENT chose it.",
+      "  * Plain Paste (R2) targets the ACTIVE layer, which the artist picked.",
+      "    A locked active layer therefore REFUSES: nothing lands, the document",
+      "    is byte-identical, and no undo step is recorded.",
+      "  * Preserving Paste (R3) targets a layer the INCOMING FRAGMENT named.",
+      "    A locked target DIVERTS to a numerically suffixed sibling -- 'Sky'",
+      "    locked gives 'Sky 2' -- because the artist asked for STRUCTURE, not",
+      "    for that particular layer.",
+      "  * HIDDEN IS NOT LOCKED. Hidden is a visibility state, not a protection,",
+      "    so a hidden target is appended to normally and the artist unhides.",
+      "    The asymmetry with lock is deliberate.",
+      "",
+      "WHY THIS FAMILY COULD NOT EXIST BEFORE 2026-07-28: every case is seeded",
+      "from a setup_svg, and until LOCKSVG (13.1) the SVG codec dropped",
+      "`common.locked` in both active ports. paste_layers.json's own _doc still",
+      "records 'WHAT THIS FAMILY CANNOT REACH: appending into a LOCKED or HIDDEN",
+      "matching layer ... no setup_svg can produce a locked layer'. jas:locked",
+      "retired that sentence and this family is what replaces it.",
+      "",
+      "THE THREE SETUP DOCUMENTS (SVG px -> document pt is x3/4):",
+      "  paste_locked_active_layer.svg   [0] 'Sky' LOCKED and ACTIVE, [1] 'Ground'",
+      "  paste_locked_named_layer.svg    [0] 'Ground' ACTIVE, [1] 'Sky' LOCKED,",
+      "                                  [2] 'Sky 2' open -- the suffix already taken",
+      "  paste_hidden_named_layer.svg    [0] 'Ground' ACTIVE, [1] 'Sky', both open;",
+      "                                  visibility does NOT survive SVG in either",
+      "                                  port, so the hidden state is produced by",
+      "                                  driving select_element + hide_selection",
+      "                                  rather than seeded",
+      "",
+      "HOW THE GOLDENS ARE IMPLEMENTATION-INDEPENDENT, which is what let this",
+      "family go RED IN BOTH PORTS AT ONCE. Not one golden here was generated",
+      "from the behaviour it is meant to pin:",
+      "  * every REFUSAL points at its own family's SETUP golden by FILE",
+      "    IDENTITY, so 'the document is unchanged' is asserted against the",
+      "    document itself and cannot drift into a golden that merely looks",
+      "    unchanged;",
+      "  * every DIVERT points at a CONTROL case's golden by file identity. The",
+      "    control pastes a fragment layer literally named 'Sky 2' into the same",
+      "    setup, which is behaviour this ruling does not touch. So the divert is",
+      "    pinned as an EQUATION -- diverting from a locked 'Sky' must produce",
+      "    exactly what naming the sibling outright would have produced -- rather",
+      "    than as a snapshot of the code that implements it.",
+      "",
+      "WHAT THIS FAMILY DOES NOT REACH. The refusal's VISIBLE half: `paste` and",
+      "`paste_in_place` now carry `!active_document.active_layer_locked` in their",
+      "`enabled_when`, and that is watched by the menu_state corpus, not here. An",
+      "ACTIVE message on top of the greyed item is NOT built and NOT decided --",
+      "see 15.4."
+    ],
+    "name": "paste_locked_family_setup_is_a_locked_active_sky_over_an_open_ground",
+    "setup_svg": "paste_locked_active_layer.svg",
+    "txns": [],
+    "expected_json": "paste_locked_setup_expected.json"
+  },
+  {
+    "_doc": "THE HEADLINE REFUSAL. R2 targets the ACTIVE layer, which is locked. Nothing lands. The golden is the SETUP golden, by file identity.",
+    "name": "plain_paste_into_a_locked_active_layer_refuses_and_changes_nothing",
+    "setup_svg": "paste_locked_active_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></svg>"
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_setup_expected.json"
+  },
+  {
+    "_doc": "paste_in_place is plain Paste's targeting at offset 0 (actions.yaml: 'Layer targeting is plain Paste's'), so it refuses too. Without this the keyboard shortcut walks straight past the greyed menu item.",
+    "name": "paste_in_place_into_a_locked_active_layer_refuses_too",
+    "setup_svg": "paste_locked_active_layer.svg",
+    "txns": [
+      {
+        "name": "paste_in_place",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 0.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></svg>"
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_setup_expected.json"
+  },
+  {
+    "_doc": "The PRODUCTION payload path. Plain text becomes a Text element in the ACTIVE layer, so a locked active layer refuses that too -- a guard on the SVG body alone would leave this hole open, and this is the param production actually reads.",
+    "name": "paste_clipboard_text_into_a_locked_active_layer_refuses",
+    "setup_svg": "paste_locked_active_layer.svg",
+    "txns": [
+      {
+        "name": "paste_text",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "text": "a locked layer must refuse this"
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_setup_expected.json"
+  },
+  {
+    "_doc": "R3 with an UNNAMED fragment layer degenerates to R2, so its target is the ACTIVE layer -- the artist's choice -- and it refuses. Preserve mode is not an escape hatch from the lock.",
+    "name": "preserving_paste_of_an_unnamed_fragment_refuses_when_the_active_layer_is_locked",
+    "setup_svg": "paste_locked_active_layer.svg",
+    "txns": [
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></svg>",
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_setup_expected.json"
+  },
+  {
+    "_doc": "ATOMICITY. A fragment carrying a divertible named layer AND a loose element that would land in the locked active layer refuses WHOLESALE. The 'Sky 2' sibling must NOT appear: a partial paste that silently drops the loose half is worse than declining, and the artist can unlock and repeat.",
+    "name": "preserving_paste_refuses_wholesale_when_any_entry_targets_the_locked_active_layer",
+    "setup_svg": "paste_locked_active_layer.svg",
+    "txns": [
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Sky\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></g><rect x=\"48\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,255,0)\" stroke=\"none\"/></svg>",
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_setup_expected.json"
+  },
+  {
+    "_doc": "THE CONTROL for the divert below. A fragment layer literally named 'Sky 2' is a name this document lacks, so R3 CREATES it, verbatim, at the end of the layer list. Behaviour this ruling does not touch -- which is exactly why the divert can be pinned against it.",
+    "name": "control_preserving_paste_of_a_layer_named_sky_2_creates_it_verbatim",
+    "setup_svg": "paste_locked_active_layer.svg",
+    "txns": [
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Sky 2\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></g></svg>",
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_created_sibling_expected.json"
+  },
+  {
+    "_doc": "THE HEADLINE DIVERT. The fragment names 'Sky'; the document's 'Sky' is LOCKED. R3 diverts to 'Sky 2' -- and must produce EXACTLY the document the control above produced from a fragment that named 'Sky 2' outright. Shared golden, so the two can never drift apart.",
+    "name": "preserving_paste_of_a_locked_named_layer_diverts_to_a_numeric_sibling",
+    "setup_svg": "paste_locked_active_layer.svg",
+    "txns": [
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Sky\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></g></svg>",
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_created_sibling_expected.json"
+  },
+  {
+    "_doc": "The refusal is TARGET-SCOPED, not document-scoped. 'Ground' is open, so a fragment naming it appends normally even though the ACTIVE layer of this same document is locked.",
+    "name": "preserving_paste_of_an_open_named_layer_appends_although_the_active_layer_is_locked",
+    "setup_svg": "paste_locked_active_layer.svg",
+    "txns": [
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Ground\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></g></svg>",
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_ground_append_expected.json"
+  },
+  {
+    "_doc": "Setup for the suffix-already-taken vectors: 'Ground' is ACTIVE and open, 'Sky' is LOCKED, and 'Sky 2' ALREADY EXISTS and is open.",
+    "name": "paste_locked_sibling_family_setup_has_sky_locked_and_sky_2_already_present",
+    "setup_svg": "paste_locked_named_layer.svg",
+    "txns": [],
+    "expected_json": "paste_locked_sibling_setup_expected.json"
+  },
+  {
+    "_doc": "THE ANTI-BLANKET VECTOR. A locked layer elsewhere in the document must not stop a plain paste into an OPEN active layer. Without this case a guard that refused every paste in a document containing any lock would stay green.",
+    "name": "plain_paste_into_an_open_active_layer_still_lands_although_another_layer_is_locked",
+    "setup_svg": "paste_locked_named_layer.svg",
+    "txns": [
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></svg>"
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_open_active_append_expected.json"
+  },
+  {
+    "_doc": "THE CONTROL for the append-into-an-existing-sibling divert below: a fragment layer named 'Sky 2' matches the layer already there and APPENDS. Untouched by this ruling.",
+    "name": "control_preserving_paste_of_a_layer_named_sky_2_appends_into_the_existing_one",
+    "setup_svg": "paste_locked_named_layer.svg",
+    "txns": [
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Sky 2\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></g></svg>",
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_existing_sibling_append_expected.json"
+  },
+  {
+    "_doc": "THE SUFFIX WALK, and the reason it is a WALK rather than a mint. 'Sky' is locked, so the divert looks at 'Sky 2' -- which already exists and is OPEN, so the artwork APPENDS into it and NO new layer is created. Minting 'Sky 3' instead would make every repeat of one paste manufacture another layer, which is the proliferation the verbatim-naming rule exists to avoid.",
+    "name": "preserving_paste_of_a_locked_named_layer_appends_into_the_existing_numeric_sibling",
+    "setup_svg": "paste_locked_named_layer.svg",
+    "txns": [
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Sky\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></g></svg>",
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_existing_sibling_append_expected.json"
+  },
+  {
+    "_doc": "THE CONTROL for the collapse below: two fragment layers both named 'Sky 2' land together in the one 'Sky 2', because matching is against the WORKING document.",
+    "name": "control_two_fragment_layers_named_sky_2_collapse_into_the_one_sibling",
+    "setup_svg": "paste_locked_named_layer.svg",
+    "txns": [
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Sky 2\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></g><g inkscape:groupmode=\"layer\" inkscape:label=\"Sky 2\"><rect x=\"48\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,255,0)\" stroke=\"none\"/></g></svg>",
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_two_into_sibling_expected.json"
+  },
+  {
+    "_doc": "Two fragment layers both named 'Sky', whose document layer is LOCKED, must both divert to the SAME sibling rather than producing 'Sky 2' and 'Sky 3'. Shared golden with the control above.",
+    "name": "two_fragment_layers_of_one_locked_name_collapse_into_one_sibling",
+    "setup_svg": "paste_locked_named_layer.svg",
+    "txns": [
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Sky\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></g><g inkscape:groupmode=\"layer\" inkscape:label=\"Sky\"><rect x=\"48\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,255,0)\" stroke=\"none\"/></g></svg>",
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_locked_two_into_sibling_expected.json"
+  },
+  {
+    "_doc": "Setup for the HIDDEN vectors: 'Sky' at [1] is hidden by driving the production seam (select_element then hide_selection) because visibility does not survive the SVG codec in either port. It is hidden, and it is NOT locked.",
+    "name": "paste_hidden_family_setup_hides_sky_without_locking_it",
+    "setup_svg": "paste_hidden_named_layer.svg",
+    "txns": [
+      {
+        "name": "hide_layer",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              1
+            ]
+          },
+          {
+            "op": "hide_selection"
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_hidden_setup_expected.json"
+  },
+  {
+    "_doc": "HIDDEN IS NOT LOCKED, on the R3 path. The named target is hidden, so the fragment is APPENDED INTO IT -- no divert, no new layer, and its visibility is left invisible for the artist to unhide. Diverting here would manufacture a layer to avoid a condition that protects nothing.",
+    "name": "preserving_paste_of_a_hidden_named_layer_appends_into_it_and_creates_nothing",
+    "setup_svg": "paste_hidden_named_layer.svg",
+    "txns": [
+      {
+        "name": "hide_layer",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              1
+            ]
+          },
+          {
+            "op": "hide_selection"
+          }
+        ]
+      },
+      {
+        "name": "paste_preserving_layers",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Sky\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></g></svg>",
+            "preserve_layers": true
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_hidden_named_append_expected.json"
+  },
+  {
+    "_doc": "HIDDEN IS NOT LOCKED, on the R2 path. The ACTIVE layer is hidden; a plain paste lands in it normally and simply will not be visible until the artist shows the layer.",
+    "name": "plain_paste_into_a_hidden_active_layer_appends_normally",
+    "setup_svg": "paste_hidden_named_layer.svg",
+    "txns": [
+      {
+        "name": "hide_layer",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0
+            ]
+          },
+          {
+            "op": "hide_selection"
+          }
+        ]
+      },
+      {
+        "name": "paste",
+        "ops": [
+          {
+            "op": "paste",
+            "offset": 24.0,
+            "svg": "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"16\" width=\"16\" height=\"16\" fill=\"rgb(255,0,0)\" stroke=\"none\"/></svg>"
+          }
+        ]
+      }
+    ],
+    "expected_json": "paste_hidden_active_append_expected.json"
+  }
+]

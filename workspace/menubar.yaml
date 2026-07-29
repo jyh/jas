@@ -32,10 +32,17 @@ menubar:
           enabled_when: "active_document.has_selection" }
       - { id: menu_copy,           label: "&Copy",           action: copy,           shortcut: "Ctrl+C",
           enabled_when: "active_document.has_selection" }
+      # THE REFUSAL, MADE VISIBLE (LAYER_STRUCTURE.md 15.4, RULED 2026-07-28).
+      # Both of these paste into the ACTIVE layer, which the artist chose, so a
+      # locked one makes them refuse. Greying them out is what keeps that
+      # refusal from being a silent no-op: the artist sees the answer instead of
+      # pressing Ctrl+V and watching nothing happen. Paste, Preserving Layers is
+      # deliberately NOT greyed -- it DIVERTS around a locked layer rather than
+      # refusing, so it remains available and is the way through.
       - { id: menu_paste,          label: "&Paste",          action: paste,          shortcut: "Ctrl+V",
-          enabled_when: "state.tab_count > 0" }
+          enabled_when: "state.tab_count > 0 && !active_document.active_layer_locked" }
       - { id: menu_paste_in_place, label: "Paste in &Place", action: paste_in_place, shortcut: "Ctrl+Shift+V",
-          enabled_when: "state.tab_count > 0" }
+          enabled_when: "state.tab_count > 0 && !active_document.active_layer_locked" }
       # Menu-only, no chord: see workspace/shortcuts.yaml. R3 is an explicit
       # command by design, so the menu is the whole of its surface.
       - { id: menu_paste_preserving_layers, label: "Paste, Preserving &Layers", action: paste_preserving_layers,

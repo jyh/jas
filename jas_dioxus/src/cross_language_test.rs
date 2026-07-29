@@ -994,7 +994,8 @@ mod tests {
                          "operations/lock_inheritance.json",
                          "operations/lock_toggle_no_materialization.json",
                          "operations/select_all_top_level.json",
-                         "operations/paste_layers.json"] {
+                         "operations/paste_layers.json",
+                         "operations/paste_locked_layers.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
@@ -3644,6 +3645,29 @@ mod tests {
     #[test]
     fn operation_select_all_top_level() {
         run_operation_fixture("operations/select_all_top_level.json");
+    }
+
+    /// PASTE AND A LOCKED TARGET — transcripts/LAYER_STRUCTURE.md §15 (RULED by
+    /// JYH 2026-07-28): **refuse when the ARTIST chose the target, divert when
+    /// the FRAGMENT chose it.** Plain Paste targets the ACTIVE layer, so a
+    /// locked one refuses; preserving Paste targets a layer the fragment named,
+    /// so a locked one diverts to `"Sky" → "Sky 2"`. Hidden is NOT locked and is
+    /// appended into normally.
+    ///
+    /// It is the family `paste_layers.json` said it could not be: that file's
+    /// own `_doc` records "WHAT THIS FAMILY CANNOT REACH: appending into a
+    /// LOCKED or HIDDEN matching layer … no `setup_svg` can produce a locked
+    /// layer". `jas:locked` (§13.1) retired that sentence.
+    ///
+    /// EVERY GOLDEN HERE IS IMPLEMENTATION-INDEPENDENT, which is what let the
+    /// family go red in both ports at once. A refusal points at its own family's
+    /// SETUP golden by file identity; a divert points at a CONTROL case that
+    /// pastes a fragment layer literally named `"Sky 2"`, which this ruling does
+    /// not touch — so the divert is pinned as an EQUATION rather than as a
+    /// snapshot of the code that implements it.
+    #[test]
+    fn operation_paste_locked_layers() {
+        run_operation_fixture("operations/paste_locked_layers.json");
     }
 
     /// WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES — D4/D5, ratified
