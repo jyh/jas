@@ -4824,6 +4824,81 @@ mod tests {
         assert!(paths.contains(&vec![0, 1]));
     }
 
+    /// §19 (RULED 2026-07-28, JYH: *"yes document order"*) — the selection a
+    /// DUPLICATE leaves behind is in document order, and it names the COPIES.
+    ///
+    /// Four rects a b c d; duplicate the NON-CONTIGUOUS pair b=[0,1] and
+    /// d=[0,3] with dx=6. The descending walk is load-bearing and stays
+    /// (inserting after [0,1] shifts [0,3]), so the document that comes out is
+    ///
+    ///     [0,0] a@0   [0,1] b@10   [0,2] b'@16   [0,3] c@20   [0,4] d@30   [0,5] d'@36
+    ///
+    /// and the two COPIES are at [0,2] and [0,5].
+    ///
+    /// **This assertion is deliberately over-specified relative to §19**, and
+    /// that is the point: the byproduct loop pushed `[0,4]` and `[0,2]`, and
+    /// `[0,4]` is not merely mis-ORDERED — after the later insertion at [0,1]
+    /// shifted everything above it, `[0,4]` names **d, the SOURCE**. Sorting
+    /// stale paths yields a tidy ascending list of the wrong elements, so a
+    /// test asserting only "ascending" would pass on a half-fix. Both the
+    /// order and the identity are pinned here, by path AND by geometry.
+    #[test]
+    fn copy_selection_of_two_elements_selects_both_copies_in_document_order() {
+        let mut model = Model::default();
+        for i in 0..4 {
+            Controller::add_element(
+                &mut model,
+                make_rect(i as f64 * 10.0, 0.0, 5.0, 5.0),
+            );
+        }
+        Controller::set_selection(
+            &mut model,
+            vec![
+                ElementSelection::all(vec![0, 1]),
+                ElementSelection::all(vec![0, 3]),
+            ],
+        );
+        Controller::copy_selection(&mut model, 6.0, 0.0);
+
+        // The document grew by exactly the two copies, in document order.
+        let doc = model.document();
+        let xs: Vec<f64> = doc.layers[0]
+            .children()
+            .unwrap()
+            .iter()
+            .map(|c| match &**c {
+                Element::Rect(r) => r.x,
+                other => panic!("expected a Rect, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(xs, vec![0.0, 10.0, 16.0, 20.0, 30.0, 36.0], "document order");
+
+        // ORDER: ascending, i.e. document order — NOT the descending byproduct.
+        let paths: Vec<Vec<usize>> =
+            doc.selection.iter().map(|es| es.path.clone()).collect();
+        assert_eq!(
+            paths,
+            vec![vec![0, 2], vec![0, 5]],
+            "the duplicate must leave its selection in DOCUMENT order",
+        );
+
+        // IDENTITY: both selected paths must name the OFFSET copies (x=16, 36),
+        // never a source (x=10, 30). This is the half a sort alone cannot fix.
+        let selected_xs: Vec<f64> = doc
+            .selection
+            .iter()
+            .map(|es| match doc.get_element(&es.path).unwrap() {
+                Element::Rect(r) => r.x,
+                other => panic!("expected a Rect, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            selected_xs,
+            vec![16.0, 36.0],
+            "the selection must name the two COPIES, not a source",
+        );
+    }
+
     #[test]
     fn assign_id_stamps_id_at_path() {
         // assign_id stamps the carried id onto the element at the path;
