@@ -1153,10 +1153,22 @@ private func clickAndCapture(_ tool: TypeOnPathTool, _ ctx: ToolContext,
     #expect(model.currentEditSession != nil)
 }
 
-/// The DEPTH twin of the discriminator: this port's 3-deep search must still
-/// find an unlocked grandchild. If a ruling on Q3 adopts Rust's 2-deep walk,
-/// THIS is the test that goes red and says the behaviour changed out loud.
-@Test func typeOnPathStillConvertsAnUnlockedGroupedPath() {
+// MARK: - Type-on-path SEARCH DEPTH — PROBES OF UNRULED BEHAVIOUR
+//
+// These two pin what this port does TODAY. They are NOT a ruling, and nothing
+// here should be read as one. seat/fleet/SCOPE-lock-immutable.md §8 Q3 asks
+// which depth is canonical, and the question is open. Their job is to make a
+// ruling VISIBLE: whichever way it lands, one of them turns red and says the
+// behaviour changed out loud, instead of a silent drift.
+//
+// Measured, both ports, at the time of writing:
+//   Rust  hit_test_path_curve   layer children only        (2-deep)
+//   Swift hitTestPathCurve      one level into Groups      (3-deep, exactly)
+// The Rust twin carries the mirror-image probe.
+
+/// This port's 3-deep search DOES reach a path inside one Group.
+/// The Rust twin asserts the opposite for the same document. UNRULED.
+@Test func probeTypeOnPathReachesAPathOneGroupDeep_UNRULED() {
     let model = Model()
     model.setDocumentForTest(Document(layers: [
         Layer(name: "L", children: [.group(Group(children: [.path(hLine())]))])
@@ -1164,5 +1176,24 @@ private func clickAndCapture(_ tool: TypeOnPathTool, _ ctx: ToolContext,
     let (ctx, _) = makeLiveHitCtx(model)
     let tool = TypeOnPathTool()
     let (before, after) = clickAndCapture(tool, ctx, model, 100, 100)
-    #expect(before != after, "an UNLOCKED grouped path must still convert at this port's depth")
+    #expect(before != after, "an UNLOCKED grouped path converts at this port's depth")
+}
+
+/// …and STOPS there. This port's walk is not a recursion — it is the child
+/// loop with one hand-unrolled level, so a path two Groups deep is unreachable
+/// here too. That is the finding worth a ruling: this port's depth is not the
+/// house's `hit_test` (2-deep) NOR its `hit_test_deep` (unbounded), but a third
+/// number that no rule names. Both this port's own Type tool
+/// (`TypeTool.hitTestText`) and Rust's recurse without limit.
+@Test func probeTypeOnPathDoesNotReachAPathTwoGroupsDeep_UNRULED() {
+    let model = Model()
+    model.setDocumentForTest(Document(layers: [
+        Layer(name: "L", children: [
+            .group(Group(children: [.group(Group(children: [.path(hLine())]))]))
+        ])
+    ]))
+    let (ctx, _) = makeLiveHitCtx(model)
+    let tool = TypeOnPathTool()
+    let (before, after) = clickAndCapture(tool, ctx, model, 100, 100)
+    #expect(before == after, "the walk stops at one Group — hand-unrolled, not recursive")
 }

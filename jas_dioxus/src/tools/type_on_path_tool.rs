@@ -1205,4 +1205,52 @@ mod tests {
         assert_ne!(before, after, "an UNLOCKED path must still convert");
         assert!(tool.session.is_some());
     }
+
+    // ===================================================================
+    // SEARCH DEPTH — A PROBE OF UNRULED BEHAVIOUR
+    //
+    // This pins what this port does TODAY. It is NOT a ruling, and nothing
+    // here should be read as one. `seat/fleet/SCOPE-lock-immutable.md` §8 Q3
+    // asks which depth is canonical and the question is open. Its job is to
+    // make a ruling VISIBLE: whichever way it lands, this test turns red and
+    // says the behaviour changed out loud, instead of drifting silently.
+    //
+    // Measured, both ports:
+    //   Rust  `hit_test_path_curve`  layer children only     (2-deep)
+    //   Swift `hitTestPathCurve`     one level into Groups   (3-deep, exactly)
+    // The Swift twin carries the mirror-image probes.
+    // ===================================================================
+
+    /// This port's 2-deep search does NOT reach a path inside a Group; the
+    /// Swift twin asserts the opposite for the same document. UNRULED.
+    ///
+    /// Worth a ruling because neither number is arbitrary elsewhere in the
+    /// house: `doc_primitives::hit_test` is deliberately 2-deep (it answers
+    /// "which OBJECT did I click", the shape §16 ruled for Select All) and
+    /// `hit_test_deep` recurses without limit. This tool's sibling — the Type
+    /// tool's `hit_test_text` at `type_tool.rs:123` — recurses without limit in
+    /// BOTH ports. So the two type tools disagree with each other inside this
+    /// very port, and Swift's Type-on-Path picks a third depth that no rule
+    /// names.
+    #[test]
+    fn probe_type_on_path_does_not_reach_a_path_one_group_deep_unruled() {
+        use crate::geometry::element::GroupElem;
+        let mut tool = TypeOnPathTool::new();
+        let mut model = model_with_path();
+        // Re-wrap the existing path in a Group, leaving geometry untouched.
+        let mut doc = model.document().clone();
+        if let Some(children) = doc.layers[0].children_mut() {
+            let inner = children.pop().unwrap();
+            children.push(Rc::new(Element::Group(GroupElem {
+                children: vec![inner],
+                common: CommonProps::default(),
+                isolated_blending: false,
+                knockout_group: false,
+            })));
+        }
+        model.set_document_for_test(doc);
+        let (before, after) = click_and_capture(&mut tool, &mut model, 100.0, 100.0);
+        assert_eq!(before, after, "this port's walk stops at layer children");
+        assert!(tool.session.is_none());
+    }
 }
