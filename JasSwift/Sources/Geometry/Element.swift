@@ -1961,6 +1961,47 @@ public func withMask(_ element: Element, mask: Mask?) -> Element {
     }
 }
 
+/// Return a copy of `element` with the Opacity panel's two page-level
+/// blending flags replaced. Only Group and Layer carry them; every other kind
+/// is returned unchanged, exactly as `withWidthPoints` leaves the ten kinds
+/// that have no width profile alone.
+///
+/// CLONE-THEN-MUTATE, deliberately (`var v = element; v.field = ...`). The
+/// alternative — rebuilding `Group(children:…)` / `Layer(name:…)` with the two
+/// flags added to the argument list — is the Swift copy-site omission class
+/// that has been found five times in this repository: it creates a site whose
+/// correctness is a list somebody has to keep current. Here every field except
+/// the two named is preserved structurally.
+public func withContainerBlendFlags(_ element: Element,
+                                    isolatedBlending: Bool,
+                                    knockoutGroup: Bool) -> Element {
+    switch element {
+    case .group(var v):
+        v.isolatedBlending = isolatedBlending
+        v.knockoutGroup = knockoutGroup
+        return .group(v)
+    case .layer(var v):
+        v.isolatedBlending = isolatedBlending
+        v.knockoutGroup = knockoutGroup
+        return .layer(v)
+    default:
+        return element
+    }
+}
+
+/// The Opacity panel's two page-level blending flags, or `(false, false)` for
+/// a kind that cannot carry them. The read half of
+/// ``withContainerBlendFlags(_:isolatedBlending:knockoutGroup:)``; both codecs
+/// that write the flags go through it so neither has to re-derive which kinds
+/// have them.
+public func containerBlendFlags(_ element: Element) -> (isolatedBlending: Bool, knockoutGroup: Bool) {
+    switch element {
+    case .group(let v): return (v.isolatedBlending, v.knockoutGroup)
+    case .layer(let v): return (v.isolatedBlending, v.knockoutGroup)
+    default: return (false, false)
+    }
+}
+
 /// Return a copy of `element` with width points replaced.
 /// Only Line and Path support width points; others returned unchanged.
 public func withWidthPoints(_ element: Element, widthPoints: [StrokeWidthPoint]) -> Element {
@@ -3242,7 +3283,7 @@ public struct Layer: Equatable {
                 knockoutGroup: Bool = false,
                 mask: Mask? = nil,
                 id: String? = nil) {
-        self.name = (name?.isEmpty == true) ? nil : name
+        self.name = Layer.normalizedName(name)
         self.id = id
         self.children = children
         self.opacity = opacity; self.transform = transform
@@ -3339,12 +3380,36 @@ extension Group {
 }
 
 extension Layer {
+    /// The empty layer name means UNNAMED, everywhere. Owned here so the
+    /// memberwise init and ``withName(_:)`` cannot drift apart.
+    static func normalizedName(_ name: String?) -> String? {
+        (name?.isEmpty == true) ? nil : name
+    }
+
     public func withId(_ id: String?) -> Layer {
         var v = self; v.id = id; return v
     }
 
     public func withChildren(_ children: [Element]) -> Layer {
         var v = self; v.children = children; return v
+    }
+
+    /// Clone-then-mutate single-field writes, so a caller that wants to change
+    /// a layer's name / lock / visibility never has to spell out an argument
+    /// list against an 11-field struct. Every such rebuild that existed before
+    /// these was silently dropping `id`, `blendMode`, `mask` and both opacity
+    /// flags (the Swift copy-site omission class); see `CopySiteOmissionTests`
+    /// and `scripts/check_swift_copy_sites.py`.
+    public func withName(_ name: String?) -> Layer {
+        var v = self; v.name = Layer.normalizedName(name); return v
+    }
+
+    public func withLocked(_ locked: Bool) -> Layer {
+        var v = self; v.locked = locked; return v
+    }
+
+    public func withVisibility(_ visibility: Visibility) -> Layer {
+        var v = self; v.visibility = visibility; return v
     }
 }
 

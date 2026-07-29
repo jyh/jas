@@ -1,0 +1,162 @@
+{
+  "_doc": [
+    "A SATURATED SETUP DOCUMENT for the preservation corpus, in canonical test",
+    "JSON rather than SVG.",
+    "",
+    "WHY NOT AN SVG, like every other vector's setup. The SVG codec has no",
+    "counterpart for a mask, a blend mode or a stroke alignment, and no port",
+    "writes a jas: extension for the two gradients, the stroke brush or the",
+    "width profile (test_fixtures/expected/codec_field_survival.json, `svg`",
+    "column). preservation_nested_attrs.svg says so in its own header: 'Deliberately",
+    "NOT set: mask, blendMode ... the SVG reader populates none of them, so writing",
+    "them here would produce a fixture that silently asserts nothing.' A corpus",
+    "whose only door is SVG can therefore never place a mask or a blend mode on a",
+    "BYSTANDER -- which is precisely the class transcripts/EDIT_SEMANTICS_FREEZE.md",
+    "T4 exists to watch, and precisely what Swift's container rebuilds destroy.",
+    "The canonical test JSON is the codec that now carries all twelve, so it is",
+    "the door that can express the setup the law needs.",
+    "",
+    "WHAT IS SATURATED, and for whose sake:",
+    "  grp_masked  -- a CONTAINER bystander carrying a mask (with an inverted,",
+    "                 unlinked, transformed subtree) and a blend mode. It is the",
+    "                 shape of Swift's `withChildren` / inline-container-literal",
+    "                 class: rebuild the group to reach the child inside it and",
+    "                 the mask and mode go with it.",
+    "  p_dashed    -- a LEAF bystander carrying every remaining watched field:",
+    "                 blend mode, tool origin, fill rule, an inside-aligned dashed",
+    "                 stroke with anchor alignment and a non-default miter limit,",
+    "                 a width profile, a stroke brush and its overrides, and both",
+    "                 gradients.",
+    "  msk_rect    -- the mask's own artwork. It is NOT a document element (the",
+    "                 invariant walk does not descend into `mask`), so it is",
+    "                 compared as part of grp_masked's attribute blob.",
+    "",
+    "The vector that uses this file names `bystander_fields_present`, so a setup",
+    "that silently decayed to defaults reds the gate instead of passing on",
+    "nothing -- the document-level form of section 3.1's anti-vacuity guard.",
+    "",
+    "STOP COLOURS ARE RGB HEX-EXPRESSIBLE, deliberately: jas_dioxus holds a",
+    "gradient stop colour as a Color and JasSwift as a `#rrggbb` String, so a",
+    "shared fixture can only carry what BOTH can hold."
+  ],
+  "layers": [
+    {
+      "type": "layer",
+      "id": "lyr_main",
+      "name": "Main Layer",
+      "locked": false,
+      "opacity": 0.9,
+      "transform": null,
+      "visibility": "preview",
+      "children": [
+        {
+          "type": "group",
+          "id": "grp_masked",
+          "name": "Masked Group",
+          "locked": false,
+          "opacity": 0.8,
+          "transform": null,
+          "visibility": "preview",
+          "mode": "multiply",
+          "mask": {
+            "clip": true,
+            "disabled": false,
+            "invert": true,
+            "linked": false,
+            "unlink_transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 9.0, "f": 9.0},
+            "subtree": {
+              "type": "rect",
+              "id": "msk_rect",
+              "name": null,
+              "locked": false,
+              "opacity": 1.0,
+              "transform": null,
+              "visibility": "preview",
+              "x": 1.0, "y": 2.0, "width": 3.0, "height": 4.0, "rx": 0.0, "ry": 0.0,
+              "fill": {"color": {"a": 1.0, "b": 1.0, "g": 1.0, "r": 1.0, "space": "rgb"}, "opacity": 1.0},
+              "stroke": null
+            }
+          },
+          "children": [
+            {
+              "type": "rect",
+              "id": "r_target",
+              "name": "Target Rect",
+              "locked": false,
+              "opacity": 1.0,
+              "transform": null,
+              "visibility": "preview",
+              "x": 0.0, "y": 0.0, "width": 20.0, "height": 20.0, "rx": 0.0, "ry": 0.0,
+              "fill": {"color": {"a": 1.0, "b": 0.0, "g": 0.0, "r": 1.0, "space": "rgb"}, "opacity": 1.0},
+              "stroke": null
+            }
+          ]
+        },
+        {
+          "type": "path",
+          "id": "p_dashed",
+          "name": "Dashed Bystander",
+          "locked": false,
+          "opacity": 1.0,
+          "transform": null,
+          "visibility": "preview",
+          "mode": "screen",
+          "tool_origin": "blob_brush",
+          "fill_rule": "evenodd",
+          "d": [
+            {"cmd": "M", "x": 100.0, "y": 100.0},
+            {"cmd": "L", "x": 160.0, "y": 100.0},
+            {"cmd": "L", "x": 160.0, "y": 160.0},
+            {"cmd": "Z"}
+          ],
+          "fill": {"color": {"a": 1.0, "b": 0.0, "g": 1.0, "r": 0.0, "space": "rgb"}, "opacity": 1.0},
+          "stroke": {
+            "color": {"a": 1.0, "b": 0.0, "g": 0.0, "r": 0.0, "space": "rgb"},
+            "linecap": "round",
+            "linejoin": "bevel",
+            "opacity": 0.75,
+            "width": 4.5,
+            "align": "inside",
+            "dash_pattern": [3.0, 1.5, 6.0, 0.75],
+            "dash_align_anchors": true,
+            "miter_limit": 7.5
+          },
+          "width_points": [
+            {"t": 0.0, "width_left": 1.0, "width_right": 2.0},
+            {"t": 1.0, "width_left": 3.0, "width_right": 4.0}
+          ],
+          "stroke_brush": "basic/calligraphic_5",
+          "stroke_brush_overrides": "{\"angle\":30}",
+          "fill_gradient": {
+            "angle": 45.0,
+            "aspect_ratio": 200.0,
+            "dither": true,
+            "method": "smooth",
+            "nodes": [],
+            "stops": [
+              {"color": {"a": 1.0, "b": 0.0, "g": 0.0, "r": 1.0, "space": "rgb"}, "location": 0.0, "midpoint_to_next": 25.0, "opacity": 100.0},
+              {"color": {"a": 1.0, "b": 1.0, "g": 0.0, "r": 0.0, "space": "rgb"}, "location": 100.0, "midpoint_to_next": 50.0, "opacity": 50.0}
+            ],
+            "stroke_sub_mode": "along",
+            "type": "radial"
+          },
+          "stroke_gradient": {
+            "angle": 0.0,
+            "aspect_ratio": 100.0,
+            "dither": false,
+            "method": "classic",
+            "nodes": [],
+            "stops": [
+              {"color": {"a": 1.0, "b": 0.0, "g": 0.0, "r": 0.0, "space": "rgb"}, "location": 0.0, "midpoint_to_next": 50.0, "opacity": 100.0},
+              {"color": {"a": 1.0, "b": 1.0, "g": 1.0, "r": 1.0, "space": "rgb"}, "location": 100.0, "midpoint_to_next": 50.0, "opacity": 100.0}
+            ],
+            "stroke_sub_mode": "within",
+            "type": "linear"
+          }
+        }
+      ]
+    }
+  ],
+  "selected_layer": 0,
+  "selection": []
+}

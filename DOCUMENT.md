@@ -152,7 +152,7 @@ Every element carries these properties:
 |----------|------|---------|-------------|
 | `opacity` | float | 1.0 | Opacity from 0.0 (transparent) to 1.0 (opaque) |
 | `transform` | Transform or nil | nil | Optional 2D affine transform |
-| `locked` | bool | false | If true, the element cannot be selected or edited |
+| `locked` | bool | false | If true, the element cannot be selected or edited. Persists to SVG as `jas:locked="true"` (namespace `urn:jas:1`), written only when true; see `transcripts/LAYER_STRUCTURE.md` §13.1 |
 
 ---
 

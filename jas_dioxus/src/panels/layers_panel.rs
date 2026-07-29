@@ -139,7 +139,6 @@ mod tests {
             layers_search_query: String::new(),
             layers_isolation_stack: Vec::new(),
             layers_solo_state: None,
-            layers_saved_lock_states: std::collections::HashMap::new(),
             layers_hidden_types: std::collections::HashSet::new(),
             layers_filter_dropdown_open: false,
             artboards_panel_selection: Vec::new(),

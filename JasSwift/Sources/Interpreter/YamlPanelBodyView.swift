@@ -3692,7 +3692,6 @@ struct TreeViewContent: View {
     @State private var searchQuery: String = ""
     @State private var isolationStack: [ElementPath] = []
     @State private var soloState: (path: ElementPath, saved: [ElementPath: Visibility])? = nil
-    @State private var savedLockStates: [ElementPath: [Bool]] = [:]
     @State private var hiddenTypes: Set<String> = []
     @State private var showLayerOptionsFor: ElementPath? = nil
     @State private var showFilterMenu: Bool = false
@@ -4107,34 +4106,15 @@ struct TreeViewContent: View {
             SwiftUI.Text(locked ? "\u{1F512}" : "\u{1F513}")
                 .frame(width: 16, height: 16)
                 .onTapGesture {
-                    let e = model.document.getElement(path)
-                    let wasUnlocked = !e.isLocked
-                    let isCont = isContainerElem(e)
-                    var doc = model.document
-                    // Save child states when locking a container
-                    if isCont && wasUnlocked, let kids = elementChildrenStatic(e) {
-                        savedLockStates[path] = kids.map { $0.isLocked }
-                    }
-                    doc = doc.replaceElement(path, with: e.withLocked(wasUnlocked))
-                    // Lock all children when container locked
-                    if isCont && wasUnlocked, let kids = elementChildrenStatic(e) {
-                        for (i, c) in kids.enumerated() {
-                            let cp = path + [i]
-                            doc = doc.replaceElement(cp, with: c.withLocked(true))
-                        }
-                    }
-                    // Restore children on unlock
-                    if isCont && !wasUnlocked, let saved = savedLockStates.removeValue(forKey: path) {
-                        let e2 = doc.getElement(path)
-                        if let kids2 = elementChildrenStatic(e2) {
-                            for (i, c) in kids2.enumerated() where i < saved.count {
-                                let cp = path + [i]
-                                doc = doc.replaceElement(cp, with: c.withLocked(saved[i]))
-                            }
-                        }
-                    }
+                    // The save/restore dance that used to stand here went with
+                    // materialization (transcripts/LAYER_STRUCTURE.md §13): a
+                    // lock now writes ONE flag and reaches the contents by
+                    // inheritance, so there is nothing to remember — and the
+                    // `@State` table it lived in was VIEW-lived, so a later
+                    // unlock after the panel had been torn down silently failed
+                    // to restore anything anyway (D5b).
                     // Undoable lock toggle: editDocument self-brackets one step.
-                    model.editDocument(doc)
+                    model.editDocument(model.document.togglingElementLock(at: path))
                 }
             // Twirl or gap
             if row.isContainer {
@@ -4155,9 +4135,12 @@ struct TreeViewContent: View {
                 TextField("", text: $editingName, onCommit: {
                     let e = model.document.getElement(path)
                     if case .layer(let le) = e {
-                        let newLayer = Layer(name: editingName, children: le.children,
-                                             opacity: le.opacity, transform: le.transform,
-                                             locked: le.locked, visibility: le.visibility)
+                        // Clone-then-mutate: a rename speaks to the NAME.
+                        // The rebuild this replaced named 6 of Layer's 11
+                        // stored fields, so renaming a layer destroyed its
+                        // `id`, blend mode, mask and both opacity flags — the
+                        // Swift copy-site omission class.
+                        let newLayer = le.withName(editingName)
                         // Undoable rename: editDocument self-brackets one step.
                         model.editDocument(model.document.replaceElement(path, with: .layer(newLayer)))
                     }
@@ -4377,9 +4360,12 @@ struct TreeViewContent: View {
                 TextField("", text: $editingName, onCommit: {
                     let e = model.document.getElement(path)
                     if case .layer(let le) = e {
-                        let newLayer = Layer(name: editingName, children: le.children,
-                                             opacity: le.opacity, transform: le.transform,
-                                             locked: le.locked, visibility: le.visibility)
+                        // Clone-then-mutate: a rename speaks to the NAME.
+                        // The rebuild this replaced named 6 of Layer's 11
+                        // stored fields, so renaming a layer destroyed its
+                        // `id`, blend mode, mask and both opacity flags — the
+                        // Swift copy-site omission class.
+                        let newLayer = le.withName(editingName)
                         // Undoable rename: editDocument self-brackets one step.
                         model.editDocument(model.document.replaceElement(path, with: .layer(newLayer)))
                     }

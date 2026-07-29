@@ -286,8 +286,157 @@ fn stroke_json(stroke: &Option<Stroke>) -> String {
             o.str_val("linejoin", linejoin_str(s.linejoin));
             o.num("opacity", s.opacity);
             o.num("width", s.width);
+            // The four stroke fields the canonical test JSON dropped by
+            // construction until 2026-07-28 (see `extended_element_fields`).
+            // Emitted only when non-default, per this file's
+            // identity-omission convention, so a stroke that carries none of
+            // them serializes byte-identically to before.
+            if s.align != StrokeAlign::Center {
+                o.str_val("align", stroke_align_str(s.align));
+            }
+            let dashes = s.dash_array();
+            if !dashes.is_empty() {
+                let items: Vec<String> = dashes.iter().map(|d| fmt(*d)).collect();
+                o.raw("dash_pattern", json_array(&items));
+            }
+            if s.dash_align_anchors {
+                o.bool_val("dash_align_anchors", true);
+            }
+            if s.miter_limit != 10.0 {
+                o.num("miter_limit", s.miter_limit);
+            }
             o.build()
         }
+    }
+}
+
+fn stroke_align_str(a: StrokeAlign) -> &'static str {
+    match a {
+        StrokeAlign::Center => "center",
+        StrokeAlign::Inside => "inside",
+        StrokeAlign::Outside => "outside",
+    }
+}
+
+/// Snake-case name for a blend mode. Mirrors `BlendMode`'s Swift `rawValue`
+/// exactly, so the two ports emit the same token for the same mode.
+fn blend_mode_str(m: BlendMode) -> &'static str {
+    match m {
+        BlendMode::Normal => "normal",
+        BlendMode::Darken => "darken",
+        BlendMode::Multiply => "multiply",
+        BlendMode::ColorBurn => "color_burn",
+        BlendMode::Lighten => "lighten",
+        BlendMode::Screen => "screen",
+        BlendMode::ColorDodge => "color_dodge",
+        BlendMode::Overlay => "overlay",
+        BlendMode::SoftLight => "soft_light",
+        BlendMode::HardLight => "hard_light",
+        BlendMode::Difference => "difference",
+        BlendMode::Exclusion => "exclusion",
+        BlendMode::Hue => "hue",
+        BlendMode::Saturation => "saturation",
+        BlendMode::Color => "color",
+        BlendMode::Luminosity => "luminosity",
+    }
+}
+
+fn gradient_type_str(t: GradientType) -> &'static str {
+    match t {
+        GradientType::Linear => "linear",
+        GradientType::Radial => "radial",
+        GradientType::Freeform => "freeform",
+    }
+}
+
+fn gradient_method_str(m: GradientMethod) -> &'static str {
+    match m {
+        GradientMethod::Classic => "classic",
+        GradientMethod::Smooth => "smooth",
+        GradientMethod::Points => "points",
+        GradientMethod::Lines => "lines",
+    }
+}
+
+fn stroke_sub_mode_str(m: StrokeSubMode) -> &'static str {
+    match m {
+        StrokeSubMode::Within => "within",
+        StrokeSubMode::Along => "along",
+        StrokeSubMode::Across => "across",
+    }
+}
+
+/// A gradient, in the ONE form both ports can write byte-identically.
+///
+/// A stop's colour is emitted as this file's shared colour OBJECT rather than
+/// as a hex string, deliberately: jas_dioxus stores it as a `Color` (rgb / hsb
+/// / cmyk with alpha) and JasSwift as a `"#rrggbb"` String, so hex is the
+/// NARROWER of the two and writing it would silently flatten an hsb or
+/// translucent Rust stop on the way out — a codec speaks to nothing, so it may
+/// not narrow anything. The object form is lossless for every value either
+/// port can hold; the cost is stated rather than hidden: a shared fixture can
+/// only carry a stop colour JasSwift can express, because JasSwift's reader
+/// converts the object back to hex.
+fn gradient_json(g: &Gradient) -> String {
+    let mut o = JsonObj::new();
+    o.num("angle", g.angle);
+    o.num("aspect_ratio", g.aspect_ratio);
+    o.bool_val("dither", g.dither);
+    o.str_val("method", gradient_method_str(g.method));
+    let nodes: Vec<String> = g.nodes.iter().map(|n| {
+        let mut n_o = JsonObj::new();
+        n_o.raw("color", color_json(&n.color));
+        n_o.num("opacity", n.opacity);
+        n_o.num("spread", n.spread);
+        n_o.num("x", n.x);
+        n_o.num("y", n.y);
+        n_o.build()
+    }).collect();
+    o.raw("nodes", json_array(&nodes));
+    let stops: Vec<String> = g.stops.iter().map(|s| {
+        let mut s_o = JsonObj::new();
+        s_o.raw("color", color_json(&s.color));
+        s_o.num("location", s.location);
+        s_o.num("midpoint_to_next", s.midpoint_to_next);
+        s_o.num("opacity", s.opacity);
+        s_o.build()
+    }).collect();
+    o.raw("stops", json_array(&stops));
+    o.str_val("stroke_sub_mode", stroke_sub_mode_str(g.stroke_sub_mode));
+    o.str_val("type", gradient_type_str(g.gtype));
+    o.build()
+}
+
+/// An opacity mask. The subtree is a FULL nested element, so the mask's own
+/// artwork carries everything an element carries — including, recursively, a
+/// mask of its own.
+fn mask_json(m: &Mask) -> String {
+    let mut o = JsonObj::new();
+    o.bool_val("clip", m.clip);
+    o.bool_val("disabled", m.disabled);
+    o.bool_val("invert", m.invert);
+    o.bool_val("linked", m.linked);
+    o.raw("subtree", element_json(&m.subtree));
+    o.raw("unlink_transform", transform_json(&m.unlink_transform));
+    o.build()
+}
+
+fn width_points_json(pts: &[StrokeWidthPoint]) -> String {
+    let items: Vec<String> = pts.iter().map(|p| {
+        let mut o = JsonObj::new();
+        o.num("t", p.t);
+        o.num("width_left", p.width_left);
+        o.num("width_right", p.width_right);
+        o.build()
+    }).collect();
+    json_array(&items)
+}
+
+fn element_width_points(elem: &Element) -> &[StrokeWidthPoint] {
+    match elem {
+        Element::Line(e) => &e.width_points,
+        Element::Path(e) => &e.width_points,
+        _ => &[],
     }
 }
 
@@ -476,6 +625,74 @@ fn points_json(points: &[(f64, f64)]) -> String {
 // ---------------------------------------------------------------------------
 // Element serializer
 // ---------------------------------------------------------------------------
+
+/// The TWELVE fields the canonical test JSON dropped by construction until
+/// 2026-07-28, emitted here for every element kind that can hold them.
+///
+/// WHY THIS EXISTS, and why it is not a nicety. Every document-level gate in
+/// this repository — including THE PRESERVATION LAW's primary gate
+/// (transcripts/EDIT_SEMANTICS_FREEZE.md §4.1/§4.2, "serialize before,
+/// serialize after, diff") — snapshots this codec. A field the codec does not
+/// emit is a field the law cannot range over: before 2026-07-28 an edit that
+/// destroyed a BYSTANDER's mask, blend mode, dash pattern, stroke brush,
+/// width profile or either gradient produced byte-identical canonical JSON
+/// and the gate stayed green. The blindness was measured, not inferred: it is
+/// the `test_json` column of test_fixtures/expected/codec_field_survival.json,
+/// where all twelve read DROPPED while the BINARY codec's dropped set was a
+/// strict SUBSET of it.
+///
+/// Every key is emitted CONDITIONALLY on being non-default, per this file's
+/// identity-omission convention (the same rule `id` and `fill_rule` already
+/// follow). That is what keeps an element carrying none of them serializing
+/// byte-identically to before — and it is also what makes destruction
+/// visible: a bystander whose mask is destroyed loses the key entirely, and
+/// key-presence is part of the diff.
+fn extended_element_fields(o: &mut JsonObj, elem: &Element) {
+    let c = elem.common();
+    if c.mode != BlendMode::Normal {
+        o.str_val("mode", blend_mode_str(c.mode));
+    }
+    if let Some(m) = &c.mask {
+        o.raw("mask", mask_json(m));
+    }
+    if let Some(t) = &c.tool_origin {
+        o.str_val("tool_origin", t);
+    }
+    if let Some(g) = elem.fill_gradient() {
+        o.raw("fill_gradient", gradient_json(g));
+    }
+    if let Some(g) = elem.stroke_gradient() {
+        o.raw("stroke_gradient", gradient_json(g));
+    }
+    let wp = element_width_points(elem);
+    if !wp.is_empty() {
+        o.raw("width_points", width_points_json(wp));
+    }
+    if let Element::Path(e) = elem {
+        if let Some(b) = &e.stroke_brush {
+            o.str_val("stroke_brush", b);
+        }
+        if let Some(b) = &e.stroke_brush_overrides {
+            o.str_val("stroke_brush_overrides", b);
+        }
+    }
+    // The two CONTAINER-only flags (Opacity panel, transcripts/OPACITY.md
+    // §Group). They live on Group and Layer and nowhere else, so they are
+    // written here rather than beside the eleven common keys — and, like every
+    // key above, only when true, which is what keeps every shipped golden
+    // (whose containers are all false) byte-identical.
+    let (iso, ko) = match elem {
+        Element::Group(e) => (e.isolated_blending, e.knockout_group),
+        Element::Layer(e) => (e.isolated_blending, e.knockout_group),
+        _ => (false, false),
+    };
+    if iso {
+        o.bool_val("isolated_blending", true);
+    }
+    if ko {
+        o.bool_val("knockout_group", true);
+    }
+}
 
 fn element_json(elem: &Element) -> String {
     let mut o = JsonObj::new();
@@ -704,6 +921,7 @@ fn element_json(elem: &Element) -> String {
             }
         },
     }
+    extended_element_fields(&mut o, elem);
     o.build()
 }
 
@@ -1142,7 +1360,174 @@ fn parse_stroke(v: &serde_json::Value) -> Option<Stroke> {
         "bevel" => LineJoin::Bevel,
         _ => LineJoin::Miter,
     };
-    Some(Stroke { color: parse_color(&v["color"]), width: parse_f(&v["width"]), linecap: lc, linejoin: lj, miter_limit: 10.0, align: StrokeAlign::Center, dash_pattern: [0.0; 6], dash_len: 0, dash_align_anchors: false, start_arrow: Arrowhead::None, end_arrow: Arrowhead::None, start_arrow_scale: 100.0, end_arrow_scale: 100.0, arrow_align: ArrowAlign::TipAtEnd, opacity: v["opacity"].as_f64().unwrap_or(1.0) })
+    // The four extended stroke keys (absent ⇒ the default, matching the
+    // writer's identity-omission convention). These were hard-coded to
+    // defaults here until 2026-07-28, which is why a dashed, inside-aligned
+    // stroke came back solid and centred.
+    let align = match v["align"].as_str().unwrap_or("center") {
+        "inside" => StrokeAlign::Inside,
+        "outside" => StrokeAlign::Outside,
+        _ => StrokeAlign::Center,
+    };
+    let mut dash_pattern = [0.0f64; 6];
+    let mut dash_len: u8 = 0;
+    if let Some(arr) = v["dash_pattern"].as_array() {
+        for (i, d) in arr.iter().take(6).enumerate() {
+            dash_pattern[i] = parse_f(d);
+            dash_len = (i + 1) as u8;
+        }
+    }
+    Some(Stroke {
+        color: parse_color(&v["color"]),
+        width: parse_f(&v["width"]),
+        linecap: lc,
+        linejoin: lj,
+        miter_limit: v["miter_limit"].as_f64().unwrap_or(10.0),
+        align,
+        dash_pattern,
+        dash_len,
+        dash_align_anchors: v["dash_align_anchors"].as_bool().unwrap_or(false),
+        // ARROWHEADS ARE STILL DROPPED. `start_arrow`, `end_arrow`, the two
+        // scales and `arrow_align` are the same shape of blindness this wave
+        // closed for the four fields above, and they are NOT in the shipped
+        // matrix's `fields` list, so nothing measures them in any codec.
+        // Carrying them here without measuring the binary and SVG columns
+        // would be a claim wider than the evidence, so they are BANKED, named:
+        // add the five rows to test_fixtures/expected/codec_field_survival.json
+        // and close whichever codecs then read DROPPED.
+        start_arrow: Arrowhead::None,
+        end_arrow: Arrowhead::None,
+        start_arrow_scale: 100.0,
+        end_arrow_scale: 100.0,
+        arrow_align: ArrowAlign::TipAtEnd,
+        opacity: v["opacity"].as_f64().unwrap_or(1.0),
+    })
+}
+
+fn parse_blend_mode(v: &serde_json::Value) -> BlendMode {
+    match v.as_str().unwrap_or("normal") {
+        "darken" => BlendMode::Darken,
+        "multiply" => BlendMode::Multiply,
+        "color_burn" => BlendMode::ColorBurn,
+        "lighten" => BlendMode::Lighten,
+        "screen" => BlendMode::Screen,
+        "color_dodge" => BlendMode::ColorDodge,
+        "overlay" => BlendMode::Overlay,
+        "soft_light" => BlendMode::SoftLight,
+        "hard_light" => BlendMode::HardLight,
+        "difference" => BlendMode::Difference,
+        "exclusion" => BlendMode::Exclusion,
+        "hue" => BlendMode::Hue,
+        "saturation" => BlendMode::Saturation,
+        "color" => BlendMode::Color,
+        "luminosity" => BlendMode::Luminosity,
+        _ => BlendMode::Normal,
+    }
+}
+
+fn parse_gradient(v: &serde_json::Value) -> Option<Box<Gradient>> {
+    let obj = v.as_object()?;
+    let _ = obj;
+    Some(Box::new(Gradient {
+        gtype: match v["type"].as_str().unwrap_or("linear") {
+            "radial" => GradientType::Radial,
+            "freeform" => GradientType::Freeform,
+            _ => GradientType::Linear,
+        },
+        angle: parse_f(&v["angle"]),
+        aspect_ratio: v["aspect_ratio"].as_f64().unwrap_or(100.0),
+        method: match v["method"].as_str().unwrap_or("classic") {
+            "smooth" => GradientMethod::Smooth,
+            "points" => GradientMethod::Points,
+            "lines" => GradientMethod::Lines,
+            _ => GradientMethod::Classic,
+        },
+        dither: v["dither"].as_bool().unwrap_or(false),
+        stroke_sub_mode: match v["stroke_sub_mode"].as_str().unwrap_or("within") {
+            "along" => StrokeSubMode::Along,
+            "across" => StrokeSubMode::Across,
+            _ => StrokeSubMode::Within,
+        },
+        stops: v["stops"].as_array().unwrap_or(&vec![]).iter().map(|s| GradientStop {
+            color: parse_color(&s["color"]),
+            opacity: s["opacity"].as_f64().unwrap_or(100.0),
+            location: parse_f(&s["location"]),
+            midpoint_to_next: s["midpoint_to_next"].as_f64().unwrap_or(50.0),
+        }).collect(),
+        nodes: v["nodes"].as_array().unwrap_or(&vec![]).iter().map(|n| GradientNode {
+            x: parse_f(&n["x"]),
+            y: parse_f(&n["y"]),
+            color: parse_color(&n["color"]),
+            opacity: n["opacity"].as_f64().unwrap_or(100.0),
+            spread: n["spread"].as_f64().unwrap_or(25.0),
+        }).collect(),
+    }))
+}
+
+fn parse_mask(v: &serde_json::Value) -> Option<Box<Mask>> {
+    let obj = v.as_object()?;
+    let _ = obj;
+    Some(Box::new(Mask {
+        subtree: Box::new(parse_element(&v["subtree"])),
+        clip: v["clip"].as_bool().unwrap_or(true),
+        invert: v["invert"].as_bool().unwrap_or(false),
+        disabled: v["disabled"].as_bool().unwrap_or(false),
+        linked: v["linked"].as_bool().unwrap_or(true),
+        unlink_transform: parse_transform_opt(&v["unlink_transform"]),
+    }))
+}
+
+fn parse_width_points(v: &serde_json::Value) -> Vec<StrokeWidthPoint> {
+    v.as_array().unwrap_or(&vec![]).iter().map(|p| StrokeWidthPoint {
+        t: parse_f(&p["t"]),
+        width_left: parse_f(&p["width_left"]),
+        width_right: parse_f(&p["width_right"]),
+    }).collect()
+}
+
+/// Read back the twelve extended fields `extended_element_fields` writes.
+/// Kept as a post-pass over the built element rather than threaded through
+/// the eight struct literals below: every kind that can hold a field gets it
+/// from ONE place, so a new element kind cannot silently miss one.
+fn apply_extended_element_fields(elem: &mut Element, v: &serde_json::Value) {
+    let c = elem.common_mut();
+    c.mode = parse_blend_mode(&v["mode"]);
+    c.mask = parse_mask(&v["mask"]);
+    let fg = parse_gradient(&v["fill_gradient"]);
+    let sg = parse_gradient(&v["stroke_gradient"]);
+    let wp = parse_width_points(&v["width_points"]);
+    match elem {
+        Element::Line(e) => {
+            e.stroke_gradient = sg;
+            e.width_points = wp;
+        }
+        Element::Rect(e) => { e.fill_gradient = fg; e.stroke_gradient = sg; }
+        Element::Circle(e) => { e.fill_gradient = fg; e.stroke_gradient = sg; }
+        Element::Ellipse(e) => { e.fill_gradient = fg; e.stroke_gradient = sg; }
+        Element::Polyline(e) => { e.fill_gradient = fg; e.stroke_gradient = sg; }
+        Element::Polygon(e) => { e.fill_gradient = fg; e.stroke_gradient = sg; }
+        Element::Path(e) => {
+            e.fill_gradient = fg;
+            e.stroke_gradient = sg;
+            e.width_points = wp;
+            e.stroke_brush = parse_str_opt(&v["stroke_brush"]);
+            e.stroke_brush_overrides = parse_str_opt(&v["stroke_brush_overrides"]);
+        }
+        // The container-only flags. The `group` / `layer` arms of
+        // `parse_element_base` still build with `false`, exactly as
+        // `parse_common` still builds with the default blend mode: this
+        // post-pass is the ONE place either flag is read, so a new container
+        // kind cannot silently miss it.
+        Element::Group(e) => {
+            e.isolated_blending = v["isolated_blending"].as_bool().unwrap_or(false);
+            e.knockout_group = v["knockout_group"].as_bool().unwrap_or(false);
+        }
+        Element::Layer(e) => {
+            e.isolated_blending = v["isolated_blending"].as_bool().unwrap_or(false);
+            e.knockout_group = v["knockout_group"].as_bool().unwrap_or(false);
+        }
+        _ => {}
+    }
 }
 
 /// Public so the `algorithm_roundtrip` harness can read a fixture's
@@ -1217,6 +1602,12 @@ fn parse_points(v: &serde_json::Value) -> Vec<(f64, f64)> {
 }
 
 pub fn parse_element(v: &serde_json::Value) -> Element {
+    let mut elem = parse_element_base(v);
+    apply_extended_element_fields(&mut elem, v);
+    elem
+}
+
+fn parse_element_base(v: &serde_json::Value) -> Element {
     let typ = v["type"].as_str().unwrap_or("");
     let common = parse_common(v);
     match typ {

@@ -119,14 +119,59 @@ private func nameAttr(_ name: String?) -> String {
     return " inkscape:label=\"\(escapeXml(n))\""
 }
 
-/// Standard SVG `id` attribute for an element's stable identity.
-/// Emitted ONLY when the id is set (Some/non-empty) so id-less
-/// elements serialize byte-identically to before — keeping the SVG
-/// fixtures and the cross-language test_json comparison green. Mirrors
-/// `nameAttr` (the inkscape:label writer) right next to it.
-private func idAttr(_ id: String?) -> String {
-    guard let s = id, !s.isEmpty else { return "" }
-    return " id=\"\(escapeXml(s))\""
+/// The standard SVG `id` attribute for an element's stable identity, followed
+/// by the workspace-private `jas:locked` flag.
+///
+/// `id` is emitted ONLY when set (non-nil/non-empty) and `jas:locked` ONLY when
+/// true, so an id-less unlocked element serializes byte-identically to before —
+/// keeping the SVG fixtures and the cross-language test_json comparison green.
+/// Measured when `jas:locked` was added (LOCKSVG, 2026-07-28): 0 of the
+/// elements across the 60 SVG fixtures carry `locked == true`, so the
+/// conditional attribute moved ZERO goldens. Same convention as
+/// `fill-rule="evenodd"` and the five arrowhead attributes.
+///
+/// WHY THE TWO FIELDS SHARE ONE HELPER, and it is not tidiness. `elementSvg`
+/// hand-inlines its attribute list in FIFTEEN arms, so an attribute added
+/// per-arm is added fifteen times and a missed arm is a silent drop — the
+/// Swift copy-site omission class (`project_swift_copy_site_omission_class`),
+/// which has bitten this project four times and survived two hand audits.
+/// `idAttr` was already called by every arm, so widening its signature with a
+/// REQUIRED `locked:` argument makes the COMPILER enumerate the fifteen sites
+/// instead of a reviewer. Mirrors Rust's `id_lock_attrs`.
+///
+/// `urn:jas:1` is the namespace, not `sodipodi:insensitive` or `data-locked`:
+/// it is where the sibling CommonProps field `toolOrigin` already lives
+/// (`jas:tool-origin`), and `documentToSvg` declares `xmlns:jas` by matching
+/// the ` jas:` PREFIX in the emitted body, so a new `jas:`-namespaced attribute
+/// is covered by that guard automatically. An attribute in any OTHER prefix
+/// would need its own declaration trigger, and the last time one was missed
+/// Foundation rejected the WHOLE document and the artwork came back empty.
+private func idLockAttrs(_ id: String?, locked: Bool) -> String {
+    var s = ""
+    if let v = id, !v.isEmpty { s += " id=\"\(escapeXml(v))\"" }
+    if locked { s += " jas:locked=\"true\"" }
+    return s
+}
+
+/// The Opacity panel's two page-level blending flags, as workspace-private
+/// attributes on a `<g>`. Written ONLY when true, so an ordinary group or
+/// layer serializes byte-identically to before and no shipped golden moved.
+///
+/// WHY A `jas:` EXTENSION AND NOT A STANDARD ATTRIBUTE. There is no standard
+/// one. CSS `isolation: isolate` is the nearest thing to isolated blending,
+/// but it is a RENDERING property a jas file would then be promising to
+/// honour, and neither port's renderer implements either flag yet
+/// (transcripts/OPACITY.md marks both `pending_renderer`); knockout groups are
+/// a PDF transparency-group concept with no SVG analogue at all. So this takes
+/// the shape `jas:locked` landed in one day earlier — a workspace-private
+/// boolean in the `urn:jas:1` namespace that `documentToSvg`'s ` jas:` prefix
+/// guard already declares. Mirrors Rust's `container_blend_attrs`.
+private func containerBlendAttrs(_ elem: Element) -> String {
+    let flags = containerBlendFlags(elem)
+    var s = ""
+    if flags.isolatedBlending { s += " jas:isolated-blending=\"true\"" }
+    if flags.knockoutGroup { s += " jas:knockout-group=\"true\"" }
+    return s
 }
 
 private func pathData(_ commands: [PathCommand]) -> String {
@@ -301,7 +346,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
     case .line(let v):
         return "\(indent)<line x1=\"\(fmt(px(v.x1)))\" y1=\"\(fmt(px(v.y1)))\"" +
             " x2=\"\(fmt(px(v.x2)))\" y2=\"\(fmt(px(v.y2)))\"" +
-            "\(strokeAttrs(v.stroke))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
+            "\(strokeAttrs(v.stroke))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
 
     case .rect(let v):
         var rxy = ""
@@ -310,31 +355,31 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         return "\(indent)<rect x=\"\(fmt(px(v.x)))\" y=\"\(fmt(px(v.y)))\"" +
             " width=\"\(fmt(px(v.width)))\" height=\"\(fmt(px(v.height)))\"" +
             "\(rxy)\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
 
     case .circle(let v):
         return "\(indent)<circle cx=\"\(fmt(px(v.cx)))\" cy=\"\(fmt(px(v.cy)))\"" +
             " r=\"\(fmt(px(v.r)))\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
 
     case .ellipse(let v):
         return "\(indent)<ellipse cx=\"\(fmt(px(v.cx)))\" cy=\"\(fmt(px(v.cy)))\"" +
             " rx=\"\(fmt(px(v.rx)))\" ry=\"\(fmt(px(v.ry)))\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
 
     case .polyline(let v):
         let ps = v.points.map { "\(fmt(px($0.0))),\(fmt(px($0.1)))" }.joined(separator: " ")
         return "\(indent)<polyline points=\"\(ps)\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
 
     case .polygon(let v):
         let ps = v.points.map { "\(fmt(px($0.0))),\(fmt(px($0.1)))" }.joined(separator: " ")
         return "\(indent)<polygon points=\"\(ps)\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(nameAttr(v.name))/>"
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
 
     case .path(let v):
         let toolOriginAttr = v.toolOrigin.map {
@@ -348,7 +393,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         return "\(indent)<path d=\"\(pathData(v.d))\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))\(fillRuleAttr)" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))" +
-            "\(toolOriginAttr)\(idAttr(v.id))\(nameAttr(v.name))/>"
+            "\(toolOriginAttr)\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
 
     case .text(let v):
         let areaAttrs = v.isAreaText
@@ -389,7 +434,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             "\(fwAttr)\(fsAttr)\(tdAttr)\(extraAttrs)" +
             "\(areaAttrs)" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))\(spaceAttr)>" +
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(spaceAttr)>" +
             "\(body)</text>"
 
     case .textPath(let v):
@@ -418,13 +463,13 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         return "\(indent)<text\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             " font-family=\"\(escapeXml(v.fontFamily))\" font-size=\"\(fmt(px(v.fontSize)))\"" +
             "\(fwAttr)\(fsAttr)\(tdAttr)\(extraAttrs)" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idAttr(v.id))>" +
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))>" +
             "<textPath path=\"\(d)\"" +
             (v.startOffset > 0 ? " startOffset=\"\(fmt(v.startOffset * 100))%\"" : "") +
             "\(tpSpaceAttr)>\(tpBody)</textPath></text>"
 
     case .group(let v):
-        var lines = ["\(indent)<g\(idAttr(v.id))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
+        var lines = ["\(indent)<g\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(containerBlendAttrs(elem))>"]
         for child in v.children {
             lines.append(elementSvg(child, indent: indent + "  "))
         }
@@ -434,7 +479,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
     case .layer(let v):
         // inkscape:groupmode="layer" lets the parser distinguish a
         // Layer from a named Group (both carry inkscape:label).
-        var lines = ["\(indent)<g inkscape:groupmode=\"layer\"\(idAttr(v.id))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))>"]
+        var lines = ["\(indent)<g inkscape:groupmode=\"layer\"\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(containerBlendAttrs(elem))>"]
         for child in v.children {
             lines.append(elementSvg(child, indent: indent + "  "))
         }
@@ -458,7 +503,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             // compound is byte-identical to before.
             var lines = ["\(indent)<g data-jas-live=\"compound_shape\"" +
                 " data-jas-operation=\"\(cs.operation.rawValue)\"" +
-                "\(opacityAttr(cs.opacity))\(transformAttr(cs.transform))\(idAttr(cs.id))\(nameAttr(cs.name))>"]
+                "\(opacityAttr(cs.opacity))\(transformAttr(cs.transform))\(idLockAttrs(cs.id, locked: cs.locked))\(nameAttr(cs.name))>"]
             for child in cs.operands {
                 lines.append(elementSvg(child, indent: indent + "  "))
             }
@@ -477,7 +522,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             // transformAttr, and ONLY when set so existing <use> fixtures stay
             // byte-identical.
             return "\(indent)<use href=\"#\(escapeXml(r.target.id))\"" +
-                "\(opacityAttr(r.opacity))\(transformAttr(r.transform))\(idAttr(r.id))\(nameAttr(r.name))" +
+                "\(opacityAttr(r.opacity))\(transformAttr(r.transform))\(idLockAttrs(r.id, locked: r.locked))\(nameAttr(r.name))" +
                 "\(instanceTransformAttr(r.instanceTransform))/>"
         case .recorded(let rec):
             // RECORDED_ELEMENTS.md §8: a recorded element exports as a
@@ -490,7 +535,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             let inputs = rec.inputs.map { $0.id }.joined(separator: ",")
             return "\(indent)<g data-jas-live=\"recorded\"" +
                 " data-jas-inputs=\"\(escapeXml(inputs))\"" +
-                "\(opacityAttr(rec.opacity))\(transformAttr(rec.transform))\(idAttr(rec.id))\(nameAttr(rec.name))></g>"
+                "\(opacityAttr(rec.opacity))\(transformAttr(rec.transform))\(idLockAttrs(rec.id, locked: rec.locked))\(nameAttr(rec.name))></g>"
         case .generated(let gen):
             // CONCEPTS.md §6: a generated element exports as a data-jas-live
             // group carrying the concept id + params JSON. Full SVG round-trip
@@ -499,7 +544,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             return "\(indent)<g data-jas-live=\"generated\"" +
                 " data-jas-concept=\"\(escapeXml(gen.conceptId))\"" +
                 " data-jas-params=\"\(escapeXml(params))\"" +
-                "\(opacityAttr(gen.opacity))\(transformAttr(gen.transform))\(idAttr(gen.id))\(nameAttr(gen.name))></g>"
+                "\(opacityAttr(gen.opacity))\(transformAttr(gen.transform))\(idLockAttrs(gen.id, locked: gen.locked))\(nameAttr(gen.name))></g>"
         }
     }
 }
@@ -1336,7 +1381,31 @@ private func parseId(_ elem: XMLElement) -> String? {
     return s
 }
 
+/// Parse one SVG node into an Element, then apply the workspace-private
+/// `jas:locked` flag written by `idLockAttrs`.
+///
+/// WHY THE FLAG IS APPLIED HERE AND NOT THREADED THROUGH THE ARMS. The body
+/// below builds fourteen different structs, each with its own initializer and
+/// its own `locked: Bool = false` default — the exact shape of the Swift
+/// copy-site omission class, where a field added to thirteen arms and forgotten
+/// in the fourteenth is a silent drop. `Element.withLocked` is ONE call whose
+/// own switch the compiler already checks for exhaustiveness over all twelve
+/// cases (and `LiveVariant.withLocked` over the four live kinds), so no arm can
+/// be missed by construction. Rust reaches the same guarantee differently: its
+/// reader funnels every kind through a single `parse_common`, which is where
+/// `locked` was hard-coded `false` until 2026-07-28.
+///
+/// Only the exact string "true" locks: a foreign or malformed value must not
+/// silently protect artwork the artist never protected. Mirrors Rust
+/// `parse_common`.
 private func parseElement(_ node: XMLNode) -> Element? {
+    guard let parsed = parseElementBody(node) else { return nil }
+    guard let elem = node as? XMLElement else { return parsed }
+    let locked = elem.attribute(forName: "jas:locked")?.stringValue == "true"
+    return parsed.withLocked(locked)
+}
+
+private func parseElementBody(_ node: XMLNode) -> Element? {
     guard let elem = node as? XMLElement, let tag = elem.localName else { return nil }
 
     let fill = parseFill(elem)
@@ -1557,13 +1626,20 @@ private func parseElement(_ node: XMLNode) -> Element? {
         // a named Group, not a Layer.
         let groupMode = elem.attribute(forName: "groupmode")?.stringValue
                       ?? elem.attribute(forName: "inkscape:groupmode")?.stringValue
+        // The two container-only flags ride workspace-private attributes (see
+        // `containerBlendAttrs`); absent means false, so every pre-existing
+        // file still reads exactly as it was authored.
+        let iso = elem.attribute(forName: "jas:isolated-blending")?.stringValue == "true"
+        let ko = elem.attribute(forName: "jas:knockout-group")?.stringValue == "true"
         if groupMode == "layer" {
             return .layer(Layer(name: name ?? "", children: children,
                                     opacity: opacity, transform: transform,
+                                    isolatedBlending: iso, knockoutGroup: ko,
                                     id: id))
         }
         return .group(Group(children: children,
                                 opacity: opacity, transform: transform,
+                                isolatedBlending: iso, knockoutGroup: ko,
                                 name: name, id: id))
 
     case "use":
@@ -1648,9 +1724,40 @@ public func svgToDocument(_ svg: String) -> Document {
             case .layer(let l):
                 layers.append(l)
             case .group(let g):
+                // A top-level <g> with no inkscape:groupmode is PROMOTED to a
+                // Layer. This rebuilds the container field by field, so every
+                // field not named here is silently reset to its default — the
+                // Swift copy-site omission class. Rust's equivalent promotion
+                // (`svg_to_document`) carries `common: g.common.clone()` and so
+                // loses nothing. `locked` is threaded here because LOCKSVG
+                // makes it reachable from a file; the fields still missing
+                // (`visibility`, `blendMode`, `mask`, `isolatedBlending`,
+                // `knockoutGroup`) are a REAL divergence from Rust that the SVG
+                // codec cannot yet see, because none of them survives an SVG
+                // round trip in either port either. Closing them is a codec
+                // stone of its own, not this one — stated rather than smoothed
+                // over, and the `locked_all_kinds` fixture drives this branch.
+                // ALL ELEVEN stored properties cross here. Layer and Group carry
+                // the same eleven, and Rust's twin (`svg.rs`'s `Element::Group`
+                // arm) clones `g.common` wholesale plus both opacity flags -- so
+                // anything not named here is a live cross-port disagreement
+                // about what an SVG means, not merely a Swift-internal loss.
+                // The list this replaced named five, then six.
+                //
+                // This is a cross-TYPE conversion, so an explicit list is
+                // unavoidable; it is written as `g.<field>` so
+                // `scripts/check_swift_copy_sites.py` counts it -- 11 of 11
+                // today, and a twelfth field ON LAYER turns it RED (measured).
+                // A twelfth on GROUP alone does not, because the gate counts a
+                // construction against the type being CONSTRUCTED; that
+                // asymmetry is the honest limit of this particular watch.
                 layers.append(Layer(name: g.name, children: g.children,
-                                        opacity: g.opacity, transform: g.transform,
-                                        id: g.id))
+                                    opacity: g.opacity, transform: g.transform,
+                                    locked: g.locked, visibility: g.visibility,
+                                    blendMode: g.blendMode,
+                                    isolatedBlending: g.isolatedBlending,
+                                    knockoutGroup: g.knockoutGroup,
+                                    mask: g.mask, id: g.id))
             default:
                 // If the last layer is a nameless wrapper (created by
                 // this same loop on a previous bare element), append
@@ -1658,9 +1765,20 @@ public func svgToDocument(_ svg: String) -> Document {
                 if layers.isEmpty || layers.last!.name != nil {
                     layers.append(Layer(children: [elem]))
                 } else {
-                    let last = layers.removeLast()
-                    layers.append(Layer(name: last.name, children: last.children + [elem],
-                                            opacity: last.opacity, transform: last.transform))
+                    // Clone-then-mutate, mirroring Rust's `le.children.push`.
+                    // The remove/rebuild this replaced named 4 of Layer's 11
+                    // stored properties, dropping id, locked, visibility,
+                    // blendMode, mask, isolatedBlending and knockoutGroup.
+                    //
+                    // It was harmless in practice ONLY because this branch is
+                    // reached solely for a wrapper THIS loop just built with
+                    // defaults -- a property nobody was watching, and not one
+                    // the code states. `scripts/check_swift_copy_sites.py`
+                    // watches it now, which is how it was caught: the gate went
+                    // red at 4/11 and named every missing field.
+                    let lastIdx = layers.count - 1
+                    layers[lastIdx] = layers[lastIdx]
+                        .withChildren(layers[lastIdx].children + [elem])
                 }
             }
         }

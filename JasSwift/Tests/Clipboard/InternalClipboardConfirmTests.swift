@@ -9,13 +9,19 @@ import Foundation
 /// path had been read, and JYH's ratification rode on confirming the
 /// internal-clipboard path. These are the measurements for Swift.
 ///
-/// **The headline finding is structural: Swift HAS NO internal element
-/// clipboard.** `EditClipboard.pasteClipboard` has exactly two branches — SVG,
-/// and plain-text-becomes-a-Text-element — with no third fallback. Rust carries
-/// `TabState.clipboard: Vec<Element>` and falls through to it. So "the internal
-/// path" is not a path these two ports implement differently; it is a path only
-/// one port HAS. These probes pin what Swift does at each point where Rust would
-/// consult that fallback, so the divergence is watched rather than remembered.
+/// **The headline finding was structural: Swift HAD NO internal element
+/// clipboard**, where Rust carried `TabState.clipboard: Vec<Element>` and fell
+/// through to it. So "the internal path" was not a path the two ports
+/// implemented differently; it was a path only one port HAD. **That is now
+/// resolved rather than merely watched**: JYH ruled on 2026-07-28 (D4/D5) that
+/// Swift is canon, and `TabState.clipboard` is deleted — neither port has an
+/// internal clipboard. The two probes that pinned the divergence are gone from
+/// the end of this file; what replaces them is `ClipboardTextPasteTests` plus
+/// the cross-language family `paste_clipboard_text.json`, which makes the ports
+/// AGREE rather than recording that they do not.
+///
+/// What remains here is the still-true half: what an in-app COPY emits, and
+/// what a paste does with ids and offsets.
 ///
 /// Written as CHARACTERIZATION probes (they assert today's behaviour, not the
 /// behaviour R2/R3 will require), so the evidence that they can see is their
@@ -27,9 +33,11 @@ import Foundation
     /// places; `svgToDocument` scales back by 3/4. So `x = 1` ships as
     /// `"1.3333"` and returns as `0.999975` — a quantization of ~2.5e-5 pt on
     /// EVERY clipboard round trip. It is a property of the SVG transport, not of
-    /// paste, but it is worth stating plainly: Swift has no lossless copy/paste
-    /// path, because it has no internal element clipboard. Rust's internal
-    /// fallback clones `Element` values and is exact.
+    /// paste, but it is worth stating plainly: NEITHER port has a lossless
+    /// copy/paste path any more. Rust's internal fallback cloned `Element`
+    /// values and was exact; deleting it (D4/D5) means Rust now quantizes
+    /// exactly as Swift does — which is a convergence, and the price of it is
+    /// this ~2.5e-5 pt.
     private static let svgTol = 1e-3
 
     private static func privatePasteboard() -> NSPasteboard {
@@ -285,21 +293,26 @@ import Foundation
                 "paste_in_place moved the element to (\(copy.x), \(copy.y)), expected (7, 11)")
     }
 
-    // MARK: - A spec sentence neither port implements
+    // MARK: - A spec sentence neither port implemented — now INVERTED
 
-    /// FOUND WHILE MEASURING Q6, and it is a SHARED defect rather than a
-    /// divergence. `workspace/actions.yaml` §paste (line 186) says "Repeated
-    /// pastes stack with cumulative offsets". Neither port does: paste never
-    /// mutates the clipboard, so every paste of the same payload applies the
-    /// SAME 24pt offset and the second paste lands exactly on the first —
-    /// invisible, the outcome the offset exists to prevent, arrived at by
-    /// pasting twice instead of once.
+    /// FOUND WHILE MEASURING Q6, and it was a SHARED defect rather than a
+    /// divergence. `workspace/actions.yaml` §paste has said "Repeated pastes
+    /// stack with cumulative offsets" since it was written; neither port did,
+    /// so every paste of the same payload applied the SAME 24pt offset and the
+    /// second paste landed exactly on the first — invisible, the outcome the
+    /// offset exists to prevent, arrived at by pasting twice instead of once.
     ///
-    /// Rust has the same shape: `clipboard_read_and_paste` reads `tab.clipboard`
-    /// and never writes it, so its repeated pastes are equally non-cumulative.
-    /// That half is READ, not driven — the sink is unreachable from
-    /// `cargo test --lib` (see `internal_clipboard_confirm_tests`).
-    @Test func repeatedPastesDoNotStackCumulativelyAsTheSpecRequires() {
+    /// **RULED AND FIXED 2026-07-28** (JYH: "follow the spec" — implement the
+    /// stacking, do not amend the sentence). This probe carried the instruction
+    /// "invert this probe if cumulative stacking is ever implemented — do not
+    /// delete it", and that is what happened: it now measures 24 then 48, and
+    /// asserts the two pastes are NOT coincident. Kept here, in the suite that
+    /// found the defect, so the finding and its repair sit together.
+    ///
+    /// The full contract lives in `PasteStackingTests` and in the shared corpus
+    /// family `test_fixtures/operations/paste_stacking.json`, which both ports
+    /// run. This one probe is the original measurement, turned over.
+    @Test func repeatedPastesStackCumulativelyAsTheSpecRequires() {
         let pb = Self.privatePasteboard()
         let doc0 = Document(layers: [Layer(children: [Self.rect(0, 0, id: "r-1")])],
                             selectedLayer: 0, selection: [ElementSelection.all([0, 0])])
@@ -316,51 +329,19 @@ import Foundation
             Issue.record("expected three rects"); return
         }
         #expect(abs(first.x - 24) < Self.svgTol, "first paste at x=\(first.x), expected 24")
-        // TODAY: 24 again, not 48. Invert this probe if cumulative stacking is
-        // ever implemented — do not delete it.
-        #expect(abs(second.x - 24) < Self.svgTol,
-                "second paste at x=\(second.x); TODAY it repeats 24 rather than stacking to 48, so it lands exactly on the first paste")
-        #expect(abs(second.x - first.x) < Self.svgTol,
-                "the two pastes are NOT coincident (\(first.x) vs \(second.x)) — cumulative stacking may have landed")
+        #expect(abs(second.x - 48) < Self.svgTol,
+                "second paste at x=\(second.x), expected 48 — the run is cumulative")
+        #expect(abs(second.x - first.x) > Self.svgTol,
+                "the two pastes are COINCIDENT (\(first.x) vs \(second.x)) — the second is invisible under the first")
     }
 
-    // MARK: - Q4: the two points where Rust would consult its internal clipboard
-
-    /// Q4, DIVERGENCE ONE. Non-SVG text on the pasteboard. Swift builds a Text
-    /// element from it. Rust ignores the text entirely and pastes whatever is in
-    /// `tab.clipboard` — the elements from the last in-app copy. Same gesture,
-    /// two different documents.
-    @Test func plainTextPasteBuildsATextElementWhereRustWouldPasteItsInternalClipboard() {
-        let pb = Self.privatePasteboard()
-        pb.clearContents()
-        pb.setString("hello from another app", forType: .string)
-        let doc0 = Document(layers: [Layer(children: [Self.rect(0, 0, id: "r-1")])],
-                            selectedLayer: 0, selection: [])
-        let model = Model(document: doc0)
-        EditClipboard.pasteClipboard(model, offset: 24.0, pasteboard: pb)
-
-        let kids = model.document.layers[0].children
-        #expect(kids.count == 2, "expected the plain text to append one element, got \(kids.count)")
-        guard kids.count == 2, case .text(let t) = kids[1] else {
-            Issue.record("expected a Text element from a plain-text paste, got \(kids.count == 2 ? "\(kids[1])" : "nothing")")
-            return
-        }
-        #expect(t.content == "hello from another app")
-        #expect(t.x == 24 && t.y == 40, "text landed at (\(t.x), \(t.y)), expected (24, 40)")
-    }
-
-    /// Q4, DIVERGENCE TWO. Nothing readable on the pasteboard. Swift no-ops.
-    /// Rust reaches its internal clipboard and pastes the last in-app copy, so
-    /// the same empty-clipboard gesture appends elements in one port and nothing
-    /// in the other.
-    @Test func emptyPasteboardIsANoOpWhereRustWouldStillPasteItsInternalClipboard() {
-        let pb = Self.privatePasteboard()
-        pb.clearContents()
-        let doc0 = Document(layers: [Layer(children: [Self.rect(0, 0, id: "r-1")])],
-                            selectedLayer: 0, selection: [])
-        let model = Model(document: doc0)
-        EditClipboard.pasteClipboard(model, offset: 24.0, pasteboard: pb)
-        #expect(model.document.layers[0].children.count == 1,
-                "expected a no-op, but the layer holds \(model.document.layers[0].children.count) children")
-    }
+    // MARK: - Q4: the two points where Rust USED TO consult its internal clipboard
+    //
+    // Both divergences are CLOSED (D4/D5, ratified 2026-07-28: Swift is canon;
+    // `TabState.clipboard` is deleted). The probes that pinned them moved to
+    // `ClipboardTextPasteTests`, which asserts the RULED behaviour rather than a
+    // divergence, and their cross-language twins now live in
+    // `test_fixtures/operations/paste_clipboard_text.json` — where BOTH ports
+    // must agree over shared goldens, which is the only place a divergence of
+    // this shape can be prevented rather than merely recorded.
 }

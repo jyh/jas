@@ -12,7 +12,7 @@ use wasm_bindgen::JsCast;
 use crate::canvas::render;
 use crate::document::controller::Controller;
 use crate::document::model::Model;
-use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign, Element as GeoElement};
+use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign};
 use crate::tools::type_tool::TypeTool;
 use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind};
@@ -59,13 +59,22 @@ pub(crate) struct Act(pub Rc<RefCell<dyn FnMut(Box<dyn FnOnce(&mut AppState)>)>>
 /// ``crate::workspace::app_state::EditingTarget``.
 pub(crate) use crate::document::model::EditingTarget;
 
-/// Per-tab state: each tab has its own document, tools, and clipboard.
+/// Per-tab state: each tab has its own document and tools.
 /// View state (zoom_level, view_offset_x, view_offset_y) lives on the
 /// inner Model so doc.zoom.* effects can mutate it directly.
+///
+/// **There is no internal clipboard here, and its absence is a ruling.** This
+/// struct used to carry `clipboard: Vec<Element>`, a Rust-only buffer written by
+/// all five copy sites and read by exactly one place — the fallback in
+/// `workspace::clipboard::clipboard_read_and_paste`. That fallback made a paste
+/// of non-SVG text, or of an empty clipboard, produce STALE INTERNAL ARTWORK
+/// instead of what the system clipboard held (LAYER_STRUCTURE.md §8.3, D4/D5).
+/// JYH ruled 2026-07-28 that Swift — which never had such a buffer — is canon.
+/// Deleting the reader left the field write-only, so the field went too. Copy
+/// now writes the system clipboard and nothing else, in both ports.
 pub(crate) struct TabState {
     pub(crate) model: Model,
     pub(crate) tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
-    pub(crate) clipboard: Vec<GeoElement>,
 }
 
 impl TabState {
@@ -119,11 +128,7 @@ impl TabState {
         // stand-in: a tab being constructed has no Artboards-panel selection
         // yet, so `current_artboard` is the first board by its own rule.
         model.center_view_on_current_artboard(&[]);
-        Self {
-            model,
-            tools,
-            clipboard: Vec::new(),
-        }
+        Self { model, tools }
     }
 }
 
@@ -212,11 +217,6 @@ pub(crate) struct AppState {
     /// on the same element restores them. Map from sibling path to saved
     /// visibility state. None when no solo is active.
     pub(crate) layers_solo_state: Option<LayerSoloState>,
-    /// Saved lock states for unlock-on-container. When a container is
-    /// locked, each direct child's current lock state is saved here so
-    /// unlocking restores them. Outer key: container path. Inner Vec:
-    /// one entry per direct child.
-    pub(crate) layers_saved_lock_states: std::collections::HashMap<Vec<usize>, Vec<bool>>,
     /// Set of element types currently hidden by the layers type filter.
     /// Type names: layer, group, path, rect, circle, ellipse, polyline,
     /// polygon, text, textpath, line. When empty (default), all types
@@ -1439,7 +1439,6 @@ impl AppState {
             layers_search_query: String::new(),
             layers_isolation_stack: Vec::new(),
             layers_solo_state: None,
-            layers_saved_lock_states: std::collections::HashMap::new(),
             layers_hidden_types: std::collections::HashSet::new(),
             layers_filter_dropdown_open: false,
             artboards_panel_selection: Vec::new(),
@@ -4851,6 +4850,83 @@ mod oplog_bracket_tests {
         match m.document().get_element(&vec![0, 0]).unwrap() {
             Element::Text(t) => assert_eq!(t.font_size, 16.0, "undo restored the font size"),
             other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    /// THE PARITY HALF of the Swift repair in
+    /// `JasSwift/Tests/Document/CopySiteOmissionTests.swift`
+    /// (`characterApplyKeepsTextIdentityAndPaint`).
+    ///
+    /// Swift's `Controller.applyTextAttrs` rebuilt `Text` field by field and
+    /// so destroyed the element's name, id, blend mode and mask on every
+    /// Character-panel apply — an `id` loss, i.e. a direct violation of the
+    /// ratified Preservation Law. THIS port never had the defect, because the
+    /// loop below is `let mut new_t = t.clone(); set_character_attrs!(...)`.
+    /// Untested, though, "Rust already conforms" was only an inspection. This
+    /// pins it, so the clone can never quietly become a rebuild here either.
+    ///
+    /// Asserted BY FIELD rather than by comparing whole structs: a whole-struct
+    /// comparison is exactly the check that is blind to this class, because
+    /// both sides would be built the same wrong way.
+    #[test]
+    fn character_panel_apply_preserves_identity_and_paint() {
+        use crate::geometry::element::{BlendMode, Mask, PathCommand, TextPathElem};
+        let common = CommonProps {
+            name: Some("Section title".into()),
+            id: Some("txt-1".into()),
+            mode: BlendMode::Multiply,
+            mask: Some(Box::new(Mask {
+                subtree: Box::new(rect(1.0, 2.0, 3.0, 4.0)),
+                clip: false, invert: false, disabled: false,
+                linked: true, unlink_transform: None,
+            })),
+            ..Default::default()
+        };
+        let text = TextElem::from_string(
+            0.0, 0.0, "Headline", "serif", 12.0,
+            "normal", "normal", "none", 0.0, 0.0,
+            Some(Fill::new(Color::BLACK)), None, common.clone(),
+        );
+        let text_path = TextPathElem::from_string(
+            vec![PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                 PathCommand::LineTo { x: 100.0, y: 0.0 }],
+            "On a path", 0.0, "serif", 12.0,
+            "normal", "normal", "none",
+            Some(Fill::new(Color::BLACK)), None,
+            CommonProps { name: Some("Curved label".into()),
+                          id: Some("tp-1".into()),
+                          mode: BlendMode::Screen,
+                          ..common.clone() },
+        );
+        let mut st = state_with_layer(
+            vec![Element::Text(text), Element::TextPath(text_path)],
+            vec![vec![0, 0], vec![0, 1]],
+        );
+
+        st.character_panel.font_size = 24.0;
+        st.apply_character_panel_to_selection("font_size");
+
+        let doc = st.tab().unwrap().model.document().clone();
+        match doc.get_element(&vec![0, 0]).unwrap() {
+            Element::Text(t) => {
+                // The edit landed, so nothing below is vacuous.
+                assert_eq!(t.font_size, 24.0);
+                assert_eq!(t.common.name.as_deref(), Some("Section title"));
+                assert_eq!(t.common.id.as_deref(), Some("txt-1"));
+                assert_eq!(t.common.mode, BlendMode::Multiply);
+                assert!(t.common.mask.is_some(), "the mask survived the apply");
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+        match doc.get_element(&vec![0, 1]).unwrap() {
+            Element::TextPath(tp) => {
+                assert_eq!(tp.font_size, 24.0);
+                assert_eq!(tp.common.name.as_deref(), Some("Curved label"));
+                assert_eq!(tp.common.id.as_deref(), Some("tp-1"));
+                assert_eq!(tp.common.mode, BlendMode::Screen);
+                assert!(tp.common.mask.is_some(), "the mask survived the apply");
+            }
+            other => panic!("expected TextPath, got {other:?}"),
         }
     }
 

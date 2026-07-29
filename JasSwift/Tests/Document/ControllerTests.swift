@@ -208,6 +208,59 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(selPaths(ctrl.document.selection).contains([0, 0]))
 }
 
+// MARK: - D1: a marquee must not reach into a LOCKED layer
+
+// PER-PORT, and here is why: no shared conformance fixture can express
+// this. Every document case in the cross-language corpus is seeded from
+// a `setup_svg`, and the SVG codec does not persist `locked` at ALL --
+// `Svg.swift` has zero occurrences of the token, so a layer parsed from
+// SVG is always unlocked. The corpus is structurally blind to lock as a
+// PRECONDITION (SCOPE-effective-locked.md §5, P2). Until the codec
+// carries it, a locked-layer behaviour can only be pinned in-port, and
+// jas_dioxus carries the mirror of these three in `controller.rs`.
+//
+// D1 itself (SCOPE-effective-locked.md §3): `selectFlat` skipped a layer
+// only for `visibility == .invisible`; jas_dioxus `select_flat` skipped
+// it for `layer.locked() || layer_vis == Visibility::Invisible`. So
+// rubber-banding across a locked layer selected its contents here and
+// not there.
+
+/// Two layers, one rect each, side by side and both inside any marquee
+/// large enough to cover them. Layer 0 is LOCKED, layer 1 is not.
+private func makeLockedLayerCtrl(lockFirst: Bool) -> Controller {
+    let locked = Layer(name: "Locked",
+                       children: [.rect(Rect(x: 0, y: 0, width: 10, height: 10))],
+                       locked: lockFirst)
+    let open = Layer(name: "Open",
+                     children: [.rect(Rect(x: 20, y: 0, width: 10, height: 10))])
+    return Controller(model: Model(document: Document(layers: [locked, open])))
+}
+
+/// Positive control: with NOTHING locked the same marquee reaches both
+/// rects. Without this the locked assertion below could pass for a
+/// geometric reason and never see the guard at all.
+@Test func selectRectReachesBothLayersWhenNothingIsLocked() {
+    let ctrl = makeLockedLayerCtrl(lockFirst: false)
+    ctrl.selectRect(x: -1, y: -1, width: 120, height: 120)
+    #expect(selPaths(ctrl.document.selection) == [[0, 0], [1, 0]])
+}
+
+@Test func selectRectSkipsALockedLayerAndKeepsGoing() {
+    let ctrl = makeLockedLayerCtrl(lockFirst: true)
+    ctrl.selectRect(x: -1, y: -1, width: 120, height: 120)
+    // Only the unlocked layer's rect. `[1, 0]` also proves the guard
+    // CONTINUES rather than aborting the layer walk.
+    #expect(selPaths(ctrl.document.selection) == [[1, 0]])
+}
+
+/// `selectPolygon` (the lasso) shares `selectFlat` with `selectRect`, so
+/// it inherits the same guard -- asserted, not assumed.
+@Test func selectPolygonSkipsALockedLayer() {
+    let ctrl = makeLockedLayerCtrl(lockFirst: true)
+    ctrl.selectPolygon(polygon: [(-1, -1), (120, -1), (120, 120), (-1, 120)])
+    #expect(selPaths(ctrl.document.selection) == [[1, 0]])
+}
+
 // MARK: - Control point selection tests
 
 @Test func selectControlPoint() {

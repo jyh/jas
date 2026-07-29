@@ -118,15 +118,14 @@ public extension WorkspaceState {
             // path which calls ensure_artboards_invariant.
             let (repaired, _) = ensureArtboardsInvariant(doc.artboards)
             if repaired.count != doc.artboards.count {
-                doc = Document(
-                    layers: doc.layers,
-                    selectedLayer: doc.selectedLayer,
-                    selection: doc.selection,
-                    artboards: repaired,
-                    artboardOptions: doc.artboardOptions,
-                    documentSetup: doc.documentSetup,
-                    printPreferences: doc.printPreferences
-                )
+                // Clone-then-mutate: `replacing` touches ONLY `artboards`, so
+                // the repair cannot eat anything else. The rebuild this
+                // replaced named 7 of the 8 parameters and the one it forgot
+                // was `symbols` — so restoring a pre-artboards tab DELETED
+                // every Symbol master and orphaned every instance pointing at
+                // one (the Swift copy-site omission class). Gated by
+                // `CopySiteOmissionTests.sessionRestoreKeepsSymbolMasters`.
+                doc = doc.replacing(artboards: repaired)
             }
             return doc
         } catch {

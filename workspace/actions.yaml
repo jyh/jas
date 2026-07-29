@@ -186,6 +186,30 @@ actions:
       objects become the new selection. Repeated pastes stack with cumulative
       offsets.
 
+      STACKING, in full, because "cumulative" has to mean something exact. The
+      Nth paste of one clipboard lands 24 x N points down and to the right of
+      the original, so pasting the same thing three times gives three copies at
+      24, 48 and 72 rather than three copies on one spot. The run is counted
+      against WHAT IS ON THE CLIPBOARD, not against any record of copying: copy
+      something DIFFERENT and the next paste starts a fresh run at 24 — which is
+      also what happens when the new thing was copied in another application,
+      where this one has no way to notice a copy at all. Copy the SAME artwork
+      again and the run CONTINUES, because the 24 slot is already occupied and
+      landing a second copy exactly on top of the first is the one outcome the
+      offset exists to prevent. Changing the selection does not restart the run
+      either; a paste sets the selection itself, so a run that restarted on a
+      selection change could never reach its second step.
+
+      Three more things the run does not do. "Paste In Place" stands outside it
+      entirely — it neither advances the run nor restarts it, so pasting, then
+      pasting in place, then pasting again gives 24, then the original position,
+      then 48. A paste that puts nothing on the canvas — an empty clipboard —
+      leaves the run exactly where it was. And undoing a paste puts the run back
+      too, so the next paste lands where the undone one did instead of skipping
+      its slot and leaving a visible gap. The run belongs to the document it
+      counts in: a second open document has its own, and none of them survive
+      closing and reopening a file, where the clipboard they counted is gone.
+
       Every pasted object lands in the ACTIVE layer, no matter what layer it
       came from. If the clipboard holds a fragment whose own layers are named,
       those names are ignored and the fragment is flattened into the one active
@@ -198,8 +222,31 @@ actions:
       A layer that is locked or hidden is still a valid paste target and is
       pasted into unchanged; the pasted artwork simply inherits that layer's
       state, so a paste into a hidden layer will not appear until the layer is
-      shown. Pasted objects keep the ids they were copied with. Disabled when no
-      document is open.
+      shown. Pasting also leaves the target layer itself exactly as it was — its
+      lock, its visibility, its name and its identity are none of a paste's
+      business. Pasted objects keep the ids they were copied with. Disabled when
+      no document is open.
+
+      WHAT PASTE ACTS ON is whatever the system clipboard holds at the moment
+      the command runs, and nothing else. There is no hidden second clipboard
+      inside the application, and a paste never resurrects an earlier copy. Three
+      kinds of clipboard content, decided in this order:
+
+      A drawing — content that begins with an SVG document or an XML declaration,
+      after any leading blank space — is read as artwork and pasted as described
+      above. This is what an in-application Copy puts on the clipboard, so
+      copying and pasting inside the application takes this route.
+
+      Any other text — a sentence copied from a word processor, a snippet of web
+      page markup, a filename — is pasted as a TEXT OBJECT holding exactly that
+      text, placed at the paste offset with its baseline one line below, in the
+      active layer, and selected. Text the artist copied is text the artist gets:
+      it is never silently discarded in favour of something they copied earlier,
+      and text that merely looks like markup is not mistaken for a drawing.
+
+      An empty clipboard, or a clipboard the application cannot read at all, does
+      nothing whatsoever: no object appears, the selection is untouched, and no
+      undo step is recorded. Nothing on the clipboard means nothing to paste.
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"
@@ -211,6 +258,11 @@ actions:
       fragment carries, offset 24 points down and to the right exactly as plain
       Paste does. The two commands differ only in WHICH layer each object lands
       in. The pasted objects become the new selection.
+
+      Because they differ only in that, the two commands share ONE cumulative
+      run: pasting and then pasting-preserving-layers gives 24 and then 48, not
+      24 twice. The offset never depends on which of the two the artist reached
+      for, nor on whether the layer a paste lands in had to be created.
 
       Each named layer in the fragment is matched by name against the layers of
       the active document. When a layer of that name already exists, the
@@ -229,7 +281,13 @@ actions:
 
       A matching layer that is locked or hidden is appended to unchanged: the
       paste neither refuses nor unlocks nor reveals it. Pasted objects keep the
-      ids they were copied with. Disabled when no document is open.
+      ids they were copied with.
+
+      This command reads the same three kinds of clipboard content plain Paste
+      reads, and treats the last two identically to it: plain text becomes a text
+      object in the active layer, since text carries no layer structure to
+      preserve, and an empty or unreadable clipboard does nothing at all.
+      Disabled when no document is open.
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"
@@ -242,6 +300,15 @@ actions:
       different document or layer. The pasted objects become the new
       selection. Layer targeting is plain Paste's: everything lands in the
       ACTIVE layer, and any layer names the fragment carries are ignored.
+      Clipboard handling is plain Paste's too: a drawing is pasted as artwork,
+      any other text becomes a text object — placed at the origin with its
+      baseline one line below, since there is no offset — and an empty or
+      unreadable clipboard does nothing at all.
+
+      This command stands OUTSIDE plain Paste's cumulative run. It lands on the
+      original position, which is not one of the run's slots, so it neither
+      advances the run nor restarts it: paste, paste in place, paste puts copies
+      at 24, at the original, and at 48.
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"
@@ -250,7 +317,10 @@ actions:
   select_all:
     description: >
       Select all unlocked, visible objects in the active document. Hidden
-      and locked objects are excluded from the selection.
+      and locked objects are excluded from the selection, and "locked"
+      means INHERITED lock: an object is excluded when its own flag is
+      set or when any layer or group it sits inside is locked, at any
+      depth. A locked layer therefore contributes nothing at all.
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"
@@ -333,7 +403,10 @@ actions:
     description: >
       Recursively ungroup every unlocked Group in the document until no
       groups remain (except locked ones). Operates on the entire document,
-      not just the selection.
+      not just the selection. "Locked" is INHERITED lock: a group survives
+      when its own flag is set OR when any layer or group it sits inside is
+      locked, at any depth — a locked layer's contents are left exactly as
+      they are, structure included.
     category: object
     tier: 3
     enabled_when: "state.tab_count > 0"
@@ -1504,12 +1577,19 @@ actions:
 
   toggle_element_lock:
     description: >
-      Toggle the lock state of a single element. When locking a
-      container, the container's direct children's current lock states
-      are saved, then all children are locked. When unlocking a
-      container, each direct child's lock state is restored to its
-      saved value. Locked elements cannot be selected or edited on
-      the canvas, but can be dragged/reparented in the layers panel.
+      Toggle the lock state of a single element, and of that element
+      only. Locking a container writes the container's own flag and
+      nothing else: lock is INHERITED, so a locked layer or group locks
+      everything inside it at every depth without anything being
+      written onto the contents. Unlocking therefore has nothing to
+      restore — the contents were never changed, and they come back
+      exactly as the artist left them, including any element that
+      carried a lock of its own. An element inside a locked container
+      cannot be individually unlocked; opening the container is what
+      frees it. Locked elements cannot be selected or edited on the
+      canvas, but can be dragged/reparented in the layers panel.
+      Locking also removes the element and everything inside it from
+      the current selection.
     category: layers
     tier: 3
     params:

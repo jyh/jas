@@ -574,16 +574,39 @@ public class Controller {
         var selection: Selection = []
         for (li, layer) in doc.layers.enumerated() {
             let layerVis = layer.visibility
-            if layerVis == .invisible { continue }
+            // A locked layer's subtree is non-selectable by INHERITANCE — lock
+            // is not materialized onto children (transcripts/LAYER_STRUCTURE.md
+            // §13, RULED 2026-07-28), so the guard has to be an ancestor-aware
+            // read at every level rather than a flag on each element. Mirrors
+            // this port's own `docHitTest` / `docHitTestDeep` and jas_dioxus
+            // `select_flat`.
+            //
+            // HONEST NOTE ON WHAT IS WATCHED. This walk is three levels deep,
+            // and the layer guard on this line is the one that enforces at
+            // levels 1 and 2: under it, `effectiveLocked` at those depths is
+            // ALGEBRAICALLY the element's own flag, so those two reads are
+            // expressive rather than behavioural and no mutation can turn them
+            // red (measured: reverting either to `.isLocked` leaves the whole
+            // suite green). The GRANDCHILD read below is the behavioural
+            // change, and it does red.
+            if doc.effectiveLocked([li]) || layerVis == .invisible { continue }
             for (ci, child) in layer.children.enumerated() {
-                if child.isLocked { continue }
+                if doc.effectiveLocked([li, ci]) { continue }
                 let childVis = min(layerVis, child.visibility)
                 if childVis == .invisible { continue }
                 if case .group(let g) = child {
-                    let anyHit = g.children.contains { predicate($0) }
+                    // A locked grandchild neither TRIGGERS the group selection
+                    // nor JOINS it. Before §13 the predicate ran over every
+                    // grandchild unguarded, so a rubber band that touched only
+                    // a locked member dragged the group and its unlocked
+                    // siblings into the selection with it.
+                    let anyHit = g.children.enumerated().contains {
+                        !doc.effectiveLocked([li, ci, $0.offset]) && predicate($0.element)
+                    }
                     if anyHit {
                         selection.insert(ElementSelection.all([li, ci]))
                         for gi in 0..<g.children.count {
+                            if doc.effectiveLocked([li, ci, gi]) { continue }
                             selection.insert(ElementSelection.all([li, ci, gi]))
                         }
                     }
@@ -683,7 +706,11 @@ public class Controller {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }
         let doc = model.document
         let elem = doc.getElement(path)
-        if elem.isLocked { return }
+        // Both reads below are INHERITED down the path. Until LOCKINHERIT the
+        // first one read the element's OWN `isLocked` flag, one line above an
+        // ancestor-aware visibility read — so a click on a child of a locked
+        // layer selected it. transcripts/LAYER_STRUCTURE.md §13.
+        if doc.effectiveLocked(path) { return }
         if doc.effectiveVisibility(path) == .invisible { return }
         if path.count >= 2 {
             let parentPath = Array(path.dropLast())
@@ -2044,70 +2071,70 @@ public class Controller {
 
     /// Apply a character-attribute dict onto a single `Text`, returning
     /// a new value with only the overlapping keys replaced.
+    ///
+    /// CLONE-THEN-MUTATE, and it must stay that way. This was an open-coded
+    /// rebuild naming 27 of `Text`'s 31 stored properties, so every
+    /// Character-panel apply silently destroyed the element's `name`, `id`,
+    /// `blendMode` and `mask` — the Swift copy-site omission class
+    /// (EDIT_SEMANTICS_FREEZE.md §3.1). The `id` loss is a direct violation of
+    /// the Preservation Law: setting a font does not speak to a text element's
+    /// identity. Rust's twin
+    /// (`app_state.rs::apply_character_panel_to_selection`) is
+    /// `let mut new_t = t.clone(); set_character_attrs!(new_t, attrs);` and
+    /// always conformed, so the rebuild was also a live port divergence.
+    ///
+    /// Do NOT repair this shape by adding the four missing arguments — that
+    /// is the repair that has failed twice in this class, because the next new
+    /// field lands right back in the same place. With `var out = t` there is
+    /// no field list left to fall behind. Gated by
+    /// `CopySiteOmissionTests.characterApplyKeepsTextIdentityAndPaint` and
+    /// structurally by `scripts/check_swift_copy_sites.py`.
     private static func applyTextAttrs(_ t: Text, attrs: [String: Any]) -> Text {
-        let ff = (attrs["font_family"] as? String) ?? t.fontFamily
-        let fs = (attrs["font_size"] as? NSNumber)?.doubleValue ?? t.fontSize
-        let fw = (attrs["font_weight"] as? String) ?? t.fontWeight
-        let fst = (attrs["font_style"] as? String) ?? t.fontStyle
-        let td = (attrs["text_decoration"] as? String) ?? t.textDecoration
-        let tt = (attrs["text_transform"] as? String) ?? t.textTransform
-        let fv = (attrs["font_variant"] as? String) ?? t.fontVariant
-        let bs = (attrs["baseline_shift"] as? String) ?? t.baselineShift
-        let lh = (attrs["line_height"] as? String) ?? t.lineHeight
-        let ls = (attrs["letter_spacing"] as? String) ?? t.letterSpacing
-        let lang = (attrs["xml_lang"] as? String) ?? t.xmlLang
-        let aa = (attrs["aa_mode"] as? String) ?? t.aaMode
-        let rotate = (attrs["rotate"] as? String) ?? t.rotate
-        let hscale = (attrs["horizontal_scale"] as? String) ?? t.horizontalScale
-        let vscale = (attrs["vertical_scale"] as? String) ?? t.verticalScale
-        let kern = (attrs["kerning"] as? String) ?? t.kerning
-        return Text(x: t.x, y: t.y, tspans: t.tspans,
-                    fontFamily: ff, fontSize: fs,
-                    fontWeight: fw, fontStyle: fst, textDecoration: td,
-                    textTransform: tt, fontVariant: fv,
-                    baselineShift: bs, lineHeight: lh,
-                    letterSpacing: ls, xmlLang: lang,
-                    aaMode: aa, rotate: rotate,
-                    horizontalScale: hscale, verticalScale: vscale,
-                    kerning: kern,
-                    width: t.width, height: t.height,
-                    fill: t.fill, stroke: t.stroke,
-                    opacity: t.opacity, transform: t.transform,
-                    locked: t.locked, visibility: t.visibility)
+        var out = t
+        out.fontFamily = (attrs["font_family"] as? String) ?? t.fontFamily
+        out.fontSize = (attrs["font_size"] as? NSNumber)?.doubleValue ?? t.fontSize
+        out.fontWeight = (attrs["font_weight"] as? String) ?? t.fontWeight
+        out.fontStyle = (attrs["font_style"] as? String) ?? t.fontStyle
+        out.textDecoration = (attrs["text_decoration"] as? String) ?? t.textDecoration
+        out.textTransform = (attrs["text_transform"] as? String) ?? t.textTransform
+        out.fontVariant = (attrs["font_variant"] as? String) ?? t.fontVariant
+        out.baselineShift = (attrs["baseline_shift"] as? String) ?? t.baselineShift
+        out.lineHeight = (attrs["line_height"] as? String) ?? t.lineHeight
+        out.letterSpacing = (attrs["letter_spacing"] as? String) ?? t.letterSpacing
+        out.xmlLang = (attrs["xml_lang"] as? String) ?? t.xmlLang
+        out.aaMode = (attrs["aa_mode"] as? String) ?? t.aaMode
+        out.rotate = (attrs["rotate"] as? String) ?? t.rotate
+        out.horizontalScale = (attrs["horizontal_scale"] as? String) ?? t.horizontalScale
+        out.verticalScale = (attrs["vertical_scale"] as? String) ?? t.verticalScale
+        out.kerning = (attrs["kerning"] as? String) ?? t.kerning
+        return out
     }
 
     /// Apply a character-attribute dict onto a single `TextPath`,
     /// returning a new value with overlapping keys replaced.
+    ///
+    /// Same clause and same repair as ``applyTextAttrs(_:attrs:)`` — see its
+    /// note. The rebuild this replaced named 25 of `TextPath`'s 29 stored
+    /// properties and lost the identical four.
     private static func applyTextPathAttrs(_ tp: TextPath, attrs: [String: Any]) -> TextPath {
-        let ff = (attrs["font_family"] as? String) ?? tp.fontFamily
-        let fs = (attrs["font_size"] as? NSNumber)?.doubleValue ?? tp.fontSize
-        let fw = (attrs["font_weight"] as? String) ?? tp.fontWeight
-        let fst = (attrs["font_style"] as? String) ?? tp.fontStyle
-        let td = (attrs["text_decoration"] as? String) ?? tp.textDecoration
-        let tt = (attrs["text_transform"] as? String) ?? tp.textTransform
-        let fv = (attrs["font_variant"] as? String) ?? tp.fontVariant
-        let bs = (attrs["baseline_shift"] as? String) ?? tp.baselineShift
-        let lh = (attrs["line_height"] as? String) ?? tp.lineHeight
-        let ls = (attrs["letter_spacing"] as? String) ?? tp.letterSpacing
-        let lang = (attrs["xml_lang"] as? String) ?? tp.xmlLang
-        let aa = (attrs["aa_mode"] as? String) ?? tp.aaMode
-        let rotate = (attrs["rotate"] as? String) ?? tp.rotate
-        let hscale = (attrs["horizontal_scale"] as? String) ?? tp.horizontalScale
-        let vscale = (attrs["vertical_scale"] as? String) ?? tp.verticalScale
-        let kern = (attrs["kerning"] as? String) ?? tp.kerning
-        return TextPath(d: tp.d, tspans: tp.tspans,
-                        startOffset: tp.startOffset,
-                        fontFamily: ff, fontSize: fs,
-                        fontWeight: fw, fontStyle: fst, textDecoration: td,
-                        textTransform: tt, fontVariant: fv,
-                        baselineShift: bs, lineHeight: lh,
-                        letterSpacing: ls, xmlLang: lang,
-                        aaMode: aa, rotate: rotate,
-                        horizontalScale: hscale, verticalScale: vscale,
-                        kerning: kern,
-                        fill: tp.fill, stroke: tp.stroke,
-                        opacity: tp.opacity, transform: tp.transform,
-                        locked: tp.locked, visibility: tp.visibility)
+        var out = tp
+        out.fontFamily = (attrs["font_family"] as? String) ?? tp.fontFamily
+        out.fontSize = (attrs["font_size"] as? NSNumber)?.doubleValue ?? tp.fontSize
+        out.fontWeight = (attrs["font_weight"] as? String) ?? tp.fontWeight
+        out.fontStyle = (attrs["font_style"] as? String) ?? tp.fontStyle
+        out.textDecoration = (attrs["text_decoration"] as? String) ?? tp.textDecoration
+        out.textTransform = (attrs["text_transform"] as? String) ?? tp.textTransform
+        out.fontVariant = (attrs["font_variant"] as? String) ?? tp.fontVariant
+        out.baselineShift = (attrs["baseline_shift"] as? String) ?? tp.baselineShift
+        out.lineHeight = (attrs["line_height"] as? String) ?? tp.lineHeight
+        out.letterSpacing = (attrs["letter_spacing"] as? String) ?? tp.letterSpacing
+        out.xmlLang = (attrs["xml_lang"] as? String) ?? tp.xmlLang
+        out.aaMode = (attrs["aa_mode"] as? String) ?? tp.aaMode
+        out.rotate = (attrs["rotate"] as? String) ?? tp.rotate
+        out.horizontalScale = (attrs["horizontal_scale"] as? String) ?? tp.horizontalScale
+        out.verticalScale = (attrs["vertical_scale"] as? String) ?? tp.verticalScale
+        out.kerning = (attrs["kerning"] as? String) ?? tp.kerning
+        return out
     }
 
     public func setSelectionWidthProfile(_ widthPoints: [StrokeWidthPoint]) {

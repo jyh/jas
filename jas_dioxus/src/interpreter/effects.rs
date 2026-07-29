@@ -2871,6 +2871,14 @@ fn evaluate_field_value(
 /// Walk the document layer by layer (including one level of Group
 /// nesting) looking for a Path whose command list has an anchor
 /// within `radius` of `(x, y)`. Returns (element path, command index).
+///
+/// A locked Path is skipped in BOTH positions — as a direct layer child
+/// and as a member of a group. Before S7 (SCOPE-effective-locked.md §4)
+/// only the group's own lock was consulted here, so an anchor could be
+/// dragged out of an element the artist had locked; JasSwift
+/// `findPathAnchorNear` guarded all three positions, and every other
+/// interactive probe in this file and in `doc_primitives` already did
+/// the same.
 fn find_path_anchor_near(
     doc: &crate::document::document::Document,
     x: f64, y: f64, radius: f64,
@@ -2879,6 +2887,9 @@ fn find_path_anchor_near(
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
                 if let Element::Path(pe) = &**child {
+                    if pe.common.locked {
+                        continue;
+                    }
                     if let Some(idx) = anchor_index_near(pe, x, y, radius) {
                         return Some((vec![li, ci], idx));
                     }
@@ -2889,6 +2900,9 @@ fn find_path_anchor_near(
                     }
                     for (gi, gc) in g.children.iter().enumerate() {
                         if let Element::Path(pe) = &**gc {
+                            if pe.common.locked {
+                                continue;
+                            }
                             if let Some(idx) = anchor_index_near(pe, x, y, radius) {
                                 return Some((vec![li, ci, gi], idx));
                             }
@@ -2951,10 +2965,12 @@ fn find_path_handle_near(
         }
         None
     }
+    // Locked Paths are skipped in both positions — see `find_path_anchor_near`.
     for (li, layer) in doc.layers.iter().enumerate() {
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
                 if let Element::Path(pe) = &**child {
+                    if pe.common.locked { continue; }
                     if let Some(r) = check(pe, &[li, ci], x, y, radius) {
                         return Some(r);
                     }
@@ -2963,6 +2979,7 @@ fn find_path_handle_near(
                     if child.common().locked { continue; }
                     for (gi, gc) in g.children.iter().enumerate() {
                         if let Element::Path(pe) = &**gc {
+                            if pe.common.locked { continue; }
                             if let Some(r) = check(pe, &[li, ci, gi], x, y, radius) {
                                 return Some(r);
                             }
@@ -2995,10 +3012,12 @@ fn find_path_anchor_by_cp_index(
         }
         None
     }
+    // Locked Paths are skipped in both positions — see `find_path_anchor_near`.
     for (li, layer) in doc.layers.iter().enumerate() {
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
                 if let Element::Path(pe) = &**child {
+                    if pe.common.locked { continue; }
                     if let Some(r) = check(pe, &[li, ci], x, y, radius) {
                         return Some(r);
                     }
@@ -3007,6 +3026,7 @@ fn find_path_anchor_by_cp_index(
                     if child.common().locked { continue; }
                     for (gi, gc) in g.children.iter().enumerate() {
                         if let Element::Path(pe) = &**gc {
+                            if pe.common.locked { continue; }
                             if let Some(r) = check(pe, &[li, ci, gi], x, y, radius) {
                                 return Some(r);
                             }
@@ -5946,17 +5966,22 @@ fn path_insert_anchor_on_segment_near(
     }
 
     {
+        // Locked Paths are skipped in both positions — see
+        // `find_path_anchor_near`. This is the fourth walker of the S7
+        // family and carried the identical asymmetry.
         let doc = model.document();
         for (li, layer) in doc.layers.iter().enumerate() {
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
                     if let Element::Path(pe) = &**child {
+                        if pe.common.locked { continue; }
                         try_path(&mut best, pe, &[li, ci], x, y);
                     }
                     if let Element::Group(g) = &**child {
                         if child.common().locked { continue; }
                         for (gi, gc) in g.children.iter().enumerate() {
                             if let Element::Path(pe) = &**gc {
+                                if pe.common.locked { continue; }
                                 try_path(&mut best, pe, &[li, ci, gi], x, y);
                             }
                         }
@@ -11793,5 +11818,182 @@ mod tests {
             out.fill_rule,
             FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE),
             "subtract-generated rings wear the generated-geometry rule");
+    }
+
+    // ── S7: the anchor probes must skip a LOCKED Path ──────────────
+    //
+    // SCOPE-effective-locked.md §4, S7. The three `find_path_*` walkers in
+    // this file plus the one inside `doc.path.insert_anchor_on_segment_near`
+    // all had the same asymmetry: the GROUP arm checked
+    // `child.common().locked`, and the direct-Path arm checked nothing at
+    // all — nor did the Path arm *inside* the group. JasSwift
+    // `YamlToolEffects.swift` guards all three positions in all four
+    // walkers (`!pe.locked` / `!g.locked` / `!pe.locked`).
+    //
+    // Swift is the correct one and this port adopts it, because every other
+    // interactive probe in EVERY port already refuses locked elements:
+    // `doc_primitives::hit_test` / `hit_test_deep` here, `docHitTest` /
+    // `docHitTestDeep` in Swift, `hit_test` / `hit_test_deep` in the live
+    // Python reference, and this file's own `cp_recursive`
+    // (`doc.path.probe_partial_hit`), magic wand and eyedropper. A locked
+    // element that cannot be clicked but CAN have an anchor dragged out of
+    // it is not a defensible second rule; it is the one walker family that
+    // was missed.
+    //
+    // PER-PORT: no shared fixture can seed a locked document (the SVG codec
+    // drops `locked` entirely), so these live here and their mirrors live in
+    // JasSwift/Tests/Tools/YamlToolEffectsTests.swift.
+
+    /// A three-anchor curve: anchors at (0,0), (30,0), (60,0), with the
+    /// handles around the middle anchor at (20,10) and (40,-10). Offset in
+    /// y so the same shape can be planted twice in one document.
+    fn s7_curve(dy: f64) -> Vec<PathCommand> {
+        vec![
+            PathCommand::MoveTo { x: 0.0, y: dy },
+            PathCommand::CurveTo { x1: 10.0, y1: 10.0 + dy, x2: 20.0, y2: 10.0 + dy, x: 30.0, y: dy },
+            PathCommand::CurveTo { x1: 40.0, y1: -10.0 + dy, x2: 50.0, y2: -10.0 + dy, x: 60.0, y: dy },
+        ]
+    }
+
+    /// One layer holding, in order:
+    ///   [0, 0]    a Path, `locked` per the argument      (the DIRECT arm)
+    ///   [0, 1]    an UNLOCKED Group holding
+    ///   [0, 1, 0] a Path, `locked` per the argument      (the NESTED arm)
+    /// The nested copy sits 100 units lower so the two are probed apart. The
+    /// group is deliberately never locked: the group guard already existed,
+    /// so a locked group would hide the arm under test.
+    fn s7_model(locked: bool) -> Model {
+        // Struct update from Default so a field added to PathElem does not
+        // need this site edited (Ship of Theseus law).
+        let mk = |dy: f64| Element::Path(PathElem {
+            d: s7_curve(dy),
+            common: CommonProps { locked, ..CommonProps::default() },
+            ..PathElem::default()
+        });
+        let group = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(mk(100.0))],
+            common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(mk(0.0)), std::rc::Rc::new(group)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L".to_string()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0, selection: vec![],
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    fn s7_probe_mode(model: &Model, x: f64, y: f64) -> String {
+        let mut store = StateStore::new();
+        store.set_tool("anchor_point", "mode", serde_json::json!("idle"));
+        let mut m = model.clone();
+        run_effects(
+            &vec![serde_json::json!({
+                "doc.path.probe_anchor_hit": { "x": x, "y": y, "hit_radius": 5 }
+            })],
+            &serde_json::json!({}), &mut store,
+            Some(&mut m), None, None, None);
+        store.get_tool("anchor_point", "mode").as_str().unwrap_or("").to_string()
+    }
+
+    /// Positive control for the whole family: with NOTHING locked, all four
+    /// probe points land. Without this every "locked ⇒ no effect" assertion
+    /// below could pass because the probe missed the geometry entirely.
+    #[test]
+    fn anchor_probes_hit_when_nothing_is_locked() {
+        let model = s7_model(false);
+        assert_eq!(s7_probe_mode(&model, 20.0, 10.0), "pressed_handle",
+            "handle of the DIRECT path");
+        assert_eq!(s7_probe_mode(&model, 30.0, 0.0), "pressed_smooth",
+            "anchor of the DIRECT path");
+        assert_eq!(s7_probe_mode(&model, 20.0, 110.0), "pressed_handle",
+            "handle of the path NESTED in an unlocked group");
+        assert_eq!(s7_probe_mode(&model, 30.0, 100.0), "pressed_smooth",
+            "anchor of the path NESTED in an unlocked group");
+    }
+
+    /// `find_path_handle_near` + `find_path_anchor_by_cp_index`, both arms.
+    #[test]
+    fn anchor_probe_skips_a_locked_path() {
+        let model = s7_model(true);
+        assert_eq!(s7_probe_mode(&model, 20.0, 10.0), "idle",
+            "handle of a locked DIRECT path");
+        assert_eq!(s7_probe_mode(&model, 30.0, 0.0), "idle",
+            "anchor of a locked DIRECT path");
+        assert_eq!(s7_probe_mode(&model, 20.0, 110.0), "idle",
+            "handle of a locked path NESTED in an unlocked group");
+        assert_eq!(s7_probe_mode(&model, 30.0, 100.0), "idle",
+            "anchor of a locked path NESTED in an unlocked group");
+    }
+
+    fn s7_delete_anchor(model: &Model, x: f64, y: f64) -> Model {
+        let mut m = model.clone();
+        let mut store = StateStore::new();
+        run_effects(
+            &vec![serde_json::json!({
+                "doc.path.delete_anchor_near": { "x": x, "y": y, "hit_radius": 5 }
+            })],
+            &serde_json::json!({}), &mut store,
+            Some(&mut m), None, None, None);
+        m
+    }
+
+    /// `find_path_anchor_near`, both arms — with its own positive control.
+    #[test]
+    fn delete_anchor_near_skips_a_locked_path() {
+        let open = s7_model(false);
+        assert_eq!(s7_delete_anchor(&open, 30.0, 0.0).document()
+                       .get_element(&vec![0, 0]).map(|e| match e {
+                           Element::Path(p) => p.d.len(), _ => 0 }),
+                   Some(2),
+            "control: unlocked DIRECT path loses its middle anchor");
+        assert_eq!(s7_delete_anchor(&open, 30.0, 100.0).document()
+                       .get_element(&vec![0, 1, 0]).map(|e| match e {
+                           Element::Path(p) => p.d.len(), _ => 0 }),
+                   Some(2),
+            "control: unlocked NESTED path loses its middle anchor");
+
+        let locked = s7_model(true);
+        assert_eq!(path_at(&s7_delete_anchor(&locked, 30.0, 0.0), &[0, 0]).d.len(), 3,
+            "a locked DIRECT path keeps all three anchors");
+        assert_eq!(path_at(&s7_delete_anchor(&locked, 30.0, 100.0), &[0, 1, 0]).d.len(), 3,
+            "a locked NESTED path keeps all three anchors");
+    }
+
+    fn s7_insert_anchor(model: &Model, x: f64, y: f64) -> Model {
+        let mut m = model.clone();
+        let mut store = StateStore::new();
+        run_effects(
+            &vec![serde_json::json!({
+                "doc.path.insert_anchor_on_segment_near": { "x": x, "y": y, "hit_radius": 5 }
+            })],
+            &serde_json::json!({}), &mut store,
+            Some(&mut m), None, None, None);
+        m
+    }
+
+    /// The fourth walker — the one inlined in
+    /// `doc.path.insert_anchor_on_segment_near`, which the scope did not
+    /// name but which carries the identical asymmetry. (15, 7.5) is the
+    /// t = 0.5 point of the first cubic; the nested copy's is (15, 107.5).
+    #[test]
+    fn insert_anchor_on_segment_skips_a_locked_path() {
+        let open = s7_model(false);
+        assert_eq!(path_at(&s7_insert_anchor(&open, 15.0, 7.5), &[0, 0]).d.len(), 4,
+            "control: unlocked DIRECT path gains an anchor");
+        assert_eq!(path_at(&s7_insert_anchor(&open, 15.0, 107.5), &[0, 1, 0]).d.len(), 4,
+            "control: unlocked NESTED path gains an anchor");
+
+        let locked = s7_model(true);
+        assert_eq!(path_at(&s7_insert_anchor(&locked, 15.0, 7.5), &[0, 0]).d.len(), 3,
+            "a locked DIRECT path gains nothing");
+        assert_eq!(path_at(&s7_insert_anchor(&locked, 15.0, 107.5), &[0, 1, 0]).d.len(), 3,
+            "a locked NESTED path gains nothing");
     }
 }

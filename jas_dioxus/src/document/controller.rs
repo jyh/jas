@@ -777,6 +777,13 @@ impl Controller {
     }
 
     /// Select all unlocked, visible elements in the document.
+    ///
+    /// "Unlocked" is INHERITED (transcripts/LAYER_STRUCTURE.md §13). This loop
+    /// used to test `child.locked()` and never the LAYER's own flag, so Select
+    /// All swept up the entire contents of a locked layer — while JasSwift's
+    /// `selectAll` (which delegates to `selectFlat`) skipped it. A live
+    /// prime-directive divergence, invisible to the corpus until `jas:locked`
+    /// let a fixture start from a locked document.
     pub fn select_all(model: &mut Model) {
         use crate::geometry::element::Visibility;
         let doc = model.document().clone();
@@ -788,7 +795,13 @@ impl Controller {
             }
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
-                    if child.locked() {
+                    // ONE read, deliberately: `effective_locked` on the CHILD
+                    // path already folds in the layer's own flag, so a
+                    // layer-level short-circuit above this loop would be
+                    // redundant — and a redundant guard is one no mutation can
+                    // turn red, which is how a guard rots. Measured: with both
+                    // present, reverting EITHER left the whole suite green.
+                    if doc.effective_locked(&vec![li, ci]) {
                         continue;
                     }
                     if std::cmp::min(layer_vis, child.visibility()) == Visibility::Invisible {
@@ -853,11 +866,15 @@ impl Controller {
             return;
         }
         let doc = model.document().clone();
-        let elem = match doc.get_element(path) {
-            Some(e) => e,
-            None => return,
-        };
-        if elem.locked() {
+        // A path that names no element selects nothing.
+        if doc.get_element(path).is_none() {
+            return;
+        }
+        // Both reads below are INHERITED down the path. Until LOCKINHERIT the
+        // first one read the element's OWN `locked` flag, one line above an
+        // ancestor-aware visibility read — so a click on a child of a locked
+        // layer selected it. transcripts/LAYER_STRUCTURE.md §13.
+        if doc.effective_locked(path) {
             return;
         }
         if doc.effective_visibility(path) == Visibility::Invisible {
@@ -2328,22 +2345,36 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
-    /// Ungroup all unlocked Group elements in the entire document.
+    /// Ungroup all unlocked Group elements in the entire document, where
+    /// "unlocked" is INHERITED (transcripts/LAYER_STRUCTURE.md §13): a Group
+    /// inside a locked layer or a locked group is left alone, structure
+    /// included, exactly as one with its own flag set is.
     pub fn ungroup_all(model: &mut Model) {
         let doc = model.document().clone();
         let mut changed = false;
 
-        fn flatten(children: &[Rc<Element>], changed: &mut bool) -> Vec<Rc<Element>> {
+        // `ancestor_locked` is the INHERITED half of the lock read
+        // (transcripts/LAYER_STRUCTURE.md §13): a Group survives when its own
+        // flag is set OR when anything it sits inside is locked. This is the
+        // same `effective_locked` fold, threaded through a walk that already
+        // has the ancestors in hand. It is NOT a new guard — `ungroup_all`
+        // always read lock; §13 changed what the word means.
+        fn flatten(
+            children: &[Rc<Element>],
+            ancestor_locked: bool,
+            changed: &mut bool,
+        ) -> Vec<Rc<Element>> {
             let mut result = Vec::new();
             for child in children {
-                if child.is_group() && !child.locked() {
+                let locked = ancestor_locked || child.locked();
+                if child.is_group() && !locked {
                     *changed = true;
                     let inner = child.children().unwrap_or(&[]);
-                    result.extend(flatten(inner, changed));
+                    result.extend(flatten(inner, locked, changed));
                 } else if child.is_group() {
                     // Locked group: recurse into children but keep the group
                     let inner = child.children().unwrap_or(&[]);
-                    let new_children = flatten(inner, changed);
+                    let new_children = flatten(inner, locked, changed);
                     let mut new_group = (**child).clone();
                     if let Some(gc) = new_group.children_mut() {
                         *gc = new_children;
@@ -2361,7 +2392,7 @@ impl Controller {
             .iter()
             .map(|layer| {
                 let children = layer.children().unwrap_or(&[]);
-                let new_children = flatten(children, &mut changed);
+                let new_children = flatten(children, layer.locked(), &mut changed);
                 let mut new_layer = layer.clone();
                 if let Some(lc) = new_layer.children_mut() {
                     *lc = new_children;
@@ -2797,15 +2828,25 @@ fn select_flat(
     let mut entries: Selection = Vec::new();
     for (li, layer) in doc.layers.iter().enumerate() {
         let layer_vis = layer.visibility();
-        // A locked layer's subtree is non-selectable by inheritance (lock is
-        // not materialized onto children); skip the whole layer. Mirrors the
-        // hit_test path and Swift/OCaml/Python.
-        if layer.locked() || layer_vis == Visibility::Invisible {
+        // A locked layer's subtree is non-selectable by INHERITANCE — lock is
+        // not materialized onto children (transcripts/LAYER_STRUCTURE.md §13,
+        // RULED 2026-07-28), so the guard has to be an ancestor-aware read at
+        // every level rather than a flag on each element. Mirrors the hit_test
+        // path and JasSwift `selectFlat`.
+        //
+        // HONEST NOTE ON WHAT IS WATCHED. This walk is three levels deep, and
+        // the layer guard below is the one that enforces at levels 1 and 2:
+        // under it, `effective_locked` at those depths is ALGEBRAICALLY the
+        // element's own flag, so those two reads are expressive rather than
+        // behavioural and no mutation can turn them red (measured: reverting
+        // either to `.locked()` leaves the whole suite green). The GRANDCHILD
+        // read further down is the behavioural change, and it does red.
+        if doc.effective_locked(&vec![li]) || layer_vis == Visibility::Invisible {
             continue;
         }
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
-                if child.locked() {
+                if doc.effective_locked(&vec![li, ci]) {
                     continue;
                 }
                 let child_vis = std::cmp::min(layer_vis, child.visibility());
@@ -2813,11 +2854,21 @@ fn select_flat(
                     continue;
                 }
                 if child.is_group() {
+                    // A locked grandchild neither TRIGGERS the group selection
+                    // nor JOINS it. Before §13 the predicate ran over every
+                    // grandchild unguarded, so a rubber band that touched only
+                    // a locked member dragged the group and its unlocked
+                    // siblings into the selection with it.
                     if let Some(grandchildren) = child.children()
-                        && grandchildren.iter().any(|gc| predicate(gc))
+                        && grandchildren.iter().enumerate().any(|(gi, gc)| {
+                            !doc.effective_locked(&vec![li, ci, gi]) && predicate(gc)
+                        })
                     {
                         entries.push(ElementSelection::all(vec![li, ci]));
-                        for (gi, _gc) in grandchildren.iter().enumerate() {
+                        for gi in 0..grandchildren.len() {
+                            if doc.effective_locked(&vec![li, ci, gi]) {
+                                continue;
+                            }
                             entries.push(ElementSelection::all(vec![li, ci, gi]));
                         }
                     }
@@ -3546,6 +3597,80 @@ mod tests {
         Controller::select_rect(&mut model, -1.0, -1.0, 12.0, 12.0, false);
         let paths = sel_paths(&model);
         assert!(paths.contains(&vec![0, 0])); // rect at (0,0) 10x10
+    }
+
+    // D1 (SCOPE-effective-locked.md §3): a marquee must not reach into a
+    // LOCKED layer.
+    //
+    // PER-PORT, and here is why: no shared conformance fixture can express
+    // this. Every document case in the cross-language corpus is seeded from a
+    // `setup_svg`, and the SVG codec does not persist `locked` at all
+    // (`geometry/svg.rs` hardcodes `locked: false` in `parse_common` and never
+    // writes it), so a layer parsed from SVG is always unlocked. The corpus is
+    // structurally blind to lock as a PRECONDITION. Until the codec carries
+    // it, this can only be pinned in-port; JasSwift carries the mirror of
+    // these three in `Tests/Document/ControllerTests.swift`.
+    //
+    // This port already had the guard. These are REGRESSION PINS, not
+    // red-first evidence -- the red was in JasSwift, whose `selectFlat`
+    // checked visibility only. They exist so the pair cannot drift apart
+    // again in either direction.
+
+    /// Two layers, one rect each, side by side and both inside any marquee
+    /// large enough to cover them. Layer 0's lock is the parameter.
+    fn locked_layer_model(lock_first: bool) -> Model {
+        let locked = Element::Layer(LayerElem {
+            children: vec![Rc::new(make_rect(0.0, 0.0, 10.0, 10.0))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps {
+                name: Some("Locked".to_string()),
+                locked: lock_first,
+                ..Default::default()
+            },
+        });
+        let open = Element::Layer(LayerElem {
+            children: vec![Rc::new(make_rect(20.0, 0.0, 10.0, 10.0))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("Open".to_string()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![locked, open],
+            selected_layer: 0,
+            selection: vec![],
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    /// Positive control: with NOTHING locked the same marquee reaches both
+    /// rects. Without this the locked assertion below could pass for a
+    /// geometric reason and never see the guard at all.
+    #[test]
+    fn select_rect_reaches_both_layers_when_nothing_is_locked() {
+        let mut model = locked_layer_model(false);
+        Controller::select_rect(&mut model, -1.0, -1.0, 120.0, 120.0, false);
+        assert_eq!(sel_paths(&model), vec![vec![0, 0], vec![1, 0]]);
+    }
+
+    #[test]
+    fn select_rect_skips_a_locked_layer_and_keeps_going() {
+        let mut model = locked_layer_model(true);
+        Controller::select_rect(&mut model, -1.0, -1.0, 120.0, 120.0, false);
+        // Only the unlocked layer's rect. `[1, 0]` also proves the guard
+        // CONTINUES rather than aborting the layer walk.
+        assert_eq!(sel_paths(&model), vec![vec![1, 0]]);
+    }
+
+    /// `select_polygon` (the lasso) shares `select_flat` with `select_rect`,
+    /// so it inherits the same guard -- asserted, not assumed.
+    #[test]
+    fn select_polygon_skips_a_locked_layer() {
+        let mut model = locked_layer_model(true);
+        let poly = [(-1.0, -1.0), (120.0, -1.0), (120.0, 120.0), (-1.0, 120.0)];
+        Controller::select_polygon(&mut model, &poly, false);
+        assert_eq!(sel_paths(&model), vec![vec![1, 0]]);
     }
 
     #[test]
@@ -6816,3 +6941,277 @@ mod preservation_law_tests {
     }
 }
 
+
+/// UNGROUP ALL MUST PRESERVE WHAT IT DOES NOT SPEAK TO — the Rust twin of
+/// Swift's `UngroupAllPreservationTests`, case for case.
+///
+/// Rust has never carried the defect these gate (`(**child).clone()` and
+/// `new_doc.layers = new_layers` mutate in place, and every attribute lives in
+/// ONE `CommonProps` that clones wholesale), so these probes are written GREEN.
+/// That is deliberate and it is the point: the shared ACTION corpus case
+/// `menu_ungroup_all_nested` is STRUCTURALLY BLIND to everything at issue here
+/// — its `expected_json` carries no `symbols`, no `artboards`, no
+/// `document_setup`, no `print_preferences`, and its one layer has no `id`, no
+/// blend mode and no mask. So the corpus could not have caught Swift's loss and
+/// cannot catch a future Rust regression either. These probes are the only
+/// thing that watches the Rust side, exactly as the Swift suite is the only
+/// thing that watches Swift, and they assert BY VALUE for the same reason.
+#[cfg(test)]
+mod ungroup_all_preservation_tests {
+    use super::*;
+    use crate::document::artboard::{Artboard, ArtboardOptions};
+    use crate::document::document_setup::DocumentSetup;
+    use crate::document::print_preferences::PrintPreferences;
+    use crate::geometry::element::{
+        BlendMode, Color, CommonProps, Fill, GroupElem, LayerElem, Mask, RectElem,
+        Visibility,
+    };
+    use std::rc::Rc;
+
+    fn rect(x: f64) -> Element {
+        Element::Rect(RectElem {
+            x,
+            y: 0.0,
+            width: 10.0,
+            height: 10.0,
+            rx: 0.0,
+            ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        })
+    }
+
+    fn a_mask() -> Mask {
+        Mask {
+            subtree: Box::new(rect(0.0)),
+            clip: false,
+            invert: true,
+            disabled: false,
+            linked: true,
+            unlink_transform: None,
+        }
+    }
+
+    /// An unlocked group with a rect inside — GUARANTEES `changed == true`.
+    fn nest() -> Element {
+        Element::Group(GroupElem {
+            children: vec![Rc::new(rect(1.0))],
+            common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        })
+    }
+
+    fn named_layer(name: &str, children: Vec<Element>) -> Element {
+        Element::Layer(LayerElem {
+            children: children.into_iter().map(Rc::new).collect(),
+            common: CommonProps {
+                name: Some(name.to_string()),
+                ..CommonProps::default()
+            },
+            isolated_blending: false,
+            knockout_group: false,
+        })
+    }
+
+    /// Twin of `documentLevelStateSurvivesUngroupAll`.
+    #[test]
+    fn document_level_state_survives_ungroup_all() {
+        let mut master = rect(3.0);
+        master.common_mut().id = Some("master-1".to_string());
+        let board = Artboard {
+            id: "ab-keep".to_string(),
+            name: "Board Keep".to_string(),
+            x: 11.0,
+            y: 22.0,
+            width: 333.0,
+            height: 444.0,
+            show_center_mark: true,
+            ..Artboard::default_with_id("ab-keep".to_string())
+        };
+        let mut setup = DocumentSetup::default();
+        setup.bleed_top = 9.0;
+        setup.show_images_outline = true;
+        let mut prefs = PrintPreferences::default();
+        prefs.preset_name = "Proof Sheet".to_string();
+        prefs.copies = 7;
+        let doc = Document {
+            layers: vec![
+                named_layer("Base", vec![rect(0.0)]),
+                named_layer("Nested", vec![nest()]),
+            ],
+            symbols: vec![master],
+            selected_layer: 1,
+            artboards: vec![board],
+            artboard_options: ArtboardOptions {
+                fade_region_outside_artboard: false,
+                update_while_dragging: false,
+            },
+            document_setup: setup,
+            print_preferences: prefs,
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::ungroup_all(&mut model);
+        let out = model.document();
+
+        // The operation really ran (guard against a vacuous pass).
+        assert_eq!(out.layers[1].children().unwrap().len(), 1);
+        assert!(matches!(
+            &*out.layers[1].children().unwrap()[0],
+            Element::Rect(_)
+        ));
+
+        assert_eq!(out.artboards.len(), 1);
+        assert_eq!(out.artboards[0].id, "ab-keep");
+        assert_eq!(out.artboards[0].name, "Board Keep");
+        assert_eq!(out.artboards[0].x, 11.0);
+        assert_eq!(out.artboards[0].width, 333.0);
+        assert!(out.artboards[0].show_center_mark);
+        assert!(!out.artboard_options.fade_region_outside_artboard);
+        assert!(!out.artboard_options.update_while_dragging);
+        assert_eq!(out.document_setup.bleed_top, 9.0);
+        assert!(out.document_setup.show_images_outline);
+        assert_eq!(out.print_preferences.preset_name, "Proof Sheet");
+        assert_eq!(out.print_preferences.copies, 7);
+        assert_eq!(out.symbols.len(), 1);
+        assert_eq!(out.symbols[0].common().id.as_deref(), Some("master-1"));
+        assert_eq!(out.selected_layer, 1);
+        assert!(out.selection.is_empty());
+    }
+
+    /// Twin of `lockedGroupKeepsEveryAttribute`.
+    #[test]
+    fn locked_group_keeps_every_attribute() {
+        let keeper = Element::Group(GroupElem {
+            children: vec![Rc::new(nest()), Rc::new(rect(50.0))],
+            common: CommonProps {
+                opacity: 0.5,
+                mode: BlendMode::Multiply,
+                transform: None,
+                locked: true,
+                visibility: Visibility::Outline,
+                mask: Some(Box::new(a_mask())),
+                name: Some("Keeper".to_string()),
+                id: Some("g-keep".to_string()),
+                ..CommonProps::default()
+            },
+            isolated_blending: true,
+            knockout_group: true,
+        });
+        let doc = Document {
+            layers: vec![named_layer("L", vec![keeper])],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::ungroup_all(&mut model);
+        let out = model.document();
+
+        let kept = &*out.layers[0].children().unwrap()[0];
+        let Element::Group(g) = kept else {
+            panic!("the locked group was not kept")
+        };
+        // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): the kept group's
+        // CONTENTS are locked too, so the nested group inside it survives as a
+        // group. Before the ruling this asserted the opposite — the inner
+        // group was dissolved while its locked parent was kept, which is the
+        // one-level-deep reading inheritance replaces. `layer_keeps_every_
+        // attribute` above is the positive control that ungroup_all still runs.
+        assert_eq!(g.children.len(), 2);
+        assert!(matches!(&*g.children[0], Element::Group(_)),
+            "a group inside a LOCKED group is locked, so it is left alone");
+        assert!(matches!(&*g.children[1], Element::Rect(_)));
+
+        assert_eq!(g.common.name.as_deref(), Some("Keeper"));
+        assert_eq!(g.common.id.as_deref(), Some("g-keep"));
+        assert!(g.common.locked);
+        assert_eq!(g.common.opacity, 0.5);
+        assert_eq!(g.common.visibility, Visibility::Outline);
+        assert_eq!(g.common.mode, BlendMode::Multiply);
+        assert!(g.isolated_blending);
+        assert!(g.knockout_group);
+        assert!(g.common.mask.is_some());
+        assert!(!g.common.mask.as_ref().unwrap().clip);
+        assert!(g.common.mask.as_ref().unwrap().invert);
+    }
+
+    /// Twin of `layerKeepsEveryAttribute`.
+    #[test]
+    fn layer_keeps_every_attribute() {
+        let doc = Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![Rc::new(nest())],
+                common: CommonProps {
+                    opacity: 0.25,
+                    mode: BlendMode::Screen,
+                    locked: false,
+                    visibility: Visibility::Outline,
+                    mask: Some(Box::new(a_mask())),
+                    name: Some("Styled".to_string()),
+                    id: Some("lay-keep".to_string()),
+                    ..CommonProps::default()
+                },
+                isolated_blending: true,
+                knockout_group: true,
+            })],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::ungroup_all(&mut model);
+        let out = model.document();
+
+        let Element::Layer(l) = &out.layers[0] else {
+            panic!("layer")
+        };
+        // The operation ran.
+        assert_eq!(l.children.len(), 1);
+        assert!(matches!(&*l.children[0], Element::Rect(_)));
+
+        assert_eq!(l.common.name.as_deref(), Some("Styled"));
+        assert_eq!(l.common.id.as_deref(), Some("lay-keep"));
+        assert_eq!(l.common.opacity, 0.25);
+        assert_eq!(l.common.visibility, Visibility::Outline);
+        assert_eq!(l.common.mode, BlendMode::Screen);
+        assert!(l.isolated_blending);
+        assert!(l.knockout_group);
+        assert!(l.common.mask.is_some());
+        assert!(!l.common.locked);
+    }
+
+    /// Twin of `lockedLayerStaysLocked`.
+    ///
+    /// The fact this test was written to pin — that a locked LAYER did NOT
+    /// protect its contents, so an unlocked group inside one was dissolved
+    /// anyway — was banked with the note "if lock becomes INHERITED, this
+    /// assertion is what moves". It became inherited (JYH, 2026-07-28,
+    /// transcripts/LAYER_STRUCTURE.md §13), and it moved.
+    #[test]
+    fn locked_layer_stays_locked() {
+        let doc = Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![Rc::new(nest())],
+                common: CommonProps {
+                    locked: true,
+                    name: Some("Locked".to_string()),
+                    ..CommonProps::default()
+                },
+                isolated_blending: false,
+                knockout_group: false,
+            })],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::ungroup_all(&mut model);
+        let out = model.document();
+        assert!(out.layers[0].locked());
+        assert_eq!(out.layers[0].children().unwrap().len(), 1);
+        // The group inside a LOCKED layer is left alone, structure included.
+        assert!(matches!(
+            &*out.layers[0].children().unwrap()[0],
+            Element::Group(_)
+        ));
+    }
+}

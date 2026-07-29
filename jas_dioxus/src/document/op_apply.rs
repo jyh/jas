@@ -988,21 +988,237 @@ pub fn paste_fragment_into(
     Some(new_doc)
 }
 
-/// `paste_fragment_into` against a `Model`, self-bracketing through
-/// `edit_document`. Returns `false` (a no-op that journals nothing) when
-/// nothing was pasted.
-pub fn apply_paste(
+// ── THE PASTE RUN — "Repeated pastes stack with cumulative offsets" ─────────
+//
+// `workspace/actions.yaml` §paste has required that sentence since it was
+// written, and NEITHER active port implemented it: the second paste landed
+// exactly on the first. Both ports were wrong together, so the written
+// requirement governs (JYH, 2026-07-28: "follow the spec").
+//
+// `paste_run_apply` below is THE ONLY PLACE the run moves, in this port. Both
+// model-level paste entry points route through it, so the corpus-only `svg`
+// param and the production `text` param cannot drift apart — a run implemented
+// in one of them would have gone green in half the corpus while production kept
+// pasting on one spot.
+
+/// Apply a paste under the run, and advance the run if it landed.
+///
+/// `payload` is the RAW CLIPBOARD STRING the run is keyed to — see
+/// [`crate::document::model::PasteRun`] for why that, and not a copy hook, is
+/// what makes the reset rule hold. `base` is the BASE STEP (24pt), not the
+/// distance travelled: the Nth consecutive paste of one payload lands at
+/// `N * base` from the source, so three pastes sit at 24, 48, 72 and never on
+/// top of each other. `body` receives the EFFECTIVE offset and answers with the
+/// pasted document, or `None` when there was nothing to paste.
+///
+/// Four decisions, each stated because the spec sentence says only "repeated
+/// pastes stack" and something had to be chosen (the artist-facing prose is in
+/// `actions.yaml` §paste; the corpus family is
+/// `test_fixtures/operations/paste_stacking.json`):
+///
+/// 1. **RESET IS KEYED TO WHAT IS PASTED.** A payload that differs from the one
+///    the run is counting starts a new run. A copy of DIFFERENT artwork
+///    therefore resets it — including an EXTERNAL copy from another
+///    application, which no in-app copy hook could see. A copy of the SAME
+///    artwork does not, because the slot at `+base` already holds the previous
+///    paste. A selection change does NOT reset: paste itself SETS the
+///    selection, so a selection-keyed reset would fire after every paste and
+///    the requirement would be unimplementable — it could never reach step two.
+/// 2. **`paste_in_place` DOES NOT PARTICIPATE.** It passes `base == 0.0` and is
+///    ruled to apply no offset; its copy lands on the source, which is not a run
+///    slot. So it neither advances the run nor restarts it: 24, 0, 48.
+/// 3. **"Paste, Preserving Layers" SHARES THE ONE RUN.** R2 and R3 differ in
+///    WHICH LAYER artwork lands in, never in the offset — `actions.yaml` says
+///    preserving-layers offsets "exactly as plain Paste does". One `base`, one
+///    run, nothing to diverge.
+/// 4. **A PASTE THAT LANDS NOTHING DOES NOT ADVANCE THE RUN.** The early return
+///    below is before any run write, so an empty clipboard leaves it where it
+///    was.
+///
+/// UNDO restores the run (see [`crate::document::model::Model::undo`]): the
+/// `begin_txn` inside `edit_document` captures the PRE-paste run and the advance
+/// below happens after the write, so undoing a paste puts the next one exactly
+/// where the undone one was rather than skipping a slot.
+fn paste_run_apply(
     model: &mut Model,
-    fragment: &[crate::geometry::element::Element],
-    offset: f64,
-    preserve_layers: bool,
+    payload: &str,
+    base: f64,
+    body: impl FnOnce(&crate::document::document::Document, f64)
+        -> Option<crate::document::document::Document>,
 ) -> bool {
-    let Some(new_doc) = paste_fragment_into(model.document(), fragment, offset, preserve_layers)
-    else {
+    let effective = model.paste_run_offset(payload, base);
+    let Some(new_doc) = body(model.document(), effective) else {
         return false;
     };
     model.edit_document(new_doc);
+    model.advance_paste_run(payload, base);
     true
+}
+
+/// `paste_fragment_into` against a `Model`, self-bracketing through
+/// `edit_document` and participating in the paste run. Returns `false` (a no-op
+/// that journals nothing) when nothing was pasted.
+///
+/// Takes the fragment MARKUP rather than a parsed fragment, for two reasons: the
+/// markup is what the run is keyed to (see [`paste_run_apply`]), and moving the
+/// parse in here means the two ports' call sites are identical where they used
+/// to differ in shape (`Vec<Element>` vs `[Element]` mapping). Reached only from
+/// the `svg` op param, which presupposes the SVG branch was already chosen; the
+/// production payload dispatch is [`apply_paste_clipboard_text`].
+pub fn apply_paste(
+    model: &mut Model,
+    svg: &str,
+    offset: f64,
+    preserve_layers: bool,
+) -> bool {
+    paste_run_apply(model, svg, offset, |doc, effective| {
+        let fragment = crate::geometry::svg::svg_to_document(svg).layers;
+        paste_fragment_into(doc, &fragment, effective, preserve_layers)
+    })
+}
+
+// ── WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES ────────────────────────
+// D4 and D5, ratified 2026-07-28: SWIFT IS CANON, Rust drops its
+// internal-clipboard fallback (LAYER_STRUCTURE.md §8.3 / §8.6 item 1).
+//
+// `paste_fragment_into` above answers "where does this fragment land". The two
+// functions below answer the question BEFORE it: given the raw clipboard
+// payload, is there a fragment at all? Rust used to answer that question with
+// INVISIBLE STATE — a non-SVG payload fell through to `TabState.clipboard` and
+// re-pasted the last in-app copy, so the artist got artwork they had not
+// copied and lost the text they had. That is ruling R2 one level up, and it is
+// gone: `TabState.clipboard` no longer exists.
+//
+// Lifting the dispatch out of `clipboard_read_and_paste`'s `spawn_local`
+// closure is also what makes it TESTABLE — `test_fixtures/operations/
+// paste_clipboard_text.json` drives these two functions through the `paste`
+// verb's `text` param in both ports.
+
+/// Does this clipboard payload announce itself as SVG?
+///
+/// Deliberately a PREFIX test on the trimmed payload rather than a parse
+/// attempt: markup copied from a browser (`<b>…</b>`, an HTML fragment) is
+/// text the artist wants as text, and handing it to `svg_to_document` would
+/// silently yield an empty fragment — a paste that looks like it did nothing.
+/// The mirror is Swift `clipboardTextIsSvg`; the corpus pins BOTH accepted
+/// prefixes and a rejected-markup case so neither arm can be dropped unseen.
+pub fn clipboard_text_is_svg(text: &str) -> bool {
+    let trimmed = text.trim();
+    trimmed.starts_with("<?xml") || trimmed.starts_with("<svg")
+}
+
+/// Paste a non-SVG clipboard payload as a Text element in the ACTIVE layer.
+///
+/// Swift's canon verbatim: the element sits at `(offset, offset + 16)` — the
+/// baseline is one 16pt line below the paste origin, so `paste_in_place` puts
+/// it at `(0, 16)` — and takes every other parameter's default. It carries NO
+/// FILL (SVG's implicit black); that is pinned rather than invented, and
+/// banked in LAYER_STRUCTURE.md rather than decided here.
+///
+/// Field-preserving by construction: it mutates the target layer through
+/// `children_mut()` and never rebuilds it from a field list, which is the shape
+/// §9.5 of the brief had to repair on the SVG path.
+fn paste_text_element_into(
+    doc: &crate::document::document::Document,
+    text: &str,
+    offset: f64,
+) -> Option<crate::document::document::Document> {
+    use crate::document::document::ElementSelection;
+    use crate::geometry::element::{CommonProps, Element, TextElem};
+    if doc.layers.is_empty() {
+        return None;
+    }
+    // Same clamp as `paste_fragment_into`: an out-of-range `selected_layer`
+    // clamps rather than panicking.
+    let active = doc.selected_layer.min(doc.layers.len() - 1);
+    let mut new_doc = doc.clone();
+    let elem = Element::Text(TextElem::from_string(
+        offset,
+        offset + 16.0,
+        text,
+        "sans-serif",
+        16.0,
+        "normal",
+        "normal",
+        "none",
+        0.0,
+        0.0,
+        None,
+        None,
+        CommonProps::default(),
+    ));
+    let kids = new_doc.layers[active].children_mut()?;
+    let at = kids.len();
+    kids.push(std::rc::Rc::new(elem));
+    new_doc.selection = vec![ElementSelection::all(vec![active, at])];
+    Some(new_doc)
+}
+
+/// THE DISPATCH. Given the raw clipboard payload, produce the pasted document
+/// — or `None` when there is nothing to paste. PURE: no `Model`, no
+/// transaction, no `web_sys`, no `AppState`.
+///
+/// `text` is `None` when the clipboard READ ITSELF FAILED (the JS promise
+/// rejected; Swift's `NSPasteboard.string(forType:)` returned nil) and
+/// `Some("")` when the clipboard was readable but empty. **D5 rules both the
+/// same way: nothing to paste.** They are kept as distinct inputs rather than
+/// collapsed at the call site so the corpus can pin each — an empty clipboard
+/// and a broken clipboard are different states, and a future ruling that wants
+/// them to differ has a seam to move.
+///
+/// **D4**: a payload that is not SVG becomes a TEXT ELEMENT holding it. It does
+/// NOT fall back to any internal buffer — that fallback was the whole defect.
+pub fn paste_clipboard_text_into(
+    doc: &crate::document::document::Document,
+    text: Option<&str>,
+    offset: f64,
+    preserve_layers: bool,
+) -> Option<crate::document::document::Document> {
+    // D5 — unreadable, and readable-but-empty.
+    let text = text?;
+    if text.is_empty() {
+        return None;
+    }
+    if clipboard_text_is_svg(text) {
+        // The SVG branch is UNCHANGED and routes into the same
+        // `paste_fragment_into` R2/R3 body the `svg` op param reaches. The
+        // corpus pins that by file identity: the `text` case and the `svg`
+        // case share one golden.
+        let fragment = crate::geometry::svg::svg_to_document(text).layers;
+        paste_fragment_into(doc, &fragment, offset, preserve_layers)
+    } else {
+        // D4. `preserve_layers` has nothing to bite on — there is no fragment
+        // layer, therefore no name to preserve — so it degenerates to plain
+        // Paste, exactly as an unnamed fragment layer does.
+        paste_text_element_into(doc, text, offset)
+    }
+}
+
+/// `paste_clipboard_text_into` against a `Model`, self-bracketing through
+/// `edit_document` and participating in the paste run. Returns `false` (a no-op
+/// that journals nothing) when there was nothing on the clipboard to paste.
+/// Mirrors `apply_paste`.
+///
+/// **THE PRODUCTION ENTRY POINT.** `workspace::clipboard::clipboard_read_and_paste`
+/// and Swift's `EditClipboard.pasteClipboard` both land here, so this is where
+/// the paste run has to reach the artist. The run is keyed to the RAW PAYLOAD —
+/// the same string the port read off the system clipboard — which is exactly the
+/// identity "the same clipboard content" the spec sentence is about.
+///
+/// An UNREADABLE clipboard (`None`) returns before the run is consulted at all:
+/// there is no payload to key on, and nothing to paste.
+pub fn apply_paste_clipboard_text(
+    model: &mut Model,
+    text: Option<&str>,
+    offset: f64,
+    preserve_layers: bool,
+) -> bool {
+    let Some(payload) = text else {
+        return false;
+    };
+    paste_run_apply(model, payload, offset, |doc, effective| {
+        paste_clipboard_text_into(doc, Some(payload), effective, preserve_layers)
+    })
 }
 
 /// Unpack the Group at `path` (OP_LOG.md §9 Phase P5): extract its children,
@@ -1592,7 +1808,12 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
     // txn for it would spuriously journal a selection-only batch as an
     // undoable step. `select_by_ids` is the id-primary twin (selection-only,
     // non-undoable), so it is excluded for the identical reason.
-    if name != "select_rect" && name != "select_by_ids" && !model.in_txn() {
+    // `select_element` is the path-addressed click seam — selection-only for
+    // exactly the same reason as `select_rect`, and excluded on the same
+    // grounds.
+    if name != "select_rect" && name != "select_by_ids" && name != "select_element"
+        && !model.in_txn()
+    {
         model.begin_txn();
     }
     // Fork-4 `targets` (OP_LOG.md §9). Populated for the THREE replay-safe
@@ -1650,6 +1871,26 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             // Keystone: the resolved selection is this op's targets, so
             // `capture_recipe` can seed its working set (empty targets ⇒
             // empty recipe). Resolved AFTER the Controller call.
+            targets = controller::selection_to_ids(model.document());
+        }
+        // The path-addressed CLICK seam — the same `Controller::select_element`
+        // the Type / Type-on-Path tools call after they create an element, and
+        // the site transcripts/LAYER_STRUCTURE.md §13 rules on (its own-flag
+        // `locked` read sat one line above an INHERITED `effective_visibility`
+        // read). Selection-only and non-undoable, exactly like `select_rect`.
+        // Routed through the production Controller mutator, never a copy of it.
+        "select_element" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            // A path that names no element is an addressed target that does not
+            // exist — the MissingTarget class, not a benign no-op. (A REFUSED
+            // select is a different thing: the element is there and the answer
+            // is "no", which is `Ok` with an unchanged selection.)
+            if model.document().get_element(&path).is_none() {
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
+            }
+            Controller::select_element(model, &path);
             targets = controller::selection_to_ids(model.document());
         }
         "move_selection" => {
@@ -1925,24 +2166,49 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
         // to 0.0, which is `paste_in_place`.
         //
         // This arm and `workspace::clipboard::clipboard_read_and_paste` call ONE
-        // body (`apply_paste`), which is the point: LAYER_STRUCTURE.md §5 records
-        // that no corpus vector could reach ANY paste behaviour, so R2/R3 would
-        // have landed unwatched. A verb that re-implemented the paste instead of
-        // routing through the production helper would be a decoy that never goes
-        // red.
+        // body (`apply_paste_clipboard_text`), which is the point:
+        // LAYER_STRUCTURE.md §5 records that no corpus vector could reach ANY
+        // paste behaviour, so R2/R3 would have landed unwatched. A verb that
+        // re-implemented the paste instead of routing through the production
+        // helper would be a decoy that never goes red.
+        //
+        // BOTH params also route through `paste_run_apply`, so the cumulative
+        // offset run (`actions.yaml` §paste) is the same run whichever one a
+        // vector uses. `offset` is therefore the BASE STEP, not the distance
+        // travelled: a vector pasting one payload three times at offset 24 lands
+        // at 24, 48, 72.
         "paste" => {
-            let Some(svg) = str_field(op, "svg") else {
-                return Err(req_err(op, "svg"));
-            };
-            let fragment = crate::geometry::svg::svg_to_document(svg).layers;
             let offset = num_field(op, "offset");
             let preserve = op
                 .get("preserve_layers")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            if !apply_paste(model, &fragment, offset, preserve) {
-                // Benign no-op by the S3 taxonomy: an empty / unparseable
-                // fragment is an empty clipboard, not a missing target.
+            // `text` = the RAW CLIPBOARD PAYLOAD, before any branch is chosen —
+            // the D4/D5 dispatch (`paste_clipboard_text.json`). JSON null means
+            // the clipboard read FAILED; the empty string means it succeeded and
+            // was empty; both are no-ops, and they are distinct inputs so the
+            // corpus can pin each. `svg` = the fragment MARKUP, which
+            // presupposes the SVG branch was already taken
+            // (`paste_layers.json`). Not two paths: a `text` payload that IS
+            // SVG lands in the same `paste_fragment_into` body, which the two
+            // families pin by SHARING one golden file.
+            let changed = if op.get("text").is_some() {
+                apply_paste_clipboard_text(
+                    model,
+                    op.get("text").and_then(|v| v.as_str()),
+                    offset,
+                    preserve,
+                )
+            } else {
+                let Some(svg) = str_field(op, "svg") else {
+                    return Err(req_err(op, "svg"));
+                };
+                apply_paste(model, svg, offset, preserve)
+            };
+            if !changed {
+                // Benign no-op by the S3 taxonomy: an empty / unreadable
+                // clipboard, or an empty / unparseable fragment, is not a
+                // missing target.
                 return Ok(());
             }
             // `targets` stays EMPTY. Paste is not one of the replay-safe verbs
@@ -1963,6 +2229,22 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
                 return Err(OpError::MissingTarget { id: format!("{path:?}") });
             }
             targets = t;
+        }
+        // The Layers-panel LOCK BUTTON's document work (`actions.yaml`
+        // §toggle_element_lock). Until LOCKINHERIT this behaviour lived only
+        // behind a Dioxus click handler and a SwiftUI closure, so NO shared
+        // fixture could reach it and the materialization design it implemented
+        // was watched by nothing cross-language. The verb routes through the
+        // SAME pure `Document::toggling_element_lock` the panel calls.
+        "toggle_element_lock" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            if model.document().get_element(&path).is_none() {
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
+            }
+            let new_doc = model.document().toggling_element_lock(&path);
+            model.edit_document(new_doc);
         }
         "lock_selection" => {
             Controller::lock_selection(model);
@@ -2514,5 +2796,286 @@ mod paste_layer_structure_tests {
         let out = paste_fragment_into(&doc, &[rect(1.0, 2.0)], 0.0, false).expect("pasted");
         assert_eq!(kids(&out, 1), vec![(1.0, 2.0)], "clamped to the last layer");
         assert_eq!(out.selection[0].path, vec![1, 0]);
+    }
+
+    // ── D4/D5 — the CLIPBOARD DISPATCH, the shapes the corpus cannot reach ──
+    //
+    // `test_fixtures/operations/paste_clipboard_text.json` is the primary,
+    // cross-language gate: it pins text-becomes-Text, empty and unreadable
+    // no-op, and SVG-still-routes-to-the-shared-body, in both ports over shared
+    // goldens. These probes exist for the three shapes that family CANNOT
+    // express, and each says which.
+
+    /// **THE PRESERVATION LAW ON THE TEXT BRANCH**, and the corpus is
+    /// structurally blind to it: every corpus case is seeded from a `setup_svg`
+    /// and the SVG codec does not persist `locked` at all, so no fixture can
+    /// build a locked, hidden, identified target layer (LAYER_STRUCTURE.md
+    /// §9.6). A text paste does not speak to whether the target layer is locked,
+    /// so it must not change it. Rust satisfies this by construction —
+    /// `children_mut()` mutates the layer value in place — but a port that
+    /// rebuilt the layer from a field list would drop exactly these fields, and
+    /// that is the defect §9.5 had to repair on the SVG path. Swift's twin is
+    /// `pasteOfPlainTextPreservesTheTargetLayersOwnFields`.
+    #[test]
+    fn pasting_text_into_a_locked_hidden_identified_layer_preserves_its_fields() {
+        use crate::geometry::element::Visibility;
+        let target = layer(
+            "Sky",
+            vec![rect(5.0, 5.0)],
+            CommonProps {
+                locked: true,
+                visibility: Visibility::Invisible,
+                id: Some("lyr-sky".into()),
+                ..CommonProps::default()
+            },
+        );
+        let mut doc = doc_with(target);
+        doc.selected_layer = 1;
+        let out = paste_clipboard_text_into(&doc, Some("a note"), 24.0, false)
+            .expect("a text payload pastes");
+        let l = match &out.layers[1] {
+            Element::Layer(l) => l.clone(),
+            other => panic!("expected a Layer, got {other:?}"),
+        };
+        assert_eq!(l.children.len(), 2, "the text element was not appended");
+        assert!(l.common.locked, "the paste silently UNLOCKED the target layer");
+        assert_eq!(
+            l.common.visibility,
+            Visibility::Invisible,
+            "the paste silently REVEALED the target layer"
+        );
+        assert_eq!(
+            l.common.id.as_deref(),
+            Some("lyr-sky"),
+            "the paste DESTROYED the target layer's identity"
+        );
+        assert_eq!(l.name(), "Sky", "the paste dropped the target layer's name");
+        // MANDATORY VALUE ASSERTION on the pasted element itself.
+        match &*l.children[1] {
+            Element::Text(t) => {
+                assert_eq!(t.content(), "a note");
+                assert_eq!((t.x, t.y), (24.0, 40.0), "text baseline is offset + 16");
+            }
+            other => panic!("expected a Text element, got {other:?}"),
+        }
+        assert_eq!(out.selection.len(), 1);
+        assert_eq!(out.selection[0].path, vec![1, 1]);
+    }
+
+    /// A LAYERLESS document has nowhere to put a Text element. The corpus is
+    /// always seeded from an SVG, which always yields at least one layer, so
+    /// only a hand-built document reaches this. `None` means the caller opens no
+    /// transaction — an impossible paste must not cost an undo step.
+    #[test]
+    fn pasting_text_into_a_layerless_document_returns_none() {
+        let no_layers = Document {
+            layers: Vec::new(),
+            ..Document::default()
+        };
+        assert!(
+            paste_clipboard_text_into(&no_layers, Some("hello"), 24.0, false).is_none(),
+            "a layerless document has nowhere to paste text"
+        );
+    }
+
+    /// Hardening, matching `paste_fragment_into`'s clamp: an out-of-range
+    /// `selected_layer` lands the text in the LAST layer rather than panicking
+    /// on the index. Unreachable from the corpus, which cannot author an
+    /// out-of-range selected layer through `setup_svg`.
+    #[test]
+    fn pasting_text_with_an_out_of_range_selected_layer_clamps() {
+        let mut doc = doc_with(layer("Sky", vec![], CommonProps::default()));
+        doc.selected_layer = 99;
+        let out = paste_clipboard_text_into(&doc, Some("x"), 0.0, false).expect("pasted");
+        assert_eq!(out.selection[0].path, vec![1, 0], "clamped to the last layer");
+        match &out.layers[1] {
+            Element::Layer(l) => match &*l.children[0] {
+                Element::Text(t) => assert_eq!((t.x, t.y), (0.0, 16.0)),
+                other => panic!("expected a Text element, got {other:?}"),
+            },
+            other => panic!("expected a Layer, got {other:?}"),
+        }
+    }
+}
+
+/// THE PASTE STACK — `workspace/actions.yaml` §paste, "Repeated pastes stack
+/// with cumulative offsets".
+///
+/// The shared corpus family `test_fixtures/operations/paste_stacking.json`
+/// carries the geometry, in both ports, over one set of goldens. THIS module
+/// carries only what that lane structurally cannot reach, and each test says
+/// which:
+///
+/// 1. **UNDO AND REDO.** The operations runner applies a vector's `history`
+///    AFTER every transaction, so no fixture can paste after an undo; an undo op
+///    embedded inside a transaction would desync the `checkpoint_equivalence`
+///    gate, which replays `journal[0..head]` and never replays history
+///    navigation. So the rule that undo restores the run is pinned HERE and by
+///    the Swift twin (`PasteStackingTests`) over identical vectors — twin
+///    per-port probes, not a shared gate. Stated plainly because it is the one
+///    decision in this wave that no cross-language byte watches.
+/// 2. **THE PER-DOCUMENT LIFETIME.** A fixture builds one `Model`; two open
+///    documents cannot be expressed.
+/// 3. **THE ABORTED TRANSACTION.** No op sequence aborts.
+///
+/// Everything here drives `apply_paste_clipboard_text` — the PRODUCTION entry
+/// point (`workspace::clipboard::clipboard_read_and_paste` and Swift's
+/// `EditClipboard.pasteClipboard` both call it) — rather than the pure body, so
+/// a run implemented only where the corpus can see it would leave these red.
+#[cfg(test)]
+mod paste_stacking_tests {
+    use super::*;
+    use crate::document::document::Document;
+    use crate::geometry::element::{CommonProps, Element, LayerElem};
+
+    /// A one-layer document with nothing in it: every x below is therefore the
+    /// paste offset itself, with no source coordinate to subtract.
+    fn model() -> Model {
+        let doc = Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: Vec::new(),
+                common: CommonProps {
+                    name: Some("Base".to_string()),
+                    ..CommonProps::default()
+                },
+                isolated_blending: false,
+                knockout_group: false,
+            })],
+            selected_layer: 0,
+            selection: Vec::new(),
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    /// A clipboard payload holding one rect at the origin. `A` and `B` differ,
+    /// so they are different payloads for the reset rule.
+    const A: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\">\
+                     <rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" \
+                     fill=\"rgb(0,0,255)\" stroke=\"none\"/></svg>";
+    const B: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\">\
+                     <rect x=\"0\" y=\"0\" width=\"20\" height=\"20\" \
+                     fill=\"rgb(0,128,0)\" stroke=\"none\"/></svg>";
+
+    /// x-coordinates of the active layer's children, in order — the whole
+    /// observable of a paste run.
+    fn xs(model: &Model) -> Vec<f64> {
+        match &model.document().layers[0] {
+            Element::Layer(l) => l
+                .children
+                .iter()
+                .map(|c| match &**c {
+                    Element::Rect(r) => r.x,
+                    _ => f64::NAN,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn paste(model: &mut Model, payload: &str) -> bool {
+        apply_paste_clipboard_text(model, Some(payload), 24.0, false)
+    }
+
+    /// The headline requirement, at the production entry point rather than in
+    /// the corpus: three pastes of one payload land at 24, 48, 72. Duplicated
+    /// on purpose — if this module's helpers are wrong, every other test here
+    /// is measuring the wrong thing, and this is the one that says so.
+    #[test]
+    fn three_pastes_of_one_payload_stack_cumulatively() {
+        let mut m = model();
+        for _ in 0..3 {
+            assert!(paste(&mut m, A));
+        }
+        assert_eq!(xs(&m), vec![24.0, 48.0, 72.0]);
+    }
+
+    /// UNDO RESTORES THE RUN. `begin_txn` (inside `edit_document`) captures the
+    /// PRE-paste run and the advance happens after the write, so undoing the
+    /// second paste puts the next one exactly where the undone one was: 48, not
+    /// 72. Anything else leaves a HOLE in the run — a slot the artist can see is
+    /// empty and cannot fill by pasting.
+    ///
+    /// This is the concrete reason the run is NOT app state. A counter that
+    /// outlives the artwork it counts has the same defect the lock save-state
+    /// table was ruled a design flaw for, on the same day.
+    #[test]
+    fn undo_restores_the_run_so_the_next_paste_fills_the_vacated_slot() {
+        let mut m = model();
+        assert!(paste(&mut m, A));
+        assert!(paste(&mut m, A));
+        assert_eq!(xs(&m), vec![24.0, 48.0]);
+        m.undo();
+        assert_eq!(xs(&m), vec![24.0], "undo removed the second paste");
+        assert!(paste(&mut m, A));
+        assert_eq!(
+            xs(&m),
+            vec![24.0, 48.0],
+            "the paste after an undo must REPLACE the undone one at 48, \
+             not skip to 72 and leave 48 empty"
+        );
+    }
+
+    /// REDO is undo's mirror: it restores the run as it stood after the redone
+    /// transaction, so a further paste continues at 72 rather than re-landing
+    /// on 48.
+    #[test]
+    fn redo_restores_the_run_it_had_advanced() {
+        let mut m = model();
+        assert!(paste(&mut m, A));
+        assert!(paste(&mut m, A));
+        m.undo();
+        m.redo();
+        assert_eq!(xs(&m), vec![24.0, 48.0], "redo put the second paste back");
+        assert!(paste(&mut m, A));
+        assert_eq!(xs(&m), vec![24.0, 48.0, 72.0]);
+    }
+
+    /// An ABORTED transaction rolls the run back with the document it rolled
+    /// back: the paste inside it never happened, so the next paste is still the
+    /// second of the run.
+    #[test]
+    fn an_aborted_transaction_rolls_the_run_back() {
+        let mut m = model();
+        assert!(paste(&mut m, A));
+        m.begin_txn();
+        assert!(apply_paste_clipboard_text(&mut m, Some(A), 24.0, false));
+        m.abort_txn();
+        assert_eq!(xs(&m), vec![24.0], "abort removed the second paste");
+        assert!(paste(&mut m, A));
+        assert_eq!(xs(&m), vec![24.0, 48.0], "still the second of the run");
+    }
+
+    /// THE RUN IS PER-DOCUMENT. Pasting the same clipboard into a second open
+    /// document starts at 24 there rather than continuing the first document's
+    /// run — which falls out of living on the `Model`, one per tab, and is the
+    /// reason it does not live in app state.
+    #[test]
+    fn the_run_is_per_document() {
+        let mut a = model();
+        let mut b = model();
+        assert!(paste(&mut a, A));
+        assert!(paste(&mut a, A));
+        assert_eq!(xs(&a), vec![24.0, 48.0]);
+        assert!(paste(&mut b, A));
+        assert_eq!(xs(&b), vec![24.0], "a second document starts its own run");
+    }
+
+    /// The run is a SINGLE SLOT, and this is the corner that buys: a paste of B
+    /// between two pastes of A loses A's count, so the third paste lands back on
+    /// the first. BANKED, NOT RULED — the same limitation a fragment-keyed run
+    /// would have, pinned here so the day a multi-slot run is ruled the byte
+    /// moves.
+    #[test]
+    fn an_intervening_payload_loses_the_first_runs_count() {
+        let mut m = model();
+        assert!(paste(&mut m, A));
+        assert!(paste(&mut m, B));
+        assert!(paste(&mut m, A));
+        assert_eq!(
+            xs(&m),
+            vec![24.0, 24.0, 24.0],
+            "single-slot run: A's count did not survive B"
+        );
     }
 }

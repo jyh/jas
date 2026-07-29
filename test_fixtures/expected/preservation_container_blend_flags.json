@@ -1,0 +1,95 @@
+{
+  "_doc": [
+    "A CONTAINER-FLAG SETUP DOCUMENT for the preservation corpus, in canonical",
+    "test JSON rather than SVG.",
+    "",
+    "WHY IT EXISTS. `isolated_blending` and `knockout_group` are the Opacity",
+    "panel's two page-level blending flags, and they live on Group and Layer",
+    "ONLY -- no leaf can carry either. Until 2026-07-28 they were destroyed by",
+    "ALL THREE codecs in BOTH ports (coverage gap",
+    "`container-blend-fields-survive-no-codec`), so the preservation law could",
+    "not range over them: the law's gate snapshots canonical test JSON, and a",
+    "field the codec does not emit is a field an edit can destroy in total",
+    "silence. They are container fields on exactly the element kinds the law's",
+    "T4 BYSTANDER clause is about, which is what makes the hole worth a setup of",
+    "its own.",
+    "",
+    "WHY NOT AN SVG, like most vectors' setups. Same reason as",
+    "preservation_saturated_bystanders.json: at the time this file was written",
+    "the SVG codec carried neither flag either, so an SVG door could not place",
+    "one on a bystander. The canonical test JSON is the door that can.",
+    "",
+    "THE SHAPE, and what each id is for:",
+    "  lyr_flags     -- the enclosing LAYER, both flags true. A container",
+    "                   bystander that every whole-document walk rebuilds.",
+    "  grp_knockout  -- a GROUP bystander, both flags true. The vector's edit",
+    "                   never speaks to it, but `show_all` walks THROUGH it, so",
+    "                   an implementation that rebuilds a container field by",
+    "                   field to reach the child inside loses both flags here.",
+    "                   That is the Swift copy-site omission class, and it is",
+    "                   the class this setup exists to make visible.",
+    "  r_inside      -- the leaf inside grp_knockout that gets hidden and then",
+    "                   shown again, so the hide/show nets to zero and the",
+    "                   container walk is the only thing show_all really does.",
+    "  r_sibling     -- the vector's SUBJECT: nudged, so the run is not",
+    "                   byte-identical and the invariants are not vacuous.",
+    "",
+    "The vector that uses this file names `bystander_fields_present`, so a setup",
+    "whose flags silently decayed to defaults on the way IN reds the gate",
+    "instead of passing on nothing."
+  ],
+  "layers": [
+    {
+      "type": "layer",
+      "id": "lyr_flags",
+      "name": "Flags Layer",
+      "locked": false,
+      "opacity": 1.0,
+      "transform": null,
+      "visibility": "preview",
+      "isolated_blending": true,
+      "knockout_group": true,
+      "children": [
+        {
+          "type": "group",
+          "id": "grp_knockout",
+          "name": "Knockout Group",
+          "locked": false,
+          "opacity": 0.75,
+          "transform": null,
+          "visibility": "preview",
+          "isolated_blending": true,
+          "knockout_group": true,
+          "children": [
+            {
+              "type": "rect",
+              "id": "r_inside",
+              "name": "Inside Rect",
+              "locked": false,
+              "opacity": 1.0,
+              "transform": null,
+              "visibility": "preview",
+              "x": 0.0, "y": 0.0, "width": 20.0, "height": 20.0, "rx": 0.0, "ry": 0.0,
+              "fill": {"color": {"a": 1.0, "b": 0.0, "g": 0.0, "r": 1.0, "space": "rgb"}, "opacity": 1.0},
+              "stroke": null
+            }
+          ]
+        },
+        {
+          "type": "rect",
+          "id": "r_sibling",
+          "name": "Sibling Rect",
+          "locked": false,
+          "opacity": 1.0,
+          "transform": null,
+          "visibility": "preview",
+          "x": 100.0, "y": 100.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0,
+          "fill": {"color": {"a": 1.0, "b": 0.0, "g": 1.0, "r": 0.0, "space": "rgb"}, "opacity": 1.0},
+          "stroke": null
+        }
+      ]
+    }
+  ],
+  "selected_layer": 0,
+  "selection": []
+}

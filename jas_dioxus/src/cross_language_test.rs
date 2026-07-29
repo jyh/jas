@@ -117,6 +117,10 @@ mod tests {
             // recorded and the generated kinds, which have no SVG read path
             // and so can only be reached through the JSON/binary lanes.
             "live_named", "live_named_recipe",
+            // LOCKSVG: the two lock goldens pin the canonical-JSON lane too,
+            // so a `locked` regression in test_json cannot hide behind the SVG
+            // lane being the one under repair.
+            "locked_layer_and_element", "locked_all_kinds",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -164,6 +168,10 @@ mod tests {
             // TAG_LIVE slot 5 like every other element's. Both fixtures name
             // their live elements, so a codec that packed nil there reds.
             "live_named", "live_named_recipe",
+            // LOCKSVG: `common.locked` rides pack_common slot 1 and always
+            // did; these two goldens make that a MEASUREMENT rather than an
+            // assumption, on a document where the flag is actually true.
+            "locked_layer_and_element", "locked_all_kinds",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -247,6 +255,8 @@ mod tests {
             // `transform` field (emitted as `instance_transform`) is set,
             // distinct from common.transform.
             "reference_instance_transform",
+            // LOCKSVG: `common.locked` across the SVG boundary.
+            "locked_layer_and_element", "locked_all_kinds",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -288,6 +298,11 @@ mod tests {
             // already lifted into common.name generically while the live
             // writer arms routed through a name-less attribute tail.
             "live_named",
+            // LOCKSVG: the WRITE side. `assert_svg_parse` above pins the
+            // reader; only a round trip can catch a writer arm that drops
+            // `jas:locked`, because the reader would then read a file that
+            // never carried it and agree with itself.
+            "locked_layer_and_element", "locked_all_kinds",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
@@ -409,6 +424,51 @@ mod tests {
     #[test]
     fn svg_parse_complex_document() {
         assert_svg_parse("complex_document");
+    }
+
+    // ---------------------------------------------------------------
+    // LOCKSVG — `common.locked` survives the SVG boundary.
+    //
+    // Until 2026-07-28 it did not, in EITHER active port: this port's
+    // `parse_common` hard-coded `locked: false` and had no writer at all;
+    // JasSwift's Svg.swift contained zero occurrences of `locked`,
+    // case-insensitive. Lock a layer, save, reopen — the protection was gone.
+    // Every fixture in the shared corpus is SVG-seeded, so the corpus was
+    // STRUCTURALLY BLIND to lock as a precondition and could gate nothing
+    // about it (jas_dioxus/src/document/op_apply.rs said so in a doc comment).
+    //
+    // The spelling is ` jas:locked="true"` in the `urn:jas:1` namespace, the
+    // same namespace and the same written-only-when-non-default shape as the
+    // sibling CommonProps field `jas:tool-origin`.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn svg_parse_locked_layer_and_element() {
+        // The SEMANTIC vector, and the one the inherited-lock ruling
+        // (transcripts/LAYER_STRUCTURE.md §13) needs to exist before it can be
+        // gated at all: a LOCKED LAYER whose children carry no lock flag of
+        // their own (inheritance, NOT materialization — the children stay
+        // `locked: false` in the golden), plus a LOCKED ELEMENT sitting inside
+        // an UNLOCKED layer.
+        assert_svg_parse("locked_layer_and_element");
+    }
+
+    #[test]
+    fn svg_parse_locked_all_kinds() {
+        // The WRITER-ARM CENSUS. One locked instance of every element kind
+        // that has an SVG read path — line, rect, circle, ellipse, polyline,
+        // polygon, path, text, text-on-path, group, layer, <use> reference,
+        // compound shape — plus a <defs> symbol master and a top-level bare
+        // <g> that the importer PROMOTES to a Layer (that promotion rebuilds
+        // the container field by field in JasSwift, which is exactly where the
+        // Swift copy-site omission class strikes). A writer arm that forgets
+        // the attribute cannot hide behind a sibling arm that remembers it.
+        //
+        // NOT covered, stated rather than implied: the `recorded` and
+        // `generated` live kinds, which NEITHER port can read back from SVG at
+        // all (they import as plain Groups), so no round-trip fixture can
+        // watch their writer arms.
+        assert_svg_parse("locked_all_kinds");
     }
 
     #[test]
@@ -748,8 +808,34 @@ mod tests {
     ///     ops like `select_rect`, whose selection IS serialized state per §7,
     ///     are captured); an embedded `snapshot` op opens its own boundaries.
     fn run_operation_model(tc: &serde_json::Value) -> Model {
-        let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
-        let doc = svg_to_document(&setup_svg);
+        run_operation_model_from(setup_document(tc), tc)
+    }
+
+    /// The setup document a vector names, through whichever of the two doors
+    /// it declares.
+    ///
+    /// `setup_svg` is the corpus-wide default. `setup_test_json` exists
+    /// because the SVG codec has NO counterpart for a mask, a blend mode or a
+    /// stroke alignment and no port writes a jas: extension for the gradients,
+    /// the stroke brush or the width profile (the `svg` column of
+    /// test_fixtures/expected/codec_field_survival.json) — so a corpus whose
+    /// only door is SVG can never place those on a BYSTANDER, which is exactly
+    /// the class EDIT_SEMANTICS_FREEZE.md T4 exists to watch. The canonical
+    /// test JSON carries all twelve, so it is the door that can express the
+    /// setup the law needs.
+    fn setup_document(tc: &serde_json::Value) -> crate::document::document::Document {
+        if let Some(name) = tc.get("setup_test_json").and_then(|v| v.as_str()) {
+            test_json_to_document(&read_fixture(&format!("expected/{name}")))
+        } else {
+            svg_to_document(&read_fixture(&format!(
+                "svg/{}", tc["setup_svg"].as_str().unwrap())))
+        }
+    }
+
+    fn run_operation_model_from(
+        doc: crate::document::document::Document,
+        tc: &serde_json::Value,
+    ) -> Model {
         let mut model = Model::new(doc, None);
 
         if let Some(txns) = tc.get("txns").and_then(|v| v.as_array()) {
@@ -905,6 +991,8 @@ mod tests {
                          "operations/id_primary_move.json",
                          "operations/id_primary_copy.json",
                          "operations/boolean_collapse_default.json",
+                         "operations/lock_inheritance.json",
+                         "operations/lock_toggle_no_materialization.json",
                          "operations/paste_layers.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
@@ -968,6 +1056,15 @@ mod tests {
         // the second rect (which starts at doc-x 72). No geometry changes; only
         // the selection becomes [{kind:"all", path:[0,0]}].
         "select_click.json",
+        // D4 (SCOPE-effective-locked.md §3): the same click-select, but on a
+        // document whose LAYERS overlap. Every other selection-family vector
+        // is single-layer, where a forward and a reversed layer walk are the
+        // same walk — so the corpus could not see that this port's layer loop
+        // in doc_primitives::hit_test/hit_test_deep was NOT reversed while
+        // Swift's and the live Python reference's both were. Topmost-first is
+        // what hit-testing means, so the press at doc(36,36) — inside both the
+        // Background rect and the Foreground circle — must resolve [1, 0].
+        "select_click_multi_layer.json",
         // Marquee-select (TESTING_STRATEGY.md §5 rec 4): the other half of
         // the selection tool. When on_mousedown hit-tests to NULL (press on
         // empty space, here doc(-10,-10), outside both rects) the tool enters
@@ -1357,6 +1454,15 @@ mod tests {
         // `menu_group_two_rects` in menu_object_ops.json, which R1 must leave
         // byte-identical.
         "group_flatten.json",
+        // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
+        // inherited lock. `actions.yaml` §select_all always said "locked
+        // objects are excluded" without saying WHOSE flag, and the two ports
+        // answered differently — Rust's hand-rolled loop never checked the
+        // LAYER's, so Select All swept up a locked layer's whole contents while
+        // Swift skipped it. Deliberately groupless in the open layer: Select
+        // All's group-expansion difference (SCOPE-effective-locked.md D2 / Q2)
+        // is UNRULED and would red here for a reason that is not about lock.
+        "lock_inheritance_actions.json",
     ];
 
     /// Run an action fixture and return the resulting `AppState`.
@@ -2290,6 +2396,61 @@ mod tests {
             "preservation vector '{name}' has no bystander — T4 is unwatchable here"
         );
 
+        // `bystander_fields_present` (optional) is the DOCUMENT-LEVEL form of
+        // §3.1's anti-vacuity guard: "every battery asserts its fixture
+        // differs from the default in every non-subject field, because a rich
+        // fixture that silently decays to defaults passes on nothing".
+        // `bystanders_unchanged` compares before against after, so a setup
+        // that lost its mask on the way IN would compare two identical
+        // mask-less snapshots and pass. Naming a field here asserts the
+        // BEFORE snapshot really carries it.
+        //
+        // A dotted name `a.b` means: top-level key `a` is present and its
+        // canonical JSON value contains the key `b` — the shape that reaches
+        // the four stroke fields, which live inside the `stroke` value rather
+        // than beside it. The two ports implement the identical rule.
+        if let Some(map) = tc.get("bystander_fields_present").and_then(|v| v.as_object()) {
+            let named: Vec<String> = str_list(tc, "subject_ids")
+                .into_iter()
+                .chain(str_list(tc, "consumed_ids"))
+                .collect();
+            for (id, keys) in map {
+                assert!(
+                    !named.contains(id),
+                    "preservation vector '{name}' lists '{id}' under \
+                     bystander_fields_present, but the vector NAMES it — a \
+                     subject is not a bystander"
+                );
+                let attrs = before.attrs.get(id).unwrap_or_else(|| panic!(
+                    "preservation vector '{name}' names bystander '{id}', which \
+                     is absent from the loaded setup document"));
+                let obj = attrs.as_object().expect("an element attribute object");
+                for key in keys.as_array().expect("an array of field names") {
+                    let key = key.as_str().expect("field names are strings");
+                    match key.split_once('.') {
+                        None => assert!(
+                            obj.contains_key(key),
+                            "preservation vector '{name}': bystander '{id}' was \
+                             declared to carry '{key}', but the loaded setup does \
+                             not — the fixture decayed to defaults and every \
+                             invariant over that field is vacuous"),
+                        Some((outer, inner)) => {
+                            let v = obj.get(outer).unwrap_or_else(|| panic!(
+                                "preservation vector '{name}': bystander '{id}' \
+                                 has no '{outer}' at all, so '{key}' cannot be \
+                                 carried"));
+                            assert!(
+                                crate::geometry::test_json::canonical_json_value(v)
+                                    .contains(&format!("\"{inner}\":")),
+                                "preservation vector '{name}': bystander '{id}' \
+                                 was declared to carry '{key}', but its '{outer}' \
+                                 is {v} — the fixture decayed to defaults");
+                        }
+                    }
+                }
+            }
+        }
+
         // `must_change` (optional) turns `speaks_to` from a PERMISSION into a
         // CLAIM. `subject_fields_only` only forbids differences OUTSIDE
         // `speaks_to`, so listing a key there makes the gate blind to it: an
@@ -2323,19 +2484,56 @@ mod tests {
     /// THE DOCUMENT-LEVEL INVARIANT GATE. Runs every
     /// `test_fixtures/preservation/*.json` vector through the production op
     /// dispatcher and asserts the six invariants over the whole document.
+    /// Read the corpus file and return its vectors, refusing any shape that
+    /// would let an EMPTIED corpus pass.
+    ///
+    /// Measured on 2026-07-28: with the file rewritten to `[]` this test
+    /// printed `ok` in 0.00s, and so did its Swift twin and both script
+    /// gates — the loop below has nothing to iterate and every assertion
+    /// inside it is skipped rather than failed. The floor is declared by the
+    /// corpus itself (`min_vectors`) so it lives in ONE place instead of as a
+    /// magic number in four, and the bare-array form is REFUSED rather than
+    /// tolerated, because a tolerant reader would accept `[]` again.
+    fn preservation_vectors(json_str: &str) -> Vec<serde_json::Value> {
+        let root: serde_json::Value = serde_json::from_str(json_str)
+            .expect("preservation_invariants.json parses");
+        let obj = root.as_object().expect(
+            "the preservation corpus's top level must be an OBJECT carrying \
+             'min_vectors' and 'vectors' — a bare array cannot declare its own \
+             floor, which is how emptying it to `[]` turned all four gates green",
+        );
+        let min = obj
+            .get("min_vectors")
+            .and_then(|v| v.as_u64())
+            .expect("the preservation corpus must declare 'min_vectors'")
+            as usize;
+        assert!(min >= 1, "min_vectors must be at least 1 — a floor of zero is not a floor");
+        let vectors = obj
+            .get("vectors")
+            .and_then(|v| v.as_array())
+            .expect("the preservation corpus must carry a 'vectors' array")
+            .clone();
+        assert!(
+            vectors.len() >= min,
+            "preservation corpus declares min_vectors={min} but carries {} — \
+             vectors were removed without lowering the floor the corpus states \
+             about itself",
+            vectors.len()
+        );
+        vectors
+    }
+
     #[test]
     fn preservation_invariants() {
         let json_str = read_fixture("preservation/preservation_invariants.json");
-        let tests: serde_json::Value = serde_json::from_str(&json_str)
-            .expect("preservation_invariants.json parses");
+        let tests = preservation_vectors(&json_str);
         let mut failures: Vec<String> = Vec::new();
 
-        for tc in tests.as_array().expect("an array of vectors") {
+        for tc in &tests {
             let name = tc["name"].as_str().expect("a name");
 
             // BEFORE: the setup document, loaded and serialized with no ops.
-            let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
-            let before_model = Model::new(svg_to_document(&setup_svg), None);
+            let before_model = Model::new(setup_document(tc), None);
             let before_json = <DocumentOps as OpWorld>::to_test_json(&before_model);
 
             // AFTER. A vector drives its edit through ONE of two production
@@ -2369,23 +2567,8 @@ mod tests {
                 })
                 .collect();
 
-            for (inv, result) in preservation_invariants_for(tc, &before, &after) {
-                let pin = pinned.iter().find(|(p, _)| p == inv);
-                match (pin, &result) {
-                    // Unpinned invariant that failed — the law is broken here.
-                    (None, Some(why)) => failures.push(format!(
-                        "[{name}] {inv} VIOLATED: {why}"
-                    )),
-                    // Pinned violation that no longer reproduces — the pin is
-                    // stale and must be deleted (this is what stops a pin from
-                    // rotting into a suppression).
-                    (Some((_, row)), None) => failures.push(format!(
-                        "[{name}] {inv} is PINNED as a known violation ({row}) but now \
-                         HOLDS — remove the pin from the vector"
-                    )),
-                    _ => {}
-                }
-            }
+            failures.extend(preservation_pin_report(
+                name, &pinned, preservation_invariants_for(tc, &before, &after)));
         }
 
         assert!(
@@ -2394,6 +2577,85 @@ mod tests {
             failures.len(),
             failures.join("\n  ")
         );
+    }
+
+    /// Fold one vector's evaluated invariants against its PINS.
+    ///
+    /// Extracted so `preservation_pin_inversion` can drive it directly. The
+    /// inversion arm below — a pinned violation that now HOLDS is a FAILURE —
+    /// is the mechanism that stops a pin from rotting into a silent
+    /// suppression, and it is exercised ZERO times by the shipped corpus,
+    /// where every vector declares `expected_violations: []`. A mechanism no
+    /// data exercises is one refactor away from being deleted by accident.
+    fn preservation_pin_report(
+        name: &str,
+        pinned: &[(String, String)],
+        results: Vec<InvResult>,
+    ) -> Vec<String> {
+        let mut failures = Vec::new();
+        for (inv, result) in results {
+            let pin = pinned.iter().find(|(p, _)| p == inv);
+            match (pin, &result) {
+                // Unpinned invariant that failed — the law is broken here.
+                (None, Some(why)) => failures.push(format!("[{name}] {inv} VIOLATED: {why}")),
+                // Pinned violation that no longer reproduces — the pin is
+                // stale and must be deleted (this is what stops a pin from
+                // rotting into a suppression).
+                (Some((_, row)), None) => failures.push(format!(
+                    "[{name}] {inv} is PINNED as a known violation ({row}) but now \
+                     HOLDS — remove the pin from the vector"
+                )),
+                _ => {}
+            }
+        }
+        failures
+    }
+
+    /// THE PIN INVERSION, as a truth table. Twin of Swift
+    /// `preservationPinInversion`; the two assert the same four cells with the
+    /// same strings, so the ports cannot drift on what a pin MEANS.
+    #[test]
+    fn preservation_pin_inversion() {
+        let pin = vec![(
+            "bystanders_unchanged".to_string(),
+            "some/site.rs:1 — the row this pin cites".to_string(),
+        )];
+        let violated: Vec<InvResult> =
+            vec![("bystanders_unchanged", Some("grp.mask: {...} -> <absent>".into()))];
+        let holds: Vec<InvResult> = vec![("bystanders_unchanged", None)];
+
+        // 1. UNPINNED + violated → reported as a violation.
+        let out = preservation_pin_report("v", &[], violated.clone());
+        assert_eq!(out.len(), 1, "unpinned violation must be reported: {out:?}");
+        assert!(out[0].contains("bystanders_unchanged VIOLATED"), "{out:?}");
+
+        // 2. PINNED + violated → silent; the pin is doing its job.
+        assert!(
+            preservation_pin_report("v", &pin, violated).is_empty(),
+            "a pinned violation that still reproduces must be silent"
+        );
+
+        // 3. PINNED + holds → THE INVERSION. Repairing the site reds the gate
+        //    until the pin is deleted.
+        let out = preservation_pin_report("v", &pin, holds.clone());
+        assert_eq!(out.len(), 1, "a repaired pinned site must red the gate: {out:?}");
+        assert!(
+            out[0].contains("is PINNED as a known violation")
+                && out[0].contains("but now HOLDS")
+                && out[0].contains("some/site.rs:1"),
+            "the inversion must name the pin's own row: {out:?}"
+        );
+
+        // 4. UNPINNED + holds → silent, the ordinary green case.
+        assert!(preservation_pin_report("v", &[], holds).is_empty());
+
+        // 5. A pin on a DIFFERENT invariant does not suppress this one — the
+        //    match is per-invariant, not per-vector.
+        let other = vec![("id_survival".to_string(), "elsewhere".to_string())];
+        let out = preservation_pin_report(
+            "v", &other,
+            vec![("bystanders_unchanged", Some("boom".into()))]);
+        assert_eq!(out.len(), 1, "a pin must not suppress a sibling invariant: {out:?}");
     }
 
     /// `OpWorld` trait-level pin for the DOCUMENT world (OP_LOG.md §2 Fork 5 /
@@ -3360,6 +3622,88 @@ mod tests {
     #[test]
     fn operation_paste_layers() {
         run_operation_fixture("operations/paste_layers.json");
+    }
+
+    /// WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES — D4/D5, ratified
+    /// 2026-07-28 (Swift is canon; Rust drops its internal-clipboard fallback).
+    ///
+    /// `paste_layers.json` carries the fragment MARKUP in `svg`, which
+    /// presupposes the SVG branch was already chosen. This family carries the
+    /// RAW CLIPBOARD PAYLOAD in `text` — before any branch is chosen — so it is
+    /// the only thing that can watch the DISPATCH: text becomes a Text element,
+    /// an empty or unreadable clipboard is a no-op, and an SVG payload still
+    /// reaches the shared paste body.
+    ///
+    /// It is NOT a parallel path.
+    /// `paste_clipboard_svg_payload_through_text_equals_the_svg_param` points at
+    /// `paste_layers.json`'s OWN golden file, so a second copy of the paste body
+    /// behind the `text` param could not stay agreeing with it.
+    #[test]
+    fn operation_paste_clipboard_text() {
+        run_operation_fixture("operations/paste_clipboard_text.json");
+    }
+
+    /// REPEATED PASTES STACK WITH CUMULATIVE OFFSETS — `workspace/actions.yaml`
+    /// §paste, a sentence the spec has carried since it was written and which
+    /// NEITHER active port implemented: the second paste landed exactly on the
+    /// first. Both ports were wrong together, so the written requirement
+    /// governs (JYH, 2026-07-28: "follow the spec").
+    ///
+    /// The family pins the three run positions (36 / 60 / 84 in document space)
+    /// and the four decisions the sentence leaves open — reset keyed to the
+    /// PAYLOAD, `paste_in_place` outside the run, preserving-layers sharing the
+    /// one run, and a paste that lands nothing not advancing it. Two of its
+    /// vectors point at ANOTHER vector's golden by file identity rather than
+    /// carrying a second copy.
+    ///
+    /// `paste_clipboard_text_payload_stacks_too` is the one that matters most:
+    /// `text` is the raw clipboard payload, which is what production reads in
+    /// both ports, so a run implemented on the corpus-only `svg` param alone
+    /// would still leave the artist pasting on one spot.
+    ///
+    /// UNDO is NOT reachable from here (the runner applies `history` after every
+    /// transaction) and is pinned by `op_apply::paste_stacking_tests` and its
+    /// Swift twin instead.
+    #[test]
+    fn operation_paste_stacking() {
+        run_operation_fixture("operations/paste_stacking.json");
+    }
+
+    /// LOCK IS INHERITED, NOT MATERIALIZED — transcripts/LAYER_STRUCTURE.md §13
+    /// (RULED by JYH 2026-07-28). A locked layer locks everything inside it, at
+    /// every depth, and those elements cannot be individually unlocked.
+    ///
+    /// Drives the two selection seams the ruling names: `select_element` (the
+    /// path-addressed click, where the element's OWN `locked` was read one line
+    /// above an INHERITED `effective_visibility`) and `select_rect` (the
+    /// marquee). Both op verbs route through the production `Controller`
+    /// mutators.
+    ///
+    /// This family could not have existed before `jas:locked` landed the same
+    /// day (§13.1): every case is seeded from a `setup_svg`, and until then the
+    /// SVG codec dropped `common.locked` in both ports, so NO shared fixture
+    /// anywhere could start from a locked document.
+    #[test]
+    fn operation_lock_inheritance() {
+        run_operation_fixture("operations/lock_inheritance.json");
+    }
+
+    /// MATERIALIZATION IS REPEALED — transcripts/LAYER_STRUCTURE.md §13.
+    ///
+    /// The shipped spec (`workspace/panels/layers.yaml`, `workspace/actions.yaml`
+    /// §toggle_element_lock) said locking a container WRITES `locked = true`
+    /// onto each direct child and restores saved states on unlock, while the
+    /// Rust comments in `controller.rs` / `doc_primitives.rs` asserted the
+    /// opposite. Nothing could see the contradiction because the lock button's
+    /// document work lived only behind a Dioxus click handler — no op verb, no
+    /// action, no gesture reached it.
+    ///
+    /// The `toggle_element_lock` verb this family added routes through the SAME
+    /// pure `Document::toggling_element_lock` the panel calls, so it gates the panel's
+    /// behaviour rather than duplicating it.
+    #[test]
+    fn operation_lock_toggle_no_materialization() {
+        run_operation_fixture("operations/lock_toggle_no_materialization.json");
     }
 
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*
@@ -5455,6 +5799,12 @@ mod tests {
     // the string oracle: it would be normalized back to default on the way in
     // and pass, green and vacuous.
     //
+    // NOTE 2026-07-28: the SUBSET claim above was true when written and is NOT
+    // true now -- the preservation wave extended canonical test-JSON to carry
+    // all twelve formerly-dropped fields, so test_json drops NOTHING and binary
+    // drops only fill_gradient / stroke_gradient. The oracle got STRONGER. This
+    // gate stays: it is BYTE-level where the oracle is string-level.
+    //
     // This gate compares at the MODEL level instead (PartialEq on PathElem),
     // which is what lets it see the fields the oracle cannot express. The
     // saturated Path below is mirrored in JasSwift/Tests/CrossLanguageTests
@@ -5551,16 +5901,52 @@ mod tests {
         }
     }
 
+    /// The attribute-SATURATED Group: the container half of this gate.
+    /// `isolated_blending` and `knockout_group` live on Group and Layer ONLY,
+    /// so a saturated Path cannot reach them and the fixture's `fields` list
+    /// held no container field at all until 2026-07-28. Mirrored by
+    /// `saturatedGroup()` in JasSwift.
+    ///
+    /// It carries a child on purpose: an EMPTY container is a shape a codec
+    /// can legitimately drop, which would confuse a structural loss with a
+    /// field loss.
+    fn survival_saturated_group() -> crate::geometry::element::GroupElem {
+        use crate::geometry::element::*;
+        let mut gc = CommonProps::default();
+        gc.name = Some("name_group".to_string());
+        gc.id = Some("id_group".to_string());
+        GroupElem {
+            children: vec![std::rc::Rc::new(Element::Rect(RectElem {
+                x: 30.0, y: 40.0, width: 5.0, height: 6.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::Rgb { r: 1.0, g: 1.0, b: 1.0, a: 1.0 })),
+                stroke: None,
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            }))],
+            common: gc,
+            isolated_blending: true,
+            knockout_group: true,
+        }
+    }
+
     fn survival_doc() -> crate::document::document::Document {
         use crate::geometry::element::*;
         let mut d = crate::document::document::Document::default();
         let mut lc = CommonProps::default();
         lc.name = Some("Layer 1".to_string());
+        // The enclosing Layer is saturated too: Group and Layer are watched
+        // SEPARATELY because every codec in both ports has a distinct
+        // construction site per kind, so one can be repaired and the other
+        // missed.
         d.layers = vec![Element::Layer(LayerElem {
-            children: vec![std::rc::Rc::new(Element::Path(survival_saturated_path()))],
+            children: vec![
+                std::rc::Rc::new(Element::Path(survival_saturated_path())),
+                std::rc::Rc::new(Element::Group(survival_saturated_group())),
+            ],
             common: lc,
-            isolated_blending: false,
-            knockout_group: false,
+            isolated_blending: true,
+            knockout_group: true,
         })];
         d
     }
@@ -5573,23 +5959,65 @@ mod tests {
         match kids.first()?.as_ref() { Element::Path(p) => Some(p.clone()), _ => None }
     }
 
+    fn survival_first_layer(
+        d: &crate::document::document::Document,
+    ) -> Option<crate::geometry::element::LayerElem> {
+        use crate::geometry::element::Element;
+        match d.layers.first()? { Element::Layer(e) => Some(e.clone()), _ => None }
+    }
+
+    fn survival_first_group(
+        d: &crate::document::document::Document,
+    ) -> Option<crate::geometry::element::GroupElem> {
+        use crate::geometry::element::Element;
+        let kids = match d.layers.first()? { Element::Layer(e) => &e.children, _ => return None };
+        kids.iter().find_map(|c| match c.as_ref() {
+            Element::Group(g) => Some(g.clone()),
+            _ => None,
+        })
+    }
+
     /// PRESERVED / DROPPED for each watched field of `after` against `before`.
+    ///
+    /// Takes the whole DOCUMENT on each side rather than the Path alone,
+    /// because four of the watched fields are container fields that no leaf
+    /// can carry.
     fn survival_row(
-        before: &crate::geometry::element::PathElem,
-        after: Option<&crate::geometry::element::PathElem>,
+        before_doc: &crate::document::document::Document,
+        after_doc: &crate::document::document::Document,
     ) -> Vec<(&'static str, &'static str)> {
-        let a = match after {
+        let before = survival_first_path(before_doc)
+            .expect("the saturated doc has a Path");
+        let before = &before;
+        let a = match survival_first_path(after_doc) {
             Some(a) => a,
             None => panic!("codec_field_survival: the saturated Path did not survive the \
                             round trip AT ALL -- every field row below is meaningless"),
         };
+        let a = &a;
+        // The two containers. A missing one is a STRUCTURAL loss, not a field
+        // loss, so it panics rather than reporting DROPPED four times and
+        // inviting the reader to fix the wrong thing.
+        let bl = survival_first_layer(before_doc).expect("the saturated doc has a Layer");
+        let al = survival_first_layer(after_doc).unwrap_or_else(|| panic!(
+            "codec_field_survival: the saturated Layer did not survive the round trip \
+             AT ALL -- the layer.* rows below would be meaningless"));
+        let bg = survival_first_group(before_doc).expect("the saturated doc has a Group");
+        let ag = survival_first_group(after_doc).unwrap_or_else(|| panic!(
+            "codec_field_survival: the saturated Group did not survive the round trip \
+             AT ALL -- the group.* rows below would be meaningless"));
         let s = |ok: bool| if ok { "PRESERVED" } else { "DROPPED" };
         vec![
+            ("common.locked", s(a.common.locked == before.common.locked)),
             ("common.mask", s(a.common.mask == before.common.mask)),
             ("common.mode", s(a.common.mode == before.common.mode)),
             ("common.tool_origin", s(a.common.tool_origin == before.common.tool_origin)),
             ("fill_gradient", s(a.fill_gradient == before.fill_gradient)),
             ("fill_rule", s(a.fill_rule == before.fill_rule)),
+            ("group.isolated_blending", s(ag.isolated_blending == bg.isolated_blending)),
+            ("group.knockout_group", s(ag.knockout_group == bg.knockout_group)),
+            ("layer.isolated_blending", s(al.isolated_blending == bl.isolated_blending)),
+            ("layer.knockout_group", s(al.knockout_group == bl.knockout_group)),
             ("stroke.align", s(a.stroke.map(|x| x.align) == before.stroke.map(|x| x.align))),
             ("stroke.dash_align_anchors",
              s(a.stroke.map(|x| x.dash_align_anchors) == before.stroke.map(|x| x.dash_align_anchors))),
@@ -5617,7 +6045,6 @@ mod tests {
         assert!(!fields.is_empty(), "codec_field_survival: the field list is empty");
 
         let doc = survival_doc();
-        let before = survival_first_path(&doc).expect("saturated doc has a Path");
 
         let via_json = test_json_to_document(&document_to_test_json(&doc));
         let via_bin = binary_to_document(&document_to_binary(&doc, false))
@@ -5625,7 +6052,7 @@ mod tests {
         let via_svg = svg_to_document(&document_to_svg(&doc));
 
         for (codec, rt) in [("test_json", &via_json), ("binary", &via_bin), ("svg", &via_svg)] {
-            let got = survival_row(&before, survival_first_path(rt).as_ref());
+            let got = survival_row(&doc, rt);
             assert_eq!(got.len(), fields.len(),
                 "codec_field_survival: the gate watches {} fields, the fixture declares {}",
                 got.len(), fields.len());

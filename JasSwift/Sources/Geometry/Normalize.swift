@@ -198,14 +198,16 @@ private func normalizeElement(_ elem: Element) -> Element {
                                   fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                                   opacity: e.opacity, transform: e.transform,
                                   locked: e.locked, visibility: e.visibility, name: e.name, id: e.id))
+    // Group and Layer carry no color of their own, so normalize touches
+    // ONLY their children. Clone-then-mutate, not a rebuild: the memberwise
+    // rebuild this replaced named 7 of 11 fields and therefore dropped
+    // `blendMode`, `mask`, `isolatedBlending` and `knockoutGroup` from every
+    // group and every layer on the way in (the Swift copy-site omission
+    // class). Gated by `CopySiteOmissionTests`.
     case .group(let g):
-        return .group(Group(children: g.children.map(normalizeElement),
-                            opacity: g.opacity, transform: g.transform,
-                            locked: g.locked, visibility: g.visibility, name: g.name, id: g.id))
+        return .group(g.withChildren(g.children.map(normalizeElement)))
     case .layer(let l):
-        return .layer(Layer(name: l.name, children: l.children.map(normalizeElement),
-                            opacity: l.opacity, transform: l.transform,
-                            locked: l.locked, visibility: l.visibility, id: l.id))
+        return .layer(l.withChildren(l.children.map(normalizeElement)))
     case .live(let v):
         // Phase 1: pass through unchanged. Phase 2 will recursively
         // normalize operands and fill / stroke like Group does.
@@ -213,8 +215,8 @@ private func normalizeElement(_ elem: Element) -> Element {
     }
 }
 
+/// Same clone-then-mutate rule as the `.layer` arm above, and for the same
+/// reason — see its note.
 private func normalizeLayer(_ layer: Layer) -> Layer {
-    Layer(name: layer.name, children: layer.children.map(normalizeElement),
-          opacity: layer.opacity, transform: layer.transform,
-          locked: layer.locked, visibility: layer.visibility, id: layer.id)
+    layer.withChildren(layer.children.map(normalizeElement))
 }

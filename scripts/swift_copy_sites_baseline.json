@@ -1,0 +1,262 @@
+{
+  "_doc": [
+    "THE COPY-SITE DEBT LEDGER. Every truncated rebuild that existed when",
+    "scripts/check_swift_copy_sites.py widened its watch list from three",
+    "hand-written container types to the DERIVED element-type list, keyed by",
+    "file and constructed type and carrying the exact fields each site drops.",
+    "",
+    "This is a ratchet, not a permission slip. A new key, an extra site at a",
+    "known key, or a newly-dropped field at a known key FAILS the gate; so does",
+    "repairing a site without lowering the ledger, so the file can only shrink",
+    "and shrinking it is a visible edit.",
+    "",
+    "The rows are NOT all the same defect, and three kinds are mixed here:",
+    "",
+    "  * ALREADY BANKED, deliberately. Normalize.swift's ten arms carry an",
+    "    in-source note saying so: the fields they omit (blendMode, mask, the",
+    "    gradients, the stroke brush) appear in zero expected golden, which is",
+    "    the corpus manifest's `codec-optional-fields-unset` gap, so forwarding",
+    "    them would be an unpinned change. That is a ruling waiting to happen,",
+    "    not an oversight.",
+    "  * A RULING, not a refactor. ShapeRecognize.swift rebuilds a Polyline as a",
+    "    Rect -- a cross-TYPE conversion. Whether recognising a drawn shape",
+    "    preserves the element's identity or mints a new one is an",
+    "    EDIT_SEMANTICS_FREEZE.md question no one has answered.",
+    "  * PLAIN DEBT. The rest are same-type copies that simply forget fields."
+  ],
+  "sites": {
+    "JasSwift/Sources/Algorithms/ShapeRecognize.swift::Circle": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "id",
+        "mask",
+        "name",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Algorithms/ShapeRecognize.swift::Ellipse": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "id",
+        "mask",
+        "name",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Algorithms/ShapeRecognize.swift::Line": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "id",
+        "mask",
+        "name",
+        "strokeGradient",
+        "widthPoints"
+      ]
+    },
+    "JasSwift/Sources/Algorithms/ShapeRecognize.swift::Path": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "id",
+        "mask",
+        "name",
+        "strokeBrush",
+        "strokeBrushOverrides",
+        "strokeGradient",
+        "toolOrigin",
+        "widthPoints"
+      ]
+    },
+    "JasSwift/Sources/Algorithms/ShapeRecognize.swift::Polygon": {
+      "sites": 2,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "id",
+        "mask",
+        "name",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Algorithms/ShapeRecognize.swift::Polyline": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fill",
+        "fillGradient",
+        "id",
+        "mask",
+        "name",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Algorithms/ShapeRecognize.swift::Rect": {
+      "sites": 2,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "id",
+        "mask",
+        "name",
+        "rx",
+        "ry",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Document/Controller.swift::Path": {
+      "sites": 2,
+      "missing": [
+        "fillGradient",
+        "fillRule",
+        "strokeBrush",
+        "strokeBrushOverrides",
+        "strokeGradient",
+        "toolOrigin",
+        "widthPoints"
+      ]
+    },
+    "JasSwift/Sources/Document/Controller.swift::Polygon": {
+      "sites": 1,
+      "missing": [
+        "fillGradient",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Document/OpApply.swift::Rect": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "id",
+        "mask",
+        "name",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Geometry/Normalize.swift::Circle": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "mask",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Geometry/Normalize.swift::Ellipse": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "mask",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Geometry/Normalize.swift::Line": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "mask",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Geometry/Normalize.swift::Path": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "mask",
+        "strokeBrush",
+        "strokeBrushOverrides",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Geometry/Normalize.swift::Polygon": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "mask",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Geometry/Normalize.swift::Polyline": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "mask",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Geometry/Normalize.swift::Rect": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "mask",
+        "strokeGradient"
+      ]
+    },
+    "JasSwift/Sources/Geometry/Normalize.swift::Text": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "mask"
+      ]
+    },
+    "JasSwift/Sources/Geometry/Normalize.swift::TextPath": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "mask"
+      ]
+    },
+    "JasSwift/Sources/Tools/TypeOnPathTool.swift::TextPath": {
+      "sites": 2,
+      "missing": [
+        "aaMode",
+        "baselineShift",
+        "blendMode",
+        "fontFamily",
+        "fontStyle",
+        "fontVariant",
+        "fontWeight",
+        "horizontalScale",
+        "id",
+        "kerning",
+        "letterSpacing",
+        "lineHeight",
+        "locked",
+        "mask",
+        "name",
+        "opacity",
+        "rotate",
+        "stroke",
+        "textDecoration",
+        "textTransform",
+        "transform",
+        "tspans",
+        "verticalScale",
+        "visibility",
+        "xmlLang"
+      ]
+    },
+    "JasSwift/Sources/Tools/YamlToolEffects.swift::Rect": {
+      "sites": 1,
+      "missing": [
+        "blendMode",
+        "fillGradient",
+        "id",
+        "mask",
+        "name",
+        "strokeGradient"
+      ]
+    }
+  }
+}

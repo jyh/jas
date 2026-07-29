@@ -734,3 +734,1005 @@ Three coverage-gap rows updated in `scripts/corpus_manifest.json`:
 `unblock` predicted this fix's shape exactly), and
 `identity-law-duplication-verbs-id-less` (its paste half is now watched, though
 still unfixed).
+
+---
+
+## 10. RULINGS TAKEN AFTER RATIFICATION (the defects this phase surfaced)
+
+### D6 — Swift's `Selection` becomes an ordered array. RULED 2026-07-28.
+> JYH: *"agreed to use vec for swift, with a thought that once we have AI
+> assistance, we may be large selections, but let's deal with it at that point."*
+
+**QUEUED, not yet implemented.**
+
+Swift's `Selection` is a `Set` (`Document.swift:175`); Rust's is a `Vec`
+(`document.rs:207`). Measured: copy emits in per-process hash order — 5 elements,
+10 processes, **10 different orders, document order never once**. This is on the
+SHARED SVG path, not just the internal clipboard.
+
+**Ruled on determinism, not performance.** The z-order of a copied fragment is
+part of the artwork: paste the same selection twice and the stacking can differ.
+Performance does not decide it — membership queries dominate (18 Swift sites, 38
+Rust), but the worst nested scan (`renderer.rs:9488`) is in a **Cmd-click
+handler**, bounded by user interaction rather than frame rate, and Rust already
+builds a local `HashSet` beside it where the cost showed. For realistic selection
+sizes a linear scan over a small array likely beats hashing anyway.
+
+**Deliberately NOT an ordered-set type.** An array-plus-index would keep dedup and
+O(1) lookups, but Swift has no stdlib `OrderedSet`, so it means a dependency or
+~40 lines of our own — and it would diverge from Rust's representation. Identical
+representation in both ports is worth more than the convenience.
+
+**THE MIGRATION HAZARD, named up front:** `Set` gives free deduplication. Rust
+pays for order with manual guards (`if !doc.selection.iter().any(...)` before
+every push). Every Swift insertion site needs the same guard or duplicate
+selections appear. That is the **Swift copy-site omission class**, which has bitten
+this project three times — so the sites must be enumerated BY THE COMPILER, not by
+a human reading. Removing a defaulted initializer parameter is the ratified trick.
+
+**Deferred by JYH, consciously:** large selections under AI assistance may change
+the performance calculus. Revisit then, with data — not before.
+
+### D7 — cumulative paste offsets. RULED 2026-07-28: follow the spec.
+> JYH: *"D7: yes, follow the spec."*
+
+`workspace/actions.yaml:186` already specifies *"Repeated pastes stack with
+cumulative offsets."* **Neither port implements it** — measured, the second paste
+lands exactly on the first (x=24, not 48); `paste_count`/`pasteCount` have zero
+hits in either port. Both ports are wrong TOGETHER, so this is a tier-1 spec
+violation rather than a divergence, and no adjudication was needed: the written
+requirement stands and the code must meet it.
+
+Implement the stacking; do NOT amend the sentence. (A previous lane started to
+delete that sentence and correctly put it back — deleting a requirement is
+deciding a ruling.)
+
+### Open question 1 — layer naming on create. RULED 2026-07-28: verbatim.
+> JYH: *"R3: verbatim."*
+
+When R3's preserving paste creates a layer the document lacks, it takes the
+fragment's layer name **exactly as given**, not a disambiguated variant.
+"Preserving layers" means preserving them, names included; a user who reached for
+that command wants their names back. The known cost is accepted: two documents'
+"Layer 1" can fuse on a later paste, which is the same command doing what it says.
+
+### Open question 3 — mixed depths under R1. RULED 2026-07-28: frontmost wins.
+> JYH: *"R1: preference for frontmost."*
+
+When a selection spans different DEPTHS — an element alongside something nested
+deeper inside a group — the **frontmost path wins, even when it is the deeper
+one**, so a shallower element is pulled INTO the group. This confirms the
+conservative reading the R1 lane took to compile and pinned in a fixture; it is
+now ruled rather than provisional.
+
+Consistent with R1 itself: frontmost governs placement in both cases, so there is
+one rule to remember rather than two.
+
+---
+
+## 11. STILL OPEN — not ruled, and NOT to be inferred
+
+These were put to JYH in the same sitting and were not answered. They are
+recorded as open rather than resolved, because assuming a ruling is exactly the
+failure this document exists to prevent.
+
+1. **Paste and element ids.** Both ports copy ids VERBATIM, so a pasted element
+   can duplicate a live identity. The cardinality law says a paste is 0 -> N and
+   should mint fresh, so this looks ratified-by-implication — **but it touches
+   IDENTITY, and identity rulings in this project have twice been got wrong by
+   inference.** It needs JYH's explicit word. The `paste` verb landed with R2/R3
+   is what finally makes it gateable.
+2. **R3 into a LOCKED or hidden layer.** Unaddressed everywhere in the spec. The
+   proposal on the table was: append succeeds and the layer STAYS locked --
+   locking guards against accidental edits and an explicit paste is not
+   accidental, while silently unlocking discards a state the artist set and
+   failing would be the silent no-op that R1 just abolished. Not ruled.
+3. **Cross-artboard selections.** Nobody has looked. It may already work, or be a
+   fourth instance of this family. **Measure before ruling.**
+
+### Paste and element ids — RULED 2026-07-28: MINT FRESH.
+> JYH: *"Paste ids, it seems we have to mint fresh, we should not duplicate."*
+
+A paste is 0 -> N under the cardinality law, so pasted elements take FRESH ids.
+Both ports currently copy ids verbatim.
+
+**The shipped spec contradicts this ruling and must be corrected**:
+`workspace/actions.yaml` says *"Pasted objects keep the ids they were copied
+with"* in BOTH paste descriptions, and that text is on public `main`. It was the
+lane's provisional reading, written before the ruling existed. Code and spec both
+change.
+
+### Locked layers — the question was reframed by measurement, then RULED.
+> JYH: *"the artist will assume locked means locked, no changes, but if we
+> silently drop that is also a problem... paste into a new similarly-named layer
+> when the target layer is locked."*
+> Then, after the measurement below: *"yes, lock should protect contents."*
+
+**WHAT THE MEASUREMENT FOUND.** Both ports have `effective_visibility` /
+`effectiveVisibility` which INHERIT visibility down the tree — `select_all`
+computes `min(layer_vis, child.visibility())`. But for locking the same code
+checks `child.locked()`, the child's OWN flag, and **there is no
+`effective_locked` anywhere in either port.**
+
+So **locking a layer does not protect its contents today.** Its children stay
+individually selectable, clickable and editable; the lock only stops you
+selecting the layer object itself. The question "what should paste do with a
+locked layer" could not be answered honestly until that was known, because the
+premise — that lock protects anything — was false.
+
+**RULED: lock must protect its contents.** An artist locks a layer in order to
+work around it. Scoping is under way (`seat/fleet/SCOPE-effective-locked.md`);
+it is a change well beyond paste, touching selection, hit-testing and every
+operation that walks children, and the SVG codec may not persist `locked` at all
+— which would make persistence a prerequisite rather than a detail.
+
+**The paste behaviour follows from it, and is JYH's proposal:** once lock really
+protects, pasting into a locked layer would create content the artist cannot
+touch, so R3 diverts to a NEW similarly-named layer — neither violating the lock,
+nor silently dropping artwork, nor stranding it. It is also *visible*: a new
+layer appears in the panel. Generalised, R3's rule becomes **"append into the
+matching layer if it can accept content; otherwise create."**
+
+Two costs on the record: this is the one place R3's ratified VERBATIM naming does
+not hold, so it needs a stated exception and a naming convention; and whether the
+divert follows automatically or needs its own ruling is listed as an open
+question in the scope.
+
+**The currently shipped text is the opposite** — *"A matching layer that is locked
+or hidden is appended to unchanged: the paste neither refuses nor unlocks nor
+reveals it"* — published, provisional, and now superseded pending the scope.
+## 12. D4 AND D5 — TEXT ON THE CLIPBOARD PASTES AS TEXT
+
+**Closes §8.6 item 1 and §9.9 item 4.** JYH ruled at council 2026-07-28:
+**Swift is canon; Rust drops the internal-clipboard fallback.** D5 was ruled in
+the same breath and in the same direction, and nothing was found that makes the
+empty case differ from the text case, so nothing was banked in its place.
+
+### 10.0 The headline
+
+**The internal clipboard is deleted, not merely bypassed.** `TabState.clipboard`
+had exactly **one reader** — the fallback in `clipboard_read_and_paste` — and
+**five writers**. Removing the reader left the field write-only, so the field
+went with it, and all five copy sites now write the system clipboard and nothing
+else, which is exactly what Swift's single `copySelection` does. That is the
+enumeration the work order asked for, done mechanically:
+
+| site | what it did | what it does |
+|---|---|---|
+| `keyboard.rs` Cmd+C | SVG + `tab.clipboard` | SVG |
+| `keyboard.rs` Cmd+X | SVG + `tab.clipboard` + delete | SVG + delete |
+| `menu_bar.rs` Cut | SVG + `tab.clipboard` + delete | SVG + delete |
+| `menu_bar.rs` Copy | SVG + `tab.clipboard` | SVG |
+| `renderer.rs` `doc.copy_selection_to_clipboard` | SVG + `tab.clipboard` | SVG |
+
+The verifying grep is `grep -rn "\.clipboard" jas_dioxus/src/`: before, five
+writes and one read; after, none.
+
+### 10.1 The machinery, and why it is not a parallel path
+
+The work order said to use the `paste` verb R2/R3 landed, not to build beside
+it. That verb's `svg` param carries **fragment markup**, which presupposes the
+SVG branch was already chosen — so it could not express the D4/D5 question at
+all. It gained a **`text`** param carrying the **raw clipboard payload**, before
+any branch is chosen, and that is the only new surface.
+
+| piece | Rust | Swift |
+|---|---|---|
+| predicate | `op_apply::clipboard_text_is_svg` | `clipboardTextIsSvg` |
+| text branch | `paste_text_element_into` | `pasteTextElementInto` |
+| the dispatch | `paste_clipboard_text_into` | `pasteClipboardTextInto` |
+| `Model` wrapper | `apply_paste_clipboard_text` | `applyPasteClipboardText` |
+| production caller | `clipboard_read_and_paste` (now one call) | `EditClipboard.pasteClipboard` (now one call) |
+
+`text` routes an SVG payload into the **same** `paste_fragment_into` body the
+`svg` param reaches, and that is pinned **by file identity, not by assertion**:
+`paste_clipboard_svg_payload_through_text_equals_the_svg_param` and
+`paste_single_unnamed_layer_flattens_into_active` point at ONE golden file, so a
+second copy of the paste body behind `text` could not stay agreeing with it.
+
+`null` in `text` means **the clipboard read failed**; `""` means **readable and
+empty**. They are kept as distinct inputs rather than collapsed at the call
+site, so the corpus pins each and a future ruling that wants them to differ has
+a seam to move. Both no-op today.
+
+### 10.2 RED FIRST, in BOTH ports at once — and how that was possible
+
+`test_fixtures/operations/paste_clipboard_text.json` (11 cases) was authored
+**and its goldens HAND-AUTHORED from the canonical test-JSON encoding**
+(`jas_dioxus/src/geometry/test_json.rs`, the `Element::Text` arm plus
+`tspan_json` and `common_fields`) rather than generated from a port. That is
+what made a simultaneous two-port red possible: a golden generated from a port
+can only ever red the other one.
+
+> **Rust**: `op 'paste' unexpectedly errored: MissingParam(svg)` — the first case
+> aborts the family.
+> **Swift**: **18 recorded issues across 10 of the 11 cases.** The eleventh is
+> the setup case, which has no `txns` and therefore cannot fail — so the family
+> DISCRIMINATES rather than being uniformly red.
+
+Rust was then implemented and the family went green **without a golden being
+regenerated**: the hand-authored bytes and the implementation's bytes matched
+exactly, first run, all 11 cases. That is a stronger result than a green, and it
+is the only evidence in this brief that the spec and the code were derived
+independently.
+
+### 10.3 A second defect, found and repaired red-first in the same seam
+
+**Swift's plain-text branch dropped the target layer's fields.** It rebuilt the
+layer as `Layer(name:children:opacity:transform:)` — a hand-written four-field
+list against a twelve-field struct — so **pasting text into a locked layer
+UNLOCKED it, into a hidden layer REVEALED it, and into an identified layer
+DESTROYED its identity.** The Swift copy-site omission class
+(EDIT_SEMANTICS_FREEZE.md §3.1) at a paste, and it shipped on main. §9.5
+repaired exactly this shape on the SVG path and left it standing here.
+
+> **Measured before the repair**, by
+> `pasteOfPlainTextPreservesTheTargetLayersOwnFields`:
+> `locked -> false` (want `true`), `visibility -> .preview` (want `.invisible`),
+> `id -> nil` (want `"lyr-sky"`). Three issues.
+
+This had to be repaired rather than banked: Rust's new text branch uses
+`children_mut()` and is field-preserving by construction, so leaving Swift's
+rebuild in place would have **created** a fresh divergence out of the fix for
+this one. The repair is the shape that cannot drift again — the branch mutates
+the layer value in place, so there is no field list to fall behind.
+
+### 10.4 Mutation proof — every cause reverted INDIVIDUALLY
+
+Production restored and verified after every one; the family was re-run green
+between each.
+
+| # | port | mutation | RED observed |
+|---|---|---|---|
+| M1 | Rust | D4 text branch removed | 3 failed — corpus `paste_clipboard_plain_text_becomes_a_text_element`, plus both text probes |
+| M2 | Rust | the `""` guard removed | **1 failed — `paste_clipboard_empty_text_is_a_noop` ONLY**; the unreadable case correctly stayed green |
+| M3 | Rust | the `<?xml` arm of the predicate deleted | **1 failed — `paste_clipboard_xml_declaration_payload_takes_the_svg_branch` ONLY** |
+| M4 | Rust | baseline drop removed (`y = offset`) | 3 failed — `left: (24.0, 24.0)  right: (24.0, 40.0)`; `left: (0.0, 0.0)  right: (0.0, 16.0)` |
+| M5 | Rust | the verb no longer routes through `apply_paste_clipboard_text` | 1 failed immediately — **the `text` param is not a decoy** |
+| M6 | Rust | the text branch appends but does not select | 3 failed — selection `left: 0  right: 1` |
+| M12 | Rust | the unreadable (`text?`) arm removed | **1 failed — `paste_clipboard_unreadable_is_a_noop` ONLY** |
+| M7 | Swift | D4 text branch removed | 11 issues across 5 tests, 5 of them corpus cases |
+| M8 | Swift | the `!isEmpty` half of the guard removed | **2 issues — the empty-STRING probe and one corpus case**; the unreadable probe stayed green |
+| M13 | Swift | the `nil` half of the guard removed | **3 issues — the unreadable probe, the empty-pasteboard probe, one corpus case**; the empty-STRING probe stayed green |
+| M9 | Swift | the OLD field-list `Layer` rebuild restored | 3 issues, exactly the three field assertions — **and the corpus stayed GREEN** |
+| M10 | Swift | `EditClipboard.pasteClipboard` no longer calls the dispatch | **11 issues across 9 tests in 2 suites**, including every pre-existing paste probe — the production wire is real |
+| M11 | Swift | the verb no longer routes through `applyPasteClipboardText` | 8 corpus cases failed |
+
+**M2 / M12 and M8 / M13 are the useful splits**: they show the empty case and
+the unreadable case are separately watched, so neither is riding on the other.
+Without them the two no-op cases would be indistinguishable from vacuous.
+
+**M9 is the most important row**, for the same reason M8 was in §9.4: **under it
+the shared cross-language corpus stayed GREEN while three in-port assertions went
+RED.** §9.6's blind spot, restated with a live example — every corpus case is
+seeded from a `setup_svg` and the SVG codec does not persist `locked` at all, so
+the corpus is structurally blind to the locked / hidden / layer-id question on
+the text branch exactly as it is on the SVG branch. That class remains OPEN and
+is watched by per-port probes only.
+
+### 10.5 What this gate reaches, and what it does NOT
+
+**Reached, in both ports, over shared goldens:** everything from the payload
+string down. Text becomes a Text element at `(offset, offset + 16)` in the
+active layer and becomes the selection; markup that is not SVG stays text;
+whitespace-only text is still text; an empty string and an unreadable clipboard
+each no-op; and all three SVG payload shapes (`<svg`, `<?xml`, leading
+whitespace) route into the shared R2/R3 body.
+
+**Reached in Swift only:** the WIRE. `EditClipboard.pasteClipboard` takes an
+injectable `NSPasteboard`, so `ClipboardTextPasteTests` drives read -> dispatch
+-> document edit end to end (M10 is what proves that is not decorative).
+
+**NOT reached in Rust, and this is the named obstacle the work order
+anticipated:** the clipboard READ. `clipboard_read_and_paste` still reads inside
+a `spawn_local` closure over an `Rc<RefCell<AppState>>` and a Dioxus `Signal`,
+neither constructible outside a Dioxus runtime. The dispatch was lifted OUT of
+that closure — which is what makes everything above reachable — but the read
+itself, the text-editing-session hand-off above it and the `begin_txn`/`commit`
+bracket below it are still asserted on a **reading**. So the two ports are
+watched to different depths and only the shallower depth is common. Recorded as
+the coverage-gap row `rust-clipboard-read-unreachable-from-cargo-test`, with the
+unblock (an injectable reader parameter) stated there.
+
+**Also NOT done:** no GUI was driven in either port; `jas_flask` and the frozen
+ports were not examined; the reference interpreter still has no clipboard code
+at all, so it could not arbitrate — this family, like `paste_layers.json`, is
+Rust-vs-Swift.
+
+### 10.6 §8.5's mutation-proof gap, closed on the way past
+
+§8.5 recorded that `internal_copy_payload_order_is_deterministic_selection_order`
+**reproduced** the copy expression rather than calling it, so a change at any of
+the five copy sites would not have been caught. There is no expression left to
+reproduce: the module is renamed `copy_payload_tests` and both probes now drive
+the production `selection_to_svg` through a real `AppState`, round-tripping the
+payload back through `svg_to_document`. The two D4/D5 characterization probes at
+the end of `InternalClipboardConfirmTests` are deleted — they pinned a
+divergence that no longer exists, and what replaces them makes the ports AGREE
+rather than recording that they do not.
+
+### 10.7 The spec
+
+`workspace/actions.yaml` §paste gains the clipboard-content rule in three
+ordered paragraphs (a drawing, any other text, nothing at all), plus one
+sentence stating that a paste leaves the target layer's own lock, visibility,
+name and identity alone — the sentence §10.3's defect violated.
+§paste_preserving_layers and §paste_in_place each gain the same rule by
+reference. `workspace/workspace.json` regenerated.
+
+**The sentence still NOT touched**: §paste's *"Repeated pastes stack with
+cumulative offsets."* D7 remains banked (§8.6 item 3) and no port implements it.
+
+### 10.8 Gates
+
+| gate | before this pass | after |
+|---|---|---|
+| `cargo test --lib` | 2756 passed / 0 failed / 18 ignored | **2760** passed / 0 failed / 18 ignored |
+| `swift test` | 2794 tests / 23 suites | **2802** tests / 24 suites |
+| `pytest workspace_interpreter/` | 1268 passed | 1268 passed |
+| `cross_language_algorithms.py` | 1086 (465 + 396 + 225) | 1086 (465 + 396 + 225) |
+| `cross_language_commutativity.py` | 28 + 28 oracle | 28 + 28 oracle |
+| `check_corpus_manifest.py` | 26 families / 478 files / 31 gaps | 26 / **483** / **32** |
+| `check_naming_rule.py` | OK, 1392 tracked text files | OK, 1392 (+ `--self-test` OK, 22 cases) |
+| everything else in house law 8 | OK | OK |
+
+The full set was run, not the subset expected to matter: `check_menu_structure`,
+`check_intent_map` (237 actions), `check_toolbar_structure`, `check_action_refs`
+(257 references), `check_panel_goldens`, `check_path_b_exclusions`,
+`genericity_check`, `check_preservation_corpus` (12 vectors),
+`check_corpus_manifest --self-test`, `lane_report --self-test`,
+`check_workspace_json`. **No golden outside the new family moved** — the
+`paste` verb's `svg` arm is untouched, so `paste_layers.json`'s twelve cases and
+`menu_state.json` are byte-identical.
+
+### 10.9 Banked — no ruling invented
+
+1. **The canon Text element carries `fill: null`.** Swift's
+   `Text(x:y:content:)` defaults `fill` to nil, so a pasted text object has no
+   explicit fill and relies on SVG's implicit black. Rust now matches it exactly,
+   because matching Swift is the ruling. Whether a pasted text object should take
+   the current fill (as the Type tool's would) is a real question and this pass
+   did not answer it — the golden is what will move.
+2. **Whitespace-only text is a paste.** The guard tests byte-emptiness, not
+   trimmed-emptiness, so three spaces produce a Text element holding three
+   spaces. Swift's behaviour, pinned rather than invented, with its own corpus
+   case so a ruling moves a visible byte.
+3. **D6 (nondeterministic Swift paste z-order) and D7 (no cumulative paste
+   stacking) are untouched** and remain exactly as §8.6 banked them.
+
+---
+
+## 13. LOCK IS INHERITED, NOT MATERIALIZED. RULED 2026-07-28.
+
+> JYH: *"yes, let's choose inheritance: a locked layer locks everything inside,
+> and those elements cannot be unlocked."*
+
+This settles the fork the scope uncovered. Full costing:
+`seat/fleet/SCOPE-effective-locked.md`.
+
+### What the scope found, and why this was a fork at all
+**The shipped spec already contained a lock-propagation design, and it was the
+opposite one.** `workspace/panels/layers.yaml:81-85` and
+`workspace/actions.yaml:1505-1512` specify **MATERIALIZATION**: locking a
+container WRITES `locked=true` onto each direct child, saving their prior states
+in transient app state for restore on unlock, one level deep. Meanwhile the Rust
+comments at `controller.rs:2800` and `doc_primitives.rs:79` assert the exact
+opposite — *"the lock is NOT materialized onto children."* **The spec and the
+implementation contradicted each other in writing, and neither actually protected
+contents.**
+
+Both designs satisfy the ruling that lock protects contents. They differ in what
+they can EXPRESS:
+
+| | materialization | inheritance (RULED) |
+|---|---|---|
+| child unlocked inside a locked parent | expressible | **not expressible** |
+| depth | one level | whole subtree |
+| restore state | transient, app-lived | none needed |
+| survives save/reload | no (restore table is not in the document) | yes |
+
+### The ruling
+**Inheritance.** `effective_locked(path)` ORs down the path, mirroring
+`effective_visibility`. A locked layer locks everything inside it, at every
+depth, and **those elements cannot be individually unlocked** — JYH ruled the
+expressiveness loss explicitly, not by omission.
+
+Consistent with the visibility precedent: nothing anywhere lets a child be
+visible inside an invisible parent, and lock now behaves the same way. One rule
+to learn instead of two.
+
+### What follows automatically
+* **Materialization is REPEALED** — the two YAML specs are rewritten, and the
+  `layers_saved_lock_states` / `savedLockStates` machinery is deleted. Keeping
+  both would double-apply: lock a layer, children get written locked, unlock it,
+  restore fires against a state inheritance already made meaningless.
+* **R3's locked-layer divert** (JYH's earlier proposal: paste into a new
+  similarly-named layer) now has a real premise, because a locked layer will
+  genuinely refuse content. It remains listed as an open question in the scope —
+  whether it follows automatically or needs its own ruling.
+* Scope stone 3's deleted restore-on-unlock behaviour is observable only through
+  the Layers panel, and panel interaction has no shared corpus, so its removal is
+  watched by the widget-tree snapshot rather than by a behavioural gate. Stated,
+  not smoothed over.
+
+### The prerequisite, and it is not optional
+**`locked` does not survive an SVG round trip in either active port** — Rust
+writes one hardcoded `locked: false` at `svg.rs:1350`, Swift writes nothing. Every
+conformance fixture is SVG-seeded, so **the shared corpus is structurally blind to
+lock** and cannot gate this ruling at all until the codec carries it. That is also
+why the corpus stayed green through the unlock-on-paste bug. Persistence is scope
+stone 1, before enforcement.
+
+### Do first, ruling or not — five live divergences
+The scope found five, all source-confirmed, inside the code this ruling touches.
+Two are worse than the ruling and unrelated to it: **`ungroup_all` in Swift drops
+`symbols`, `artboards`, `artboardOptions`, `documentSetup` and `printPreferences`
+from the Document plus seven fields from every rebuilt Group** (the copy-site
+omission class again), and **Rust iterates layers in the wrong z-order in
+hit-testing**, where Swift, the Python reference and Rust's own inner loops all
+agree against it. Also measured: **Align's documented lock rule is unimplemented**
+— `align.rs` mentions `locked` on two lines and both are comments.
+
+### 13.1 STONE 1 LANDED — `jas:locked`, the prerequisite (2026-07-28)
+
+The prerequisite above is closed. `common.locked` now survives an SVG round trip
+in **both** active ports, so the shared conformance corpus can finally start a
+case from a locked document and the ruling becomes gateable.
+
+**The spelling, and the reasoning that picked it.** ` jas:locked="true"`, in the
+`urn:jas:1` namespace, written immediately after the element's `id`.
+
+The scope left this open (its Q5) between `sodipodi:insensitive` and
+`data-locked`. Both were rejected:
+
+* The precedent is the **sibling `CommonProps` field**. `tool_origin` is written
+  `jas:tool-origin` by both ports and read by both, in the same namespace,
+  emitted only when set (`svg.rs` `tool_origin_attr` / `parse_common`;
+  `Svg.swift` the `<path>` arm and `parseElement`). The five arrowhead
+  attributes (`jas:start-arrow` and friends) are the same shape. `locked` is a
+  `CommonProps` field, so it belongs where its siblings live.
+* `sodipodi:insensitive` carries a **measured hazard**, not merely a different
+  taste. JasSwift decides whether to declare `xmlns:jas` by matching the
+  ` jas:` PREFIX in its emitted body — a guard written *after* an undeclared
+  prefix made Foundation reject a WHOLE document and the artwork came back
+  empty. A `jas:`-namespaced attribute inherits that guard for free. A
+  `sodipodi:`-namespaced one would need `needsSodipodi` widened (it is
+  currently `needsNamedview` alone), and forgetting that re-opens exactly the
+  hole the guard was built to close.
+* `data-locked` is already shipped in **jas_flask** (`svg_io.mjs:96,225`) but
+  only for leaf shapes — `:144` and `:156` hard-code `locked: false` for `<g>`,
+  so it cannot express a locked layer at all. Adopting it would import a
+  spelling that does not cover the case the ruling is about.
+
+**Written only when true, so golden churn is zero** — measured, not assumed: 0
+of the elements across the 60 SVG fixtures carry `locked = true`, and no shipped
+golden moved. Same conditional-key convention as `fill-rule="evenodd"`. Only the
+exact string `"true"` locks on read; a foreign or malformed value must not
+silently protect artwork the artist never protected.
+
+**The copy-site omission class, handled by making the COMPILER enumerate.** Both
+ports hand-inline their attribute lists per element kind (16 arms in Rust, 15 in
+Swift). Every arm in both ports already called `id_attr` / `idAttr`, so that
+helper took a REQUIRED `locked` argument and became `id_lock_attrs` /
+`idLockAttrs`; the compilers then listed the sites — 10 in Rust, 15 in Swift —
+and neither would build until every one was answered. On the read side Rust
+already funnels every kind through one `parse_common`; Swift's reader builds
+fourteen different structs, so it applies `Element.withLocked` once at
+`parseElement`, whose own switch the compiler checks for exhaustiveness over all
+twelve cases.
+
+**A second defect, found by the census fixture and repaired.** JasSwift promotes
+a top-level bare `<g>` to a Layer by rebuilding it field by field, where Rust
+carries `common: g.common.clone()` and loses nothing. `locked` is threaded now.
+The fields still dropped there — `visibility`, `blendMode`, `mask`,
+`isolatedBlending`, `knockoutGroup` — are a REAL divergence from Rust that no
+SVG gate can see, because none of them survives an SVG round trip in either port
+either. Named in a comment at the site; `isolatedBlending` / `knockoutGroup` were then
+the standing coverage gap `container-blend-fields-survive-no-codec`.
+
+**That gap CLOSED on 2026-07-28** (CONTAINERFLAGS), which retires half of the
+sentence above: `isolatedBlending` and `knockoutGroup` now survive **all three**
+codecs in both ports — the canonical test JSON emits them conditionally on true,
+the binary codec carries two container-private trailing slots, and SVG carries
+` jas:isolated-blending` / ` jas:knockout-group` in the same `urn:jas:1`
+namespace `jas:locked` uses. All four cells are asserted in
+`test_fixtures/expected/codec_field_survival.json`, whose `fields` list gained
+`group.*` and `layer.*` rows so the two container kinds are measured separately.
+`visibility`, `blendMode` and `mask` are unchanged by that wave and remain
+SVG-invisible.
+
+**THE REFERENCE CANNOT ADJUDICATE THIS, and that is a standing fact about lock
+persistence, not a gap this stone left.** `workspace_interpreter/` has **no SVG
+codec at all** — measured: `svg` appears in four files and every occurrence is
+prose in a comment. It *does* model lock (`common.locked` on its document dicts,
+read by `doc_primitives._child_is_locked` and reachable from expressions as
+`element_at(path(0)).common.locked`), so it can adjudicate lock SEMANTICS and
+already prunes locked subtrees in `hit_test`. It cannot adjudicate lock
+PERSISTENCE, in this or any codec. For Stone 4 that is fine: enforcement is
+semantics. It is recorded here so no later wave mistakes the reference's silence
+for agreement.
+
+**What is gated.** `common.locked` is now a watched row of
+`test_fixtures/expected/codec_field_survival.json` in all three codec columns
+(it was absent, which is why the drop was structurally invisible even though the
+saturated Path the gate round-trips has carried `locked: true` since the file was
+written). Two new SVG fixtures — `locked_layer_and_element.svg` (the semantic
+vector: a locked LAYER whose children carry no flag of their own, plus a locked
+ELEMENT inside an unlocked layer) and `locked_all_kinds.svg` (the writer-arm
+census) — are registered in four lanes per port plus the cross-language
+commutativity driver, whose OFF-DIAGONAL cells are what prove the two ports
+agree on the spelling rather than each agreeing with itself.
+
+**BANKED, not decided** — each needs JYH, and none blocks Stone 4:
+
+1. **Interop read.** Should the readers ALSO accept `sodipodi:insensitive`, so a
+   layer locked in Inkscape opens locked here? There is precedent for a
+   dual-spelling read (`name` accepts `inkscape:label` OR a `<title>` child),
+   and it is one line per port — but it is a second decision that Q5 owns, and
+   both ports must move together.
+2. **jas_flask.** It still writes and reads `data-locked` on leaf shapes only,
+   so a locked rect saved by the flask renderer still loses its lock in the
+   active ports and vice versa. Flask is the non-gating reference renderer, so
+   this is a divergence by policy rather than a defect — but it is a divergence.
+3. **The frozen ports.** `jas_ocaml/lib/geometry/svg.ml:1038` and the Python Qt
+   app still parse `locked = false` unconditionally. Correct per the freeze; the
+   consequence is that a file saved by an active port and reopened in a frozen
+   one silently unlocks. Stated, not fixed.
+
+## 14. REPEATED PASTES STACK WITH CUMULATIVE OFFSETS. RULED 2026-07-28.
+
+> JYH: *"follow the spec."*
+
+`workspace/actions.yaml` §paste has carried the sentence **"Repeated pastes
+stack with cumulative offsets"** since it was written. Neither active port
+implemented it: the second paste landed exactly on the first — invisible, the
+one outcome the offset exists to prevent, arrived at by pasting twice instead of
+once. Both ports were wrong TOGETHER, so this was never a divergence needing
+adjudication. The written requirement governs: implement the stacking, do not
+amend the sentence.
+
+### 14.1 The four decisions the sentence leaves open
+
+The spec says "cumulative" and stops. Four things had to be chosen, and all four
+are now artist-facing prose in `actions.yaml` (§paste, §paste_preserving_layers,
+§paste_in_place) as well as code:
+
+1. **RESET IS KEYED TO WHAT IS PASTED, not to a copy hook.** A paste whose
+   payload differs from the one the run is counting starts a new run. This is
+   what makes an EXTERNAL copy — from another application — reset the offset,
+   which no in-app copy hook could ever see. Re-copying the SAME artwork does
+   NOT reset: the first slot already holds the previous paste. A
+   SELECTION-keyed reset was considered and rejected with a proof, not a
+   preference: paste SETS the selection, so a selection-keyed reset would fire
+   after every paste and the run could never reach step two.
+2. **`paste_in_place` DOES NOT PARTICIPATE.** It lands on the source, which is
+   not a run slot, so it neither advances the run nor restarts it: 24, 0, 48.
+3. **"Paste, Preserving Layers" SHARES THE ONE RUN.** The two commands differ in
+   WHICH LAYER artwork lands in, never in the offset — §9's ruling, applied.
+4. **A PASTE THAT LANDS NOTHING DOES NOT ADVANCE THE RUN.**
+
+### 14.2 The run is keyed to the RAW CLIPBOARD PAYLOAD
+
+`Model.paste_run` / `Model.pasteRunState` holds `(payload, count)` where
+`payload` is the raw string — the text a port read off the system clipboard, or
+the `svg` fragment markup the corpus supplies. It is offset-independent, it is
+what both op params already carry, it costs a string compare rather than a deep
+element compare, and "the same clipboard content" is exactly what the spec
+sentence is about.
+
+TWO CONSEQUENCES, BANKED AND PROBED, NOT RULED:
+
+- Markup differing only in whitespace is a DIFFERENT payload and restarts the
+  run. Conservative: the artist's clipboard did change.
+- The run is a SINGLE SLOT. Copying B between two pastes of A loses A's count,
+  so the next A lands back on the first. A fragment-keyed run would have the
+  same limitation. Pinned by `an_intervening_payload_loses_the_first_runs_count`
+  in both ports, so the day a multi-slot run is ruled, a byte moves.
+
+### 14.3 Where it lives, and the lifetime argument
+
+Per-document, session-lived, never serialized, undoable — on the `Model`.
+
+- **NOT `Document`.** It is a value type that many Swift sites rebuild field by
+  field, so a new field there is dropped silently at every one of them (the
+  copy-site omission class, found five times). It would also survive a save, and
+  a paste offset remembered from a previous session is a lie: the clipboard it
+  counted is gone.
+- **NOT app state.** §13's lock save-state table was ruled a design flaw the
+  same day for living somewhere whose lifetime does not match what it describes.
+  A counter that outlives the artwork it counts is the same defect: undo the
+  second paste and the third would skip to 72, leaving 48 empty — a slot the
+  artist can see and cannot fill.
+
+Undoability is bought EXPLICITLY. The `(Document, IdIndex)` undo/redo tuple
+became a NAMED `Checkpoint` struct carrying the run, so the COMPILER enumerated
+all 13 sites in Rust and all 11 in Swift rather than letting a two-element
+destructure silently drop a third field. `begin_txn` captures the PRE-paste run,
+so undo-then-paste is exactly redo; abort rolls it back too.
+
+### 14.4 One place the run moves
+
+`paste_run_apply` / `pasteRunApply`. Both model-level entry points route through
+it: `apply_paste` (the corpus-only `svg` param) and `apply_paste_clipboard_text`
+(the `text` param, which is what BOTH ports' production paste reads after §12).
+Measured: a run implemented on `svg` alone leaves ONE corpus vector red and
+every per-port probe green, which is precisely the decoy shape.
+
+Rust's production path was REROUTED as part of this: `clipboard_read_and_paste`
+called the pure `paste_clipboard_text_into` and bracketed by hand, which would
+have left the run unreachable from the artist. Swift's `EditClipboard.pasteClipboard`
+already routed through the model-level function and needed no change.
+
+### 14.5 What is watched, and what is not
+
+WATCHED: `test_fixtures/operations/paste_stacking.json`, 9 vectors over shared
+goldens in both ports, plus twin per-port probes for undo, redo, abort and the
+per-document lifetime — which the operations runner structurally cannot reach,
+because it applies `history` AFTER every transaction and an undo op embedded in
+a transaction would desync the `checkpoint_equivalence` gate.
+
+NOT WATCHED, and MEASURED rather than asserted: **Rust's production wire.**
+Replacing the clipboard payload in `clipboard_read_and_paste` with `None` — so
+production pastes nothing at all — leaves all 2784 `cargo test --lib` tests
+GREEN. The same mutation in Swift (`EditClipboard.pasteClipboard` reading `nil`)
+reddens 19 issues across 14 tests, including both stacking wire probes. This is
+the pre-existing `rust-clipboard-read-unreachable-from-cargo-test` gap in
+`scripts/corpus_manifest.json`, unchanged by this wave and now covering the
+paste run as well: the read still sits in a `spawn_local` closure over an
+`Rc<RefCell<AppState>>` and a Dioxus `Signal`. The two ports are watched to
+DIFFERENT depths here and only the shallower depth is common.
+
+ALSO NOT WATCHED: no GUI was driven in either port. Nobody has seen a second
+paste land at 48 on screen.
+### 13.2 STONES 3 AND 4 LANDED — the repeal and `effective_locked` (2026-07-28)
+
+Both stones are ONE semantic change and landed together. Keeping
+materialization while adding inheritance would DOUBLE-APPLY: lock a layer,
+children get written locked, unlock it, and the restore fires against a state
+inheritance had already made meaningless.
+
+**STONE 4 — `effective_locked` / `effectiveLocked.`** ORs `locked` down the
+path, mirroring `effective_visibility` / `effectiveVisibility` line for line
+(`document.rs`, `Document.swift`). Because the fold is an OR there is
+deliberately no escape hatch: a child cannot be unlocked inside a locked
+parent, which is the expressiveness loss ruled explicitly above. An empty or
+unresolvable path is NOT locked — nothing is protected by an address that names
+no artwork.
+
+Wired at three seams per port, and each one had a different defect:
+
+* **`select_element` / `selectElement`** — the smoking gun the scope named. The
+  element's OWN `locked` was read ONE LINE ABOVE an ancestor-aware
+  `effective_visibility` read, so a click on a child of a locked layer selected
+  it, in both ports.
+* **`select_all`** (Rust only; Swift delegates to `selectFlat`) — the
+  hand-rolled layer→child loop tested `child.locked()` and NEVER the layer's,
+  so Select All swept up a locked layer's whole contents. Swift already skipped
+  it. **A live prime-directive divergence, not merely a gap** — and one no gate
+  could see until `jas:locked` let a fixture start from a locked document.
+* **`select_flat` / `selectFlat`** — the layer and child guards became ancestor
+  reads, and the GRANDCHILD acquired a guard it never had: a locked member of
+  an open group no longer TRIGGERS the group selection nor JOINS it. A rubber
+  band that touched only a locked element used to drag the group and its
+  unlocked siblings in with it.
+
+Left alone on purpose: `hit_test` / `hit_test_deep` already prune locked
+subtrees correctly in Rust, Swift AND the Python reference, and
+`select_recursive` / `selectRecursive` already cascade. Nothing there moved.
+
+**STONE 3 — materialization repealed.** `workspace/panels/layers.yaml` and
+`workspace/actions.yaml` §`toggle_element_lock` now state inheritance;
+`§select_all` says whose flag "locked" means; `§ungroup_all` says the same (see
+Q7 below). `AppState.layers_saved_lock_states` (declaration + five construction
+sites) and `YamlPanelBodyView.savedLockStates` are DELETED, and with them the
+`saved_to_restore` / `savedToRestore` parameter. `workspace.json`,
+`intent_map.json` and `INTENT_MAP.md` regenerated.
+
+**THE MACHINERY THAT MADE STONE 3 GATEABLE AT ALL.** The scope listed the
+restore-deletion among the things "that CANNOT be watched by a shared
+cross-language gate", because the lock button's document work lived only behind
+a Dioxus click handler and a SwiftUI closure — no op verb, no action, no
+gesture reached it. That is precisely how a spec which WRITES `locked=true`
+onto every direct child shipped while the Rust comments eight lines away
+asserted the opposite. Two op verbs were added, each routing through the
+PRODUCTION mutator rather than a copy of it:
+
+* `select_element` — the path-addressed click seam
+  (`Controller::select_element` / `Controller.selectElement`), selection-only
+  and non-undoable exactly like `select_rect`.
+* `toggle_element_lock` — the panel lock button's document work, now
+  `Document::toggling_element_lock` / `Document.togglingElementLock`.
+
+Rust's half of that function MOVED out of the web-gated
+`interpreter::renderer` and onto `Document`: it is document logic with no UI in
+it, `op_apply` must reach it in a `--no-default-features` build (the
+cross-language algorithm driver builds that way, and it went red), and Swift's
+twin was already a `Document` method — so the move is toward parity. **BANKED:
+its VISIBILITY twin `cycle_element_visibility_at` is still in `renderer.rs`
+while Swift's `cyclingElementVisibility` is on `Document`. The same move is
+owed, and was not made here because nothing in this wave forced it.**
+
+**RED FIRST, MEASURED, IN BOTH PORTS.** Per-case counts were taken by
+generating each case into a unique throwaway golden, because the Rust runner
+panics at the first mismatch and would otherwise report "1 failure" for any
+number of them.
+
+`test_fixtures/operations/lock_inheritance.json` — **6 of 15 RED in EACH port,
+and the same 6:**
+
+| case | before | ruled |
+|---|---|---|
+| click a child of a locked layer | `[0,0]` | `[]` |
+| click a grandchild of a locked layer | `[0,1]`,`[0,1,0]` | `[]` |
+| click an unlocked group inside a locked layer | `[0,1]` | `[]` |
+| click a child of a locked group | `[1,1]`,`[1,1,0]` | `[]` |
+| marquee over the whole document | 4 entries | 3 |
+| marquee over only a locked member of an open group | 3 entries | `[]` |
+
+`test_fixtures/actions/lock_inheritance_actions.json` — `select_all` RED in
+jas_dioxus, **GREEN in JasSwift**. That asymmetry IS the finding.
+
+`test_fixtures/operations/lock_toggle_no_materialization.json` — **4 of 7 RED
+in each port**: locking a layer, locking a group, the lock→unlock round trip,
+and the selection prune. The round trip is the one that shows the shipped
+design was LOSSY through this seam: the lock wrote flags onto both children and
+the unlock, with no restore table to consult, left them locked while the
+container itself opened.
+
+Final: `cargo test --lib` 2782 (was 2777) · `swift test` 2828 in 26 suites (was
+2823) · pytest 1270 · cross-language 1086 (ORACLE 465 + COMPARISON 396 +
+RELATIONAL 225) · commutativity 32+32 · workspace 8+4 · manifest 26 families /
+504 files / 34 gaps · preservation 13 vectors.
+
+**Q7 ANSWERED BY DIRECT APPLICATION, NOT BY A NEW RULING.** `ungroup_all`
+already READ lock ("except locked ones"); §13 changed what the word MEANS, so
+the read follows: a Group inside a locked layer or a locked group is left
+alone, structure included. No new guard was added anywhere — this is NOT the
+unruled Q3 (whether an operation should refuse to act on a SELECTED locked
+element). A sibling lane had pinned the old behaviour deliberately, with the
+note *"if lock becomes INHERITED, this assertion is what has to move, and it is
+written so the move is visible instead of silent."* It moved, in both ports'
+tests, exactly as that lane intended.
+
+**BANKED — each needs JYH, and none blocked these stones:**
+
+1. **Does a container selection sweep up a locked member?** Clicking the free
+   member of a mixed group still selects the group AND every child, including
+   the locked one. §13 rules on what may be selected by POINTING AT IT, not on
+   what a container selection collects. Pinned by
+   `click_a_free_member_of_a_mixed_group_selects_the_whole_group`, so the day
+   of a ruling is a visible byte change rather than a silent drift.
+2. **The Layers panel's own SELECT_SQUARE ignores lock entirely.** Rust's
+   `on_select_click` (`renderer.rs`) writes `doc.selection` directly with no
+   lock check of any kind — not the element's own, not an ancestor's. Selection
+   from the PANEL is therefore still not gated, in a wave whose whole subject
+   was the selection gate. Not fixed here because it is GUI-only code no corpus
+   drives; it wants a GUI-harness check.
+3. **Q3 remains open and is now the visible next gap.** Move, delete,
+   transform and align still ignore lock — for a DIRECTLY locked element, not
+   just an inherited one — and `align.rs` still mentions `locked` on two
+   comment lines and reads it nowhere.
+4. **`Q4` — the panel icon.** A child of a locked layer now renders
+   `lock_unlocked` (its stored flag) while being unselectable.
+   `runtime_contexts.yaml:243` surfaces the stored value, so the icon and the
+   enforcement disagree. Unchanged by this wave and stated rather than
+   smoothed over.
+
+**WHAT THIS WAVE DID NOT DO.** No GUI was driven in either port: the Layers
+panel lock button, the Dioxus handler and the SwiftUI closure are compile-and-
+corpus findings only. The deleted restore-on-unlock BEHAVIOUR is not directly
+observable by any shared gate — the corpus can prove that unlocking leaves the
+children untouched, which is the same fact from the outside, but the tables'
+disappearance is watched by the compiler alone. And the frozen ports keep the
+materialization design at their tag, correctly.
+
+---
+
+## 15. LOCK IS IMMUTABLE, AND WHAT PASTE DOES ABOUT IT. RULED 2026-07-28.
+
+> JYH, on Q3: *"yes, locked is locked and immutable."*
+> On Q6: *"numeric suffixes; hidden is not locked so it can be appended to; I
+> think plain Paste should just refuse, it is more intuitive."*
+
+### 15.1 Q3 — a locked element refuses OPERATIONS, not only selection
+Selection-level enforcement (§13, Stone 4) was deliberately scoped narrow because
+Q3 was unruled. It is ruled now: **locked means immutable.** An operation must
+not mutate a locked element even if it somehow reaches one.
+
+The measured surface, from `seat/fleet/SCOPE-effective-locked.md` — every one of
+these ignores lock TODAY even for a **directly** locked element:
+delete · move / drag / nudge · group / ungroup · boolean ops ·
+fill / stroke / brush apply · anchor drag (Rust's direct-Path arm) ·
+**Align, whose own module doc states the rule while `align.rs` contains `locked`
+on exactly two lines, both comments.**
+
+**STILL OPEN — where the guard lives.** Two shapes, and this was NOT ruled:
+* **Per-operation guards** — one check in each of ~8 places. Simple, and it rots
+  the way this class always rots: the ninth operation arrives without one.
+* **At the write chokepoint** — every mutation already funnels through
+  `setDocumentUnbracketed(_:intent:)` (Arc 1, S1). One guard there is inherited
+  by every future operation for free. But it must diff a write to know what it
+  touched, and some writes legitimately touch locked elements — unlocking, for
+  one. **Measure whether the chokepoint can see enough before committing.**
+
+### 15.2 Q6 — the principle: WHO CHOSE THE TARGET
+JYH's split between plain and preserving paste is not arbitrary and generalises:
+
+> **Refuse when the ARTIST chose the target. Divert when the FRAGMENT chose it.**
+
+* **Plain Paste (R2) targets the ACTIVE layer — the artist's explicit choice.**
+  Landing artwork somewhere else would silently override that choice, which is
+  worse than declining. **It refuses.**
+* **Preserving Paste (R3) targets a layer named by the incoming fragment.** The
+  artist asked for STRUCTURE, not for that layer. Diverting serves their actual
+  intent, so **it creates a sibling** rather than refusing.
+
+### 15.3 The three sub-rulings
+1. **Numeric suffixes.** A diverted layer takes the fragment's name plus a
+   numeric suffix — "Sky" locked ⇒ "Sky 2". This is the ONE place R3's ratified
+   VERBATIM naming cannot hold, and it is a stated exception rather than a
+   silent one. Precedent in-house: `advance_next_untitled_past` /
+   `advanceNextUntitledPast` already suffix Untitled-N numerically.
+2. **Hidden is NOT locked.** Hidden is a visibility state, not a protection, so a
+   hidden target is **appended to normally** and the artist unhides to see the
+   result. Diverting there would manufacture layers to avoid a condition that
+   protects nothing. The asymmetry is deliberate.
+3. **Plain Paste refuses** into a locked active layer.
+
+### 15.4 A REFUSAL MUST NOT BE A SILENT NO-OP
+This is the defect §13 abolished for grouping: select across layers, press Cmd+G,
+nothing happens and nothing says why — which reads as broken software.
+
+**Recommended implementation, using machinery that already exists rather than a
+new notification system:** declare `enabled_when` on `paste` so the Edit menu
+item GREYS OUT while the active layer is locked. The artist then sees the
+refusal before attempting it, and Cmd+V doing nothing is explained rather than
+mysterious.
+
+Measured: `paste` currently declares **no** `enabled_when`; the expression
+language CAN already read `.common.locked` (`actions.yaml:1534,1851`); but there
+is **no `active_document.active_layer_locked`** primitive to hang it on. Adding
+one is small and well-precedented — `active_document.*` already exposes
+`has_selection`, `can_undo`, `current_artboard` and a dozen more.
+
+**Not ruled, flagged:** whether a refusal ALSO wants an active message (status
+bar or transient) on top of the disabled item, for the artist who presses Cmd+V
+without looking at the menu.
+
+---
+
+## 16. SELECT ALL SELECTS TOP-LEVEL OBJECTS. RULED 2026-07-28 (D2).
+
+> JYH: *"keep the Rust shape."*
+
+### 16.1 What the two ports actually did
+**Rust** `select_all` walks layers then direct children and pushes ONE entry per
+child. A group contributes a single entry `[li, ci]`.
+
+**Swift** `selectAll` delegates to `selectFlat`, whose group branch inserts
+**both** the group and every unlocked grandchild:
+
+```swift
+if anyHit {
+    selection.insert(ElementSelection.all([li, ci]))         // the group
+    for gi in 0..<g.children.count {
+        selection.insert(ElementSelection.all([li, ci, gi])) // AND each child
+    }
+}
+```
+
+A group of three therefore yielded **four** entries. That is the measured
+2-entry cardinality difference on a 6-element document.
+
+### 16.2 Why this was a DEFECT, not a competing design
+The Swift selection contained an element **and its own descendants at the same
+time**, and no operation has a coherent reading of that set: translate it and the
+group moves by 24 while each child — already carried by its parent — moves 24
+again; delete it and the group goes, then its children are deleted from a parent
+that no longer exists.
+
+**The cause is one function serving two callers.** `selectFlat`'s group branch
+was written for the MARQUEE, where "did anything inside the band match?" is the
+right question and its own comment says so. `selectAll` calls it with
+`predicate: { _ in true }`, so every group always hits and a rubber-band rule
+fired universally in a context it was never written for. Rust never had the bug
+because `select_all` is its own hand-rolled loop rather than a marquee call.
+
+### 16.3 The ruling
+**Select All selects top-level objects; a group counts as ONE.** That is what
+grouping means — the group IS the object, and entering it is how you reach the
+members. Swift changes; Rust is canonical.
+
+`workspace/actions.yaml` §select_all was rewritten today for inherited lock and
+is **silent on group expansion**, which is how this stayed unadjudicated. The
+ruling goes there, or the next reader re-derives the argument.
+
+### 16.4 STILL OPEN — the invariant underneath
+Should the selection MODEL permit an ancestor and its own descendant to be
+selected simultaneously at all? If not, that is an assertable invariant, and it
+would have caught this without anyone noticing the divergence. **Not ruled.**
+Raised because a rule that makes a defect impossible is worth more than a fix
+that makes one instance go away.
+
+---
+
+## 17. HOW §15 GETS BUILT: FOUR LAYERS, THREE OF THEM NOW. RULED 2026-07-28.
+
+> JYH: *"defer layer 4. I believe we need to add LockedTarget."*
+
+Full costing: `seat/fleet/SCOPE-lock-immutable.md`.
+
+### 17.1 The ruling was priced as one thing; it is four
+Scoping separated what §15 actually requires, and only the last is expensive:
+
+| | layer | cost |
+|---|---|---|
+| 1 | **Enforcement** — the code path refuses | the ruling itself |
+| 2 | **Signal** — a machine-readable refusal | one new error class |
+| 3 | **Affordance** — the menu item greys out | small, existing machinery |
+| 4 | **Notification** — an active message | **a UI subsystem** |
+
+**Layers 1–3 land now. Layer 4 is DEFERRED, deliberately and on the record.**
+
+### 17.2 Why layer 4 is deferred, and it is not about cost
+**Zero message surface exists in either active port** — measured, eight patterns
+across four trees, no hits. What exists is 26 modal dialogs (a modal for "that is
+locked" is more disruptive than the operation it refuses) and a Swift-only
+`NSAlert` with no Rust equivalent, so not even the modal escape hatch is at
+parity.
+
+The argument for deferring is not the price. It is that **a channel built to
+serve lock would be shaped by lock.** jas needs a transient message channel for
+save failures, import warnings, tool constraints and — before long — AI
+suggestions. Designing it as "the thing that says you cannot do that", under
+schedule pressure from a feature that is not about notification, is how a project
+acquires a bad toast system it then lives with for years. **Scope it separately,
+when something other than lock is also asking for it.**
+
+**The half-measure objection does not apply here.** Partial closure genuinely
+rots in this codebase — the Swift copy-site omission class has five sightings,
+each one somebody closing the instances and leaving the category. But that risk
+attaches to ENFORCEMENT, not to notification. Deferring layer 4 weakens layer 1
+not at all; the two risks live on different layers, which is why they were
+decided separately.
+
+**The residual, stated rather than glossed:** an artist who presses the keyboard
+shortcut without looking at the menu gets silence. This is NOT the grouping
+defect §13 abolished — grouping's no-op had an explanation nowhere, this one has
+one in the menu. On macOS a disabled item's key equivalent does not fire at all;
+in Dioxus the key router is ours and must be made to honour `enabled_when`, which
+it should do regardless.
+
+### 17.3 LockedTarget — RULED, and it widens a FROZEN taxonomy
+There is already a cross-language fault taxonomy with a fixture contract: Rust
+`OpError` and Swift `OpApplyError`, five classes each (`MalformedEnvelope`,
+`UnknownVerb`, `MissingParam`, `BadParamType`, `MissingTarget`), asserted through
+`expected_error` in 11 files under `test_fixtures/operations/`.
+
+**A sixth class, `LockedTarget`, is added.** It gives the refusal a
+**corpus-gated, cross-language signal today**, independently of any UI channel —
+which is precisely what makes deferring layer 4 safe rather than lossy. The
+refusal becomes provable in both ports the moment it is implemented.
+
+**Both ports declare the taxonomy FROZEN in comments, so this is a ratified
+widening, not an implementation detail.** It is recorded here as such. Note the
+honest limit: `workspace_interpreter/` does not implement the channel at all
+(zero hits for `expected_error`/`OpError`), so "cross-language" here means **two
+ports, not three**, and the live reference cannot adjudicate a lock refusal.
+
+### 17.4 What is NOT part of this decision
+Two items in the scope are bugs today no matter how §15 had been ruled, and
+must not be counted as its price:
+
+* **S0 — `Object > Lock` still MATERIALISES** in both ports
+  (`controller.rs:2797`, `Controller.swift:892`), stamping `locked = true` onto
+  every descendant. §13 repealed that and only the Layers-panel path was fixed.
+  **This is worse because of our own work:** §13.1 landed `jas:locked`
+  persistence, so the stamped flags now survive save/reload and, under
+  inheritance, are individually unremovable — unlock the parent and the children
+  stay locked, which is exactly the outcome §13 ruled against. Unpushed, so
+  nothing is published. **Fix first.**
+* **D-A — Swift destructively converts a LOCKED path.** `hitTestPathCurve`
+  (`CanvasSubwindow.swift:3201`) has no lock check anywhere, so the Type-on-Path
+  tool converts a locked Path where Rust refuses (`type_on_path_tool.rs:107`).
+  Live data loss.

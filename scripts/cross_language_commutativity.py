@@ -65,6 +65,14 @@ FIXTURE_NAMES = [
     "text_basic", "text_path_basic",
     "group_nested", "transform_translate", "transform_rotate",
     "multi_layer",
+    # LOCKSVG (2026-07-28): `common.locked` across the SVG boundary. These are
+    # the fixtures whose OFF-DIAGONAL cells matter most -- the flag is written
+    # by one port's serializer and read by the OTHER port's parser, which is
+    # the only thing that can prove the two ports agree on the spelling
+    # (`jas:locked="true"` in the urn:jas:1 namespace) rather than merely each
+    # agreeing with itself. `locked_all_kinds` additionally covers every
+    # writer arm that has an SVG read path.
+    "locked_layer_and_element", "locked_all_kinds",
 ]
 
 

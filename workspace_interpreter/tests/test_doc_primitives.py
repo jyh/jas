@@ -46,6 +46,26 @@ def _doc_with_rect():
     return Document(layers=(layer,))
 
 
+def _doc_two_overlapping_layers():
+    """Two layers whose contents both contain (15, 15).
+
+    Layer index 1 is the TOPMOST layer (later in document order paints
+    last), so a hit-test at that point must resolve into it. Pins D4 of
+    SCOPE-effective-locked.md §3: this reference walks layers reversed,
+    and Rust did not, so on any document whose layers overlap the two
+    ports disagreed about which element is under the cursor.
+    """
+    from document.document import Document
+    from geometry.element import Layer, Rect as RectElem
+    bottom = Layer(name="Background", children=(
+        RectElem(x=0.0, y=0.0, width=40.0, height=40.0),
+    ))
+    top = Layer(name="Foreground", children=(
+        RectElem(x=10.0, y=10.0, width=20.0, height=20.0),
+    ))
+    return Document(layers=(bottom, top))
+
+
 class TestDocPrimitives:
     def teardown_method(self, method):
         # Ensure the current-doc slot is reset between tests to
@@ -62,6 +82,18 @@ class TestDocPrimitives:
             v = evaluate("hit_test(15, 15)", {})
             assert v.type == ValueType.PATH
             assert tuple(v.value) == (0, 0)
+
+    def test_hit_test_prefers_the_topmost_layer(self):
+        with doc_primitives.with_doc(_doc_two_overlapping_layers()):
+            v = evaluate("hit_test(15, 15)", {})
+            assert v.type == ValueType.PATH
+            assert tuple(v.value) == (1, 0)
+
+    def test_hit_test_deep_prefers_the_topmost_layer(self):
+        with doc_primitives.with_doc(_doc_two_overlapping_layers()):
+            v = evaluate("hit_test_deep(15, 15)", {})
+            assert v.type == ValueType.PATH
+            assert tuple(v.value) == (1, 0)
 
     def test_hit_test_misses_outside(self):
         with doc_primitives.with_doc(_doc_with_rect()):

@@ -3544,32 +3544,19 @@ fn run_yaml_effect(
     }
 
     // doc.copy_selection_to_clipboard — copy the current selection to the
-    // system clipboard (SVG) and the internal clipboard (cut OK path).
-    // Mirrors the inline copy the menu/keyboard cut runs: write the
-    // selection SVG to the system clipboard via clipboard_write, then
-    // snapshot the selected GeoElements into tab.clipboard. This is a
-    // non-document side effect (no snapshot needed), so the cut_orphan
-    // OK action lists exactly one `snapshot` before the document-mutating
-    // doc.delete_selection. The selection is preserved across opening the
-    // confirm dialog, so this copies exactly what the user was about to cut.
+    // SYSTEM clipboard as SVG (cut OK path). Mirrors the inline copy the
+    // menu/keyboard cut runs. This is a non-document side effect (no snapshot
+    // needed), so the cut_orphan OK action lists exactly one `snapshot` before
+    // the document-mutating doc.delete_selection. The selection is preserved
+    // across opening the confirm dialog, so this copies exactly what the user
+    // was about to cut.
+    //
+    // It used to ALSO snapshot the selected elements into `tab.clipboard`; that
+    // internal buffer is gone (D4/D5, ratified 2026-07-28 — see `TabState`), so
+    // this site now writes the same one clipboard Swift's `copySelection` does.
     if eff.get("doc.copy_selection_to_clipboard").is_some() {
         if let Some(svg) = crate::workspace::clipboard::selection_to_svg(st) {
             crate::workspace::clipboard::clipboard_write(svg);
-        }
-        let elements: Vec<crate::geometry::element::Element> = {
-            match st.tabs.get(st.active_tab) {
-                Some(tab) => {
-                    let doc = tab.model.document();
-                    doc.selection
-                        .iter()
-                        .filter_map(|es| doc.get_element(&es.path).cloned())
-                        .collect()
-                }
-                None => Vec::new(),
-            }
-        };
-        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            tab.clipboard = elements;
         }
         return deferred;
     }
@@ -9367,76 +9354,16 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                         let a = lock_app.clone();
                         spawn(async move {
                             let mut st = a.borrow_mut();
-                            // Read current lock + container info from doc
-                            let (was_unlocked, is_container, child_count) = {
-                                if let Some(tab) = st.tab() {
-                                    let doc = tab.model.document();
-                                    if let Some(elem) = doc.get_element(&p) {
-                                        let child_count = elem.children().map(|c| c.len()).unwrap_or(0);
-                                        (!elem.locked(), elem.is_group_or_layer(), child_count)
-                                    } else { (false, false, 0) }
-                                } else { (false, false, 0) }
-                            };
-
-                            if is_container && was_unlocked {
-                                // Save direct children's lock states before locking container
-                                let mut saved = Vec::with_capacity(child_count);
-                                if let Some(tab) = st.tab() {
-                                    let doc = tab.model.document();
-                                    if let Some(elem) = doc.get_element(&p) {
-                                        if let Some(children) = elem.children() {
-                                            for c in children {
-                                                saved.push(c.locked());
-                                            }
-                                        }
-                                    }
-                                }
-                                st.layers_saved_lock_states.insert(p.clone(), saved);
-                            }
-
-                            // Take the saved state out before the tab borrow so we can use
-                            // it inside the tab_mut block without a second borrow of st.
-                            let saved_to_restore = if is_container && !was_unlocked {
-                                st.layers_saved_lock_states.remove(&p)
-                            } else {
-                                None
-                            };
-
+                            // The whole save/restore dance that used to stand
+                            // here went with materialization
+                            // (transcripts/LAYER_STRUCTURE.md §13): a lock now
+                            // writes ONE flag and reaches the contents by
+                            // inheritance, so there is nothing to remember.
                             if let Some(tab) = st.tab_mut() {
                                 tab.model.begin_txn();
-                                // One clone -> all three lock mutations -> one commit, so the
-                                // whole lock toggle is a single undo step / one index update.
-                                let mut doc = tab.model.document().clone();
-                                if let Some(elem) = doc.get_element_mut(&p) {
-                                    elem.common_mut().locked = was_unlocked;
-                                    // When locking a container, also lock all direct children
-                                    if is_container && was_unlocked {
-                                        if let Some(children) = elem.children_mut() {
-                                            for c in children.iter_mut() {
-                                                std::rc::Rc::make_mut(c).common_mut().locked = true;
-                                            }
-                                        }
-                                    }
-                                }
-                                // Restore saved child lock states on unlock
-                                if let Some(saved) = saved_to_restore {
-                                    if let Some(elem) = doc.get_element_mut(&p) {
-                                        if let Some(children) = elem.children_mut() {
-                                            for (i, c) in children.iter_mut().enumerate() {
-                                                if let Some(&saved_locked) = saved.get(i) {
-                                                    std::rc::Rc::make_mut(c).common_mut().locked = saved_locked;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                // Locking an element removes it and its descendants from selection
-                                if was_unlocked {
-                                    let path = p.clone();
-                                    doc.selection.retain(|es| {
-                                        !(es.path == path || es.path.starts_with(&path))
-                                    });
-                                }
+                                // One transform -> one commit, so the whole lock
+                                // toggle is a single undo step / one index update.
+                                let doc = tab.model.document().toggling_element_lock(&p);
                                 tab.model.set_document(doc);
                                 tab.model.commit_txn();
                             }

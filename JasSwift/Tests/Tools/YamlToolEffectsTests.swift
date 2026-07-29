@@ -1738,3 +1738,106 @@ private func smoothCurvePathModel() -> Model {
     #expect(out1 != nil && cpsEqual(out1!, 100, 80))   // MIRRORED out-handle
     #expect(cpsEqual(anchorPos(p1.d, 1), 100, 100))    // anchor put
 }
+
+// MARK: - S7: the anchor probes must skip a LOCKED Path
+
+// Mirror of jas_dioxus `effects.rs`
+// `anchor_probes_hit_when_nothing_is_locked` /
+// `anchor_probe_skips_a_locked_path` /
+// `delete_anchor_near_skips_a_locked_path` /
+// `insert_anchor_on_segment_skips_a_locked_path`, same geometry and the
+// same probe points.
+//
+// SCOPE-effective-locked.md §4, S7: this port already guarded all three
+// positions (direct Path, Group, Path-inside-Group) in all four
+// `findPath*` / `tryPath` walkers; jas_dioxus guarded only the Group. So
+// these are REGRESSION PINS on the correct side of a divergence whose
+// red was in Rust -- they exist so the pair cannot drift apart again in
+// either direction.
+//
+// PER-PORT, because no shared fixture can seed a locked document: every
+// cross-language document case starts from a `setup_svg` and the SVG
+// codec does not persist `locked` at all.
+
+/// A three-anchor curve: anchors at (0,dy), (30,dy), (60,dy); handles
+/// around the middle anchor at (20,10+dy) and (40,-10+dy).
+private func s7Curve(_ dy: Double) -> [PathCommand] {
+    [
+        .moveTo(0, dy),
+        .curveTo(x1: 10, y1: 10 + dy, x2: 20, y2: 10 + dy, x: 30, y: dy),
+        .curveTo(x1: 40, y1: -10 + dy, x2: 50, y2: -10 + dy, x: 60, y: dy),
+    ]
+}
+
+/// [0,0] a Path locked per the argument (the DIRECT arm); [0,1] an
+/// UNLOCKED Group holding [0,1,0], a Path locked per the argument (the
+/// NESTED arm), 100 units lower. The group is never locked: the group
+/// guard is not the arm under test.
+private func s7Model(locked: Bool) -> Model {
+    func mk(_ dy: Double) -> Element {
+        .path(Path(d: s7Curve(dy), locked: locked, fillRule: .nonzero))
+    }
+    let group = Element.group(Group(children: [mk(100)]))
+    let layer = Layer(name: "L", children: [mk(0), group])
+    return Model(document: Document(layers: [layer], selectedLayer: 0, selection: []))
+}
+
+private func s7ProbeMode(_ locked: Bool, _ x: Double, _ y: Double) -> String {
+    let model = s7Model(locked: locked)
+    let store = StateStore()
+    store.setTool("anchor_point", "mode", "idle")
+    runEffects(
+        [["doc.path.probe_anchor_hit": ["x": x, "y": y, "hit_radius": 5]]],
+        ctx: [:], store: store, platformEffects: buildYamlToolEffects(model: model)
+    )
+    return (store.getTool("anchor_point", "mode") as? String) ?? ""
+}
+
+/// Positive control for the family: with NOTHING locked all four probe
+/// points land, so the "locked => idle" assertions below cannot pass by
+/// missing the geometry.
+@Test func anchorProbesHitWhenNothingIsLocked() {
+    #expect(s7ProbeMode(false, 20, 10) == "pressed_handle")
+    #expect(s7ProbeMode(false, 30, 0) == "pressed_smooth")
+    #expect(s7ProbeMode(false, 20, 110) == "pressed_handle")
+    #expect(s7ProbeMode(false, 30, 100) == "pressed_smooth")
+}
+
+@Test func anchorProbeSkipsALockedPath() {
+    #expect(s7ProbeMode(true, 20, 10) == "idle")     // handle, DIRECT
+    #expect(s7ProbeMode(true, 30, 0) == "idle")      // anchor, DIRECT
+    #expect(s7ProbeMode(true, 20, 110) == "idle")    // handle, NESTED
+    #expect(s7ProbeMode(true, 30, 100) == "idle")    // anchor, NESTED
+}
+
+/// Command count of the Path at `path` after running one effect.
+private func s7CommandCount(
+    _ locked: Bool, _ verb: String, _ x: Double, _ y: Double, at path: ElementPath
+) -> Int {
+    let model = s7Model(locked: locked)
+    let store = StateStore()
+    runEffects(
+        [[verb: ["x": x, "y": y, "hit_radius": 5]]],
+        ctx: [:], store: store, platformEffects: buildYamlToolEffects(model: model)
+    )
+    guard case .path(let p) = model.document.getElement(path) else { return -1 }
+    return p.d.count
+}
+
+@Test func deleteAnchorNearSkipsALockedPath() {
+    let del = "doc.path.delete_anchor_near"
+    #expect(s7CommandCount(false, del, 30, 0, at: [0, 0]) == 2)
+    #expect(s7CommandCount(false, del, 30, 100, at: [0, 1, 0]) == 2)
+    #expect(s7CommandCount(true, del, 30, 0, at: [0, 0]) == 3)
+    #expect(s7CommandCount(true, del, 30, 100, at: [0, 1, 0]) == 3)
+}
+
+/// (15, 7.5) is the t = 0.5 point of the first cubic; the nested copy's
+/// is (15, 107.5).
+@Test func insertAnchorOnSegmentSkipsALockedPath() {
+    let ins = "doc.path.insert_anchor_on_segment_near"
+    #expect(s7CommandCount(false, ins, 15, 7.5, at: [0, 0]) == 4)
+    #expect(s7CommandCount(false, ins, 15, 107.5, at: [0, 1, 0]) == 4)
+    #expect(s7CommandCount(true, ins, 15, 7.5, at: [0, 0]) == 3)
+    #expect(s7CommandCount(true, ins, 15, 107.5, at: [0, 1, 0]) == 3)
+}

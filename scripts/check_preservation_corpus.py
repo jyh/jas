@@ -53,8 +53,20 @@ JasSwift/Tests/CrossLanguageTests.swift). A declared violation is asserted to
 FAIL there, so fixing a site turns the gate red until the declaration is
 removed.
 
+THE FLOOR (added 2026-07-28, after an audit measured the hole). Every check
+above is a check ON a vector, so a corpus with NO vectors satisfied all of
+them vacuously: this gate printed `OK (0 vectors, 1 file(s))` and returned 0
+for a file containing `[]`, and so did the other three (both ports' loops are
+bare `for`s, and check_corpus_manifest.py never fires because the DIRECTORY is
+still non-empty). Deleting the file was caught; EMPTYING it was not. Each
+corpus file therefore declares `min_vectors` in its own header and every one
+of the four gates refuses a file carrying fewer — the count is a fact the
+corpus states about itself rather than a magic number in four places, and
+lowering it is a visible edit instead of an invisible deletion.
+
 Usage:
     python3 scripts/check_preservation_corpus.py
+    python3 scripts/check_preservation_corpus.py --self-test
 """
 
 import json
@@ -87,9 +99,56 @@ SELECTION_ONLY_OPS = {"select_by_ids", "select_rect", "select_all", "deselect"}
 PORTS = ("rust", "swift")
 
 REQUIRED_KEYS = (
-    "name", "doc", "setup_svg", "cardinality", "subject_ids", "speaks_to",
+    "name", "doc", "cardinality", "subject_ids", "speaks_to",
     "consumed_ids", "expected_fresh_ids", "expected_violations",
 )
+
+# Where a `setup_test_json` document lives, relative to test_fixtures/.
+TEST_JSON_SETUP_DIR = os.path.join(FIXTURES, "expected")
+
+# Element types that are CONTAINERS for the V2 bystander rule.
+CONTAINER_TYPES = {"group", "layer"}
+
+
+def load_corpus_file(path: str):
+    """Read one corpus file and return `(min_vectors, vectors, errors)`.
+
+    The shape is an OBJECT — `{"min_vectors": N, "vectors": [...]}` — and the
+    bare-array form this family used until 2026-07-28 is REFUSED rather than
+    tolerated, because a tolerant reader would accept `[]` again and re-open
+    exactly the hole `min_vectors` exists to close.
+    """
+    where = os.path.basename(path)
+    with open(path, encoding="utf-8") as f:
+        try:
+            root = json.load(f)
+        except json.JSONDecodeError as e:
+            return 0, [], [f"{where}: bad JSON: {e}"]
+    if not isinstance(root, dict):
+        return 0, [], [
+            f"{where}: top level must be an OBJECT carrying 'min_vectors' and "
+            f"'vectors' (a bare array cannot declare its own floor, which is "
+            f"how an emptied corpus turned all four gates green)"
+        ]
+    errs = []
+    n_min = root.get("min_vectors")
+    if not isinstance(n_min, int) or isinstance(n_min, bool) or n_min < 1:
+        errs.append(
+            f"{where}: 'min_vectors' must be an integer >= 1, got {n_min!r} — "
+            f"a floor of zero is not a floor"
+        )
+        n_min = 0
+    vecs = root.get("vectors")
+    if not isinstance(vecs, list):
+        errs.append(f"{where}: 'vectors' must be a list")
+        return n_min, [], errs
+    if len(vecs) < n_min:
+        errs.append(
+            f"{where}: declares min_vectors={n_min} but carries {len(vecs)} "
+            f"vector(s) — the corpus lost vectors without anyone lowering the "
+            f"floor it states about itself"
+        )
+    return n_min, vecs, errs
 
 
 def svg_ids(svg_text: str) -> set:
@@ -104,6 +163,35 @@ def svg_container_ids(svg_text: str) -> set:
         if m:
             out.add(m.group(1))
     return out
+
+
+def test_json_setup_ids(doc) -> tuple:
+    """`(all ids, container ids)` of a canonical-test-JSON setup document.
+
+    The walk descends `layers` / `children` / `symbols` exactly as the two
+    ports' `preservation_walk` does — deliberately NOT into `mask`, whose
+    subtree is artwork belonging to its host element rather than a document
+    element of its own.
+    """
+    ids, containers = set(), set()
+
+    def walk(node):
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        if "type" in node and isinstance(node.get("id"), str):
+            ids.add(node["id"])
+            if node["type"] in CONTAINER_TYPES:
+                containers.add(node["id"])
+        for key in ("layers", "children", "symbols"):
+            if key in node:
+                walk(node[key])
+
+    walk(doc)
+    return ids, containers
 
 
 def vector_ops(vec: dict) -> list:
@@ -135,14 +223,47 @@ def check_vector(path: str, vec, seen_names: set) -> list:
     if vec["cardinality"] not in CARDINALITIES:
         errs.append(f"{tag}: unknown cardinality {vec['cardinality']!r}")
 
-    svg_path = os.path.join(SVG_DIR, vec["setup_svg"])
-    if not os.path.exists(svg_path):
-        errs.append(f"{tag}: setup_svg {vec['setup_svg']} does not exist")
+    # A vector declares EXACTLY ONE setup door. `setup_test_json` exists
+    # because the SVG codec has no counterpart for a mask, a blend mode or a
+    # stroke alignment, so a corpus whose only door is SVG cannot place those
+    # on a bystander — the very class T4 exists to watch.
+    doors = [k for k in ("setup_svg", "setup_test_json") if k in vec]
+    if len(doors) != 1:
+        errs.append(
+            f"{tag}: must declare exactly ONE of setup_svg / setup_test_json, "
+            f"declares {doors}"
+        )
         return errs
-    with open(svg_path, encoding="utf-8") as f:
-        svg = f.read()
-    present = svg_ids(svg)
-    containers = svg_container_ids(svg)
+    if "setup_test_json" in vec:
+        setup_name = vec["setup_test_json"]
+        setup_path = os.path.join(TEST_JSON_SETUP_DIR, setup_name)
+        if not os.path.exists(setup_path):
+            errs.append(f"{tag}: setup_test_json {setup_name} does not exist")
+            return errs
+        if "events" in vec:
+            errs.append(
+                f"{tag}: declares BOTH `events` and `setup_test_json` — the "
+                f"gesture runner takes SVG text, so this pairing would silently "
+                f"run against the wrong document (V3)"
+            )
+            return errs
+        with open(setup_path, encoding="utf-8") as f:
+            try:
+                doc = json.load(f)
+            except json.JSONDecodeError as e:
+                errs.append(f"{tag}: setup_test_json {setup_name} is bad JSON: {e}")
+                return errs
+        present, containers = test_json_setup_ids(doc)
+    else:
+        setup_name = vec["setup_svg"]
+        svg_path = os.path.join(SVG_DIR, setup_name)
+        if not os.path.exists(svg_path):
+            errs.append(f"{tag}: setup_svg {setup_name} does not exist")
+            return errs
+        with open(svg_path, encoding="utf-8") as f:
+            svg = f.read()
+        present = svg_ids(svg)
+        containers = svg_container_ids(svg)
 
     named = list(vec["subject_ids"]) + list(vec["consumed_ids"])
 
@@ -150,18 +271,40 @@ def check_vector(path: str, vec, seen_names: set) -> list:
     for eid in named:
         if eid not in present:
             errs.append(
-                f"{tag}: names id {eid!r}, which the setup SVG "
-                f"{vec['setup_svg']} does not define (V1)"
+                f"{tag}: names id {eid!r}, which the setup "
+                f"{setup_name} does not define (V1)"
             )
 
     # V2 — a container bystander must exist.
     bystander_containers = containers - set(named)
     if not bystander_containers:
         errs.append(
-            f"{tag}: no CONTAINER bystander — every `<g>` id in "
-            f"{vec['setup_svg']} is named by this vector, so the T4 "
+            f"{tag}: no CONTAINER bystander — every container id in "
+            f"{setup_name} is named by this vector, so the T4 "
             f"bystander clause is unwatchable here (V2)"
         )
+
+    # V7 — `bystander_fields_present` must be well-formed and must range over
+    # BYSTANDERS. The runtime half (that the loaded setup really carries each
+    # field) lives in the two ports' gates; this half stops a typo'd id from
+    # turning the claim into a no-op.
+    for bid, keys in (vec.get("bystander_fields_present") or {}).items():
+        if bid in named:
+            errs.append(
+                f"{tag}: bystander_fields_present names {bid!r}, which the "
+                f"vector also names as a subject or consumed id — a subject is "
+                f"not a bystander (V7)"
+            )
+        if bid not in present:
+            errs.append(
+                f"{tag}: bystander_fields_present names {bid!r}, which the "
+                f"setup {setup_name} does not define (V7)"
+            )
+        if not isinstance(keys, list) or not keys:
+            errs.append(
+                f"{tag}: bystander_fields_present[{bid!r}] must be a non-empty "
+                f"list of field names (V7)"
+            )
 
     # V3 — the vector must actually edit the document, through whichever of
     # the two drivers it declares.
@@ -261,16 +404,11 @@ def main() -> int:
     errs = []
     seen_names = set()
     n = 0
+    floor = 0
     for path in files:
-        with open(path, encoding="utf-8") as f:
-            try:
-                vecs = json.load(f)
-            except json.JSONDecodeError as e:
-                errs.append(f"{os.path.basename(path)}: bad JSON: {e}")
-                continue
-        if not isinstance(vecs, list):
-            errs.append(f"{os.path.basename(path)}: top level must be a list")
-            continue
+        n_min, vecs, file_errs = load_corpus_file(path)
+        errs.extend(file_errs)
+        floor += n_min
         for vec in vecs:
             n += 1
             errs.extend(check_vector(path, vec, seen_names))
@@ -280,9 +418,65 @@ def main() -> int:
     if errs:
         print(f"preservation-corpus gate: {len(errs)} problem(s) in {n} vector(s)")
         return 1
-    print(f"preservation-corpus gate: OK ({n} vectors, {len(files)} file(s))")
+    print(f"preservation-corpus gate: OK ({n} vectors, {len(files)} file(s), "
+          f"declared floor {floor})")
+    return 0
+
+
+def self_test() -> int:
+    """Pin the FLOOR's own red, because the floor is the one check here that
+    fires on the ABSENCE of data and so can never be exercised by the shipped
+    corpus. Four shapes, each of which was green before 2026-07-28."""
+    import tempfile
+
+    failures = []
+
+    def check(cond, label):
+        if cond:
+            print(f"  ok: {label}")
+        else:
+            failures.append(label)
+            print(f"  FAIL: {label}")
+
+    cases = [
+        ("[]", "an emptied bare array is refused (the shipped hole)",
+         "top level must be an OBJECT"),
+        ('{"min_vectors": 12, "vectors": []}',
+         "a corpus below its own declared floor is refused",
+         "declares min_vectors=12 but carries 0"),
+        ('{"min_vectors": 0, "vectors": []}',
+         "a floor of zero is refused", "not a floor"),
+        ('{"vectors": []}', "a corpus that declares no floor is refused",
+         "must be an integer >= 1"),
+    ]
+    with tempfile.TemporaryDirectory(prefix="preservation_selftest_") as root:
+        for body, label, needle in cases:
+            path = os.path.join(root, "case.json")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(body)
+            _, _, errs = load_corpus_file(path)
+            check(any(needle in e for e in errs), label)
+
+        # And the shipped corpus itself passes the floor it declares — a
+        # self-test that only proved the red could pass over a corpus the
+        # real gate rejects.
+        for path in sorted(
+            os.path.join(CORPUS_DIR, f)
+            for f in os.listdir(CORPUS_DIR) if f.endswith(".json")
+        ):
+            n_min, vecs, errs = load_corpus_file(path)
+            check(errs == [] and n_min >= 1 and len(vecs) >= n_min,
+                  f"{os.path.basename(path)} declares a floor of {n_min} and "
+                  f"carries {len(vecs)}")
+
+    if failures:
+        print(f"self-test: {len(failures)} FAILURE(S)")
+        return 1
+    print("self-test: OK")
     return 0
 
 
 if __name__ == "__main__":
+    if "--self-test" in sys.argv[1:]:
+        sys.exit(self_test())
     sys.exit(main())

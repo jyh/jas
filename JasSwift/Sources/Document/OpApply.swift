@@ -971,18 +971,205 @@ public func pasteFragmentInto(
     return doc.replacing(layers: layers, selection: newSelection)
 }
 
-/// `pasteFragmentInto` against a `Model`, self-bracketing through
-/// `editDocument`. Returns `false` (a no-op that journals nothing) when nothing
-/// was pasted. Mirrors Rust `apply_paste`.
+// ── THE PASTE RUN — "Repeated pastes stack with cumulative offsets" ─────────
+//
+// `workspace/actions.yaml` paste has required that sentence since it was
+// written, and NEITHER active port implemented it: the second paste landed
+// exactly on the first. Both ports were wrong together, so the written
+// requirement governs (JYH, 2026-07-28: "follow the spec").
+//
+// `pasteRunApply` below is THE ONLY PLACE the run moves, in this port. Both
+// model-level paste entry points route through it, so the corpus-only `svg`
+// param and the production `text` param cannot drift apart — a run implemented
+// in one of them would have gone green in half the corpus while production kept
+// pasting on one spot.
+
+/// Apply a paste under the run, and advance the run if it landed.
+///
+/// `payload` is the RAW CLIPBOARD STRING the run is keyed to — see ``PasteRun``
+/// for why that, and not a copy hook, is what makes the reset rule hold. `base`
+/// is the BASE STEP (24pt), not the distance travelled: the Nth consecutive
+/// paste of one payload lands at `N * base` from the source, so three pastes sit
+/// at 24, 48, 72 and never on top of each other. `body` receives the EFFECTIVE
+/// offset and answers with the pasted document, or `nil` when there was nothing
+/// to paste.
+///
+/// Four decisions, each stated because the spec sentence says only "repeated
+/// pastes stack" and something had to be chosen (the artist-facing prose is in
+/// `actions.yaml` paste; the corpus family is
+/// `test_fixtures/operations/paste_stacking.json`):
+///
+/// 1. **RESET IS KEYED TO WHAT IS PASTED.** A payload that differs from the one
+///    the run is counting starts a new run. A copy of DIFFERENT artwork
+///    therefore resets it — including an EXTERNAL copy from another
+///    application, which no in-app copy hook could see. A copy of the SAME
+///    artwork does not, because the slot at `+base` already holds the previous
+///    paste. A selection change does NOT reset: paste itself SETS the selection,
+///    so a selection-keyed reset would fire after every paste and the
+///    requirement would be unimplementable — it could never reach step two.
+/// 2. **`paste_in_place` DOES NOT PARTICIPATE.** It passes `base == 0.0` and is
+///    ruled to apply no offset; its copy lands on the source, which is not a run
+///    slot. So it neither advances the run nor restarts it: 24, 0, 48.
+/// 3. **"Paste, Preserving Layers" SHARES THE ONE RUN.** R2 and R3 differ in
+///    WHICH LAYER artwork lands in, never in the offset — `actions.yaml` says
+///    preserving-layers offsets "exactly as plain Paste does". One `base`, one
+///    run, nothing to diverge.
+/// 4. **A PASTE THAT LANDS NOTHING DOES NOT ADVANCE THE RUN.** The early return
+///    below is before any run write, so an empty clipboard leaves it where it
+///    was.
+///
+/// UNDO restores the run (see ``Model/undo()``): the `beginTxn` inside
+/// `editDocument` captures the PRE-paste run and the advance below happens after
+/// the write, so undoing a paste puts the next one exactly where the undone one
+/// was rather than skipping a slot. Mirrors Rust `paste_run_apply`.
+private func pasteRunApply(
+    _ model: Model, payload: String, base: Double,
+    body: (Document, Double) -> Document?
+) -> Bool {
+    let effective = model.pasteRunOffset(for: payload, base: base)
+    guard let newDoc = body(model.document, effective) else { return false }
+    model.editDocument(newDoc)
+    model.advancePasteRun(payload, base: base)
+    return true
+}
+
+/// `pasteFragmentInto` against a `Model`, self-bracketing through `editDocument`
+/// and participating in the paste run. Returns `false` (a no-op that journals
+/// nothing) when nothing was pasted. Mirrors Rust `apply_paste`.
+///
+/// Takes the fragment MARKUP rather than a parsed fragment, for two reasons: the
+/// markup is what the run is keyed to (see `pasteRunApply`), and moving the
+/// parse in here means the two ports' call sites are identical where they used
+/// to differ in shape. Reached only from the `svg` op param, which presupposes
+/// the SVG branch was already chosen; the production payload dispatch is
+/// ``applyPasteClipboardText(_:text:offset:preserveLayers:)``.
 @discardableResult
 public func applyPaste(
-    _ model: Model, fragment: [Element], offset: Double, preserveLayers: Bool
+    _ model: Model, svg: String, offset: Double, preserveLayers: Bool
 ) -> Bool {
-    guard let newDoc = pasteFragmentInto(
-        model.document, fragment: fragment, offset: offset, preserveLayers: preserveLayers)
-    else { return false }
-    model.editDocument(newDoc)
-    return true
+    pasteRunApply(model, payload: svg, base: offset) { doc, effective in
+        let fragment = svgToDocument(svg).layers.map { Element.layer($0) }
+        return pasteFragmentInto(doc, fragment: fragment, offset: effective,
+                                 preserveLayers: preserveLayers)
+    }
+}
+
+// ── WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES ────────────────────────
+// D4 and D5, ratified 2026-07-28: SWIFT IS CANON, Rust drops its
+// internal-clipboard fallback (LAYER_STRUCTURE.md §8.3 / §8.6 item 1).
+//
+// `pasteFragmentInto` above answers "where does this fragment land". The
+// functions below answer the question BEFORE it: given the raw clipboard
+// payload, is there a fragment at all? Swift already answered it correctly —
+// text becomes text, an empty pasteboard is a no-op — but the answer lived
+// INSIDE `EditClipboard.pasteClipboard`, where no fixture could reach it. It is
+// lifted here so the shared corpus family `paste_clipboard_text.json` drives it
+// in both ports through the `paste` verb's `text` param. Mirrors Rust
+// `op_apply::paste_clipboard_text_into`.
+
+/// Does this clipboard payload announce itself as SVG?
+///
+/// Deliberately a PREFIX test on the trimmed payload rather than a parse
+/// attempt: markup copied from a browser (`<b>…</b>`, an HTML fragment) is text
+/// the artist wants as text, and handing it to `svgToDocument` would silently
+/// yield an empty fragment — a paste that looks like it did nothing. The mirror
+/// is Rust `clipboard_text_is_svg`; the corpus pins BOTH accepted prefixes and a
+/// rejected-markup case so neither arm can be dropped unseen.
+public func clipboardTextIsSvg(_ text: String) -> Bool {
+    let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return s.hasPrefix("<?xml") || s.hasPrefix("<svg")
+}
+
+/// Paste a non-SVG clipboard payload as a Text element in the ACTIVE layer.
+///
+/// The element sits at `(offset, offset + 16)` — the baseline is one 16pt line
+/// below the paste origin, so `paste_in_place` puts it at `(0, 16)` — and takes
+/// every other parameter's default. It carries NO FILL (SVG's implicit black);
+/// that is pinned rather than invented, and banked in LAYER_STRUCTURE.md rather
+/// than decided here.
+///
+/// **FIELD-PRESERVING, and that is a REPAIR.** This body used to rebuild the
+/// target as `Layer(name:children:opacity:transform:)` — a hand-written
+/// four-field list against a twelve-field struct — so pasting text into a LOCKED
+/// layer UNLOCKED it, into a HIDDEN layer REVEALED it, and into an IDENTIFIED
+/// layer DESTROYED its identity. That is the Swift copy-site omission class
+/// (EDIT_SEMANTICS_FREEZE.md §3.1), the same defect §9.5 repaired on the SVG
+/// path and left standing here; it shipped on main and is measured red by
+/// `ClipboardTextPasteTests.pasteOfPlainTextPreservesTheTargetLayersOwnFields`.
+/// Mutating the layer VALUE in place is the shape that cannot drift again.
+private func pasteTextElementInto(_ doc: Document, text: String, offset: Double) -> Document? {
+    if doc.layers.isEmpty { return nil }
+    // Same clamp as `pasteFragmentInto`: an out-of-range `selectedLayer` clamps
+    // rather than trapping on the index.
+    let active = min(max(doc.selectedLayer, 0), doc.layers.count - 1)
+    var layers = doc.layers
+    var target = layers[active]
+    let at = target.children.count
+    target.children.append(.text(Text(x: offset, y: offset + 16.0, content: text)))
+    layers[active] = target
+    // `replacing(...)` so artboards / artboardOptions / documentSetup /
+    // printPreferences survive — the designated initializer's empty defaults
+    // silently drop unset fields.
+    return doc.replacing(layers: layers, selection: [ElementSelection.all([active, at])])
+}
+
+/// THE DISPATCH. Given the raw clipboard payload, produce the pasted document —
+/// or `nil` when there is nothing to paste. PURE: no `Model`, no transaction, no
+/// `NSPasteboard`.
+///
+/// `text` is `nil` when the clipboard READ ITSELF FAILED
+/// (`NSPasteboard.string(forType:)` returned nil; Rust's JS promise rejected)
+/// and `""` when the clipboard was readable but empty. **D5 rules both the same
+/// way: nothing to paste.** They are kept as distinct inputs rather than
+/// collapsed at the call site so the corpus can pin each — an empty clipboard
+/// and a broken clipboard are different states, and a future ruling that wants
+/// them to differ has a seam to move.
+///
+/// **D4**: a payload that is not SVG becomes a TEXT ELEMENT holding it. Rust
+/// used to fall back to an internal buffer here and paste stale artwork; that
+/// buffer no longer exists in either port.
+public func pasteClipboardTextInto(
+    _ doc: Document, text: String?, offset: Double, preserveLayers: Bool
+) -> Document? {
+    // D5 — unreadable, and readable-but-empty.
+    guard let text, !text.isEmpty else { return nil }
+    if clipboardTextIsSvg(text) {
+        // The SVG branch is UNCHANGED and routes into the same
+        // `pasteFragmentInto` R2/R3 body the `svg` op param reaches. The corpus
+        // pins that by file identity: the `text` case and the `svg` case share
+        // one golden.
+        let fragment = svgToDocument(text).layers.map { Element.layer($0) }
+        return pasteFragmentInto(doc, fragment: fragment, offset: offset,
+                                 preserveLayers: preserveLayers)
+    }
+    // D4. `preserveLayers` has nothing to bite on — there is no fragment layer,
+    // therefore no name to preserve — so it degenerates to plain Paste, exactly
+    // as an unnamed fragment layer does.
+    return pasteTextElementInto(doc, text: text, offset: offset)
+}
+
+/// `pasteClipboardTextInto` against a `Model`, self-bracketing through
+/// `editDocument` and participating in the paste run. Returns `false` (a no-op
+/// that journals nothing) when there was nothing on the clipboard to paste.
+/// Mirrors Rust `apply_paste_clipboard_text`.
+///
+/// **THE PRODUCTION ENTRY POINT.** ``EditClipboard/pasteClipboard(_:offset:pasteboard:preserveLayers:)``
+/// and Rust's `clipboard_read_and_paste` both land here, so this is where the
+/// paste run has to reach the artist. The run is keyed to the RAW PAYLOAD — the
+/// same string the port read off the system pasteboard — which is exactly the
+/// identity "the same clipboard content" the spec sentence is about.
+///
+/// An UNREADABLE pasteboard (`nil`) returns before the run is consulted at all:
+/// there is no payload to key on, and nothing to paste.
+@discardableResult
+public func applyPasteClipboardText(
+    _ model: Model, text: String?, offset: Double, preserveLayers: Bool
+) -> Bool {
+    guard let payload = text else { return false }
+    return pasteRunApply(model, payload: payload, base: offset) { doc, effective in
+        pasteClipboardTextInto(doc, text: payload, offset: effective,
+                               preserveLayers: preserveLayers)
+    }
 }
 
 /// Unpack the Group at `path`: extract its children, delete the group, and
@@ -1324,8 +1511,11 @@ public func opApply(
     // journal-neutral — opening a txn for it would spuriously journal a
     // selection-only batch as an undoable step. `select_by_ids` is the
     // id-primary twin (selection-only, non-undoable), so it is excluded for the
-    // identical reason.
-    if name != "select_rect" && name != "select_by_ids" && !model.isInTxn {
+    // identical reason. `select_element` is the path-addressed click seam —
+    // selection-only for exactly the same reason as `select_rect`, and excluded
+    // on the same grounds.
+    if name != "select_rect" && name != "select_by_ids" && name != "select_element"
+        && !model.isInTxn {
         model.beginTxn()
     }
     // Fork-4 `targets` (OP_LOG.md §9). Populated for the THREE replay-safe verbs
@@ -1380,6 +1570,25 @@ public func opApply(
         // Keystone: the resolved selection is this op's targets, so
         // captureRecipe can seed its working set (empty targets ⇒ empty
         // recipe). Resolved AFTER the Controller call.
+        targets = selectionToIds(model.document)
+    // The path-addressed CLICK seam — the same `Controller.selectElement` the
+    // Type / Type-on-Path tools call after they create an element, and the site
+    // transcripts/LAYER_STRUCTURE.md §13 rules on (its own-flag `isLocked` read
+    // sat one line above an INHERITED `effectiveVisibility` read). Selection-only
+    // and non-undoable, exactly like `select_rect`. Routed through the production
+    // Controller mutator, never a copy of it. Mirrors Rust's `select_element`.
+    case "select_element":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        // A path that names no element is an addressed target that does not
+        // exist — the MissingTarget class, not a benign no-op. (A REFUSED select
+        // is a different thing: the element is there and the answer is "no",
+        // which succeeds with an unchanged selection.) `selectElement` traps on
+        // an empty or out-of-range path, so this guard is also what keeps a
+        // malformed op an ERROR rather than a crash.
+        guard !path.isEmpty, model.document.tryGetElement(path) != nil else {
+            return .missingTarget(id: String(describing: path))
+        }
+        controller.selectElement(path)
         targets = selectionToIds(model.document)
     case "move_selection":
         controller.moveSelection(dx: numField(op, "dx"), dy: numField(op, "dy"))
@@ -1554,18 +1763,39 @@ public func opApply(
     // `svgToDocument`. `preserve_layers` selects R3 over R2 and defaults to
     // false; `offset` defaults to 0.0, which is `paste_in_place`.
     //
-    // This arm and `EditClipboard.pasteClipboard` call ONE body (`applyPaste`),
-    // which is the point: LAYER_STRUCTURE.md §5 records that no corpus vector
-    // could reach ANY paste behaviour in EITHER port, so R2/R3 would have
-    // landed unwatched. A verb that re-implemented the paste would be a decoy.
+    // This arm and `EditClipboard.pasteClipboard` call ONE body
+    // (`applyPasteClipboardText`), which is the point: LAYER_STRUCTURE.md §5
+    // records that no corpus vector could reach ANY paste behaviour in EITHER
+    // port, so R2/R3 would have landed unwatched. A verb that re-implemented the
+    // paste would be a decoy.
+    //
+    // BOTH params also route through `pasteRunApply`, so the cumulative offset
+    // run (`actions.yaml` paste) is the same run whichever one a vector uses.
+    // `offset` is therefore the BASE STEP, not the distance travelled: a vector
+    // pasting one payload three times at offset 24 lands at 24, 48, 72.
     case "paste":
-        guard let svg = strField(op, "svg") else { return reqErr(op, "svg") }
-        let fragment = svgToDocument(svg).layers.map { Element.layer($0) }
+        let offset = numField(op, "offset")
         let preserve = (op["preserve_layers"] as? Bool) ?? false
-        if !applyPaste(model, fragment: fragment, offset: numField(op, "offset"),
-                       preserveLayers: preserve) {
-            // Benign no-op by the S3 taxonomy: an empty / unparseable fragment
-            // is an empty clipboard, not a missing target.
+        // `text` = the RAW CLIPBOARD PAYLOAD, before any branch is chosen — the
+        // D4/D5 dispatch (`paste_clipboard_text.json`). JSON null (NSNull) means
+        // the clipboard read FAILED; the empty string means it succeeded and was
+        // empty; both are no-ops, and they are distinct inputs so the corpus can
+        // pin each. `svg` = the fragment MARKUP, which presupposes the SVG
+        // branch was already taken (`paste_layers.json`). Not two paths: a
+        // `text` payload that IS SVG lands in the same `pasteFragmentInto` body,
+        // which the two families pin by SHARING one golden file.
+        let changed: Bool
+        if op["text"] != nil {
+            changed = applyPasteClipboardText(model, text: strField(op, "text"),
+                                              offset: offset, preserveLayers: preserve)
+        } else {
+            guard let svg = strField(op, "svg") else { return reqErr(op, "svg") }
+            changed = applyPaste(model, svg: svg, offset: offset,
+                                 preserveLayers: preserve)
+        }
+        if !changed {
+            // Benign no-op by the S3 taxonomy: an empty / unreadable clipboard,
+            // or an empty / unparseable fragment, is not a missing target.
             return nil
         }
         // `targets` stays EMPTY, matching Rust: paste is not one of the
@@ -1581,6 +1811,18 @@ public func opApply(
             return .missingTarget(id: String(describing: path))
         }
         targets = t
+    // The Layers-panel LOCK BUTTON's document work (`actions.yaml`
+    // §toggle_element_lock). Until LOCKINHERIT this behaviour lived only behind
+    // a SwiftUI closure and a Dioxus click handler, so NO shared fixture could
+    // reach it and the materialization design it implemented was watched by
+    // nothing cross-language. The verb routes through the SAME pure
+    // `Document.togglingElementLock` the panel calls. Mirrors Rust's arm.
+    case "toggle_element_lock":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard !path.isEmpty, model.document.tryGetElement(path) != nil else {
+            return .missingTarget(id: String(describing: path))
+        }
+        model.editDocument(model.document.togglingElementLock(at: path))
     case "lock_selection":
         controller.lockSelection()
     case "unlock_all":

@@ -136,3 +136,115 @@ private func makeTestDoc() -> Document {
     // layers[0] should still be a Layer (struct type, always true if it compiles)
     #expect(doc2.layers[0].name == "L0")
 }
+
+// MARK: - D5a: the Layers LOCK button prunes the selection
+
+// Mirror of jas_dioxus `renderer.rs`
+// `toggle_element_lock_at_locks_and_prunes_the_selection` /
+// `..._prunes_only_the_locked_subtree` / `..._unlock_leaves_the_selection_alone`.
+//
+// SCOPE-effective-locked.md §3, D5a: jas_dioxus dropped the locked element
+// and its descendants from the selection; this port's closure had no
+// equivalent, so a locked layer stayed selected -- and nothing downstream
+// refuses to move or delete a selected element for being locked, so that is
+// not cosmetic.
+//
+// PER-PORT: the Layers panel is reached through GUI event handlers no shared
+// corpus drives, and no shared fixture can seed a locked document anyway
+// (the SVG codec drops `locked` entirely).
+
+/// One layer named "L" holding two rects, with `selection` seeded to the
+/// whole tree: the layer and both of its children.
+private func lockToggleDoc() -> Document {
+    let layer = Layer(name: "L", children: [
+        .rect(Rect(x: 0, y: 0, width: 10, height: 10)),
+        .rect(Rect(x: 20, y: 0, width: 10, height: 10)),
+    ])
+    return Document(layers: [layer], selection: [
+        ElementSelection.all([0]),
+        ElementSelection.all([0, 0]),
+        ElementSelection.all([0, 1]),
+    ])
+}
+
+@Test func togglingElementLockLocksAndPrunesTheSelection() {
+    let doc = lockToggleDoc()
+    #expect(doc.selection.count == 3)   // control: everything starts selected
+    let out = doc.togglingElementLock(at: [0])
+    #expect(out.getElement([0]).isLocked)
+    #expect(out.selection.isEmpty)
+}
+
+/// Locking a CHILD must prune that child only -- if the prune were written
+/// as a whole-clear, or matched on the wrong end of the path, this is the
+/// case that notices.
+@Test func togglingElementLockPrunesOnlyTheLockedSubtree() {
+    let out = lockToggleDoc().togglingElementLock(at: [0, 0])
+    #expect(out.selectedPaths == [[0], [0, 1]])
+}
+
+/// UNlocking must not touch the selection at all -- the prune is keyed on
+/// the direction of the toggle, not on the button being pressed.
+@Test func togglingElementLockUnlockLeavesTheSelectionAlone() {
+    let locked = lockToggleDoc().togglingElementLock(at: [0])
+    #expect(locked.selection.isEmpty)
+    let reselected = locked.replacing(selection: [ElementSelection.all([0])])
+    let out = reselected.togglingElementLock(at: [0])
+    #expect(!out.getElement([0]).isLocked)
+    #expect(out.selection.count == 1)
+}
+
+/// MATERIALIZATION IS REPEALED (transcripts/LAYER_STRUCTURE.md §13, RULED
+/// 2026-07-28). Locking a CONTAINER writes the container's own flag and
+/// nothing else — the contents are protected by ``Document.effectiveLocked``
+/// reading down the path, not by flags an artist never set. The shared corpus
+/// family `test_fixtures/operations/lock_toggle_no_materialization.json` is
+/// the cross-language gate; this is the same fact at the pure function.
+@Test func togglingElementLockDoesNotMaterializeOntoChildren() {
+    let out = lockToggleDoc().togglingElementLock(at: [0])
+    #expect(out.getElement([0]).isLocked)
+    #expect(!out.getElement([0, 0]).isLocked)
+    #expect(!out.getElement([0, 1]).isLocked)
+    // ...and the children are protected anyway, by inheritance.
+    #expect(out.effectiveLocked([0, 0]))
+    #expect(out.effectiveLocked([0, 1]))
+}
+
+/// A round trip through the lock button leaves the document where it started.
+/// Before the repeal it was LOSSY: the lock wrote `locked = true` onto both
+/// children and the unlock — with no restore table to consult — left them
+/// locked while the container itself opened.
+@Test func togglingElementLockRoundTripLeavesChildrenUntouched() {
+    let out = lockToggleDoc().togglingElementLock(at: [0])
+        .togglingElementLock(at: [0])
+    #expect(!out.getElement([0]).isLocked)
+    #expect(!out.getElement([0, 0]).isLocked)
+    #expect(!out.getElement([0, 1]).isLocked)
+}
+
+/// ``Document.effectiveLocked`` ORs down the path, mirroring
+/// ``Document.effectiveVisibility``. A child CANNOT be unlocked inside a
+/// locked parent — JYH ruled that expressiveness loss explicitly
+/// (transcripts/LAYER_STRUCTURE.md §13), so there is no escape hatch to test
+/// for; what IS tested is that the OR is total and that an unresolvable path
+/// is not reported as locked.
+@Test func effectiveLockedOrsDownThePath() {
+    let doc = lockToggleDoc()
+    #expect(!doc.effectiveLocked([0]))
+    #expect(!doc.effectiveLocked([0, 0]))
+    // Own flag on the LEAF.
+    let leafLocked = doc.togglingElementLock(at: [0, 1])
+    #expect(!leafLocked.effectiveLocked([0, 0]))
+    #expect(leafLocked.effectiveLocked([0, 1]))
+    #expect(!leafLocked.effectiveLocked([0]))
+    // Own flag on the CONTAINER reaches both children.
+    let layerLocked = doc.togglingElementLock(at: [0])
+    #expect(layerLocked.effectiveLocked([0]))
+    #expect(layerLocked.effectiveLocked([0, 0]))
+    #expect(layerLocked.effectiveLocked([0, 1]))
+    // Addresses that name no artwork are not locked.
+    #expect(!doc.effectiveLocked([]))
+    #expect(!layerLocked.effectiveLocked([7]))
+    #expect(layerLocked.effectiveLocked([0, 9]),
+            "an out-of-range CHILD index still inherits what the walk already saw")
+}

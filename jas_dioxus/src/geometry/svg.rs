@@ -167,16 +167,71 @@ fn tool_origin_attr(origin: &Option<String>) -> String {
     }
 }
 
-/// Standard SVG `id` attribute for an element's stable identity.
-/// Emitted ONLY when the id is set (Some/non-empty) so id-less
-/// elements serialize byte-identically to before — keeping the SVG
-/// fixtures and cross-language test_json comparison green. Mirrors
-/// `name_attr` (the inkscape:label writer) right next to it.
-fn id_attr(id: &Option<String>) -> String {
-    match id {
+/// The standard SVG `id` attribute for an element's stable identity, followed
+/// by the workspace-private `jas:locked` flag.
+///
+/// `id` is emitted ONLY when set (Some/non-empty) and `jas:locked` ONLY when
+/// true, so an id-less unlocked element serializes byte-identically to before —
+/// keeping the SVG fixtures and the cross-language test_json comparison green.
+/// Measured when `jas:locked` was added (LOCKSVG, 2026-07-28): 0 of the
+/// elements across the 60 SVG fixtures carry `locked = true`, so the
+/// conditional attribute moved ZERO goldens. Same convention as
+/// `fill-rule="evenodd"`, `data-jas-dash-align-anchors` and the five arrowhead
+/// attributes.
+///
+/// WHY THE TWO FIELDS SHARE ONE HELPER, and it is not tidiness. `element_svg`
+/// hand-inlines its attribute lists in sixteen arms, so an attribute added
+/// per-arm is added SIXTEEN TIMES and a missed arm is a silent drop that no
+/// compiler can see — the omission class `common_attrs_no_name` was created to
+/// close for opacity/transform/id, and the one JasSwift keeps re-learning
+/// (`project_swift_copy_site_omission_class`). `id_attr` was already called by
+/// EVERY arm, so widening its signature makes the COMPILER enumerate the
+/// sixteen sites instead of a human. Mirrors JasSwift's `idLockAttrs`.
+///
+/// `urn:jas:1` is the namespace, not `sodipodi:insensitive` or `data-locked`:
+/// it is where the sibling CommonProps field `tool_origin` already lives
+/// (`jas:tool-origin`, written below and read by `parse_common`), and JasSwift
+/// declares `xmlns:jas` by matching the ` jas:` PREFIX in its emitted body, so
+/// a new `jas:`-namespaced attribute is covered by that guard automatically.
+/// An attribute in any other prefix would need its own declaration trigger, and
+/// forgetting one makes Foundation reject the WHOLE document.
+/// The Opacity panel's two page-level blending flags, as workspace-private
+/// attributes on a `<g>`. Written ONLY when true, so an ordinary group or
+/// layer serializes byte-identically to before and no shipped golden moved
+/// (measured: 0 of the containers across the SVG fixtures carry either flag).
+///
+/// WHY A `jas:` EXTENSION AND NOT A STANDARD ATTRIBUTE. There is no standard
+/// one. CSS `isolation: isolate` is the nearest thing to isolated blending,
+/// but it is a RENDERING property a jas file would then be promising to
+/// honour, and neither port's renderer implements either flag yet
+/// (transcripts/OPACITY.md marks both `pending_renderer`); knockout groups are
+/// a PDF transparency-group concept with no SVG analogue at all. So this is
+/// exactly the shape `jas:locked` landed in one day earlier -- a
+/// workspace-private boolean in the `urn:jas:1` namespace, alongside the
+/// sibling `jas:tool-origin`. Emitting a standard property we do not honour
+/// would be the guess the Preservation Law forbids; dropping the value
+/// silently was the defect. Mirrors JasSwift's `containerBlendAttrs`.
+fn container_blend_attrs(isolated_blending: bool, knockout_group: bool) -> String {
+    let mut s = String::new();
+    if isolated_blending {
+        s.push_str(" jas:isolated-blending=\"true\"");
+    }
+    if knockout_group {
+        s.push_str(" jas:knockout-group=\"true\"");
+    }
+    s
+}
+
+fn id_lock_attrs(id: &Option<String>, locked: bool) -> String {
+    let id_part = match id {
         None => String::new(),
         Some(s) if s.is_empty() => String::new(),
         Some(s) => format!(" id=\"{}\"", escape_xml(s)),
+    };
+    if locked {
+        format!("{} jas:locked=\"true\"", id_part)
+    } else {
+        id_part
     }
 }
 
@@ -204,7 +259,7 @@ fn common_attrs_no_name(c: &CommonProps) -> String {
         "{}{}{}",
         opacity_attr(c.opacity),
         transform_attr(&c.transform),
-        id_attr(&c.id),
+        id_lock_attrs(&c.id, c.locked),
     )
 }
 
@@ -288,7 +343,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity),
                 transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -307,7 +362,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 rxy,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -318,7 +373,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.r)),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -329,7 +384,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.rx)), fmt(px(e.ry)),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -343,7 +398,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 indent, ps,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -357,7 +412,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 indent, ps,
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -373,7 +428,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke), fr_attr,
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
                 tool_origin_attr(&e.common.tool_origin),
-                id_attr(&e.common.id),
+                id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             )
         }
@@ -536,9 +591,10 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             // inkscape:groupmode="layer" lets the parser distinguish
             // a Layer from a named Group (both carry inkscape:label).
             let mut lines = vec![format!(
-                "{}<g inkscape:groupmode=\"layer\"{}{}{}{}>",
-                indent, id_attr(&e.common.id), name_attr(&e.common.name),
+                "{}<g inkscape:groupmode=\"layer\"{}{}{}{}{}>",
+                indent, id_lock_attrs(&e.common.id, e.common.locked), name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                container_blend_attrs(e.isolated_blending, e.knockout_group),
             )];
             let child_indent = format!("{}  ", indent);
             for child in &e.children {
@@ -549,9 +605,10 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
         }
         Element::Group(e) => {
             let mut lines = vec![format!(
-                "{}<g{}{}{}{}>",
-                indent, id_attr(&e.common.id), name_attr(&e.common.name),
+                "{}<g{}{}{}{}{}>",
+                indent, id_lock_attrs(&e.common.id, e.common.locked), name_attr(&e.common.name),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
+                container_blend_attrs(e.isolated_blending, e.knockout_group),
             )];
             let child_indent = format!("{}  ", indent);
             for child in &e.children {
@@ -1347,7 +1404,14 @@ fn parse_common(node: &XmlNode) -> CommonProps {
         opacity: parse_opacity(node),
         mode: crate::geometry::element::BlendMode::default(),
         transform: parse_transform(node),
-        locked: false,
+        // LOCKSVG (2026-07-28): the workspace-private lock flag, written by
+        // `id_lock_attrs` above. It was hard-coded `false` here from the day
+        // this function was written, which is why locking a layer, saving and
+        // reopening lost the protection entirely — and why every SVG-seeded
+        // fixture in the shared corpus was blind to lock as a precondition.
+        // Only the exact string "true" locks: a foreign or malformed value
+        // must not silently protect artwork the artist never protected.
+        locked: node.attrs.get("jas:locked").map(|v| v == "true").unwrap_or(false),
         visibility: crate::geometry::element::Visibility::default(),
         mask: None,
         tool_origin: node.attrs.get("jas:tool-origin").cloned(),
@@ -1920,10 +1984,19 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             let group_mode = node.attrs.get("inkscape:groupmode").cloned();
             // common.name is already populated from inkscape:label
             // by parse_common; both Layer and Group inherit it from there.
+            // The two container-only flags ride workspace-private attributes
+            // (see `container_blend_attrs`); absent means false, so every
+            // pre-existing file still reads exactly as it was authored.
+            let iso = node.attrs.get("jas:isolated-blending").map(|v| v == "true").unwrap_or(false);
+            let ko = node.attrs.get("jas:knockout-group").map(|v| v == "true").unwrap_or(false);
             if group_mode.as_deref() == Some("layer") {
-                Some(Element::Layer(LayerElem { children, common, isolated_blending: false, knockout_group: false }))
+                Some(Element::Layer(LayerElem {
+                    children, common, isolated_blending: iso, knockout_group: ko,
+                }))
             } else {
-                Some(Element::Group(GroupElem { children, common, isolated_blending: false, knockout_group: false }))
+                Some(Element::Group(GroupElem {
+                    children, common, isolated_blending: iso, knockout_group: ko,
+                }))
             }
         }
         "use" => {

@@ -1297,7 +1297,16 @@ non-delegating rebuild sites, which it does not see.
 re-derive it.** The binary codec also drops, outside this ruling's scope:
 `isolated_blending` and `knockout_group` on **Group** in both ports (and on
 **Layer** in Rust, where JasSwift's `Layer` has no such field at all — a model
-divergence, not a shared codec drop); `fill` and `stroke` on a live
+divergence, not a shared codec drop);
+<!-- AMENDED 2026-07-28 — see the amendment note at the end of this section.
+     The parenthetical above is FALSE as of this commit: JasSwift's `Layer` DOES
+     carry `isolatedBlending` and `knockoutGroup`
+     (JasSwift/Sources/Geometry/Element.swift:3227,3229), mirroring Rust's
+     `LayerElem` (element.rs:1347,1350). So this is a SHARED codec drop on BOTH
+     kinds in BOTH ports, not a model divergence. The original text is left
+     standing because a ratified record is corrected by amendment, not by
+     rewriting. -->
+`fill` and `stroke` on a live
 CompoundShape (both readers hard-code `None`, both writers omit them); and
 eleven `TextElem` / `TextPathElem` fields
 (`text_transform`, `font_variant`, `baseline_shift`, `line_height`,
@@ -1314,3 +1323,57 @@ mismatch in `pack_element` would land SILENTLY. The repair therefore needs a
 **byte-level binary comparison**, not the string oracle — otherwise we would be
 extending a format whose divergences we cannot see. Coverage gap
 `codec-string-oracle-cannot-see-a-dropped-field` is the record of that.
+
+---
+
+### AMENDMENT, 2026-07-28 — authorised by JYH at council
+
+Two statements in this section were true when ratified and are **no longer
+true**. They are corrected here rather than rewritten above, because a ratified
+record that is quietly edited teaches the next reader nothing about how it moved.
+
+**A1 — the SUBSET claim is now FALSE.** The sentence above asserts that "the
+fields the binary codec drops are a strict SUBSET of the fields that string
+oracle also drops." That was measured and correct on 2026-07-27. The preservation
+wave of 2026-07-28 then extended canonical test-JSON to carry all twelve
+formerly-dropped fields. Re-measured against
+`test_fixtures/expected/codec_field_survival.json` on this commit:
+
+```
+test_json DROPS: 0  []
+binary    DROPS: 2  ['fill_gradient', 'stroke_gradient']
+```
+
+So binary's drops are now a strict SUPERSET, and **the string oracle became
+stronger, not weaker**. The conclusion drawn from the old premise nevertheless
+still stands, for a different reason: the byte gate remains necessary because it
+compares BYTES where the oracle compares STRINGS, and slot ordering, arity and
+encoding are invisible to a string comparison however complete its field
+coverage. The gate is kept; only its justification is corrected. The same stale
+sentence was annotated in the four other places it had been copied to
+(`binary_wire.json`, `CrossLanguageTests.swift`, `cross_language_test.rs`,
+`binary.rs`).
+
+**A2 — the Layer model-divergence claim is FALSE.** JasSwift's `Layer` carries
+`isolatedBlending` and `knockoutGroup` (`Element.swift:3227,3229`), mirroring
+Rust's `LayerElem` (`element.rs:1347,1350`). Measured on this commit. So this is
+a **shared codec drop on both Group and Layer in both ports**, not a model
+divergence — which makes it worse than recorded, because a shared drop is
+invisible to every equivalence gate by construction.
+
+Verified further, and banked as coverage gap
+`container-blend-fields-survive-no-codec`: both fields are destroyed by **all
+three codecs in both ports**. Rust hard-codes them to `false` on parse
+(`test_json.rs:1707,1714` and three further construction sites); JasSwift's
+`TestJson.swift`, `Binary.swift` and `Svg.swift` mention them **zero times each**.
+Neither name appears among the survival matrix's 13 fields, so nothing measures
+them in any codec. They are lost on save AND invisible to this law's bystander
+clause, on precisely the container kinds that clause is about.
+
+**How this was found.** Not by re-reading the freeze. A1 came from the
+adversarial verifier of the wave that invalidated it — the same wave's own report
+corrected the claim in one file of five. A2 came from checking the freeze's
+neighbouring sentence while making the A1 edit, which is the only reason it
+surfaced at all. **A ratified document is not self-checking**, and neither
+statement had a gate: the next such drift will be found the same accidental way
+unless one is built.
