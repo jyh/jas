@@ -269,6 +269,31 @@ pub fn selection_to_ids(doc: &Document) -> Vec<String> {
         .collect()
 }
 
+/// Rewrite `path` for an element having been inserted at `inserted_at`.
+///
+/// A path held across a structural insertion goes stale: inserting a sibling
+/// ahead of it pushes it up one slot, and nothing in the path itself says so.
+/// `Controller::copy_selection` is where that bit us (§19) — it records a copy
+/// path and then inserts BELOW it, so the recorded path silently came to name
+/// the source instead of the copy.
+///
+/// Only the slot the insertion happened in can move: `inserted_at` splits into
+/// a parent prefix and a sibling index, and a path is affected only when it
+/// shares that prefix AND sits at or after that index. Paths in other subtrees,
+/// paths shorter than the prefix, and the prefix itself are untouched. Nothing
+/// below the affected component changes — the subtree moved intact.
+///
+/// Mirrors JasSwift `shiftedPath(_:forInsertionAt:)`.
+fn shift_path_for_insertion(path: &mut ElementPath, inserted_at: &ElementPath) {
+    let Some(depth) = inserted_at.len().checked_sub(1) else { return };
+    if path.len() <= depth || path[..depth] != inserted_at[..depth] {
+        return;
+    }
+    if path[depth] >= inserted_at[depth] {
+        path[depth] += 1;
+    }
+}
+
 impl Controller {
     /// Add an element to the current editing target and select the
     /// new element. In content-mode (the default), the element is
@@ -925,6 +950,29 @@ impl Controller {
         let mut new_doc = doc.clone();
         let mut new_selection: Selection = Vec::new();
         for es in &doc.selection {
+            // AN ANCESTOR IN THE SELECTION COVERS ITS DESCENDANTS (§16.4).
+            //
+            // Every element below is read from the PRISTINE `doc` and written
+            // back absolutely. For disjoint entries that is exactly right; for
+            // an ancestor and its descendant it is not, because the
+            // descendant's write lands on top of the ancestor's and discards
+            // the ancestor's contribution to it. A group dragged with one
+            // member's control point also selected left that member STRANDED at
+            // its pristine coordinates with a single corner displaced.
+            //
+            // §16.4 rules such a selection out, but the ruling is not yet
+            // enforced at the extend/add seams or at `doc.set_selection`'s
+            // still-live container expansion (§20). Applying the rule HERE
+            // makes the operation correct whatever produced the selection.
+            //
+            // The entry is skipped entirely, including its post-move selection
+            // rewrite, so the ancestor's own entry carries the whole move.
+            if doc.selection.iter().any(|other| {
+                other.path.len() < es.path.len() && es.path.starts_with(&other.path)
+            }) {
+                new_selection.push(es.clone());
+                continue;
+            }
             if let Some(elem) = doc.get_element(&es.path) {
                 let new_elem = move_control_points(elem, &es.kind, dx, dy);
                 let kind = remap_cp_selection_after_move(elem, &new_elem, &es.kind);
@@ -947,7 +995,8 @@ impl Controller {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(
                     &es.path,
-                    crate::geometry::element::with_stroke_brush(elem, slug.clone()),
+                    crate::geometry::element::map_paintable(
+                        elem, &|e| crate::geometry::element::with_stroke_brush(e, slug.clone())),
                 );
             }
         }
@@ -964,7 +1013,8 @@ impl Controller {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(
                     &es.path,
-                    crate::geometry::element::with_stroke_brush_overrides(elem, overrides.clone()),
+                    crate::geometry::element::map_paintable(
+                        elem, &|e| crate::geometry::element::with_stroke_brush_overrides(e, overrides.clone())),
                 );
             }
         }
@@ -975,7 +1025,10 @@ impl Controller {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
-                new_doc = new_doc.replace_element(&es.path, with_fill(elem, fill));
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::map_paintable(elem, &|e| with_fill(e, fill)),
+                );
             }
         }
         new_doc
@@ -985,7 +1038,10 @@ impl Controller {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
-                new_doc = new_doc.replace_element(&es.path, with_stroke(elem, stroke));
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::map_paintable(elem, &|e| with_stroke(e, stroke)),
+                );
             }
         }
         new_doc
@@ -1035,8 +1091,22 @@ impl Controller {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
-                let next = f(elem.stroke().cloned());
-                new_doc = new_doc.replace_element(&es.path, with_stroke(elem, next));
+                // The RECOLOUR path, and it must recurse too. `fill_mapped` /
+                // `stroke_mapped` read each element's OWN paint and rewrite it,
+                // which is how per-element opacity survives a colour change --
+                // and it is the path the COLOR PANEL actually uses
+                // (`apply_active_color_write`), not the stamp-one-value path.
+                // Routing only the stamp path left clicking a swatch with a
+                // group selected doing nothing. Found by JYH clicking it,
+                // 2026-07-29.
+                //
+                // The closure reads the LEAF's own paint, so each member is
+                // recoloured individually and keeps its own opacity.
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::map_paintable(
+                        elem, &|leaf| with_stroke(leaf, f(leaf.stroke().cloned()))),
+                );
             }
         }
         new_doc
@@ -1063,8 +1133,11 @@ impl Controller {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
-                let next = f(elem.fill().cloned());
-                new_doc = new_doc.replace_element(&es.path, with_fill(elem, next));
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::map_paintable(
+                        elem, &|leaf| with_fill(leaf, f(leaf.fill().cloned()))),
+                );
             }
         }
         new_doc
@@ -1083,7 +1156,8 @@ impl Controller {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(
                     &es.path,
-                    with_fill_gradient(elem, gradient.clone()),
+                    crate::geometry::element::map_paintable(
+                        elem, &|e| with_fill_gradient(e, gradient.clone())),
                 );
             }
         }
@@ -1099,7 +1173,8 @@ impl Controller {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(
                     &es.path,
-                    with_stroke_gradient(elem, gradient.clone()),
+                    crate::geometry::element::map_paintable(
+                        elem, &|e| with_stroke_gradient(e, gradient.clone())),
                 );
             }
         }
@@ -1241,10 +1316,36 @@ impl Controller {
     }
 
     /// Duplicate selected elements, offset by (dx, dy).
+    ///
+    /// **The selection this leaves behind is in DOCUMENT ORDER, and it names
+    /// the COPIES** — transcripts/LAYER_STRUCTURE.md §19, RULED 2026-07-28 by
+    /// JYH (*"yes document order"*).
+    ///
+    /// The walk runs BACK-TO-FRONT and that is load-bearing: inserting after
+    /// [0,1] shifts [0,3], so a forward walk would read its own insertions as
+    /// sources. What was wrong was letting the RESULT inherit the walk's order
+    /// as a byproduct — nobody chose descending, and §10 (D6) made selection
+    /// order part of the document precisely because a copied fragment's z-order
+    /// is part of the artwork. Duplicate, then Copy, and the clipboard listed
+    /// the elements backwards.
+    ///
+    /// **The same shift that forces the descending walk also invalidates the
+    /// copy paths it has already recorded**, which is a separate defect found
+    /// while gating §19 and repaired here. Duplicating [0,1] and [0,3]: the
+    /// walk copies d first and records [0,4], then copies b, and THAT insertion
+    /// pushes everything above [0,1] up one slot — so the recorded [0,4] stops
+    /// naming d's copy and starts naming **d itself, the source**. The result
+    /// was not merely mis-ordered; a Copy afterwards put a source element on the
+    /// clipboard. `shift_path_for_insertion` keeps the recorded paths honest as
+    /// the document moves underneath them, and the sort is then a sort of the
+    /// right paths rather than a tidy list of the wrong ones.
     pub fn copy_selection(model: &mut Model, dx: f64, dy: f64) {
         let doc = model.document().clone();
         let mut new_doc = doc.clone();
-        let mut new_selection: Selection = Vec::new();
+        // Copy paths only: copying always selects the new element AS A WHOLE,
+        // so the `kind` is `All` for every entry and the running state is a
+        // plain path list that stays rewritable as the document shifts.
+        let mut copy_paths: Vec<ElementPath> = Vec::new();
         let mut sorted_sels: Vec<_> = doc.selection.clone();
         sorted_sels.sort_by(|a, b| b.path.cmp(&a.path));
         for es in &sorted_sels {
@@ -1256,11 +1357,20 @@ impl Controller {
                 new_doc = new_doc.insert_element_after(&es.path, copied.clone());
                 let mut copy_path = es.path.clone();
                 *copy_path.last_mut().unwrap() += 1;
-                // Copying always selects the new element as a whole.
-                new_selection.push(ElementSelection::all(copy_path));
+                // This insertion moves every copy path already recorded that
+                // sits at or after it under the same parent.
+                for prev in copy_paths.iter_mut() {
+                    shift_path_for_insertion(prev, &copy_path);
+                }
+                copy_paths.push(copy_path);
             }
         }
-        new_doc.selection = new_selection;
+        // §19: document order, not the walk's order.
+        copy_paths.sort();
+        new_doc.selection = copy_paths
+            .into_iter()
+            .map(ElementSelection::all)
+            .collect::<Selection>();
         model.edit_document(new_doc);
     }
 
@@ -2515,6 +2625,35 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
+    /// `Object > Lock` (Ctrl+2, `workspace/actions.yaml` §lock): set the
+    /// `locked` flag on each selected element and clear the selection.
+    ///
+    /// **ON EACH SELECTED ELEMENT, AND ON NOTHING ELSE.** A Group or Layer's
+    /// lock reaches its contents by INHERITANCE
+    /// ([`Document::effective_locked`]), never by being written onto them —
+    /// this is step 1 of [`Document::toggling_element_lock`], the Layers-panel
+    /// lock button, applied once per selected path. It is deliberately the same
+    /// shape rather than a second one: until LOCKMAT this function kept its own
+    /// recursive `lock_element` helper that stamped `locked = true` onto every
+    /// descendant of a Group, which is the MATERIALIZATION
+    /// transcripts/LAYER_STRUCTURE.md §13 repealed (RULED by JYH 2026-07-28).
+    /// §13 repaired the panel path and left this one, and the two then said
+    /// different things about the same artist action.
+    ///
+    /// Why the residue could not simply be left: §13.1 landed `jas:locked`, so
+    /// stamped flags SURVIVE SAVE AND RELOAD, and under inheritance nothing
+    /// clears a single one of them — opening the parent leaves every child
+    /// locked, and `Unlock All` is the whole document or nothing.
+    ///
+    /// The selection is cleared WHOLESALE, which is `toggling_element_lock`'s
+    /// step 2 in the case where every selected path was just locked: it is not
+    /// cosmetic, because nothing downstream refuses to move or delete a locked
+    /// element (SCOPE-effective-locked.md §2), so a lock that left the selection
+    /// alone would leave locked content draggable.
+    ///
+    /// Clone-then-mutate through `get_element_mut`, so every field of the
+    /// locked element that this operation does not speak to comes back
+    /// untouched. The twin is JasSwift `Controller.lockSelection()`.
     pub fn lock_selection(model: &mut Model) {
         let doc = model.document().clone();
         if doc.selection.is_empty() {
@@ -2522,9 +2661,8 @@ impl Controller {
         }
         let mut new_doc = doc.clone();
         for es in &doc.selection {
-            if let Some(elem) = new_doc.get_element(&es.path).cloned() {
-                let locked = lock_element(&elem);
-                new_doc = new_doc.replace_element(&es.path, locked);
+            if let Some(elem) = new_doc.get_element_mut(&es.path) {
+                elem.common_mut().locked = true;
             }
         }
         new_doc.selection.clear();
@@ -2554,7 +2692,20 @@ impl Controller {
         let new_layers: Vec<Element> = doc.layers.iter().map(unlock_element).collect();
         let mut new_doc = doc;
         new_doc.layers = new_layers;
-        new_doc.selection.clear();
+        // UNLOCK ALL PRESERVES THE SELECTION (RULED 2026-07-29). This used to
+        // CLEAR it, while JasSwift REPLACED it with every path just unlocked —
+        // a live divergence on a shared verb, and `actions.yaml` describes
+        // `unlock_all` without mentioning the selection at all.
+        //
+        // The PRESERVATION LAW settles it: an edit changes what it speaks to
+        // and preserves the rest, and selection order is part of the document
+        // (§10/D6). Unlock All speaks to `locked`; the selection is the rest.
+        //
+        // Lock and Hide DO clear, and `actions.yaml` gives the reason —
+        // "because nothing downstream refuses to move or delete a selected
+        // element for being locked". That is a workaround for the enforcement
+        // §15 will add, and it does not apply here: unlocking makes nothing
+        // unselectable, so clearing would destroy artist state for nothing.
         model.edit_document(new_doc);
     }
 
@@ -2794,16 +2945,15 @@ fn show_all_in(
     new
 }
 
-fn lock_element(elem: &Element) -> Element {
-    let mut new = elem.clone();
-    if new.is_group()
-        && let Some(children) = new.children_mut() {
-            *children = children.iter().map(|c| Rc::new(lock_element(c))).collect();
-        }
-    new.common_mut().locked = true;
-    new
-}
-
+/// Clear `locked` on `elem` and, RECURSIVELY, on everything inside it.
+///
+/// The recursion here is NOT the materialization §13 repealed — it is the sole
+/// artist-reachable REVOCATION (`Object > Unlock All`), and it is what clears
+/// flags a document already carries: files saved before LOCKMAT hold stamped
+/// descendants that inheritance can no longer express, and this walk is the
+/// only thing in either port that can remove them. Its twin, `lock_element`,
+/// was deleted with that wave; `Controller::lock_selection` now writes the flag
+/// on the selected element alone.
 fn unlock_element(elem: &Element) -> Element {
     let mut new = elem.clone();
     if let Some(children) = new.children_mut() {
@@ -2859,18 +3009,21 @@ fn select_flat(
                     // grandchild unguarded, so a rubber band that touched only
                     // a locked member dragged the group and its unlocked
                     // siblings into the selection with it.
+                    //
+                    // §16.4 (RULED 2026-07-29): the band ASKS about members,
+                    // but ANSWERS with the group alone. This branch used to
+                    // push the group AND every unlocked member, which is the
+                    // one selection shape no operation reads coherently:
+                    // `copy_selection` copies the group whole and then copies
+                    // each member INTO the source group, so marquee-then-
+                    // duplicate left the SOURCE holding four children instead
+                    // of two. Move and delete survived it only by accident.
                     if let Some(grandchildren) = child.children()
                         && grandchildren.iter().enumerate().any(|(gi, gc)| {
                             !doc.effective_locked(&vec![li, ci, gi]) && predicate(gc)
                         })
                     {
                         entries.push(ElementSelection::all(vec![li, ci]));
-                        for gi in 0..grandchildren.len() {
-                            if doc.effective_locked(&vec![li, ci, gi]) {
-                                continue;
-                            }
-                            entries.push(ElementSelection::all(vec![li, ci, gi]));
-                        }
                     }
                 } else if predicate(child) {
                     entries.push(ElementSelection::all(vec![li, ci]));
@@ -3037,19 +3190,75 @@ pub fn selection_fill_summary(doc: &Document) -> FillSummary {
     if doc.selection.is_empty() {
         return FillSummary::NoSelection;
     }
+    // A selected CONTAINER summarises the paint of its members, at any depth --
+    // the read twin of `map_paintable`. Reading a container's own `fill()`
+    // gives `None` and reported "no fill" for a group whose members all carry
+    // one; a group whose members disagree is `Mixed`, the same answer those
+    // members give when selected without the group around them.
     let mut first: Option<Option<Fill>> = None;
+    let mut mixed = false;
     for es in &doc.selection {
-        let fill = doc.get_element(&es.path).and_then(|e| e.fill()).copied();
-        match &first {
-            None => first = Some(fill),
-            Some(prev) => {
-                if *prev != fill {
-                    return FillSummary::Mixed;
+        let Some(elem) = doc.get_element(&es.path) else { continue };
+        crate::geometry::element::for_each_paintable(elem, &mut |leaf| {
+            if mixed {
+                return;
+            }
+            let fill = leaf.fill().copied();
+            match &first {
+                None => first = Some(fill),
+                Some(prev) => {
+                    if *prev != fill {
+                        mixed = true;
+                    }
                 }
             }
+        });
+        if mixed {
+            return FillSummary::Mixed;
         }
     }
     FillSummary::Uniform(first.unwrap_or(None))
+}
+
+/// The stroke the Stroke panel should DISPLAY for the current selection.
+///
+/// Found by JYH at council 2026-07-29: selecting a group showed 1 pt while both
+/// members carried 5. The panel override read `doc.selection.first()` and then
+/// that element's OWN stroke -- `None` for a container -- and fell through to a
+/// hard-coded 1.0. Both ports did it identically, so no cross-language gate saw
+/// it. The eighth consumer of the container-blind premise.
+///
+/// ONLY THE CONTAINER CASE CHANGES. A single leaf and a uniform multi-selection
+/// resolve to the value they always did. A MIXED selection still falls back to
+/// the first element's stroke -- the pre-existing lie, deliberately left alone:
+/// showing the tab default instead would be a DIFFERENT lie, not progress, and
+/// the honest answer is `<mixed>`, which needs the widget vocabulary scoped in
+/// transcripts/MIXED_SELECTION.md.
+pub fn selection_stroke_for_panel(doc: &Document) -> Option<Stroke> {
+    match selection_stroke_summary(doc) {
+        StrokeSummary::Uniform(Some(s)) => Some(s),
+        // MIXED (or no stroke): fall back to the FIRST PAINTABLE LEAF, not the
+        // first selection ENTRY. Reading the entry directly gives `None` for a
+        // container and drops to a hard-coded 1.0, so a mixed GROUP answered
+        // 1 pt while its two members selected DIRECTLY answered with the first
+        // member's weight -- the same document and the same mixedness giving
+        // two different numbers. THE SPELLINGS MUST AGREE: a group is a mixed
+        // selection of one (MIXED_SELECTION.md §4).
+        //
+        // Both answers are still lies until `<mixed>` exists. This makes them
+        // the SAME lie, which is the most that can be done without the widget
+        // vocabulary.
+        _ => doc.selection.first().and_then(|es| {
+            let elem = doc.get_element(&es.path)?;
+            let mut found: Option<Stroke> = None;
+            crate::geometry::element::for_each_paintable(elem, &mut |leaf| {
+                if found.is_none() {
+                    found = leaf.stroke().cloned();
+                }
+            });
+            found
+        }),
+    }
 }
 
 /// Compute the stroke summary for the current selection.
@@ -3057,16 +3266,31 @@ pub fn selection_stroke_summary(doc: &Document) -> StrokeSummary {
     if doc.selection.is_empty() {
         return StrokeSummary::NoSelection;
     }
+    // A selected CONTAINER summarises the paint of its members, at any depth --
+    // the read twin of `map_paintable`. Reading a container's own `stroke()`
+    // gives `None` and reported "no stroke" for a group whose members all carry
+    // one; a group whose members disagree is `Mixed`, the same answer those
+    // members give when selected without the group around them.
     let mut first: Option<Option<Stroke>> = None;
+    let mut mixed = false;
     for es in &doc.selection {
-        let stroke = doc.get_element(&es.path).and_then(|e| e.stroke()).copied();
-        match &first {
-            None => first = Some(stroke),
-            Some(prev) => {
-                if *prev != stroke {
-                    return StrokeSummary::Mixed;
+        let Some(elem) = doc.get_element(&es.path) else { continue };
+        crate::geometry::element::for_each_paintable(elem, &mut |leaf| {
+            if mixed {
+                return;
+            }
+            let stroke = leaf.stroke().copied();
+            match &first {
+                None => first = Some(stroke),
+                Some(prev) => {
+                    if *prev != stroke {
+                        mixed = true;
+                    }
                 }
             }
+        });
+        if mixed {
+            return StrokeSummary::Mixed;
         }
     }
     StrokeSummary::Uniform(first.unwrap_or(None))
@@ -3729,6 +3953,465 @@ mod tests {
         } else {
             panic!("expected Rect");
         }
+    }
+
+
+    /// A GROUP selected as ONE entry must move when the selection moves.
+    ///
+    /// This is the shape every Selection-tool click on a group produces:
+    /// `selection.yaml` runs `doc.set_selection: { paths: [hit] }` and
+    /// `hit_test` returns the GROUP's path for a click inside a child
+    /// (`doc_primitives.rs`, `hit_test_returns_group_path_when_clicking_child_rect`).
+    /// §16 then made Select All produce it too, "a group counting as ONE".
+    ///
+    /// `move_control_points` had no Group arm, so the group fell to its
+    /// catch-all and did not move. Rust masked it because `doc.set_selection`
+    /// expands a container to its descendants and the CHILDREN moved
+    /// themselves; JasSwift does not expand and could not drag a group at all.
+    /// LAYER_STRUCTURE.md §20 rules that expansion away, which would have
+    /// carried the defect here too. Twin: JasSwift `GroupMoveProbeTests`.
+    #[test]
+    fn a_group_selected_as_one_entry_moves() {
+        let mut model = setup_model();
+        // The setup doc has a Group at [0,1] (see ungroup_selection).
+        let before = match model.document().get_element(&vec![0, 1]).unwrap() {
+            Element::Group(g) => match &*g.children[0] {
+                Element::Line(l) => (l.x1, l.y1),
+                other => panic!("group child 0 is unexpected: {:?}", other),
+            },
+            other => panic!("[0,1] is not a Group: {:?}", other),
+        };
+        Controller::set_selection(&mut model, vec![ElementSelection::all(vec![0, 1])]);
+        Controller::move_selection(&mut model, 10.0, 20.0);
+        let after = match model.document().get_element(&vec![0, 1]).unwrap() {
+            Element::Group(g) => match &*g.children[0] {
+                Element::Line(l) => (l.x1, l.y1),
+                other => panic!("group child 0 is unexpected: {:?}", other),
+            },
+            other => panic!("[0,1] is not a Group: {:?}", other),
+        };
+        assert_eq!(
+            after,
+            (before.0 + 10.0, before.1 + 20.0),
+            "a Group selected as ONE entry did not move"
+        );
+    }
+
+
+    /// §16.4 — A SELECTION NEVER HOLDS AN ANCESTOR AND ITS OWN DESCENDANT.
+    ///
+    /// RULED 2026-07-29 (banked by JYH, reversible in council). §16 gave Select
+    /// All this shape, "a group counting as ONE"; the MARQUEE kept the older
+    /// branch that pushed the group AND every unlocked member. The corpus
+    /// defended it in prose — the marquee "legitimately asks did anything
+    /// inside the band match, and its answer includes the members".
+    ///
+    /// It is not defensible, and the reason is COPY, not taste. `copy_selection`
+    /// walks the selection and copies each entry. Given the group and its two
+    /// members it copies the GROUP (whole, with both children) and then copies
+    /// each MEMBER into the source group — so a marquee-then-duplicate left the
+    /// SOURCE group holding four children instead of two. Measured before the
+    /// fix: `Group(4 children)` beside `Group(2 children)`. The artist asked for
+    /// a copy and got the original damaged.
+    ///
+    /// Move and delete survived the same shape only by accident (delete sorts
+    /// descending; move writes absolute positions read from the pristine
+    /// document). Accidental safety across two verbs is not an invariant.
+    ///
+    /// The marquee still ASKS about members — a band touching any unlocked
+    /// member selects the group. It just answers with the outermost object.
+    #[test]
+    fn a_marquee_selects_the_group_not_its_members_too() {
+        use crate::geometry::element::GroupElem;
+        use std::rc::Rc;
+        let mk_rect = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(mk_rect(0.0)), Rc::new(mk_rect(20.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(group)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: Vec::new(), ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+
+        // A band over the whole group.
+        Controller::select_rect(&mut model, -5.0, -5.0, 100.0, 100.0, false);
+        let paths: Vec<ElementPath> = model.document().selection.iter()
+            .map(|s| s.path.clone()).collect();
+        assert_eq!(paths, vec![vec![0, 0]],
+                   "the marquee selects the GROUP alone, not the group and its \
+                    members; got {paths:?}");
+
+        // And the consequence that made this a defect rather than a preference.
+        Controller::copy_selection(&mut model, 100.0, 0.0);
+        let kids = model.document().layers[0].children().unwrap().to_vec();
+        assert_eq!(kids.len(), 2, "one copy beside the source");
+        for (i, k) in kids.iter().enumerate() {
+            match k.as_ref() {
+                Element::Group(g) => assert_eq!(
+                    g.children.len(), 2,
+                    "group [{i}] must still hold exactly its two members -- \
+                     before the fix the SOURCE group ended up with four"),
+                other => panic!("expected a Group at [{i}], got {other:?}"),
+            }
+        }
+    }
+
+
+    /// AN ANCESTOR IN THE SELECTION COVERS ITS DESCENDANTS — the move applies
+    /// once, at the outermost entry.
+    ///
+    /// §16.4 rules that a selection never holds an ancestor and its own
+    /// descendant, but the ruling is not yet ENFORCED at every producer: the
+    /// extend/add seams (`add_to_selection`, `toggle_selection`, raw
+    /// `set_selection`, and `doc.set_selection`'s still-live container
+    /// expansion) can all still build one. Found by an adversarial review of
+    /// §16.4, 2026-07-29.
+    ///
+    /// `move_selection` reads each element from the PRISTINE pre-move document
+    /// and writes an absolute result. For two disjoint entries that is exactly
+    /// right. For an ancestor and its descendant it is not: the descendant's
+    /// write lands on top of the ancestor's, discarding the ancestor's
+    /// contribution to it.
+    ///
+    /// Measured: group selected whole plus one member's single control point,
+    /// dragged +24. The sibling moved 20 -> 44 correctly, while the
+    /// partially-selected member became a Polygon STRANDED at pristine
+    /// coordinates — [(24,0), (10,0), (10,10), (0,10)] — with one corner
+    /// displaced and the group's translation lost. That is artwork corruption
+    /// from an ordinary two-tool gesture.
+    ///
+    /// The rule here is the one §16.4 states: the OUTERMOST entry wins. It also
+    /// makes the operation correct regardless of which producer built the
+    /// selection, which enforcing §16.4 at each seam separately would not.
+    #[test]
+    fn an_ancestor_in_the_selection_covers_its_descendants() {
+        use crate::geometry::element::GroupElem;
+        use crate::document::document::SortedCps;
+        use std::rc::Rc;
+        let mk_rect = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(mk_rect(0.0)), Rc::new(mk_rect(20.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(group)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: Vec::new(), ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::set_selection(&mut model, vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection { path: vec![0, 0, 0],
+                               kind: SelectionKind::Partial(SortedCps::from_iter([0usize])) },
+        ]);
+        Controller::move_selection(&mut model, 24.0, 0.0);
+
+        let Some(Element::Group(g)) = model.document().get_element(&vec![0, 0]) else {
+            panic!("[0,0] should still be a Group");
+        };
+        // BOTH members ride the group's move, whole, and neither is rebuilt as
+        // a Polygon by a control-point edit that the group's move supersedes.
+        match g.children[0].as_ref() {
+            Element::Rect(r) => assert_eq!(
+                (r.x, r.y), (24.0, 0.0),
+                "the partially-selected member rides the group's move whole"),
+            other => panic!("child 0 must stay a Rect, got {other:?}"),
+        }
+        match g.children[1].as_ref() {
+            Element::Rect(r) => assert_eq!((r.x, r.y), (44.0, 0.0),
+                                           "the sibling moves with the group"),
+            other => panic!("child 1 must stay a Rect, got {other:?}"),
+        }
+    }
+
+
+    /// FILL AND STROKE RECURSE INTO A SELECTED CONTAINER. RULED 2026-07-29.
+    ///
+    /// Selecting a group and clicking a swatch is the commonest operation in
+    /// the application, and it did NOTHING to the group's members. Both ports
+    /// handled containers EXPLICITLY -- Rust `Group(_) | Layer(_) =>
+    /// elem.clone()`, Swift `case .group, .layer:` -- so nobody forgot; someone
+    /// decided a container has no fill of its own. True of the data model,
+    /// false of the artist's intent.
+    ///
+    /// It was invisible in Rust because `doc.set_selection` expands a container
+    /// to its descendants, so the MEMBERS were in the selection and got filled.
+    /// JasSwift does not expand, so there it was simply broken, and §20 would
+    /// have carried it into Rust.
+    ///
+    /// JYH at council: *"yes, recurse into members"* -- the convention a vector
+    /// illustration application follows. The recursion lives at the
+    /// selection-apply level, NOT inside `with_fill`/`with_stroke`: those are
+    /// also called at render time (`canvas/render.rs`, stroke scaling) and on
+    /// symbol-instance overrides, where recursing would be wrong.
+    #[test]
+    fn fill_and_stroke_recurse_into_a_selected_container() {
+        use crate::geometry::element::GroupElem;
+        use std::rc::Rc;
+        let mk = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        // A group holding a leaf AND a nested group, so recursion is tested at
+        // two depths rather than one.
+        let inner = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(40.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { id: Some("inner".into()), ..Default::default() },
+        });
+        let outer = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(0.0)), Rc::new(inner)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { id: Some("outer".into()), ..Default::default() },
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(outer)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        let red = Fill::new(Color::rgb(1.0, 0.0, 0.0));
+        Controller::set_selection_fill(&mut model, Some(red.clone()));
+
+        let d = model.document();
+        let Some(Element::Group(g)) = d.get_element(&vec![0, 0]) else { panic!("group") };
+        // T4 BYSTANDER: the container is rebuilt, so its own fields must survive.
+        assert_eq!(g.common.id.as_deref(), Some("outer"),
+                   "the rebuilt container keeps its own id");
+        match g.children[0].as_ref() {
+            Element::Rect(r) => assert!(r.fill.is_some(), "the direct member is filled"),
+            other => panic!("expected Rect, got {other:?}"),
+        }
+        let Element::Group(ig) = g.children[1].as_ref() else { panic!("nested group") };
+        assert_eq!(ig.common.id.as_deref(), Some("inner"),
+                   "the nested container keeps ITS id too");
+        match ig.children[0].as_ref() {
+            Element::Rect(r) => assert!(r.fill.is_some(),
+                                        "the member two levels down is filled"),
+            other => panic!("expected Rect, got {other:?}"),
+        }
+    }
+
+
+    /// A CONTAINER'S FULL SELECTION MOVES IT, however that fullness is spelled.
+    ///
+    /// DOCUMENT.md's control-point table grants a Group FOUR control points at
+    /// its bounding-box corners. `control_point_count` and `control_points`
+    /// both implement that. So "this group is fully selected" has TWO valid
+    /// spellings: `All`, and `Partial([0,1,2,3])` -- the latter is exactly what
+    /// `kind.to_sorted(control_point_count(elem))` produces from an `All` entry.
+    ///
+    /// The GROUPMOVE repair guarded its container arm on `kind.is_all(0)`,
+    /// which is the right predicate for an element with NO control points and
+    /// the wrong one for a container that has four: `Partial([0,1,2,3])` fails
+    /// it, falls to the catch-all, and THE GROUP DOES NOT MOVE. Defect 1, still
+    /// armed one layer down, and this seat armed it.
+    ///
+    /// Found by an adversarial review of the element-dispatch ledger, which
+    /// cited the spec table against this seat's own claim that a container has
+    /// no control points.
+    #[test]
+    fn a_container_moves_however_its_full_selection_is_spelled() {
+        use crate::geometry::element::{GroupElem, control_point_count, move_control_points};
+        use crate::document::document::SortedCps;
+        use std::rc::Rc;
+        let mk = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let g = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(0.0)), Rc::new(mk(20.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        assert_eq!(control_point_count(&g), 4,
+                   "DOCUMENT.md grants a Group four bbox-corner control points");
+
+        let full = SelectionKind::Partial(SortedCps::from_iter([0usize, 1, 2, 3]));
+        for (label, kind) in [("All", SelectionKind::All), ("Partial(all four)", full)] {
+            let moved = move_control_points(&g, &kind, 24.0, 0.0);
+            let Element::Group(mg) = &moved else { panic!("still a Group") };
+            let Element::Rect(r) = mg.children[0].as_ref() else { panic!("Rect") };
+            assert_eq!(r.x, 24.0,
+                       "a fully-selected container moves when spelled {label}");
+        }
+
+        // A PARTIAL container selection is a resize gesture, not a move, and
+        // group resize does not exist. It must leave the group alone rather
+        // than translating it by a drag meant for one corner.
+        let corner = SelectionKind::Partial(SortedCps::from_iter([0usize]));
+        assert_eq!(move_control_points(&g, &corner, 24.0, 0.0), g,
+                   "one corner selected is a resize gesture, not a translate");
+    }
+
+
+    /// A SELECTED CONTAINER SUMMARISES ITS MEMBERS' PAINT.
+    ///
+    /// The panels read the selection through `selection_fill_summary` /
+    /// `selection_stroke_summary`, whose three states are NoSelection, Mixed and
+    /// Uniform. Both read `e.fill()` / `e.stroke()`, which return `None` for a
+    /// container -- so a selected GROUP reported `Uniform(None)`, "no stroke".
+    ///
+    /// That is a WRONG answer rather than an unavailable one, and since the
+    /// paint ruling (JYH, 2026-07-29: fill and stroke recurse into members) it
+    /// is an asymmetry an artist meets directly: set a group's stroke, and the
+    /// panel says the group has none.
+    ///
+    /// The summary now recurses through containers to their paintable leaves --
+    /// the READ twin of `map_paintable`. A group whose members agree reads back
+    /// as `Uniform`; one whose members differ reads `Mixed`, which is the
+    /// honest answer and the same one two differently-stroked siblings give.
+    #[test]
+    fn a_selected_container_summarises_its_members_paint() {
+        use crate::geometry::element::GroupElem;
+        use std::rc::Rc;
+        let mk = |w: f64| Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None,
+            stroke: Some(Stroke { width: w, ..Stroke::new(Color::BLACK, w) }),
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let uniform = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(5.0)), Rc::new(mk(5.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let mixed = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(5.0)), Rc::new(mk(1.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(uniform), Rc::new(mixed)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let base = Document { layers: vec![layer], selected_layer: 0,
+                              selection: Vec::new(), ..Document::default() };
+
+        // A group whose members agree reads back as their common value.
+        let mut d = base.clone();
+        d.selection = vec![ElementSelection::all(vec![0, 0])];
+        match selection_stroke_summary(&d) {
+            StrokeSummary::Uniform(Some(s)) => assert_eq!(s.width, 5.0),
+            other => panic!("a uniform group must summarise its members, got {other:?}"),
+        }
+
+        // JYH's own example, one level in: a 5pt and a 1pt member have no
+        // honest common weight.
+        d = base.clone();
+        d.selection = vec![ElementSelection::all(vec![0, 1])];
+        assert!(matches!(selection_stroke_summary(&d), StrokeSummary::Mixed),
+                "a group with a 5pt and a 1pt member is Mixed, not Uniform(None)");
+
+        // And the same two shapes selected WITHOUT a container agree with it --
+        // which is the point: a group is a mixed selection of one.
+        d = base.clone();
+        d.selection = vec![ElementSelection::all(vec![0, 1, 0]),
+                           ElementSelection::all(vec![0, 1, 1])];
+        assert!(matches!(selection_stroke_summary(&d), StrokeSummary::Mixed),
+                "the container and non-container spellings must agree");
+    }
+
+
+    /// THE STROKE PANEL'S WEIGHT FIELD RESOLVES A CONTAINER.
+    ///
+    /// Found by JYH at council 2026-07-29, clicking a group: the Weight field
+    /// showed 1 pt while both members carried 5. The panel override read
+    /// `doc.selection.first()` and then that element's OWN stroke -- `None` for
+    /// a container -- and fell through to `?? 1.0`. Both ports, identically,
+    /// which is why no cross-language gate saw it.
+    ///
+    /// The summary already recurses into containers (PAINTSUMMARY), so the fix
+    /// is to ASK it. Only the container case changes: a single leaf and a
+    /// uniform multi-selection resolve to the same value they always did, and a
+    /// MIXED selection still falls back to the first element's stroke -- the
+    /// pre-existing lie, left alone until transcripts/MIXED_SELECTION.md is
+    /// answered, because replacing one lie with a different one is not progress.
+    #[test]
+    fn the_weight_override_resolves_a_uniform_container() {
+        use crate::geometry::element::GroupElem;
+        use std::rc::Rc;
+        let mk = |w: f64| Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: Some(Stroke::new(Color::BLACK, w)),
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        });
+        let g = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(5.0)), Rc::new(mk(5.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(g), Rc::new(mk(3.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let mut doc = Document { layers: vec![layer], selected_layer: 0,
+                                 selection: Vec::new(), ..Document::default() };
+
+        // The GROUP: both members are 5, so the panel must say 5.
+        doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        assert_eq!(selection_stroke_for_panel(&doc).map(|s| s.width), Some(5.0),
+                   "a uniform group resolves to its members' common weight");
+
+        // The LEAF, unchanged: this is what already worked.
+        doc.selection = vec![ElementSelection::all(vec![0, 1])];
+        assert_eq!(selection_stroke_for_panel(&doc).map(|s| s.width), Some(3.0),
+                   "a leaf still resolves to its own weight");
+
+        // A MIXED container and its members selected DIRECTLY must give the
+        // SAME answer -- a group is a mixed selection of one. Reading the
+        // selection ENTRY instead of the first leaf gave 1.0 for the group and
+        // the first member's weight for the members: two numbers, one fact.
+        let mixed = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(5.0)), Rc::new(mk(1.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let mut d2 = doc.clone();
+        d2.layers = vec![Element::Layer(LayerElem {
+            children: vec![Rc::new(mixed)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        })];
+        d2.selection = vec![ElementSelection::all(vec![0, 0])];
+        let via_group = selection_stroke_for_panel(&d2).map(|s| s.width);
+        d2.selection = vec![ElementSelection::all(vec![0, 0, 0]),
+                            ElementSelection::all(vec![0, 0, 1])];
+        let via_members = selection_stroke_for_panel(&d2).map(|s| s.width);
+        assert_eq!(via_group, via_members,
+                   "a mixed group and its members must answer alike");
+        assert_eq!(via_group, Some(5.0), "and that answer is the first leaf's");
     }
 
     #[test]
@@ -4822,6 +5505,81 @@ mod tests {
         // Original was at index 0; copy is appended at index 1.
         let paths = sel_paths(&model);
         assert!(paths.contains(&vec![0, 1]));
+    }
+
+    /// §19 (RULED 2026-07-28, JYH: *"yes document order"*) — the selection a
+    /// DUPLICATE leaves behind is in document order, and it names the COPIES.
+    ///
+    /// Four rects a b c d; duplicate the NON-CONTIGUOUS pair b=[0,1] and
+    /// d=[0,3] with dx=6. The descending walk is load-bearing and stays
+    /// (inserting after [0,1] shifts [0,3]), so the document that comes out is
+    ///
+    ///     [0,0] a@0   [0,1] b@10   [0,2] b'@16   [0,3] c@20   [0,4] d@30   [0,5] d'@36
+    ///
+    /// and the two COPIES are at [0,2] and [0,5].
+    ///
+    /// **This assertion is deliberately over-specified relative to §19**, and
+    /// that is the point: the byproduct loop pushed `[0,4]` and `[0,2]`, and
+    /// `[0,4]` is not merely mis-ORDERED — after the later insertion at [0,1]
+    /// shifted everything above it, `[0,4]` names **d, the SOURCE**. Sorting
+    /// stale paths yields a tidy ascending list of the wrong elements, so a
+    /// test asserting only "ascending" would pass on a half-fix. Both the
+    /// order and the identity are pinned here, by path AND by geometry.
+    #[test]
+    fn copy_selection_of_two_elements_selects_both_copies_in_document_order() {
+        let mut model = Model::default();
+        for i in 0..4 {
+            Controller::add_element(
+                &mut model,
+                make_rect(i as f64 * 10.0, 0.0, 5.0, 5.0),
+            );
+        }
+        Controller::set_selection(
+            &mut model,
+            vec![
+                ElementSelection::all(vec![0, 1]),
+                ElementSelection::all(vec![0, 3]),
+            ],
+        );
+        Controller::copy_selection(&mut model, 6.0, 0.0);
+
+        // The document grew by exactly the two copies, in document order.
+        let doc = model.document();
+        let xs: Vec<f64> = doc.layers[0]
+            .children()
+            .unwrap()
+            .iter()
+            .map(|c| match &**c {
+                Element::Rect(r) => r.x,
+                other => panic!("expected a Rect, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(xs, vec![0.0, 10.0, 16.0, 20.0, 30.0, 36.0], "document order");
+
+        // ORDER: ascending, i.e. document order — NOT the descending byproduct.
+        let paths: Vec<Vec<usize>> =
+            doc.selection.iter().map(|es| es.path.clone()).collect();
+        assert_eq!(
+            paths,
+            vec![vec![0, 2], vec![0, 5]],
+            "the duplicate must leave its selection in DOCUMENT order",
+        );
+
+        // IDENTITY: both selected paths must name the OFFSET copies (x=16, 36),
+        // never a source (x=10, 30). This is the half a sort alone cannot fix.
+        let selected_xs: Vec<f64> = doc
+            .selection
+            .iter()
+            .map(|es| match doc.get_element(&es.path).unwrap() {
+                Element::Rect(r) => r.x,
+                other => panic!("expected a Rect, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            selected_xs,
+            vec![16.0, 36.0],
+            "the selection must name the two COPIES, not a source",
+        );
     }
 
     #[test]
@@ -6758,16 +7516,23 @@ mod preservation_law_tests {
             other => panic!("expected a compound shape, got {other:?}"),
         }) else { panic!("expected a compound shape") };
         // MANDATORY GEOMETRY PAIRING: the copy carries the source's operand
-        // geometry. It is NOT offset by (dx, dy): `move_control_points` falls
-        // through to a bare clone for a compound shape (`_ => elem.clone()`),
-        // so Edit > Copy of a live compound lands the copy exactly on top of
-        // its source. That is a pre-existing behaviour gap, recorded here
-        // because a geometry assertion must state what actually happened —
-        // it is not this wave's subject and is not repaired here.
+        // geometry, OFFSET by (dx, dy).
+        //
+        // This assertion used to demand x == 0 and explained why: a compound
+        // shape fell through `move_control_points`'s catch-all, so Edit > Copy
+        // of a live compound landed the copy exactly on top of its source. It
+        // was recorded as a pre-existing gap and deliberately not repaired.
+        //
+        // That gap is now CLOSED — `move_control_points` gained container and
+        // live arms delegating to `translate_element` (2026-07-29), so the copy
+        // lands beside its source like every other kind. This test and its
+        // JasSwift twin both went red on the same value, in lockstep, which is
+        // the corpus reporting a recorded gap being closed rather than a
+        // regression.
         let Element::Rect(r) = copy.operands[0].as_ref() else { panic!("rect") };
-        assert!((r.x - 0.0).abs() < 1e-9 && (r.width - 10.0).abs() < 1e-9,
-                "the copy carries the back operand's geometry, got x={} w={}",
-                r.x, r.width);
+        assert!((r.x - 20.0).abs() < 1e-9 && (r.width - 10.0).abs() < 1e-9,
+                "the copy carries the back operand's geometry offset by dx=20, \
+                 got x={} w={}", r.x, r.width);
         assert!(copy.common.id.is_none(), "the copy itself is born id-less");
         for (i, operand) in copy.operands.iter().enumerate() {
             assert!(operand.common().id.is_none(),

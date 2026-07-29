@@ -1,0 +1,138 @@
+{
+  "_doc": [
+    "THE ELEMENT-DISPATCH LEDGER. See scripts/check_element_dispatch.py for what",
+    "this is and why it exists. Every function that switches on Element kind with",
+    "no container arm must appear here exactly once.",
+    "",
+    "VERDICTS:",
+    "  leaf_only -- the container case IS handled; `handled_at` says where.",
+    "  unhandled -- containers have NO answer anywhere; `unreached_because` says",
+    "               what keeps them away, and `becomes_owed_when` states the",
+    "               expiry. NOT a decision to reject containers -- an unfinished",
+    "               feature with a note saying so.",
+    "  owed      -- a container DOES reach here and the result is wrong or",
+    "               silently nothing; `artist_visible` says what they see.",
+    "",
+    "Five defects wore this shape in one week, every one invisible in Rust (where",
+    "doc.set_selection expands containers) and live in JasSwift (which does not).",
+    "LAYER_STRUCTURE.md section 20 removes that expansion, at which point every",
+    "remaining site goes live in Rust too."
+  ],
+  "sites": {
+    "rust:jas_dioxus/src/geometry/element.rs::with_fill_gradient": {
+      "verdict": "leaf_only",
+      "reason": "Handled by the caller. Containers recurse at the SELECTION-APPLY level via map_paintable (RULED 2026-07-29: paint recurses into members). Deliberately NOT here -- with_* is also called at render time and on symbol-instance overrides, where recursing would be wrong or wasteful.",
+      "handled_at": "document/controller.rs::set_selection_fill_gradient via element.rs::map_paintable"
+    },
+    "rust:jas_dioxus/src/geometry/element.rs::with_stroke_gradient": {
+      "verdict": "leaf_only",
+      "reason": "As with_fill_gradient: containers recurse at the apply level.",
+      "handled_at": "document/controller.rs::set_selection_stroke_gradient via element.rs::map_paintable"
+    },
+    "rust:jas_dioxus/src/geometry/element.rs::with_stroke_brush": {
+      "verdict": "leaf_only",
+      "reason": "As with_fill_gradient. A brush is stroke styling, so it recurses under the same ruling. Note this arm also PROMOTES a Line/Polyline to a Path to carry the brush -- a container has no stroke to promote.",
+      "handled_at": "document/controller.rs::set_selection_stroke_brush via element.rs::map_paintable"
+    },
+    "rust:jas_dioxus/src/geometry/element.rs::with_stroke_brush_overrides": {
+      "verdict": "leaf_only",
+      "reason": "As with_stroke_brush.",
+      "handled_at": "document/controller.rs::set_selection_stroke_brush_overrides via element.rs::map_paintable"
+    },
+    "swift:JasSwift/Sources/Geometry/Element.swift::withFillGradient": {
+      "verdict": "leaf_only",
+      "reason": "Twin of Rust with_fill_gradient; containers recurse via Element.mapPaintable.",
+      "handled_at": "Document/Controller.swift::setSelectionFillGradient via Element.mapPaintable"
+    },
+    "swift:JasSwift/Sources/Geometry/Element.swift::withStrokeGradient": {
+      "verdict": "leaf_only",
+      "reason": "Twin of Rust with_stroke_gradient; containers recurse via Element.mapPaintable.",
+      "handled_at": "Document/Controller.swift::setSelectionStrokeGradient via Element.mapPaintable"
+    },
+    "rust:jas_dioxus/src/geometry/element.rs::fill": {
+      "verdict": "leaf_only",
+      "reason": "An accessor for an element's OWN fill, and a container genuinely has none. The container answer belongs to the SUMMARY that reads a selection, and as of 2026-07-29 selection_fill_summary recurses to paintable leaves, so a group reads back its members' common value or Mixed.",
+      "handled_at": "document/controller.rs::selection_fill_summary via element.rs::for_each_paintable"
+    },
+    "rust:jas_dioxus/src/geometry/element.rs::stroke": {
+      "verdict": "leaf_only",
+      "reason": "As fill: the container answer lives in selection_stroke_summary.",
+      "handled_at": "document/controller.rs::selection_stroke_summary via element.rs::for_each_paintable"
+    },
+    "rust:jas_dioxus/src/geometry/element.rs::fill_gradient": {
+      "verdict": "owed",
+      "reason": "An accessor with NO summary twin. fill and stroke gained one on 2026-07-29; the gradient readers did not, so a selected group still reports no gradient even when every member carries the same one.",
+      "artist_visible": "set a gradient on a group, and the Gradient panel reads back empty"
+    },
+    "rust:jas_dioxus/src/geometry/element.rs::stroke_gradient": {
+      "verdict": "owed",
+      "reason": "As fill_gradient: no summary twin recurses for gradients.",
+      "artist_visible": "set a stroke gradient on a group, and the panel reads back empty"
+    },
+    "rust:jas_dioxus/src/geometry/element.rs::control_points": {
+      "verdict": "leaf_only",
+      "reason": "The catch-all IS the container answer and it is the spec's: DOCUMENT.md's control-point table grants a Group four BOUNDING BOX CORNERS, which is exactly what elem.bounds() returns here. Do not 'fix' this to empty -- see transcripts/TRANSFORM_BOX.md, where those four corners are the unbuilt transform box's handles rather than geometry.",
+      "handled_at": "its own catch-all, per DOCUMENT.md's control-point table"
+    },
+    "rust:jas_dioxus/src/geometry/element.rs::control_point_count": {
+      "verdict": "leaf_only",
+      "reason": "As control_points: the catch-all returns 4, which is DOCUMENT.md's answer for a Group. move_control_points now guards on THIS count rather than on zero -- guarding on zero left a fully-selected group unable to move.",
+      "handled_at": "its own catch-all, per DOCUMENT.md's control-point table"
+    },
+    "rust:jas_dioxus/src/document/op_apply.rs::scale_elem_stroke_width": {
+      "verdict": "owed",
+      "reason": "A container reaches here through the transform trio and its members' stroke widths are left untouched. A prerequisite for the transform box (transcripts/TRANSFORM_BOX.md section 9), not an independent defect.",
+      "artist_visible": "scale a group 2x with scale_strokes on, and its strokes stay thin"
+    },
+    "rust:jas_dioxus/src/algorithms/shape_recognize.rs::template_appearance": {
+      "verdict": "unhandled",
+      "reason": "Containers have NO answer here or anywhere in this module. recognize_element declines a Group rather than recursing into it, so clean-up-shape on a group would silently do nothing -- unlike the eyedropper, which faces the identical situation and unwraps the container. The catch-all also FABRICATES CommonProps::default() rather than refusing, so a container arriving here would lose its transform, opacity, mask and id.",
+      "unreached_because": "shape_recognize.rs::recognize_element returns None for Group|Layer|Live in an EXHAUSTIVE match (a new element kind fails to compile), and the feature has NO production caller in either port -- tests only",
+      "becomes_owed_when": "shape recognition is wired to a command, or that match gains a catch-all"
+    },
+    "rust:jas_dioxus/src/algorithms/shape_recognize.rs::recognized_to_element": {
+      "verdict": "unhandled",
+      "reason": "A constructor: recognized shape + template -> clean primitive. It delegates the whole container question to template_appearance and would build a plausible-looking element from fabricated defaults.",
+      "unreached_because": "same gate as template_appearance -- recognize_element returns None first",
+      "becomes_owed_when": "shape recognition is wired to a command"
+    },
+    "swift:JasSwift/Sources/Algorithms/ShapeRecognize.swift::templateAppearance": {
+      "verdict": "unhandled",
+      "reason": "Twin of Rust template_appearance.",
+      "unreached_because": "ShapeRecognize.swift::recognizeElement gates Group/Layer identically; no production caller",
+      "becomes_owed_when": "shape recognition is wired to a command"
+    },
+    "swift:JasSwift/Sources/Algorithms/ShapeRecognize.swift::recognizedToElement": {
+      "verdict": "unhandled",
+      "reason": "Twin of Rust recognized_to_element.",
+      "unreached_because": "same gate -- recognizeElement returns nil for containers first",
+      "becomes_owed_when": "shape recognition is wired to a command"
+    },
+    "swift:JasSwift/Sources/Algorithms/ShapeRecognize.swift::recognizeElement": {
+      "verdict": "unhandled",
+      "reason": "THIS IS THE GATE the three rows above name. It lists Group/Layer/Live and returns nil -- declining rather than recursing. Recorded as a site in its own right so that changing it is visibly a decision about containers.",
+      "unreached_because": "it is itself the gate; no production caller reaches it at all",
+      "becomes_owed_when": "shape recognition is wired to a command, at which point this is where the container answer must be written"
+    },
+    "swift:JasSwift/Sources/Algorithms/Eyedropper.swift::rebuildWithOpacityAndBlend": {
+      "verdict": "leaf_only",
+      "reason": "Containers ARE handled: the caller unwraps them. applyToTargetRecursive walks .group/.layer and applies to every leaf, in BOTH ports, and isTargetEligible's own comment states the rule -- 'Group / Layer are never targets, the caller recurses into them and applies to leaves' (EYEDROPPER_TOOL.md section Eligibility). Eyedropping onto a group works.",
+      "handled_at": "Tools/YamlToolEffects.swift::applyToTargetRecursive"
+    },
+    "rust:jas_dioxus/src/interpreter/effects.rs::build_element": {
+      "verdict": "leaf_only",
+      "reason": "A CONSTRUCTOR: it builds a new element from a YAML tool spec. It emits leaves by construction and takes no element as input, so there is no container to mishandle. Groups are created by group_selection, never here.",
+      "handled_at": "nothing to handle -- it consumes a spec, not an element"
+    },
+    "rust:jas_dioxus/src/painter/element_render.rs::element_needs_legacy": {
+      "verdict": "leaf_only",
+      "reason": "A per-element PREDICATE asking whether this node needs the legacy paint path. It is called on every node of the tree during the render walk, containers included, and the walk descends into children on its own -- so a container's own answer is about the container's own paint, which is the right question.",
+      "handled_at": "the render walk descends into children independently"
+    },
+    "rust:jas_dioxus/src/geometry/element.rs::promote_to_path_for_brush": {
+      "verdict": "leaf_only",
+      "reason": "Promotes a Line or open Polyline to a geometry-identical Path so it can carry a stroke brush. A container has no stroke geometry to promote; its members are promoted individually when the brush recurses to them.",
+      "handled_at": "element.rs::map_paintable reaches each member, which promotes itself"
+    }
+  }
+}

@@ -99,13 +99,40 @@ impl TypeOnPathTool {
     }
 
     /// Find the first Path or TextPath whose curve is close to (x, y).
+    ///
+    /// This tool's ONLY route to an existing element, and the ONLY guard
+    /// between the artist's locked artwork and [`Self::begin_session_convert_path`]'s
+    /// `replace_element`: reaching a Path here IS its destruction, since the
+    /// conversion has no later refusal point.
+    ///
+    /// The twin is JasSwift `hitTestPathCurve(in:x:y:)`. The two deliberately
+    /// differ in SEARCH DEPTH — this port stops at layer children, Swift
+    /// descends one level into Groups — which is an UNRULED divergence
+    /// recorded in `seat/fleet/SCOPE-lock-immutable.md` §4 D-A and §8 Q3,
+    /// awaiting a ruling. Lock and depth are separate questions; only lock is
+    /// settled.
     fn hit_test_path_curve(model: &Model, x: f64, y: f64) -> Option<(Vec<usize>, Element)> {
         let doc = model.document();
         let threshold = HIT_RADIUS + 2.0;
         for (li, layer) in doc.layers.iter().enumerate() {
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
-                    if child.common().locked {
+                    // LOCK IS IMMUTABLE (transcripts/LAYER_STRUCTURE.md §15.1)
+                    // AND INHERITED (§13), both RULED by JYH 2026-07-28.
+                    //
+                    // This read was `child.common().locked` — the element's OWN
+                    // flag — and it predates §13, so a Path inside a locked
+                    // LAYER was converted and lost. ONE read, deliberately,
+                    // matching this port's own `select_all`: `effective_locked`
+                    // on the CHILD path already folds in the layer's flag, so a
+                    // layer-level short-circuit above this loop would be
+                    // redundant — and a redundant guard is one no mutation can
+                    // turn red, which is how a guard rots.
+                    //
+                    // MEASURED, both reverted individually: restoring the
+                    // own-flag read reds 2 (the inherited vectors); deleting
+                    // the guard outright reds 4.
+                    if doc.effective_locked(&vec![li, ci]) {
                         continue;
                     }
                     match &**child {
@@ -1069,5 +1096,161 @@ mod tests {
         let handled = tool.paste_text(&mut model, "X");
         assert!(handled);
         assert_eq!(tool.session.as_ref().unwrap().content, "aXb");
+    }
+
+    // ===================================================================
+    // LOCK IS IMMUTABLE, AND IT IS INHERITED — transcripts/LAYER_STRUCTURE.md
+    // §13 (lock is inherited) and §15.1 (locked means immutable), both RULED
+    // by JYH 2026-07-28.
+    //
+    // The Type-on-Path tool is the one place in either active port where an
+    // absent lock guard costs the ARTWORK rather than an expectation: a click
+    // on an existing Path DESTRUCTIVELY converts it to a TextPath
+    // (`begin_session_convert_path` -> `replace_element`), and the original
+    // Path is gone. So the assertion here is not "the tool refused" but the
+    // stronger one — the document is BYTE-IDENTICAL, compared through the
+    // canonical test JSON, which is the same serialization the cross-language
+    // corpus compares.
+    //
+    // NOT WATCHED BY THE SHARED CORPUS, and it cannot be. Both ports' gesture
+    // runners build the tool by id out of the YAML workspace
+    // (`recorder::replay::build_gesture_tool` -> `YamlTool::from_workspace_tool`;
+    // Swift `loadYamlTool`), and Type / Type-on-a-Path are permanent-native in
+    // every port by ratified policy (NATIVE_BOUNDARY.md §"permanent-native").
+    // A gesture fixture naming `type_on_path` would panic, not run. These are
+    // therefore PER-PORT gates with a hand-written Swift twin in
+    // JasSwift/Tests/Tools/ToolInteractionTests.swift.
+    // ===================================================================
+
+    /// Lock the containing LAYER, leaving every child's own flag false —
+    /// the §13 vector, where the protection exists only as an inherited fact.
+    fn lock_layer(model: &mut Model) {
+        let mut doc = model.document().clone();
+        doc.layers[0].common_mut().locked = true;
+        model.set_document_for_test(doc);
+    }
+
+    /// Lock the layer's first child directly — the pre-§13 own-flag vector.
+    fn lock_first_child(model: &mut Model) {
+        let mut doc = model.document().clone();
+        if let Some(children) = doc.layers[0].children_mut() {
+            let mut e = (*children[0]).clone();
+            e.common_mut().locked = true;
+            children[0] = Rc::new(e);
+        }
+        model.set_document_for_test(doc);
+    }
+
+    /// Press and release at the same point (no drag, so the empty-canvas
+    /// arm of `on_release` is a documented no-op) and return the canonical
+    /// document JSON before and after.
+    fn click_and_capture(tool: &mut TypeOnPathTool, model: &mut Model, x: f64, y: f64) -> (String, String) {
+        let before = crate::geometry::test_json::document_to_test_json(model.document());
+        tool.on_press(model, x, y, false, false);
+        tool.on_release(model, x, y, false, false);
+        let after = crate::geometry::test_json::document_to_test_json(model.document());
+        (before, after)
+    }
+
+    #[test]
+    fn locked_path_is_not_converted_to_textpath() {
+        let mut tool = TypeOnPathTool::new();
+        let mut model = model_with_path();
+        lock_first_child(&mut model);
+        let (before, after) = click_and_capture(&mut tool, &mut model, 100.0, 100.0);
+        assert_eq!(before, after, "a locked Path must survive a Type-on-Path click byte-identically");
+        assert!(tool.session.is_none(), "no editing session may open on a locked element");
+        assert!(!model.can_undo(), "a refused conversion must not leave an undo step");
+    }
+
+    #[test]
+    fn path_inside_a_locked_layer_is_not_converted_to_textpath() {
+        // §13: the child's OWN flag is false. Only an inherited read sees this.
+        let mut tool = TypeOnPathTool::new();
+        let mut model = model_with_path();
+        lock_layer(&mut model);
+        let (before, after) = click_and_capture(&mut tool, &mut model, 100.0, 100.0);
+        assert_eq!(before, after, "a Path inside a locked LAYER must survive byte-identically");
+        assert!(tool.session.is_none(), "no editing session may open inside a locked layer");
+        assert!(!model.can_undo(), "a refused conversion must not leave an undo step");
+    }
+
+    #[test]
+    fn locked_textpath_does_not_open_an_editing_session() {
+        let mut tool = TypeOnPathTool::new();
+        let mut model = model_with_textpath("abc");
+        lock_first_child(&mut model);
+        let (before, after) = click_and_capture(&mut tool, &mut model, 50.0, 100.0);
+        assert_eq!(before, after);
+        assert!(tool.session.is_none(), "typing into a locked TextPath would mutate it");
+    }
+
+    #[test]
+    fn textpath_inside_a_locked_layer_does_not_open_an_editing_session() {
+        let mut tool = TypeOnPathTool::new();
+        let mut model = model_with_textpath("abc");
+        lock_layer(&mut model);
+        let (before, after) = click_and_capture(&mut tool, &mut model, 50.0, 100.0);
+        assert_eq!(before, after);
+        assert!(tool.session.is_none(), "typing into a TextPath in a locked layer would mutate it");
+    }
+
+    /// The DISCRIMINATOR. Without it every assertion above is satisfied by a
+    /// tool that refuses everything — including the artist's unlocked artwork.
+    #[test]
+    fn an_unlocked_path_is_still_converted() {
+        let mut tool = TypeOnPathTool::new();
+        let mut model = model_with_path();
+        let (before, after) = click_and_capture(&mut tool, &mut model, 100.0, 100.0);
+        assert_ne!(before, after, "an UNLOCKED path must still convert");
+        assert!(tool.session.is_some());
+    }
+
+    // ===================================================================
+    // SEARCH DEPTH — A PROBE OF UNRULED BEHAVIOUR
+    //
+    // This pins what this port does TODAY. It is NOT a ruling, and nothing
+    // here should be read as one. `seat/fleet/SCOPE-lock-immutable.md` §8 Q3
+    // asks which depth is canonical and the question is open. Its job is to
+    // make a ruling VISIBLE: whichever way it lands, this test turns red and
+    // says the behaviour changed out loud, instead of drifting silently.
+    //
+    // Measured, both ports:
+    //   Rust  `hit_test_path_curve`  layer children only     (2-deep)
+    //   Swift `hitTestPathCurve`     one level into Groups   (3-deep, exactly)
+    // The Swift twin carries the mirror-image probes.
+    // ===================================================================
+
+    /// This port's 2-deep search does NOT reach a path inside a Group; the
+    /// Swift twin asserts the opposite for the same document. UNRULED.
+    ///
+    /// Worth a ruling because neither number is arbitrary elsewhere in the
+    /// house: `doc_primitives::hit_test` is deliberately 2-deep (it answers
+    /// "which OBJECT did I click", the shape §16 ruled for Select All) and
+    /// `hit_test_deep` recurses without limit. This tool's sibling — the Type
+    /// tool's `hit_test_text` at `type_tool.rs:123` — recurses without limit in
+    /// BOTH ports. So the two type tools disagree with each other inside this
+    /// very port, and Swift's Type-on-Path picks a third depth that no rule
+    /// names.
+    #[test]
+    fn probe_type_on_path_does_not_reach_a_path_one_group_deep_unruled() {
+        use crate::geometry::element::GroupElem;
+        let mut tool = TypeOnPathTool::new();
+        let mut model = model_with_path();
+        // Re-wrap the existing path in a Group, leaving geometry untouched.
+        let mut doc = model.document().clone();
+        if let Some(children) = doc.layers[0].children_mut() {
+            let inner = children.pop().unwrap();
+            children.push(Rc::new(Element::Group(GroupElem {
+                children: vec![inner],
+                common: CommonProps::default(),
+                isolated_blending: false,
+                knockout_group: false,
+            })));
+        }
+        model.set_document_for_test(doc);
+        let (before, after) = click_and_capture(&mut tool, &mut model, 100.0, 100.0);
+        assert_eq!(before, after, "this port's walk stops at layer children");
+        assert!(tool.session.is_none());
     }
 }

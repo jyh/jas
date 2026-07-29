@@ -3638,10 +3638,19 @@ mod tests {
     /// `copy_of_a_two_element_selection_emits_a_deterministic_order` case can
     /// require a NON-document order ([0,3] then [0,1]) and mean it.
     ///
-    /// `marquee_over_everything_still_expands_groups_unlike_select_all` is the
-    /// case that stops the D2 repair being made by deleting `selectFlat`'s group
-    /// branch: the branch is right for the marquee, which is the caller it was
-    /// written for, and wrong only for Select All.
+    /// `a_marquee_and_select_all_agree_on_the_same_top_level_objects` shares
+    /// `select_all_top_level_expected.json` with the Select All case, which is
+    /// §16.4 (RULED 2026-07-29) made structural: the two operations must land on
+    /// the SAME selection for this document, so if either drifts the shared
+    /// golden reds.
+    ///
+    /// This comment previously said the marquee's group branch "is right for the
+    /// marquee, which is the caller it was written for, and wrong only for
+    /// Select All". That was the pre-§16.4 reading and it is no longer true. The
+    /// branch pushed the group AND every unlocked member, and `copy_selection`
+    /// reads that shape as a copy of the group PLUS a copy of each member into
+    /// the source group — marquee-then-duplicate left the SOURCE holding four
+    /// children instead of two.
     #[test]
     fn operation_select_all_top_level() {
         run_operation_fixture("operations/select_all_top_level.json");
@@ -3750,6 +3759,26 @@ mod tests {
     #[test]
     fn operation_lock_toggle_no_materialization() {
         run_operation_fixture("operations/lock_toggle_no_materialization.json");
+    }
+
+    /// `Object > Lock` STOPPED MATERIALIZING — transcripts/LAYER_STRUCTURE.md
+    /// §13. The sibling of the family above, and the half of the repeal that
+    /// was left behind: §13 repaired the Layers-panel path
+    /// (`Document::toggling_element_lock`) and `lock_selection` kept a SECOND,
+    /// recursive implementation that stamped `locked = true` onto every
+    /// descendant of a Group.
+    ///
+    /// Worse than a leftover once §13.1 landed `jas:locked`: the stamped flags
+    /// survive save and reload, and under inheritance nothing in the UI can
+    /// clear one of them — the artist opens the parent and the children stay
+    /// locked.
+    ///
+    /// Two of the goldens are the PANEL family's own, by file identity, so the
+    /// gate states the two paths are one behaviour rather than describing the
+    /// answer twice.
+    #[test]
+    fn operation_lock_selection_no_materialization() {
+        run_operation_fixture("operations/lock_selection_no_materialization.json");
     }
 
     /// Print-config field setters (OP_LOG.md §9 Phase P1): the eight doc.*

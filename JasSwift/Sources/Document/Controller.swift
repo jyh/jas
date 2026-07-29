@@ -607,15 +607,20 @@ public class Controller {
                     // grandchild unguarded, so a rubber band that touched only
                     // a locked member dragged the group and its unlocked
                     // siblings into the selection with it.
+                    //
+                    // §16.4 (RULED 2026-07-29): the band ASKS about members,
+                    // but ANSWERS with the group alone. This branch used to
+                    // push the group AND every unlocked member, which is the
+                    // one selection shape no operation reads coherently:
+                    // `copySelection` copies the group whole and then copies
+                    // each member INTO the source group, so marquee-then-
+                    // duplicate left the SOURCE holding four children instead
+                    // of two. Move and delete survived it only by accident.
                     let anyHit = g.children.enumerated().contains {
                         !doc.effectiveLocked([li, ci, $0.offset]) && predicate($0.element)
                     }
                     if anyHit {
                         selection.append(ElementSelection.all([li, ci]))
-                        for gi in 0..<g.children.count {
-                            if doc.effectiveLocked([li, ci, gi]) { continue }
-                            selection.append(ElementSelection.all([li, ci, gi]))
-                        }
                     }
                 } else {
                     if predicate(child) {
@@ -832,7 +837,30 @@ public class Controller {
 
     public func moveSelection(dx: Double, dy: Double) {
         var doc = model.document
-        for es in doc.selection {
+        let entries = doc.selection
+        for es in entries {
+            // AN ANCESTOR IN THE SELECTION COVERS ITS DESCENDANTS (§16.4).
+            //
+            // Moving a container moves its members, so a descendant entry
+            // beneath a selected ancestor would apply the move a second time —
+            // or, worse, apply a control-point edit that supersedes it. A group
+            // dragged with one member's control point also selected left that
+            // member rebuilt as a Polygon with the group's translation lost.
+            //
+            // §16.4 rules such a selection out, but it is not yet enforced at
+            // the extend/add seams or at `doc.set_selection`'s container
+            // expansion (§20). Applying the rule here makes the operation
+            // correct whatever produced the selection.
+            //
+            // It also closes the observable window on a second difference: this
+            // loop reads each element from the RUNNING document while Rust's
+            // `move_selection` reads from the pristine pre-move one. That is
+            // only observable when two entries overlap, and after this skip
+            // they cannot. Twin: `an_ancestor_in_the_selection_covers_its_descendants`.
+            if entries.contains(where: { other in
+                other.path.count < es.path.count
+                    && Array(es.path.prefix(other.path.count)) == other.path
+            }) { continue }
             let elem = doc.getElement(es.path)
             let newElem = elem.moveControlPoints(es.kind, dx: dx, dy: dy)
             doc = doc.replaceElement(es.path, with: newElem)
@@ -947,56 +975,52 @@ public class Controller {
         model.editDocument(newDoc)
     }
 
+    /// `Object > Lock` (Ctrl+2, `workspace/actions.yaml` §lock): set the
+    /// `locked` flag on each selected element and clear the selection.
+    ///
+    /// **ON EACH SELECTED ELEMENT, AND ON NOTHING ELSE.** A Group or Layer's
+    /// lock reaches its contents by INHERITANCE (``Document/effectiveLocked(_:)``),
+    /// never by being written onto them — this is step 1 of
+    /// ``Document/togglingElementLock(at:)``, the Layers-panel lock button,
+    /// applied once per selected path, and it uses the very same
+    /// ``Element/withLocked(_:)`` helper. It is deliberately the same shape
+    /// rather than a second one: until LOCKMAT this function kept its own
+    /// recursive `lockRecursive` whose `case .group` arm stamped
+    /// `locked = true` onto every descendant, which is the MATERIALIZATION
+    /// transcripts/LAYER_STRUCTURE.md §13 repealed (RULED by JYH 2026-07-28).
+    /// §13 repaired the panel path and left this one, and the two then said
+    /// different things about the same artist action.
+    ///
+    /// Why the residue could not simply be left: §13.1 landed `jas:locked`, so
+    /// stamped flags SURVIVE SAVE AND RELOAD, and under inheritance nothing
+    /// clears a single one of them — opening the parent leaves every child
+    /// locked, and `Unlock All` is the whole document or nothing.
+    ///
+    /// The selection is cleared WHOLESALE, which is `togglingElementLock`'s
+    /// step 2 in the case where every selected path was just locked: it is not
+    /// cosmetic, because nothing downstream refuses to move or delete a locked
+    /// element, so a lock that left the selection alone would leave locked
+    /// content draggable.
+    ///
+    /// `withLocked` is clone-then-mutate on all twelve Element cases, so the
+    /// copy-site omission class cannot reach this walk — the group arm it
+    /// replaced needed a hand-written comment to stay honest about eleven
+    /// fields, and this one has no rebuild to get wrong. `tryGetElement` rather
+    /// than `getElement`, matching `togglingElementLock`'s guard: a selection
+    /// entry naming no element is skipped, not trapped on.
+    ///
+    /// The twin is jas_dioxus `Controller::lock_selection`.
     public func lockSelection() {
-        func lockRecursive(_ elem: Element) -> Element {
-            switch elem {
-            case .group(let g):
-                // T4: locking speaks to `locked`. The Group is the very thing
-                // the artist named, so everything else about it — id, name,
-                // blendMode, mask, isolatedBlending, knockoutGroup — must come
-                // back. The inline five-argument literal this replaced kept
-                // five of eleven fields and DESTROYED the locked group's own
-                // `id`. Rust's `lock_element` is clone-then-mutate and never
-                // had the hole.
-                var v = g.withChildren(g.children.map { lockRecursive($0) })
-                v.locked = true
-                return .group(v)
-            default:
-                return elem.withLocked(true)
-            }
-        }
         var doc = model.document
         for es in doc.selection {
-            let elem = doc.getElement(es.path)
-            doc = doc.replaceElement(es.path, with: lockRecursive(elem))
+            guard let elem = doc.tryGetElement(es.path) else { continue }
+            doc = doc.replaceElement(es.path, with: elem.withLocked(true))
         }
         model.editDocument(doc.replacing(selection: []))
     }
 
     public func unlockAll() {
         let doc = model.document
-        var lockedPaths: [ElementPath] = []
-
-        func collectLocked(_ path: ElementPath, _ elem: Element) {
-            switch elem {
-            case .group(let g):
-                if g.locked { lockedPaths.append(path) }
-                for (i, child) in g.children.enumerated() {
-                    collectLocked(path + [i], child)
-                }
-            case .layer(let l):
-                for (i, child) in l.children.enumerated() {
-                    collectLocked(path + [i], child)
-                }
-            default:
-                if elem.isLocked { lockedPaths.append(path) }
-            }
-        }
-        for (li, layer) in doc.layers.enumerated() {
-            for (ci, child) in layer.children.enumerated() {
-                collectLocked([li, ci], child)
-            }
-        }
 
         func unlockChildren(_ elements: [Element]) -> [Element] {
             elements.map { elem in
@@ -1025,13 +1049,25 @@ public class Controller {
             v.locked = false
             return v
         }
-        let newDoc = doc.replacing(layers: newLayers, selection: [])
-        var newSelection: Selection = []
-        for path in lockedPaths {
-            let _ = newDoc.getElement(path)
-            newSelection.append(ElementSelection.all(path))
-        }
-        model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
+        // UNLOCK ALL PRESERVES THE SELECTION (RULED 2026-07-29). This used to
+        // REPLACE it with every path just unlocked, while Rust CLEARED it — a
+        // live divergence on a shared verb, and `actions.yaml` describes
+        // `unlock_all` without mentioning the selection at all.
+        //
+        // The PRESERVATION LAW settles it: an edit changes what it speaks to
+        // and preserves the rest, and selection order is part of the document
+        // (§10/D6). Unlock All speaks to `locked`; the selection is the rest.
+        //
+        // Lock and Hide DO clear, and actions.yaml gives the reason — "because
+        // nothing downstream refuses to move or delete a selected element for
+        // being locked". That is a workaround for the enforcement §15 will
+        // add, and it does not apply here: unlocking makes nothing
+        // unselectable, so clearing would destroy artist state for nothing.
+        //
+        // Deleting the re-selection also retires a second defect inside the
+        // first: `collectLocked` began at depth 2, so a LAYER's own lock was
+        // never collected and the replacement selection silently omitted it.
+        model.editDocument(doc.replacing(layers: newLayers))
     }
 
     /// Set every element in the current selection to
@@ -1795,7 +1831,7 @@ public class Controller {
         if doc.selection.isEmpty { return doc }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withFill(elem, fill: fill)
+            let newElem = elem.mapPaintable { withFill($0, fill: fill) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         return doc
@@ -1815,7 +1851,7 @@ public class Controller {
         if doc.selection.isEmpty { return doc }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withStroke(elem, stroke: stroke)
+            let newElem = elem.mapPaintable { withStroke($0, stroke: stroke) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         return doc
@@ -1855,7 +1891,17 @@ public class Controller {
         if doc.selection.isEmpty { return nil }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withStroke(elem, stroke: f(elem.stroke))
+            // The RECOLOUR path, and it must recurse too. `fillMapped` /
+            // `strokeMapped` read each element's OWN paint and rewrite it, which
+            // is how per-element opacity survives a colour change — and it is
+            // the path the COLOR PANEL actually uses (`applyActiveColorWrite`),
+            // not the stamp-one-value path. Routing only the stamp path left
+            // clicking a swatch with a group selected doing nothing. Found by
+            // JYH clicking it, 2026-07-29.
+            //
+            // The closure reads the LEAF's own paint, so each member is
+            // recoloured individually and keeps its own opacity.
+            let newElem = elem.mapPaintable { withStroke($0, stroke: f($0.stroke)) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         return doc
@@ -1882,7 +1928,7 @@ public class Controller {
         if doc.selection.isEmpty { return nil }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withFill(elem, fill: f(elem.fill))
+            let newElem = elem.mapPaintable { withFill($0, fill: f($0.fill)) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         return doc
@@ -1930,7 +1976,7 @@ public class Controller {
         if doc.selection.isEmpty { return }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withStrokeBrush(elem, strokeBrush: slug)
+            let newElem = elem.mapPaintable { withStrokeBrush($0, strokeBrush: slug) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.editDocument(doc)
@@ -1942,7 +1988,7 @@ public class Controller {
         if doc.selection.isEmpty { return }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withStrokeBrushOverrides(elem, overrides: overrides)
+            let newElem = elem.mapPaintable { withStrokeBrushOverrides($0, overrides: overrides) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.editDocument(doc)
@@ -1956,7 +2002,7 @@ public class Controller {
         if doc.selection.isEmpty { return }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withFillGradient(elem, fillGradient: gradient)
+            let newElem = elem.mapPaintable { withFillGradient($0, fillGradient: gradient) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.editDocument(doc)
@@ -1968,7 +2014,7 @@ public class Controller {
         if doc.selection.isEmpty { return }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withStrokeGradient(elem, strokeGradient: gradient)
+            let newElem = elem.mapPaintable { withStrokeGradient($0, strokeGradient: gradient) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.editDocument(doc)
@@ -2207,10 +2253,37 @@ public class Controller {
         model.editDocument(doc)
     }
 
+    /// Duplicate the selected elements, offset by (dx, dy).
+    ///
+    /// **The selection this leaves behind is in DOCUMENT ORDER, and it names
+    /// the COPIES** — transcripts/LAYER_STRUCTURE.md §19, RULED 2026-07-28 by
+    /// JYH (*"yes document order"*). Mirrors Rust `Controller::copy_selection`.
+    ///
+    /// The walk runs BACK-TO-FRONT and that is load-bearing: inserting after
+    /// [0,1] shifts [0,3], so a forward walk would read its own insertions as
+    /// sources. What was wrong was letting the RESULT inherit the walk's order
+    /// as a byproduct — nobody chose descending, and §10 (D6) made selection
+    /// order part of the document precisely because a copied fragment's z-order
+    /// is part of the artwork. Duplicate, then Copy, and the clipboard listed
+    /// the elements backwards.
+    ///
+    /// **The same shift that forces the descending walk also invalidates the
+    /// copy paths it has already recorded**, which is a separate defect found
+    /// while gating §19 and repaired here. Duplicating [0,1] and [0,3]: the walk
+    /// copies d first and records [0,4], then copies b, and THAT insertion
+    /// pushes everything above [0,1] up one slot — so the recorded [0,4] stops
+    /// naming d's copy and starts naming **d itself, the source**. The result
+    /// was not merely mis-ordered; a Copy afterwards put a source element on the
+    /// clipboard. `shiftedPath(_:forInsertionAt:)` keeps the recorded paths
+    /// honest as the document moves underneath them, and the sort is then a sort
+    /// of the right paths rather than a tidy list of the wrong ones.
     public func copySelection(dx: Double, dy: Double) {
         var doc = model.document
-        var newSelection: Selection = []
-        // Sort paths in reverse so insertions don't shift earlier paths
+        // Copy paths only: copying always selects the new element AS A WHOLE,
+        // so the `kind` is `.all` for every entry and the running state is a
+        // plain path list that stays rewritable as the document shifts.
+        var copyPaths: [ElementPath] = []
+        // Sort paths in reverse so insertions don't shift the sources not yet read.
         let sortedSels = doc.selection.sorted { $0.path.lexicographicallyPrecedes($1.path) }.reversed()
         for es in sortedSels {
             let elem = doc.getElement(es.path)
@@ -2220,11 +2293,42 @@ public class Controller {
             doc = doc.insertElementAfter(es.path, element: copied)
             var copyPath = es.path
             copyPath[copyPath.count - 1] += 1
-            // Copying always selects the new element as a whole.
-            newSelection.append(ElementSelection.all(copyPath))
+            // This insertion moves every copy path already recorded that sits
+            // at or after it under the same parent.
+            copyPaths = copyPaths.map { shiftedPath($0, forInsertionAt: copyPath) }
+            copyPaths.append(copyPath)
         }
-        model.editDocument(doc.replacing(selection: newSelection))
+        // §19: document order, not the walk's order.
+        copyPaths.sort { $0.lexicographicallyPrecedes($1) }
+        model.editDocument(doc.replacing(selection: copyPaths.map(ElementSelection.all)))
     }
+}
+
+/// Rewrite `path` for an element having been inserted at `insertedAt`.
+///
+/// A path held across a structural insertion goes stale: inserting a sibling
+/// ahead of it pushes it up one slot, and nothing in the path itself says so.
+/// ``Controller/copySelection(dx:dy:)`` is where that bit us (§19) — it records
+/// a copy path and then inserts BELOW it, so the recorded path silently came to
+/// name the source instead of the copy.
+///
+/// Only the slot the insertion happened in can move: `insertedAt` splits into a
+/// parent prefix and a sibling index, and a path is affected only when it shares
+/// that prefix AND sits at or after that index. Paths in other subtrees, paths
+/// shorter than the prefix, and the prefix itself are untouched. Nothing below
+/// the affected component changes — the subtree moved intact.
+///
+/// Mirrors Rust `shift_path_for_insertion`.
+func shiftedPath(_ path: ElementPath, forInsertionAt insertedAt: ElementPath) -> ElementPath {
+    guard !insertedAt.isEmpty else { return path }
+    let depth = insertedAt.count - 1
+    guard path.count > depth,
+          Array(path[..<depth]) == Array(insertedAt[..<depth]),
+          path[depth] >= insertedAt[depth]
+    else { return path }
+    var out = path
+    out[depth] += 1
+    return out
 }
 
 /// Resolve the current selection to the stable `common.id`s of the selected
@@ -2259,44 +2363,102 @@ public enum StrokeSummary: Equatable {
 public func selectionFillSummary(_ doc: Document) -> FillSummary {
     let sel = doc.selection
     guard !sel.isEmpty else { return .noSelection }
+    // A selected CONTAINER summarises the paint of its members, at any depth —
+    // the read twin of `mapPaintable`. These used to SKIP containers, so a
+    // selected group reported `.noSelection` while Rust's twin reported
+    // `Uniform(None)`: two different wrong answers to the same question.
+    // A group whose members agree now reads back as their common value; one
+    // whose members disagree is `.mixed`, the same answer those members give
+    // when selected without the group around them.
     var first = true
     var value: Fill? = nil
+    var isMixed = false
     for es in sel {
-        let elem = doc.getElement(es.path)
-        // Skip groups/layers -- they have no fill.
-        if case .group = elem { continue }
-        if case .layer = elem { continue }
-        let f = elem.fill
-        if first {
-            value = f
-            first = false
-        } else if f != value {
-            return .mixed
+        doc.getElement(es.path).forEachPaintable { leaf in
+            if isMixed { return }
+            let v = leaf.fill
+            if first {
+                value = v
+                first = false
+            } else if v != value {
+                isMixed = true
+            }
         }
+        if isMixed { return .mixed }
     }
-    if first { return .noSelection }
+    // `first` still true means the selection reached no paintable leaf at all
+    // (an empty container). That is NOT "nothing selected" — the `sel.isEmpty`
+    // guard above owns that — and Rust returns `Uniform(None)` here, so this
+    // must too or the ports disagree on an empty group.
     return .uniform(value)
+}
+
+/// The stroke the Stroke panel should DISPLAY for the current selection.
+///
+/// Found by JYH at council 2026-07-29: selecting a group showed 1 pt while both
+/// members carried 5. `strokePanelLiveOverrides` read `doc.selection.first` and
+/// then that element's OWN stroke — nil for a container — and fell through to a
+/// hard-coded 1.0. BOTH ports did it identically, so no cross-language gate saw
+/// it. The eighth consumer of the container-blind premise.
+///
+/// ONLY THE CONTAINER CASE CHANGES. A single leaf and a uniform multi-selection
+/// resolve to the value they always did. A MIXED selection still falls back to
+/// the first element's stroke — the pre-existing lie, deliberately left alone:
+/// showing the tab default instead would be a DIFFERENT lie, not progress, and
+/// the honest answer is `<mixed>`, scoped in transcripts/MIXED_SELECTION.md.
+///
+/// Twin: Rust `selection_stroke_for_panel`.
+public func selectionStrokeForPanel(_ doc: Document) -> Stroke? {
+    if case .uniform(let s?) = selectionStrokeSummary(doc) { return s }
+    // MIXED (or no stroke): fall back to the FIRST PAINTABLE LEAF, not the
+    // first selection ENTRY. Reading the entry directly gives nil for a
+    // container and drops to a hard-coded 1.0, so a mixed GROUP answered 1 pt
+    // while its two members selected DIRECTLY answered with the first member's
+    // weight — the same document and the same mixedness giving two different
+    // numbers. THE SPELLINGS MUST AGREE: a group is a mixed selection of one
+    // (MIXED_SELECTION.md §4).
+    //
+    // Both answers are still lies until `<mixed>` exists. This makes them the
+    // SAME lie, which is the most that can be done without the widget vocabulary.
+    guard let first = doc.selection.first else { return nil }
+    var found: Stroke? = nil
+    doc.getElement(first.path).forEachPaintable { leaf in
+        if found == nil { found = leaf.stroke }
+    }
+    return found
 }
 
 /// Summarize the stroke of all selected elements.
 public func selectionStrokeSummary(_ doc: Document) -> StrokeSummary {
     let sel = doc.selection
     guard !sel.isEmpty else { return .noSelection }
+    // A selected CONTAINER summarises the paint of its members, at any depth —
+    // the read twin of `mapPaintable`. These used to SKIP containers, so a
+    // selected group reported `.noSelection` while Rust's twin reported
+    // `Uniform(None)`: two different wrong answers to the same question.
+    // A group whose members agree now reads back as their common value; one
+    // whose members disagree is `.mixed`, the same answer those members give
+    // when selected without the group around them.
     var first = true
     var value: Stroke? = nil
+    var isMixed = false
     for es in sel {
-        let elem = doc.getElement(es.path)
-        if case .group = elem { continue }
-        if case .layer = elem { continue }
-        let s = elem.stroke
-        if first {
-            value = s
-            first = false
-        } else if s != value {
-            return .mixed
+        doc.getElement(es.path).forEachPaintable { leaf in
+            if isMixed { return }
+            let v = leaf.stroke
+            if first {
+                value = v
+                first = false
+            } else if v != value {
+                isMixed = true
+            }
         }
+        if isMixed { return .mixed }
     }
-    if first { return .noSelection }
+    // `first` still true means the selection reached no paintable leaf at all
+    // (an empty container). That is NOT "nothing selected" — the `sel.isEmpty`
+    // guard above owns that — and Rust returns `Uniform(None)` here, so this
+    // must too or the ports disagree on an empty group.
     return .uniform(value)
 }
 

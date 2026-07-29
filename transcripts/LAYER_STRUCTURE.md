@@ -1279,6 +1279,136 @@ agree on the spelling rather than each agreeing with itself.
    consequence is that a file saved by an active port and reopened in a frozen
    one silently unlocks. Stated, not fixed.
 
+### 13.2 STONE 2 LANDED — `Object > Lock` stops materializing (2026-07-28, LOCKMAT)
+
+**§13's repeal was half-landed and the half that shipped had teeth.** The
+Layers-panel path was repaired; `Object > Lock` — the menu item, Ctrl+2, and the
+`lock_selection` op verb — kept a SECOND, recursive implementation that stamped
+`locked = true` onto every descendant of a Group. Two doors to the same artist
+action wrote different documents, on public `main`.
+
+Both are now one shape. `Controller::lock_selection` is clone-then-mutate
+through `get_element_mut`; `Controller.lockSelection` calls
+`Element.withLocked(true)`, the very helper `togglingElementLock` uses. Rust's
+`lock_element` is deleted. The spec says the rule too: `workspace/actions.yaml`
+§lock and §unlock_all.
+
+**MEASURED, and it narrows the scope's framing: the residue was GROUP-ONLY, in
+both ports.** Rust recursed under `new.is_group()`, which is
+`matches!(self, Element::Group(_))` and excludes `Element::Layer`; Swift recursed
+in its `case .group` arm alone. Locking a LAYER never stamped in either port. The
+layer vector in the new family is therefore a control, kept so the repair cannot
+be read as "stop writing the flag" — and it is not vacuous: mutations M3/M6,
+which materialize onto a layer's children, red it and nothing else.
+
+**RED FIRST, IN BOTH PORTS AT ONCE.**
+`test_fixtures/operations/lock_selection_no_materialization.json`, 7 cases:
+**3 of 7 failed in Rust and 3 in Swift, on exactly the same case names**, before
+either port moved. The family discriminates — the setup, both controls and the
+leaf case were green throughout. That simultaneity was possible because **not one
+golden was generated from the behaviour it pins** (§15.5's device):
+
+* the group and leaf headlines point at the PANEL family's own goldens BY FILE
+  IDENTITY, which pins `Object > Lock` as an **equation** — it must produce
+  exactly what the lock button produces on the same element, which is the thing
+  that had stopped being true;
+* `unlocking_a_group_frees_its_children` shares one golden with
+  `control_clicking_a_child_of_an_untouched_group`, so the lock/unlock round trip
+  is pinned against a document nothing touched;
+* the three new goldens were DERIVED from `lock_toggle_group_locked_expected.json`
+  by flipping named flags.
+
+**A preservation vector had pinned the PRE-RULING answer, and was turned rather
+than deleted.** `lock_a_group_keeps_the_group_itself` named `r_back` and
+`r_front` as SUBJECTS with `must_change: ["locked"]` — it asserted the
+materialization in as many words, and it went red on the fix. They are
+BYSTANDERS now, a strictly stronger claim.
+
+**Mutation proof — 6 causes, each reverted INDIVIDUALLY, whole suite each time:**
+
+| # | port | mutation | RED observed |
+|---|---|---|---|
+| M1 | Rust | Group recursion restored | 2 failed — the new family AND `preservation_invariants` |
+| M2 | Rust | the wholesale selection clear dropped | 3 failed — new family + `action_corpus` + `controller::tests::lock_selection` |
+| M3 | Rust | materialize onto a LAYER's children | **1 failed — ONLY the new family**, so the depth control earns its place |
+| M4 | Swift | Group recursion restored | 4 issues / 2 tests — twin of M1 |
+| M5 | Swift | the selection clear dropped | 6 issues / 3 tests — twin of M2 |
+| M6 | Swift | materialize onto a LAYER's children | **1 issue — ONLY the new family**, twin of M3 |
+
+No guard was found redundant: every part of the repair is load-bearing, and the
+two ports red on matching causes.
+
+#### The rest of the class, enumerated mechanically — and it is empty now
+
+Method: grep every write of `locked` in both ports' non-test sources, then
+classify each site. Rust: `renderer.rs` `common.locked` doc.set arm (target-only,
+already documented), `effects.rs` and `controller.rs` boolean/group unanimity
+carries (mint a new element, not a cascade), `document.rs`
+`toggling_element_lock` (target-only), `unlock_element` (recursive BY DESIGN, see
+below). Swift: the `doc.set` twin, `Controller.swift:90` unanimity,
+`Document.swift` `togglingElementLock`, `LayersPanel.swift:271`
+`withLocked(newLocked)` on one top-level layer, `unlockChildren`. `Object > Lock`
+was the only remaining materializer in either port.
+
+Three findings that came out of that sweep and are NOT fixed here, each with its
+reason:
+
+1. **`unlock_all` keeps its recursion deliberately** — it is the sole
+   artist-reachable revocation (EDIT_SEMANTICS_FREEZE **T6(i)**), and it is the
+   only thing in either port that can clear flags a document ALREADY carries.
+   Comment added at both sites saying so. Note that `toggle_all_layers_lock`'s
+   "Unlock All Layers" branch is NOT a substitute: it writes only the top-level
+   layer paths.
+2. **`unlock_all`'s post-state selection still DIVERGES** (SCOPE §4 D-C): Rust
+   clears the selection, Swift re-selects every formerly-locked path, and Swift's
+   `collectLocked` starts at depth 2 so a layer's own lock is never collected.
+   Real, shared-corpus-gateable, and left alone so this wave stays a gate on
+   materialization alone.
+3. **`JasSwift/Sources/Interpreter/YamlPanelBodyView.swift:4337`** holds a
+   SECOND lock toggle that writes the flag without pruning the selection. It sits
+   in `treeRows_OLD`, reached only from `treeRows_DEPRECATED`, and grep finds no
+   caller of either — dead code, so it is reported rather than repaired.
+
+#### BANKED FOR JYH — do saved documents need repair? (facts, not a decision)
+
+**Can a stamped child be distinguished from one the artist locked deliberately?
+NO, and this is the hard part of the answer.** All three codecs carry a bare
+boolean with no provenance: `jas:locked="true"`, one binary slot, one JSON key.
+The one asymmetry available is a pattern, and it is necessary but not sufficient
+— the old `lock_element` stamped the ENTIRE subtree, so a locked group with any
+UNLOCKED descendant cannot have come from `Object > Lock`; but a fully-locked
+subtree is exactly what an artist also gets by locking a small group's children
+by hand. A migration keyed on the pattern would silently unlock deliberate work,
+most often on the small groups where it is likeliest.
+
+**The exposure is much wider than the SVG window, and this is the fact that
+should drive the ruling.** `jas:locked` landed on 2026-07-28 (LOCKSVG), hours
+before this repair, so almost no SVG file can carry stamped flags. But **both
+active ports auto-persist whole documents in the JAS BINARY format for session
+restore** — jas_dioxus to `localStorage` every 30 seconds and on `beforeunload`
+(`workspace/session.rs`), JasSwift to
+`~/Library/Application Support/Jas/session/tabN.jasbin` (`Canvas/Session.swift`)
+— and `binary.rs` / `Binary.swift` have packed `locked` on the Group and Layer
+arms since well before 2026-06-16. **Stamped flags have therefore been surviving
+restart in both ports for as long as the materialization existed.**
+
+The choice, stated without taking it:
+* **(a) leave them.** The artist meets a lock they cannot remove except with
+  `Unlock All`, which also clears every lock they placed on purpose.
+* **(b) clear every descendant flag under a locked container on load.** Lossy in
+  exactly one scenario: lock a child, then lock its parent, then later unlock the
+  parent and expect the child to still be locked. Under inheritance that child's
+  flag is unobservable while the parent is locked, so the loss is narrow — but it
+  is silent.
+* **(c) neither; make the revocation reachable** — a per-subtree unlock, which
+  the ruling's "cannot be individually unlocked" does not forbid at the container
+  level.
+
+**Blind spot of the above:** the codec history was established by reading the
+packers and `git log -S`, not by opening a real localStorage blob or a `.jasbin`
+from any machine. Nobody has measured how many documents actually carry stamped
+flags, and no GUI was driven in either port during this wave.
+
 ## 14. REPEATED PASTES STACK WITH CUMULATIVE OFFSETS. RULED 2026-07-28.
 
 > JYH: *"follow the spec."*
@@ -1821,12 +1951,26 @@ members. Swift changes; Rust is canonical.
 is **silent on group expansion**, which is how this stayed unadjudicated. The
 ruling goes there, or the next reader re-derives the argument.
 
-### 16.4 STILL OPEN — the invariant underneath
+### 16.4 RULED 2026-07-29 — the invariant underneath
 Should the selection MODEL permit an ancestor and its own descendant to be
-selected simultaneously at all? If not, that is an assertable invariant, and it
-would have caught this without anyone noticing the divergence. **Not ruled.**
-Raised because a rule that makes a defect impossible is worth more than a fix
-that makes one instance go away.
+selected simultaneously at all?
+
+**RULED: no.** The marquee ASKS about a group's members — a band touching any
+unlocked member selects the group — but ANSWERS with the group alone, exactly as
+Select All does (§16.3). Banked to the Mac seat overnight by JYH, **reversible in
+council**; the reasoning and the evidence that would overturn it are in
+`seat/fleet/BANKED-overnight-2026-07-29.md`, the measurement in **§22**.
+
+It was ruled on evidence, not taste: `copy_selection` reads the old shape as a
+copy of the group PLUS a copy of each member INTO the source group, so
+marquee-then-duplicate left the SOURCE group holding four children instead of
+two. An adversarial review (`seat/fleet/REVIEW-marquee-ruling.md`) found a
+second, sharper consequence — **under the old shape, DESELECT could SELECT**:
+Select All then shift-marquee over a group XORed the group entry OUT and its two
+members IN.
+
+**The invariant is ruled but NOT YET ASSERTABLE, and that is a separate stone.**
+Other producers still violate it — see §22.4.
 
 ---
 
@@ -2168,6 +2312,153 @@ is where the byproduct becomes artist-visible.
 
 ---
 
+## 19A. §19, IMPLEMENTED — and the byproduct was worse than an order
+
+### 19A.0 The headline
+
+Implemented in both active ports, gated at three levels, and mutation-proven
+six ways. **But the ruling's premise was wrong in the artist's favour: the
+byproduct paths were not merely mis-ORDERED, they were STALE, and one of them
+named a SOURCE element.**
+
+Duplicating `[0,1]` and `[0,3]`, the descending walk copies d first and records
+`[0,4]`; it then copies b, and *that* insertion pushes everything above `[0,1]`
+up one slot. The recorded `[0,4]` therefore stops naming d's copy (now at
+`[0,5]`) and starts naming **d itself**. So the shipped behaviour was not "the
+clipboard lists the copies backwards" — it was **"the clipboard contains one
+copy and one original"**, and dragging after an Alt-drag duplicate moved one
+copy and one source. Measured on the clipboard, in both ports: payload
+`[30, 16]` where the copies are at x=16 and x=36.
+
+**The same fact that makes the descending walk load-bearing invalidates the
+paths that walk records.** They are one defect seen from two ends, which is why
+the repair is one function: `shift_path_for_insertion` /
+`shiftedPath(_:forInsertionAt:)` rewrites every already-recorded copy path for
+each new insertion, and the §19 sort is then a sort of the RIGHT paths rather
+than a tidy list of the wrong ones.
+
+**Why a sort alone would have passed a weaker gate.** Sorting stale paths gives
+`[[0,2],[0,4]]` — ascending, document order by inspection, and still naming a
+source. Every assertion added here pins ORDER **and** IDENTITY, by path and by
+geometry, for exactly that reason.
+
+### 19A.1 RED FIRST — measured, on the commit before the fix
+
+| gate | red |
+|---|---|
+| Rust `copy_selection_of_two_elements_selects_both_copies_in_document_order` | selection `[[0,4],[0,2]]`, required `[[0,2],[0,5]]` |
+| Rust `a_duplicate_then_copy_emits_the_copies_in_document_order` | **clipboard payload `[30.0, 15.999975]`**, required `[16, 36]` |
+| Swift `copySelectionOfTwoElementsSelectsBothCopiesInDocumentOrder` | selection `[[0,4],[0,2]]`, selected xs `[30.0, 16.0]` |
+| Swift `DuplicateCopyOrderTests.aDuplicateThenCopyEmitsTheCopiesInDocumentOrder` | **clipboard payload `[30, 16]`** |
+| `operation_select_all_top_level` / `operationSelectAllTopLevel` | 2 cases, **both ports, byte-identical actuals** |
+
+### 19A.2 What the gate reaches, and what it does not
+
+**The clipboard half is IN-PORT in each port, not cross-language, and that is a
+limit of the corpus rather than a choice.** `copy_selection` is a shared op
+verb, so the SELECTION is gated cross-language; there is **no copy-to-clipboard
+op verb in either port**, and the corpus's canonical JSON serializes a document,
+not a pasteboard. So:
+
+* Rust `workspace::clipboard::copy_payload_tests` drives the production
+  `selection_to_svg` through a real `AppState`.
+* Swift `JasSwift/Tests/Clipboard/DuplicateCopyOrderTests.swift` drives the
+  production `EditClipboard.copySelection` onto a real (private) `NSPasteboard`.
+
+Both run the production mutator first, so each is the artist's gesture pair end
+to end within its port; what is asserted twice rather than once is that the two
+payloads agree, and the shared selection golden is what holds that together.
+
+### 19A.3 The corpus, and the case that earns its bytes
+
+Two new cases in `test_fixtures/operations/select_all_top_level.json`:
+
+1. `duplicating_a_noncontiguous_pair_selects_both_copies_not_a_source` — new
+   setup `dup_order_four_rects.svg` (four distinctly coloured rects, so identity
+   is legible in the golden rather than inferable from indices). Two elements
+   admit only two orders, so the pre-existing contiguous case cannot tell a SORT
+   from a REVERSAL; this one can.
+2. `duplicating_across_parents_and_depths_rewrites_only_the_paths_that_moved` —
+   duplicates `[0,0]`, `[0,1,2]` and `[1,1]` of this family's own setup. **Four
+   separate mutations red this single case**, which is why it exists: it is the
+   only thing that watches the path-rewrite RULE rather than its outcome on one
+   flat layer.
+
+The pre-existing `copy_of_a_two_element_selection_emits_a_deterministic_order`
+golden moved from `[[0,2],[0,1]]` to `[[0,1],[0,3]]`, and its `_doc` — which
+described the old order as deliberate — is corrected in place rather than left
+to rot.
+
+### 19A.4 Mutation proof — every cause reverted INDIVIDUALLY
+
+Production restored and the suite re-verified green after each.
+
+| # | port | mutation | RED observed |
+|---|---|---|---|
+| M1 | Rust | drop `copy_paths.sort()` | 3 failed — both in-port gates + the corpus family |
+| M2 | Rust | drop the `shift_path_for_insertion` loop | 3 failed — the same three |
+| M2b | Rust | drop the helper's parent-prefix check | 1 failed — the across-parents case |
+| M2c | Rust | weaken the helper's `>=` to `>` | 1 failed — the across-parents case |
+| M3 | Swift | drop `copyPaths.sort` | 7 issues in 3 tests |
+| M4 | Swift | drop the `shiftedPath` map | 6 issues in 3 tests |
+| M4b | Swift | drop the parent-prefix check | 1 issue — the across-parents case |
+| M4c | Swift | weaken `>=` to `>` | 1 issue — the across-parents case |
+
+**M2b and M2c were GREEN on the first attempt** — measured, before the
+across-parents case existed. Under house law a guard no mutation can red is
+deleted; these two are load-bearing for correctness across parents and across
+depths, so the case was written to red them instead. That is the same choice
+§18.1 made and it is recorded here so the reasoning is not re-litigated: the
+rule is *delete the guard or gate it*, never *leave it unwatched*.
+
+### 19A.5 THE PREMISE IS FALSE — a second operation, measured, NOT fixed
+
+§19 states *"Every other selection-producing operation already yields document
+order, so this was the odd one out."* **Surveyed by measurement, not by reading,
+and that is not true.**
+
+> **R3 "Paste, preserving layers" leaves a non-document-order selection, for
+> exactly the §19 byproduct reason.** `paste_fragment_into` appends into each
+> fragment layer's target and records `[idx, at]` as it goes, so the result is in
+> FRAGMENT order. Measured: `multi_layer.svg` (layers Background, Foreground) with
+> a fragment whose layers are `[Foreground, Background]` yields selection
+> **`[[1,1],[0,1]]`**. No existing golden moves, because every shipped preserving
+> case happens to list its fragment layers in ascending document order.
+
+**Deliberately NOT fixed here, and this is a ruling, not an oversight.** §19
+names the duplicate; extending a ruling to an operation it did not name is
+itself a ruling, and this seat has been wrong twice in one day by inference.
+The principle plainly reaches it — a Copy after a paste emits that order, which
+is §19's own artist-visible consequence — but the fix touches `op_apply` and the
+`paste_layers` goldens, which were concurrently in another lane's hands. **Cost
+if ruled: one sort per port plus one corpus case with a reversed fragment.**
+
+Everything else surveyed yields document order: `ungroup_selection` (one layer),
+`show_all`, `group_selection`, `select_all`, and the marquee/toggle paths §18
+repaired. `ungroup_all` and Rust's `unlock_all` clear the selection entirely.
+
+### 19A.6 BANKED — found by the survey, out of scope, needs JYH
+
+1. **`ungroup_selection` across TWO LAYERS is broken in BOTH ports, and broken
+   DIFFERENTLY.** Its `offset` accumulator advances across every ungrouped
+   group regardless of which layer the group lives in, so the second layer's
+   released children are computed at the wrong indices. Measured on two layers
+   holding one two-child group each (four released children):
+   * Rust → `[[0,0],[0,1],[1,1]]` — **three** entries; `[1,0]` is never
+     selected and `[1,2]` is dropped by the `get_element(...).is_some()` guard
+     at `controller.rs:1517`.
+   * Swift → `[[0,0],[0,1],[1,1],[1,2]]` — **four** entries, and `[1,2]` does
+     not exist; `Controller.swift:1298` has no such guard.
+
+   `ungroup` is a shared op verb, so this is corpus-reachable and currently
+   **ungated**. Not order, so not §19; a live divergence at a real seam.
+2. **The same `offset` shape appears in `release_compound_shape`
+   (`controller.rs:1696`) and `expand_compound_shape` (`controller.rs:1852`)**
+   — by INSPECTION, not measured. Three call sites of one wrong idea argue for
+   one shared helper rather than three separate repairs.
+
+---
+
 ## 20. `doc.set_selection` SELECTS ONLY THE NAMED PATHS. RULED 2026-07-28.
 
 > JYH: *"accept recommendation, swift."*
@@ -2222,3 +2513,145 @@ would have caught D2 without anyone noticing a divergence.
 *A narrower fallback, if the panel work proves larger than it looks:* keep the
 expansion as a DERIVED view computed at render time, leaving the stored selection
 clean. Same end state for the model, smaller blast radius.
+
+---
+
+## 21. THE MEASUREMENT §20.4 ASKED FOR — and the defect it found. 2026-07-29.
+
+§20.4 recorded that the consumers of `doc.selection` relying on descendants
+being present were **NOT enumerated**, and said to measure before implementing.
+This is that measurement. It found a load-bearing consumer, and on the way it
+found a live defect in both ports that had nothing to do with §20.
+
+### 21.1 A group selected as ONE entry did not move
+`move_control_points` (Rust) / `moveControlPoints` (Swift) matched nine leaf
+kinds and fell to a catch-all returning the element unchanged. **There was no
+`Group` arm, no `Layer` arm, and no arm for the non-reference live kinds.**
+`Controller::move_selection` calls it once per selected path, so a container in
+the selection contributed nothing.
+
+It reaches the artist by the shortest possible route. The Selection tool sets a
+ONE-ENTRY selection on a click — `selection.yaml` runs `doc.set_selection: {
+paths: [hit] }` — and `hit_test` returns the **group's** path for a click inside
+a group's child (`doc_primitives.rs`,
+`hit_test_returns_group_path_when_clicking_child_rect`). So this was every
+click-and-drag of a group. §16 then made Select All produce the same shape.
+
+**JasSwift could not drag a group at all. Rust could, by accident:**
+`doc.set_selection` expands a container to all descendants, so the CHILDREN were
+in the selection and each moved itself — visually indistinguishable from the
+group moving.
+
+**That accident is what §20 rules should be deleted.** Implementing §20 as ruled
+would have carried the defect into the canonical port. The fix is a prerequisite
+for §20, not a sibling of it.
+
+### 21.2 Two corrections to §20's own text
+* **§20.2's mechanism is wrong.** It argues the expanded selection is incoherent
+  because "translate it and the group moves by 24 while each child, already
+  carried by its parent, moves 24 again." **That double-move never happened** —
+  the group contributed nothing, so children moved once. The ruling's conclusion
+  may stand; the reason given for it does not.
+* **§20.3's claim that this unlocks §16.4 is wrong.** The MARQUEE independently
+  produces ancestor+descendant selections, deliberately, and the ratified corpus
+  says so in prose: *"the MARQUEE keeps the group branch — it legitimately asks
+  'did anything inside the band match?' and its answer includes the members."*
+  **13 such pairs live in 4 goldens today.** §16.4 is not assertable after §20
+  lands; it needs a ruling on the marquee first. **STILL OPEN, and now with a
+  measured obstacle rather than an assumed clear path.**
+
+### 21.3 The durable half — an invariant, not a patch
+**For an ALL selection, moving IS translating:**
+`move_control_points(elem, All, d) == translate_element(elem, d)`, for every
+kind. The two functions are two spellings of one idea; they disagreed only where
+one had forgotten a kind. Asserted **per kind** in both ports
+(`move_all_equals_translate_for_every_kind`, `moveAllEqualsTranslateForEveryKind`).
+
+Writing that test found a **second** kind nobody had reported: **Polyline** had
+no arm either, so a polyline did not move, whole or by control point. Fixed in
+the same shape. The bug this started from was one of two — which is the argument
+for a per-kind invariant over a per-bug fix.
+
+### 21.4 A recorded gap closed, in lockstep
+Both ports carried a test asserting Edit > Copy of a live compound shape lands
+the copy **exactly on top of** its source, each explaining that
+`move_control_points` fell through for a compound shape, each declining to
+repair it. Both went red on the same value (x=20, not 0) when the arms landed,
+and now assert the copy lands beside its source. Two ports, one number — the
+corpus reporting a closure rather than a regression.
+
+---
+
+## 22. §16.4 RULED, AND WHAT AN ADVERSARY FOUND IN THE RULING. 2026-07-29.
+
+Decided by the Mac seat under the Captain's overnight grant — *"bank these
+decisions… it is better to proceed, we can change decisions in the council as
+needed."* Written at length because it **overrides ratified corpus prose**.
+
+### 22.1 What was overridden, and on what evidence
+The corpus defended the old shape: *"the MARQUEE keeps the group branch — it
+legitimately asks 'did anything inside the band match?' and its answer includes
+the members."*
+
+Measured, before any change: with the group and its two members in the
+selection, `copy_selection` copies the **group whole** and then copies **each
+member into the source group**. The source ended holding **four** children
+instead of two, beside the copy. *Marquee, then duplicate, damages the original.*
+The post-copy selection was garbage as well.
+
+Move and delete survived the same shape **only by accident** — delete sorts
+paths descending (`document.rs`), and move writes absolute positions read from
+the pristine pre-move document (`controller.rs`). Accidental safety across two
+verbs is not an invariant.
+
+### 22.2 What the adversary found that this seat had missed
+An independent design review was commissioned to attack the ruling before it
+landed. It returned **STAND**, on a stronger argument than the one it was given:
+
+* **Under the old shape, DESELECT could SELECT.** Select All, then shift-marquee
+  over the group: the XOR removed the group entry and **added its two members**.
+  The old shape was incoherent against the ruled Select All shape *inside the
+  marquee's own extend mode* — reversal would restore that.
+* **Reasoned from source, not driven:** the Transform-panel property writes
+  compose per selection entry, so the old shape **double-applied** opacity
+  (50% → 25% on members), blend mode, and multi-entry transforms. No accident
+  saved those, unlike move and delete.
+
+### 22.3 Three corrections the review made to this seat's account
+1. **The group branch is NOT redundant — it stays.** This seat expected the
+   branch to become dead once its expansion was removed. Collapsing it into the
+   plain `predicate(child)` arm reds **exactly one** test in 2837:
+   `marquee_over_only_a_locked_member_of_an_open_group_takes_nothing`. Its
+   surviving content is *lock-aware member-asking*, and that is load-bearing.
+2. **Its empty-interior semantics are UNWATCHED.** A band falling between a
+   group's members selects nothing — no corpus case pins it. **Owed.**
+3. **The justifying defect is pinned Rust-only.** There is no Swift twin of the
+   copy consequence, and the corpus copy case runs on `two_rects.svg`, which has
+   **no group** — which is precisely why this hid for so long. **Owed: a
+   marquee-then-copy-over-a-group family in both ports.**
+
+*On one point the review and this seat disagree and the disagreement is
+recorded rather than resolved:* it reports 15 ancestor/descendant pairs in 5
+goldens before the ruling; a re-run of this seat's census at the exact commit
+reviewed (`630633e0`) reports **13 pairs in 4 files**. The likely cause is that
+the review measured a tree that already carried the S0 merge, which adds a fifth
+such file. **Neither number is load-bearing** — the actionable figure is §22.4's.
+
+### 22.4 The invariant is RULED but NOT YET ASSERTABLE
+After the ruling, a census of the whole fixture tree still finds **4
+ancestor/descendant pairs in 2 files**. The marquee is no longer among the
+producers. The ones that remain are:
+
+* **`doc.set_selection`'s container expansion** — still live in Rust
+  (`interpreter/effects.rs`). **§20 is ruled and NOT implemented.**
+* **The extend / add seams** — `add_to_selection`, `toggle_selection` and raw
+  `set_selection` all accept such a pair today; none is ruled.
+* **A NEW live defect the review found while probing**, unrelated to the ruling
+  and not repaired here: marquee a group, shift + direct-marquee one member's
+  control point, then move — the member is **turned into a Polygon stranded at
+  its pristine coordinates with a single control point displaced**. Banked.
+
+**The path to assertable**, in order: implement §20 in both ports with the YAML
+ancestor-aware panel predicate; rule the extend/add seams; then assert at the
+write chokepoint plus a fixture-tree lint. Only then does §16.4 become a gate
+rather than a rule.

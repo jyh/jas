@@ -32,6 +32,15 @@ jobs:
       - run: python scripts/check_preservation_corpus.py
       - run: python scripts/check_corpus_manifest.py --self-test && python scripts/check_corpus_manifest.py
       - run: python scripts/check_swift_copy_sites.py --self-test && python scripts/check_swift_copy_sites.py
+      # Asserts every check_*.py runs on BOTH platform families. The list of
+      # steps in each lane is hand-maintained, so a gate added after a lane was
+      # written is watched on one platform and unwatched on the other, silently.
+      # That is how the line above was wrong on Windows for its whole life.
+      - run: python scripts/check_lane_coverage.py --self-test && python scripts/check_lane_coverage.py
+      # Every function that dispatches on Element kind must account for
+      # containers, or carry a ledger row saying why not. Five defects wore
+      # that shape in one week, all invisible in Rust and live in JasSwift.
+      - run: python scripts/check_element_dispatch.py --self-test && python scripts/check_element_dispatch.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -196,6 +205,25 @@ jobs:
           python scripts/check_preservation_corpus.py
           python scripts/check_corpus_manifest.py --self-test
           python scripts/check_corpus_manifest.py
+          # Added here after this gate landed 2026-07-28 keyed on str(Path) and
+          # failed WHOLESALE on Windows while CI stayed green — it runs in the
+          # ubuntu job, and ubuntu is the platform that cannot see the defect.
+          # A path-keyed gate belongs on the platform whose paths differ.
+          python scripts/check_swift_copy_sites.py --self-test
+          python scripts/check_swift_copy_sites.py
+          # Same argument as the two lines above, one level up: this asserts no
+          # gate is watched on only one platform family. It reports its own
+          # absence, so it must appear in both lanes or it fails immediately.
+          python scripts/check_lane_coverage.py --self-test
+          python scripts/check_lane_coverage.py
+          python scripts/check_element_dispatch.py --self-test
+          python scripts/check_element_dispatch.py
+          # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
+          # every platform, and compares with PurePosixPath — no str(Path) in the
+          # path, so it should be separator-clean here. Windows CI is what proves
+          # that, not this comment.
+          python scripts/check_naming_rule.py --self-test
+          python scripts/check_naming_rule.py
 
       # These five are the newline half's blast radius: each regenerates a
       # corpus and byte-compares it against the committed golden, so a text

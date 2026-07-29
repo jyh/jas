@@ -2074,6 +2074,25 @@ func selectionOutlineScale(_ doc: Document, _ path: ElementPath) -> Double {
     return scale
 }
 
+/// The single bounding box that outlines a SELECTED CONTAINER, or nil if this
+/// element is not a container (it strokes its own geometry instead) or has no
+/// extent to outline.
+///
+/// Split out from `drawElementOverlay` so the decision is assertable without a
+/// `CGContext`: the drawing is one `addRect`, and what was actually wrong was
+/// the decision, not the drawing. Twin of the `is_container` branch in Rust's
+/// `canvas/render.rs`, zero-extent guard included.
+func containerSelectionOutlineRect(_ elem: Element) -> CGRect? {
+    switch elem {
+    case .group, .layer:
+        let b = elem.bounds
+        guard b.width > 0, b.height > 0 else { return nil }
+        return CGRect(x: b.x, y: b.y, width: b.width, height: b.height)
+    default:
+        return nil
+    }
+}
+
 /// Draw an element's selection overlay (outline + control handles).
 /// Internal so tools can call it via the ToolContext. `kind` decides
 /// which control points are highlighted (and gets handle decoration);
@@ -2122,8 +2141,32 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
         return
     }
 
-    // Groups and Layers: nothing — descendants draw their own
-    // highlights.
+    // Groups and Layers: ONE bbox around the contents.
+    //
+    // This used to `return` and draw nothing, on the premise that "descendants
+    // are individually in the selection and draw their own highlights". That
+    // premise is Rust's container expansion in `doc.set_selection`
+    // (`interpreter/effects.rs`), which JasSwift does not do — so the
+    // descendants were never in the selection and a selected group showed NO
+    // highlight at all. Found by JYH at council 2026-07-29, clicking the group
+    // the GROUPMOVE fix had just made draggable.
+    //
+    // Third consumer found resting on that same premise, after
+    // `moveControlPoints` (a group would not move) and `copySelection` (a copy
+    // damaged its source). §20 rules the expansion away, so Rust would have
+    // joined them.
+    //
+    // Rust already renders this and states the rule (`canvas/render.rs`): "per
+    // the vector-illustration convention, a selected Group is shown as a single
+    // bbox around its contents — not as individual descendant outlines". The
+    // zero-extent guard is mirrored from there: stroking an empty container's
+    // bounds would draw a dot at its origin. Handle squares stay absent —
+    // `selectionHandleRects` already returns [] for containers in both ports.
+    if let outline = containerSelectionOutlineRect(elem) {
+        ctx.addRect(outline)
+        ctx.strokePath()
+        return
+    }
     if case .group = elem { return }
     if case .layer = elem { return }
 
@@ -3199,37 +3242,7 @@ class CanvasNSView: NSView {
     }
 
     private func hitTestPathCurve(_ x: Double, _ y: Double) -> (ElementPath, Element)? {
-        let threshold = hitRadius + 2
-        for (li, layer) in document.layers.enumerated() {
-            for (ci, child) in layer.children.enumerated() {
-                switch child {
-                case .path(let v):
-                    if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
-                        return ([li, ci], child)
-                    }
-                case .textPath(let v):
-                    if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
-                        return ([li, ci], child)
-                    }
-                case .group(let g):
-                    for (gi, gc) in g.children.enumerated() {
-                        switch gc {
-                        case .path(let v):
-                            if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
-                                return ([li, ci, gi], gc)
-                            }
-                        case .textPath(let v):
-                            if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
-                                return ([li, ci, gi], gc)
-                            }
-                        default: break
-                        }
-                    }
-                default: break
-                }
-            }
-        }
-        return nil
+        JasLib.hitTestPathCurve(in: document, x: x, y: y)
     }
 
     // MARK: - Event dispatch
@@ -3819,6 +3832,90 @@ class CanvasNSView: NSView {
         activeTool.onMove(ctx, x: end.x, y: end.y, shift: extend, alt: false, dragging: true)
         activeTool.onRelease(ctx, x: end.x, y: end.y, shift: extend, alt: false)
     }
+}
+
+/// Find the first Path or TextPath whose curve is close to (x, y), in
+/// document coordinates. The Type-on-Path tool's only route to an existing
+/// element: `CanvasNSView` injects this into `ToolContext` as the
+/// `hitTestPathCurve` closure, and `TypeOnPathTool.beginPressNoSession`
+/// DESTRUCTIVELY converts whatever comes back from it.
+///
+/// **Lifted out of `CanvasNSView` so a test can reach the PRODUCTION walk.**
+/// `ToolContext` takes the hit test as a closure, so a test that supplied its
+/// own closure would prove nothing about what ships — and this function is the
+/// only guard between the artist's locked artwork and `replaceElement`.
+///
+/// The twin is jas_dioxus `TypeOnPathTool::hit_test_path_curve`. The two
+/// deliberately differ in SEARCH DEPTH — Rust stops at layer children, this
+/// port descends one level into Groups — which is an UNRULED divergence
+/// recorded in `seat/fleet/SCOPE-lock-immutable.md` §4 D-A and §8 Q3, awaiting
+/// a ruling. The lock guards below are written to cover whatever depth this
+/// port searches, so a ruling either way moves the loops, not the rule.
+func hitTestPathCurve(in document: Document, x: Double, y: Double) -> (ElementPath, Element)? {
+    let threshold = hitRadius + 2
+    for (li, layer) in document.layers.enumerated() {
+        for (ci, child) in layer.children.enumerated() {
+            // LOCK IS IMMUTABLE (transcripts/LAYER_STRUCTURE.md §15.1) AND
+            // INHERITED (§13), both RULED by JYH 2026-07-28. A locked element
+            // must not be REACHED by this tool at all, because reaching it is
+            // already the conversion — there is no later refusal point.
+            //
+            // ONE read per depth, deliberately, matching this port's own
+            // `selectAll`: `effectiveLocked` on the CHILD path already folds in
+            // the layer's flag, so a layer-level short-circuit above this loop
+            // would be redundant — and a redundant guard is one no mutation can
+            // turn red, which is how a guard rots. This read is also what skips
+            // a locked GROUP whole, so the grandchild read below only ever
+            // decides an individually-locked member.
+            //
+            // MEASURED, each reverted individually: deleting THIS read reds 4;
+            // degrading it to the own-flag `child.isLocked` reds the 2 locked-
+            // LAYER vectors; deleting the GRANDCHILD read reds exactly 1.
+            if document.effectiveLocked([li, ci]) { continue }
+            switch child {
+            case .path(let v):
+                if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                    return ([li, ci], child)
+                }
+            case .textPath(let v):
+                if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                    return ([li, ci], child)
+                }
+            case .group(let g):
+                for (gi, gc) in g.children.enumerated() {
+                    // HONEST NOTE ON WHAT IS WATCHED. Under the child-depth
+                    // guard above, `effectiveLocked` here is ALGEBRAICALLY
+                    // `gc.isLocked` — measured: degrading it to the own-flag
+                    // read alone leaves the WHOLE suite green. The guard is not
+                    // redundant (deleting it reds the locked-grandchild vector);
+                    // its SPELLING is what no single mutation can see.
+                    //
+                    // It is kept as the inherited read anyway, and that is
+                    // measured too rather than argued: deleting the child-depth
+                    // guard alone does NOT red the locked-GROUP vector, because
+                    // this fold catches the group's flag on the way down. Do
+                    // both — delete the child guard AND degrade this one — and
+                    // the locked-GROUP vector goes red with 4 others. So the
+                    // spelling is the defence in depth, and it is the one that
+                    // survives a Q3 ruling that moves these loops.
+                    if document.effectiveLocked([li, ci, gi]) { continue }
+                    switch gc {
+                    case .path(let v):
+                        if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                            return ([li, ci, gi], gc)
+                        }
+                    case .textPath(let v):
+                        if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                            return ([li, ci, gi], gc)
+                        }
+                    default: break
+                    }
+                }
+            default: break
+            }
+        }
+    }
+    return nil
 }
 
 /// Bridges the CoreGraphics-based CanvasNSView into SwiftUI.

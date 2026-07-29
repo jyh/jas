@@ -306,6 +306,70 @@ mod copy_payload_tests {
         }
     }
 
+    /// §19's GATE, and the reason it is written HERE rather than beside
+    /// `Controller::copy_selection`: the selection a duplicate leaves is an
+    /// INTERNAL fact until a subsequent Copy emits it. **A gate that checked
+    /// the selection and not the clipboard would pass on a fix that left the
+    /// leak in place**, because `selection_to_svg` walks `doc.selection` in
+    /// stored order and writes the elements in exactly that order.
+    ///
+    /// Alt-drag-duplicate the NON-CONTIGUOUS pair b=[0,1] and d=[0,3] of four
+    /// rects, then Copy. The duplicate's descending walk is load-bearing and
+    /// stays, so the document is
+    ///
+    ///     a@0  b@10  b'@16  c@20  d@30  d'@36
+    ///
+    /// and the payload must be the two COPIES, front-to-back: **[16, 36]**.
+    ///
+    /// THE FOUR OUTCOMES, so the assertion cannot be read as merely tidy:
+    ///   * `[30, 16]` — what shipped. Reverse document order AND it carries d,
+    ///     the SOURCE, because the byproduct recorded `[0,4]` before the later
+    ///     insertion at [0,1] shifted d up to index 4.
+    ///   * `[16, 30]` — sorted the stale paths. Order fixed, still a source.
+    ///   * `[36, 16]` — fixed the paths, kept the descending order.
+    ///   * `[16, 36]` — RULED.
+    ///
+    /// This drives the PRODUCTION mutator and the PRODUCTION payload
+    /// expression, so it is the artist's gesture pair and not a reconstruction.
+    #[test]
+    fn a_duplicate_then_copy_emits_the_copies_in_document_order() {
+        use crate::document::controller::Controller;
+
+        let children: Vec<Rc<Element>> = (0..4)
+            .map(|i| Rc::new(rect(i as f64 * 10.0, 0.0, &format!("r{i}"))))
+            .collect();
+        let doc = Document {
+            layers: vec![Element::Layer(LayerElem {
+                children,
+                ..LayerElem::default()
+            })],
+            selected_layer: 0,
+            selection: vec![
+                ElementSelection::all(vec![0, 1]),
+                ElementSelection::all(vec![0, 3]),
+            ],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::copy_selection(&mut model, 6.0, 0.0);
+
+        let xs = payload_xs(model.document().clone());
+        assert_eq!(
+            xs.len(),
+            2,
+            "a duplicate of two elements must put two elements on the \
+             clipboard; got {xs:?}",
+        );
+        for (got, want) in xs.iter().zip([16.0_f64, 36.0]) {
+            assert!(
+                (got - want).abs() < 1e-3,
+                "clipboard payload is {xs:?}; expected [16, 36] — the two \
+                 COPIES in document order. [30, 16] is the shipped defect \
+                 (reverse order, and the second entry is the SOURCE d).",
+            );
+        }
+    }
+
     /// Q5. The paste body applies `translate_element(elem, offset, offset)`, and
     /// `translate_element` is `..e.clone()` — id included. `clear_ids` exists
     /// and is deliberately NOT called there (`element.rs:2247`), so after

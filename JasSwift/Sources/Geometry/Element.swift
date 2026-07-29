@@ -1022,6 +1022,16 @@ public enum Element: Equatable {
                 kind.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
             }
             return .polygon(v)
+        // A polyline's control points are its points, exactly as a polygon's
+        // are — the kinds differ only in whether the run closes. This arm was
+        // ABSENT in both ports: a polyline fell to `default` and did not move,
+        // whole or by control point. Found by the Rust twin of
+        // `moveAllEqualsTranslateForEveryKind`, not by a report.
+        case .polyline(var v):
+            v.points = v.points.enumerated().map { (i, pt) in
+                kind.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
+            }
+            return .polyline(v)
         case .path(var v):
             v.d = movePathCommandPoints(v.d, kind, dx: dx, dy: dy)
             return .path(v)
@@ -1078,6 +1088,36 @@ public enum Element: Equatable {
             var updated = r
             updated.transform = (r.transform ?? .identity).translated(dx, dy)
             return .live(.reference(updated))
+        // CONTAINERS AND THE REMAINING LIVE KINDS. A container has no control
+        // points of its own, so selecting it selects the whole subtree and
+        // moving it moves its members. `translated(dx:dy:)` already does that
+        // for every one of these kinds (it is the Align and paste path), so
+        // delegate rather than re-derive.
+        //
+        // Without this, a Group fell to `default: return self` and a group
+        // selected as ONE entry DID NOT MOVE — which in JasSwift was every
+        // click-and-drag of a group, because the Selection tool sets a
+        // one-entry selection (`selection.yaml` `doc.set_selection`) and
+        // hit_test returns the GROUP's path for a click inside its child.
+        // Rust hid the identical missing arm behind `doc.set_selection`'s
+        // container expansion, which LAYER_STRUCTURE.md §20 rules should be
+        // removed — so this had to be repaired before that lands.
+        // Measured 2026-07-29; twin invariant:
+        // `move_all_equals_translate_for_every_kind`.
+        case .group, .layer, .live:
+            // The predicate is the element's OWN control-point count, not zero.
+            // DOCUMENT.md's table grants a Group FOUR bbox-corner control
+            // points, so "fully selected" has two valid spellings — `.all`, and
+            // `.partial([0,1,2,3])`, which is what a full selection expands to.
+            // Guarding on `isAll(total: 0)` accepted only the first, so the
+            // second fell through and THE GROUP DID NOT MOVE: the very defect
+            // this arm was added to fix, still armed one layer down.
+            //
+            // A PARTIAL container selection (one corner) is a resize gesture,
+            // not a move, and group resize does not exist — it correctly falls
+            // through. Twin: `a_container_moves_however_its_full_selection_is_spelled`.
+            guard kind.isAll(total: controlPointCount) else { return self }
+            return translated(dx: dx, dy: dy)
         default:
             return self
         }
@@ -1499,6 +1539,61 @@ public enum Element: Equatable {
     /// align_left double the offset (per ALIGN.md §Translation
     /// semantics, mirrored from `translate_element` in
     /// `jas_dioxus/src/geometry/element.rs`).
+    /// Apply a per-element rewrite to every PAINTABLE element a selection entry
+    /// reaches: the element itself when it is a leaf, or every leaf beneath it
+    /// when it is a container, at any depth.
+    ///
+    /// RULED 2026-07-29 (JYH at council: *"yes, recurse into members"*).
+    /// Selecting a group and clicking a swatch is the commonest operation in the
+    /// application and it did NOTHING — `withFill` and its siblings return a
+    /// container unchanged, which is right for the data model (a group carries
+    /// no fill of its own) and wrong for the artist's intent. Rust hid it behind
+    /// `doc.set_selection`'s container expansion; JasSwift, which does not
+    /// expand, was simply broken.
+    ///
+    /// **The recursion lives HERE and not inside `withFill`/`withStroke`.**
+    /// Those are also called at render time (stroke scaling) and on
+    /// symbol-instance overrides, where recursing would be wrong or wasteful.
+    /// Only "apply this to the selection" wants the walk.
+    ///
+    /// Containers are rebuilt through `withChildren`, never by re-listing their
+    /// fields — that is the Swift copy-site omission class, and re-listing here
+    /// would silently drop a container's `id`, `mask` and blending flags on
+    /// every swatch click. Twin: Rust `map_paintable`.
+    ///
+    /// NOTE: this does NOT skip locked descendants. Lock enforcement is §15's
+    /// job and is not built yet; no other selection operation respects it
+    /// either, and a lone exception here would be an inconsistency rather than
+    /// a protection.
+    /// Visit every PAINTABLE element a selection entry reaches: the element
+    /// itself when it is a leaf, or every leaf beneath it when it is a
+    /// container. The READ twin of `mapPaintable`.
+    ///
+    /// The panels summarise a selection through `selectionFillSummary` /
+    /// `selectionStrokeSummary`, which SKIPPED containers — so a selected group
+    /// summarised to `.noSelection`, "nothing is selected", while Rust's twin
+    /// said `Uniform(None)`, "this has no stroke". Both wrong, and wrong in
+    /// different directions. An empty container visits nothing and so
+    /// contributes no value.
+    public func forEachPaintable(_ f: (Element) -> Void) {
+        switch self {
+        case .group(let g): g.children.forEach { $0.forEachPaintable(f) }
+        case .layer(let l): l.children.forEach { $0.forEachPaintable(f) }
+        default: f(self)
+        }
+    }
+
+    public func mapPaintable(_ f: (Element) -> Element) -> Element {
+        switch self {
+        case .group(let g):
+            return .group(g.withChildren(g.children.map { $0.mapPaintable(f) }))
+        case .layer(let l):
+            return .layer(l.withChildren(l.children.map { $0.mapPaintable(f) }))
+        default:
+            return f(self)
+        }
+    }
+
     public func translated(dx: Double, dy: Double) -> Element {
         // PRESERVATION (EDIT_SEMANTICS_FREEZE.md §3.1): a translation speaks
         // to POSITION only, so every arm is clone-then-mutate — the Swift

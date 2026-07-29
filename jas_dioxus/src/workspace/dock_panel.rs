@@ -172,10 +172,7 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
     // ── Stroke panel overrides ──────────────────────────────
     // Read cap/join/width from the selected element; fall back to panel state.
     let sel_stroke = st.tab().and_then(|tab| {
-        let doc = tab.model.document();
-        doc.selection.first()
-            .and_then(|es| doc.get_element(&es.path))
-            .and_then(|e| e.stroke().cloned())
+        crate::document::controller::selection_stroke_for_panel(tab.model.document())
     });
     let sp = &st.stroke_panel;
     if let Some(ref s) = sel_stroke {

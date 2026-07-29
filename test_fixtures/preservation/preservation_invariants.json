@@ -373,13 +373,11 @@
     },
     {
       "name": "lock_a_group_keeps_the_group_itself",
-      "doc": "T4 in its purest form. Locking a group speaks to `locked` and nothing else, so the container must come back carrying its own id, name, opacity and transform. Swift's Controller.lockSelection rebuilt the Group from an inline five-argument literal, so the very container the artist locked lost its identity; Rust's lock_element is clone-then-mutate and never had the hole. The lock materializes onto the descendants too (both ports recurse), so r_back and r_front are subjects rather than bystanders here; lyr_main and r_bystander are the T4 witnesses.",
+      "doc": "T4 in its purest form. Locking a group speaks to `locked` and nothing else, so the container must come back carrying its own id, name, opacity and transform. Swift's Controller.lockSelection rebuilt the Group from an inline five-argument literal, so the very container the artist locked lost its identity; Rust's lock_element was clone-then-mutate and never had the hole. TURNED BY LOCKMAT, and it pinned the PRE-RULING answer in as many words: this vector used to name r_back and r_front as SUBJECTS, because both ports recursed and stamped `locked = true` onto them. transcripts/LAYER_STRUCTURE.md §13 (RULED by JYH 2026-07-28) makes lock INHERITED, so the descendants of a locked group are exactly what the edit must NOT touch. They are bystanders now, alongside lyr_main and r_bystander, which is a strictly stronger claim than the one this vector made before — a regression to materialization reds it here as well as in operations/lock_selection_no_materialization.json.",
       "setup_svg": "preservation_nested_attrs.svg",
       "cardinality": "one_to_one",
       "subject_ids": [
-        "grp_inner",
-        "r_back",
-        "r_front"
+        "grp_inner"
       ],
       "speaks_to": [
         "locked"

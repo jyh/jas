@@ -275,11 +275,7 @@ public func strokeWithGroup(
 
 public func strokePanelLiveOverrides(model: Model) -> [String: Any] {
     let doc = model.document
-    var stroke: Stroke? = nil
-    if let first = doc.selection.first {
-        stroke = doc.getElement(first.path).stroke
-    }
-    let s = stroke ?? model.defaultStroke
+    let s = selectionStrokeForPanel(doc) ?? model.defaultStroke
     var out: [String: Any] = ["weight": s?.width ?? 1.0]
     // Also mirror the selection's cap / join (matches the Rust dock), so
     // those widgets reflect the selection. Display-only.

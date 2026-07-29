@@ -1,0 +1,304 @@
+[
+  {
+    "_doc": [
+      "OBJECT > LOCK STOPS MATERIALIZING — transcripts/LAYER_STRUCTURE.md §13,",
+      "RULED by JYH 2026-07-28.",
+      "",
+      "§13 repealed materialization and the LAYERS-PANEL path was repaired",
+      "(`Document::toggling_element_lock` / `Document.togglingElementLock`, gated",
+      "by lock_toggle_no_materialization.json). `Object > Lock` — the menu item,",
+      "Ctrl+2, and the `lock_selection` op verb — was NOT. It kept a second,",
+      "recursive implementation (`lock_element` in jas_dioxus, `lockRecursive` in",
+      "JasSwift) that stamped `locked = true` onto every descendant of a Group.",
+      "",
+      "WHY THAT WAS WORSE THAN A LEFTOVER, and why it is fixed here rather than",
+      "recorded. §13.1 landed `jas:locked` SVG persistence the same day, so the",
+      "stamped flags SURVIVE SAVE AND RELOAD. Under inheritance they are also",
+      "INDIVIDUALLY UNREMOVABLE — opening the parent leaves every child locked",
+      "and there is no UI anywhere that clears a single one (`Unlock All` is the",
+      "whole document or nothing). `unlocking_a_group_frees_its_children` below",
+      "is that exact artist story, and it is the case the residue reddened.",
+      "",
+      "THE RESIDUE IS GROUP-ONLY IN BOTH PORTS — measured, not assumed. Rust",
+      "recursed under `new.is_group()`, which is `matches!(self,",
+      "Element::Group(_))` and excludes `Element::Layer`; Swift recursed in its",
+      "`case .group` arm alone. So locking a LAYER never stamped in either port,",
+      "which is why `object_lock_on_a_layer_writes_only_the_layers_own_flag` is a",
+      "control here and not a headline. It is kept precisely so the repair cannot",
+      "be mistaken for 'stop writing the flag'.",
+      "",
+      "NOT ONE GOLDEN IN THIS FAMILY WAS GENERATED FROM THE BEHAVIOUR IT PINS,",
+      "which is what let the red be measured in both ports before either moved",
+      "(the device is §15.5's). Two mechanisms:",
+      "  * IDENTITY — the two headline cases point at",
+      "    lock_toggle_group_locked_expected.json and",
+      "    lock_toggle_leaf_locked_expected.json, goldens the panel family already",
+      "    owns. That pins `Object > Lock` as an EQUATION: locking a group from",
+      "    the Object menu must produce exactly what the Layers-panel lock button",
+      "    produces on the same group. Two functions doing the same job",
+      "    differently is how this diverged, so the gate says they are the same",
+      "    job rather than describing the answer twice.",
+      "  * EQUATION AGAINST A CONTROL — `unlocking_a_group_frees_its_children`",
+      "    and `control_clicking_a_child_of_an_untouched_group` share one golden.",
+      "    Lock a group and unlock it again, and a click on its child must land",
+      "    exactly where a click lands when nothing ever happened.",
+      "The three genuinely new goldens were DERIVED from",
+      "lock_toggle_group_locked_expected.json by flipping named flags, not",
+      "produced by any runner.",
+      "",
+      "WHAT THIS FAMILY CANNOT REACH. `lock_selection` reads `doc.selection` and",
+      "the op corpus can only seed that through `select_element` / `select_rect`,",
+      "so a selection holding an element AND its own ancestor — which production",
+      "can build through the Layers panel — is not expressible here. Also",
+      "untouched: `unlock_all`, whose post-state selection DIVERGES between the",
+      "ports today (jas_dioxus clears it, JasSwift re-selects every formerly",
+      "locked path) — a real defect, deliberately left to its own wave so this",
+      "family stays a gate on materialization alone."
+    ],
+    "name": "lock_selection_setup_is_a_layer_holding_a_group_of_two_rects",
+    "setup_svg": "group_nested.svg",
+    "txns": [],
+    "expected_json": "lock_selection_setup_expected.json"
+  },
+  {
+    "_doc": "THE HEADLINE. Object > Lock on a GROUP writes the group's own flag and NOTHING ELSE. Pinned BY FILE IDENTITY against the Layers-panel lock button's own golden: the two paths must be one behaviour. Before the repair both rects came back locked:true — flags the artist never set, which `jas:locked` then wrote into the saved file.",
+    "name": "object_lock_on_a_group_writes_only_the_groups_own_flag",
+    "setup_svg": "group_nested.svg",
+    "txns": [
+      {
+        "name": "select_element",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "lock_selection",
+        "ops": [
+          {
+            "op": "lock_selection"
+          }
+        ]
+      }
+    ],
+    "expected_json": "lock_toggle_group_locked_expected.json"
+  },
+  {
+    "_doc": "THE PROTECTION SURVIVES THE REPAIR. After the group is locked, a click on a child is still refused — by INHERITANCE now rather than by a stamped flag, and the SELECTION half of this case was already correct before the repair. It is nonetheless one of the three red cases, because the golden compares the whole document and the residue left its flags there; that is the honest reading, and the case still earns its place as the one that stops the repair from being 'lock less'.",
+    "name": "a_child_of_a_group_locked_from_the_object_menu_is_not_selectable",
+    "setup_svg": "group_nested.svg",
+    "txns": [
+      {
+        "name": "select_element",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "lock_selection",
+        "ops": [
+          {
+            "op": "lock_selection"
+          }
+        ]
+      },
+      {
+        "name": "select_element",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ],
+    "expected_json": "lock_toggle_group_locked_expected.json"
+  },
+  {
+    "_doc": "THE ARTIST STORY THE RULING IS ABOUT. Lock a group from the Object menu, then unlock that group — and its children are free again, because nothing was ever written onto them. Pinned as an EQUATION against control_clicking_a_child_of_an_untouched_group below: the round trip must leave the document and the next click exactly where they started. Before the repair the children stayed locked:true with no UI able to clear them individually, so the click was refused and the selection came back empty.",
+    "name": "unlocking_a_group_frees_its_children",
+    "setup_svg": "group_nested.svg",
+    "txns": [
+      {
+        "name": "select_element",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "lock_selection",
+        "ops": [
+          {
+            "op": "lock_selection"
+          }
+        ]
+      },
+      {
+        "name": "toggle_element_lock",
+        "ops": [
+          {
+            "op": "toggle_element_lock",
+            "path": [
+              0,
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "select_element",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ],
+    "expected_json": "lock_selection_child_selected_expected.json"
+  },
+  {
+    "_doc": "THE CONTROL that gives the case above its meaning: a click on a group's child in a document nothing has touched. Behaviour this ruling does not speak to, which is why the shared golden could be derived without consulting the code under repair.",
+    "name": "control_clicking_a_child_of_an_untouched_group",
+    "setup_svg": "group_nested.svg",
+    "txns": [
+      {
+        "name": "select_element",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
+      }
+    ],
+    "expected_json": "lock_selection_child_selected_expected.json"
+  },
+  {
+    "_doc": "DEPTH CONTROL. Locking a LAYER leaves the group inside it and both grandchildren untouched. Green before and after — Rust's `is_group()` excludes Layer and Swift recursed only in its `case .group` arm — so this case pins that the repair is 'stop recursing', not 'stop writing the flag', and it watches the one depth the group cases cannot see.",
+    "name": "object_lock_on_a_layer_writes_only_the_layers_own_flag",
+    "setup_svg": "group_nested.svg",
+    "txns": [
+      {
+        "name": "select_element",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0
+            ]
+          }
+        ]
+      },
+      {
+        "name": "lock_selection",
+        "ops": [
+          {
+            "op": "lock_selection"
+          }
+        ]
+      }
+    ],
+    "expected_json": "lock_selection_layer_locked_expected.json"
+  },
+  {
+    "_doc": "LEAF CONTROL, pinned BY FILE IDENTITY against the panel family's leaf golden. A leaf has no children to materialize onto, so this case is unchanged by the repair and holds the two paths to the same answer on the simplest input there is.",
+    "name": "object_lock_on_a_leaf_flips_its_own_flag",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "select_element",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "name": "lock_selection",
+        "ops": [
+          {
+            "op": "lock_selection"
+          }
+        ]
+      }
+    ],
+    "expected_json": "lock_toggle_leaf_locked_expected.json"
+  },
+  {
+    "name": "unlock_all_preserves_the_selection_it_found",
+    "_doc": "THE SEAM NEITHER PORT HAD A SPEC ANSWER FOR, and the ports DIVERGED on it. Rust's unlock_all cleared the selection; Swift's unlockAll replaced it with every path it had just unlocked (and its collectLocked walk started at depth 2, so a LAYER's own lock was never collected -- a second defect inside the first). actions.yaml describes unlock_all without mentioning the selection at all.\nRULED 2026-07-29 (banked to this seat, reversible in council): unlock_all PRESERVES the selection. The PRESERVATION LAW governs -- an edit changes what it speaks to and preserves the rest, and selection order is part of the document (§10/D6). Unlock All speaks to `locked` flags; the selection is the rest.\nLock and Hide DO clear, and actions.yaml says why: 'because nothing downstream refuses to move or delete a selected element for being locked'. That reason is a workaround for missing enforcement -- exactly what §15 closes -- and it does not apply here, because unlocking makes nothing unselectable. Clearing without that reason just destroys artist state.\nHere rect [0,0] is locked, then the UNLOCKED bystander [0,1] is selected, then Unlock All runs. The selection must come back UNCHANGED, holding [0,1] and nothing else -- not cleared (Rust's old answer) and not replaced by the freed [0,0] (Swift's old answer).",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "lock_the_first_rect",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0
+            ]
+          },
+          {
+            "op": "lock_selection"
+          }
+        ]
+      },
+      {
+        "name": "select_the_bystander",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "name": "unlock_all",
+        "ops": [
+          {
+            "op": "unlock_all"
+          }
+        ]
+      }
+    ],
+    "expected_json": "unlock_all_preserves_selection_expected.json"
+  }
+]
