@@ -993,6 +993,7 @@ mod tests {
                          "operations/boolean_collapse_default.json",
                          "operations/lock_inheritance.json",
                          "operations/lock_toggle_no_materialization.json",
+                         "operations/lock_selection_no_materialization.json",
                          "operations/select_all_top_level.json",
                          "operations/paste_layers.json",
                          "operations/paste_locked_layers.json"] {

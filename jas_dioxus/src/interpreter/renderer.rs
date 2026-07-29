@@ -8606,7 +8606,12 @@ fn tree_flatten_rc_children(
         path.push(i);
 
         let is_container = child.is_group_or_layer();
-        let is_selected = selected_paths.contains(&path);
+        // AT OR UNDER a selected path, not an exact match: selecting a group
+        // marks its members' rows too (RULED 2026-07-29). The shorthand is
+        // expanded HERE rather than by writing descendants into
+        // `doc.selection` -- see `path_is_selected_or_under`.
+        let is_selected = crate::document::controller::path_is_selected_or_under(
+            selected_paths, &path);
         let is_renaming = renaming_path.as_ref() == Some(&path);
         let is_layer = child.is_layer();
         let is_collapsed = collapsed_paths.contains(&path);
@@ -8687,7 +8692,12 @@ fn tree_flatten_layers(
     for (i, elem) in layers.iter().enumerate().rev() {
         let path = vec![i];
         let is_container = elem.is_group_or_layer();
-        let is_selected = selected_paths.contains(&path);
+        // AT OR UNDER a selected path, not an exact match: selecting a group
+        // marks its members' rows too (RULED 2026-07-29). The shorthand is
+        // expanded HERE rather than by writing descendants into
+        // `doc.selection` -- see `path_is_selected_or_under`.
+        let is_selected = crate::document::controller::path_is_selected_or_under(
+            selected_paths, &path);
         let is_renaming = renaming_path.as_ref() == Some(&path);
         let is_layer = elem.is_layer();
         let is_collapsed = collapsed_paths.contains(&path);

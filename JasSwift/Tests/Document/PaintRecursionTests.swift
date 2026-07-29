@@ -268,3 +268,38 @@ struct StrokePanelWeightTests {
         #expect(viaGroup?.width == 5, "and that answer is the first leaf's")
     }
 }
+
+/// THE LAYERS-PANEL MARKER IS ANCESTOR-AWARE. RULED 2026-07-29.
+///
+/// JYH at council: *"when we select a group on the canvas, it should be as if
+/// the children are selected too… almost as if the container were shorthand for
+/// 'select all these at once'."*
+///
+/// AS IF is the design. The shorthand is expanded at the point of USE — here for
+/// the panel marker, `mapPaintable`/`forEachPaintable` for operations — rather
+/// than by writing descendants into `doc.selection`, which is where all eight
+/// container defects came from. Twin: Rust `the_panel_marker_is_ancestor_aware`.
+@Suite("Ancestor-aware panel marker")
+struct PanelMarkerTests {
+    @Test func aSelectedGroupMarksItsMembersRows() {
+        let sel: [ElementPath] = [[0, 1]]
+        #expect(pathIsSelectedOrUnder(sel, [0, 1]), "the group's own row")
+        #expect(pathIsSelectedOrUnder(sel, [0, 1, 0]), "a member's row")
+        #expect(pathIsSelectedOrUnder(sel, [0, 1, 2, 5]), "a member two levels down")
+    }
+
+    @Test func itDoesNotMarkAncestorsOrSiblings() {
+        let sel: [ElementPath] = [[0, 1]]
+        #expect(!pathIsSelectedOrUnder(sel, [0]), "the containing layer is NOT marked")
+        #expect(!pathIsSelectedOrUnder(sel, [0, 0]), "a sibling is not marked")
+    }
+
+    /// Element-wise, never a string prefix: [0,1] must not match [0,10].
+    @Test func itComparesPathElementsNotPrefixes() {
+        let sel: [ElementPath] = [[0, 1]]
+        #expect(!pathIsSelectedOrUnder(sel, [0, 10]), "[0,10] is not under [0,1]")
+        #expect(!pathIsSelectedOrUnder(sel, [0, 11, 3]), "nor is [0,11,3]")
+        #expect(!pathIsSelectedOrUnder([ElementPath](), [0, 1]),
+                "an empty selection marks nothing")
+    }
+}

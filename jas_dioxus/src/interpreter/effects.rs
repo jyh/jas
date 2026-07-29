@@ -718,39 +718,31 @@ fn run_doc_effect(
         "doc.set_selection" => {
             let paths = extract_path_list(spec, store, ctx);
             let doc = model.document();
-            // Drop paths that don't resolve to an element. Matches
-            // Flask's setSelection behavior for invalid paths.
-            // Expand containers to include all descendants — matches
-            // the Layers panel selection-square click behavior. Without
-            // this, a Selection-tool click on a group would put only
-            // the group in selection, and the Layers panel would
-            // highlight only the group row (not its children).
-            fn collect_descendants(
-                elem: &crate::geometry::element::Element,
-                path: &[usize],
-                out: &mut Vec<ElementPath>,
-            ) {
-                if let Some(children) = elem.children() {
-                    for (i, child) in children.iter().enumerate() {
-                        let mut child_path = path.to_vec();
-                        child_path.push(i);
-                        out.push(child_path.clone());
-                        collect_descendants(child, &child_path, out);
-                    }
-                }
-            }
-            let mut expanded: Vec<ElementPath> = Vec::new();
-            for p in paths {
-                if let Some(elem) = doc.get_element(&p) {
-                    expanded.push(p.clone());
-                    if elem.is_group_or_layer() {
-                        collect_descendants(elem, &p, &mut expanded);
-                    }
-                }
-            }
-            let selection = expanded
+            // SELECT ONLY THE NAMED PATHS (LAYER_STRUCTURE.md §20, RULED
+            // 2026-07-28, implemented 2026-07-29). Invalid paths are dropped,
+            // matching the reference's setSelection.
+            //
+            // This used to EXPAND every named container to all its descendants,
+            // so that the Layers panel would mark a group's child rows. That
+            // put a fact about how a panel DRAWS into the document's selection,
+            // and it is the single root of eight defects found on 2026-07-29 --
+            // every one invisible in this port precisely BECAUSE of the
+            // expansion, and live in JasSwift, which never had it. The worst:
+            // `copy_selection` saw a group and its members as PEERS and copied
+            // each, so marquee-then-duplicate left the SOURCE group holding
+            // four children instead of two.
+            //
+            // The panel keeps its markers. JYH at council 2026-07-29: *"when we
+            // select a group on the canvas, it should be as if the children are
+            // selected too."* AS IF is the design: the shorthand is expanded at
+            // the point of USE -- `path_is_selected_or_under` for the panel
+            // marker, `map_paintable` / `for_each_paintable` for operations --
+            // rather than written into the stored selection, where no operation
+            // can read it coherently.
+            let selection = paths
                 .into_iter()
-                .map(|p| crate::document::document::ElementSelection::all(p))
+                .filter(|p| doc.get_element(p).is_some())
+                .map(crate::document::document::ElementSelection::all)
                 .collect();
             Controller::set_selection(model, selection);
         }

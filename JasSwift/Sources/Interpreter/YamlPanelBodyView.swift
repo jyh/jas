@@ -4089,7 +4089,13 @@ struct TreeViewContent: View {
     private func rowView(row: FlatRow, selectedPaths: Set<ElementPath>) -> some View {
         let elem = row.elem
         let path = row.path
-        let isSelected = selectedPaths.contains(path)
+        // AT OR UNDER a selected path, not an exact match: selecting a group
+        // marks its members' rows too (RULED 2026-07-29). The shorthand is
+        // expanded here rather than in the stored selection. The identical
+        // line in `treeRows_OLD` is deliberately NOT changed — it and its
+        // only caller `treeRows_DEPRECATED` are unreferenced dead code, and
+        // touching it would imply it is live.
+        let isSelected = pathIsSelectedOrUnder(selectedPaths, path)
         let isPanelSelected = panelSelection.contains(path)
         let (name, isNamed) = elementDisplayName(elem)
         let vis = elem.visibility

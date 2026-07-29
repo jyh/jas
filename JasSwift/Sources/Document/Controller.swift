@@ -780,10 +780,16 @@ public class Controller {
             let parentPath = Array(path.dropLast())
             let parent = doc.getElement(parentPath)
             if case .group(let g) = parent {
-                var selection: Selection = [ElementSelection.all(parentPath)]
-                for i in 0..<g.children.count {
-                    selection.append(ElementSelection.all(parentPath + [i]))
-                }
+                // THE GROUP ALONE (§20, implemented 2026-07-29). This used to
+                // write the group AND every sibling into the selection — the
+                // second producer of the expanded shape, after doc.set_selection.
+                //
+                // The artist's experience is unchanged: clicking a child still
+                // selects the whole group, operations still reach every member
+                // (mapPaintable), and the panel still marks every member's row
+                // (pathIsSelectedOrUnder). What changes is that the MODEL no
+                // longer holds a group and its own children as peers.
+                let selection: Selection = [ElementSelection.all(parentPath)]
                 // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
                 model.setDocumentUnbracketed(doc.replacing(selection: selection), intent: .selection)
                 return
@@ -2391,6 +2397,24 @@ public func selectionFillSummary(_ doc: Document) -> FillSummary {
     // guard above owns that — and Rust returns `Uniform(None)` here, so this
     // must too or the ports disagree on an empty group.
     return .uniform(value)
+}
+
+/// True when `path` is a selected path OR sits underneath one.
+///
+/// The Layers panel's row marker. RULED 2026-07-29 — JYH: *"when we select a
+/// group on the canvas, it should be as if the children are selected too."*
+/// "AS IF" is the design: the container's shorthand is expanded HERE, at the
+/// point of use, rather than by writing descendants into `doc.selection`. The
+/// stored selection stays minimal, so no operation can see a group and its own
+/// child as peers — the shape that produced all eight container defects.
+///
+/// Compared ELEMENT-WISE, never as a string prefix: `[0,1]` must not match
+/// `[0,10]`. Twin: Rust `path_is_selected_or_under`.
+public func pathIsSelectedOrUnder<S: Sequence>(_ selected: S, _ path: ElementPath) -> Bool
+where S.Element == ElementPath {
+    selected.contains { s in
+        path.count >= s.count && Array(path.prefix(s.count)) == s
+    }
 }
 
 /// The stroke the Stroke panel should DISPLAY for the current selection.
