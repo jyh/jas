@@ -1598,3 +1598,58 @@ one is small and well-precedented — `active_document.*` already exposes
 **Not ruled, flagged:** whether a refusal ALSO wants an active message (status
 bar or transient) on top of the disabled item, for the artist who presses Cmd+V
 without looking at the menu.
+
+---
+
+## 16. SELECT ALL SELECTS TOP-LEVEL OBJECTS. RULED 2026-07-28 (D2).
+
+> JYH: *"keep the Rust shape."*
+
+### 16.1 What the two ports actually did
+**Rust** `select_all` walks layers then direct children and pushes ONE entry per
+child. A group contributes a single entry `[li, ci]`.
+
+**Swift** `selectAll` delegates to `selectFlat`, whose group branch inserts
+**both** the group and every unlocked grandchild:
+
+```swift
+if anyHit {
+    selection.insert(ElementSelection.all([li, ci]))         // the group
+    for gi in 0..<g.children.count {
+        selection.insert(ElementSelection.all([li, ci, gi])) // AND each child
+    }
+}
+```
+
+A group of three therefore yielded **four** entries. That is the measured
+2-entry cardinality difference on a 6-element document.
+
+### 16.2 Why this was a DEFECT, not a competing design
+The Swift selection contained an element **and its own descendants at the same
+time**, and no operation has a coherent reading of that set: translate it and the
+group moves by 24 while each child — already carried by its parent — moves 24
+again; delete it and the group goes, then its children are deleted from a parent
+that no longer exists.
+
+**The cause is one function serving two callers.** `selectFlat`'s group branch
+was written for the MARQUEE, where "did anything inside the band match?" is the
+right question and its own comment says so. `selectAll` calls it with
+`predicate: { _ in true }`, so every group always hits and a rubber-band rule
+fired universally in a context it was never written for. Rust never had the bug
+because `select_all` is its own hand-rolled loop rather than a marquee call.
+
+### 16.3 The ruling
+**Select All selects top-level objects; a group counts as ONE.** That is what
+grouping means — the group IS the object, and entering it is how you reach the
+members. Swift changes; Rust is canonical.
+
+`workspace/actions.yaml` §select_all was rewritten today for inherited lock and
+is **silent on group expansion**, which is how this stayed unadjudicated. The
+ruling goes there, or the next reader re-derives the argument.
+
+### 16.4 STILL OPEN — the invariant underneath
+Should the selection MODEL permit an ancestor and its own descendant to be
+selected simultaneously at all? If not, that is an assertable invariant, and it
+would have caught this without anyone noticing the divergence. **Not ruled.**
+Raised because a rule that makes a defect impossible is worth more than a fix
+that makes one instance go away.
