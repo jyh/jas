@@ -125,18 +125,32 @@ private func idPathsInDocumentOrder(_ doc: Document) -> [(String, ElementPath)] 
     return out
 }
 
+/// The SELECTION-ONLY verbs: they change `doc.selection` and nothing else, so
+/// they are non-undoable and must stay journal-neutral (no transaction is
+/// opened for them). Named ONCE so a new selection verb has one place to
+/// register. Mirrors Rust `is_selection_only_verb`.
+private func isSelectionOnlyVerb(_ name: String) -> Bool {
+    switch name {
+    case "select_rect", "select_by_ids", "select_element", "select_all", "add_to_selection":
+        return true
+    default:
+        return false
+    }
+}
+
 /// Build the selection (in DOCUMENT ORDER) for the elements whose `id` is in
 /// `ids`, as `ElementSelection.all(path)` entries. Document order — NOT the
 /// order of `ids` — so the result is byte-identical to what `select_rect` would
-/// produce for the same set (the byte-gate reconciliation; the selection
-/// serializer also sorts by path). An id that resolves to no element is silently
-/// dropped (hardened: a stale/unknown id is a skip). Mirrors Rust
-/// `selection_for_ids`.
+/// produce for the same set (the byte-gate reconciliation). The canonical-JSON
+/// selection serializer no longer normalizes order (LAYER_STRUCTURE.md §10 D6),
+/// so this walk being document-ordered is now load-bearing rather than belt-and-
+/// braces. An id that resolves to no element is silently dropped (hardened: a
+/// stale/unknown id is a skip). Mirrors Rust `selection_for_ids`.
 private func selectionForIds(_ doc: Document, _ ids: [String]) -> Selection {
     let wanted = Set(ids)
     var sel: Selection = []
     for (id, path) in idPathsInDocumentOrder(doc) where wanted.contains(id) {
-        sel.insert(ElementSelection.all(path))
+        sel.append(ElementSelection.all(path))
     }
     return sel
 }
@@ -871,6 +885,71 @@ private func splitFragmentEntry(_ entry: Element) -> (String?, [Element]) {
     return (nil, [entry])
 }
 
+/// The layer index a paste that targets the ACTIVE layer would land in, or
+/// `nil` when it must refuse.
+///
+/// **THE ONE PLACE THE R2 LOCK REFUSAL LIVES IN THIS PORT.** Both bodies that
+/// paste into the active layer call it — `pasteFragmentInto` (artwork) and
+/// `pasteTextElementInto` (a plain-text clipboard payload) — so a guard on one
+/// of them could not leave the other open. ``pasteClipboardTextInto(_:text:offset:preserveLayers:)``
+/// dispatches between exactly those two, and production reaches both.
+///
+/// Two distinct reasons to refuse, deliberately collapsed into one `nil`
+/// because both mean "this paste lands nothing": a document with no layers at
+/// all, and — RULED by JYH 2026-07-28, LAYER_STRUCTURE.md §15 — an active layer
+/// that is effectively locked. The clamp for an out-of-range `selectedLayer` is
+/// inside ``Document/activeLayerLocked``.
+///
+/// Mirrors Rust `op_apply::active_paste_target`.
+func activePasteTarget(_ doc: Document) -> Int? {
+    if doc.layers.isEmpty || doc.activeLayerLocked { return nil }
+    return min(max(doc.selectedLayer, 0), doc.layers.count - 1)
+}
+
+/// R3's target layer for a fragment layer named `name`, CREATING it in `layers`
+/// when it has to. Never refuses: the fragment chose this target, not the
+/// artist, so a locked one is diverted around rather than declined (§15.2).
+///
+/// The walk, in one sentence: take the first of `name`, `name 2`, `name 3`, …
+/// that either does not exist (create it, verbatim) or exists and is not locked
+/// (append into it).
+///
+/// **WHY A WALK AND NOT A MINT.** JYH ruled the suffix — "Sky" locked ⇒
+/// "Sky 2" — and the precedent named for the shape is `advanceNextUntitledPast`,
+/// which likewise finds a free N rather than always adding one. Stopping at an
+/// EXISTING open "Sky 2" instead of minting "Sky 3" is what keeps a repeated
+/// paste from manufacturing a layer per repetition; that is the same
+/// proliferation argument the VERBATIM naming rule above rests on, applied one
+/// step along.
+///
+/// It terminates by pigeonhole: every iteration either returns or increments
+/// `n`, and a document with `k` layers can block at most `k` candidate names.
+///
+/// The lock read is the layer's OWN flag, which for a TOP-LEVEL layer is
+/// exactly its effective lock — ``Document/effectiveLocked(_:)`` folds an OR
+/// down a path, and this path has length one. The Rust twin spells it
+/// `effective_locked(&vec![i])` and computes the same bit; it reads a Document
+/// where this reads the working layer array.
+///
+/// Mirrors Rust `op_apply::preserving_layer_target`.
+func preservingLayerTarget(_ layers: inout [Layer], name: String) -> Int {
+    var candidate = name
+    var n = 1
+    while true {
+        // Match against the WORKING layer list, so two fragment layers of one
+        // name collapse into one target.
+        if let found = layers.firstIndex(where: { $0.name == candidate }) {
+            // HIDDEN IS NOT LOCKED: only the lock diverts.
+            if !layers[found].locked { return found }
+            n += 1
+            candidate = "\(name) \(n)"
+        } else {
+            layers.append(Layer(name: candidate, children: []))
+            return layers.count - 1
+        }
+    }
+}
+
 /// Apply a paste to `doc`, returning the new document, or `nil` when nothing
 /// was pasted (an empty fragment, or a document with no layers to paste into).
 /// PURE — no `Model`, no transaction, no pasteboard.
@@ -917,11 +996,34 @@ private func splitFragmentEntry(_ entry: Element) -> (String?, [Element]) {
 /// one name collapse into a single created layer (the first creates, the second
 /// matches) rather than creating two layers with the same name.
 ///
-/// **LOCKED / HIDDEN target layers are appended into unchanged** — no refusal,
-/// no unlock, no reveal. Open question 2; today's answer is pinned rather than
-/// invented. Note that reaching it required a real fix: the old paste rebuilt
-/// the target as `Layer(name:children:opacity:transform:)`, which SILENTLY
-/// DROPPED `locked`, `visibility`, `blendMode`, `mask`, `isolatedBlending`,
+/// # A LOCKED TARGET — §15, RULED by JYH 2026-07-28
+///
+/// **Refuse when the ARTIST chose the target, divert when the FRAGMENT chose
+/// it.** The two arms above differ in exactly that, so the lock answer differs
+/// with them:
+///
+/// * **R2's target is the ACTIVE layer, which the artist picked.** A locked one
+///   REFUSES — this returns `nil`, so nothing lands, nothing is journalled and
+///   the paste run does not advance. Landing the artwork somewhere else would
+///   silently override an explicit choice, which is worse than declining. The
+///   read is ``Document/activeLayerLocked``, the SAME property the greyed-out
+///   menu item reads.
+/// * **R3's target was named by the incoming fragment.** A locked one DIVERTS
+///   to a numerically suffixed sibling — see `preservingLayerTarget`.
+/// * **HIDDEN IS NOT LOCKED**, on either arm. Hidden is a visibility state, not
+///   a protection, so a hidden target is appended into normally and the artist
+///   unhides. Diverting there would manufacture layers to avoid a condition
+///   that protects nothing; the asymmetry is deliberate and is JYH's.
+///
+/// **THE REFUSAL IS WHOLESALE.** A preserving paste whose fragment carries both
+/// a divertible named layer and a loose element bound for the locked active
+/// layer lands NOTHING, rather than landing the half it can. Everything below
+/// builds a local `layers` array, so any early `return nil` discards the whole
+/// paste atomically. DECIDED, not ruled; banked in §15 for JYH.
+///
+/// Reaching any of this required a real fix first: the old paste rebuilt the
+/// target as `Layer(name:children:opacity:transform:)`, which SILENTLY DROPPED
+/// `locked`, `visibility`, `blendMode`, `mask`, `isolatedBlending`,
 /// `knockoutGroup` and `id` — the Swift copy-site omission class, landing at a
 /// paste. The append below mutates the layer VALUE in place, so there is no
 /// field list to fall behind.
@@ -935,30 +1037,29 @@ public func pasteFragmentInto(
     _ doc: Document, fragment: [Element], offset: Double, preserveLayers: Bool
 ) -> Document? {
     if doc.layers.isEmpty { return nil }
-    // Hardened like every other read here: an out-of-range `selectedLayer`
-    // clamps rather than trapping on the index.
-    let active = min(max(doc.selectedLayer, 0), doc.layers.count - 1)
+    let active = activePasteTarget(doc)
     var layers = doc.layers
     var newSelection: Selection = []
 
     for entry in fragment {
         let (name, children) = splitFragmentEntry(entry)
         if children.isEmpty { continue }
-        var idx = active
+        let idx: Int
         if preserveLayers, let n = name {
-            if let found = layers.firstIndex(where: { $0.name == n }) {
-                idx = found
-            } else {
-                layers.append(Layer(name: n, children: []))
-                idx = layers.count - 1
-            }
+            idx = preservingLayerTarget(&layers, name: n)
+        } else {
+            // R2's target is the artist's own ACTIVE layer, so a locked one
+            // REFUSES (§15). `layers` is a local copy, so this discards the
+            // whole paste — including any sibling an earlier entry created.
+            guard let a = active else { return nil }
+            idx = a
         }
         // FIELD-PRESERVING append: mutate the layer value, never rebuild it
         // from a hand-written field list (see the doc comment).
         var target = layers[idx]
         for child in children {
             let translated = EditClipboard.translateElement(child, dx: offset, dy: offset)
-            newSelection.insert(ElementSelection.all([idx, target.children.count]))
+            newSelection.append(ElementSelection.all([idx, target.children.count]))
             target.children.append(translated)
         }
         layers[idx] = target
@@ -1098,10 +1199,10 @@ public func clipboardTextIsSvg(_ text: String) -> Bool {
 /// `ClipboardTextPasteTests.pasteOfPlainTextPreservesTheTargetLayersOwnFields`.
 /// Mutating the layer VALUE in place is the shape that cannot drift again.
 private func pasteTextElementInto(_ doc: Document, text: String, offset: Double) -> Document? {
-    if doc.layers.isEmpty { return nil }
-    // Same clamp as `pasteFragmentInto`: an out-of-range `selectedLayer` clamps
-    // rather than trapping on the index.
-    let active = min(max(doc.selectedLayer, 0), doc.layers.count - 1)
+    // A LOCKED ACTIVE LAYER REFUSES (§15), through the same `activePasteTarget`
+    // the artwork path reads. Text carries no layer structure to preserve, so
+    // `preserveLayers` never diverts it and R2's answer is the only one here.
+    guard let active = activePasteTarget(doc) else { return nil }
     var layers = doc.layers
     var target = layers[active]
     let at = target.children.count
@@ -1513,9 +1614,11 @@ public func opApply(
     // id-primary twin (selection-only, non-undoable), so it is excluded for the
     // identical reason. `select_element` is the path-addressed click seam —
     // selection-only for exactly the same reason as `select_rect`, and excluded
-    // on the same grounds.
-    if name != "select_rect" && name != "select_by_ids" && name != "select_element"
-        && !model.isInTxn {
+    // on the same grounds. `select_all` (LAYER_STRUCTURE.md §16) and
+    // `add_to_selection` join the list for the same reason; the set is named
+    // once, in `isSelectionOnlyVerb`, so a new selection verb has ONE place to
+    // register rather than a growing `&&` chain that is easy to miss.
+    if !isSelectionOnlyVerb(name) && !model.isInTxn {
         model.beginTxn()
     }
     // Fork-4 `targets` (OP_LOG.md §9). Populated for the THREE replay-safe verbs
@@ -1589,6 +1692,28 @@ public func opApply(
             return .missingTarget(id: String(describing: path))
         }
         controller.selectElement(path)
+        targets = selectionToIds(model.document)
+    // SELECT ALL — transcripts/LAYER_STRUCTURE.md §16 (RULED 2026-07-28): it
+    // selects TOP-LEVEL objects, a group counting as ONE. Before this verb
+    // nothing shared could reach `selectAll` in either port, which is how this
+    // port's group-expanding version (a selection containing an element AND its
+    // own descendants) survived unadjudicated. Routed through the production
+    // `Controller.selectAll`, never a copy of it. Mirrors Rust's `select_all`.
+    case "select_all":
+        controller.selectAll()
+        targets = selectionToIds(model.document)
+    // The ADDITIVE selection seam — the same `Controller.addToSelection` the
+    // YAML effect `doc.add_to_selection` calls (shift-click). It is the one
+    // production site whose contract is "idempotent: no-op if the path is
+    // already selected", so it is what a corpus case can use to watch the DEDUP
+    // guard that `Selection` being an ordered array makes manual
+    // (LAYER_STRUCTURE.md §10, "THE MIGRATION HAZARD").
+    case "add_to_selection":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard !path.isEmpty, model.document.tryGetElement(path) != nil else {
+            return .missingTarget(id: String(describing: path))
+        }
+        controller.addToSelection(path)
         targets = selectionToIds(model.document)
     case "move_selection":
         controller.moveSelection(dx: numField(op, "dx"), dy: numField(op, "dy"))

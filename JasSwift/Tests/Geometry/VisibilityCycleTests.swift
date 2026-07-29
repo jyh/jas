@@ -23,7 +23,7 @@ import Testing
         let layer = Layer(children: [.rect(Rect(x: 0, y: 0, width: 10, height: 10))])
         let path: ElementPath = [0, 0]
         let doc = Document(layers: [layer], selectedLayer: 0,
-                           selection: Set([ElementSelection.all(path)]))
+                           selection: [ElementSelection.all(path)])
         #expect(doc.selection.contains { $0.path == path })
         // Preview -> Outline: still selected.
         let d1 = doc.cyclingElementVisibility(at: path)

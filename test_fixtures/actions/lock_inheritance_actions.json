@@ -23,12 +23,12 @@
       "",
       "So the only selectable object in the document is [1,1].",
       "",
-      "DELIBERATELY GROUPLESS IN THE OPEN LAYER. The two ports still disagree",
-      "about whether Select All EXPANDS a group (SCOPE-effective-locked.md D2 /",
-      "Q2 — Rust adds the group alone, Swift adds the group and every",
-      "grandchild), and that question is UNRULED. A fixture whose unlocked",
-      "layer held an unlocked group would red on THAT divergence and say",
-      "nothing about lock. This one isolates the ruled question."
+      "GROUPLESS IN THE OPEN LAYER, and no longer for the original reason. This",
+      "case was written groupless because Select All's group-expansion difference",
+      "was UNRULED, so a group here would have gone red for a reason that is not",
+      "about lock. It is RULED now (§16, 2026-07-28: a group counts as ONE), and",
+      "the case below carries a group deliberately. This one stays groupless so",
+      "the lock vector keeps isolating the lock question."
     ],
     "name": "select_all_skips_a_locked_layers_whole_subtree",
     "setup_svg": "locked_layer_and_element.svg",
@@ -71,5 +71,31 @@
       }
     ],
     "expected_json": "ungroup_all_leaves_a_locked_layers_groups_alone_expected.json"
+  },
+  {
+    "_doc": [
+      "SELECT ALL COUNTS A GROUP AS ONE, THROUGH THE ACTION SEAM —",
+      "transcripts/LAYER_STRUCTURE.md §16 (D2, RULED 2026-07-28).",
+      "",
+      "The twin of the operations family's headline case, one layer up: this",
+      "drives the `select_all` ACTION, which is what the Edit menu item",
+      "dispatches, rather than the `select_all` OP VERB. Both reach the same",
+      "Controller mutator, so this is not a second implementation — it is the",
+      "evidence that the seam the USER touches reaches the ruled body.",
+      "",
+      "THE DOCUMENT (select_all_top_level.svg): two layers; a three-child group",
+      "'Trio' beside a solo rect in Alpha, a two-child group 'Pair' beside a",
+      "solo rect in Beta. FOUR top-level objects, so FOUR entries. Before the",
+      "ruling JasSwift produced NINE here."
+    ],
+    "name": "select_all_action_counts_a_group_as_one_object",
+    "setup_svg": "select_all_top_level.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      }
+    ],
+    "expected_json": "select_all_action_counts_a_group_as_one_object_expected.json"
   }
 ]

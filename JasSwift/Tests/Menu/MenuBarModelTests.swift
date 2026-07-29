@@ -204,6 +204,38 @@ private func menu(_ model: [MenuModel], _ label: String) -> MenuModel? {
     #expect(enabled("make_instance") == false)  // selection_count == 1 (it is 2)
     #expect(enabled("undo") == true)            // can_undo
     #expect(enabled("redo") == false)           // can_redo
+    // §15's visible half, from an OPEN active layer: paste is available.
+    #expect(enabled("paste") == true)
+    #expect(enabled("paste_in_place") == true)
+
+    // THE REFUSAL, MADE VISIBLE (LAYER_STRUCTURE.md §15.4). Lock the ACTIVE
+    // layer and nothing else, and `paste` / `paste_in_place` must grey out —
+    // while `paste_preserving_layers`, which DIVERTS rather than refusing,
+    // must stay available. That asymmetry is the ruling, so it is asserted
+    // rather than assumed.
+    //
+    // WHY THIS TEST HAS TO EXIST AND CANNOT BE THE SHARED GATE: the cross-app
+    // `menu_state` corpus SEEDS its context, so it pins how the predicate is
+    // EVALUATED and is structurally blind to a port that forgets to BUILD the
+    // key. A missing key evaluates to null → false → `!false` → paste stays
+    // enabled, which is silently the pre-ruling behaviour. Only a live-ctx test
+    // can catch that, and it is a per-port claim in both ports.
+    let lockedModel = Model(document: Document(layers: [
+        Layer(name: "L0", children: [r1, r2], locked: true),
+    ]), filename: "/tmp/wiring.svg")
+    let lockedCtx = buildMenuContext(model: lockedModel, tabCount: 1,
+                                     hasSelection: false, canUndo: false,
+                                     canRedo: false, workspace: nil)
+    let lockedItems = MenuState.menuState(menubar, lockedCtx)
+    func enabledLocked(_ action: String) -> Bool? {
+        lockedItems.first { ($0["action"] as? String) == action }?["enabled"] as? Bool
+    }
+    #expect(enabledLocked("paste") == false, "paste must grey out on a locked active layer")
+    #expect(enabledLocked("paste_in_place") == false,
+            "paste_in_place shares plain Paste's target, so it greys out too")
+    #expect(enabledLocked("paste_preserving_layers") == true,
+            "preserving paste DIVERTS rather than refusing, so it stays available")
+    #expect(enabledLocked("save") == true, "the lock must not disable unrelated items")
 
     // checked: the pane / panel toggles carry `checked_when` → a Bool (false
     // here, workspace nil); non-toggle items carry no `checked_when` → JSON null.

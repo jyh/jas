@@ -21,7 +21,7 @@ struct GroupFlattenTests {
 
     private func doc(_ layers: [Layer], _ sel: [[Int]]) -> Model {
         var d = Document(layers: layers)
-        d = d.replacing(selection: Set(sel.map { ElementSelection(path: $0) }))
+        d = d.replacing(selection: sel.map { ElementSelection(path: $0) })
         return Model(document: d)
     }
 
@@ -66,7 +66,7 @@ struct GroupFlattenTests {
         }
         #expect(ll.x1 == 1 && ll.y1 == 1 && ll.x2 == 6 && ll.y2 == 6,
                 "the line's geometry survived the move")
-        #expect(after.selection == Set([ElementSelection(path: [1, 0])]),
+        #expect(after.selection == [ElementSelection(path: [1, 0])],
                 "selection becomes the new group")
     }
 
@@ -157,7 +157,7 @@ struct GroupFlattenTests {
             Issue.record("the new group must take the frontmost slot"); return
         }
         #expect(g.children == [a, c], "a and c relocated whole")
-        #expect(after.selection == Set([ElementSelection(path: [0, 1])]),
+        #expect(after.selection == [ElementSelection(path: [0, 1])],
                 "selection follows the group to its real path")
     }
 
@@ -175,7 +175,7 @@ struct GroupFlattenTests {
         if case .group = after.layers[0].children[0] {} else {
             Issue.record("expected a group at index 0")
         }
-        #expect(after.selection == Set([ElementSelection(path: [0, 0])]),
+        #expect(after.selection == [ElementSelection(path: [0, 0])],
                 "group at index 0, as before R1")
     }
 

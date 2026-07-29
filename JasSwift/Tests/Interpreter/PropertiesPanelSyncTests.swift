@@ -9,7 +9,7 @@ import Testing
 
 private func propModel(_ elements: [Element], selected: [ElementPath]) -> Model {
     let layer = Layer(children: elements)
-    let selection: Selection = Set(selected.map { ElementSelection.all($0) })
+    let selection: Selection = selected.map { ElementSelection.all($0) }
     return Model(document: Document(layers: [layer], selectedLayer: 0,
                                     selection: selection))
 }

@@ -171,8 +171,43 @@ public struct ElementSelection: Equatable, Hashable {
     }
 }
 
-/// A selection is a set of ElementSelection entries (unique by path).
-public typealias Selection = Set<ElementSelection>
+/// A selection is an ORDERED ARRAY of `ElementSelection` entries, unique by
+/// path. RULED 2026-07-28 (transcripts/LAYER_STRUCTURE.md §10, D6).
+///
+/// **Ruled on determinism, not performance.** This was `Set<ElementSelection>`.
+/// A `Set`'s iteration order is per-process hash order, and both copy paths
+/// iterate `doc.selection` — measured: five selected elements over ten separate
+/// test processes gave ten different orders and document order not once. The
+/// z-order of a copied fragment is part of the artwork, so a paste that stacks
+/// differently between two runs of the same build is a defect. Rust's
+/// `Selection` is `Vec<ElementSelection>`; this is now the identical
+/// representation.
+///
+/// **Deliberately NOT an ordered-set type.** `swift-collections` is already a
+/// dependency (`Package.swift:12`; `TreeDictionary` is live in this file and in
+/// `Model.swift`), so
+/// `OrderedSet` would have been free — the ruling turns on the OTHER reason:
+/// identical representation across the active ports beats the convenience.
+///
+/// **THE COST, and where it is actually paid.** `Set` gave free deduplication;
+/// an array does not. The migration made the COMPILER enumerate every insertion
+/// site — 28 in production, 23 more in the test targets — and each was answered
+/// individually against its jas_dioxus counterpart rather than blanket-guarded.
+///
+/// The audit's result, measured: a `contains(where:)` guard at all 24 of them
+/// left the whole Swift suite GREEN when removed, so 24 of those guards were
+/// redundant and are NOT here. Rust reaches the same conclusion by construction
+/// — it pushes plainly at every site but three, because a path enumerated from
+/// `layers[li].children[ci]` cannot repeat. The guards that remain are exactly
+/// the ones jas_dioxus also writes, at the two places a duplicate is genuinely
+/// reachable: `Controller.addToSelection` (its whole contract is idempotence)
+/// and the magic wand's "add" mode (a new match may already be selected).
+///
+/// The canonical-JSON selection serializer no longer sorts, so if a duplicate
+/// ever does appear it is visible in every golden carrying a multi-entry
+/// selection — `add_to_selection_twice_on_one_path_yields_one_entry` in
+/// `test_fixtures/operations/select_all_top_level.json` is the case that reds.
+public typealias Selection = [ElementSelection]
 
 /// A document consisting of an ordered list of layers, a selection,
 /// and a list of artboards (with document-global options).
@@ -491,6 +526,32 @@ public struct Document: Equatable {
             if node.isLocked { locked = true }
         }
         return locked
+    }
+
+    /// Is the ACTIVE layer — the one plain Paste targets — effectively locked?
+    ///
+    /// RULED by JYH 2026-07-28 (transcripts/LAYER_STRUCTURE.md §15): plain Paste
+    /// REFUSES into a locked active layer, because the artist picked that layer
+    /// explicitly and landing artwork elsewhere would silently override an
+    /// explicit choice.
+    ///
+    /// **THIS IS ONE DEFINITION SERVING TWO CONSUMERS, deliberately.** The
+    /// ENFORCEMENT reads it (`activePasteTarget` in `OpApply.swift`) and so does
+    /// the AFFORDANCE — it is the `active_document.active_layer_locked` menu
+    /// predicate that greys `paste` and `paste_in_place` out
+    /// (`buildMenuContext` in `JasCommands.swift`). A menu that greyed an item
+    /// out on one rule while the code refused on another would be worse than
+    /// either alone, and there is no second rule here to drift to.
+    ///
+    /// A document with NO LAYERS is not locked: there is nothing to protect, and
+    /// paste's own empty-document no-op is a different refusal with a different
+    /// cause. The out-of-range clamp mirrors `pasteFragmentInto`'s.
+    ///
+    /// The twin is jas_dioxus `Document::active_layer_locked`.
+    public var activeLayerLocked: Bool {
+        if layers.isEmpty { return false }
+        let active = min(max(selectedLayer, 0), layers.count - 1)
+        return effectiveLocked([active])
     }
 
     /// Return a new document with the element at path replaced by newElem.

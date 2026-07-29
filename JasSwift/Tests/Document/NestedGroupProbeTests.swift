@@ -23,10 +23,10 @@ struct NestedGroupProbeTests {
         let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
         let layer = Layer(name: "L", children: [rect, inner])
         var doc = Document(layers: [layer])
-        doc = doc.replacing(selection: Set([
+        doc = doc.replacing(selection: [
             ElementSelection(path: [0, 1, 0]),
             ElementSelection(path: [0, 1, 1]),
-        ]))
+        ])
         let model = Model(document: doc)
         Controller(model: model).groupSelection()
 

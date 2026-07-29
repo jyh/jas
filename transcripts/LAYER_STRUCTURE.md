@@ -1599,6 +1599,180 @@ one is small and well-precedented — `active_document.*` already exposes
 bar or transient) on top of the disabled item, for the artist who presses Cmd+V
 without looking at the menu.
 
+### 15.5 Q6 IMPLEMENTED — both ports, red first, 2026-07-28 (PASTELOCK)
+
+**The headline.** Both halves of §15.2/§15.3 are in both active ports and are
+watched by a shared corpus: `paste` refuses into a locked active layer, "Paste,
+Preserving Layers" diverts to `"Sky 2"`, hidden is appended into unchanged, and
+the Edit menu greys the two refusing commands out while the lock stands.
+
+**§15.1 IS NOT IN THIS WAVE.** Q3's general question — where the operation guard
+lives, per-operation or at the write chokepoint — is untouched, and the other
+seven or eight operations the scope named still ignore lock. This is paste only.
+
+#### RED FIRST, in BOTH PORTS at once
+
+`test_fixtures/operations/paste_locked_layers.json`, 18 cases, three SVG-seeded
+setup documents.
+
+> **8 of 18 RED in Rust and 8 in Swift, on exactly the same case names**, before
+> either port moved. The 10 green are the setups, the controls, the anti-blanket
+> vector and all three hidden vectors — so the family DISCRIMINATES rather than
+> being uniformly red. After: 18 of 18 in both.
+
+That simultaneity was possible because **not one golden was generated from the
+behaviour it pins.** Two devices, and the second is the reusable one:
+
+* every REFUSAL points at its own family's SETUP golden **by file identity**, so
+  "the document is unchanged" is asserted against the document itself;
+* every DIVERT points at a **CONTROL** case that pastes a fragment layer
+  literally named `"Sky 2"` into the same setup — behaviour this ruling does not
+  touch. **The divert is therefore pinned as an EQUATION** (diverting from a
+  locked `"Sky"` must produce exactly what naming the sibling outright produces)
+  rather than as a snapshot of the code that implements it. The ten golden files
+  were generated from a REDUCED family holding only the unchanged cases, so
+  today's wrong answers could not be baked in.
+
+This is the family §9.2 said could not exist. `paste_layers.json`'s `_doc` read
+"no `setup_svg` can produce a locked layer" until this wave; `jas:locked`
+(§13.1) landed the same day and retired it. Both that sentence and the corpus
+manifest's `paste-flow-layer-targeting-divergence` row are updated.
+
+#### The three decisions the ruling left open, and how each was taken
+
+1. **The suffix is a WALK, not a mint.** `name`, `name 2`, `name 3`, … — take
+   the first that either does not exist (create it verbatim) or exists and is
+   not locked (append into it). Stopping at an EXISTING open `"Sky 2"` instead
+   of minting `"Sky 3"` is what keeps a repeated paste from manufacturing one
+   layer per repetition, which is the same proliferation argument R3's verbatim
+   naming already rests on. Shape from `advance_next_untitled_past`, as §15.3
+   asked. Terminates by pigeonhole.
+2. **The refusal is WHOLESALE.** A preserving paste carrying both a divertible
+   named layer and a loose element bound for the locked active layer lands
+   NOTHING. §15 speaks about a paste, not half of one, and a partial paste that
+   silently drops content is the failure mode the ruling is written against.
+   **Banked below** — it is a decision, not a ruling.
+3. **`paste_in_place` refuses too.** `actions.yaml` already says "Layer
+   targeting is plain Paste's", so it inherits plain Paste's answer. Not doing
+   this would leave Cmd+Shift+V walking straight past the greyed menu item.
+   Derived, not ruled; **banked below**.
+
+#### Where the guards live — one per port, per concern
+
+| concern | Rust | Swift |
+|---|---|---|
+| is the artist's layer locked | `Document::active_layer_locked` | `Document.activeLayerLocked` |
+| R2 refusal | `op_apply::active_paste_target` | `activePasteTarget` |
+| R3 divert | `op_apply::preserving_layer_target` | `preservingLayerTarget` |
+
+`active_paste_target` is **the one place the R2 refusal lives**, read by both
+bodies that target the active layer — the artwork paste and the plain-text
+paste. A guard on one would have left the other open, and production reaches
+both.
+
+`active_layer_locked` is **one definition with two consumers**: the enforcement
+above, and the `active_document.active_layer_locked` menu predicate. A menu that
+greyed on one rule while the code refused on another would be worse than either
+alone; there is no second rule to drift to.
+
+**One deliberate spelling difference, stated because it is a divergence risk
+even at zero divergence today.** Rust's divert reads
+`effective_locked(&vec![i])` on a Document; Swift's reads `layers[i].locked` on
+the working layer array, because that port's paste body builds a local `[Layer]`
+rather than a working Document. For a TOP-LEVEL layer the two are identical — an
+OR folded down a path of length one — and a paste target is always top-level.
+
+#### Mutation proof — 13 causes, each reverted INDIVIDUALLY
+
+| # | port | mutation | RED observed |
+|---|---|---|---|
+| M1 | Rust | R2 refusal deleted | 2 failed — corpus `plain_paste_into_a_locked_active_layer_refuses_and_changes_nothing` + the inherited-lock text probe |
+| M2 | Rust | R3 divert deleted | 4 failed — corpus divert case + all three divert probes |
+| M3 | Rust | the walk always MINTS | 2 failed — `…_appends_into_the_existing_numeric_sibling` |
+| M4 | Rust | refusal made PARTIAL | **1 failed — ONLY the wholesale case.** The split that proves atomicity is separable from the refusal |
+| M5 | Rust | HIDDEN treated as locked | 2 failed — the hidden corpus case + the hidden probe |
+| M6–M10 | Swift | the same five | 8 / 11 / 5 / 1 / 3 issues, same case names |
+| M11 | YAML | the `enabled_when` term reverted | RED in the SHARED `menu_state` corpus in BOTH ports, plus both live-ctx tests |
+| M12 | Rust | ctx builder stops emitting the key | **RED in ONLY the Rust live-ctx test — the shared corpus stayed GREEN** |
+| M13 | Swift | ctx builder stops emitting the key | **RED in ONLY the Swift live-ctx test, same proof** |
+
+**M5/M10 are why "hidden is not locked" is a floor and not a sentence.**
+**M12/M13 are the load-bearing pair**: they measure that the shared `menu_state`
+corpus, which SEEDS its context, is structurally blind to a port that forgets to
+BUILD the predicate — and a missing key is null, `!null` is true, and paste
+stays enabled, which is silently the pre-ruling behaviour. The per-port live-ctx
+tests are therefore not redundant with the corpus, and that was measured rather
+than argued.
+
+#### Two measurements in §15.4 above that are WRONG, corrected
+
+1. **"`paste` currently declares no `enabled_when`" is false.** It has declared
+   `enabled_when: "state.tab_count > 0"` since 2026-04-12 (`git blame` →
+   `07af52e13`). The lock term is CONJOINED onto it. Written as §15.4 describes,
+   the new predicate would have silently dropped the no-document guard.
+2. **The predicate that greys a menu item lives in `workspace/menubar.yaml`,**
+   not in the action's own `enabled_when` in `workspace/actions.yaml`. The
+   action-level one is real but is not what the menubar compiles from — the
+   first attempt edited only `actions.yaml` and moved zero corpus bytes, which
+   is how this was found. Both are updated now.
+
+#### Probes that pinned the PRE-RULING answer, turned rather than deleted
+
+`preserve_appends_into_a_locked_matching_layer_and_leaves_it_locked` (and its
+Swift twin) said in as many words that a ruling to refuse or unlock would turn
+it red. It did. Three probes lost their `locked: true` target, in both ports,
+because a locked active layer now refuses outright — which preserves strictly
+more than an append that keeps the flag. Each keeps an inverted lock assertion
+as a live discriminator against a copy site that starts INVENTING a lock.
+
+#### A defect in the Swift test suite, found BY the mutation proof
+
+M7's first run did not report failures — it **TRAPPED** with "Index out of
+range" and aborted the whole `swift test` process, so the summary line never
+printed and any later failure would have been invisible. Cause: `#expect`
+records and CONTINUES where Rust's `assert_eq!` panics, so a probe that indexes
+a layer the mutant never created runs off the end. Fixed here for the three
+probes involved (bounds-safe helper plus hard count guards). **This is a
+property of the whole Swift suite, not of these three probes** — any
+`#expect`-then-index probe has it. Banked.
+
+#### BANKED for JYH — decisions taken here that a council may want to revisit
+
+1. **Wholesale vs partial refusal** (decision 2 above). The alternative is to
+   land the divertible named layers and drop the loose elements, which was
+   rejected as silently losing content.
+2. **`paste_in_place` refuses** (decision 3 above). Derived from an existing
+   sentence in `actions.yaml` rather than ruled.
+3. **The ACTIVE MESSAGE was NOT built and nothing was invented for it.** What it
+   would need, MEASURED here rather than assumed — method: case-insensitive grep
+   over each port's non-test sources for `status_bar` / `statusbar` /
+   `status_message` / `toast` / `snackbar` / `notification` / `banner`, and for
+   Swift additionally `NSAlert` / `showMessage`:
+   * **Rust: zero.** The single hit is a doc comment about `state_store` change
+     notifications, which is the reactive-signal sense of the word. There is no
+     status bar, no toast, no transient anything.
+   * **Swift: zero transient surfaces, but SIXTEEN `NSAlert` sites** (chiefly
+     `JasCommands.swift`, plus `LayersPanel.swift` and `ContentView.swift`).
+     A modal alert is the WRONG SHAPE for this: it demands a click for a message
+     that should evaporate, and it is AppKit, which the iOS-readiness doctrine
+     keeps behind thin adapters. It is also Swift-only, so using it would make
+     the two ports diverge on a user-visible behaviour.
+
+   So the honest position is that the message is a **UI SUBSYSTEM** — in Rust it
+   would be built from nothing — not a detail this wave could have added. Three
+   things want settling before any code: the surface and its lifetime; whether a
+   refusal is the ONLY client (a one-client notification system is a liability);
+   and whether it is per-document or per-window.
+
+   **Blind spot of that measurement:** it is a name-based grep. A message
+   surface built under an unguessed name, or one living in a `.rsx`/SwiftUI
+   view without any of those words, would not have been found. No GUI was run.
+4. **The suffix separator is a SPACE** (`"Sky 2"`, matching §15.3's own
+   spelling). A document whose layers are already `"Sky"` and `"Sky 2"` by the
+   artist's own hand will therefore see a paste append into their `"Sky 2"`.
+   That is the walk working as designed, and it is also the one place where a
+   diverted paste lands in a layer the artist made for another purpose.
+
 ---
 
 ## 16. SELECT ALL SELECTS TOP-LEVEL OBJECTS. RULED 2026-07-28 (D2).
@@ -1736,3 +1910,315 @@ must not be counted as its price:
   (`CanvasSubwindow.swift:3201`) has no lock check anywhere, so the Type-on-Path
   tool converts a locked Path where Rust refuses (`type_on_path_tool.rs:107`).
   Live data loss.
+## 18. D2 AND D6, IMPLEMENTED — and the gate that had to be un-blinded first
+
+**Lands §16 (D2) and §10 (D6) together.** They were separable as rulings and
+not as code: both live in JasSwift's selection subsystem, and the D2 repair
+rewrites a function whose type D6 changes.
+
+### 17.0 The headline
+
+Both are implemented in both active ports and both are **watched** — but only
+after a third thing was fixed, which was not in either ruling and is the most
+useful finding of the pass:
+
+> **The shared corpus was structurally blind to selection ORDER, in BOTH
+> ports.** `test_json::selection_json` / `TestJson.selectionJson` SORTED the
+> selection by path before emitting it. Every golden therefore agreed no matter
+> what order either port produced. That is why D6 — ten different orders over
+> ten processes, measured in §8.3 — never moved a shared byte.
+
+The sort is gone. Rust stayed **green with zero golden churn**, which is the
+half worth stating: Rust's runtime selection order already IS document order in
+every corpus case, so making the property visible cost nothing. JasSwift went
+**RED with 23 issues across 5 tests** (`actionCorpus`,
+`operationControllerOps`, `operationLockInheritance`, `operationPasteLayers`,
+`operationSelectAndMove`) — the D6 defect, finally on a shared gate, before one
+line of the fix was written.
+
+### 17.1 A defect in the CANONICAL port, found on the way
+
+`Controller::toggle_selection` (Rust) built two `HashMap`s and iterated **them**,
+so with two or more surviving entries the shift-marquee's selection order was
+Rust's per-process `RandomState` order. **That is D6's own defect, in the port
+that is supposed to be canonical**, and the `selection_json` sort is what hid
+it. JasSwift's `toggleSelection` had the identical shape over `Dictionary`. Both
+are repaired the same way: the maps are lookup-only and emission walks `current`
+then `new` in their own order.
+
+No existing golden moved, because no existing case reached `toggle_selection`
+with a multi-entry map — so the repair would have been a fix no mutation could
+turn red. A case was added for exactly that reason
+(`extend_marquee_deselects_one_and_keeps_the_other_eight_in_order`), and M5/M6
+below are it going red.
+
+### 17.2 D6 — the migration, and the number that proves the audit was mechanical
+
+`Selection` is `[ElementSelection]`, identical to Rust's `Vec<ElementSelection>`.
+
+**The sites were enumerated BY THE COMPILER.** Changing the typealias makes
+`Set.insert(_:)` a type error at every insertion site (`Array.insert` requires
+an `at:` index), so the build lists them:
+
+| pass | unique `file:line` errors | files |
+|---|---|---|
+| production | **28** | 5 — `Controller.swift`, `OpApply.swift`, `Binary.swift`, `TestJson.swift`, `YamlToolEffects.swift` |
+| test targets | **23** | 15 |
+
+The second pass exists because Swift stops at the first failing module; the
+production number is the one that matters.
+
+**A note for accuracy, correcting what JYH was told at council.**
+`swift-collections` IS already a dependency (`JasSwift/Package.swift:12`;
+`TreeDictionary` is live in `Document.swift` and `Model.swift`), so `OrderedSet`
+would have been free. The ruling stands on the other reason it gave —
+identical representation across the active ports beats the convenience.
+
+### 17.3 The dedup guards: 24 of 25 were redundant, and are gone
+
+The first cut of D6 put a `contains(where:)` guard at every enumerated site,
+which is what "every Swift insertion site needs the same guard" reads like.
+**Measured**: replacing all of them with a plain `append` left the whole Swift
+suite GREEN. Under house law a guard no mutation can turn red is deleted, so 24
+were deleted and the `appendUnique` extension with them.
+
+That is also the correct answer on parity grounds, which is the stronger
+argument: **jas_dioxus pushes plainly at every selection site but two**, because
+a path enumerated from `layers[li].children[ci]` cannot repeat. The two Rust
+guards are now the two Swift guards, written out at each site rather than hidden
+behind a helper:
+
+* `Controller::add_to_selection` / `Controller.addToSelection` — its whole
+  contract is idempotence. JasSwift had **no such Controller method at all**;
+  the guard was inlined in the `doc.add_to_selection` YAML effect, where nothing
+  shared could reach it. It now lives where Rust's lives.
+* the magic wand's `"add"` mode — a new match may already be selected.
+
+Two sites take a plain `append` for a stated reason rather than an audited one:
+`Binary.unpackSelection` and `TestJson.parseSelection`, because **a codec reads
+back what was written** — a duplicate in a file must survive the round trip and
+be visible, not be silently repaired by the decoder. Both mirror Rust.
+
+**One behaviour changed as a deliberate parity choice, and is flagged rather
+than smuggled:** `doc.set_selection` no longer deduplicates, because jas_dioxus
+does not. Under `Set` this port silently deduped a spec naming one path twice.
+Nothing in either port's corpus reaches a repeated path there, so this is parity
+rather than measurement. **Noticed while reading it:** Rust's `doc.set_selection`
+also EXPANDS containers to every descendant and JasSwift's does not — a real,
+pre-existing divergence, unrelated to this pass, unwatched by any gate, and
+recorded here because nobody had written it down.
+
+### 17.4 D2 — the repair respects the caller it was written for
+
+`selectFlat` is **untouched**, and `selectRect` / `selectPolygon` keep it. Only
+`selectAll` changes, into its own loop mirroring Rust's `select_all` line for
+line — including its single `effectiveLocked([li, ci])` read, since that read
+already folds in the layer's flag and a layer-level short-circuit above it would
+be another guard no mutation could red.
+
+The corpus pins the distinction rather than describing it:
+`marquee_over_everything_still_expands_groups_unlike_select_all` requires **nine**
+entries over the same document that Select All must answer with **four**. A
+repair made by deleting `selectFlat`'s group branch reds that case immediately.
+
+### 17.5 The machinery, and the two new verbs
+
+| piece | Rust | Swift |
+|---|---|---|
+| Select All verb | `"select_all"` arm | `case "select_all"` |
+| additive verb | `"add_to_selection"` arm | `case "add_to_selection"` |
+| selection-only set | `is_selection_only_verb` | `isSelectionOnlyVerb` |
+
+Both verbs route through the PRODUCTION `Controller` mutator. The growing `&&`
+chain that listed the journal-neutral verbs became one named predicate per port,
+so a new selection verb has one place to register.
+
+### 17.6 The corpus family
+
+`test_fixtures/operations/select_all_top_level.json` — 8 cases, both ports,
+goldens generated from Rust. Setup `select_all_top_level.svg` is new: two
+layers, a three-child group beside a solo rect, a two-child group beside a solo
+rect. Four top-level objects, nine elements.
+
+Plus one ACTION-seam case,
+`select_all_action_counts_a_group_as_one_object` in
+`test_fixtures/actions/lock_inheritance_actions.json`, because the Edit menu
+dispatches the ACTION and not the op verb; it is evidence that the seam the
+artist touches reaches the ruled body. That file's `_doc` said Select All's
+group expansion was UNRULED and that a group would red for the wrong reason —
+true when written, stale now, and corrected in place.
+
+### 17.7 RED FIRST — measured
+
+| gate | red, before the change | after |
+|---|---|---|
+| `swift test`, sort removed (D6) | **23 issues in 5 tests** | 2839 / 27 suites GREEN |
+| `operationSelectAllTopLevel` (D2) | **2 of 7 cases**: 9 entries where 4 are required, 3 where 2 are | 8 of 8 GREEN |
+| `actionCorpus` (D2) | 1 case | GREEN |
+
+The D2 family DISCRIMINATES rather than being uniformly red: five of its seven
+cases passed before the fix, including the marquee case and both order cases.
+
+### 17.8 Mutation proof — every cause reverted INDIVIDUALLY
+
+Production restored and the suite re-verified green after each.
+
+| # | port | mutation | RED observed |
+|---|---|---|---|
+| M1 | Swift | `selectAll` delegates to `selectFlat` again | 3 issues — `operationSelectAllTopLevel` (2), `actionCorpus` (1) |
+| M2 | Swift | restore the path sort in `selectionJson` | 2 issues — exactly the two ORDER cases |
+| M3 | Swift | drop `Controller.addToSelection`'s guard | 2 issues — the corpus dedup case + `docAddToSelectionIsIdempotent` |
+| M4 | Rust | drop `Controller::add_to_selection`'s guard | 2 failed — the diff shows the literal duplicate, `"selection":[{path:[0,1]},{path:[0,1]}]` |
+| M5 | Rust | `toggle_selection` emits survivors in the other order | 1 failed — the extend-marquee case |
+| M6 | Swift | `toggleSelection` the same | 1 issue — the same case |
+| M7 | Swift | `selectFlat`'s group branch appends the group twice | 2 issues — `operationSelectAllTopLevel` + `operationLockInheritance` |
+
+M2 is the row that matters most: it is the proof that the ORDER is gated and not
+merely the membership. M4 is the dedup half, and it is the only place in the
+pass where a golden shows a duplicated selection entry.
+
+### 17.9 Gates
+
+| gate | before | after |
+|---|---|---|
+| `cargo test --lib` | 2790 passed / 0 failed / 18 ignored | **2792** passed / 0 failed / 18 ignored |
+| `swift test` | 2838 tests / 27 suites | **2839** tests / 27 suites |
+| `pytest workspace_interpreter/` | 1270 passed | 1270 passed |
+| `cross_language_algorithms.py` | 1086 (465+396+225) | 1086 (465+396+225) |
+| `cross_language_commutativity.py` | 32 comparisons | 32 comparisons |
+| `cross_language_workspace.py` | 4 comparisons | 4 comparisons |
+| `check_corpus_manifest.py` | 26 families / 512 files / 35 gaps | 26 / **523** / 35 |
+| `check_preservation_corpus.py` | 14 vectors, floor 14 | 14 vectors, floor 14 |
+| `check_naming_rule.py` | OK, 1437 files | OK, **1448** files |
+| `check_encoding_hygiene.py` | 0 violations | 0 violations |
+| `check_swift_copy_sites.py` | OK | OK, 25 sites / 21 ledger rows |
+| structural gates (menu, toolbar, action refs, panel goldens, path-B, intent map, workspace.json) | OK | OK |
+| `jas_flask` | — | 325 passed |
+
+### 17.10 What was NOT done, and why
+
+* **No GUI was driven.** §7's first blind spot stands. Nobody has watched a
+  Select All happen on screen in either port; the evidence is the corpus, the
+  in-port probes and the mutation table.
+* **The reference interpreter could not arbitrate.** `workspace_interpreter/`
+  has no selection model of the kind these rulings are about — it is not a
+  consumer of `test_fixtures/operations` at all (the manifest lists `rust` and
+  `swift`). So this family, like the paste family before it, is Rust-vs-Swift.
+  It DID arbitrate one thing: nothing in `menu_state.json` moved.
+* **The frozen ports were not examined**, per the freeze. Recorded because it is
+  measurable and someone will ask: `cd jas && pytest` fails 6 tests on this
+  branch **with and without this pass's changes** — verified by stashing the
+  working tree and re-running. Pre-existing, not caused here, not fixed here.
+* **§16.4 is still open** — whether the selection MODEL should forbid an
+  ancestor and its own descendant at the same time. This pass fixes the one
+  instance; it does not make the class impossible. Note that the marquee
+  deliberately PRODUCES such a selection, so the invariant cannot simply be
+  asserted — it would have to be scoped, and that is the ruling §16.4 wants.
+* **`copy_selection` still leaves the selection in DESCENDING path order** in
+  both ports, which the new golden now pins. Whether that is the intended
+  post-copy selection order or an artifact of iterating backwards to keep
+  insertion indices stable is not ruled; it is pinned so the day it is ruled
+  moves a visible byte.
+
+### 17.11 BANKED — needs JYH, not decided here
+
+1. **Is the post-`copy_selection` selection order part of the contract?** Both
+   ports emit the copies' paths descending, because both iterate the selection
+   backwards so insertions do not shift earlier paths. Now golden-pinned. The
+   artist-visible consequence is small (it is a selection, not a z-order) but it
+   is the one place the corpus asserts a non-document order, so it should be
+   ruled rather than inherited from an implementation detail.
+2. **`doc.set_selection` diverges twice over, and only one half was touched.**
+   Rust EXPANDS a selected container to every descendant; JasSwift selects only
+   the named paths. That is a live divergence at a real production seam,
+   unwatched by any gate, found by reading during this pass and NOT repaired —
+   it is not what either ruling is about, and choosing a winner is a ruling. The
+   dedup half was aligned to Rust here.
+
+---
+
+## 19. THE SELECTION AFTER A DUPLICATE IS IN DOCUMENT ORDER. RULED 2026-07-28.
+
+> JYH: *"yes document order."*
+
+`Controller::copy_selection` (the Alt-drag duplicate, not the clipboard) sorts
+the source selection **descending** — `sort_by(|a, b| b.path.cmp(&a.path))` — and
+must: inserting after `[0,1]` shifts `[0,3]`, so the walk has to run
+back-to-front. **That part is load-bearing and stays.**
+
+But the NEW selection was then built in that same descending order, purely as a
+byproduct of the loop. Duplicating `[0,1]` and `[0,3]` yielded `[[0,4],[0,2]]`.
+Both ports did it; a shared convention nobody ever chose.
+
+**Not cosmetic, because of §10 (D6).** Selection order is part of the document
+precisely because a copied fragment's z-order is part of the artwork. So:
+Alt-drag-duplicate, then Copy, and the clipboard SVG lists the elements in
+REVERSE document order — pasting them stacks them backwards. The defect surfaces
+one step from where it is created, which is why it went unseen.
+
+**RULED: the selection a duplicate leaves behind is in document order.** Sort the
+result; leave the descending iteration alone. Every other selection-producing
+operation already yields document order, so this was the odd one out, and leaving
+one operation's order as an artifact would undercut the ruling that made order
+semantic in the first place.
+
+*Gate:* duplicate two elements, copy, assert the clipboard's element order
+matches document order — the assertion has to reach the CLIPBOARD, because that
+is where the byproduct becomes artist-visible.
+
+---
+
+## 20. `doc.set_selection` SELECTS ONLY THE NAMED PATHS. RULED 2026-07-28.
+
+> JYH: *"accept recommendation, swift."*
+
+### 20.1 What Rust did, and the reason it gave
+`jas_dioxus/src/interpreter/effects.rs:718` expands every named container to
+include all its descendants. The comment states why:
+
+> *"Expand containers to include all descendants — matches the Layers panel
+> selection-square click behavior. Without this, a Selection-tool click on a
+> group would put only the group in selection, and the Layers panel would
+> highlight only the group row (not its children)."*
+
+Swift does not expand: it filters to valid paths and stops.
+
+### 20.2 Why Swift is right
+**This is a presentation problem solved by corrupting the model.** The panel
+highlights a row by asking `selection_contains(path)`, an EXACT-path test
+(`doc_primitives.rs:185`), so to light up a group's children Rust writes every
+descendant into `doc.selection`. The document's selection was made to carry a
+fact about how a panel draws.
+
+**And it contradicts §16 (D2), ruled the same day.** Swift's `selectAll` was
+called a defect precisely because it produced a selection containing an element
+AND its own descendants — a set no operation reads coherently: translate it and
+the group moves by 24 while each child, already carried by its parent, moves 24
+again. Rust's `doc.set_selection` produces exactly that set, on **every
+Selection-tool click on a group**. So D2 was half-fixed: the function that made
+those sets in one place was repaired, and the one that makes them on every click
+was left.
+
+### 20.3 The ruling, and what it unlocks
+**Select only the named paths. The highlight moves to where it belongs** — the
+panel asks *"is this row AT OR UNDER a selected path?"* instead of requiring the
+selection to enumerate every descendant.
+
+**This also answers §16.4.** That invariant — may the selection hold an ancestor
+and its own descendant? — could not be asserted while Rust deliberately violated
+it to drive a highlight. Once the expansion is gone it becomes assertable, and it
+would have caught D2 without anyone noticing a divergence.
+
+### 20.4 Two costs, on the record
+* The ancestor-aware predicate must exist in BOTH ports **and probably in the
+  expression language**, since `workspace/panels/layers.yaml` drives the panel.
+  A small YAML-layer addition, not a purely internal change.
+* **NOT YET ENUMERATED: every consumer of `doc.selection` that may rely on
+  descendants being present.** An operation written against the expanded form
+  changes behaviour when it stops being expanded. That enumeration is exactly the
+  kind this seat has been wrong about twice in one day — **measure it before
+  implementing, do not assert it.**
+
+*A narrower fallback, if the panel work proves larger than it looks:* keep the
+expansion as a DERIVED view computed at render time, leaving the stored selection
+clean. Same end state for the model, smaller blast radius.

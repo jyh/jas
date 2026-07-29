@@ -50,7 +50,7 @@ private func strokeModel(
     model.setDocumentForTest(Document(
         layers: [Layer(children: lines)],
         selectedLayer: 0,
-        selection: Set((0..<lines.count).map { ElementSelection(path: [0, $0]) })))
+        selection: (0..<lines.count).map { ElementSelection(path: [0, $0]) }))
     model.defaultStroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 1.0)
     return model
 }

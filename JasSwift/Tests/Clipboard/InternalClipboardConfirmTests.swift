@@ -191,7 +191,7 @@ import Foundation
             kids.append(Self.rect(Double(i) * 10, 0, id: "r\(i)"))
         }
         var sel: Selection = []
-        for i in 0..<5 { sel.insert(ElementSelection.all([0, i])) }
+        for i in 0..<5 { sel.append(ElementSelection.all([0, i])) }
         let model = Model(document: Document(layers: [Layer(children: kids)],
                                              selectedLayer: 0, selection: sel))
         EditClipboard.copySelection(model, pasteboard: pb)

@@ -1,0 +1,145 @@
+[
+  {
+    "_doc": [
+      "SELECT ALL SELECTS TOP-LEVEL OBJECTS, AND SELECTION ORDER IS PART OF THE",
+      "DOCUMENT — the cross-language family for transcripts/LAYER_STRUCTURE.md",
+      "§16 (D2, RULED 2026-07-28: 'keep the Rust shape') and §10 (D6, RULED",
+      "2026-07-28: JasSwift's Selection becomes an ordered array).",
+      "",
+      "WHY THIS FAMILY COULD NOT EXIST BEFORE TODAY, twice over:",
+      "  * op_apply had NO select_all verb in either port, so nothing shared",
+      "    could reach Select All at all. That is how JasSwift's group-expanding",
+      "    version survived unadjudicated (§16.1).",
+      "  * the canonical-JSON selection serializer SORTED by path in both ports,",
+      "    so no golden anywhere could see selection ORDER. That is how D6 —",
+      "    measured as ten different orders over ten processes — stayed green.",
+      "    The sort is gone; these goldens pin emission order.",
+      "",
+      "THE DOCUMENT (select_all_top_level.svg; SVG px -> document pt is x3/4,",
+      "so x=32 lands at 24):",
+      "  [0]     Layer 'Alpha'",
+      "  [0,0]      rect  'solo-a'",
+      "  [0,1]      group 'Trio'    -- THREE children",
+      "  [0,1,0..2]    rect t1 t2 t3",
+      "  [1]     Layer 'Beta'",
+      "  [1,0]      group 'Pair'    -- two children",
+      "  [1,0,0..1]    rect p1 p2",
+      "  [1,1]      rect  'solo-b'",
+      "",
+      "So Select All must yield FOUR entries — [0,0] [0,1] [1,0] [1,1] — one per",
+      "top-level object, a group counting as ONE. Before the ruling JasSwift",
+      "yielded NINE: it delegated to selectFlat, whose group branch inserts the",
+      "group AND every unlocked grandchild. §16.2 is why that is a defect rather",
+      "than a competing design: no operation has a coherent reading of a set",
+      "containing an element and its own descendants — translate it and the group",
+      "moves by 24 while each child, already carried by its parent, moves again.",
+      "",
+      "SELECTION-ONLY: select_all and add_to_selection are non-undoable, so these",
+      "cases journal nothing and the checkpoint_equivalence gate replays an empty",
+      "prefix. Both verbs route through the PRODUCTION Controller mutator; a verb",
+      "that re-implemented the walk would be a decoy that never goes red."
+    ],
+    "name": "select_all_family_setup_is_two_layers_a_trio_and_a_pair",
+    "setup_svg": "select_all_top_level.svg",
+    "txns": [],
+    "expected_json": "select_all_noop_expected.json"
+  },
+  {
+    "_doc": "THE HEADLINE. Four entries, one per top-level object, in document order. A group counts as ONE (§16.3). Nine entries here is the pre-ruling JasSwift shape.",
+    "name": "select_all_selects_top_level_objects_a_group_counting_as_one",
+    "setup_svg": "select_all_top_level.svg",
+    "txns": [
+      {
+        "name": "select_all",
+        "ops": [{ "op": "select_all" }]
+      }
+    ],
+    "expected_json": "select_all_top_level_expected.json"
+  },
+  {
+    "_doc": "The MARQUEE keeps the group branch — it legitimately asks 'did anything inside the band match?' and its answer includes the members. Same document, same four top-level objects in range, a DIFFERENT and larger selection. This is what stops a D2 repair from being made by deleting the branch instead of by giving Select All its own loop.",
+    "name": "marquee_over_everything_still_expands_groups_unlike_select_all",
+    "setup_svg": "select_all_top_level.svg",
+    "txns": [
+      {
+        "name": "select_rect",
+        "ops": [
+          { "op": "select_rect", "x": -10.0, "y": -10.0, "width": 400.0, "height": 400.0 }
+        ]
+      }
+    ],
+    "expected_json": "select_all_marquee_expands_expected.json"
+  },
+  {
+    "_doc": "Select All is ancestor-aware about lock (§13): the locked layer contributes nothing, a locked element and a locked group are skipped, and 'Mixed Group' comes in as ONE entry even though one of its members is locked — because Select All never looks inside a group at all.",
+    "name": "select_all_skips_locked_by_inheritance_and_still_counts_a_group_as_one",
+    "setup_svg": "locked_inheritance.svg",
+    "txns": [
+      {
+        "name": "select_all",
+        "ops": [{ "op": "select_all" }]
+      }
+    ],
+    "expected_json": "select_all_locked_inheritance_expected.json"
+  },
+  {
+    "_doc": "D6 ORDER, on the SHIFT-MARQUEE. Marquee everything (nine entries), then shift-marquee the solo rect at [0,0] alone: the XOR drops it and the other EIGHT must come back in their original order. Both ports built that result by iterating a hash map — Rust's RandomState, Swift's Dictionary — so with two or more survivors the order was per-process. This is the case that reds if either reverts; without it the repair would be a guard no mutation could turn red.",
+    "name": "extend_marquee_deselects_one_and_keeps_the_other_eight_in_order",
+    "setup_svg": "select_all_top_level.svg",
+    "txns": [
+      {
+        "name": "marquee_then_shift_marquee",
+        "ops": [
+          { "op": "select_rect", "x": -10.0, "y": -10.0, "width": 400.0, "height": 400.0 },
+          { "op": "select_rect", "x": -1.0, "y": -1.0, "width": 10.0, "height": 10.0, "extend": true }
+        ]
+      }
+    ],
+    "expected_json": "select_all_extend_marquee_order_expected.json"
+  },
+  {
+    "_doc": "D6 ORDER, on a COPY. copy_selection walks the selection in DESCENDING path order so its insertions do not shift earlier paths, and pushes each copy's path as it goes — so the resulting selection is [0,3] then [0,1], deliberately NOT document order, while the copied ELEMENTS land in document order as [a a' b b']. Both halves are pinned here. Under a Set-ordered selection this golden is unreachable: the emitted order was whatever the hash gave.",
+    "name": "copy_of_a_two_element_selection_emits_a_deterministic_order",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "copy",
+        "ops": [
+          { "op": "select_rect", "x": 0.0, "y": 0.0, "width": 200.0, "height": 200.0 },
+          { "op": "copy_selection", "dx": 6.0, "dy": 6.0 }
+        ]
+      }
+    ],
+    "expected_json": "select_all_copy_order_expected.json"
+  },
+  {
+    "_doc": "D6 DEDUP. Selection is an ordered array in both ports now, so nothing deduplicates for free: add_to_selection must refuse a path it already holds. This case would go RED with a SECOND {kind:all, path:[0,1]} entry if the guard were dropped from either port — which is exactly the mutation that proves it.",
+    "name": "add_to_selection_twice_on_one_path_yields_one_entry",
+    "setup_svg": "select_all_top_level.svg",
+    "txns": [
+      {
+        "name": "add_twice",
+        "ops": [
+          { "op": "add_to_selection", "path": [0, 1] },
+          { "op": "add_to_selection", "path": [0, 1] }
+        ]
+      }
+    ],
+    "expected_json": "select_all_add_once_expected.json"
+  },
+  {
+    "_doc": "D6 ORDER, on the additive seam. add_to_selection APPENDS: the entries come out in the order they were added, [1,1] then [0,0], not sorted into document order. A Set could not express this at all.",
+    "name": "add_to_selection_appends_in_the_order_the_paths_were_added",
+    "setup_svg": "select_all_top_level.svg",
+    "txns": [
+      {
+        "name": "add_two_out_of_order",
+        "ops": [
+          { "op": "add_to_selection", "path": [1, 1] },
+          { "op": "add_to_selection", "path": [0, 0] }
+        ]
+      }
+    ],
+    "expected_json": "select_all_add_order_expected.json"
+  }
+]

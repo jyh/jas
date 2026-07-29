@@ -68,25 +68,31 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     effects["doc.set_selection"] = { spec, ctx, store in
         let paths = extractPathList(spec, store: store, ctx: ctx)
         let doc = model.document
-        let valid = paths.compactMap { p -> ElementSelection? in
-            isValidPath(doc, p) ? ElementSelection.all(p) : nil
+        // UNGUARDED, matching jas_dioxus: it builds this selection with a plain
+        // `collect()` and does not dedup either. Under `Set` this site silently
+        // deduped a spec that named one path twice; it now behaves as the
+        // canonical port does. Nothing in either port's corpus reaches a
+        // repeated path here, so the choice is parity rather than measurement,
+        // and it is stated rather than assumed (LAYER_STRUCTURE.md §10).
+        var valid: Selection = []
+        for p in paths where isValidPath(doc, p) {
+            valid.append(ElementSelection.all(p))
         }
-        Controller(model: model).setSelection(Set(valid))
+        Controller(model: model).setSelection(valid)
         return nil
     }
 
     // doc.add_to_selection — `path` (raw array or expression).
-    // Idempotent: no-op if the path is already in the selection.
+    // Idempotent: no-op if the path is already in the selection. The guard used
+    // to be inlined HERE, in the interpreter, where nothing shared could reach
+    // it; it now lives in `Controller.addToSelection` exactly as Rust's does,
+    // and the `add_to_selection` op verb drives the same function
+    // (LAYER_STRUCTURE.md §10, "THE MIGRATION HAZARD").
     effects["doc.add_to_selection"] = { spec, ctx, store in
         guard let path = extractPath(spec, store: store, ctx: ctx) else {
             return nil
         }
-        var sel = model.document.selection
-        if sel.contains(where: { $0.path == path }) {
-            return nil
-        }
-        sel.insert(ElementSelection.all(path))
-        Controller(model: model).setSelection(sel)
+        Controller(model: model).addToSelection(path)
         return nil
     }
 
@@ -96,10 +102,10 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
             return nil
         }
         var sel = model.document.selection
-        if let existing = sel.first(where: { $0.path == path }) {
-            sel.remove(existing)
+        if let pos = sel.firstIndex(where: { $0.path == path }) {
+            sel.remove(at: pos)
         } else {
-            sel.insert(ElementSelection.all(path))
+            sel.append(ElementSelection.all(path))
         }
         Controller(model: model).setSelection(sel)
         return nil
@@ -1764,7 +1770,7 @@ private func pathDeleteAnchorNear(
         // Keep the path in the selection (matches native Delete-anchor).
         var sel = doc.selection
         sel = sel.filter { $0.path != path }
-        sel.insert(ElementSelection.all(path))
+        sel.append(ElementSelection.all(path))
         doc = doc.replacing(selection: sel)
         model.editDocument(doc)
     } else {
@@ -2184,7 +2190,7 @@ private func pathProbePartialHit(
                 } else {
                     sel.append(ElementSelection.partial(path, [cpIdx]))
                 }
-                Controller(model: model).setSelection(Set(sel))
+                Controller(model: model).setSelection(sel)
             } else {
                 Controller(model: model).selectControlPoint(path: path, index: cpIdx)
             }
@@ -3706,18 +3712,23 @@ private func magicWandApply(
     let newEntries = matches.map { ElementSelection.all($0) }
     switch mode {
     case "add":
+        // GUARDED, because a wand match can already be selected. jas_dioxus
+        // writes the same guard at the same site (`interpreter/effects.rs`,
+        // magic-wand "add"); it is the only dedup in either port's selection
+        // code outside `add_to_selection`.
         var existing = doc.selection
         for es in newEntries where !existing.contains(where: { $0.path == es.path }) {
-            existing.insert(es)
+            existing.append(es)
         }
         Controller(model: model).setSelection(existing)
     case "subtract":
         let toRemove = Set(newEntries.map { $0.path })
         let kept = doc.selection.filter { !toRemove.contains($0.path) }
-        Controller(model: model).setSelection(Set(kept))
+        Controller(model: model).setSelection(kept)
     default:
-        // "replace"
-        Controller(model: model).setSelection(Set(newEntries))
+        // "replace" — `matches` is walked in document order, so it cannot
+        // repeat a path. Unguarded, exactly as jas_dioxus is here.
+        Controller(model: model).setSelection(newEntries)
     }
 }
 

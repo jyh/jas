@@ -32,7 +32,7 @@ private func modelWithRect(_ r: Element) -> Model {
     let layer = Layer(children: [r])
     let doc = Document(
         layers: [layer], selectedLayer: 0,
-        selection: Set([ElementSelection.all([0, 0])])
+        selection: [ElementSelection.all([0, 0])]
     )
     return Model(document: doc)
 }
