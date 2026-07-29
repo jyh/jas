@@ -836,8 +836,9 @@ pub(crate) fn MenuBarView(
 /// menu ctx built in the other apps (Python `menu.menu._build_menu_ctx`).
 ///
 /// - `state.tab_count`: open tab count.
-/// - `active_document.*`: the 6 document predicates (selection, undo/redo,
-///   modified, has_filename = filename does NOT start with "Untitled-").
+/// - `active_document.*`: the 7 document predicates (selection, undo/redo,
+///   modified, has_filename = filename does NOT start with "Untitled-",
+///   active_layer_locked).
 /// - `workspace.has_saved_layout`: active layout != the system "Workspace".
 /// - `panels.<id>`: is_panel_visible for all 16 Window-menu panel ids.
 /// - `panes.<id>`: is_pane_visible for toolbar / dock.
@@ -856,6 +857,13 @@ fn build_menu_ctx(st: &AppState) -> serde_json::Value {
                 "can_redo": m.can_redo(),
                 "is_modified": m.is_modified(),
                 "has_filename": !m.filename.starts_with("Untitled-"),
+                // §15's VISIBLE HALF: `paste` and `paste_in_place` grey out
+                // while the active layer is locked, so the refusal the paste
+                // body enforces is seen BEFORE the artist presses Cmd+V rather
+                // than experienced as a key that does nothing. It reads
+                // `Document::active_layer_locked` — the very function the
+                // refusal reads — so the menu and the code cannot disagree.
+                "active_layer_locked": doc.active_layer_locked(),
             })
         }
         None => serde_json::json!({
@@ -865,6 +873,9 @@ fn build_menu_ctx(st: &AppState) -> serde_json::Value {
             "can_redo": false,
             "is_modified": false,
             "has_filename": false,
+            // No document: paste is already disabled by `state.tab_count > 0`,
+            // and "the active layer of no document" is not locked.
+            "active_layer_locked": false,
         }),
     };
 
@@ -1076,6 +1087,50 @@ mod tests {
         assert!(!eval("active_document.selection_count == 1"), "make_instance disabled @ 2 selected");
         assert!(eval("active_document.has_selection"), "copy enabled with a selection");
         assert!(eval("state.tab_count > 0"), "tab-gated items enabled with an open tab");
+
+        // §15's VISIBLE HALF. Lock the ACTIVE layer and nothing else: `paste`
+        // and `paste_in_place` must grey out, while `paste_preserving_layers`,
+        // which DIVERTS rather than refusing, must stay available. The
+        // asymmetry IS the ruling, so it is asserted rather than assumed.
+        //
+        // WHY THIS ASSERTION HAS TO LIVE HERE AND CANNOT BE THE SHARED GATE:
+        // the cross-app `menu_state` corpus SEEDS its context, so it pins how
+        // the predicate is EVALUATED and is structurally blind to a port that
+        // forgets to BUILD the key. A missing key evaluates to null -> false ->
+        // `!false` -> paste stays enabled, which is silently the pre-ruling
+        // behaviour. Only a live-ctx assertion catches that; the Swift twin is
+        // `liveMenuCtxDrivesEnabledAndChecked`.
+        let paste_expr = "state.tab_count > 0 && !active_document.active_layer_locked";
+        assert!(eval(paste_expr), "paste enabled while the active layer is open");
+        {
+            use crate::geometry::element::{CommonProps, Element, LayerElem};
+            let mut locked_doc = Document::default();
+            locked_doc.layers = vec![Element::Layer(LayerElem {
+                children: Vec::new(),
+                common: CommonProps { locked: true, ..CommonProps::default() },
+                isolated_blending: false,
+                knockout_group: false,
+            })];
+            let mut st_locked = AppState::new();
+            if st_locked.tabs.is_empty() {
+                st_locked.tabs.push(TabState::new());
+                st_locked.active_tab = 0;
+            }
+            st_locked.tabs[st_locked.active_tab]
+                .model
+                .set_document_for_test(locked_doc);
+            let lctx = build_menu_ctx(&st_locked);
+            let leval = |e: &str| crate::interpreter::expr::eval(e, &lctx).to_bool();
+            assert!(
+                !leval(paste_expr),
+                "paste must grey out on a locked active layer"
+            );
+            assert!(
+                leval("state.tab_count > 0"),
+                "preserving paste DIVERTS rather than refusing, so its own \
+                 predicate stays true and unrelated tab-gated items stay enabled"
+            );
+        }
 
         // checked_when wiring: panels.<id> must equal live is_panel_visible.
         crate::workspace::layout_apply::layout_apply(

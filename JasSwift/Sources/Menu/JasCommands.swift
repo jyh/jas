@@ -831,7 +831,7 @@ func panelKindForMenuId(_ id: String) -> PanelKind? {
 /// - `state.tab_count` — the open-document/tab count.
 /// - `active_document` — has_selection / selection_count / can_undo / can_redo /
 ///   is_modified / has_filename (has_filename = filename does NOT start with
-///   `Untitled-`); all-false when no document is active.
+///   `Untitled-`) / active_layer_locked; all-false when no document is active.
 /// - `workspace.has_saved_layout` — the active layout is not the system
 ///   "Workspace" layout.
 /// - `panels` — `isPanelVisible(kind)` for each of the 14 ids (concepts → false).
@@ -849,12 +849,22 @@ func buildMenuContext(model: Model?, tabCount: Int, hasSelection: Bool?,
             "can_redo": canRedo ?? model.canRedo,
             "is_modified": model.isModified,
             "has_filename": !model.filename.hasPrefix("Untitled-"),
+            // §15's VISIBLE HALF: `paste` and `paste_in_place` grey out while
+            // the active layer is locked, so the refusal the paste body
+            // enforces is seen BEFORE the artist presses Cmd+V rather than
+            // experienced as a key that does nothing. It reads
+            // ``Document/activeLayerLocked`` — the very property the refusal
+            // reads — so the menu and the code cannot disagree.
+            "active_layer_locked": doc.activeLayerLocked,
         ]
     } else {
         activeDocument = [
             "has_selection": false, "selection_count": 0,
             "can_undo": false, "can_redo": false,
             "is_modified": false, "has_filename": false,
+            // No document: paste is already disabled by `state.tab_count > 0`,
+            // and "the active layer of no document" is not locked.
+            "active_layer_locked": false,
         ]
     }
     var hasSavedLayout = false

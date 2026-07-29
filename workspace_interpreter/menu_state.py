@@ -17,8 +17,19 @@ The context namespaces (the live renderers build these from real app state;
 the corpus seeds them directly):
   * ``state.tab_count``           — open-document count
   * ``active_document.{has_selection, selection_count, can_undo, can_redo,
-      is_modified, has_filename}``
+      is_modified, has_filename, active_layer_locked}``
   * ``workspace.has_saved_layout``
+
+``active_layer_locked`` is the newest of these and the only one that greys an
+item out for a reason the code ALSO enforces: ``paste`` and ``paste_in_place``
+refuse into a locked active layer (transcripts/LAYER_STRUCTURE.md §15, RULED
+2026-07-28), and their ``enabled_when`` says so in the menu. Each port builds
+it from the same function its paste body reads — jas_dioxus
+``Document::active_layer_locked``, JasSwift ``Document.activeLayerLocked`` —
+so the affordance and the enforcement have no second rule to drift to. This
+module cannot check that; it evaluates whatever context it is handed. What it
+DOES pin is that all ports read the same predicate name and reach the same
+booleans from it.
   * ``panels.<panel_id>``         — bool, the panel's current visibility
   * ``panes.<pane_id>``           — bool, the pane's current visibility
 """
