@@ -1023,7 +1023,10 @@ impl Controller {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
-                new_doc = new_doc.replace_element(&es.path, with_fill(elem, fill));
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::map_paintable(elem, &|e| with_fill(e, fill)),
+                );
             }
         }
         new_doc
@@ -1033,7 +1036,10 @@ impl Controller {
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
-                new_doc = new_doc.replace_element(&es.path, with_stroke(elem, stroke));
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::map_paintable(elem, &|e| with_stroke(e, stroke)),
+                );
             }
         }
         new_doc
@@ -1131,7 +1137,8 @@ impl Controller {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(
                     &es.path,
-                    with_fill_gradient(elem, gradient.clone()),
+                    crate::geometry::element::map_paintable(
+                        elem, &|e| with_fill_gradient(e, gradient.clone())),
                 );
             }
         }
@@ -1147,7 +1154,8 @@ impl Controller {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(
                     &es.path,
-                    with_stroke_gradient(elem, gradient.clone()),
+                    crate::geometry::element::map_paintable(
+                        elem, &|e| with_stroke_gradient(e, gradient.clone())),
                 );
             }
         }
@@ -4044,6 +4052,80 @@ mod tests {
             Element::Rect(r) => assert_eq!((r.x, r.y), (44.0, 0.0),
                                            "the sibling moves with the group"),
             other => panic!("child 1 must stay a Rect, got {other:?}"),
+        }
+    }
+
+
+    /// FILL AND STROKE RECURSE INTO A SELECTED CONTAINER. RULED 2026-07-29.
+    ///
+    /// Selecting a group and clicking a swatch is the commonest operation in
+    /// the application, and it did NOTHING to the group's members. Both ports
+    /// handled containers EXPLICITLY -- Rust `Group(_) | Layer(_) =>
+    /// elem.clone()`, Swift `case .group, .layer:` -- so nobody forgot; someone
+    /// decided a container has no fill of its own. True of the data model,
+    /// false of the artist's intent.
+    ///
+    /// It was invisible in Rust because `doc.set_selection` expands a container
+    /// to its descendants, so the MEMBERS were in the selection and got filled.
+    /// JasSwift does not expand, so there it was simply broken, and §20 would
+    /// have carried it into Rust.
+    ///
+    /// JYH at council: *"yes, recurse into members"* -- the convention a vector
+    /// illustration application follows. The recursion lives at the
+    /// selection-apply level, NOT inside `with_fill`/`with_stroke`: those are
+    /// also called at render time (`canvas/render.rs`, stroke scaling) and on
+    /// symbol-instance overrides, where recursing would be wrong.
+    #[test]
+    fn fill_and_stroke_recurse_into_a_selected_container() {
+        use crate::geometry::element::GroupElem;
+        use std::rc::Rc;
+        let mk = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        // A group holding a leaf AND a nested group, so recursion is tested at
+        // two depths rather than one.
+        let inner = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(40.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { id: Some("inner".into()), ..Default::default() },
+        });
+        let outer = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(0.0)), Rc::new(inner)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { id: Some("outer".into()), ..Default::default() },
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(outer)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        let red = Fill::new(Color::rgb(1.0, 0.0, 0.0));
+        Controller::set_selection_fill(&mut model, Some(red.clone()));
+
+        let d = model.document();
+        let Some(Element::Group(g)) = d.get_element(&vec![0, 0]) else { panic!("group") };
+        // T4 BYSTANDER: the container is rebuilt, so its own fields must survive.
+        assert_eq!(g.common.id.as_deref(), Some("outer"),
+                   "the rebuilt container keeps its own id");
+        match g.children[0].as_ref() {
+            Element::Rect(r) => assert!(r.fill.is_some(), "the direct member is filled"),
+            other => panic!("expected Rect, got {other:?}"),
+        }
+        let Element::Group(ig) = g.children[1].as_ref() else { panic!("nested group") };
+        assert_eq!(ig.common.id.as_deref(), Some("inner"),
+                   "the nested container keeps ITS id too");
+        match ig.children[0].as_ref() {
+            Element::Rect(r) => assert!(r.fill.is_some(),
+                                        "the member two levels down is filled"),
+            other => panic!("expected Rect, got {other:?}"),
         }
     }
 

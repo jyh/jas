@@ -1528,6 +1528,43 @@ public enum Element: Equatable {
     /// align_left double the offset (per ALIGN.md §Translation
     /// semantics, mirrored from `translate_element` in
     /// `jas_dioxus/src/geometry/element.rs`).
+    /// Apply a per-element rewrite to every PAINTABLE element a selection entry
+    /// reaches: the element itself when it is a leaf, or every leaf beneath it
+    /// when it is a container, at any depth.
+    ///
+    /// RULED 2026-07-29 (JYH at council: *"yes, recurse into members"*).
+    /// Selecting a group and clicking a swatch is the commonest operation in the
+    /// application and it did NOTHING — `withFill` and its siblings return a
+    /// container unchanged, which is right for the data model (a group carries
+    /// no fill of its own) and wrong for the artist's intent. Rust hid it behind
+    /// `doc.set_selection`'s container expansion; JasSwift, which does not
+    /// expand, was simply broken.
+    ///
+    /// **The recursion lives HERE and not inside `withFill`/`withStroke`.**
+    /// Those are also called at render time (stroke scaling) and on
+    /// symbol-instance overrides, where recursing would be wrong or wasteful.
+    /// Only "apply this to the selection" wants the walk.
+    ///
+    /// Containers are rebuilt through `withChildren`, never by re-listing their
+    /// fields — that is the Swift copy-site omission class, and re-listing here
+    /// would silently drop a container's `id`, `mask` and blending flags on
+    /// every swatch click. Twin: Rust `map_paintable`.
+    ///
+    /// NOTE: this does NOT skip locked descendants. Lock enforcement is §15's
+    /// job and is not built yet; no other selection operation respects it
+    /// either, and a lone exception here would be an inconsistency rather than
+    /// a protection.
+    public func mapPaintable(_ f: (Element) -> Element) -> Element {
+        switch self {
+        case .group(let g):
+            return .group(g.withChildren(g.children.map { $0.mapPaintable(f) }))
+        case .layer(let l):
+            return .layer(l.withChildren(l.children.map { $0.mapPaintable(f) }))
+        default:
+            return f(self)
+        }
+    }
+
     public func translated(dx: Double, dy: Double) -> Element {
         // PRESERVATION (EDIT_SEMANTICS_FREEZE.md §3.1): a translation speaks
         // to POSITION only, so every arm is clone-then-mutate — the Swift

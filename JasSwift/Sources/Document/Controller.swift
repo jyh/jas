@@ -1831,7 +1831,7 @@ public class Controller {
         if doc.selection.isEmpty { return doc }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withFill(elem, fill: fill)
+            let newElem = elem.mapPaintable { withFill($0, fill: fill) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         return doc
@@ -1851,7 +1851,7 @@ public class Controller {
         if doc.selection.isEmpty { return doc }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withStroke(elem, stroke: stroke)
+            let newElem = elem.mapPaintable { withStroke($0, stroke: stroke) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         return doc
@@ -1992,7 +1992,7 @@ public class Controller {
         if doc.selection.isEmpty { return }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withFillGradient(elem, fillGradient: gradient)
+            let newElem = elem.mapPaintable { withFillGradient($0, fillGradient: gradient) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.editDocument(doc)
@@ -2004,7 +2004,7 @@ public class Controller {
         if doc.selection.isEmpty { return }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withStrokeGradient(elem, strokeGradient: gradient)
+            let newElem = elem.mapPaintable { withStrokeGradient($0, strokeGradient: gradient) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.editDocument(doc)

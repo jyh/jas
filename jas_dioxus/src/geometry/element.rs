@@ -3014,6 +3014,42 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
 /// Return a copy of the element with its `fill_gradient` replaced.
 /// Elements that do not support a fill gradient (Line, Text, TextPath,
 /// Group, Layer, Live) are returned unchanged.
+/// Apply a per-element rewrite to every PAINTABLE element a selection entry
+/// reaches: the element itself when it is a leaf, or every leaf beneath it when
+/// it is a container, at any depth.
+///
+/// RULED 2026-07-29 (JYH at council: *"yes, recurse into members"*). Selecting a
+/// group and clicking a swatch is the commonest operation in the application and
+/// it did nothing, because `with_fill` and its siblings return a container
+/// unchanged — correct for the data model (a group carries no fill of its own)
+/// and wrong for the artist's intent.
+///
+/// **The recursion lives HERE and not inside `with_fill`/`with_stroke`.** Those
+/// are also called at render time (`canvas/render.rs` scales a stroke for
+/// display) and on symbol-instance overrides, where recursing would be wrong or
+/// wasteful. Only "apply this to the selection" wants the walk.
+///
+/// Containers are rebuilt clone-then-mutate (`..e.clone()`), so a container's own
+/// `id`, `name`, `mask`, blending flags and transform survive the walk — the T4
+/// bystander clause of the PRESERVATION LAW.
+///
+/// NOTE: this does NOT skip locked descendants. Lock enforcement is §15's job
+/// and is not built yet; no other selection operation respects it either, and a
+/// lone exception here would be an inconsistency rather than a protection.
+pub fn map_paintable(elem: &Element, f: &dyn Fn(&Element) -> Element) -> Element {
+    match elem {
+        Element::Group(e) => Element::Group(GroupElem {
+            children: e.children.iter().map(|c| Rc::new(map_paintable(c, f))).collect(),
+            ..e.clone()
+        }),
+        Element::Layer(e) => Element::Layer(LayerElem {
+            children: e.children.iter().map(|c| Rc::new(map_paintable(c, f))).collect(),
+            ..e.clone()
+        }),
+        _ => f(elem),
+    }
+}
+
 pub fn with_fill_gradient(elem: &Element, gradient: Option<Box<Gradient>>) -> Element {
     match elem {
         Element::Rect(e) => Element::Rect(RectElem { fill_gradient: gradient, ..e.clone() }),
