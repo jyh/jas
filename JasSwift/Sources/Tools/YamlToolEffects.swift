@@ -105,7 +105,12 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         if let pos = sel.firstIndex(where: { $0.path == path }) {
             sel.remove(at: pos)
         } else {
-            sel.append(ElementSelection.all(path))
+            // §16.4: a path covered by a selected ANCESTOR toggles to nothing
+            // rather than being added. This is the seam that was reachable —
+            // shift-click a group, then shift-click a member inside it — and it
+            // rebuilt the shape §20 had just removed from every other producer.
+            guard let next = selectionWithPathAdded(sel, path) else { return nil }
+            sel = next
         }
         Controller(model: model).setSelection(sel)
         return nil

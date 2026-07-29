@@ -41,6 +41,10 @@ jobs:
       # containers, or carry a ledger row saying why not. Five defects wore
       # that shape in one week, all invisible in Rust and live in JasSwift.
       - run: python scripts/check_element_dispatch.py --self-test && python scripts/check_element_dispatch.py
+      # §16.4 asserted over the corpus: no selection holds an element AND its
+      # own descendant. Four producers had to be closed before this could pass
+      # at all, and it reds on the pre-§20 tree with 13 violations.
+      - run: python scripts/check_selection_invariant.py --self-test && python scripts/check_selection_invariant.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -218,6 +222,8 @@ jobs:
           python scripts/check_lane_coverage.py
           python scripts/check_element_dispatch.py --self-test
           python scripts/check_element_dispatch.py
+          python scripts/check_selection_invariant.py --self-test
+          python scripts/check_selection_invariant.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves

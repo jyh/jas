@@ -760,8 +760,8 @@ public class Controller {
     public func addToSelection(_ path: ElementPath) {
         let doc = model.document
         if doc.selection.contains(where: { $0.path == path }) { return }
-        var sel = doc.selection
-        sel.append(ElementSelection.all(path))
+        // §16.4: a selected ancestor already covers this path.
+        guard let sel = selectionWithPathAdded(doc.selection, path) else { return }
         // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
         model.setDocumentUnbracketed(doc.replacing(selection: sel), intent: .selection)
     }
@@ -2397,6 +2397,36 @@ public func selectionFillSummary(_ doc: Document) -> FillSummary {
     // guard above owns that — and Rust returns `Uniform(None)` here, so this
     // must too or the ports disagree on an empty group.
     return .uniform(value)
+}
+
+/// `sel` with `path` added, preserving §16.4 — a selection never holds an
+/// element and its own descendant. Returns nil when there is nothing to do.
+///
+/// Both halves are derived from rulings already taken, not invented here:
+///
+///   * ALREADY COVERED by a selected ancestor → nothing to add. Selecting a
+///     group selects its members "as if" (JYH, council 2026-07-29), so the
+///     member is already in play. Subtracting one member from a selected group
+///     is a different feature — partial group selection — which §16.3's "a group
+///     counts as ONE" does not permit.
+///   * COVERS existing entries → those are SUBSUMED and the ancestor stands.
+///     "The outermost wins", the rule `moveSelection` already applies.
+///
+/// Shared by both extend seams so they cannot drift. `doc.toggle_selection` is
+/// what shift-click runs, and it was the reachable producer: shift-click a
+/// group, then shift-click a member inside it. Twin: Rust
+/// `Controller::selection_with_path_added`.
+public func selectionWithPathAdded(_ sel: Selection, _ path: ElementPath) -> Selection? {
+    // A STRICT ancestor: an exact repeat is not caught here — callers own that.
+    if sel.contains(where: { $0.path.count < path.count
+                             && Array(path.prefix($0.path.count)) == $0.path }) {
+        return nil
+    }
+    var out = sel.filter { es in
+        !(es.path.count > path.count && Array(es.path.prefix(path.count)) == path)
+    }
+    out.append(ElementSelection.all(path))
+    return out
 }
 
 /// True when `path` is a selected path OR sits underneath one.

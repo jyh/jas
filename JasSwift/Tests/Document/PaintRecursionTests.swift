@@ -303,3 +303,58 @@ struct PanelMarkerTests {
                 "an empty selection marks nothing")
     }
 }
+
+/// THE EXTEND SEAMS CANNOT BUILD AN ANCESTOR+DESCENDANT SELECTION.
+///
+/// Twin of Rust `the_extend_seams_cannot_build_an_ancestor_descendant_selection`.
+/// §20 removed the two producers that WROTE the shape, and the corpus census then
+/// read zero — but the extend seams still just appended, so shift-clicking a
+/// group and then a member inside it rebuilt it. Measured in Rust:
+/// `[[0,0], [0,0,1]]`, via the verb shift-click actually runs.
+@Suite("Extend seams preserve the selection invariant")
+struct ExtendSeamInvariantTests {
+
+    private func rect(_ x: Double) -> Element {
+        .rect(Rect(x: x, y: 0, width: 10, height: 10))
+    }
+
+    private func model() -> Model {
+        let g = Element.group(Group(children: [rect(0), rect(20)]))
+        return Model(document: Document(layers: [Layer(name: "L", children: [g, rect(40)])]))
+    }
+
+    /// A member of an already-selected group adds nothing — it is already in
+    /// play under the Captain's "as if". Subtracting one member from a selected
+    /// group is partial group selection, which §16.3 does not permit.
+    @Test func aMemberOfASelectedGroupAddsNothing() {
+        let m = model()
+        let ctrl = Controller(model: m)
+        ctrl.addToSelection([0, 0])
+        ctrl.addToSelection([0, 0, 1])
+        #expect(m.document.selection.map(\.path) == [[0, 0]],
+                "got \(m.document.selection.map(\.path))")
+    }
+
+    /// The mirror: selecting the group SUBSUMES members already selected —
+    /// "the outermost wins", as `moveSelection` already applies.
+    @Test func selectingTheGroupSubsumesItsMembers() {
+        let m = model()
+        let ctrl = Controller(model: m)
+        ctrl.addToSelection([0, 0, 0])
+        ctrl.addToSelection([0, 0, 1])
+        ctrl.addToSelection([0, 0])
+        #expect(m.document.selection.map(\.path) == [[0, 0]],
+                "got \(m.document.selection.map(\.path))")
+    }
+
+    /// And nothing else changes — a fix that made the seam inert would pass the
+    /// two tests above.
+    @Test func disjointPathsStillAccumulate() {
+        let m = model()
+        let ctrl = Controller(model: m)
+        ctrl.addToSelection([0, 0])
+        ctrl.addToSelection([0, 1])
+        #expect(m.document.selection.map(\.path) == [[0, 0], [0, 1]],
+                "got \(m.document.selection.map(\.path))")
+    }
+}

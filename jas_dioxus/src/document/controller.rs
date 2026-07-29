@@ -853,16 +853,56 @@ impl Controller {
         Self::set_selection(model, Vec::new());
     }
 
+    /// Add `path` to `sel` while preserving §16.4 — a selection never holds an
+    /// element and its own descendant.
+    ///
+    /// Returns `None` when there is nothing to do, so both callers can bail
+    /// without writing a document. The two halves are derived from rulings
+    /// already taken, not invented here:
+    ///
+    ///   * ALREADY COVERED by a selected ancestor -> nothing to add. The
+    ///     Captain's semantics are that selecting a group selects its members
+    ///     "as if", so the member is already in play. Subtracting one member
+    ///     from a selected group is a different feature (partial group
+    ///     selection) which §16.3's "a group counts as ONE" does not permit.
+    ///   * COVERS existing entries -> those entries are SUBSUMED and the
+    ///     ancestor stands. "The outermost wins", the rule `move_selection`
+    ///     already applies.
+    ///
+    /// Shared by both seams so they cannot drift: `toggle_selection` is what
+    /// shift-click runs, and it was the reachable producer.
+    fn selection_with_path_added(
+        sel: &Selection,
+        path: &ElementPath,
+    ) -> Option<Selection> {
+        // Covered by an ancestor already in the selection (a strict ancestor,
+        // so an exact repeat is NOT caught here -- the callers own that).
+        if sel.iter().any(|es| {
+            es.path.len() < path.len() && path.starts_with(&es.path)
+        }) {
+            return None;
+        }
+        let mut out: Selection = sel
+            .iter()
+            .filter(|es| !(es.path.len() > path.len() && es.path.starts_with(path)))
+            .cloned()
+            .collect();
+        out.push(ElementSelection::all(path.clone()));
+        Some(out)
+    }
+
     /// Add a path to the selection as an All-kind entry. No-op if the
     /// path is already selected (matches the YAML `doc.add_to_selection`
-    /// effect's idempotent semantics).
+    /// effect's idempotent semantics), or if a selected ancestor already
+    /// covers it (§16.4 — see `selection_with_path_added`).
     pub fn add_to_selection(model: &mut Model, path: &ElementPath) {
         let doc = model.document().clone();
         if doc.selection.iter().any(|es| es.path == *path) {
             return;
         }
-        let mut sel = doc.selection.clone();
-        sel.push(ElementSelection::all(path.clone()));
+        let Some(sel) = Self::selection_with_path_added(&doc.selection, path) else {
+            return;
+        };
         let mut new_doc = doc;
         new_doc.selection = sel;
         model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
@@ -871,14 +911,24 @@ impl Controller {
     /// Toggle a path in or out of the selection. If present, removes the
     /// matching entry; otherwise appends an All-kind entry. Matches the
     /// YAML `doc.toggle_selection` effect's semantics used by shift-click.
+    ///
+    /// A path covered by a selected ANCESTOR toggles to nothing rather than
+    /// being added (§16.4). This is the seam that was reachable: shift-click a
+    /// group, then shift-click a member inside it.
     pub fn toggle_selection(model: &mut Model, path: &ElementPath) {
         let doc = model.document().clone();
-        let mut sel = doc.selection.clone();
-        if let Some(pos) = sel.iter().position(|es| es.path == *path) {
-            sel.remove(pos);
+        let sel = if let Some(pos) =
+            doc.selection.iter().position(|es| es.path == *path)
+        {
+            let mut s = doc.selection.clone();
+            s.remove(pos);
+            s
         } else {
-            sel.push(ElementSelection::all(path.clone()));
-        }
+            match Self::selection_with_path_added(&doc.selection, path) {
+                Some(s) => s,
+                None => return,
+            }
+        };
         let mut new_doc = doc;
         new_doc.selection = sel;
         model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
@@ -4505,6 +4555,94 @@ mod tests {
         let empty: Vec<ElementPath> = Vec::new();
         assert!(!path_is_selected_or_under(&empty, &vec![0, 1]),
                 "an empty selection marks nothing");
+    }
+
+
+    /// THE EXTEND SEAMS CANNOT BUILD AN ANCESTOR+DESCENDANT SELECTION.
+    ///
+    /// §16.4 rules that a selection never holds an element and its own
+    /// descendant. §20 removed the two producers that WROTE that shape
+    /// (`doc.set_selection` and `select_element`), and the corpus census then
+    /// read zero -- but `add_to_selection` and `toggle_selection` still just
+    /// pushed a path, so shift-clicking a group and then a member inside it
+    /// rebuilt it. Measured: both produced `[[0,0], [0,0,1]]`, and
+    /// `toggle_selection` is what shift-click actually runs.
+    ///
+    /// THE RULE, and it is derived rather than invented -- both halves come from
+    /// rulings already taken:
+    ///
+    ///   * Adding a path ALREADY COVERED by a selected ancestor is a NO-OP. It
+    ///     is already selected in the Captain's sense ("as if the children are
+    ///     selected too"), so there is nothing to add. Subtracting one member
+    ///     from a selected group is a different feature -- partial group
+    ///     selection -- which §16.3's "a group counts as ONE" does not permit
+    ///     and nobody has ruled.
+    ///   * Adding a path that COVERS existing entries SUBSUMES them: the
+    ///     descendants drop out and the ancestor stands. That is "the outermost
+    ///     wins", the same rule `move_selection` already applies.
+    #[test]
+    fn the_extend_seams_cannot_build_an_ancestor_descendant_selection() {
+        use crate::geometry::element::GroupElem;
+        use std::rc::Rc;
+        let mk = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let g = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(0.0)), Rc::new(mk(20.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(g), Rc::new(mk(40.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document { layers: vec![layer], selected_layer: 0,
+                             selection: Vec::new(), ..Document::default() };
+        let paths = |m: &Model| -> Vec<ElementPath> {
+            m.document().selection.iter().map(|s| s.path.clone()).collect()
+        };
+
+        // DESCENDANT AFTER ANCESTOR -> no-op, both seams.
+        for (label, add) in [
+            ("add_to_selection", Controller::add_to_selection
+                as fn(&mut Model, &ElementPath)),
+            ("toggle_selection", Controller::toggle_selection),
+        ] {
+            let mut m = Model::new(doc.clone(), None);
+            add(&mut m, &vec![0, 0]);
+            add(&mut m, &vec![0, 0, 1]);
+            assert_eq!(paths(&m), vec![vec![0, 0]],
+                       "{label}: a member of an already-selected group adds nothing");
+        }
+
+        // ANCESTOR AFTER DESCENDANT -> the ancestor SUBSUMES the descendants.
+        for (label, add) in [
+            ("add_to_selection", Controller::add_to_selection
+                as fn(&mut Model, &ElementPath)),
+            ("toggle_selection", Controller::toggle_selection),
+        ] {
+            let mut m = Model::new(doc.clone(), None);
+            add(&mut m, &vec![0, 0, 0]);
+            add(&mut m, &vec![0, 0, 1]);
+            add(&mut m, &vec![0, 0]);
+            assert_eq!(paths(&m), vec![vec![0, 0]],
+                       "{label}: selecting the group subsumes its members");
+        }
+
+        // AND NOTHING ELSE CHANGES. A disjoint sibling still accumulates, and
+        // toggle still removes an exact repeat -- guarding against a fix that
+        // makes the seams inert.
+        let mut m = Model::new(doc.clone(), None);
+        Controller::add_to_selection(&mut m, &vec![0, 0]);
+        Controller::add_to_selection(&mut m, &vec![0, 1]);
+        assert_eq!(paths(&m), vec![vec![0, 0], vec![0, 1]],
+                   "disjoint paths still accumulate");
+        Controller::toggle_selection(&mut m, &vec![0, 1]);
+        assert_eq!(paths(&m), vec![vec![0, 0]],
+                   "toggle still removes an exactly-matching path");
     }
 
     #[test]
