@@ -999,3 +999,201 @@ private func pathEraserTool() -> CanvasTool {
         Issue.record("Expected Rect element")
     }
 }
+
+// MARK: - Type-on-path: LOCK IS IMMUTABLE, AND IT IS INHERITED
+//
+// transcripts/LAYER_STRUCTURE.md §13 (lock is inherited, not materialized) and
+// §15.1 (locked means immutable), both RULED by JYH 2026-07-28.
+//
+// The Type-on-Path tool is the one place in either active port where a missing
+// lock guard costs the ARTIST THEIR ARTWORK rather than merely their
+// expectation: a click on an existing Path runs
+// `document.replaceElement(path, with: .textPath(tp))` and the Path is GONE.
+// There is no later refusal point — reaching the element IS the conversion.
+// So these assert the strong form: the document is BYTE-IDENTICAL afterwards,
+// through `documentToTestJson`, the same serialization the cross-language
+// corpus compares.
+//
+// THESE ARE PER-PORT GATES AND CANNOT BE SHARED. Both ports' gesture runners
+// build the tool by id out of the YAML workspace (Rust
+// `recorder::replay::build_gesture_tool` -> `YamlTool::from_workspace_tool`;
+// this port's `loadYamlTool`), and Type / Type-on-a-Path are permanent-native
+// in every port by ratified policy (NATIVE_BOUNDARY.md). A gesture fixture
+// naming `type_on_path` would fatalError, not run. The Rust twin lives in
+// jas_dioxus/src/tools/type_on_path_tool.rs `mod tests`.
+//
+// They bind the PRODUCTION hit test — the free `hitTestPathCurve(in:x:y:)`
+// that `CanvasNSView` injects into `ToolContext`. A test supplying its own
+// closure (as `makeCtx` does) would prove nothing about what ships.
+
+/// A ToolContext whose `hitTestPathCurve` is the real production walk over
+/// `model.document`, not a stub.
+private func makeLiveHitCtx(_ model: Model) -> (ToolContext, Controller) {
+    let ctrl = Controller(model: model)
+    let ctx = ToolContext(
+        model: model,
+        controller: ctrl,
+        hitTestSelection: { _ in false },
+        hitTestHandle: { _ in nil },
+        hitTestText: { _ in nil },
+        hitTestPathCurve: { x, y in hitTestPathCurve(in: model.document, x: x, y: y) },
+        requestUpdate: {},
+        drawElementOverlay: { _, _, _ in }
+    )
+    return (ctx, ctrl)
+}
+
+/// A horizontal path at y=100 running x 0..200 — the same geometry the Rust
+/// twin uses, so a hit at (100, 100) is unambiguous in both ports.
+private func hLine(locked: Bool = false) -> Path {
+    Path(d: [.moveTo(0, 100), .lineTo(200, 100)],
+         stroke: Stroke(color: Color(r: 0, g: 0, b: 0)),
+         locked: locked,
+         fillRule: .nonzero)
+}
+
+/// Press and release at the same point (no drag, so the empty-canvas arm of
+/// `onRelease` is a documented no-op) and return the canonical document JSON
+/// before and after.
+private func clickAndCapture(_ tool: TypeOnPathTool, _ ctx: ToolContext,
+                             _ model: Model, _ x: Double, _ y: Double) -> (String, String) {
+    let before = documentToTestJson(model.document)
+    tool.onPress(ctx, x: x, y: y, shift: false, alt: false)
+    tool.onRelease(ctx, x: x, y: y, shift: false, alt: false)
+    return (before, documentToTestJson(model.document))
+}
+
+@Test func typeOnPathLeavesALockedPathByteIdentical() {
+    let model = Model()
+    model.setDocumentForTest(
+        Document(layers: [Layer(name: "L", children: [.path(hLine(locked: true))])]))
+    let (ctx, _) = makeLiveHitCtx(model)
+    let tool = TypeOnPathTool()
+    let (before, after) = clickAndCapture(tool, ctx, model, 100, 100)
+    #expect(before == after, "a locked Path must survive a Type-on-Path click byte-identically")
+    #expect(model.canUndo == false, "a refused conversion must not leave an undo step")
+}
+
+@Test func typeOnPathLeavesAPathInsideALockedLayerByteIdentical() {
+    // §13: the child's OWN flag is false. Only an inherited read sees this.
+    let model = Model()
+    model.setDocumentForTest(
+        Document(layers: [Layer(name: "L", children: [.path(hLine())], locked: true)]))
+    let (ctx, _) = makeLiveHitCtx(model)
+    let tool = TypeOnPathTool()
+    let (before, after) = clickAndCapture(tool, ctx, model, 100, 100)
+    #expect(before == after, "a Path inside a locked LAYER must survive byte-identically")
+    #expect(model.canUndo == false, "a refused conversion must not leave an undo step")
+}
+
+@Test func typeOnPathLeavesAPathInsideALockedGroupByteIdentical() {
+    // This port searches one level deeper than Rust (the UNRULED depth
+    // divergence, seat/fleet/SCOPE-lock-immutable.md §8 Q3). While it does,
+    // the guard has to cover that depth too.
+    let model = Model()
+    model.setDocumentForTest(Document(layers: [
+        Layer(name: "L", children: [.group(Group(children: [.path(hLine())], locked: true))])
+    ]))
+    let (ctx, _) = makeLiveHitCtx(model)
+    let tool = TypeOnPathTool()
+    let (before, after) = clickAndCapture(tool, ctx, model, 100, 100)
+    #expect(before == after, "a Path inside a locked GROUP must survive byte-identically")
+    #expect(model.canUndo == false)
+}
+
+@Test func typeOnPathLeavesALockedGrandchildPathByteIdentical() {
+    // The grandchild's OWN flag, under an UNLOCKED group — the read the
+    // group-level guard does not already imply.
+    let model = Model()
+    model.setDocumentForTest(Document(layers: [
+        Layer(name: "L", children: [.group(Group(children: [.path(hLine(locked: true))]))])
+    ]))
+    let (ctx, _) = makeLiveHitCtx(model)
+    let tool = TypeOnPathTool()
+    let (before, after) = clickAndCapture(tool, ctx, model, 100, 100)
+    #expect(before == after, "a locked Path inside an unlocked Group must survive byte-identically")
+    #expect(model.canUndo == false)
+}
+
+@Test func typeOnPathDoesNotOpenASessionOnALockedTextPath() {
+    // Byte-identity alone would pass here — opening a session does not write
+    // immediately. The session IS the mutation waiting to happen.
+    let model = Model()
+    let tp = TextPath(d: [.moveTo(0, 100), .lineTo(200, 100)], content: "abc",
+                      startOffset: 0, fontSize: 16.0, locked: true)
+    model.setDocumentForTest(Document(layers: [Layer(name: "L", children: [.textPath(tp)])]))
+    let (ctx, _) = makeLiveHitCtx(model)
+    let tool = TypeOnPathTool()
+    _ = clickAndCapture(tool, ctx, model, 50, 100)
+    #expect(model.currentEditSession == nil, "typing into a locked TextPath would mutate it")
+}
+
+@Test func typeOnPathDoesNotOpenASessionOnATextPathInALockedLayer() {
+    let model = Model()
+    let tp = TextPath(d: [.moveTo(0, 100), .lineTo(200, 100)], content: "abc",
+                      startOffset: 0, fontSize: 16.0)
+    model.setDocumentForTest(
+        Document(layers: [Layer(name: "L", children: [.textPath(tp)], locked: true)]))
+    let (ctx, _) = makeLiveHitCtx(model)
+    let tool = TypeOnPathTool()
+    _ = clickAndCapture(tool, ctx, model, 50, 100)
+    #expect(model.currentEditSession == nil,
+            "typing into a TextPath in a locked layer would mutate it")
+}
+
+/// THE DISCRIMINATOR. Without it every assertion above is satisfied by a tool
+/// that refuses everything — including the artist's unlocked artwork.
+@Test func typeOnPathStillConvertsAnUnlockedPath() {
+    let model = Model()
+    model.setDocumentForTest(Document(layers: [Layer(name: "L", children: [.path(hLine())])]))
+    let (ctx, _) = makeLiveHitCtx(model)
+    let tool = TypeOnPathTool()
+    let (before, after) = clickAndCapture(tool, ctx, model, 100, 100)
+    #expect(before != after, "an UNLOCKED path must still convert")
+    #expect(model.currentEditSession != nil)
+}
+
+// MARK: - Type-on-path SEARCH DEPTH — PROBES OF UNRULED BEHAVIOUR
+//
+// These two pin what this port does TODAY. They are NOT a ruling, and nothing
+// here should be read as one. seat/fleet/SCOPE-lock-immutable.md §8 Q3 asks
+// which depth is canonical, and the question is open. Their job is to make a
+// ruling VISIBLE: whichever way it lands, one of them turns red and says the
+// behaviour changed out loud, instead of a silent drift.
+//
+// Measured, both ports, at the time of writing:
+//   Rust  hit_test_path_curve   layer children only        (2-deep)
+//   Swift hitTestPathCurve      one level into Groups      (3-deep, exactly)
+// The Rust twin carries the mirror-image probe.
+
+/// This port's 3-deep search DOES reach a path inside one Group.
+/// The Rust twin asserts the opposite for the same document. UNRULED.
+@Test func probeTypeOnPathReachesAPathOneGroupDeep_UNRULED() {
+    let model = Model()
+    model.setDocumentForTest(Document(layers: [
+        Layer(name: "L", children: [.group(Group(children: [.path(hLine())]))])
+    ]))
+    let (ctx, _) = makeLiveHitCtx(model)
+    let tool = TypeOnPathTool()
+    let (before, after) = clickAndCapture(tool, ctx, model, 100, 100)
+    #expect(before != after, "an UNLOCKED grouped path converts at this port's depth")
+}
+
+/// …and STOPS there. This port's walk is not a recursion — it is the child
+/// loop with one hand-unrolled level, so a path two Groups deep is unreachable
+/// here too. That is the finding worth a ruling: this port's depth is not the
+/// house's `hit_test` (2-deep) NOR its `hit_test_deep` (unbounded), but a third
+/// number that no rule names. Both this port's own Type tool
+/// (`TypeTool.hitTestText`) and Rust's recurse without limit.
+@Test func probeTypeOnPathDoesNotReachAPathTwoGroupsDeep_UNRULED() {
+    let model = Model()
+    model.setDocumentForTest(Document(layers: [
+        Layer(name: "L", children: [
+            .group(Group(children: [.group(Group(children: [.path(hLine())]))]))
+        ])
+    ]))
+    let (ctx, _) = makeLiveHitCtx(model)
+    let tool = TypeOnPathTool()
+    let (before, after) = clickAndCapture(tool, ctx, model, 100, 100)
+    #expect(before == after, "the walk stops at one Group — hand-unrolled, not recursive")
+}
