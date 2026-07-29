@@ -2410,8 +2410,22 @@ public func selectionFillSummary(_ doc: Document) -> FillSummary {
 /// Twin: Rust `selection_stroke_for_panel`.
 public func selectionStrokeForPanel(_ doc: Document) -> Stroke? {
     if case .uniform(let s?) = selectionStrokeSummary(doc) { return s }
+    // MIXED (or no stroke): fall back to the FIRST PAINTABLE LEAF, not the
+    // first selection ENTRY. Reading the entry directly gives nil for a
+    // container and drops to a hard-coded 1.0, so a mixed GROUP answered 1 pt
+    // while its two members selected DIRECTLY answered with the first member's
+    // weight — the same document and the same mixedness giving two different
+    // numbers. THE SPELLINGS MUST AGREE: a group is a mixed selection of one
+    // (MIXED_SELECTION.md §4).
+    //
+    // Both answers are still lies until `<mixed>` exists. This makes them the
+    // SAME lie, which is the most that can be done without the widget vocabulary.
     guard let first = doc.selection.first else { return nil }
-    return doc.getElement(first.path).stroke
+    var found: Stroke? = nil
+    doc.getElement(first.path).forEachPaintable { leaf in
+        if found == nil { found = leaf.stroke }
+    }
+    return found
 }
 
 /// Summarize the stroke of all selected elements.

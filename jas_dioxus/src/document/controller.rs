@@ -3237,11 +3237,27 @@ pub fn selection_fill_summary(doc: &Document) -> FillSummary {
 pub fn selection_stroke_for_panel(doc: &Document) -> Option<Stroke> {
     match selection_stroke_summary(doc) {
         StrokeSummary::Uniform(Some(s)) => Some(s),
-        _ => doc
-            .selection
-            .first()
-            .and_then(|es| doc.get_element(&es.path))
-            .and_then(|e| e.stroke().cloned()),
+        // MIXED (or no stroke): fall back to the FIRST PAINTABLE LEAF, not the
+        // first selection ENTRY. Reading the entry directly gives `None` for a
+        // container and drops to a hard-coded 1.0, so a mixed GROUP answered
+        // 1 pt while its two members selected DIRECTLY answered with the first
+        // member's weight -- the same document and the same mixedness giving
+        // two different numbers. THE SPELLINGS MUST AGREE: a group is a mixed
+        // selection of one (MIXED_SELECTION.md §4).
+        //
+        // Both answers are still lies until `<mixed>` exists. This makes them
+        // the SAME lie, which is the most that can be done without the widget
+        // vocabulary.
+        _ => doc.selection.first().and_then(|es| {
+            let elem = doc.get_element(&es.path)?;
+            let mut found: Option<Stroke> = None;
+            crate::geometry::element::for_each_paintable(elem, &mut |leaf| {
+                if found.is_none() {
+                    found = leaf.stroke().cloned();
+                }
+            });
+            found
+        }),
     }
 }
 
@@ -4372,6 +4388,30 @@ mod tests {
         doc.selection = vec![ElementSelection::all(vec![0, 1])];
         assert_eq!(selection_stroke_for_panel(&doc).map(|s| s.width), Some(3.0),
                    "a leaf still resolves to its own weight");
+
+        // A MIXED container and its members selected DIRECTLY must give the
+        // SAME answer -- a group is a mixed selection of one. Reading the
+        // selection ENTRY instead of the first leaf gave 1.0 for the group and
+        // the first member's weight for the members: two numbers, one fact.
+        let mixed = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(5.0)), Rc::new(mk(1.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let mut d2 = doc.clone();
+        d2.layers = vec![Element::Layer(LayerElem {
+            children: vec![Rc::new(mixed)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        })];
+        d2.selection = vec![ElementSelection::all(vec![0, 0])];
+        let via_group = selection_stroke_for_panel(&d2).map(|s| s.width);
+        d2.selection = vec![ElementSelection::all(vec![0, 0, 0]),
+                            ElementSelection::all(vec![0, 0, 1])];
+        let via_members = selection_stroke_for_panel(&d2).map(|s| s.width);
+        assert_eq!(via_group, via_members,
+                   "a mixed group and its members must answer alike");
+        assert_eq!(via_group, Some(5.0), "and that answer is the first leaf's");
     }
 
     #[test]

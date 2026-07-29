@@ -250,4 +250,21 @@ struct StrokePanelWeightTests {
         #expect(selectionStrokeForPanel(doc([[0, 1]]))?.width == 3,
                 "a leaf resolves to its own weight")
     }
+
+    /// A MIXED container and its members selected DIRECTLY must answer alike —
+    /// a group is a mixed selection of one. Reading the selection ENTRY instead
+    /// of the first leaf gave 1.0 for the group and the first member's weight
+    /// for the members: two numbers, one fact.
+    @Test func aMixedGroupAndItsMembersAnswerAlike() {
+        let mixed = Element.group(Group(children: [rect(5), rect(1)]))
+        let base = Document(layers: [Layer(name: "L", children: [mixed])])
+        let viaGroup = selectionStrokeForPanel(
+            base.replacing(selection: [ElementSelection.all([0, 0])]))
+        let viaMembers = selectionStrokeForPanel(
+            base.replacing(selection: [ElementSelection.all([0, 0, 0]),
+                                       ElementSelection.all([0, 0, 1])]))
+        #expect(viaGroup?.width == viaMembers?.width,
+                "group says \(viaGroup?.width ?? -1), members say \(viaMembers?.width ?? -1)")
+        #expect(viaGroup?.width == 5, "and that answer is the first leaf's")
+    }
 }
