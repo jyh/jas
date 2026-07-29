@@ -51,24 +51,34 @@
     "txns": [
       {
         "name": "select_all",
-        "ops": [{ "op": "select_all" }]
+        "ops": [
+          {
+            "op": "select_all"
+          }
+        ]
       }
     ],
     "expected_json": "select_all_top_level_expected.json"
   },
   {
-    "_doc": "The MARQUEE keeps the group branch — it legitimately asks 'did anything inside the band match?' and its answer includes the members. Same document, same four top-level objects in range, a DIFFERENT and larger selection. This is what stops a D2 repair from being made by deleting the branch instead of by giving Select All its own loop.",
-    "name": "marquee_over_everything_still_expands_groups_unlike_select_all",
+    "_doc": "§16.4 (RULED 2026-07-29). The MARQUEE asks 'did anything inside the band match?' about a group's members, but ANSWERS with the group alone -- the same shape Select All produces (§16.3). This case therefore shares select_all_top_level_expected.json with the Select All case above: the two operations must land on the SAME selection for this document, and a shared golden makes that agreement structural rather than coincidental. If either drifts, this reds.\nBEFORE THE RULING this branch pushed the group AND every unlocked member, nine entries where Select All gave four, and the file was named 'marquee_expands'. That shape is the one no operation reads coherently: copy_selection copies the group whole and then copies each member INTO the source group, so marquee-then-duplicate left the SOURCE holding four children instead of two. Move and delete survived it only by accident -- delete sorts paths descending, and move writes absolute positions read from the pristine document.",
+    "name": "a_marquee_and_select_all_agree_on_the_same_top_level_objects",
     "setup_svg": "select_all_top_level.svg",
     "txns": [
       {
         "name": "select_rect",
         "ops": [
-          { "op": "select_rect", "x": -10.0, "y": -10.0, "width": 400.0, "height": 400.0 }
+          {
+            "op": "select_rect",
+            "x": -10.0,
+            "y": -10.0,
+            "width": 400.0,
+            "height": 400.0
+          }
         ]
       }
     ],
-    "expected_json": "select_all_marquee_expands_expected.json"
+    "expected_json": "select_all_top_level_expected.json"
   },
   {
     "_doc": "Select All is ancestor-aware about lock (§13): the locked layer contributes nothing, a locked element and a locked group are skipped, and 'Mixed Group' comes in as ONE entry even though one of its members is locked — because Select All never looks inside a group at all.",
@@ -77,21 +87,38 @@
     "txns": [
       {
         "name": "select_all",
-        "ops": [{ "op": "select_all" }]
+        "ops": [
+          {
+            "op": "select_all"
+          }
+        ]
       }
     ],
     "expected_json": "select_all_locked_inheritance_expected.json"
   },
   {
-    "_doc": "D6 ORDER, on the SHIFT-MARQUEE. Marquee everything (nine entries), then shift-marquee the solo rect at [0,0] alone: the XOR drops it and the other EIGHT must come back in their original order. Both ports built that result by iterating a hash map — Rust's RandomState, Swift's Dictionary — so with two or more survivors the order was per-process. This is the case that reds if either reverts; without it the repair would be a guard no mutation could turn red.",
-    "name": "extend_marquee_deselects_one_and_keeps_the_other_eight_in_order",
+    "_doc": "D6 ORDER, on the SHIFT-MARQUEE. Marquee everything (FOUR top-level entries since §16.4), then shift-marquee the solo rect at [0,0] alone: the XOR drops it and the other THREE must come back in their original order. Both ports build that result by walking the document, so a Set would lose the ordering this pins.",
+    "name": "extend_marquee_deselects_one_and_keeps_the_others_in_order",
     "setup_svg": "select_all_top_level.svg",
     "txns": [
       {
         "name": "marquee_then_shift_marquee",
         "ops": [
-          { "op": "select_rect", "x": -10.0, "y": -10.0, "width": 400.0, "height": 400.0 },
-          { "op": "select_rect", "x": -1.0, "y": -1.0, "width": 10.0, "height": 10.0, "extend": true }
+          {
+            "op": "select_rect",
+            "x": -10.0,
+            "y": -10.0,
+            "width": 400.0,
+            "height": 400.0
+          },
+          {
+            "op": "select_rect",
+            "x": -1.0,
+            "y": -1.0,
+            "width": 10.0,
+            "height": 10.0,
+            "extend": true
+          }
         ]
       }
     ],
@@ -105,8 +132,18 @@
       {
         "name": "copy",
         "ops": [
-          { "op": "select_rect", "x": 0.0, "y": 0.0, "width": 200.0, "height": 200.0 },
-          { "op": "copy_selection", "dx": 6.0, "dy": 6.0 }
+          {
+            "op": "select_rect",
+            "x": 0.0,
+            "y": 0.0,
+            "width": 200.0,
+            "height": 200.0
+          },
+          {
+            "op": "copy_selection",
+            "dx": 6.0,
+            "dy": 6.0
+          }
         ]
       }
     ],
@@ -120,8 +157,20 @@
       {
         "name": "add_twice",
         "ops": [
-          { "op": "add_to_selection", "path": [0, 1] },
-          { "op": "add_to_selection", "path": [0, 1] }
+          {
+            "op": "add_to_selection",
+            "path": [
+              0,
+              1
+            ]
+          },
+          {
+            "op": "add_to_selection",
+            "path": [
+              0,
+              1
+            ]
+          }
         ]
       }
     ],
@@ -135,8 +184,20 @@
       {
         "name": "add_two_out_of_order",
         "ops": [
-          { "op": "add_to_selection", "path": [1, 1] },
-          { "op": "add_to_selection", "path": [0, 0] }
+          {
+            "op": "add_to_selection",
+            "path": [
+              1,
+              1
+            ]
+          },
+          {
+            "op": "add_to_selection",
+            "path": [
+              0,
+              0
+            ]
+          }
         ]
       }
     ],

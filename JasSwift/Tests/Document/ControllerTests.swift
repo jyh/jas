@@ -151,10 +151,18 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(ctrl.document.selection.isEmpty)
 }
 
-@Test func selectRectGroupExpansion() {
+/// A band that touches only part of a group still selects the group — the
+/// marquee ASKS about members. §16.4 (RULED 2026-07-29) changed only its
+/// ANSWER: the group alone, not the group and its members.
+///
+/// This test was `selectRectGroupExpansion` and required
+/// `[[0,1], [0,1,0], [0,1,1]]`. The question it asks is unchanged and still
+/// worth asking: the band here is 7x7 and misses `line1`'s far end entirely,
+/// so a group only PARTIALLY covered must still come back.
+@Test func selectRectSelectsAGroupItOnlyPartiallyCovers() {
     let ctrl = makeMarqueeCtrl()
     ctrl.selectRect(x: -1, y: -1, width: 7, height: 7)
-    #expect(selPaths(ctrl.document.selection) == [[0, 1], [0, 1, 0], [0, 1, 1]])
+    #expect(selPaths(ctrl.document.selection) == [[0, 1]])
 }
 
 @Test func selectRectReplacesPrevious() {
@@ -164,13 +172,20 @@ private func makeMarqueeCtrl() -> Controller {
     #expect(ctrl.document.selection.isEmpty)
 }
 
+/// A band over everything returns every TOP-LEVEL object, a group counting as
+/// one (§16.3, extended to the marquee by §16.4).
+///
+/// This test previously required `[0,1,0]` and `[0,1,1]` — the group's members
+/// — alongside the rect. It now requires their absence, which is the assertion
+/// that matters: a selection holding both a group and its own members is the
+/// shape `copySelection` misreads as "copy the group, then copy each member
+/// into the source group".
 @Test func selectRectMultipleElements() {
     let ctrl = makeMarqueeCtrl()
     ctrl.selectRect(x: -1, y: -1, width: 120, height: 120)
     let paths = selPaths(ctrl.document.selection)
-    #expect(paths.contains([0, 0]))
-    #expect(paths.contains([0, 1, 0]))
-    #expect(paths.contains([0, 1, 1]))
+    #expect(paths == [[0, 0], [0, 1]],
+            "the rect and the group, each once and nothing under them; got \(paths)")
 }
 
 // MARK: - Precise geometric hit-testing tests

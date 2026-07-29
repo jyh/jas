@@ -607,15 +607,20 @@ public class Controller {
                     // grandchild unguarded, so a rubber band that touched only
                     // a locked member dragged the group and its unlocked
                     // siblings into the selection with it.
+                    //
+                    // §16.4 (RULED 2026-07-29): the band ASKS about members,
+                    // but ANSWERS with the group alone. This branch used to
+                    // push the group AND every unlocked member, which is the
+                    // one selection shape no operation reads coherently:
+                    // `copySelection` copies the group whole and then copies
+                    // each member INTO the source group, so marquee-then-
+                    // duplicate left the SOURCE holding four children instead
+                    // of two. Move and delete survived it only by accident.
                     let anyHit = g.children.enumerated().contains {
                         !doc.effectiveLocked([li, ci, $0.offset]) && predicate($0.element)
                     }
                     if anyHit {
                         selection.append(ElementSelection.all([li, ci]))
-                        for gi in 0..<g.children.count {
-                            if doc.effectiveLocked([li, ci, gi]) { continue }
-                            selection.append(ElementSelection.all([li, ci, gi]))
-                        }
                     }
                 } else {
                     if predicate(child) {

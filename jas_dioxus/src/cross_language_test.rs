@@ -3638,10 +3638,19 @@ mod tests {
     /// `copy_of_a_two_element_selection_emits_a_deterministic_order` case can
     /// require a NON-document order ([0,3] then [0,1]) and mean it.
     ///
-    /// `marquee_over_everything_still_expands_groups_unlike_select_all` is the
-    /// case that stops the D2 repair being made by deleting `selectFlat`'s group
-    /// branch: the branch is right for the marquee, which is the caller it was
-    /// written for, and wrong only for Select All.
+    /// `a_marquee_and_select_all_agree_on_the_same_top_level_objects` shares
+    /// `select_all_top_level_expected.json` with the Select All case, which is
+    /// §16.4 (RULED 2026-07-29) made structural: the two operations must land on
+    /// the SAME selection for this document, so if either drifts the shared
+    /// golden reds.
+    ///
+    /// This comment previously said the marquee's group branch "is right for the
+    /// marquee, which is the caller it was written for, and wrong only for
+    /// Select All". That was the pre-§16.4 reading and it is no longer true. The
+    /// branch pushed the group AND every unlocked member, and `copy_selection`
+    /// reads that shape as a copy of the group PLUS a copy of each member into
+    /// the source group — marquee-then-duplicate left the SOURCE holding four
+    /// children instead of two.
     #[test]
     fn operation_select_all_top_level() {
         run_operation_fixture("operations/select_all_top_level.json");

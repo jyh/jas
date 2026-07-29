@@ -2859,18 +2859,21 @@ fn select_flat(
                     // grandchild unguarded, so a rubber band that touched only
                     // a locked member dragged the group and its unlocked
                     // siblings into the selection with it.
+                    //
+                    // §16.4 (RULED 2026-07-29): the band ASKS about members,
+                    // but ANSWERS with the group alone. This branch used to
+                    // push the group AND every unlocked member, which is the
+                    // one selection shape no operation reads coherently:
+                    // `copy_selection` copies the group whole and then copies
+                    // each member INTO the source group, so marquee-then-
+                    // duplicate left the SOURCE holding four children instead
+                    // of two. Move and delete survived it only by accident.
                     if let Some(grandchildren) = child.children()
                         && grandchildren.iter().enumerate().any(|(gi, gc)| {
                             !doc.effective_locked(&vec![li, ci, gi]) && predicate(gc)
                         })
                     {
                         entries.push(ElementSelection::all(vec![li, ci]));
-                        for gi in 0..grandchildren.len() {
-                            if doc.effective_locked(&vec![li, ci, gi]) {
-                                continue;
-                            }
-                            entries.push(ElementSelection::all(vec![li, ci, gi]));
-                        }
                     }
                 } else if predicate(child) {
                     entries.push(ElementSelection::all(vec![li, ci]));
@@ -3771,6 +3774,77 @@ mod tests {
             (before.0 + 10.0, before.1 + 20.0),
             "a Group selected as ONE entry did not move"
         );
+    }
+
+
+    /// §16.4 — A SELECTION NEVER HOLDS AN ANCESTOR AND ITS OWN DESCENDANT.
+    ///
+    /// RULED 2026-07-29 (banked by JYH, reversible in council). §16 gave Select
+    /// All this shape, "a group counting as ONE"; the MARQUEE kept the older
+    /// branch that pushed the group AND every unlocked member. The corpus
+    /// defended it in prose — the marquee "legitimately asks did anything
+    /// inside the band match, and its answer includes the members".
+    ///
+    /// It is not defensible, and the reason is COPY, not taste. `copy_selection`
+    /// walks the selection and copies each entry. Given the group and its two
+    /// members it copies the GROUP (whole, with both children) and then copies
+    /// each MEMBER into the source group — so a marquee-then-duplicate left the
+    /// SOURCE group holding four children instead of two. Measured before the
+    /// fix: `Group(4 children)` beside `Group(2 children)`. The artist asked for
+    /// a copy and got the original damaged.
+    ///
+    /// Move and delete survived the same shape only by accident (delete sorts
+    /// descending; move writes absolute positions read from the pristine
+    /// document). Accidental safety across two verbs is not an invariant.
+    ///
+    /// The marquee still ASKS about members — a band touching any unlocked
+    /// member selects the group. It just answers with the outermost object.
+    #[test]
+    fn a_marquee_selects_the_group_not_its_members_too() {
+        use crate::geometry::element::GroupElem;
+        use std::rc::Rc;
+        let mk_rect = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(mk_rect(0.0)), Rc::new(mk_rect(20.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(group)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: Vec::new(), ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+
+        // A band over the whole group.
+        Controller::select_rect(&mut model, -5.0, -5.0, 100.0, 100.0, false);
+        let paths: Vec<ElementPath> = model.document().selection.iter()
+            .map(|s| s.path.clone()).collect();
+        assert_eq!(paths, vec![vec![0, 0]],
+                   "the marquee selects the GROUP alone, not the group and its \
+                    members; got {paths:?}");
+
+        // And the consequence that made this a defect rather than a preference.
+        Controller::copy_selection(&mut model, 100.0, 0.0);
+        let kids = model.document().layers[0].children().unwrap().to_vec();
+        assert_eq!(kids.len(), 2, "one copy beside the source");
+        for (i, k) in kids.iter().enumerate() {
+            match k.as_ref() {
+                Element::Group(g) => assert_eq!(
+                    g.children.len(), 2,
+                    "group [{i}] must still hold exactly its two members -- \
+                     before the fix the SOURCE group ended up with four"),
+                other => panic!("expected a Group at [{i}], got {other:?}"),
+            }
+        }
     }
 
     #[test]
