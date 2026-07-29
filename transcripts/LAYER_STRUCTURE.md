@@ -1653,3 +1653,86 @@ selected simultaneously at all? If not, that is an assertable invariant, and it
 would have caught this without anyone noticing the divergence. **Not ruled.**
 Raised because a rule that makes a defect impossible is worth more than a fix
 that makes one instance go away.
+
+---
+
+## 17. HOW §15 GETS BUILT: FOUR LAYERS, THREE OF THEM NOW. RULED 2026-07-28.
+
+> JYH: *"defer layer 4. I believe we need to add LockedTarget."*
+
+Full costing: `seat/fleet/SCOPE-lock-immutable.md`.
+
+### 17.1 The ruling was priced as one thing; it is four
+Scoping separated what §15 actually requires, and only the last is expensive:
+
+| | layer | cost |
+|---|---|---|
+| 1 | **Enforcement** — the code path refuses | the ruling itself |
+| 2 | **Signal** — a machine-readable refusal | one new error class |
+| 3 | **Affordance** — the menu item greys out | small, existing machinery |
+| 4 | **Notification** — an active message | **a UI subsystem** |
+
+**Layers 1–3 land now. Layer 4 is DEFERRED, deliberately and on the record.**
+
+### 17.2 Why layer 4 is deferred, and it is not about cost
+**Zero message surface exists in either active port** — measured, eight patterns
+across four trees, no hits. What exists is 26 modal dialogs (a modal for "that is
+locked" is more disruptive than the operation it refuses) and a Swift-only
+`NSAlert` with no Rust equivalent, so not even the modal escape hatch is at
+parity.
+
+The argument for deferring is not the price. It is that **a channel built to
+serve lock would be shaped by lock.** jas needs a transient message channel for
+save failures, import warnings, tool constraints and — before long — AI
+suggestions. Designing it as "the thing that says you cannot do that", under
+schedule pressure from a feature that is not about notification, is how a project
+acquires a bad toast system it then lives with for years. **Scope it separately,
+when something other than lock is also asking for it.**
+
+**The half-measure objection does not apply here.** Partial closure genuinely
+rots in this codebase — the Swift copy-site omission class has five sightings,
+each one somebody closing the instances and leaving the category. But that risk
+attaches to ENFORCEMENT, not to notification. Deferring layer 4 weakens layer 1
+not at all; the two risks live on different layers, which is why they were
+decided separately.
+
+**The residual, stated rather than glossed:** an artist who presses the keyboard
+shortcut without looking at the menu gets silence. This is NOT the grouping
+defect §13 abolished — grouping's no-op had an explanation nowhere, this one has
+one in the menu. On macOS a disabled item's key equivalent does not fire at all;
+in Dioxus the key router is ours and must be made to honour `enabled_when`, which
+it should do regardless.
+
+### 17.3 LockedTarget — RULED, and it widens a FROZEN taxonomy
+There is already a cross-language fault taxonomy with a fixture contract: Rust
+`OpError` and Swift `OpApplyError`, five classes each (`MalformedEnvelope`,
+`UnknownVerb`, `MissingParam`, `BadParamType`, `MissingTarget`), asserted through
+`expected_error` in 11 files under `test_fixtures/operations/`.
+
+**A sixth class, `LockedTarget`, is added.** It gives the refusal a
+**corpus-gated, cross-language signal today**, independently of any UI channel —
+which is precisely what makes deferring layer 4 safe rather than lossy. The
+refusal becomes provable in both ports the moment it is implemented.
+
+**Both ports declare the taxonomy FROZEN in comments, so this is a ratified
+widening, not an implementation detail.** It is recorded here as such. Note the
+honest limit: `workspace_interpreter/` does not implement the channel at all
+(zero hits for `expected_error`/`OpError`), so "cross-language" here means **two
+ports, not three**, and the live reference cannot adjudicate a lock refusal.
+
+### 17.4 What is NOT part of this decision
+Two items in the scope are bugs today no matter how §15 had been ruled, and
+must not be counted as its price:
+
+* **S0 — `Object > Lock` still MATERIALISES** in both ports
+  (`controller.rs:2797`, `Controller.swift:892`), stamping `locked = true` onto
+  every descendant. §13 repealed that and only the Layers-panel path was fixed.
+  **This is worse because of our own work:** §13.1 landed `jas:locked`
+  persistence, so the stamped flags now survive save/reload and, under
+  inheritance, are individually unremovable — unlock the parent and the children
+  stay locked, which is exactly the outcome §13 ruled against. Unpushed, so
+  nothing is published. **Fix first.**
+* **D-A — Swift destructively converts a LOCKED path.** `hitTestPathCurve`
+  (`CanvasSubwindow.swift:3201`) has no lock check anywhere, so the Type-on-Path
+  tool converts a locked Path where Rust refuses (`type_on_path_tool.rs:107`).
+  Live data loss.
