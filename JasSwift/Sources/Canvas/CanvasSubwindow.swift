@@ -2074,6 +2074,25 @@ func selectionOutlineScale(_ doc: Document, _ path: ElementPath) -> Double {
     return scale
 }
 
+/// The single bounding box that outlines a SELECTED CONTAINER, or nil if this
+/// element is not a container (it strokes its own geometry instead) or has no
+/// extent to outline.
+///
+/// Split out from `drawElementOverlay` so the decision is assertable without a
+/// `CGContext`: the drawing is one `addRect`, and what was actually wrong was
+/// the decision, not the drawing. Twin of the `is_container` branch in Rust's
+/// `canvas/render.rs`, zero-extent guard included.
+func containerSelectionOutlineRect(_ elem: Element) -> CGRect? {
+    switch elem {
+    case .group, .layer:
+        let b = elem.bounds
+        guard b.width > 0, b.height > 0 else { return nil }
+        return CGRect(x: b.x, y: b.y, width: b.width, height: b.height)
+    default:
+        return nil
+    }
+}
+
 /// Draw an element's selection overlay (outline + control handles).
 /// Internal so tools can call it via the ToolContext. `kind` decides
 /// which control points are highlighted (and gets handle decoration);
@@ -2122,8 +2141,32 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
         return
     }
 
-    // Groups and Layers: nothing — descendants draw their own
-    // highlights.
+    // Groups and Layers: ONE bbox around the contents.
+    //
+    // This used to `return` and draw nothing, on the premise that "descendants
+    // are individually in the selection and draw their own highlights". That
+    // premise is Rust's container expansion in `doc.set_selection`
+    // (`interpreter/effects.rs`), which JasSwift does not do — so the
+    // descendants were never in the selection and a selected group showed NO
+    // highlight at all. Found by JYH at council 2026-07-29, clicking the group
+    // the GROUPMOVE fix had just made draggable.
+    //
+    // Third consumer found resting on that same premise, after
+    // `moveControlPoints` (a group would not move) and `copySelection` (a copy
+    // damaged its source). §20 rules the expansion away, so Rust would have
+    // joined them.
+    //
+    // Rust already renders this and states the rule (`canvas/render.rs`): "per
+    // the vector-illustration convention, a selected Group is shown as a single
+    // bbox around its contents — not as individual descendant outlines". The
+    // zero-extent guard is mirrored from there: stroking an empty container's
+    // bounds would draw a dot at its origin. Handle squares stay absent —
+    // `selectionHandleRects` already returns [] for containers in both ports.
+    if let outline = containerSelectionOutlineRect(elem) {
+        ctx.addRect(outline)
+        ctx.strokePath()
+        return
+    }
     if case .group = elem { return }
     if case .layer = elem { return }
 
