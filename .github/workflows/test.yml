@@ -37,6 +37,10 @@ jobs:
       # written is watched on one platform and unwatched on the other, silently.
       # That is how the line above was wrong on Windows for its whole life.
       - run: python scripts/check_lane_coverage.py --self-test && python scripts/check_lane_coverage.py
+      # Every function that dispatches on Element kind must account for
+      # containers, or carry a ledger row saying why not. Five defects wore
+      # that shape in one week, all invisible in Rust and live in JasSwift.
+      - run: python scripts/check_element_dispatch.py --self-test && python scripts/check_element_dispatch.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -212,6 +216,8 @@ jobs:
           # absence, so it must appear in both lanes or it fails immediately.
           python scripts/check_lane_coverage.py --self-test
           python scripts/check_lane_coverage.py
+          python scripts/check_element_dispatch.py --self-test
+          python scripts/check_element_dispatch.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves
