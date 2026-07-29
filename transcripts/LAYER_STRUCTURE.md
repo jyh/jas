@@ -2134,3 +2134,34 @@ pass where a golden shows a duplicated selection entry.
    unwatched by any gate, found by reading during this pass and NOT repaired —
    it is not what either ruling is about, and choosing a winner is a ruling. The
    dedup half was aligned to Rust here.
+
+---
+
+## 19. THE SELECTION AFTER A DUPLICATE IS IN DOCUMENT ORDER. RULED 2026-07-28.
+
+> JYH: *"yes document order."*
+
+`Controller::copy_selection` (the Alt-drag duplicate, not the clipboard) sorts
+the source selection **descending** — `sort_by(|a, b| b.path.cmp(&a.path))` — and
+must: inserting after `[0,1]` shifts `[0,3]`, so the walk has to run
+back-to-front. **That part is load-bearing and stays.**
+
+But the NEW selection was then built in that same descending order, purely as a
+byproduct of the loop. Duplicating `[0,1]` and `[0,3]` yielded `[[0,4],[0,2]]`.
+Both ports did it; a shared convention nobody ever chose.
+
+**Not cosmetic, because of §10 (D6).** Selection order is part of the document
+precisely because a copied fragment's z-order is part of the artwork. So:
+Alt-drag-duplicate, then Copy, and the clipboard SVG lists the elements in
+REVERSE document order — pasting them stacks them backwards. The defect surfaces
+one step from where it is created, which is why it went unseen.
+
+**RULED: the selection a duplicate leaves behind is in document order.** Sort the
+result; leave the descending iteration alone. Every other selection-producing
+operation already yields document order, so this was the odd one out, and leaving
+one operation's order as an artifact would undercut the ruling that made order
+semantic in the first place.
+
+*Gate:* duplicate two elements, copy, assert the clipboard's element order
+matches document order — the assertion has to reach the CLIPBOARD, because that
+is where the byproduct becomes artist-visible.
