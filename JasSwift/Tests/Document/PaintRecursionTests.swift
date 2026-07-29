@@ -70,6 +70,44 @@ struct PaintRecursionTests {
         #expect(deep.stroke != nil, "the member two levels down is stroked")
     }
 
+    /// A BRUSH is stroke styling, so it recurses too. Found by the
+    /// element-dispatch enumeration rather than by a report:
+    /// `setSelectionStrokeBrush` looped the selection and `withStrokeBrush`
+    /// returned a container unchanged, so applying a brush to a selected group
+    /// did nothing — the same shape as fill and stroke, one ruling behind.
+    @Test func aBrushReachesEveryMemberAtEveryDepth() {
+        // A brush applies to Path/Line/Polyline only — a Rect carries no
+        // stroke brush by design (`with_stroke_brush`), so the fixture uses
+        // LINES. The first draft used the shared rect model and failed for
+        // that reason: the fixture was wrong, not the code.
+        let inner = Element.group(Group(children: [
+            .line(Line(x1: 40, y1: 0, x2: 50, y2: 10))], id: "inner"))
+        let outer = Element.group(Group(children: [
+            .line(Line(x1: 0, y1: 0, x2: 10, y2: 10)), inner], id: "outer"))
+        let doc = Document(layers: [Layer(name: "L", children: [outer])])
+        let model = Model(document: doc.replacing(
+            selection: [ElementSelection.all([0, 0])]))
+        Controller(model: model).setSelectionStrokeBrush("charcoal")
+        guard case .group(let g) = model.document.getElement([0, 0]) else {
+            Issue.record("not a group"); return
+        }
+        // A brush PROMOTES a stroke-carrying leaf to a Path, so assert on the
+        // brush slug rather than on the kind that carries it.
+        var slugs: [String?] = []
+        func walk(_ e: Element) {
+            switch e {
+            case .group(let gg): gg.children.forEach(walk)
+            case .path(let p): slugs.append(p.strokeBrush)
+            case .rect, .line, .polyline: slugs.append(nil)  // unpromoted = no brush
+            default: break
+            }
+        }
+        g.children.forEach(walk)
+        #expect(slugs.count == 2, "two leaves under the selected group; found \(slugs.count)")
+        #expect(slugs.allSatisfy { $0 == "charcoal" },
+                "every leaf carries the brush, including the one two levels down; got \(slugs)")
+    }
+
     /// T4 BYSTANDER: the walk REBUILDS every container it passes through, so a
     /// container's own fields must survive. Rebuilding by re-listing fields is
     /// the Swift copy-site omission class — it would drop `id` and `mask` on

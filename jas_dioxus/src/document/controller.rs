@@ -995,7 +995,8 @@ impl Controller {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(
                     &es.path,
-                    crate::geometry::element::with_stroke_brush(elem, slug.clone()),
+                    crate::geometry::element::map_paintable(
+                        elem, &|e| crate::geometry::element::with_stroke_brush(e, slug.clone())),
                 );
             }
         }
@@ -1012,7 +1013,8 @@ impl Controller {
             if let Some(elem) = doc.get_element(&es.path) {
                 new_doc = new_doc.replace_element(
                     &es.path,
-                    crate::geometry::element::with_stroke_brush_overrides(elem, overrides.clone()),
+                    crate::geometry::element::map_paintable(
+                        elem, &|e| crate::geometry::element::with_stroke_brush_overrides(e, overrides.clone())),
                 );
             }
         }

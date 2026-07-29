@@ -1966,7 +1966,7 @@ public class Controller {
         if doc.selection.isEmpty { return }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withStrokeBrush(elem, strokeBrush: slug)
+            let newElem = elem.mapPaintable { withStrokeBrush($0, strokeBrush: slug) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.editDocument(doc)
@@ -1978,7 +1978,7 @@ public class Controller {
         if doc.selection.isEmpty { return }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withStrokeBrushOverrides(elem, overrides: overrides)
+            let newElem = elem.mapPaintable { withStrokeBrushOverrides($0, overrides: overrides) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.editDocument(doc)
