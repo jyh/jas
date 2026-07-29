@@ -2222,3 +2222,69 @@ would have caught D2 without anyone noticing a divergence.
 *A narrower fallback, if the panel work proves larger than it looks:* keep the
 expansion as a DERIVED view computed at render time, leaving the stored selection
 clean. Same end state for the model, smaller blast radius.
+
+---
+
+## 21. THE MEASUREMENT §20.4 ASKED FOR — and the defect it found. 2026-07-29.
+
+§20.4 recorded that the consumers of `doc.selection` relying on descendants
+being present were **NOT enumerated**, and said to measure before implementing.
+This is that measurement. It found a load-bearing consumer, and on the way it
+found a live defect in both ports that had nothing to do with §20.
+
+### 21.1 A group selected as ONE entry did not move
+`move_control_points` (Rust) / `moveControlPoints` (Swift) matched nine leaf
+kinds and fell to a catch-all returning the element unchanged. **There was no
+`Group` arm, no `Layer` arm, and no arm for the non-reference live kinds.**
+`Controller::move_selection` calls it once per selected path, so a container in
+the selection contributed nothing.
+
+It reaches the artist by the shortest possible route. The Selection tool sets a
+ONE-ENTRY selection on a click — `selection.yaml` runs `doc.set_selection: {
+paths: [hit] }` — and `hit_test` returns the **group's** path for a click inside
+a group's child (`doc_primitives.rs`,
+`hit_test_returns_group_path_when_clicking_child_rect`). So this was every
+click-and-drag of a group. §16 then made Select All produce the same shape.
+
+**JasSwift could not drag a group at all. Rust could, by accident:**
+`doc.set_selection` expands a container to all descendants, so the CHILDREN were
+in the selection and each moved itself — visually indistinguishable from the
+group moving.
+
+**That accident is what §20 rules should be deleted.** Implementing §20 as ruled
+would have carried the defect into the canonical port. The fix is a prerequisite
+for §20, not a sibling of it.
+
+### 21.2 Two corrections to §20's own text
+* **§20.2's mechanism is wrong.** It argues the expanded selection is incoherent
+  because "translate it and the group moves by 24 while each child, already
+  carried by its parent, moves 24 again." **That double-move never happened** —
+  the group contributed nothing, so children moved once. The ruling's conclusion
+  may stand; the reason given for it does not.
+* **§20.3's claim that this unlocks §16.4 is wrong.** The MARQUEE independently
+  produces ancestor+descendant selections, deliberately, and the ratified corpus
+  says so in prose: *"the MARQUEE keeps the group branch — it legitimately asks
+  'did anything inside the band match?' and its answer includes the members."*
+  **13 such pairs live in 4 goldens today.** §16.4 is not assertable after §20
+  lands; it needs a ruling on the marquee first. **STILL OPEN, and now with a
+  measured obstacle rather than an assumed clear path.**
+
+### 21.3 The durable half — an invariant, not a patch
+**For an ALL selection, moving IS translating:**
+`move_control_points(elem, All, d) == translate_element(elem, d)`, for every
+kind. The two functions are two spellings of one idea; they disagreed only where
+one had forgotten a kind. Asserted **per kind** in both ports
+(`move_all_equals_translate_for_every_kind`, `moveAllEqualsTranslateForEveryKind`).
+
+Writing that test found a **second** kind nobody had reported: **Polyline** had
+no arm either, so a polyline did not move, whole or by control point. Fixed in
+the same shape. The bug this started from was one of two — which is the argument
+for a per-kind invariant over a per-bug fix.
+
+### 21.4 A recorded gap closed, in lockstep
+Both ports carried a test asserting Edit > Copy of a live compound shape lands
+the copy **exactly on top of** its source, each explaining that
+`move_control_points` fell through for a compound shape, each declining to
+repair it. Both went red on the same value (x=20, not 0) when the arms landed,
+and now assert the copy lands beside its source. Two ports, one number — the
+corpus reporting a closure rather than a regression.
