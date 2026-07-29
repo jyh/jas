@@ -67,11 +67,23 @@
     "txns": [
       {
         "name": "select_element",
-        "ops": [{"op": "select_element", "path": [0, 0]}]
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0
+            ]
+          }
+        ]
       },
       {
         "name": "lock_selection",
-        "ops": [{"op": "lock_selection"}]
+        "ops": [
+          {
+            "op": "lock_selection"
+          }
+        ]
       }
     ],
     "expected_json": "lock_toggle_group_locked_expected.json"
@@ -83,15 +95,36 @@
     "txns": [
       {
         "name": "select_element",
-        "ops": [{"op": "select_element", "path": [0, 0]}]
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0
+            ]
+          }
+        ]
       },
       {
         "name": "lock_selection",
-        "ops": [{"op": "lock_selection"}]
+        "ops": [
+          {
+            "op": "lock_selection"
+          }
+        ]
       },
       {
         "name": "select_element",
-        "ops": [{"op": "select_element", "path": [0, 0, 0]}]
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
       }
     ],
     "expected_json": "lock_toggle_group_locked_expected.json"
@@ -103,19 +136,48 @@
     "txns": [
       {
         "name": "select_element",
-        "ops": [{"op": "select_element", "path": [0, 0]}]
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0
+            ]
+          }
+        ]
       },
       {
         "name": "lock_selection",
-        "ops": [{"op": "lock_selection"}]
+        "ops": [
+          {
+            "op": "lock_selection"
+          }
+        ]
       },
       {
         "name": "toggle_element_lock",
-        "ops": [{"op": "toggle_element_lock", "path": [0, 0]}]
+        "ops": [
+          {
+            "op": "toggle_element_lock",
+            "path": [
+              0,
+              0
+            ]
+          }
+        ]
       },
       {
         "name": "select_element",
-        "ops": [{"op": "select_element", "path": [0, 0, 0]}]
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
       }
     ],
     "expected_json": "lock_selection_child_selected_expected.json"
@@ -127,7 +189,16 @@
     "txns": [
       {
         "name": "select_element",
-        "ops": [{"op": "select_element", "path": [0, 0, 0]}]
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0,
+              0
+            ]
+          }
+        ]
       }
     ],
     "expected_json": "lock_selection_child_selected_expected.json"
@@ -139,11 +210,22 @@
     "txns": [
       {
         "name": "select_element",
-        "ops": [{"op": "select_element", "path": [0]}]
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0
+            ]
+          }
+        ]
       },
       {
         "name": "lock_selection",
-        "ops": [{"op": "lock_selection"}]
+        "ops": [
+          {
+            "op": "lock_selection"
+          }
+        ]
       }
     ],
     "expected_json": "lock_selection_layer_locked_expected.json"
@@ -155,13 +237,68 @@
     "txns": [
       {
         "name": "select_element",
-        "ops": [{"op": "select_element", "path": [0, 1]}]
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
       },
       {
         "name": "lock_selection",
-        "ops": [{"op": "lock_selection"}]
+        "ops": [
+          {
+            "op": "lock_selection"
+          }
+        ]
       }
     ],
     "expected_json": "lock_toggle_leaf_locked_expected.json"
+  },
+  {
+    "name": "unlock_all_preserves_the_selection_it_found",
+    "_doc": "THE SEAM NEITHER PORT HAD A SPEC ANSWER FOR, and the ports DIVERGED on it. Rust's unlock_all cleared the selection; Swift's unlockAll replaced it with every path it had just unlocked (and its collectLocked walk started at depth 2, so a LAYER's own lock was never collected -- a second defect inside the first). actions.yaml describes unlock_all without mentioning the selection at all.\nRULED 2026-07-29 (banked to this seat, reversible in council): unlock_all PRESERVES the selection. The PRESERVATION LAW governs -- an edit changes what it speaks to and preserves the rest, and selection order is part of the document (§10/D6). Unlock All speaks to `locked` flags; the selection is the rest.\nLock and Hide DO clear, and actions.yaml says why: 'because nothing downstream refuses to move or delete a selected element for being locked'. That reason is a workaround for missing enforcement -- exactly what §15 closes -- and it does not apply here, because unlocking makes nothing unselectable. Clearing without that reason just destroys artist state.\nHere rect [0,0] is locked, then the UNLOCKED bystander [0,1] is selected, then Unlock All runs. The selection must come back UNCHANGED, holding [0,1] and nothing else -- not cleared (Rust's old answer) and not replaced by the freed [0,0] (Swift's old answer).",
+    "setup_svg": "two_rects.svg",
+    "txns": [
+      {
+        "name": "lock_the_first_rect",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              0
+            ]
+          },
+          {
+            "op": "lock_selection"
+          }
+        ]
+      },
+      {
+        "name": "select_the_bystander",
+        "ops": [
+          {
+            "op": "select_element",
+            "path": [
+              0,
+              1
+            ]
+          }
+        ]
+      },
+      {
+        "name": "unlock_all",
+        "ops": [
+          {
+            "op": "unlock_all"
+          }
+        ]
+      }
+    ],
+    "expected_json": "unlock_all_preserves_selection_expected.json"
   }
 ]

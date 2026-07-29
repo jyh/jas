@@ -141,9 +141,21 @@ private func makeTwoRectCtrl() -> Controller {
 
 // MARK: - unlockAll tests
 
-@Test func unlockAllUnlocksAndSelectsFormerlyLocked() {
+/// Unlock All frees every flag and LEAVES THE SELECTION ALONE (RULED
+/// 2026-07-29). This test was `unlockAllUnlocksAndSelectsFormerlyLocked` and
+/// required the selection to come back holding the freed paths — which is what
+/// JasSwift did and Rust did not, a live divergence on a shared verb.
+///
+/// The PRESERVATION LAW decides it: unlock speaks to `locked`, and the
+/// selection is the rest. Here `lockSelection` clears the selection on its way
+/// through (it has its own stated reason to), so the selection Unlock All finds
+/// is empty and the selection it leaves must be empty too — preserved, not
+/// repopulated. The bystander case below is the one that shows preservation
+/// doing real work. Cross-port twin:
+/// `unlock_all_preserves_the_selection_it_found` in
+/// test_fixtures/operations/lock_selection_no_materialization.json.
+@Test func unlockAllUnlocksEveryFlagAndLeavesTheSelectionAlone() {
     let ctrl = makeTwoRectCtrl()
-    // Lock both
     ctrl.setSelection([
         ElementSelection.all([0, 0]),
         ElementSelection.all([0, 1]),
@@ -151,16 +163,30 @@ private func makeTwoRectCtrl() -> Controller {
     ctrl.lockSelection()
     #expect(ctrl.document.getElement([0, 0]).isLocked)
     #expect(ctrl.document.getElement([0, 1]).isLocked)
-    // Now unlock all
+    #expect(ctrl.document.selection.isEmpty, "lockSelection clears on its way through")
+
     ctrl.unlockAll()
     let doc = ctrl.document
-    // Both should be unlocked
     #expect(!doc.getElement([0, 0]).isLocked)
     #expect(!doc.getElement([0, 1]).isLocked)
-    // Selection should contain the formerly-locked paths
-    let paths = selPaths(doc.selection)
-    #expect(paths.contains([0, 0]))
-    #expect(paths.contains([0, 1]))
+    let after = selPaths(doc.selection)
+    #expect(doc.selection.isEmpty,
+            "Unlock All preserves the empty selection it found; it must not repopulate it with the freed paths. Got \(after)")
+}
+
+/// Preservation doing real work: a bystander is selected, something ELSE is
+/// unlocked, and the selection comes back untouched. Before the ruling this
+/// returned `[[0,0]]` in JasSwift (the freed path) and `[]` in Rust.
+@Test func unlockAllKeepsASelectionItDidNotTouch() {
+    let ctrl = makeTwoRectCtrl()
+    ctrl.setSelection([ElementSelection.all([0, 0])])
+    ctrl.lockSelection()
+    ctrl.setSelection([ElementSelection.all([0, 1])])
+
+    ctrl.unlockAll()
+    #expect(!ctrl.document.getElement([0, 0]).isLocked, "the lock was cleared")
+    let kept = selPaths(ctrl.document.selection)
+    #expect(kept == [[0, 1]], "the bystander selection survives untouched; got \(kept)")
 }
 
 @Test func unlockAllNothingLockedLeavesEmptySelection() {

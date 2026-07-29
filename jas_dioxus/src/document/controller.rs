@@ -2642,7 +2642,20 @@ impl Controller {
         let new_layers: Vec<Element> = doc.layers.iter().map(unlock_element).collect();
         let mut new_doc = doc;
         new_doc.layers = new_layers;
-        new_doc.selection.clear();
+        // UNLOCK ALL PRESERVES THE SELECTION (RULED 2026-07-29). This used to
+        // CLEAR it, while JasSwift REPLACED it with every path just unlocked —
+        // a live divergence on a shared verb, and `actions.yaml` describes
+        // `unlock_all` without mentioning the selection at all.
+        //
+        // The PRESERVATION LAW settles it: an edit changes what it speaks to
+        // and preserves the rest, and selection order is part of the document
+        // (§10/D6). Unlock All speaks to `locked`; the selection is the rest.
+        //
+        // Lock and Hide DO clear, and `actions.yaml` gives the reason —
+        // "because nothing downstream refuses to move or delete a selected
+        // element for being locked". That is a workaround for the enforcement
+        // §15 will add, and it does not apply here: unlocking makes nothing
+        // unselectable, so clearing would destroy artist state for nothing.
         model.edit_document(new_doc);
     }
 

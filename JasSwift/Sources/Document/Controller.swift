@@ -998,28 +998,6 @@ public class Controller {
 
     public func unlockAll() {
         let doc = model.document
-        var lockedPaths: [ElementPath] = []
-
-        func collectLocked(_ path: ElementPath, _ elem: Element) {
-            switch elem {
-            case .group(let g):
-                if g.locked { lockedPaths.append(path) }
-                for (i, child) in g.children.enumerated() {
-                    collectLocked(path + [i], child)
-                }
-            case .layer(let l):
-                for (i, child) in l.children.enumerated() {
-                    collectLocked(path + [i], child)
-                }
-            default:
-                if elem.isLocked { lockedPaths.append(path) }
-            }
-        }
-        for (li, layer) in doc.layers.enumerated() {
-            for (ci, child) in layer.children.enumerated() {
-                collectLocked([li, ci], child)
-            }
-        }
 
         func unlockChildren(_ elements: [Element]) -> [Element] {
             elements.map { elem in
@@ -1048,13 +1026,25 @@ public class Controller {
             v.locked = false
             return v
         }
-        let newDoc = doc.replacing(layers: newLayers, selection: [])
-        var newSelection: Selection = []
-        for path in lockedPaths {
-            let _ = newDoc.getElement(path)
-            newSelection.append(ElementSelection.all(path))
-        }
-        model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
+        // UNLOCK ALL PRESERVES THE SELECTION (RULED 2026-07-29). This used to
+        // REPLACE it with every path just unlocked, while Rust CLEARED it — a
+        // live divergence on a shared verb, and `actions.yaml` describes
+        // `unlock_all` without mentioning the selection at all.
+        //
+        // The PRESERVATION LAW settles it: an edit changes what it speaks to
+        // and preserves the rest, and selection order is part of the document
+        // (§10/D6). Unlock All speaks to `locked`; the selection is the rest.
+        //
+        // Lock and Hide DO clear, and actions.yaml gives the reason — "because
+        // nothing downstream refuses to move or delete a selected element for
+        // being locked". That is a workaround for the enforcement §15 will
+        // add, and it does not apply here: unlocking makes nothing
+        // unselectable, so clearing would destroy artist state for nothing.
+        //
+        // Deleting the re-selection also retires a second defect inside the
+        // first: `collectLocked` began at depth 2, so a LAYER's own lock was
+        // never collected and the replacement selection silently omitted it.
+        model.editDocument(doc.replacing(layers: newLayers))
     }
 
     /// Set every element in the current selection to
