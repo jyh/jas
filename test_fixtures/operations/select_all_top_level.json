@@ -83,6 +83,21 @@
     "expected_json": "select_all_locked_inheritance_expected.json"
   },
   {
+    "_doc": "D6 ORDER, on the SHIFT-MARQUEE. Marquee everything (nine entries), then shift-marquee the solo rect at [0,0] alone: the XOR drops it and the other EIGHT must come back in their original order. Both ports built that result by iterating a hash map — Rust's RandomState, Swift's Dictionary — so with two or more survivors the order was per-process. This is the case that reds if either reverts; without it the repair would be a guard no mutation could turn red.",
+    "name": "extend_marquee_deselects_one_and_keeps_the_other_eight_in_order",
+    "setup_svg": "select_all_top_level.svg",
+    "txns": [
+      {
+        "name": "marquee_then_shift_marquee",
+        "ops": [
+          { "op": "select_rect", "x": -10.0, "y": -10.0, "width": 400.0, "height": 400.0 },
+          { "op": "select_rect", "x": -1.0, "y": -1.0, "width": 10.0, "height": 10.0, "extend": true }
+        ]
+      }
+    ],
+    "expected_json": "select_all_extend_marquee_order_expected.json"
+  },
+  {
     "_doc": "D6 ORDER, on a COPY. copy_selection walks the selection in DESCENDING path order so its insertions do not shift earlier paths, and pushes each copy's path as it goes — so the resulting selection is [0,3] then [0,1], deliberately NOT document order, while the copied ELEMENTS land in document order as [a a' b b']. Both halves are pinned here. Under a Set-ordered selection this golden is unreachable: the emitted order was whatever the hash gave.",
     "name": "copy_of_a_two_element_selection_emits_a_deterministic_order",
     "setup_svg": "two_rects.svg",

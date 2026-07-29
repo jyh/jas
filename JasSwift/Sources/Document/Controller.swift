@@ -543,7 +543,7 @@ public class Controller {
         // z-position in the selection, and elements in BOTH are resolved here.
         for curEs in current {
             guard let newEs = newByPath[curEs.path] else {
-                result.appendUnique(curEs)
+                result.append(curEs)
                 continue
             }
             switch (curEs.kind, newEs.kind) {
@@ -557,16 +557,16 @@ public class Controller {
                 // still drops above; that is the element-level
                 // deselect gesture.
                 let xor = a.symmetricDifference(b)
-                result.appendUnique(ElementSelection(path: curEs.path, kind: .partial(xor)))
+                result.append(ElementSelection(path: curEs.path, kind: .partial(xor)))
             default:
                 // Mixed `.all` / `.partial` — keep `.all` to preserve
                 // pre-refactor behavior for this rare case.
-                result.appendUnique(ElementSelection.all(curEs.path))
+                result.append(ElementSelection.all(curEs.path))
             }
         }
         // Then NEW in its own order: newly-hit elements append behind them.
         for newEs in newSel where currentByPath[newEs.path] == nil {
-            result.appendUnique(newEs)
+            result.append(newEs)
         }
         return result
     }
@@ -611,15 +611,15 @@ public class Controller {
                         !doc.effectiveLocked([li, ci, $0.offset]) && predicate($0.element)
                     }
                     if anyHit {
-                        selection.appendUnique(ElementSelection.all([li, ci]))
+                        selection.append(ElementSelection.all([li, ci]))
                         for gi in 0..<g.children.count {
                             if doc.effectiveLocked([li, ci, gi]) { continue }
-                            selection.appendUnique(ElementSelection.all([li, ci, gi]))
+                            selection.append(ElementSelection.all([li, ci, gi]))
                         }
                     }
                 } else {
                     if predicate(child) {
-                        selection.appendUnique(ElementSelection.all([li, ci]))
+                        selection.append(ElementSelection.all([li, ci]))
                     }
                 }
             }
@@ -649,7 +649,7 @@ public class Controller {
                 for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
             default:
                 if let es = leafHandler(path, elem) {
-                    selection.appendUnique(es)
+                    selection.append(es)
                 }
             }
         }
@@ -699,9 +699,42 @@ public class Controller {
         }, extend: extend)
     }
 
-    /// Select all unlocked, visible elements in the active layer.
+    /// Select every TOP-LEVEL object: one entry per direct child of a layer,
+    /// **a group counting as ONE**. RULED 2026-07-28 (JYH: "keep the Rust
+    /// shape") — transcripts/LAYER_STRUCTURE.md §16. Locked and invisible
+    /// objects are excluded, and "locked" is INHERITED (§13).
+    ///
+    /// THIS USED TO DELEGATE TO `selectFlat`, and that was the whole defect.
+    /// `selectFlat`'s group branch inserts the group AND every unlocked
+    /// grandchild, so a group of three yielded FOUR entries — a selection
+    /// containing an element and its own descendants, which no operation has a
+    /// coherent reading of: translate it and the group moves by 24 while each
+    /// child, already carried by its parent, moves 24 again. The branch is not
+    /// wrong; it was written for the MARQUEE, where "did anything inside the
+    /// band match?" is the right question and the members belong in the answer.
+    /// Select All called it with `predicate: { _ in true }`, so every group
+    /// always hit and a rubber-band rule fired universally. jas_dioxus never had
+    /// the bug because `select_all` is its own loop — so this is now its own
+    /// loop too, and `selectRect` / `selectPolygon` keep `selectFlat` unchanged.
+    ///
+    /// ONE lock read, deliberately, exactly as Rust does it: `effectiveLocked`
+    /// on the CHILD path already folds in the layer's own flag, so a layer-level
+    /// short-circuit above the inner loop would be redundant — and a redundant
+    /// guard is one no mutation can turn red, which is how a guard rots.
     public func selectAll() {
-        selectFlat(model, predicate: { _ in true }, extend: false)
+        let doc = model.document
+        var entries: Selection = []
+        for (li, layer) in doc.layers.enumerated() {
+            let layerVis = layer.visibility
+            if layerVis == .invisible { continue }
+            for (ci, child) in layer.children.enumerated() {
+                if doc.effectiveLocked([li, ci]) { continue }
+                if min(layerVis, child.visibility) == .invisible { continue }
+                entries.append(ElementSelection.all([li, ci]))
+            }
+        }
+        // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+        model.setDocumentUnbracketed(doc.replacing(selection: entries), intent: .selection)
     }
 
     public func setSelection(_ selection: Selection) {
@@ -744,7 +777,7 @@ public class Controller {
             if case .group(let g) = parent {
                 var selection: Selection = [ElementSelection.all(parentPath)]
                 for i in 0..<g.children.count {
-                    selection.appendUnique(ElementSelection.all(parentPath + [i]))
+                    selection.append(ElementSelection.all(parentPath + [i]))
                 }
                 // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
                 model.setDocumentUnbracketed(doc.replacing(selection: selection), intent: .selection)
@@ -996,7 +1029,7 @@ public class Controller {
         var newSelection: Selection = []
         for path in lockedPaths {
             let _ = newDoc.getElement(path)
-            newSelection.appendUnique(ElementSelection.all(path))
+            newSelection.append(ElementSelection.all(path))
         }
         model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
     }
@@ -1062,7 +1095,7 @@ public class Controller {
         }
         var newSelection: Selection = []
         for path in shownPaths {
-            newSelection.appendUnique(ElementSelection.all(path))
+            newSelection.append(ElementSelection.all(path))
         }
         model.editDocument(doc.replacing(layers: newLayers, selection: newSelection))
     }
@@ -1262,7 +1295,7 @@ public class Controller {
             let childIdx = (gpath.count > 1 ? gpath[1] : 0) + offset
             for j in 0..<nChildren {
                 let path: ElementPath = [layerIdx, childIdx + j]
-                newSelection.appendUnique(ElementSelection.all(path))
+                newSelection.append(ElementSelection.all(path))
             }
             offset += nChildren - 1
         }
@@ -1380,7 +1413,7 @@ public class Controller {
             let layerIdx = csPath[0]
             let childIdx = (csPath.count > 1 ? csPath[1] : 0) + offset
             for j in 0..<n {
-                newSelection.appendUnique(ElementSelection.all([layerIdx, childIdx + j]))
+                newSelection.append(ElementSelection.all([layerIdx, childIdx + j]))
             }
             offset += n - 1
         }
@@ -1430,7 +1463,7 @@ public class Controller {
             let layerIdx = csPath[0]
             let childIdx = (csPath.count > 1 ? csPath[1] : 0) + offset
             for j in 0..<n {
-                newSelection.appendUnique(ElementSelection.all([layerIdx, childIdx + j]))
+                newSelection.append(ElementSelection.all([layerIdx, childIdx + j]))
             }
             offset += n - 1
         }
@@ -1731,7 +1764,7 @@ public class Controller {
         newLayers[layerIdx] = newLayer
         var newSelection: Selection = []
         for i in 0..<newElements.count {
-            newSelection.appendUnique(ElementSelection.all([layerIdx, childIdx + i]))
+            newSelection.append(ElementSelection.all([layerIdx, childIdx + i]))
         }
         model.editDocument(newDoc.replacing(layers: newLayers, selection: newSelection))
     }
@@ -2188,7 +2221,7 @@ public class Controller {
             var copyPath = es.path
             copyPath[copyPath.count - 1] += 1
             // Copying always selects the new element as a whole.
-            newSelection.appendUnique(ElementSelection.all(copyPath))
+            newSelection.append(ElementSelection.all(copyPath))
         }
         model.editDocument(doc.replacing(selection: newSelection))
     }

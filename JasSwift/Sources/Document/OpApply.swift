@@ -150,7 +150,7 @@ private func selectionForIds(_ doc: Document, _ ids: [String]) -> Selection {
     let wanted = Set(ids)
     var sel: Selection = []
     for (id, path) in idPathsInDocumentOrder(doc) where wanted.contains(id) {
-        sel.appendUnique(ElementSelection.all(path))
+        sel.append(ElementSelection.all(path))
     }
     return sel
 }
@@ -972,7 +972,7 @@ public func pasteFragmentInto(
         var target = layers[idx]
         for child in children {
             let translated = EditClipboard.translateElement(child, dx: offset, dy: offset)
-            newSelection.appendUnique(ElementSelection.all([idx, target.children.count]))
+            newSelection.append(ElementSelection.all([idx, target.children.count]))
             target.children.append(translated)
         }
         layers[idx] = target

@@ -68,12 +68,15 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     effects["doc.set_selection"] = { spec, ctx, store in
         let paths = extractPathList(spec, store: store, ctx: ctx)
         let doc = model.document
-        // Dedup EXPLICITLY: `Selection` is an ordered array now, so a spec
-        // that names the same path twice must still yield one entry
-        // (LAYER_STRUCTURE.md §10). Order is the spec's own order.
+        // UNGUARDED, matching jas_dioxus: it builds this selection with a plain
+        // `collect()` and does not dedup either. Under `Set` this site silently
+        // deduped a spec that named one path twice; it now behaves as the
+        // canonical port does. Nothing in either port's corpus reaches a
+        // repeated path here, so the choice is parity rather than measurement,
+        // and it is stated rather than assumed (LAYER_STRUCTURE.md §10).
         var valid: Selection = []
         for p in paths where isValidPath(doc, p) {
-            valid.appendUnique(ElementSelection.all(p))
+            valid.append(ElementSelection.all(p))
         }
         Controller(model: model).setSelection(valid)
         return nil
@@ -102,7 +105,7 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         if let pos = sel.firstIndex(where: { $0.path == path }) {
             sel.remove(at: pos)
         } else {
-            sel.appendUnique(ElementSelection.all(path))
+            sel.append(ElementSelection.all(path))
         }
         Controller(model: model).setSelection(sel)
         return nil
@@ -1767,7 +1770,7 @@ private func pathDeleteAnchorNear(
         // Keep the path in the selection (matches native Delete-anchor).
         var sel = doc.selection
         sel = sel.filter { $0.path != path }
-        sel.appendUnique(ElementSelection.all(path))
+        sel.append(ElementSelection.all(path))
         doc = doc.replacing(selection: sel)
         model.editDocument(doc)
     } else {
@@ -3709,9 +3712,13 @@ private func magicWandApply(
     let newEntries = matches.map { ElementSelection.all($0) }
     switch mode {
     case "add":
+        // GUARDED, because a wand match can already be selected. jas_dioxus
+        // writes the same guard at the same site (`interpreter/effects.rs`,
+        // magic-wand "add"); it is the only dedup in either port's selection
+        // code outside `add_to_selection`.
         var existing = doc.selection
-        for es in newEntries {
-            existing.appendUnique(es)
+        for es in newEntries where !existing.contains(where: { $0.path == es.path }) {
+            existing.append(es)
         }
         Controller(model: model).setSelection(existing)
     case "subtract":
@@ -3719,12 +3726,9 @@ private func magicWandApply(
         let kept = doc.selection.filter { !toRemove.contains($0.path) }
         Controller(model: model).setSelection(kept)
     default:
-        // "replace" — `matches` is already walked in document order, and
-        // `newEntries` preserves it. Dedup anyway: the array carries no set
-        // semantics of its own (LAYER_STRUCTURE.md §10).
-        var replacement: Selection = []
-        for es in newEntries { replacement.appendUnique(es) }
-        Controller(model: model).setSelection(replacement)
+        // "replace" — `matches` is walked in document order, so it cannot
+        // repeat a path. Unguarded, exactly as jas_dioxus is here.
+        Controller(model: model).setSelection(newEntries)
     }
 }
 

@@ -189,24 +189,25 @@ public struct ElementSelection: Equatable, Hashable {
 /// `OrderedSet` would have been free — the ruling turns on the OTHER reason:
 /// identical representation across the active ports beats the convenience.
 ///
-/// **THE COST, stated where it is paid.** `Set` gave free deduplication; an
-/// array does not. Every insertion site must guard (`contains(where:)` on the
-/// path) exactly as Rust does before every `push`, or a duplicate selection
-/// entry appears. `appendingUnique(_:)` below is that guard, named once. The
-/// canonical-JSON selection serializer no longer sorts, so a duplicate is
-/// visible in every golden carrying a multi-entry selection.
+/// **THE COST, and where it is actually paid.** `Set` gave free deduplication;
+/// an array does not. The migration made the COMPILER enumerate every insertion
+/// site — 28 in production, 23 more in the test targets — and each was answered
+/// individually against its jas_dioxus counterpart rather than blanket-guarded.
+///
+/// The audit's result, measured: a `contains(where:)` guard at all 24 of them
+/// left the whole Swift suite GREEN when removed, so 24 of those guards were
+/// redundant and are NOT here. Rust reaches the same conclusion by construction
+/// — it pushes plainly at every site but three, because a path enumerated from
+/// `layers[li].children[ci]` cannot repeat. The guards that remain are exactly
+/// the ones jas_dioxus also writes, at the two places a duplicate is genuinely
+/// reachable: `Controller.addToSelection` (its whole contract is idempotence)
+/// and the magic wand's "add" mode (a new match may already be selected).
+///
+/// The canonical-JSON selection serializer no longer sorts, so if a duplicate
+/// ever does appear it is visible in every golden carrying a multi-entry
+/// selection — `add_to_selection_twice_on_one_path_yields_one_entry` in
+/// `test_fixtures/operations/select_all_top_level.json` is the case that reds.
 public typealias Selection = [ElementSelection]
-
-extension Array where Element == ElementSelection {
-    /// Append `es` unless an entry with the same path is already present — the
-    /// deduplication a `Set` used to provide for free. Mirrors Rust's
-    /// `if !sel.iter().any(|e| e.path == p) { sel.push(...) }` idiom, which is
-    /// written out at every Rust insertion site for the same reason.
-    mutating func appendUnique(_ es: ElementSelection) {
-        if contains(where: { $0.path == es.path }) { return }
-        append(es)
-    }
-}
 
 /// A document consisting of an ordered list of layers, a selection,
 /// and a list of artboards (with document-global options).
