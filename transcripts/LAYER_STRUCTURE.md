@@ -1279,6 +1279,136 @@ agree on the spelling rather than each agreeing with itself.
    consequence is that a file saved by an active port and reopened in a frozen
    one silently unlocks. Stated, not fixed.
 
+### 13.2 STONE 2 LANDED — `Object > Lock` stops materializing (2026-07-28, LOCKMAT)
+
+**§13's repeal was half-landed and the half that shipped had teeth.** The
+Layers-panel path was repaired; `Object > Lock` — the menu item, Ctrl+2, and the
+`lock_selection` op verb — kept a SECOND, recursive implementation that stamped
+`locked = true` onto every descendant of a Group. Two doors to the same artist
+action wrote different documents, on public `main`.
+
+Both are now one shape. `Controller::lock_selection` is clone-then-mutate
+through `get_element_mut`; `Controller.lockSelection` calls
+`Element.withLocked(true)`, the very helper `togglingElementLock` uses. Rust's
+`lock_element` is deleted. The spec says the rule too: `workspace/actions.yaml`
+§lock and §unlock_all.
+
+**MEASURED, and it narrows the scope's framing: the residue was GROUP-ONLY, in
+both ports.** Rust recursed under `new.is_group()`, which is
+`matches!(self, Element::Group(_))` and excludes `Element::Layer`; Swift recursed
+in its `case .group` arm alone. Locking a LAYER never stamped in either port. The
+layer vector in the new family is therefore a control, kept so the repair cannot
+be read as "stop writing the flag" — and it is not vacuous: mutations M3/M6,
+which materialize onto a layer's children, red it and nothing else.
+
+**RED FIRST, IN BOTH PORTS AT ONCE.**
+`test_fixtures/operations/lock_selection_no_materialization.json`, 7 cases:
+**3 of 7 failed in Rust and 3 in Swift, on exactly the same case names**, before
+either port moved. The family discriminates — the setup, both controls and the
+leaf case were green throughout. That simultaneity was possible because **not one
+golden was generated from the behaviour it pins** (§15.5's device):
+
+* the group and leaf headlines point at the PANEL family's own goldens BY FILE
+  IDENTITY, which pins `Object > Lock` as an **equation** — it must produce
+  exactly what the lock button produces on the same element, which is the thing
+  that had stopped being true;
+* `unlocking_a_group_frees_its_children` shares one golden with
+  `control_clicking_a_child_of_an_untouched_group`, so the lock/unlock round trip
+  is pinned against a document nothing touched;
+* the three new goldens were DERIVED from `lock_toggle_group_locked_expected.json`
+  by flipping named flags.
+
+**A preservation vector had pinned the PRE-RULING answer, and was turned rather
+than deleted.** `lock_a_group_keeps_the_group_itself` named `r_back` and
+`r_front` as SUBJECTS with `must_change: ["locked"]` — it asserted the
+materialization in as many words, and it went red on the fix. They are
+BYSTANDERS now, a strictly stronger claim.
+
+**Mutation proof — 6 causes, each reverted INDIVIDUALLY, whole suite each time:**
+
+| # | port | mutation | RED observed |
+|---|---|---|---|
+| M1 | Rust | Group recursion restored | 2 failed — the new family AND `preservation_invariants` |
+| M2 | Rust | the wholesale selection clear dropped | 3 failed — new family + `action_corpus` + `controller::tests::lock_selection` |
+| M3 | Rust | materialize onto a LAYER's children | **1 failed — ONLY the new family**, so the depth control earns its place |
+| M4 | Swift | Group recursion restored | 4 issues / 2 tests — twin of M1 |
+| M5 | Swift | the selection clear dropped | 6 issues / 3 tests — twin of M2 |
+| M6 | Swift | materialize onto a LAYER's children | **1 issue — ONLY the new family**, twin of M3 |
+
+No guard was found redundant: every part of the repair is load-bearing, and the
+two ports red on matching causes.
+
+#### The rest of the class, enumerated mechanically — and it is empty now
+
+Method: grep every write of `locked` in both ports' non-test sources, then
+classify each site. Rust: `renderer.rs` `common.locked` doc.set arm (target-only,
+already documented), `effects.rs` and `controller.rs` boolean/group unanimity
+carries (mint a new element, not a cascade), `document.rs`
+`toggling_element_lock` (target-only), `unlock_element` (recursive BY DESIGN, see
+below). Swift: the `doc.set` twin, `Controller.swift:90` unanimity,
+`Document.swift` `togglingElementLock`, `LayersPanel.swift:271`
+`withLocked(newLocked)` on one top-level layer, `unlockChildren`. `Object > Lock`
+was the only remaining materializer in either port.
+
+Three findings that came out of that sweep and are NOT fixed here, each with its
+reason:
+
+1. **`unlock_all` keeps its recursion deliberately** — it is the sole
+   artist-reachable revocation (EDIT_SEMANTICS_FREEZE **T6(i)**), and it is the
+   only thing in either port that can clear flags a document ALREADY carries.
+   Comment added at both sites saying so. Note that `toggle_all_layers_lock`'s
+   "Unlock All Layers" branch is NOT a substitute: it writes only the top-level
+   layer paths.
+2. **`unlock_all`'s post-state selection still DIVERGES** (SCOPE §4 D-C): Rust
+   clears the selection, Swift re-selects every formerly-locked path, and Swift's
+   `collectLocked` starts at depth 2 so a layer's own lock is never collected.
+   Real, shared-corpus-gateable, and left alone so this wave stays a gate on
+   materialization alone.
+3. **`JasSwift/Sources/Interpreter/YamlPanelBodyView.swift:4337`** holds a
+   SECOND lock toggle that writes the flag without pruning the selection. It sits
+   in `treeRows_OLD`, reached only from `treeRows_DEPRECATED`, and grep finds no
+   caller of either — dead code, so it is reported rather than repaired.
+
+#### BANKED FOR JYH — do saved documents need repair? (facts, not a decision)
+
+**Can a stamped child be distinguished from one the artist locked deliberately?
+NO, and this is the hard part of the answer.** All three codecs carry a bare
+boolean with no provenance: `jas:locked="true"`, one binary slot, one JSON key.
+The one asymmetry available is a pattern, and it is necessary but not sufficient
+— the old `lock_element` stamped the ENTIRE subtree, so a locked group with any
+UNLOCKED descendant cannot have come from `Object > Lock`; but a fully-locked
+subtree is exactly what an artist also gets by locking a small group's children
+by hand. A migration keyed on the pattern would silently unlock deliberate work,
+most often on the small groups where it is likeliest.
+
+**The exposure is much wider than the SVG window, and this is the fact that
+should drive the ruling.** `jas:locked` landed on 2026-07-28 (LOCKSVG), hours
+before this repair, so almost no SVG file can carry stamped flags. But **both
+active ports auto-persist whole documents in the JAS BINARY format for session
+restore** — jas_dioxus to `localStorage` every 30 seconds and on `beforeunload`
+(`workspace/session.rs`), JasSwift to
+`~/Library/Application Support/Jas/session/tabN.jasbin` (`Canvas/Session.swift`)
+— and `binary.rs` / `Binary.swift` have packed `locked` on the Group and Layer
+arms since well before 2026-06-16. **Stamped flags have therefore been surviving
+restart in both ports for as long as the materialization existed.**
+
+The choice, stated without taking it:
+* **(a) leave them.** The artist meets a lock they cannot remove except with
+  `Unlock All`, which also clears every lock they placed on purpose.
+* **(b) clear every descendant flag under a locked container on load.** Lossy in
+  exactly one scenario: lock a child, then lock its parent, then later unlock the
+  parent and expect the child to still be locked. Under inheritance that child's
+  flag is unobservable while the parent is locked, so the loss is narrow — but it
+  is silent.
+* **(c) neither; make the revocation reachable** — a per-subtree unlock, which
+  the ruling's "cannot be individually unlocked" does not forbid at the container
+  level.
+
+**Blind spot of the above:** the codec history was established by reading the
+packers and `git log -S`, not by opening a real localStorage blob or a `.jasbin`
+from any machine. Nobody has measured how many documents actually carry stamped
+flags, and no GUI was driven in either port during this wave.
+
 ## 14. REPEATED PASTES STACK WITH CUMULATIVE OFFSETS. RULED 2026-07-28.
 
 > JYH: *"follow the spec."*
