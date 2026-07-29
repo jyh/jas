@@ -125,3 +125,56 @@ struct PaintRecursionTests {
         #expect(ig.id == "inner", "the nested container keeps ITS id; got \(ig.id ?? "nil")")
     }
 }
+
+/// A SELECTED CONTAINER SUMMARISES ITS MEMBERS' PAINT.
+///
+/// Twin of Rust `a_selected_container_summarises_its_members_paint`. The two
+/// ports were wrong in DIFFERENT directions: Swift skipped containers so a
+/// selected group summarised to `.noSelection` ("nothing is selected"), while
+/// Rust read the container's own `stroke()` and said `Uniform(None)` ("this has
+/// no stroke"). Both are wrong answers rather than unavailable ones, and since
+/// the paint ruling an artist meets it directly — set a group's stroke and the
+/// panel says it has none.
+@Suite("Container paint summary")
+struct ContainerPaintSummaryTests {
+
+    private func rect(_ w: Double) -> Element {
+        .rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0, a: 1), width: w)))
+    }
+
+    private func doc(_ sel: [[Int]]) -> Document {
+        let uniform = Element.group(Group(children: [rect(5), rect(5)]))
+        let mixed = Element.group(Group(children: [rect(5), rect(1)]))
+        let d = Document(layers: [Layer(name: "L", children: [uniform, mixed])])
+        return d.replacing(selection: sel.map { ElementSelection.all($0) })
+    }
+
+    @Test func aUniformGroupReadsBackItsMembersCommonValue() {
+        guard case .uniform(let s?) = selectionStrokeSummary(doc([[0, 0]])) else {
+            Issue.record("a uniform group must summarise its members, got \(selectionStrokeSummary(doc([[0, 0]])))")
+            return
+        }
+        #expect(s.width == 5, "got width \(s.width)")
+    }
+
+    /// JYH's own example, one level in: a 5pt and a 1pt member have no honest
+    /// common weight.
+    @Test func aGroupWithDifferingMembersIsMixed() {
+        guard case .mixed = selectionStrokeSummary(doc([[0, 1]])) else {
+            Issue.record("a 5pt + 1pt group is Mixed, not \(selectionStrokeSummary(doc([[0, 1]])))")
+            return
+        }
+    }
+
+    /// The point of the whole exercise: a group IS a mixed selection of one, so
+    /// the container and non-container spellings must agree.
+    @Test func theContainerAndNonContainerSpellingsAgree() {
+        let viaGroup = selectionStrokeSummary(doc([[0, 1]]))
+        let viaMembers = selectionStrokeSummary(doc([[0, 1, 0], [0, 1, 1]]))
+        guard case .mixed = viaGroup, case .mixed = viaMembers else {
+            Issue.record("spellings disagree: group=\(viaGroup) members=\(viaMembers)")
+            return
+        }
+    }
+}

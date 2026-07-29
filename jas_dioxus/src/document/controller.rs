@@ -3173,16 +3173,31 @@ pub fn selection_fill_summary(doc: &Document) -> FillSummary {
     if doc.selection.is_empty() {
         return FillSummary::NoSelection;
     }
+    // A selected CONTAINER summarises the paint of its members, at any depth --
+    // the read twin of `map_paintable`. Reading a container's own `fill()`
+    // gives `None` and reported "no fill" for a group whose members all carry
+    // one; a group whose members disagree is `Mixed`, the same answer those
+    // members give when selected without the group around them.
     let mut first: Option<Option<Fill>> = None;
+    let mut mixed = false;
     for es in &doc.selection {
-        let fill = doc.get_element(&es.path).and_then(|e| e.fill()).copied();
-        match &first {
-            None => first = Some(fill),
-            Some(prev) => {
-                if *prev != fill {
-                    return FillSummary::Mixed;
+        let Some(elem) = doc.get_element(&es.path) else { continue };
+        crate::geometry::element::for_each_paintable(elem, &mut |leaf| {
+            if mixed {
+                return;
+            }
+            let fill = leaf.fill().copied();
+            match &first {
+                None => first = Some(fill),
+                Some(prev) => {
+                    if *prev != fill {
+                        mixed = true;
+                    }
                 }
             }
+        });
+        if mixed {
+            return FillSummary::Mixed;
         }
     }
     FillSummary::Uniform(first.unwrap_or(None))
@@ -3193,16 +3208,31 @@ pub fn selection_stroke_summary(doc: &Document) -> StrokeSummary {
     if doc.selection.is_empty() {
         return StrokeSummary::NoSelection;
     }
+    // A selected CONTAINER summarises the paint of its members, at any depth --
+    // the read twin of `map_paintable`. Reading a container's own `stroke()`
+    // gives `None` and reported "no stroke" for a group whose members all carry
+    // one; a group whose members disagree is `Mixed`, the same answer those
+    // members give when selected without the group around them.
     let mut first: Option<Option<Stroke>> = None;
+    let mut mixed = false;
     for es in &doc.selection {
-        let stroke = doc.get_element(&es.path).and_then(|e| e.stroke()).copied();
-        match &first {
-            None => first = Some(stroke),
-            Some(prev) => {
-                if *prev != stroke {
-                    return StrokeSummary::Mixed;
+        let Some(elem) = doc.get_element(&es.path) else { continue };
+        crate::geometry::element::for_each_paintable(elem, &mut |leaf| {
+            if mixed {
+                return;
+            }
+            let stroke = leaf.stroke().copied();
+            match &first {
+                None => first = Some(stroke),
+                Some(prev) => {
+                    if *prev != stroke {
+                        mixed = true;
+                    }
                 }
             }
+        });
+        if mixed {
+            return StrokeSummary::Mixed;
         }
     }
     StrokeSummary::Uniform(first.unwrap_or(None))
@@ -4182,6 +4212,76 @@ mod tests {
         let corner = SelectionKind::Partial(SortedCps::from_iter([0usize]));
         assert_eq!(move_control_points(&g, &corner, 24.0, 0.0), g,
                    "one corner selected is a resize gesture, not a translate");
+    }
+
+
+    /// A SELECTED CONTAINER SUMMARISES ITS MEMBERS' PAINT.
+    ///
+    /// The panels read the selection through `selection_fill_summary` /
+    /// `selection_stroke_summary`, whose three states are NoSelection, Mixed and
+    /// Uniform. Both read `e.fill()` / `e.stroke()`, which return `None` for a
+    /// container -- so a selected GROUP reported `Uniform(None)`, "no stroke".
+    ///
+    /// That is a WRONG answer rather than an unavailable one, and since the
+    /// paint ruling (JYH, 2026-07-29: fill and stroke recurse into members) it
+    /// is an asymmetry an artist meets directly: set a group's stroke, and the
+    /// panel says the group has none.
+    ///
+    /// The summary now recurses through containers to their paintable leaves --
+    /// the READ twin of `map_paintable`. A group whose members agree reads back
+    /// as `Uniform`; one whose members differ reads `Mixed`, which is the
+    /// honest answer and the same one two differently-stroked siblings give.
+    #[test]
+    fn a_selected_container_summarises_its_members_paint() {
+        use crate::geometry::element::GroupElem;
+        use std::rc::Rc;
+        let mk = |w: f64| Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None,
+            stroke: Some(Stroke { width: w, ..Stroke::new(Color::BLACK, w) }),
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let uniform = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(5.0)), Rc::new(mk(5.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let mixed = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(5.0)), Rc::new(mk(1.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(uniform), Rc::new(mixed)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let base = Document { layers: vec![layer], selected_layer: 0,
+                              selection: Vec::new(), ..Document::default() };
+
+        // A group whose members agree reads back as their common value.
+        let mut d = base.clone();
+        d.selection = vec![ElementSelection::all(vec![0, 0])];
+        match selection_stroke_summary(&d) {
+            StrokeSummary::Uniform(Some(s)) => assert_eq!(s.width, 5.0),
+            other => panic!("a uniform group must summarise its members, got {other:?}"),
+        }
+
+        // JYH's own example, one level in: a 5pt and a 1pt member have no
+        // honest common weight.
+        d = base.clone();
+        d.selection = vec![ElementSelection::all(vec![0, 1])];
+        assert!(matches!(selection_stroke_summary(&d), StrokeSummary::Mixed),
+                "a group with a 5pt and a 1pt member is Mixed, not Uniform(None)");
+
+        // And the same two shapes selected WITHOUT a container agree with it --
+        // which is the point: a group is a mixed selection of one.
+        d = base.clone();
+        d.selection = vec![ElementSelection::all(vec![0, 1, 0]),
+                           ElementSelection::all(vec![0, 1, 1])];
+        assert!(matches!(selection_stroke_summary(&d), StrokeSummary::Mixed),
+                "the container and non-container spellings must agree");
     }
 
     #[test]

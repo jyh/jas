@@ -3049,6 +3049,34 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
 /// NOTE: this does NOT skip locked descendants. Lock enforcement is §15's job
 /// and is not built yet; no other selection operation respects it either, and a
 /// lone exception here would be an inconsistency rather than a protection.
+/// Visit every PAINTABLE element a selection entry reaches: the element itself
+/// when it is a leaf, or every leaf beneath it when it is a container.
+///
+/// The READ twin of `map_paintable`. The panels summarise a selection through
+/// `selection_fill_summary` / `selection_stroke_summary`, which read a
+/// container's OWN `fill()`/`stroke()` -- always `None` -- so a selected group
+/// reported "no stroke" rather than summarising its members. A wrong answer
+/// rather than an unavailable one, and since the paint ruling (fill and stroke
+/// recurse into members) an artist meets it directly: set a group's stroke and
+/// the panel says it has none.
+///
+/// An EMPTY container visits nothing, so it contributes no value to a summary.
+pub fn for_each_paintable(elem: &Element, f: &mut dyn FnMut(&Element)) {
+    match elem {
+        Element::Group(e) => {
+            for c in &e.children {
+                for_each_paintable(c, f);
+            }
+        }
+        Element::Layer(e) => {
+            for c in &e.children {
+                for_each_paintable(c, f);
+            }
+        }
+        _ => f(elem),
+    }
+}
+
 pub fn map_paintable(elem: &Element, f: &dyn Fn(&Element) -> Element) -> Element {
     match elem {
         Element::Group(e) => Element::Group(GroupElem {

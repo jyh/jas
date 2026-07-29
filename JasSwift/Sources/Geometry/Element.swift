@@ -1565,6 +1565,24 @@ public enum Element: Equatable {
     /// job and is not built yet; no other selection operation respects it
     /// either, and a lone exception here would be an inconsistency rather than
     /// a protection.
+    /// Visit every PAINTABLE element a selection entry reaches: the element
+    /// itself when it is a leaf, or every leaf beneath it when it is a
+    /// container. The READ twin of `mapPaintable`.
+    ///
+    /// The panels summarise a selection through `selectionFillSummary` /
+    /// `selectionStrokeSummary`, which SKIPPED containers — so a selected group
+    /// summarised to `.noSelection`, "nothing is selected", while Rust's twin
+    /// said `Uniform(None)`, "this has no stroke". Both wrong, and wrong in
+    /// different directions. An empty container visits nothing and so
+    /// contributes no value.
+    public func forEachPaintable(_ f: (Element) -> Void) {
+        switch self {
+        case .group(let g): g.children.forEach { $0.forEachPaintable(f) }
+        case .layer(let l): l.children.forEach { $0.forEachPaintable(f) }
+        default: f(self)
+        }
+    }
+
     public func mapPaintable(_ f: (Element) -> Element) -> Element {
         switch self {
         case .group(let g):

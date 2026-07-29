@@ -2353,22 +2353,33 @@ public enum StrokeSummary: Equatable {
 public func selectionFillSummary(_ doc: Document) -> FillSummary {
     let sel = doc.selection
     guard !sel.isEmpty else { return .noSelection }
+    // A selected CONTAINER summarises the paint of its members, at any depth —
+    // the read twin of `mapPaintable`. These used to SKIP containers, so a
+    // selected group reported `.noSelection` while Rust's twin reported
+    // `Uniform(None)`: two different wrong answers to the same question.
+    // A group whose members agree now reads back as their common value; one
+    // whose members disagree is `.mixed`, the same answer those members give
+    // when selected without the group around them.
     var first = true
     var value: Fill? = nil
+    var isMixed = false
     for es in sel {
-        let elem = doc.getElement(es.path)
-        // Skip groups/layers -- they have no fill.
-        if case .group = elem { continue }
-        if case .layer = elem { continue }
-        let f = elem.fill
-        if first {
-            value = f
-            first = false
-        } else if f != value {
-            return .mixed
+        doc.getElement(es.path).forEachPaintable { leaf in
+            if isMixed { return }
+            let v = leaf.fill
+            if first {
+                value = v
+                first = false
+            } else if v != value {
+                isMixed = true
+            }
         }
+        if isMixed { return .mixed }
     }
-    if first { return .noSelection }
+    // `first` still true means the selection reached no paintable leaf at all
+    // (an empty container). That is NOT "nothing selected" — the `sel.isEmpty`
+    // guard above owns that — and Rust returns `Uniform(None)` here, so this
+    // must too or the ports disagree on an empty group.
     return .uniform(value)
 }
 
@@ -2376,21 +2387,33 @@ public func selectionFillSummary(_ doc: Document) -> FillSummary {
 public func selectionStrokeSummary(_ doc: Document) -> StrokeSummary {
     let sel = doc.selection
     guard !sel.isEmpty else { return .noSelection }
+    // A selected CONTAINER summarises the paint of its members, at any depth —
+    // the read twin of `mapPaintable`. These used to SKIP containers, so a
+    // selected group reported `.noSelection` while Rust's twin reported
+    // `Uniform(None)`: two different wrong answers to the same question.
+    // A group whose members agree now reads back as their common value; one
+    // whose members disagree is `.mixed`, the same answer those members give
+    // when selected without the group around them.
     var first = true
     var value: Stroke? = nil
+    var isMixed = false
     for es in sel {
-        let elem = doc.getElement(es.path)
-        if case .group = elem { continue }
-        if case .layer = elem { continue }
-        let s = elem.stroke
-        if first {
-            value = s
-            first = false
-        } else if s != value {
-            return .mixed
+        doc.getElement(es.path).forEachPaintable { leaf in
+            if isMixed { return }
+            let v = leaf.stroke
+            if first {
+                value = v
+                first = false
+            } else if v != value {
+                isMixed = true
+            }
         }
+        if isMixed { return .mixed }
     }
-    if first { return .noSelection }
+    // `first` still true means the selection reached no paintable leaf at all
+    // (an empty container). That is NOT "nothing selected" — the `sel.isEmpty`
+    // guard above owns that — and Rust returns `Uniform(None)` here, so this
+    // must too or the ports disagree on an empty group.
     return .uniform(value)
 }
 
