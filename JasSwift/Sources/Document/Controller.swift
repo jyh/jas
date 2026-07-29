@@ -947,28 +947,46 @@ public class Controller {
         model.editDocument(newDoc)
     }
 
+    /// `Object > Lock` (Ctrl+2, `workspace/actions.yaml` §lock): set the
+    /// `locked` flag on each selected element and clear the selection.
+    ///
+    /// **ON EACH SELECTED ELEMENT, AND ON NOTHING ELSE.** A Group or Layer's
+    /// lock reaches its contents by INHERITANCE (``Document/effectiveLocked(_:)``),
+    /// never by being written onto them — this is step 1 of
+    /// ``Document/togglingElementLock(at:)``, the Layers-panel lock button,
+    /// applied once per selected path, and it uses the very same
+    /// ``Element/withLocked(_:)`` helper. It is deliberately the same shape
+    /// rather than a second one: until LOCKMAT this function kept its own
+    /// recursive `lockRecursive` whose `case .group` arm stamped
+    /// `locked = true` onto every descendant, which is the MATERIALIZATION
+    /// transcripts/LAYER_STRUCTURE.md §13 repealed (RULED by JYH 2026-07-28).
+    /// §13 repaired the panel path and left this one, and the two then said
+    /// different things about the same artist action.
+    ///
+    /// Why the residue could not simply be left: §13.1 landed `jas:locked`, so
+    /// stamped flags SURVIVE SAVE AND RELOAD, and under inheritance nothing
+    /// clears a single one of them — opening the parent leaves every child
+    /// locked, and `Unlock All` is the whole document or nothing.
+    ///
+    /// The selection is cleared WHOLESALE, which is `togglingElementLock`'s
+    /// step 2 in the case where every selected path was just locked: it is not
+    /// cosmetic, because nothing downstream refuses to move or delete a locked
+    /// element, so a lock that left the selection alone would leave locked
+    /// content draggable.
+    ///
+    /// `withLocked` is clone-then-mutate on all twelve Element cases, so the
+    /// copy-site omission class cannot reach this walk — the group arm it
+    /// replaced needed a hand-written comment to stay honest about eleven
+    /// fields, and this one has no rebuild to get wrong. `tryGetElement` rather
+    /// than `getElement`, matching `togglingElementLock`'s guard: a selection
+    /// entry naming no element is skipped, not trapped on.
+    ///
+    /// The twin is jas_dioxus `Controller::lock_selection`.
     public func lockSelection() {
-        func lockRecursive(_ elem: Element) -> Element {
-            switch elem {
-            case .group(let g):
-                // T4: locking speaks to `locked`. The Group is the very thing
-                // the artist named, so everything else about it — id, name,
-                // blendMode, mask, isolatedBlending, knockoutGroup — must come
-                // back. The inline five-argument literal this replaced kept
-                // five of eleven fields and DESTROYED the locked group's own
-                // `id`. Rust's `lock_element` is clone-then-mutate and never
-                // had the hole.
-                var v = g.withChildren(g.children.map { lockRecursive($0) })
-                v.locked = true
-                return .group(v)
-            default:
-                return elem.withLocked(true)
-            }
-        }
         var doc = model.document
         for es in doc.selection {
-            let elem = doc.getElement(es.path)
-            doc = doc.replaceElement(es.path, with: lockRecursive(elem))
+            guard let elem = doc.tryGetElement(es.path) else { continue }
+            doc = doc.replaceElement(es.path, with: elem.withLocked(true))
         }
         model.editDocument(doc.replacing(selection: []))
     }
