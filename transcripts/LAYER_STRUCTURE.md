@@ -2165,3 +2165,60 @@ semantic in the first place.
 *Gate:* duplicate two elements, copy, assert the clipboard's element order
 matches document order — the assertion has to reach the CLIPBOARD, because that
 is where the byproduct becomes artist-visible.
+
+---
+
+## 20. `doc.set_selection` SELECTS ONLY THE NAMED PATHS. RULED 2026-07-28.
+
+> JYH: *"accept recommendation, swift."*
+
+### 20.1 What Rust did, and the reason it gave
+`jas_dioxus/src/interpreter/effects.rs:718` expands every named container to
+include all its descendants. The comment states why:
+
+> *"Expand containers to include all descendants — matches the Layers panel
+> selection-square click behavior. Without this, a Selection-tool click on a
+> group would put only the group in selection, and the Layers panel would
+> highlight only the group row (not its children)."*
+
+Swift does not expand: it filters to valid paths and stops.
+
+### 20.2 Why Swift is right
+**This is a presentation problem solved by corrupting the model.** The panel
+highlights a row by asking `selection_contains(path)`, an EXACT-path test
+(`doc_primitives.rs:185`), so to light up a group's children Rust writes every
+descendant into `doc.selection`. The document's selection was made to carry a
+fact about how a panel draws.
+
+**And it contradicts §16 (D2), ruled the same day.** Swift's `selectAll` was
+called a defect precisely because it produced a selection containing an element
+AND its own descendants — a set no operation reads coherently: translate it and
+the group moves by 24 while each child, already carried by its parent, moves 24
+again. Rust's `doc.set_selection` produces exactly that set, on **every
+Selection-tool click on a group**. So D2 was half-fixed: the function that made
+those sets in one place was repaired, and the one that makes them on every click
+was left.
+
+### 20.3 The ruling, and what it unlocks
+**Select only the named paths. The highlight moves to where it belongs** — the
+panel asks *"is this row AT OR UNDER a selected path?"* instead of requiring the
+selection to enumerate every descendant.
+
+**This also answers §16.4.** That invariant — may the selection hold an ancestor
+and its own descendant? — could not be asserted while Rust deliberately violated
+it to drive a highlight. Once the expansion is gone it becomes assertable, and it
+would have caught D2 without anyone noticing a divergence.
+
+### 20.4 Two costs, on the record
+* The ancestor-aware predicate must exist in BOTH ports **and probably in the
+  expression language**, since `workspace/panels/layers.yaml` drives the panel.
+  A small YAML-layer addition, not a purely internal change.
+* **NOT YET ENUMERATED: every consumer of `doc.selection` that may rely on
+  descendants being present.** An operation written against the expanded form
+  changes behaviour when it stops being expanded. That enumeration is exactly the
+  kind this seat has been wrong about twice in one day — **measure it before
+  implementing, do not assert it.**
+
+*A narrower fallback, if the panel work proves larger than it looks:* keep the
+expansion as a DERIVED view computed at render time, leaving the stored selection
+clean. Same end state for the model, smaller blast radius.
