@@ -384,7 +384,15 @@ def load_fields(decls: dict[str, pathlib.Path]) -> dict[str, list[str]]:
 def scan_all(fields_by_type: dict[str, list[str]]) -> list[dict]:
     findings: list[dict] = []
     for path in sorted(SOURCES.rglob("*.swift")):
-        rel = str(path.relative_to(REPO))
+        # as_posix(), not str(): str(Path) yields "\" separators on Windows, and
+        # swift_copy_sites_baseline.json is keyed with POSIX paths. On Windows
+        # every key therefore missed BOTH ways at once — each real site reported
+        # as a NEW backslash-keyed row AND its forward-slash baseline row
+        # reported as "repaired; remove the row" — so the gate failed wholesale
+        # on a clean tree. It is wired into the ubuntu job (test.yml), which is
+        # why CI stayed green: the only platform that exposes this never ran it.
+        # Same defect and same fix as genericity_check.py's exclude matching.
+        rel = path.relative_to(REPO).as_posix()
         findings += scan_text(rel, path.read_text(encoding="utf-8"), fields_by_type)
     return findings
 
