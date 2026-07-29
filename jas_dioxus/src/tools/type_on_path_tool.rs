@@ -99,13 +99,40 @@ impl TypeOnPathTool {
     }
 
     /// Find the first Path or TextPath whose curve is close to (x, y).
+    ///
+    /// This tool's ONLY route to an existing element, and the ONLY guard
+    /// between the artist's locked artwork and [`Self::begin_session_convert_path`]'s
+    /// `replace_element`: reaching a Path here IS its destruction, since the
+    /// conversion has no later refusal point.
+    ///
+    /// The twin is JasSwift `hitTestPathCurve(in:x:y:)`. The two deliberately
+    /// differ in SEARCH DEPTH — this port stops at layer children, Swift
+    /// descends one level into Groups — which is an UNRULED divergence
+    /// recorded in `seat/fleet/SCOPE-lock-immutable.md` §4 D-A and §8 Q3,
+    /// awaiting a ruling. Lock and depth are separate questions; only lock is
+    /// settled.
     fn hit_test_path_curve(model: &Model, x: f64, y: f64) -> Option<(Vec<usize>, Element)> {
         let doc = model.document();
         let threshold = HIT_RADIUS + 2.0;
         for (li, layer) in doc.layers.iter().enumerate() {
             if let Some(children) = layer.children() {
                 for (ci, child) in children.iter().enumerate() {
-                    if child.common().locked {
+                    // LOCK IS IMMUTABLE (transcripts/LAYER_STRUCTURE.md §15.1)
+                    // AND INHERITED (§13), both RULED by JYH 2026-07-28.
+                    //
+                    // This read was `child.common().locked` — the element's OWN
+                    // flag — and it predates §13, so a Path inside a locked
+                    // LAYER was converted and lost. ONE read, deliberately,
+                    // matching this port's own `select_all`: `effective_locked`
+                    // on the CHILD path already folds in the layer's flag, so a
+                    // layer-level short-circuit above this loop would be
+                    // redundant — and a redundant guard is one no mutation can
+                    // turn red, which is how a guard rots.
+                    //
+                    // MEASURED, both reverted individually: restoring the
+                    // own-flag read reds 2 (the inherited vectors); deleting
+                    // the guard outright reds 4.
+                    if doc.effective_locked(&vec![li, ci]) {
                         continue;
                     }
                     match &**child {
