@@ -3199,37 +3199,7 @@ class CanvasNSView: NSView {
     }
 
     private func hitTestPathCurve(_ x: Double, _ y: Double) -> (ElementPath, Element)? {
-        let threshold = hitRadius + 2
-        for (li, layer) in document.layers.enumerated() {
-            for (ci, child) in layer.children.enumerated() {
-                switch child {
-                case .path(let v):
-                    if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
-                        return ([li, ci], child)
-                    }
-                case .textPath(let v):
-                    if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
-                        return ([li, ci], child)
-                    }
-                case .group(let g):
-                    for (gi, gc) in g.children.enumerated() {
-                        switch gc {
-                        case .path(let v):
-                            if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
-                                return ([li, ci, gi], gc)
-                            }
-                        case .textPath(let v):
-                            if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
-                                return ([li, ci, gi], gc)
-                            }
-                        default: break
-                        }
-                    }
-                default: break
-                }
-            }
-        }
-        return nil
+        JasLib.hitTestPathCurve(in: document, x: x, y: y)
     }
 
     // MARK: - Event dispatch
@@ -3819,6 +3789,56 @@ class CanvasNSView: NSView {
         activeTool.onMove(ctx, x: end.x, y: end.y, shift: extend, alt: false, dragging: true)
         activeTool.onRelease(ctx, x: end.x, y: end.y, shift: extend, alt: false)
     }
+}
+
+/// Find the first Path or TextPath whose curve is close to (x, y), in
+/// document coordinates. The Type-on-Path tool's only route to an existing
+/// element: `CanvasNSView` injects this into `ToolContext` as the
+/// `hitTestPathCurve` closure, and `TypeOnPathTool.beginPressNoSession`
+/// DESTRUCTIVELY converts whatever comes back from it.
+///
+/// **Lifted out of `CanvasNSView` so a test can reach the PRODUCTION walk.**
+/// `ToolContext` takes the hit test as a closure, so a test that supplied its
+/// own closure would prove nothing about what ships — and this function is the
+/// only guard between the artist's locked artwork and `replaceElement`.
+///
+/// The twin is jas_dioxus `TypeOnPathTool::hit_test_path_curve`. The two
+/// deliberately differ in SEARCH DEPTH — Rust stops at layer children, this
+/// port descends one level into Groups — which is an UNRULED divergence
+/// recorded in `seat/fleet/SCOPE-lock-immutable.md` §4 D-A and §8 Q3, awaiting
+/// a ruling.
+func hitTestPathCurve(in document: Document, x: Double, y: Double) -> (ElementPath, Element)? {
+    let threshold = hitRadius + 2
+    for (li, layer) in document.layers.enumerated() {
+        for (ci, child) in layer.children.enumerated() {
+            switch child {
+            case .path(let v):
+                if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                    return ([li, ci], child)
+                }
+            case .textPath(let v):
+                if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                    return ([li, ci], child)
+                }
+            case .group(let g):
+                for (gi, gc) in g.children.enumerated() {
+                    switch gc {
+                    case .path(let v):
+                        if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                            return ([li, ci, gi], gc)
+                        }
+                    case .textPath(let v):
+                        if pathDistanceToPoint(v.d, px: x, py: y) <= threshold {
+                            return ([li, ci, gi], gc)
+                        }
+                    default: break
+                    }
+                }
+            default: break
+            }
+        }
+    }
+    return nil
 }
 
 /// Bridges the CoreGraphics-based CanvasNSView into SwiftUI.
