@@ -311,7 +311,7 @@
       ]
     },
     "lock": {
-      "description": "Lock the selected elements to prevent editing. Locked objects cannot be selected, moved, resized, or deleted until unlocked. They remain visible on the canvas and in the Layers panel (shown with a lock icon). The selection is cleared after locking.\n",
+      "description": "Lock the selected elements to prevent editing. Locked objects cannot be selected until unlocked. They remain visible on the canvas and in the Layers panel (shown with a lock icon). The selection is cleared after locking, because nothing downstream refuses to move or delete a selected element for being locked.\nTHE FLAG IS WRITTEN ON THE SELECTED ELEMENTS AND ON NOTHING ELSE. Locking a layer or a group protects everything inside it, at every depth, but it does so by INHERITANCE: an element is locked when its own flag is set or when any container it sits inside is locked, and the application reads that down the path every time it asks. The contents are never stamped. This is the same rule the Layers panel's lock button follows, and it is deliberately one rule and one implementation rather than two: locking from this menu and locking from that button must leave a document in exactly the same state.\nThe consequence, stated because it is a real loss and was chosen knowingly: an element inside a locked container cannot be individually unlocked. Opening the container is what frees it, and opening it frees everything that did not carry a lock of its own beforehand -- there is nothing to restore, because nothing was changed.\n",
       "category": "object",
       "tier": 3,
       "enabled_when": "active_document.has_selection",
@@ -322,7 +322,7 @@
       ]
     },
     "unlock_all": {
-      "description": "Unlock all locked elements in the active document, making them selectable and editable again. The lock icon is removed from their Layers panel entries.\n",
+      "description": "Unlock all locked elements in the active document, making them selectable and editable again. The lock icon is removed from their Layers panel entries. This clears the flag on every element at every depth, which makes it the only way to remove a lock an artist did not place -- a document saved by an older version can carry locks written onto the contents of a locked group, and inheritance has no way to express, or to revoke, one of those individually.\n",
       "category": "object",
       "tier": 3,
       "enabled_when": "state.tab_count > 0",

@@ -818,6 +818,25 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("lock_toggle_no_materialization.json")
 }
 
+/// `Object > Lock` STOPPED MATERIALIZING — transcripts/LAYER_STRUCTURE.md §13.
+/// Twin of Rust `operation_lock_selection_no_materialization`.
+///
+/// The sibling of the family above, and the half of the repeal that was left
+/// behind: §13 repaired the Layers-panel path (`Document.togglingElementLock`)
+/// and `lockSelection` kept a SECOND, recursive implementation whose
+/// `case .group` arm stamped `locked = true` onto every descendant.
+///
+/// Worse than a leftover once §13.1 landed `jas:locked`: the stamped flags
+/// survive save and reload, and under inheritance nothing in the UI can clear
+/// one of them — the artist opens the parent and the children stay locked.
+///
+/// Two of the goldens are the PANEL family's own, by file identity, so the gate
+/// states the two paths are one behaviour rather than describing the answer
+/// twice.
+@Test func operationLockSelectionNoMaterialization() throws {
+    try runOperationFixture("lock_selection_no_materialization.json")
+}
+
 /// `state.boolean_remove_redundant_points` defaults to FALSE
 /// (`workspace/state.yaml`), so the collinear-collapse pass does NOT run on a
 /// default boolean. Two rects overlapping in x with the same y-extent: the

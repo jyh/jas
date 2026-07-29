@@ -2515,6 +2515,35 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
+    /// `Object > Lock` (Ctrl+2, `workspace/actions.yaml` §lock): set the
+    /// `locked` flag on each selected element and clear the selection.
+    ///
+    /// **ON EACH SELECTED ELEMENT, AND ON NOTHING ELSE.** A Group or Layer's
+    /// lock reaches its contents by INHERITANCE
+    /// ([`Document::effective_locked`]), never by being written onto them —
+    /// this is step 1 of [`Document::toggling_element_lock`], the Layers-panel
+    /// lock button, applied once per selected path. It is deliberately the same
+    /// shape rather than a second one: until LOCKMAT this function kept its own
+    /// recursive `lock_element` helper that stamped `locked = true` onto every
+    /// descendant of a Group, which is the MATERIALIZATION
+    /// transcripts/LAYER_STRUCTURE.md §13 repealed (RULED by JYH 2026-07-28).
+    /// §13 repaired the panel path and left this one, and the two then said
+    /// different things about the same artist action.
+    ///
+    /// Why the residue could not simply be left: §13.1 landed `jas:locked`, so
+    /// stamped flags SURVIVE SAVE AND RELOAD, and under inheritance nothing
+    /// clears a single one of them — opening the parent leaves every child
+    /// locked, and `Unlock All` is the whole document or nothing.
+    ///
+    /// The selection is cleared WHOLESALE, which is `toggling_element_lock`'s
+    /// step 2 in the case where every selected path was just locked: it is not
+    /// cosmetic, because nothing downstream refuses to move or delete a locked
+    /// element (SCOPE-effective-locked.md §2), so a lock that left the selection
+    /// alone would leave locked content draggable.
+    ///
+    /// Clone-then-mutate through `get_element_mut`, so every field of the
+    /// locked element that this operation does not speak to comes back
+    /// untouched. The twin is JasSwift `Controller.lockSelection()`.
     pub fn lock_selection(model: &mut Model) {
         let doc = model.document().clone();
         if doc.selection.is_empty() {
@@ -2522,9 +2551,8 @@ impl Controller {
         }
         let mut new_doc = doc.clone();
         for es in &doc.selection {
-            if let Some(elem) = new_doc.get_element(&es.path).cloned() {
-                let locked = lock_element(&elem);
-                new_doc = new_doc.replace_element(&es.path, locked);
+            if let Some(elem) = new_doc.get_element_mut(&es.path) {
+                elem.common_mut().locked = true;
             }
         }
         new_doc.selection.clear();
@@ -2794,16 +2822,15 @@ fn show_all_in(
     new
 }
 
-fn lock_element(elem: &Element) -> Element {
-    let mut new = elem.clone();
-    if new.is_group()
-        && let Some(children) = new.children_mut() {
-            *children = children.iter().map(|c| Rc::new(lock_element(c))).collect();
-        }
-    new.common_mut().locked = true;
-    new
-}
-
+/// Clear `locked` on `elem` and, RECURSIVELY, on everything inside it.
+///
+/// The recursion here is NOT the materialization §13 repealed — it is the sole
+/// artist-reachable REVOCATION (`Object > Unlock All`), and it is what clears
+/// flags a document already carries: files saved before LOCKMAT hold stamped
+/// descendants that inheritance can no longer express, and this walk is the
+/// only thing in either port that can remove them. Its twin, `lock_element`,
+/// was deleted with that wave; `Controller::lock_selection` now writes the flag
+/// on the selected element alone.
 fn unlock_element(elem: &Element) -> Element {
     let mut new = elem.clone();
     if let Some(children) = new.children_mut() {
