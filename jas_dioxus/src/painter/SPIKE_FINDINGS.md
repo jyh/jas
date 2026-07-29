@@ -1,11 +1,36 @@
 # PH1 de-risking spike — findings for the council (Mon 7/27)
 
-Evidence packet for ratifying (or amending) the Painter contract v2
-(`project_painter_contract_draft.md`). This is a working prototype, NOT the PH1
-production conversion. `canvas/render.rs`, `app_state.rs`, and all existing draw
-code are UNTOUCHED — the FLIP is unratified, so production conversion is
-forbidden until the council word. Everything here is reworkable if the fork
-changes.
+> ## STATUS AT HEAD: RATIFIED, FROZEN, AND IN PRODUCTION
+>
+> **The Painter contract v2 was RATIFIED + FROZEN by the JYH council on
+> 2026-07-23** (see §"PH1 status" below, and `lib.rs`'s module comment).
+> `Canvas2dPainter` is called in production from `canvas/render.rs` at **seven**
+> element arms. Conversion is **not** forbidden and `canvas2d.rs` is **not** an
+> unrun stub.
+>
+> **This banner exists because the paragraph it replaced said the opposite.**
+> The original preamble described the pre-ratification state — "the FLIP is
+> unratified, so production conversion is forbidden until the council word",
+> and `canvas2d.rs` as a STUB "never run" — and it contradicted *this same
+> document's own dated status section*, 200 lines lower. Anyone stopping at
+> paragraph one got the state of the world before the council sat.
+>
+> **It cost a full seat most of a day.** The jas/windows seat inherited that
+> sentence through a breadcrumb, carried it forward as ground truth, and fed it
+> to six investigators writing the Windows framework brief. An adversarial pass
+> caught it before it reached the Captain — which is the only reason it was a
+> correction and not a defect in a decision brief. Reported in Flask's seventh
+> letter, 2026-07-29.
+>
+> **The lesson is about document shape, not about this document.** A dated
+> status section is worthless if a stale preamble sits above it. Status goes
+> where the reader lands.
+
+Everything below is the ORIGINAL EVIDENCE PACKET as written for the council on
+2026-07-27, kept unedited because it is what the ratification was argued on.
+Read it as history: it describes a working prototype whose fork question is now
+answered, and `canvas/render.rs` / `app_state.rs` have since been converted at
+the arms the status section lists.
 
 Artifacts (all under `jas_dioxus/src/painter/`, plus one bench):
 - `mod.rs` — the immediate `Painter` trait (14 methods, D5 v2 vocabulary) + typed styles.
