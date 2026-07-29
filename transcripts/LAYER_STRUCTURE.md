@@ -1951,12 +1951,26 @@ members. Swift changes; Rust is canonical.
 is **silent on group expansion**, which is how this stayed unadjudicated. The
 ruling goes there, or the next reader re-derives the argument.
 
-### 16.4 STILL OPEN — the invariant underneath
+### 16.4 RULED 2026-07-29 — the invariant underneath
 Should the selection MODEL permit an ancestor and its own descendant to be
-selected simultaneously at all? If not, that is an assertable invariant, and it
-would have caught this without anyone noticing the divergence. **Not ruled.**
-Raised because a rule that makes a defect impossible is worth more than a fix
-that makes one instance go away.
+selected simultaneously at all?
+
+**RULED: no.** The marquee ASKS about a group's members — a band touching any
+unlocked member selects the group — but ANSWERS with the group alone, exactly as
+Select All does (§16.3). Banked to the Mac seat overnight by JYH, **reversible in
+council**; the reasoning and the evidence that would overturn it are in
+`seat/fleet/BANKED-overnight-2026-07-29.md`, the measurement in **§22**.
+
+It was ruled on evidence, not taste: `copy_selection` reads the old shape as a
+copy of the group PLUS a copy of each member INTO the source group, so
+marquee-then-duplicate left the SOURCE group holding four children instead of
+two. An adversarial review (`seat/fleet/REVIEW-marquee-ruling.md`) found a
+second, sharper consequence — **under the old shape, DESELECT could SELECT**:
+Select All then shift-marquee over a group XORed the group entry OUT and its two
+members IN.
+
+**The invariant is ruled but NOT YET ASSERTABLE, and that is a separate stone.**
+Other producers still violate it — see §22.4.
 
 ---
 
@@ -2565,3 +2579,79 @@ the copy **exactly on top of** its source, each explaining that
 repair it. Both went red on the same value (x=20, not 0) when the arms landed,
 and now assert the copy lands beside its source. Two ports, one number — the
 corpus reporting a closure rather than a regression.
+
+---
+
+## 22. §16.4 RULED, AND WHAT AN ADVERSARY FOUND IN THE RULING. 2026-07-29.
+
+Decided by the Mac seat under the Captain's overnight grant — *"bank these
+decisions… it is better to proceed, we can change decisions in the council as
+needed."* Written at length because it **overrides ratified corpus prose**.
+
+### 22.1 What was overridden, and on what evidence
+The corpus defended the old shape: *"the MARQUEE keeps the group branch — it
+legitimately asks 'did anything inside the band match?' and its answer includes
+the members."*
+
+Measured, before any change: with the group and its two members in the
+selection, `copy_selection` copies the **group whole** and then copies **each
+member into the source group**. The source ended holding **four** children
+instead of two, beside the copy. *Marquee, then duplicate, damages the original.*
+The post-copy selection was garbage as well.
+
+Move and delete survived the same shape **only by accident** — delete sorts
+paths descending (`document.rs`), and move writes absolute positions read from
+the pristine pre-move document (`controller.rs`). Accidental safety across two
+verbs is not an invariant.
+
+### 22.2 What the adversary found that this seat had missed
+An independent design review was commissioned to attack the ruling before it
+landed. It returned **STAND**, on a stronger argument than the one it was given:
+
+* **Under the old shape, DESELECT could SELECT.** Select All, then shift-marquee
+  over the group: the XOR removed the group entry and **added its two members**.
+  The old shape was incoherent against the ruled Select All shape *inside the
+  marquee's own extend mode* — reversal would restore that.
+* **Reasoned from source, not driven:** the Transform-panel property writes
+  compose per selection entry, so the old shape **double-applied** opacity
+  (50% → 25% on members), blend mode, and multi-entry transforms. No accident
+  saved those, unlike move and delete.
+
+### 22.3 Three corrections the review made to this seat's account
+1. **The group branch is NOT redundant — it stays.** This seat expected the
+   branch to become dead once its expansion was removed. Collapsing it into the
+   plain `predicate(child)` arm reds **exactly one** test in 2837:
+   `marquee_over_only_a_locked_member_of_an_open_group_takes_nothing`. Its
+   surviving content is *lock-aware member-asking*, and that is load-bearing.
+2. **Its empty-interior semantics are UNWATCHED.** A band falling between a
+   group's members selects nothing — no corpus case pins it. **Owed.**
+3. **The justifying defect is pinned Rust-only.** There is no Swift twin of the
+   copy consequence, and the corpus copy case runs on `two_rects.svg`, which has
+   **no group** — which is precisely why this hid for so long. **Owed: a
+   marquee-then-copy-over-a-group family in both ports.**
+
+*On one point the review and this seat disagree and the disagreement is
+recorded rather than resolved:* it reports 15 ancestor/descendant pairs in 5
+goldens before the ruling; a re-run of this seat's census at the exact commit
+reviewed (`630633e0`) reports **13 pairs in 4 files**. The likely cause is that
+the review measured a tree that already carried the S0 merge, which adds a fifth
+such file. **Neither number is load-bearing** — the actionable figure is §22.4's.
+
+### 22.4 The invariant is RULED but NOT YET ASSERTABLE
+After the ruling, a census of the whole fixture tree still finds **4
+ancestor/descendant pairs in 2 files**. The marquee is no longer among the
+producers. The ones that remain are:
+
+* **`doc.set_selection`'s container expansion** — still live in Rust
+  (`interpreter/effects.rs`). **§20 is ruled and NOT implemented.**
+* **The extend / add seams** — `add_to_selection`, `toggle_selection` and raw
+  `set_selection` all accept such a pair today; none is ruled.
+* **A NEW live defect the review found while probing**, unrelated to the ruling
+  and not repaired here: marquee a group, shift + direct-marquee one member's
+  control point, then move — the member is **turned into a Polygon stranded at
+  its pristine coordinates with a single control point displaced**. Banked.
+
+**The path to assertable**, in order: implement §20 in both ports with the YAML
+ancestor-aware panel predicate; rule the extend/add seams; then assert at the
+write chokepoint plus a fixture-tree lint. Only then does §16.4 become a gate
+rather than a rule.
