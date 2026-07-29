@@ -993,6 +993,7 @@ mod tests {
                          "operations/boolean_collapse_default.json",
                          "operations/lock_inheritance.json",
                          "operations/lock_toggle_no_materialization.json",
+                         "operations/select_all_top_level.json",
                          "operations/paste_layers.json"] {
             let json_str = read_fixture(fixture);
             let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
@@ -3622,6 +3623,27 @@ mod tests {
     #[test]
     fn operation_paste_layers() {
         run_operation_fixture("operations/paste_layers.json");
+    }
+
+    /// SELECT ALL SELECTS TOP-LEVEL OBJECTS (transcripts/LAYER_STRUCTURE.md §16,
+    /// D2, RULED 2026-07-28) — and SELECTION ORDER IS PART OF THE DOCUMENT (§10,
+    /// D6, ruled the same day).
+    ///
+    /// Neither could be watched before this family. `op_apply` had no
+    /// `select_all` verb in either port, so nothing shared reached Select All;
+    /// and the canonical-JSON selection serializer sorted by path in BOTH ports,
+    /// so no golden anywhere could see the ORDER a selection was built in. The
+    /// sort is gone and these goldens pin emission order, which is why the
+    /// `copy_of_a_two_element_selection_emits_a_deterministic_order` case can
+    /// require a NON-document order ([0,3] then [0,1]) and mean it.
+    ///
+    /// `marquee_over_everything_still_expands_groups_unlike_select_all` is the
+    /// case that stops the D2 repair being made by deleting `selectFlat`'s group
+    /// branch: the branch is right for the marquee, which is the caller it was
+    /// written for, and wrong only for Select All.
+    #[test]
+    fn operation_select_all_top_level() {
+        run_operation_fixture("operations/select_all_top_level.json");
     }
 
     /// WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES — D4/D5, ratified

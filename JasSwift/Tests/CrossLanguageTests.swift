@@ -708,6 +708,26 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("paste_layers.json")
 }
 
+/// SELECT ALL SELECTS TOP-LEVEL OBJECTS (transcripts/LAYER_STRUCTURE.md §16,
+/// D2, RULED 2026-07-28: "keep the Rust shape") — and SELECTION ORDER IS PART
+/// OF THE DOCUMENT (§10, D6, ruled the same day). Twin of Rust
+/// `operation_select_all_top_level`.
+///
+/// Neither could be watched before this family. `op_apply` had no `select_all`
+/// verb in either port, so nothing shared reached Select All — which is how
+/// this port's group branch (a selection holding a group AND its own children)
+/// survived unadjudicated. And the canonical-JSON selection serializer sorted
+/// by path in BOTH ports, so no golden could see the ORDER a selection was
+/// built in.
+///
+/// `marquee_over_everything_still_expands_groups_unlike_select_all` is the
+/// case that stops the repair being made by deleting `selectFlat`'s group
+/// branch: that branch is right for the marquee, the caller it was written
+/// for, and wrong only for Select All.
+@Test func operationSelectAllTopLevel() throws {
+    try runOperationFixture("select_all_top_level.json")
+}
+
 /// WHAT THE CLIPBOARD HOLDS DECIDES WHAT PASTE DOES — D4/D5, ratified
 /// 2026-07-28 (Swift is canon; Rust drops its internal-clipboard fallback).
 /// Twin of Rust `operation_paste_clipboard_text`.
