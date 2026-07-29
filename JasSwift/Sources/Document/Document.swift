@@ -171,8 +171,42 @@ public struct ElementSelection: Equatable, Hashable {
     }
 }
 
-/// A selection is a set of ElementSelection entries (unique by path).
-public typealias Selection = Set<ElementSelection>
+/// A selection is an ORDERED ARRAY of `ElementSelection` entries, unique by
+/// path. RULED 2026-07-28 (transcripts/LAYER_STRUCTURE.md §10, D6).
+///
+/// **Ruled on determinism, not performance.** This was `Set<ElementSelection>`.
+/// A `Set`'s iteration order is per-process hash order, and both copy paths
+/// iterate `doc.selection` — measured: five selected elements over ten separate
+/// test processes gave ten different orders and document order not once. The
+/// z-order of a copied fragment is part of the artwork, so a paste that stacks
+/// differently between two runs of the same build is a defect. Rust's
+/// `Selection` is `Vec<ElementSelection>`; this is now the identical
+/// representation.
+///
+/// **Deliberately NOT an ordered-set type.** `swift-collections` is already a
+/// dependency (`Package.swift:12`; `TreeDictionary` is live in this file and in
+/// `Model.swift`), so
+/// `OrderedSet` would have been free — the ruling turns on the OTHER reason:
+/// identical representation across the active ports beats the convenience.
+///
+/// **THE COST, stated where it is paid.** `Set` gave free deduplication; an
+/// array does not. Every insertion site must guard (`contains(where:)` on the
+/// path) exactly as Rust does before every `push`, or a duplicate selection
+/// entry appears. `appendingUnique(_:)` below is that guard, named once. The
+/// canonical-JSON selection serializer no longer sorts, so a duplicate is
+/// visible in every golden carrying a multi-entry selection.
+public typealias Selection = [ElementSelection]
+
+extension Array where Element == ElementSelection {
+    /// Append `es` unless an entry with the same path is already present — the
+    /// deduplication a `Set` used to provide for free. Mirrors Rust's
+    /// `if !sel.iter().any(|e| e.path == p) { sel.push(...) }` idiom, which is
+    /// written out at every Rust insertion site for the same reason.
+    mutating func appendUnique(_ es: ElementSelection) {
+        if contains(where: { $0.path == es.path }) { return }
+        append(es)
+    }
+}
 
 /// A document consisting of an ordered list of layers, a selection,
 /// and a list of artboards (with document-global options).

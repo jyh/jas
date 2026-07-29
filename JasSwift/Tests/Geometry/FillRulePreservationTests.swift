@@ -70,7 +70,7 @@ private func ruleOf(_ elem: Element?) -> FillRule? {
 
 private func modelWith(_ children: [Element], selected: [ElementPath] = []) -> Model {
     let layer = Layer(children: children)
-    let sel: Selection = Set(selected.map { ElementSelection.all($0) })
+    let sel: Selection = selected.map { ElementSelection.all($0) }
     return Model(document: Document(layers: [layer], selectedLayer: 0, selection: sel))
 }
 

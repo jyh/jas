@@ -1458,6 +1458,10 @@ private func parseElementBase(_ d: [String: Any]) -> Element {
     }
 }
 
+/// DECODE ORDER IS THE STORED ORDER. A codec reads back what was written — it
+/// neither reorders nor deduplicates, so a duplicate entry in a golden survives
+/// the round trip and is visible rather than silently repaired here. Mirrors
+/// Rust `parse_selection`, which collects into the `Vec` directly.
 private func parseSelection(_ v: Any?) -> Selection {
     guard let arr = v as? [[String: Any]] else { return [] }
     var sel: Selection = []
@@ -1473,7 +1477,7 @@ private func parseSelection(_ v: Any?) -> Selection {
         } else {
             kind = .all
         }
-        sel.insert(ElementSelection(path: path, kind: kind))
+        sel.append(ElementSelection(path: path, kind: kind))
     }
     return sel
 }

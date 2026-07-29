@@ -3722,7 +3722,7 @@ private func runActionModel(_ tc: [String: Any]) -> Model {
             path.map { ($0 as! NSNumber).intValue }
         }
         let controller = Controller(model: model)
-        controller.setSelection(Set(paths.map { ElementSelection.all($0) }))
+        controller.setSelection(paths.map { ElementSelection.all($0) })
     }
 
     for step in tc["actions"] as! [[String: Any]] {

@@ -1644,6 +1644,17 @@ fn selection_for_ids(
         .collect()
 }
 
+/// The SELECTION-ONLY verbs: they change `doc.selection` and nothing else, so
+/// they are non-undoable and must stay journal-neutral (no transaction is
+/// opened for them). Named ONCE so a new selection verb has one place to
+/// register. Mirrors JasSwift `isSelectionOnlyVerb`.
+fn is_selection_only_verb(name: &str) -> bool {
+    matches!(
+        name,
+        "select_rect" | "select_by_ids" | "select_element" | "select_all" | "add_to_selection"
+    )
+}
+
 /// Resolve `ids` to their selection and write it BY PATH (selection-only,
 /// non-undoable — like `select_rect`, this goes through the unbracketed selection
 /// write). The id-primary `select_by_ids` body, SHARED by the standalone
@@ -1810,10 +1821,11 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
     // non-undoable), so it is excluded for the identical reason.
     // `select_element` is the path-addressed click seam — selection-only for
     // exactly the same reason as `select_rect`, and excluded on the same
-    // grounds.
-    if name != "select_rect" && name != "select_by_ids" && name != "select_element"
-        && !model.in_txn()
-    {
+    // grounds. `select_all` (LAYER_STRUCTURE.md §16) and `add_to_selection`
+    // join the list for the same reason; the set is named once, in
+    // `is_selection_only_verb`, so a new selection verb has ONE place to
+    // register rather than a growing `&&` chain that is easy to miss.
+    if !is_selection_only_verb(name) && !model.in_txn() {
         model.begin_txn();
     }
     // Fork-4 `targets` (OP_LOG.md §9). Populated for the THREE replay-safe
@@ -1891,6 +1903,33 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
                 return Err(OpError::MissingTarget { id: format!("{path:?}") });
             }
             Controller::select_element(model, &path);
+            targets = controller::selection_to_ids(model.document());
+        }
+        // SELECT ALL — transcripts/LAYER_STRUCTURE.md §16 (RULED 2026-07-28):
+        // it selects TOP-LEVEL objects, a group counting as ONE. Before this
+        // verb nothing shared could reach `select_all` in either port, which is
+        // how JasSwift's group-expanding version (a selection containing an
+        // element AND its own descendants) survived unadjudicated. Routed
+        // through the production `Controller::select_all`, never a copy of it.
+        // Selection-only and non-undoable, exactly like `select_rect`.
+        "select_all" => {
+            Controller::select_all(model);
+            targets = controller::selection_to_ids(model.document());
+        }
+        // The ADDITIVE selection seam — the same `Controller::add_to_selection`
+        // the YAML effect `doc.add_to_selection` calls (shift-click). It is the
+        // one production site whose contract is "idempotent: no-op if the path
+        // is already selected", so it is what a corpus case can use to watch the
+        // DEDUP guard that `Selection` being an ordered Vec makes manual
+        // (LAYER_STRUCTURE.md §10, "THE MIGRATION HAZARD").
+        "add_to_selection" => {
+            let Some(path) = parse_path(op.get("path")) else {
+                return Err(req_err(op, "path"));
+            };
+            if model.document().get_element(&path).is_none() {
+                return Err(OpError::MissingTarget { id: format!("{path:?}") });
+            }
+            Controller::add_to_selection(model, &path);
             targets = controller::selection_to_ids(model.document());
         }
         "move_selection" => {

@@ -1574,9 +1574,13 @@ private func decodeRecordedOps(_ json: String) -> [PrimitiveOp] {
     }
 }
 
+/// DECODE ORDER IS THE STORED ORDER. A codec reads back what was written —
+/// it neither reorders nor deduplicates, so a duplicate entry in a file
+/// survives the round trip and is visible rather than silently repaired here.
+/// Mirrors Rust `unpack_selection`, which collects into the `Vec` directly.
 private func unpackSelection(_ v: MsgValue) throws -> Selection {
     let arr = try asArray(v)
-    var entries = Set<ElementSelection>()
+    var entries: Selection = []
     for item in arr {
         let itemArr = try asArray(item)
         let path: ElementPath = try asArray(at(itemArr, 0)).map { try asInt($0) }
@@ -1588,7 +1592,7 @@ private func unpackSelection(_ v: MsgValue) throws -> Selection {
             let cps = SortedCps(try kindArr.dropFirst().map { try asInt($0) })
             kind = .partial(cps)
         }
-        entries.insert(ElementSelection(path: path, kind: kind))
+        entries.append(ElementSelection(path: path, kind: kind))
     }
     return entries
 }
