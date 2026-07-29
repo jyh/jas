@@ -2230,10 +2230,37 @@ public class Controller {
         model.editDocument(doc)
     }
 
+    /// Duplicate the selected elements, offset by (dx, dy).
+    ///
+    /// **The selection this leaves behind is in DOCUMENT ORDER, and it names
+    /// the COPIES** — transcripts/LAYER_STRUCTURE.md §19, RULED 2026-07-28 by
+    /// JYH (*"yes document order"*). Mirrors Rust `Controller::copy_selection`.
+    ///
+    /// The walk runs BACK-TO-FRONT and that is load-bearing: inserting after
+    /// [0,1] shifts [0,3], so a forward walk would read its own insertions as
+    /// sources. What was wrong was letting the RESULT inherit the walk's order
+    /// as a byproduct — nobody chose descending, and §10 (D6) made selection
+    /// order part of the document precisely because a copied fragment's z-order
+    /// is part of the artwork. Duplicate, then Copy, and the clipboard listed
+    /// the elements backwards.
+    ///
+    /// **The same shift that forces the descending walk also invalidates the
+    /// copy paths it has already recorded**, which is a separate defect found
+    /// while gating §19 and repaired here. Duplicating [0,1] and [0,3]: the walk
+    /// copies d first and records [0,4], then copies b, and THAT insertion
+    /// pushes everything above [0,1] up one slot — so the recorded [0,4] stops
+    /// naming d's copy and starts naming **d itself, the source**. The result
+    /// was not merely mis-ordered; a Copy afterwards put a source element on the
+    /// clipboard. `shiftedPath(_:forInsertionAt:)` keeps the recorded paths
+    /// honest as the document moves underneath them, and the sort is then a sort
+    /// of the right paths rather than a tidy list of the wrong ones.
     public func copySelection(dx: Double, dy: Double) {
         var doc = model.document
-        var newSelection: Selection = []
-        // Sort paths in reverse so insertions don't shift earlier paths
+        // Copy paths only: copying always selects the new element AS A WHOLE,
+        // so the `kind` is `.all` for every entry and the running state is a
+        // plain path list that stays rewritable as the document shifts.
+        var copyPaths: [ElementPath] = []
+        // Sort paths in reverse so insertions don't shift the sources not yet read.
         let sortedSels = doc.selection.sorted { $0.path.lexicographicallyPrecedes($1.path) }.reversed()
         for es in sortedSels {
             let elem = doc.getElement(es.path)
@@ -2243,11 +2270,42 @@ public class Controller {
             doc = doc.insertElementAfter(es.path, element: copied)
             var copyPath = es.path
             copyPath[copyPath.count - 1] += 1
-            // Copying always selects the new element as a whole.
-            newSelection.append(ElementSelection.all(copyPath))
+            // This insertion moves every copy path already recorded that sits
+            // at or after it under the same parent.
+            copyPaths = copyPaths.map { shiftedPath($0, forInsertionAt: copyPath) }
+            copyPaths.append(copyPath)
         }
-        model.editDocument(doc.replacing(selection: newSelection))
+        // §19: document order, not the walk's order.
+        copyPaths.sort { $0.lexicographicallyPrecedes($1) }
+        model.editDocument(doc.replacing(selection: copyPaths.map(ElementSelection.all)))
     }
+}
+
+/// Rewrite `path` for an element having been inserted at `insertedAt`.
+///
+/// A path held across a structural insertion goes stale: inserting a sibling
+/// ahead of it pushes it up one slot, and nothing in the path itself says so.
+/// ``Controller/copySelection(dx:dy:)`` is where that bit us (§19) — it records
+/// a copy path and then inserts BELOW it, so the recorded path silently came to
+/// name the source instead of the copy.
+///
+/// Only the slot the insertion happened in can move: `insertedAt` splits into a
+/// parent prefix and a sibling index, and a path is affected only when it shares
+/// that prefix AND sits at or after that index. Paths in other subtrees, paths
+/// shorter than the prefix, and the prefix itself are untouched. Nothing below
+/// the affected component changes — the subtree moved intact.
+///
+/// Mirrors Rust `shift_path_for_insertion`.
+func shiftedPath(_ path: ElementPath, forInsertionAt insertedAt: ElementPath) -> ElementPath {
+    guard !insertedAt.isEmpty else { return path }
+    let depth = insertedAt.count - 1
+    guard path.count > depth,
+          Array(path[..<depth]) == Array(insertedAt[..<depth]),
+          path[depth] >= insertedAt[depth]
+    else { return path }
+    var out = path
+    out[depth] += 1
+    return out
 }
 
 /// Resolve the current selection to the stable `common.id`s of the selected

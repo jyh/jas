@@ -732,6 +732,59 @@ private func makeLockedLayerCtrl(lockFirst: Bool) -> Controller {
     #expect(!paths.contains([0, 0]))
 }
 
+/// §19 (RULED 2026-07-28, JYH: *"yes document order"*) — the selection a
+/// DUPLICATE leaves behind is in document order, and it names the COPIES.
+/// Twin of Rust `copy_selection_of_two_elements_selects_both_copies_in_document_order`.
+///
+/// Four rects a b c d; duplicate the NON-CONTIGUOUS pair b=[0,1] and d=[0,3]
+/// with dx=6. The descending walk is load-bearing and stays (inserting after
+/// [0,1] shifts [0,3]), so the document that comes out is
+///
+///     [0,0] a@0  [0,1] b@10  [0,2] b'@16  [0,3] c@20  [0,4] d@30  [0,5] d'@36
+///
+/// and the two COPIES are at [0,2] and [0,5].
+///
+/// **Deliberately over-specified relative to §19.** The byproduct loop appended
+/// `[0,4]` then `[0,2]`, and `[0,4]` is not merely mis-ORDERED — after the later
+/// insertion at [0,1] shifted everything above it, `[0,4]` names **d, the
+/// SOURCE**. Sorting stale paths gives a tidy ascending list of the wrong
+/// elements, so order alone would pass on a half-fix. Order AND identity are
+/// pinned, by path and by geometry.
+@Test func copySelectionOfTwoElementsSelectsBothCopiesInDocumentOrder() {
+    let rects = (0..<4).map { i in
+        Element.rect(Rect(x: Double(i) * 10.0, y: 0, width: 5, height: 5))
+    }
+    let layer = Layer(name: "L0", children: rects)
+    let baseDoc = Document(layers: [layer])
+    let doc = Document(layers: baseDoc.layers,
+                       selection: selAllCPs(baseDoc, [0, 1], [0, 3]))
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.copySelection(dx: 6, dy: 0)
+
+    // The document grew by exactly the two copies, in document order.
+    let xs: [Double] = ctrl.document.layers[0].children.map {
+        if case .rect(let r) = $0 { return r.x }
+        Issue.record("expected a Rect, got \($0)")
+        return .nan
+    }
+    #expect(xs == [0, 10, 16, 20, 30, 36])
+
+    // ORDER: ascending, i.e. document order — NOT the descending byproduct.
+    let paths = ctrl.document.selection.map(\.path)
+    #expect(paths == [[0, 2], [0, 5]],
+            "the duplicate must leave its selection in DOCUMENT order")
+
+    // IDENTITY: both selected paths must name the OFFSET copies (x=16, 36),
+    // never a source (x=10, 30). This is the half a sort alone cannot fix.
+    let selectedXs: [Double] = paths.map { p in
+        if case .rect(let r) = ctrl.document.getElement(p) { return r.x }
+        Issue.record("expected a Rect at \(p)")
+        return .nan
+    }
+    #expect(selectedXs == [16, 36],
+            "the selection must name the two COPIES, not a source")
+}
+
 @Test func copySelectionClearsId() {
     // A duplicated element must not inherit the source's stable id —
     // two elements cannot share an identity. The copy is born id-less

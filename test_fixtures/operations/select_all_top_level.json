@@ -125,7 +125,7 @@
     "expected_json": "select_all_extend_marquee_order_expected.json"
   },
   {
-    "_doc": "D6 ORDER, on a COPY. copy_selection walks the selection in DESCENDING path order so its insertions do not shift earlier paths, and pushes each copy's path as it goes — so the resulting selection is [0,3] then [0,1], deliberately NOT document order, while the copied ELEMENTS land in document order as [a a' b b']. Both halves are pinned here. Under a Set-ordered selection this golden is unreachable: the emitted order was whatever the hash gave.",
+    "_doc": "D6 ORDER, on a COPY — and, since 2026-07-28, §19 (RULED by JYH: 'yes document order'). copy_selection walks the selection in DESCENDING path order so its insertions do not shift earlier paths, and THAT STAYS, load-bearing; what changed is that the selection it leaves behind is now sorted into DOCUMENT order instead of coming out in the walk's order as a byproduct. Two contiguous rects duplicated at dx=dy=6 give elements [a a' b b'] and selection [[0,1],[0,3]] — the two copies, back-to-front. This golden used to read [[0,2],[0,1]], and that was not merely reversed: [0,2] named b, THE SOURCE, because the later insertion at [0,0] shifted b up one slot after the walk had already recorded its copy path. The artist-visible consequence is one step away — a Copy after the duplicate emits this order onto the clipboard — and is gated in-port in both ports (Rust a_duplicate_then_copy_emits_the_copies_in_document_order, Swift DuplicateCopyOrderTests), because neither port has a copy-to-clipboard op verb for the corpus to drive.",
     "name": "copy_of_a_two_element_selection_emits_a_deterministic_order",
     "setup_svg": "two_rects.svg",
     "txns": [
@@ -148,6 +148,39 @@
       }
     ],
     "expected_json": "select_all_copy_order_expected.json"
+  },
+  {
+    "_doc": "§19, THE DISCRIMINATING CASE. Two elements can only be in one of two orders, so the contiguous case above cannot tell a SORT from a REVERSAL, and on its own it reads like an order bug and nothing more. Here the duplicated pair is NON-CONTIGUOUS — green at [0,1] and yellow at [0,3] of four rects — which is the shape §19 itself names. The descending walk copies yellow first, recording [0,4], then copies green; that second insertion shifts everything above it by one, so the recorded [0,4] silently stops naming yellow's COPY and starts naming yellow, THE SOURCE. The document that comes out is red@0 green@30 green'@36 blue@60 yellow@90 yellow'@96, and the ruled selection is [[0,2],[0,5]] — the two copies, in document order. The shipped answer was [[0,4],[0,2]]: reverse order AND a source. A fix that only sorts gives [[0,2],[0,4]], ascending and still wrong, and this case is what separates the two. Distinct fills make the identity legible in the golden rather than inferable from indices.",
+    "name": "duplicating_a_noncontiguous_pair_selects_both_copies_not_a_source",
+    "setup_svg": "dup_order_four_rects.svg",
+    "txns": [
+      {
+        "name": "duplicate_two_of_four",
+        "ops": [
+          { "op": "add_to_selection", "path": [0, 1] },
+          { "op": "add_to_selection", "path": [0, 3] },
+          { "op": "copy_selection", "dx": 6.0, "dy": 0.0 }
+        ]
+      }
+    ],
+    "expected_json": "select_all_dup_noncontiguous_order_expected.json"
+  },
+  {
+    "_doc": "§19, ACROSS PARENTS AND ACROSS DEPTHS — the case that makes the path-rewrite RULE watchable rather than just its outcome on one flat layer. Duplicate three things at once in this family's own setup: solo-a at [0,0], t3 at [0,1,2] (the last child of the Trio group), and solo-b at [1,1] (in the OTHER layer). The descending walk copies solo-b, then t3, then solo-a — and that last insertion, at [0,1], is the interesting one: it pushes the Trio group from [0,1] to [0,2], so the copy path already recorded for t3' has to travel from [0,1,3] to [0,2,3], while the copy path recorded for solo-b' must NOT move at all, because it lives under a different parent. Ruled answer [[0,1],[0,2,3],[1,2]] — three copies, document order. FOUR SEPARATE MUTATIONS RED THIS ONE CASE, which is why it is worth its bytes: dropping the sort gives [[1,2],[0,2,3],[0,1]]; dropping the rewrite entirely gives [0,1,3], a path into a rect; rewriting without checking the parent prefix drags solo-b' to [1,3], a slot that does not exist; and weakening the index test from >= to > leaves t3' at [0,1,3] — the boundary case is real precisely because an insertion AT a container's own index moves that whole container and everything under it.",
+    "name": "duplicating_across_parents_and_depths_rewrites_only_the_paths_that_moved",
+    "setup_svg": "select_all_top_level.svg",
+    "txns": [
+      {
+        "name": "duplicate_three_across_the_tree",
+        "ops": [
+          { "op": "add_to_selection", "path": [0, 0] },
+          { "op": "add_to_selection", "path": [0, 1, 2] },
+          { "op": "add_to_selection", "path": [1, 1] },
+          { "op": "copy_selection", "dx": 6.0, "dy": 0.0 }
+        ]
+      }
+    ],
+    "expected_json": "select_all_dup_across_parents_expected.json"
   },
   {
     "_doc": "D6 DEDUP. Selection is an ordered array in both ports now, so nothing deduplicates for free: add_to_selection must refuse a path it already holds. This case would go RED with a SECOND {kind:all, path:[0,1]} entry if the guard were dropped from either port — which is exactly the mutation that proves it.",

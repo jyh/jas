@@ -269,6 +269,31 @@ pub fn selection_to_ids(doc: &Document) -> Vec<String> {
         .collect()
 }
 
+/// Rewrite `path` for an element having been inserted at `inserted_at`.
+///
+/// A path held across a structural insertion goes stale: inserting a sibling
+/// ahead of it pushes it up one slot, and nothing in the path itself says so.
+/// `Controller::copy_selection` is where that bit us (§19) — it records a copy
+/// path and then inserts BELOW it, so the recorded path silently came to name
+/// the source instead of the copy.
+///
+/// Only the slot the insertion happened in can move: `inserted_at` splits into
+/// a parent prefix and a sibling index, and a path is affected only when it
+/// shares that prefix AND sits at or after that index. Paths in other subtrees,
+/// paths shorter than the prefix, and the prefix itself are untouched. Nothing
+/// below the affected component changes — the subtree moved intact.
+///
+/// Mirrors JasSwift `shiftedPath(_:forInsertionAt:)`.
+fn shift_path_for_insertion(path: &mut ElementPath, inserted_at: &ElementPath) {
+    let Some(depth) = inserted_at.len().checked_sub(1) else { return };
+    if path.len() <= depth || path[..depth] != inserted_at[..depth] {
+        return;
+    }
+    if path[depth] >= inserted_at[depth] {
+        path[depth] += 1;
+    }
+}
+
 impl Controller {
     /// Add an element to the current editing target and select the
     /// new element. In content-mode (the default), the element is
@@ -1241,10 +1266,36 @@ impl Controller {
     }
 
     /// Duplicate selected elements, offset by (dx, dy).
+    ///
+    /// **The selection this leaves behind is in DOCUMENT ORDER, and it names
+    /// the COPIES** — transcripts/LAYER_STRUCTURE.md §19, RULED 2026-07-28 by
+    /// JYH (*"yes document order"*).
+    ///
+    /// The walk runs BACK-TO-FRONT and that is load-bearing: inserting after
+    /// [0,1] shifts [0,3], so a forward walk would read its own insertions as
+    /// sources. What was wrong was letting the RESULT inherit the walk's order
+    /// as a byproduct — nobody chose descending, and §10 (D6) made selection
+    /// order part of the document precisely because a copied fragment's z-order
+    /// is part of the artwork. Duplicate, then Copy, and the clipboard listed
+    /// the elements backwards.
+    ///
+    /// **The same shift that forces the descending walk also invalidates the
+    /// copy paths it has already recorded**, which is a separate defect found
+    /// while gating §19 and repaired here. Duplicating [0,1] and [0,3]: the
+    /// walk copies d first and records [0,4], then copies b, and THAT insertion
+    /// pushes everything above [0,1] up one slot — so the recorded [0,4] stops
+    /// naming d's copy and starts naming **d itself, the source**. The result
+    /// was not merely mis-ordered; a Copy afterwards put a source element on the
+    /// clipboard. `shift_path_for_insertion` keeps the recorded paths honest as
+    /// the document moves underneath them, and the sort is then a sort of the
+    /// right paths rather than a tidy list of the wrong ones.
     pub fn copy_selection(model: &mut Model, dx: f64, dy: f64) {
         let doc = model.document().clone();
         let mut new_doc = doc.clone();
-        let mut new_selection: Selection = Vec::new();
+        // Copy paths only: copying always selects the new element AS A WHOLE,
+        // so the `kind` is `All` for every entry and the running state is a
+        // plain path list that stays rewritable as the document shifts.
+        let mut copy_paths: Vec<ElementPath> = Vec::new();
         let mut sorted_sels: Vec<_> = doc.selection.clone();
         sorted_sels.sort_by(|a, b| b.path.cmp(&a.path));
         for es in &sorted_sels {
@@ -1256,11 +1307,20 @@ impl Controller {
                 new_doc = new_doc.insert_element_after(&es.path, copied.clone());
                 let mut copy_path = es.path.clone();
                 *copy_path.last_mut().unwrap() += 1;
-                // Copying always selects the new element as a whole.
-                new_selection.push(ElementSelection::all(copy_path));
+                // This insertion moves every copy path already recorded that
+                // sits at or after it under the same parent.
+                for prev in copy_paths.iter_mut() {
+                    shift_path_for_insertion(prev, &copy_path);
+                }
+                copy_paths.push(copy_path);
             }
         }
-        new_doc.selection = new_selection;
+        // §19: document order, not the walk's order.
+        copy_paths.sort();
+        new_doc.selection = copy_paths
+            .into_iter()
+            .map(ElementSelection::all)
+            .collect::<Selection>();
         model.edit_document(new_doc);
     }
 
@@ -4965,6 +5025,81 @@ mod tests {
         // Original was at index 0; copy is appended at index 1.
         let paths = sel_paths(&model);
         assert!(paths.contains(&vec![0, 1]));
+    }
+
+    /// §19 (RULED 2026-07-28, JYH: *"yes document order"*) — the selection a
+    /// DUPLICATE leaves behind is in document order, and it names the COPIES.
+    ///
+    /// Four rects a b c d; duplicate the NON-CONTIGUOUS pair b=[0,1] and
+    /// d=[0,3] with dx=6. The descending walk is load-bearing and stays
+    /// (inserting after [0,1] shifts [0,3]), so the document that comes out is
+    ///
+    ///     [0,0] a@0   [0,1] b@10   [0,2] b'@16   [0,3] c@20   [0,4] d@30   [0,5] d'@36
+    ///
+    /// and the two COPIES are at [0,2] and [0,5].
+    ///
+    /// **This assertion is deliberately over-specified relative to §19**, and
+    /// that is the point: the byproduct loop pushed `[0,4]` and `[0,2]`, and
+    /// `[0,4]` is not merely mis-ORDERED — after the later insertion at [0,1]
+    /// shifted everything above it, `[0,4]` names **d, the SOURCE**. Sorting
+    /// stale paths yields a tidy ascending list of the wrong elements, so a
+    /// test asserting only "ascending" would pass on a half-fix. Both the
+    /// order and the identity are pinned here, by path AND by geometry.
+    #[test]
+    fn copy_selection_of_two_elements_selects_both_copies_in_document_order() {
+        let mut model = Model::default();
+        for i in 0..4 {
+            Controller::add_element(
+                &mut model,
+                make_rect(i as f64 * 10.0, 0.0, 5.0, 5.0),
+            );
+        }
+        Controller::set_selection(
+            &mut model,
+            vec![
+                ElementSelection::all(vec![0, 1]),
+                ElementSelection::all(vec![0, 3]),
+            ],
+        );
+        Controller::copy_selection(&mut model, 6.0, 0.0);
+
+        // The document grew by exactly the two copies, in document order.
+        let doc = model.document();
+        let xs: Vec<f64> = doc.layers[0]
+            .children()
+            .unwrap()
+            .iter()
+            .map(|c| match &**c {
+                Element::Rect(r) => r.x,
+                other => panic!("expected a Rect, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(xs, vec![0.0, 10.0, 16.0, 20.0, 30.0, 36.0], "document order");
+
+        // ORDER: ascending, i.e. document order — NOT the descending byproduct.
+        let paths: Vec<Vec<usize>> =
+            doc.selection.iter().map(|es| es.path.clone()).collect();
+        assert_eq!(
+            paths,
+            vec![vec![0, 2], vec![0, 5]],
+            "the duplicate must leave its selection in DOCUMENT order",
+        );
+
+        // IDENTITY: both selected paths must name the OFFSET copies (x=16, 36),
+        // never a source (x=10, 30). This is the half a sort alone cannot fix.
+        let selected_xs: Vec<f64> = doc
+            .selection
+            .iter()
+            .map(|es| match doc.get_element(&es.path).unwrap() {
+                Element::Rect(r) => r.x,
+                other => panic!("expected a Rect, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            selected_xs,
+            vec![16.0, 36.0],
+            "the selection must name the two COPIES, not a source",
+        );
     }
 
     #[test]
