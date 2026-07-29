@@ -837,7 +837,30 @@ public class Controller {
 
     public func moveSelection(dx: Double, dy: Double) {
         var doc = model.document
-        for es in doc.selection {
+        let entries = doc.selection
+        for es in entries {
+            // AN ANCESTOR IN THE SELECTION COVERS ITS DESCENDANTS (§16.4).
+            //
+            // Moving a container moves its members, so a descendant entry
+            // beneath a selected ancestor would apply the move a second time —
+            // or, worse, apply a control-point edit that supersedes it. A group
+            // dragged with one member's control point also selected left that
+            // member rebuilt as a Polygon with the group's translation lost.
+            //
+            // §16.4 rules such a selection out, but it is not yet enforced at
+            // the extend/add seams or at `doc.set_selection`'s container
+            // expansion (§20). Applying the rule here makes the operation
+            // correct whatever produced the selection.
+            //
+            // It also closes the observable window on a second difference: this
+            // loop reads each element from the RUNNING document while Rust's
+            // `move_selection` reads from the pristine pre-move one. That is
+            // only observable when two entries overlap, and after this skip
+            // they cannot. Twin: `an_ancestor_in_the_selection_covers_its_descendants`.
+            if entries.contains(where: { other in
+                other.path.count < es.path.count
+                    && Array(es.path.prefix(other.path.count)) == other.path
+            }) { continue }
             let elem = doc.getElement(es.path)
             let newElem = elem.moveControlPoints(es.kind, dx: dx, dy: dy)
             doc = doc.replaceElement(es.path, with: newElem)

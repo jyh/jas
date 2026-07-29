@@ -950,6 +950,29 @@ impl Controller {
         let mut new_doc = doc.clone();
         let mut new_selection: Selection = Vec::new();
         for es in &doc.selection {
+            // AN ANCESTOR IN THE SELECTION COVERS ITS DESCENDANTS (§16.4).
+            //
+            // Every element below is read from the PRISTINE `doc` and written
+            // back absolutely. For disjoint entries that is exactly right; for
+            // an ancestor and its descendant it is not, because the
+            // descendant's write lands on top of the ancestor's and discards
+            // the ancestor's contribution to it. A group dragged with one
+            // member's control point also selected left that member STRANDED at
+            // its pristine coordinates with a single corner displaced.
+            //
+            // §16.4 rules such a selection out, but the ruling is not yet
+            // enforced at the extend/add seams or at `doc.set_selection`'s
+            // still-live container expansion (§20). Applying the rule HERE
+            // makes the operation correct whatever produced the selection.
+            //
+            // The entry is skipped entirely, including its post-move selection
+            // rewrite, so the ancestor's own entry carries the whole move.
+            if doc.selection.iter().any(|other| {
+                other.path.len() < es.path.len() && es.path.starts_with(&other.path)
+            }) {
+                new_selection.push(es.clone());
+                continue;
+            }
             if let Some(elem) = doc.get_element(&es.path) {
                 let new_elem = move_control_points(elem, &es.kind, dx, dy);
                 let kind = remap_cp_selection_after_move(elem, &new_elem, &es.kind);
@@ -3944,6 +3967,83 @@ mod tests {
                      before the fix the SOURCE group ended up with four"),
                 other => panic!("expected a Group at [{i}], got {other:?}"),
             }
+        }
+    }
+
+
+    /// AN ANCESTOR IN THE SELECTION COVERS ITS DESCENDANTS — the move applies
+    /// once, at the outermost entry.
+    ///
+    /// §16.4 rules that a selection never holds an ancestor and its own
+    /// descendant, but the ruling is not yet ENFORCED at every producer: the
+    /// extend/add seams (`add_to_selection`, `toggle_selection`, raw
+    /// `set_selection`, and `doc.set_selection`'s still-live container
+    /// expansion) can all still build one. Found by an adversarial review of
+    /// §16.4, 2026-07-29.
+    ///
+    /// `move_selection` reads each element from the PRISTINE pre-move document
+    /// and writes an absolute result. For two disjoint entries that is exactly
+    /// right. For an ancestor and its descendant it is not: the descendant's
+    /// write lands on top of the ancestor's, discarding the ancestor's
+    /// contribution to it.
+    ///
+    /// Measured: group selected whole plus one member's single control point,
+    /// dragged +24. The sibling moved 20 -> 44 correctly, while the
+    /// partially-selected member became a Polygon STRANDED at pristine
+    /// coordinates — [(24,0), (10,0), (10,10), (0,10)] — with one corner
+    /// displaced and the group's translation lost. That is artwork corruption
+    /// from an ordinary two-tool gesture.
+    ///
+    /// The rule here is the one §16.4 states: the OUTERMOST entry wins. It also
+    /// makes the operation correct regardless of which producer built the
+    /// selection, which enforcing §16.4 at each seam separately would not.
+    #[test]
+    fn an_ancestor_in_the_selection_covers_its_descendants() {
+        use crate::geometry::element::GroupElem;
+        use crate::document::document::SortedCps;
+        use std::rc::Rc;
+        let mk_rect = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(mk_rect(0.0)), Rc::new(mk_rect(20.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(group)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { name: Some("L".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: Vec::new(), ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::set_selection(&mut model, vec![
+            ElementSelection::all(vec![0, 0]),
+            ElementSelection { path: vec![0, 0, 0],
+                               kind: SelectionKind::Partial(SortedCps::from_iter([0usize])) },
+        ]);
+        Controller::move_selection(&mut model, 24.0, 0.0);
+
+        let Some(Element::Group(g)) = model.document().get_element(&vec![0, 0]) else {
+            panic!("[0,0] should still be a Group");
+        };
+        // BOTH members ride the group's move, whole, and neither is rebuilt as
+        // a Polygon by a control-point edit that the group's move supersedes.
+        match g.children[0].as_ref() {
+            Element::Rect(r) => assert_eq!(
+                (r.x, r.y), (24.0, 0.0),
+                "the partially-selected member rides the group's move whole"),
+            other => panic!("child 0 must stay a Rect, got {other:?}"),
+        }
+        match g.children[1].as_ref() {
+            Element::Rect(r) => assert_eq!((r.x, r.y), (44.0, 0.0),
+                                           "the sibling moves with the group"),
+            other => panic!("child 1 must stay a Rect, got {other:?}"),
         }
     }
 

@@ -92,3 +92,52 @@ struct MarqueeCopyTests {
                 "the band is inside the group's bounds but touches no member; got \(ctrl.document.selection.map(\.path))")
     }
 }
+
+/// §16.4 AT THE POINT OF USE — an ancestor in the selection covers its
+/// descendants.
+///
+/// The ruling forbids such a selection, but it is not yet ENFORCED at every
+/// producer: the extend/add seams and `doc.set_selection`'s still-live
+/// container expansion (§20) can all still build one. An adversarial review of
+/// §16.4 found the consequence by probing, 2026-07-29.
+///
+/// Twin of Rust `an_ancestor_in_the_selection_covers_its_descendants`.
+@Suite("Ancestor covers descendants")
+struct AncestorCoversDescendantsTests {
+
+    /// Group selected whole PLUS one member's single control point, dragged.
+    ///
+    /// Before the fix the member was rebuilt by the control-point edit and the
+    /// group's translation was lost on it — in Rust it came back as a Polygon
+    /// stranded at pristine coordinates with one corner displaced, while its
+    /// sibling had moved correctly. The two ports corrupted it *differently*,
+    /// because Rust reads each element from the pristine document and Swift
+    /// read from the running one.
+    @Test func aPartiallySelectedMemberRidesItsGroupsMoveWhole() {
+        let doc = Document(layers: [Layer(name: "Stage", children: [
+            .group(Group(children: [
+                .rect(Rect(x: 0, y: 0, width: 10, height: 10)),
+                .rect(Rect(x: 20, y: 0, width: 10, height: 10)),
+            ])),
+        ])])
+        let model = Model(document: doc.replacing(selection: [
+            ElementSelection.all([0, 0]),
+            ElementSelection(path: [0, 0, 0], kind: .partial(.single(0))),
+        ]))
+        Controller(model: model).moveSelection(dx: 24, dy: 0)
+
+        guard case .group(let g) = model.document.getElement([0, 0]) else {
+            Issue.record("[0,0] should still be a Group"); return
+        }
+        guard case .rect(let a) = g.children[0] else {
+            Issue.record("child 0 must stay a Rect"); return
+        }
+        guard case .rect(let b) = g.children[1] else {
+            Issue.record("child 1 must stay a Rect"); return
+        }
+        #expect(a.x == 24 && a.y == 0,
+                "the partially-selected member rides the group's move whole, got (\(a.x), \(a.y))")
+        #expect(b.x == 44 && b.y == 0,
+                "the sibling moves with the group, got (\(b.x), \(b.y))")
+    }
+}
