@@ -93,3 +93,41 @@ struct GroupMoveProbeTests {
                 "moving with an .all selection must equal translating: \(report)")
     }
 }
+
+/// A CONTAINER'S FULL SELECTION MOVES IT, however that fullness is spelled.
+///
+/// Twin of Rust `a_container_moves_however_its_full_selection_is_spelled`.
+/// DOCUMENT.md grants a Group four bbox-corner control points, so `.all` and
+/// `.partial([0,1,2,3])` are both "fully selected". The GROUPMOVE repair
+/// guarded on `isAll(total: 0)` and accepted only the first.
+@Suite("Container full-selection spellings")
+struct ContainerFullSelectionTests {
+
+    private func group() -> Element {
+        .group(Group(children: [
+            .rect(Rect(x: 0, y: 0, width: 10, height: 10)),
+            .rect(Rect(x: 20, y: 0, width: 10, height: 10)),
+        ]))
+    }
+
+    @Test func bothSpellingsOfFullyySelectedMoveTheGroup() {
+        let g = group()
+        #expect(g.controlPointCount == 4,
+                "DOCUMENT.md grants a Group four bbox-corner control points")
+        for kind in [SelectionKind.all, .partial(SortedCps(0..<4))] {
+            let moved = g.moveControlPoints(kind, dx: 24, dy: 0)
+            guard case .group(let mg) = moved, case .rect(let r) = mg.children[0] else {
+                Issue.record("expected a Group of Rects"); return
+            }
+            #expect(r.x == 24, "a fully-selected container moves; got x=\(r.x)")
+        }
+    }
+
+    /// One corner is a RESIZE gesture, and group resize does not exist. It must
+    /// leave the group alone rather than translating it.
+    @Test func onePartialCornerDoesNotTranslateTheGroup() {
+        let g = group()
+        #expect(g.moveControlPoints(.partial(SortedCps([0])), dx: 24, dy: 0) == g,
+                "one corner selected is a resize gesture, not a translate")
+    }
+}

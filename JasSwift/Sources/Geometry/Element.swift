@@ -1105,7 +1105,18 @@ public enum Element: Equatable {
         // Measured 2026-07-29; twin invariant:
         // `move_all_equals_translate_for_every_kind`.
         case .group, .layer, .live:
-            guard kind.isAll(total: 0) else { return self }
+            // The predicate is the element's OWN control-point count, not zero.
+            // DOCUMENT.md's table grants a Group FOUR bbox-corner control
+            // points, so "fully selected" has two valid spellings — `.all`, and
+            // `.partial([0,1,2,3])`, which is what a full selection expands to.
+            // Guarding on `isAll(total: 0)` accepted only the first, so the
+            // second fell through and THE GROUP DID NOT MOVE: the very defect
+            // this arm was added to fix, still armed one layer down.
+            //
+            // A PARTIAL container selection (one corner) is a resize gesture,
+            // not a move, and group resize does not exist — it correctly falls
+            // through. Twin: `a_container_moves_however_its_full_selection_is_spelled`.
+            guard kind.isAll(total: controlPointCount) else { return self }
             return translated(dx: dx, dy: dy)
         default:
             return self

@@ -4131,6 +4131,59 @@ mod tests {
         }
     }
 
+
+    /// A CONTAINER'S FULL SELECTION MOVES IT, however that fullness is spelled.
+    ///
+    /// DOCUMENT.md's control-point table grants a Group FOUR control points at
+    /// its bounding-box corners. `control_point_count` and `control_points`
+    /// both implement that. So "this group is fully selected" has TWO valid
+    /// spellings: `All`, and `Partial([0,1,2,3])` -- the latter is exactly what
+    /// `kind.to_sorted(control_point_count(elem))` produces from an `All` entry.
+    ///
+    /// The GROUPMOVE repair guarded its container arm on `kind.is_all(0)`,
+    /// which is the right predicate for an element with NO control points and
+    /// the wrong one for a container that has four: `Partial([0,1,2,3])` fails
+    /// it, falls to the catch-all, and THE GROUP DOES NOT MOVE. Defect 1, still
+    /// armed one layer down, and this seat armed it.
+    ///
+    /// Found by an adversarial review of the element-dispatch ledger, which
+    /// cited the spec table against this seat's own claim that a container has
+    /// no control points.
+    #[test]
+    fn a_container_moves_however_its_full_selection_is_spelled() {
+        use crate::geometry::element::{GroupElem, control_point_count, move_control_points};
+        use crate::document::document::SortedCps;
+        use std::rc::Rc;
+        let mk = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let g = Element::Group(GroupElem {
+            children: vec![Rc::new(mk(0.0)), Rc::new(mk(20.0))],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        assert_eq!(control_point_count(&g), 4,
+                   "DOCUMENT.md grants a Group four bbox-corner control points");
+
+        let full = SelectionKind::Partial(SortedCps::from_iter([0usize, 1, 2, 3]));
+        for (label, kind) in [("All", SelectionKind::All), ("Partial(all four)", full)] {
+            let moved = move_control_points(&g, &kind, 24.0, 0.0);
+            let Element::Group(mg) = &moved else { panic!("still a Group") };
+            let Element::Rect(r) = mg.children[0].as_ref() else { panic!("Rect") };
+            assert_eq!(r.x, 24.0,
+                       "a fully-selected container moves when spelled {label}");
+        }
+
+        // A PARTIAL container selection is a resize gesture, not a move, and
+        // group resize does not exist. It must leave the group alone rather
+        // than translating it by a drag meant for one corner.
+        let corner = SelectionKind::Partial(SortedCps::from_iter([0usize]));
+        assert_eq!(move_control_points(&g, &corner, 24.0, 0.0), g,
+                   "one corner selected is a resize gesture, not a translate");
+    }
+
     #[test]
     fn group_selection() {
         let mut model = setup_model();

@@ -2494,9 +2494,22 @@ pub fn move_control_points(
         // That expansion is what LAYER_STRUCTURE.md §20 rules should be
         // removed, which would have carried the defect into Rust as well. See
         // `move_all_equals_translate_for_every_kind` for the invariant.
+        // The predicate is the element's OWN control-point count, not zero.
+        // DOCUMENT.md's table grants a Group FOUR bbox-corner control points,
+        // so "fully selected" has two valid spellings -- `All`, and
+        // `Partial([0,1,2,3])`, which is what `kind.to_sorted(
+        // control_point_count(elem))` produces from an `All` entry. Guarding on
+        // `is_all(0)` accepted only the first, so the second fell to the
+        // catch-all and THE GROUP DID NOT MOVE: the very defect this arm was
+        // added to fix, still armed one layer down.
+        //
+        // A PARTIAL container selection (one corner) is a resize gesture, not a
+        // move, and group resize does not exist -- it correctly falls through.
         Element::Group(_)
         | Element::Layer(_)
-        | Element::Live(_) if kind.is_all(0) => translate_element(elem, dx, dy),
+        | Element::Live(_) if kind.is_all(control_point_count(elem)) => {
+            translate_element(elem, dx, dy)
+        }
         _ => elem.clone(),
     }
 }
