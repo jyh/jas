@@ -3,15 +3,15 @@ import Testing
 
 /// Helper: create a Selection from element paths.
 private func sel(_ paths: ElementPath...) -> Selection {
-    Set(paths.map { ElementSelection(path: $0) })
+    paths.map { ElementSelection(path: $0) }
 }
 
 /// Helper: create a Selection with each path selected as a whole.
 private func selAllCPs(_ doc: Document, _ paths: ElementPath...) -> Selection {
-    Set(paths.map { p in
+    paths.map { p in
         let _ = doc.getElement(p)
         return ElementSelection.all(p)
-    })
+    }
 }
 
 /// Helper: extract the set of paths from a Selection.

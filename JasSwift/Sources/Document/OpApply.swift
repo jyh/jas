@@ -125,18 +125,32 @@ private func idPathsInDocumentOrder(_ doc: Document) -> [(String, ElementPath)] 
     return out
 }
 
+/// The SELECTION-ONLY verbs: they change `doc.selection` and nothing else, so
+/// they are non-undoable and must stay journal-neutral (no transaction is
+/// opened for them). Named ONCE so a new selection verb has one place to
+/// register. Mirrors Rust `is_selection_only_verb`.
+private func isSelectionOnlyVerb(_ name: String) -> Bool {
+    switch name {
+    case "select_rect", "select_by_ids", "select_element", "select_all", "add_to_selection":
+        return true
+    default:
+        return false
+    }
+}
+
 /// Build the selection (in DOCUMENT ORDER) for the elements whose `id` is in
 /// `ids`, as `ElementSelection.all(path)` entries. Document order — NOT the
 /// order of `ids` — so the result is byte-identical to what `select_rect` would
-/// produce for the same set (the byte-gate reconciliation; the selection
-/// serializer also sorts by path). An id that resolves to no element is silently
-/// dropped (hardened: a stale/unknown id is a skip). Mirrors Rust
-/// `selection_for_ids`.
+/// produce for the same set (the byte-gate reconciliation). The canonical-JSON
+/// selection serializer no longer normalizes order (LAYER_STRUCTURE.md §10 D6),
+/// so this walk being document-ordered is now load-bearing rather than belt-and-
+/// braces. An id that resolves to no element is silently dropped (hardened: a
+/// stale/unknown id is a skip). Mirrors Rust `selection_for_ids`.
 private func selectionForIds(_ doc: Document, _ ids: [String]) -> Selection {
     let wanted = Set(ids)
     var sel: Selection = []
     for (id, path) in idPathsInDocumentOrder(doc) where wanted.contains(id) {
-        sel.insert(ElementSelection.all(path))
+        sel.append(ElementSelection.all(path))
     }
     return sel
 }
@@ -958,7 +972,7 @@ public func pasteFragmentInto(
         var target = layers[idx]
         for child in children {
             let translated = EditClipboard.translateElement(child, dx: offset, dy: offset)
-            newSelection.insert(ElementSelection.all([idx, target.children.count]))
+            newSelection.append(ElementSelection.all([idx, target.children.count]))
             target.children.append(translated)
         }
         layers[idx] = target
@@ -1513,9 +1527,11 @@ public func opApply(
     // id-primary twin (selection-only, non-undoable), so it is excluded for the
     // identical reason. `select_element` is the path-addressed click seam —
     // selection-only for exactly the same reason as `select_rect`, and excluded
-    // on the same grounds.
-    if name != "select_rect" && name != "select_by_ids" && name != "select_element"
-        && !model.isInTxn {
+    // on the same grounds. `select_all` (LAYER_STRUCTURE.md §16) and
+    // `add_to_selection` join the list for the same reason; the set is named
+    // once, in `isSelectionOnlyVerb`, so a new selection verb has ONE place to
+    // register rather than a growing `&&` chain that is easy to miss.
+    if !isSelectionOnlyVerb(name) && !model.isInTxn {
         model.beginTxn()
     }
     // Fork-4 `targets` (OP_LOG.md §9). Populated for the THREE replay-safe verbs
@@ -1589,6 +1605,28 @@ public func opApply(
             return .missingTarget(id: String(describing: path))
         }
         controller.selectElement(path)
+        targets = selectionToIds(model.document)
+    // SELECT ALL — transcripts/LAYER_STRUCTURE.md §16 (RULED 2026-07-28): it
+    // selects TOP-LEVEL objects, a group counting as ONE. Before this verb
+    // nothing shared could reach `selectAll` in either port, which is how this
+    // port's group-expanding version (a selection containing an element AND its
+    // own descendants) survived unadjudicated. Routed through the production
+    // `Controller.selectAll`, never a copy of it. Mirrors Rust's `select_all`.
+    case "select_all":
+        controller.selectAll()
+        targets = selectionToIds(model.document)
+    // The ADDITIVE selection seam — the same `Controller.addToSelection` the
+    // YAML effect `doc.add_to_selection` calls (shift-click). It is the one
+    // production site whose contract is "idempotent: no-op if the path is
+    // already selected", so it is what a corpus case can use to watch the DEDUP
+    // guard that `Selection` being an ordered array makes manual
+    // (LAYER_STRUCTURE.md §10, "THE MIGRATION HAZARD").
+    case "add_to_selection":
+        guard let path = parsePath(op["path"]) else { return reqErr(op, "path") }
+        guard !path.isEmpty, model.document.tryGetElement(path) != nil else {
+            return .missingTarget(id: String(describing: path))
+        }
+        controller.addToSelection(path)
         targets = selectionToIds(model.document)
     case "move_selection":
         controller.moveSelection(dx: numField(op, "dx"), dy: numField(op, "dy"))

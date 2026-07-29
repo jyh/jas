@@ -172,7 +172,7 @@ private func selectionPaths(_ model: Model) -> Set<[Int]> {
     let ctx = makeCtx(model: model)
 
     // Pre-select the blue rect [0,2].
-    Controller(model: model).setSelection(Set([ElementSelection.all([0, 2])]))
+    Controller(model: model).setSelection([ElementSelection.all([0, 2])])
 
     // Shift+click red [0,0] → ADD: {2} ∪ {0,1} = {0,1,2}.
     tool.onPress(ctx, x: 5, y: 5, shift: true, alt: false)
@@ -192,7 +192,7 @@ private func selectionPaths(_ model: Model) -> Set<[Int]> {
     let ctx = makeCtx(model: model)
 
     // Start with a non-empty selection.
-    Controller(model: model).setSelection(Set([ElementSelection.all([0, 1])]))
+    Controller(model: model).setSelection([ElementSelection.all([0, 1])])
     #expect(!model.document.selection.isEmpty)
 
     // Plain click on empty canvas (100,100) → selection cleared.
@@ -241,7 +241,7 @@ private func selectionPaths(_ model: Model) -> Set<[Int]> {
     let ctx = makeCtx(model: model)
 
     // Pre-select the empty target [0,1]; the source [0,0] is clicked.
-    Controller(model: model).setSelection(Set([ElementSelection.all([0, 1])]))
+    Controller(model: model).setSelection([ElementSelection.all([0, 1])])
     #expect(model.document.getElement([0, 1]).fill == nil)
 
     // Plain click on the green source at screen (5,5) → sample, which

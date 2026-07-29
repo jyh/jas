@@ -948,9 +948,19 @@ fn selection_json(sel: &[ElementSelection]) -> String {
             (es.path.clone(), o.build())
         })
         .collect();
-    // Sort by path lexicographically.
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
-    let items: Vec<String> = entries.into_iter().map(|(_, json)| json).collect();
+    // EMISSION ORDER IS THE SELECTION'S OWN ORDER — deliberately NOT sorted.
+    //
+    // This serializer used to sort by path, and that sort is why the shared
+    // corpus was structurally blind to the D6 defect (LAYER_STRUCTURE.md §10):
+    // JasSwift's `Selection` was a `Set`, so its iteration order was per-process
+    // hash order, and every golden agreed anyway because BOTH ports sorted on
+    // the way out. Selection order is artwork — it decides the z-order of what a
+    // copy emits — so the canonical JSON must show it.
+    //
+    // Dropping the sort also makes a DUPLICATE entry visible: `Selection` is a
+    // `Vec`/array in both ports now, so dedup is a manual guard at every
+    // insertion site and a missing one shows up here as a repeated path.
+    let items: Vec<String> = entries.drain(..).map(|(_, json)| json).collect();
     json_array(&items)
 }
 
@@ -2271,20 +2281,37 @@ mod tests {
         assert!(height_pos < type_pos);
     }
 
+    /// The serializer PRESERVES the selection's own order (it used to sort by
+    /// path). Twin: JasSwift `selectionJsonPreservesEmissionOrder`.
+    /// LAYER_STRUCTURE.md §10 D6 — the sort is what made the shared corpus
+    /// blind to a `Set`-ordered selection.
     #[test]
-    fn selection_sorted_by_path() {
+    fn selection_json_preserves_emission_order() {
         let sel = vec![
             ElementSelection::all(vec![1, 0]),
             ElementSelection::all(vec![0, 1]),
             ElementSelection::partial(vec![0, 0], [2, 0, 4]),
         ];
         let json = selection_json(&sel);
-        // [0,0] should come first, then [0,1], then [1,0].
         let pos_00 = json.find("[0,0]").unwrap();
         let pos_01 = json.find("[0,1]").unwrap();
         let pos_10 = json.find("[1,0]").unwrap();
-        assert!(pos_00 < pos_01);
-        assert!(pos_01 < pos_10);
+        // Emitted in the order given, NOT [0,0] < [0,1] < [1,0].
+        assert!(pos_10 < pos_01, "expected [1,0] first, got {json}");
+        assert!(pos_01 < pos_00, "expected [0,1] second, got {json}");
+    }
+
+    /// A duplicate path is emitted TWICE — the serializer does not dedup, so a
+    /// missing insertion guard is visible in every golden that carries a
+    /// multi-entry selection. LAYER_STRUCTURE.md §10 D6 "THE MIGRATION HAZARD".
+    #[test]
+    fn selection_json_emits_a_duplicate_path_twice() {
+        let sel = vec![
+            ElementSelection::all(vec![0, 1]),
+            ElementSelection::all(vec![0, 1]),
+        ];
+        let json = selection_json(&sel);
+        assert_eq!(json.matches("[0,1]").count(), 2, "got {json}");
     }
 
     #[test]

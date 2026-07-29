@@ -17,7 +17,7 @@ private func makeRect(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> Ele
 
 private func modelWithRects(_ rects: [Element], selected: [ElementPath]) -> Model {
     let layer = Layer(children: rects)
-    let selection: Selection = Set(selected.map { ElementSelection.all($0) })
+    let selection: Selection = selected.map { ElementSelection.all($0) }
     let doc = Document(layers: [layer], selectedLayer: 0, selection: selection)
     return Model(document: doc)
 }

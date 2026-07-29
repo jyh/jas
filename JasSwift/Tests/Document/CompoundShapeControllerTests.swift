@@ -10,7 +10,7 @@ private func rectAt(_ x: Double, _ y: Double) -> Element {
 
 private func modelWithRects(_ rects: [Element], selected: [ElementPath]) -> Model {
     let layer = Layer(children: rects)
-    let sel: Selection = Set(selected.map { ElementSelection.all($0) })
+    let sel: Selection = selected.map { ElementSelection.all($0) }
     let doc = Document(layers: [layer], selectedLayer: 0, selection: sel)
     return Model(document: doc)
 }

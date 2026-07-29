@@ -12,7 +12,7 @@ import Testing
 
 private func strokeModel(_ rects: [Element], selected: [ElementPath]) -> Model {
     let layer = Layer(children: rects)
-    let selection: Selection = Set(selected.map { ElementSelection.all($0) })
+    let selection: Selection = selected.map { ElementSelection.all($0) }
     return Model(document: Document(layers: [layer], selectedLayer: 0,
                                     selection: selection))
 }

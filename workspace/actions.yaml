@@ -321,6 +321,27 @@ actions:
       means INHERITED lock: an object is excluded when its own flag is
       set or when any layer or group it sits inside is locked, at any
       depth. A locked layer therefore contributes nothing at all.
+
+      SELECT ALL SELECTS TOP-LEVEL OBJECTS, AND A GROUP COUNTS AS ONE. Every
+      direct child of a layer contributes exactly one entry to the selection:
+      a group is selected as the single object it is, and its members are NOT
+      also selected. That is what grouping means — the group IS the object,
+      and entering the group is how you reach the members. A selection that
+      held both a group and its own children would have no coherent reading:
+      moving it by 24 would move the group by 24 and move each child, already
+      carried by its parent, by 24 again.
+
+      This is the one place Select All differs from the rubber-band marquee,
+      and the difference is deliberate. The marquee asks "did anything inside
+      the band match?", so when it touches a group it selects the group AND
+      the members that were touched. Select All asks a different question and
+      gets a different answer.
+
+      A group is skipped entirely when it is locked or hidden, whatever its
+      members are; a group with a locked member is still selected as one
+      object, because Select All never looks inside a group at all.
+
+      Selecting is not an edit: it is not recorded on the undo stack.
     category: edit
     tier: 3
     enabled_when: "state.tab_count > 0"
