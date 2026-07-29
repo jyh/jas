@@ -2396,6 +2396,25 @@ pub fn move_control_points(
                 ..e.clone()
             })
         }
+        // A polyline's control points are its points, exactly as a polygon's
+        // are — the only difference between the two kinds is whether the run
+        // closes. This arm was simply ABSENT: a polyline fell to the catch-all
+        // and did not move, whole or by control point. Found by
+        // `move_all_equals_translate_for_every_kind` while fixing the
+        // container arms below, not by a report.
+        Element::Polyline(e) => {
+            let mut new_pts = e.points.clone();
+            for i in 0..new_pts.len() {
+                if kind.contains(i) {
+                    new_pts[i].0 += dx;
+                    new_pts[i].1 += dy;
+                }
+            }
+            Element::Polyline(PolylineElem {
+                points: new_pts,
+                ..e.clone()
+            })
+        }
         Element::Path(e) => {
             let new_d = move_path_command_points(&e.d, kind, dx, dy);
             Element::Path(PathElem {
@@ -2456,6 +2475,28 @@ pub fn move_control_points(
             new_r.common.transform = Some(existing.translated(dx, dy));
             Element::Live(super::live::LiveVariant::Reference(new_r))
         }
+        // CONTAINERS AND THE REMAINING LIVE KINDS. A container has no control
+        // points of its own, so a selection of it is always a selection of the
+        // whole subtree, and moving it moves its members. `translate_element`
+        // already knows how to do that for every one of these kinds (it is the
+        // paste and Align path), so delegate rather than re-derive.
+        //
+        // Without this arm a Group fell through to `_ => elem.clone()` and a
+        // group selected as ONE entry DID NOT MOVE — measured 2026-07-29, in
+        // both ports. The Selection tool puts exactly one entry in the
+        // selection on a click (`selection.yaml` `doc.set_selection`), and
+        // `hit_test` returns the GROUP's path for a click inside a group's
+        // child, so this was every click-and-drag of a group. Rust hid it
+        // because `doc.set_selection` expands a container to its descendants
+        // (`interpreter/effects.rs`) and the CHILDREN moved themselves;
+        // JasSwift, which does not expand, could not drag a group at all.
+        //
+        // That expansion is what LAYER_STRUCTURE.md §20 rules should be
+        // removed, which would have carried the defect into Rust as well. See
+        // `move_all_equals_translate_for_every_kind` for the invariant.
+        Element::Group(_)
+        | Element::Layer(_)
+        | Element::Live(_) if kind.is_all(0) => translate_element(elem, dx, dy),
         _ => elem.clone(),
     }
 }
@@ -3187,6 +3228,80 @@ pub fn with_width_points(elem: &Element, width_points: Vec<StrokeWidthPoint>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// THE INVARIANT: for an ALL selection, moving is translating.
+    ///
+    /// `move_control_points` and `translate_element` are two spellings of the
+    /// same idea — the first takes a control-point subset, the second always
+    /// means the whole element. When the subset IS the whole element they must
+    /// agree, for every kind. They did not: `move_control_points` had no arm
+    /// for `Group`, `Layer` or the non-Reference `Live` kinds, so those fell to
+    /// its catch-all `elem.clone()` and DID NOT MOVE, while `translate_element`
+    /// moved them correctly. A group selected as one entry could not be dragged.
+    ///
+    /// This is asserted per KIND rather than per bug so the next kind added to
+    /// one function and forgotten in the other reds here instead of shipping.
+    /// Twin: JasSwift `GroupMoveProbeTests`.
+    #[test]
+    fn move_all_equals_translate_for_every_kind() {
+        use std::rc::Rc;
+        let leaf = Element::Rect(RectElem {
+            x: 3.0, y: 4.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let line = Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 5.0, y2: 5.0, stroke: None,
+            width_points: Vec::new(), common: CommonProps::default(),
+            stroke_gradient: None,
+        });
+        let kinds: Vec<(&str, Element)> = vec![
+            ("rect", leaf.clone()),
+            ("line", line.clone()),
+            ("polyline", Element::Polyline(PolylineElem {
+                points: vec![(0.0, 0.0), (1.0, 2.0)], stroke: None,
+                common: CommonProps::default(),
+                fill: None, fill_gradient: None, stroke_gradient: None,
+            })),
+            ("group", Element::Group(GroupElem {
+                children: vec![Rc::new(leaf.clone()), Rc::new(line.clone())],
+                isolated_blending: false, knockout_group: false,
+                common: CommonProps::default(),
+            })),
+            ("layer", Element::Layer(LayerElem {
+                children: vec![Rc::new(leaf.clone())],
+                isolated_blending: false, knockout_group: false,
+                common: CommonProps::default(),
+            })),
+            ("nested group", Element::Group(GroupElem {
+                children: vec![Rc::new(Element::Group(GroupElem {
+                    children: vec![Rc::new(leaf.clone())],
+                    isolated_blending: false, knockout_group: false,
+                    common: CommonProps::default(),
+                }))],
+                isolated_blending: false, knockout_group: false,
+                common: CommonProps::default(),
+            })),
+        ];
+        let (dx, dy) = (10.0, 20.0);
+        let mut disagreed = Vec::new();
+        for (name, elem) in &kinds {
+            let moved = move_control_points(elem, &SelectionKind::All, dx, dy);
+            let translated = translate_element(elem, dx, dy);
+            if moved != translated {
+                let stationary = moved == *elem;
+                disagreed.push(format!(
+                    "  {name}: move_control_points(All) != translate_element{}",
+                    if stationary { " — it did not move AT ALL" } else { "" }
+                ));
+            }
+        }
+        assert!(
+            disagreed.is_empty(),
+            "moving with an ALL selection must equal translating:\n{}",
+            disagreed.join("\n")
+        );
+    }
 
     /// Risk R9 (transcripts/CORPUS_CENSUS.md §7): a non-finite hue must be
     /// sanitised to 0 here, not carried into the components. Unsanitised, `as

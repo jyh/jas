@@ -1022,6 +1022,16 @@ public enum Element: Equatable {
                 kind.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
             }
             return .polygon(v)
+        // A polyline's control points are its points, exactly as a polygon's
+        // are — the kinds differ only in whether the run closes. This arm was
+        // ABSENT in both ports: a polyline fell to `default` and did not move,
+        // whole or by control point. Found by the Rust twin of
+        // `moveAllEqualsTranslateForEveryKind`, not by a report.
+        case .polyline(var v):
+            v.points = v.points.enumerated().map { (i, pt) in
+                kind.contains(i) ? (pt.0 + dx, pt.1 + dy) : pt
+            }
+            return .polyline(v)
         case .path(var v):
             v.d = movePathCommandPoints(v.d, kind, dx: dx, dy: dy)
             return .path(v)
@@ -1078,6 +1088,25 @@ public enum Element: Equatable {
             var updated = r
             updated.transform = (r.transform ?? .identity).translated(dx, dy)
             return .live(.reference(updated))
+        // CONTAINERS AND THE REMAINING LIVE KINDS. A container has no control
+        // points of its own, so selecting it selects the whole subtree and
+        // moving it moves its members. `translated(dx:dy:)` already does that
+        // for every one of these kinds (it is the Align and paste path), so
+        // delegate rather than re-derive.
+        //
+        // Without this, a Group fell to `default: return self` and a group
+        // selected as ONE entry DID NOT MOVE — which in JasSwift was every
+        // click-and-drag of a group, because the Selection tool sets a
+        // one-entry selection (`selection.yaml` `doc.set_selection`) and
+        // hit_test returns the GROUP's path for a click inside its child.
+        // Rust hid the identical missing arm behind `doc.set_selection`'s
+        // container expansion, which LAYER_STRUCTURE.md §20 rules should be
+        // removed — so this had to be repaired before that lands.
+        // Measured 2026-07-29; twin invariant:
+        // `move_all_equals_translate_for_every_kind`.
+        case .group, .layer, .live:
+            guard kind.isAll(total: 0) else { return self }
+            return translated(dx: dx, dy: dy)
         default:
             return self
         }

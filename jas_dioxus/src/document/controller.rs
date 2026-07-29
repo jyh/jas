@@ -3731,6 +3731,48 @@ mod tests {
         }
     }
 
+
+    /// A GROUP selected as ONE entry must move when the selection moves.
+    ///
+    /// This is the shape every Selection-tool click on a group produces:
+    /// `selection.yaml` runs `doc.set_selection: { paths: [hit] }` and
+    /// `hit_test` returns the GROUP's path for a click inside a child
+    /// (`doc_primitives.rs`, `hit_test_returns_group_path_when_clicking_child_rect`).
+    /// §16 then made Select All produce it too, "a group counting as ONE".
+    ///
+    /// `move_control_points` had no Group arm, so the group fell to its
+    /// catch-all and did not move. Rust masked it because `doc.set_selection`
+    /// expands a container to its descendants and the CHILDREN moved
+    /// themselves; JasSwift does not expand and could not drag a group at all.
+    /// LAYER_STRUCTURE.md §20 rules that expansion away, which would have
+    /// carried the defect here too. Twin: JasSwift `GroupMoveProbeTests`.
+    #[test]
+    fn a_group_selected_as_one_entry_moves() {
+        let mut model = setup_model();
+        // The setup doc has a Group at [0,1] (see ungroup_selection).
+        let before = match model.document().get_element(&vec![0, 1]).unwrap() {
+            Element::Group(g) => match &*g.children[0] {
+                Element::Line(l) => (l.x1, l.y1),
+                other => panic!("group child 0 is unexpected: {:?}", other),
+            },
+            other => panic!("[0,1] is not a Group: {:?}", other),
+        };
+        Controller::set_selection(&mut model, vec![ElementSelection::all(vec![0, 1])]);
+        Controller::move_selection(&mut model, 10.0, 20.0);
+        let after = match model.document().get_element(&vec![0, 1]).unwrap() {
+            Element::Group(g) => match &*g.children[0] {
+                Element::Line(l) => (l.x1, l.y1),
+                other => panic!("group child 0 is unexpected: {:?}", other),
+            },
+            other => panic!("[0,1] is not a Group: {:?}", other),
+        };
+        assert_eq!(
+            after,
+            (before.0 + 10.0, before.1 + 20.0),
+            "a Group selected as ONE entry did not move"
+        );
+    }
+
     #[test]
     fn group_selection() {
         let mut model = setup_model();
@@ -6758,16 +6800,23 @@ mod preservation_law_tests {
             other => panic!("expected a compound shape, got {other:?}"),
         }) else { panic!("expected a compound shape") };
         // MANDATORY GEOMETRY PAIRING: the copy carries the source's operand
-        // geometry. It is NOT offset by (dx, dy): `move_control_points` falls
-        // through to a bare clone for a compound shape (`_ => elem.clone()`),
-        // so Edit > Copy of a live compound lands the copy exactly on top of
-        // its source. That is a pre-existing behaviour gap, recorded here
-        // because a geometry assertion must state what actually happened —
-        // it is not this wave's subject and is not repaired here.
+        // geometry, OFFSET by (dx, dy).
+        //
+        // This assertion used to demand x == 0 and explained why: a compound
+        // shape fell through `move_control_points`'s catch-all, so Edit > Copy
+        // of a live compound landed the copy exactly on top of its source. It
+        // was recorded as a pre-existing gap and deliberately not repaired.
+        //
+        // That gap is now CLOSED — `move_control_points` gained container and
+        // live arms delegating to `translate_element` (2026-07-29), so the copy
+        // lands beside its source like every other kind. This test and its
+        // JasSwift twin both went red on the same value, in lockstep, which is
+        // the corpus reporting a recorded gap being closed rather than a
+        // regression.
         let Element::Rect(r) = copy.operands[0].as_ref() else { panic!("rect") };
-        assert!((r.x - 0.0).abs() < 1e-9 && (r.width - 10.0).abs() < 1e-9,
-                "the copy carries the back operand's geometry, got x={} w={}",
-                r.x, r.width);
+        assert!((r.x - 20.0).abs() < 1e-9 && (r.width - 10.0).abs() < 1e-9,
+                "the copy carries the back operand's geometry offset by dx=20, \
+                 got x={} w={}", r.x, r.width);
         assert!(copy.common.id.is_none(), "the copy itself is born id-less");
         for (i, operand) in copy.operands.iter().enumerate() {
             assert!(operand.common().id.is_none(),

@@ -165,17 +165,23 @@ private func bbox(_ points: [(Double, Double)]) -> (Double, Double, Double, Doub
         Issue.record("expected two compound shapes"); return
     }
     // MANDATORY GEOMETRY PAIRING: the copy carries the source's operand
-    // geometry. It is NOT offset by (dx, dy) — `moveControlPoints` falls
-    // through to a bare return for a compound shape, so Edit > Copy of a live
-    // compound lands the copy exactly on top of its source. A pre-existing
-    // behaviour gap, RECORDED here because a geometry assertion must state
-    // what actually happened; it is not this wave's subject and is not
-    // repaired here. (Rust's twin battery records the identical gap.)
+    // geometry, OFFSET by (dx, dy).
+    //
+    // This assertion used to demand x == 0 and explained why: a compound shape
+    // fell through `moveControlPoints` to a bare return, so Edit > Copy of a
+    // live compound landed the copy exactly on top of its source. It was
+    // recorded as a pre-existing gap and deliberately not repaired.
+    //
+    // That gap is now CLOSED — `moveControlPoints` gained container and live
+    // arms delegating to `translated(dx:dy:)` (2026-07-29), so the copy lands
+    // beside its source like every other kind. This test and its Rust twin both
+    // went red on the same value, in lockstep, which is the corpus reporting a
+    // recorded gap being closed rather than a regression.
     guard case .rect(let r) = copy.operands[0] else {
         Issue.record("expected a rect operand"); return
     }
-    #expect(abs(r.x - 0) < 1e-9 && abs(r.width - 10) < 1e-9,
-            "the copy carries the back operand's geometry, got x=\(r.x) w=\(r.width)")
+    #expect(abs(r.x - 20) < 1e-9 && abs(r.width - 10) < 1e-9,
+            "the copy carries the back operand's geometry offset by dx=20, got x=\(r.x) w=\(r.width)")
 
     #expect(copy.id == nil, "the copy itself is born id-less")
     for (i, operand) in copy.operands.enumerated() {
