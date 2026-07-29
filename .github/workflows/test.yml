@@ -196,6 +196,12 @@ jobs:
           python scripts/check_preservation_corpus.py
           python scripts/check_corpus_manifest.py --self-test
           python scripts/check_corpus_manifest.py
+          # Added here after this gate landed 2026-07-28 keyed on str(Path) and
+          # failed WHOLESALE on Windows while CI stayed green — it runs in the
+          # ubuntu job, and ubuntu is the platform that cannot see the defect.
+          # A path-keyed gate belongs on the platform whose paths differ.
+          python scripts/check_swift_copy_sites.py --self-test
+          python scripts/check_swift_copy_sites.py
 
       # These five are the newline half's blast radius: each regenerates a
       # corpus and byte-compares it against the committed golden, so a text
