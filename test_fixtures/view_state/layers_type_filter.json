@@ -27,13 +27,27 @@
     "rows as display names would re-enact the defect inside the very corpus meant",
     "to prevent it. `name` is present on some rows only to prove it is IGNORED.",
     "",
-    "VECTORS MARKED `council: R1` ENCODE A READING UNDER REVIEW. Both ports keep",
-    "an ancestor of any surviving row, because a tree cannot draw a child without",
-    "its parent row -- so hiding a CONTAINER type is inoperative whenever a",
-    "descendant survives, while layers.yaml says 'hides all elements of that",
-    "type'. That is a SHARED reading, identical in both ports, not a divergence.",
-    "It is pinned here so that whatever the council rules moves deliberately and",
-    "in one place. If the ruling changes it, THIS FILE is the edit."
+    "VECTORS MARKED `ruled: R1/2026-07-30` CARRY A COUNCIL RULING, no longer a",
+    "question. JYH ruled the filter in CHECKED-SEMANTICS: a checked type lists all",
+    "its elements, PLUS THEIR ANCESTORS; nothing checked (the default) means",
+    "everything. Stated that way the ancestor rule stops being an awkward",
+    "exception and becomes half the definition -- and the old spec sentence",
+    "(\"unchecking a type hides all elements of that type\"), which was simply FALSE",
+    "for containers, dies with it.",
+    "",
+    "The keep-sets below did not move, and that is the point: checked and",
+    "unchecked are complements over the menu, so the shipping algorithm was always",
+    "computing the ruled rule. The implementation was never wrong. THE SENTENCE",
+    "WAS. What the ruling adds is a reason for a row to be present -- it matched,",
+    "or an ancestor obligation carried it -- and those two are different kinds of",
+    "row, which is what the pending dimming work renders.",
+    "",
+    "TWO AXES, NEVER DERIVED FROM EACH OTHER (the same council). Search is the",
+    "NAME axis and matches the displayed label as literal text -- `ath` finds",
+    "`<Path>` and `math` alike, across all types. The filter is the TYPE axis and",
+    "reads the element. The auto-generated `<Circle>` label is NOT a type",
+    "indicator; it is just a name. See the last two vectors: a circle the artist",
+    "named `<Rectangle>` is still a circle."
   ],
   "min_vectors": 14,
   "vectors": [
@@ -260,7 +274,6 @@
     },
     {
       "name": "container_kept_as_ancestor_of_a_survivor",
-      "council": "R1",
       "doc": "Hiding `group` does NOT remove the group, because its rectangle survives and a tree cannot draw a child without its parent row. So unchecking Group is very nearly a no-op today, while layers.yaml says it 'hides all elements of that type'. Identical in both ports.",
       "rows": [
         {
@@ -301,11 +314,11 @@
           0,
           0
         ]
-      ]
+      ],
+      "ruled": "R1/2026-07-30"
     },
     {
       "name": "container_removed_when_its_whole_subtree_is_hidden",
-      "council": "R1",
       "doc": "The other half of the same rule, and what makes it a REACHABILITY rule rather than an exemption: hide the container AND its only descendant type, and the container does disappear.",
       "rows": [
         {
@@ -338,11 +351,11 @@
         [
           0
         ]
-      ]
+      ],
+      "ruled": "R1/2026-07-30"
     },
     {
       "name": "ancestor_chain_two_levels_deep",
-      "council": "R1",
       "doc": "The keep-set walks EVERY proper prefix, not just the immediate parent. A one-level implementation would drop the middle group and orphan the survivor.",
       "rows": [
         {
@@ -399,11 +412,11 @@
           0,
           0
         ]
-      ]
+      ],
+      "ruled": "R1/2026-07-30"
     },
     {
       "name": "sibling_containers_resolve_independently",
-      "council": "R1",
       "doc": "Two groups under one layer: one holds a survivor, one does not. The first is kept as an ancestor, the second removed. A keep-set computed per-container rather than per-surviving-row would keep both.",
       "rows": [
         {
@@ -460,7 +473,8 @@
           1,
           0
         ]
-      ]
+      ],
+      "ruled": "R1/2026-07-30"
     },
     {
       "name": "sibling_index_is_compared_elementwise",
