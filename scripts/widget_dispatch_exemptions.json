@@ -7,6 +7,26 @@
     "reason -- a blank one excuses nothing (self-test case (d)). Keyed",
     "'port:kind'.",
     "",
+    "EVERY ROW'S REASON MUST BE FALSIFIABLE. A row carries `asserts`, each a",
+    "{file, contains|lacks} claim the gate VERIFIES on every run; a row may",
+    "omit them only by declaring `permanent: true`. This is not ceremony --",
+    "it is the correction for a defect this very file committed. The",
+    "swift:dropdown row used to assert 'JasSwift has neither the state nor the",
+    "filtering'. Both clauses were false for months: the state (@State",
+    "hiddenTypes), the tokens (layersTypeValue) and the filter",
+    "(layersTypeFilterKeep) were all shipping. On 2026-07-29 this seat read the",
+    "row, believed it, and set out to BUILD what already existed -- and the",
+    "false clause had by then been copied into a source comment beside the",
+    "dispatch default, so two places agreed with each other and neither was",
+    "checked. Consensus among copies is not evidence.",
+    "",
+    "The general law, third sighting in three days: A HUMAN-READABLE CLAIM IN A",
+    "MACHINE-READ FILE IS A CLAIM NOBODY RECHECKS. The other two were the",
+    "jas/windows seat's anti-vacuity floor with slack, and two of three `owed`",
+    "rows in element_dispatch_ledger.json that named a read path which did not",
+    "exist. Same shape every time: the machine checks the part it can parse and",
+    "the part that does the reasoning goes stale in silence.",
+    "",
     "Two classes live here and they are not alike:",
     "  * the SENTINEL, which no port should ever dispatch;",
     "  * REAL GAPS, scheduled but unbuilt. Each of those is a feature JasSwift",
@@ -19,9 +39,41 @@
     "worse than the placeholder it replaces."
   ],
   "exemptions": {
-    "rust:placeholder": "THE SENTINEL, not a widget kind. `placeholder` is what the canonical set calls the fallback a port renders for an unknown or undispatched kind; dispatching it would be circular. Exempt in every port, permanently. (This is also the 37-vs-38 discrepancy between two independent counts of the same list.)",
-    "swift:placeholder": "THE SENTINEL. As rust:placeholder -- permanent, not debt.",
-    "swift:dropdown": "REAL GAP, and larger than a dispatch arm: the Layers panel's element-type filter is UNBUILT in JasSwift. jas_dioxus backs it with native `AppState.layers_hidden_types` plus tree filtering (renderer.rs ~8900); JasSwift has neither the state nor the filtering. Adding only the arm would open a menu that changes nothing. Artist-visible today as the literal placeholder text 'Filter by element type' beside the Layers search box -- which appeared in a screenshot to the Captain on 2026-07-29 and was read by nobody. Found by the jas/windows seat counting dispatch arms."
+    "rust:placeholder": {
+      "permanent": true,
+      "reason": "THE SENTINEL, not a widget kind. `placeholder` is what the canonical set calls the fallback a port renders for an unknown or undispatched kind; dispatching it would be circular. Exempt in every port, permanently. (This is also the 37-vs-38 discrepancy between two independent counts of the same list.)",
+      "asserts": []
+    },
+    "swift:placeholder": {
+      "permanent": true,
+      "reason": "THE SENTINEL. As rust:placeholder -- permanent, not debt.",
+      "asserts": []
+    },
+    "swift:dropdown": {
+      "reason": "REAL GAP, but NOT the one this row claimed until 2026-07-29. The filter is not unbuilt in JasSwift -- it WORKS. What is missing is that JasSwift draws it NATIVELY inside `renderTreeView` rather than dispatching the YAML widget: `layers.yaml` declares `lp_search_bar` as `lp_search_input` (text_input) plus `lp_filter_button` (dropdown), and the tree view then hardcodes its OWN search field and its OWN eleven-item menu. So the artist sees the search field TWICE and two filter controls, of which the YAML one is an inert placeholder. jas_dioxus renders both from the YAML (`render_layers_filter_dropdown` iterates `items`) and duplicates neither -- it has no 'Search...' literal at all -- so this is a one-port, artist-visible divergence and a genericity leak against 'all apps should use generic yaml renders unless impractical'. Adding the dispatch arm ALONE would give a third control; the fix is to delete the native pair and render from the YAML, which is artist-visible layout and wants a refuter first. Retiring this row means doing that, not adding an arm.",
+      "asserts": [
+        {
+          "file": "JasSwift/Sources/Interpreter/YamlPanelBodyView.swift",
+          "lacks": "case \"dropdown\"",
+          "why": "The gap itself. If the arm lands, this row must be re-argued or removed."
+        },
+        {
+          "file": "JasSwift/Sources/Interpreter/YamlPanelBodyView.swift",
+          "contains": "func layersTypeValue",
+          "why": "Kills the old false clause for good: the type tokens exist in this port. If this vanishes, the claim above is wrong again and the row must be rewritten."
+        },
+        {
+          "file": "JasSwift/Sources/Interpreter/YamlPanelBodyView.swift",
+          "contains": "TextField(\"Search...\"",
+          "why": "The native duplicate the reason is ABOUT. When the native search field is deleted in favour of the YAML widget, this assert fails -- which is the point: the exemption cannot outlive the condition it describes."
+        },
+        {
+          "file": "jas_dioxus/src/interpreter/renderer.rs",
+          "contains": "\"dropdown\" => render_layers_filter_dropdown",
+          "why": "The comparison the reason rests on. If jas_dioxus stops rendering the control from the YAML, this stops being a one-port divergence and the row needs new words."
+        }
+      ]
+    }
   },
   "_related_gaps": [
     "NOT exemptions -- gaps this gate does not and should not police, recorded",

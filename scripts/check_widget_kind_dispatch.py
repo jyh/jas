@@ -128,7 +128,86 @@ def dispatched(port):
 def load_exemptions():
     if not LEDGER.exists():
         return {}
-    return json.loads(LEDGER.read_text(encoding="utf-8")).get("exemptions", {})
+    raw = json.loads(LEDGER.read_text(encoding="utf-8")).get("exemptions", {})
+    return {k: normalise_row(v) for k, v in raw.items()}
+
+
+def normalise_row(row):
+    """One shape for a row, whether it was written as a bare string or an object.
+
+    The bare-string spelling is still accepted so a row can be added in a hurry,
+    but it arrives with NO asserts and `verify_asserts` refuses that unless the
+    row is declared permanent -- so the hurry is visible rather than silent.
+    """
+    if isinstance(row, str):
+        return {"reason": row, "asserts": [], "permanent": False}
+    return {
+        "reason": row.get("reason", ""),
+        "asserts": row.get("asserts", []),
+        "permanent": bool(row.get("permanent", False)),
+    }
+
+
+def verify_asserts(exemptions, read_file):
+    """Broken justifications, as `(key, description)` pairs.
+
+    WHY A GATE CHECKS ITS OWN LEDGER'S PROSE. Every exemption is an argument
+    that a gap is intended, and an argument rests on facts about the tree. The
+    facts move; the prose does not. On 2026-07-29 the `swift:dropdown` row still
+    asserted JasSwift had "neither the state nor the filtering" months after it
+    had both -- and a seat read the row, believed it, and started rebuilding
+    what already shipped. The false clause had also been copied into a source
+    comment, so two places agreed and neither was checked.
+
+    So each row states its argument as {file, contains|lacks} claims, and this
+    verifies them on every run. The valuable direction is the one that fires
+    when the gap CLOSES: an exemption must not outlive the condition it
+    describes.
+    """
+    broken = []
+    for key, row in sorted(exemptions.items()):
+        claims = row["asserts"]
+        if not claims:
+            if not row["permanent"]:
+                broken.append((
+                    key,
+                    "carries no `asserts` and is not declared `permanent` -- an "
+                    "exemption whose reason cannot be checked is a hole that "
+                    "outlives its argument"))
+            continue
+        if row["permanent"]:
+            broken.append((key, "is declared `permanent` yet carries `asserts`; "
+                                "a permanent exemption has nothing to falsify"))
+        for i, claim in enumerate(claims):
+            path = claim.get("file")
+            if not path:
+                broken.append((key, f"assert #{i} names no `file`"))
+                continue
+            src = read_file(path)
+            if src is None:
+                broken.append((key, f"assert #{i} names {path}, which is not readable"))
+                continue
+            if "contains" in claim and claim["contains"] not in src:
+                broken.append((
+                    key,
+                    f"assert #{i} expects {path} to CONTAIN {claim['contains']!r} "
+                    f"and it does not. {claim.get('why', '')}".rstrip()))
+            if "lacks" in claim and claim["lacks"] in src:
+                broken.append((
+                    key,
+                    f"assert #{i} expects {path} to LACK {claim['lacks']!r} "
+                    f"and it is present. {claim.get('why', '')}".rstrip()))
+            if "contains" not in claim and "lacks" not in claim:
+                broken.append((
+                    key, f"assert #{i} states neither `contains` nor `lacks`"))
+    return broken
+
+
+def read_repo_file(path):
+    try:
+        return (REPO / path).read_text(encoding="utf-8")
+    except OSError:
+        return None
 
 
 def below_floor(n_kinds, arm_counts):
@@ -136,11 +215,18 @@ def below_floor(n_kinds, arm_counts):
 
 
 def gaps(kinds, per_port, exemptions):
-    """(port, kind) pairs a port does not dispatch and has not excused."""
+    """(port, kind) pairs a port does not dispatch and has not excused.
+
+    A row excuses only via a NON-EMPTY reason. Normalising here as well as in
+    `load_exemptions` keeps the row shape from mattering to callers -- and
+    matters because a normalised row is a dict, which is truthy even when its
+    reason is blank. Testing the container instead of the argument is precisely
+    the kind of check that passes while meaning nothing.
+    """
     out = []
     for port, handled in sorted(per_port.items()):
         for kind in sorted(kinds - handled):
-            if exemptions.get(f"{port}:{kind}"):
+            if normalise_row(exemptions.get(f"{port}:{kind}", ""))["reason"]:
                 continue
             out.append((port, kind))
     return out
@@ -175,6 +261,79 @@ def self_test():
     if gaps(kinds, {"swift": kinds - {"dropdown"}}, {"swift:dropdown": ""}) != [("swift", "dropdown")]:
         failures.append("  a blank exemption reason must NOT excuse the gap")
 
+    # (d2) The OBJECT spelling with a blank reason excuses nothing either. A
+    #      normalised row is a dict, and a dict is truthy -- so a container test
+    #      would pass here while meaning nothing.
+    if gaps(kinds, {"swift": kinds - {"dropdown"}},
+            {"swift:dropdown": {"reason": "", "asserts": []}}) != [("swift", "dropdown")]:
+        failures.append("  a blank reason in OBJECT form must NOT excuse the gap")
+
+    # ── The justification checks. Each row's reason is an argument about the
+    #    tree, and these prove the gate notices when the argument stops holding.
+    fake = {
+        "a.swift": 'case "dropdown": renderDropdown()\nfunc layersTypeValue() {}\n',
+        "b.rust": '"dropdown" => render_layers_filter_dropdown(el),\n',
+    }
+    read = lambda p: fake.get(p)
+
+    def claims_red(name, row, want_red, want_substr=None):
+        broken = verify_asserts({"swift:dropdown": normalise_row(row)}, read)
+        if bool(broken) != want_red:
+            verb = "RED" if want_red else "GREEN"
+            failures.append(f"  {name}: expected {verb}, got {broken or 'GREEN'}")
+        if want_substr and not any(want_substr in w for _, w in broken):
+            failures.append(f"  {name}: message should mention {want_substr!r}, got {broken}")
+
+    # (f) A `contains` claim that HOLDS is silent.
+    claims_red("f/contains holds",
+               {"reason": "r", "asserts": [
+                   {"file": "a.swift", "contains": "func layersTypeValue"}]}, False)
+
+    # (g) THE DIRECTION THAT MATTERS -- a `lacks` claim broken because the gap
+    #     CLOSED. The exemption must not outlive the condition it describes,
+    #     which is the whole failure this mechanism exists to prevent.
+    claims_red("g/gap closed",
+               {"reason": "r", "asserts": [
+                   {"file": "a.swift", "lacks": 'case "dropdown"',
+                    "why": "the arm landed"}]}, True, want_substr="the arm landed")
+
+    # (h) A `contains` claim broken because the thing it cited was DELETED --
+    #     the swift:dropdown row's own historical failure mode, where the
+    #     reason described a state of the world that had moved on.
+    claims_red("h/citation vanished",
+               {"reason": "r", "asserts": [
+                   {"file": "a.swift", "contains": "func neverExisted"}]}, True)
+
+    # (i) An unreadable file is a BROKEN claim, not a passing one. A renamed
+    #     file must not silently retire an argument.
+    claims_red("i/file gone",
+               {"reason": "r", "asserts": [
+                   {"file": "nope.swift", "contains": "x"}]}, True)
+
+    # (j) A row with NO asserts and no `permanent` flag is refused: an
+    #     unfalsifiable reason is a hole that outlives its argument.
+    claims_red("j/unfalsifiable", {"reason": "r", "asserts": []}, True)
+    claims_red("j/legacy string", "a bare string reason", True)
+
+    # (k) `permanent` excuses the absence of asserts -- the sentinel rows -- but
+    #     may not carry them, so the two spellings cannot blur together.
+    claims_red("k/permanent", {"reason": "r", "permanent": True, "asserts": []}, False)
+    claims_red("k/permanent with claims",
+               {"reason": "r", "permanent": True,
+                "asserts": [{"file": "a.swift", "contains": "func layersTypeValue"}]}, True)
+
+    # (l) A malformed claim is refused rather than skipped.
+    claims_red("l/no file", {"reason": "r", "asserts": [{"contains": "x"}]}, True)
+    claims_red("l/no predicate", {"reason": "r", "asserts": [{"file": "a.swift"}]}, True)
+
+    # (m) THE LIVE LEDGER's own justifications must hold right now. This is the
+    #     production assertion, run here too so `--self-test` alone catches a
+    #     row that has gone stale.
+    if LEDGER.exists():
+        live = verify_asserts(load_exemptions(), read_repo_file)
+        if live:
+            failures.append(f"  the shipping ledger has stale justifications: {live}")
+
     # (e) THE REAL PARSE, both ports, against the live tree. This is the case
     #     that would have caught the shipped defect, and it doubles as a parser
     #     check: if either regex stops matching, the arm count collapses and the
@@ -204,8 +363,12 @@ def self_test():
         print("\n".join(failures))
         return 1
     print(f"self-test: gap detection, full-coverage silence, PER-PORT exemption "
-          f"scoping and blank-reason rejection all hold; both ports' dispatch "
-          f"arms parse ({', '.join(f'{p}={len(k)}' for p, k in sorted(real.items()))}) "
+          f"scoping and blank-reason rejection (both spellings) all hold; "
+          f"exemption JUSTIFICATIONS are checked in every direction -- a closed "
+          f"gap, a vanished citation, an unreadable file, an unfalsifiable row "
+          f"and a malformed claim each go RED, and the shipping ledger's own "
+          f"claims are verified here too; both ports' dispatch arms parse "
+          f"({', '.join(f'{p}={len(k)}' for p, k in sorted(real.items()))}) "
           f"against {len(real_kinds)} canonical kinds; anti-vacuity floor holds "
           f"at {MIN_KINDS} kinds / {MIN_ARMS} arms -- gate proven RED where it "
           f"must be.")
@@ -232,12 +395,36 @@ def main():
     exemptions = load_exemptions()
     found = gaps(kinds, per_port, exemptions)
 
+    # An exemption's ARGUMENT is checked before its effect is honoured, because
+    # a stale argument is worse than a missing one: it reads as a decision.
+    stale = verify_asserts(exemptions, read_repo_file)
+    if stale:
+        print(f"ERROR: {len(stale)} exemption justification(s) in "
+              f"{LEDGER.relative_to(REPO).as_posix()} no longer hold.",
+              file=sys.stderr)
+        print(file=sys.stderr)
+        for key, why in stale:
+            print(f"  {key}: {why}", file=sys.stderr)
+        print(file=sys.stderr)
+        print("An exemption is an ARGUMENT that a gap is intended, and an argument", file=sys.stderr)
+        print("rests on facts about the tree. The facts move; the prose does not.", file=sys.stderr)
+        print("This row's own claims say it is now out of date -- either the gap", file=sys.stderr)
+        print("closed (delete the row) or the reason changed (rewrite it, with", file=sys.stderr)
+        print("asserts that match the new argument).", file=sys.stderr)
+        print(file=sys.stderr)
+        print("Do NOT relax the asserts to make this pass. That is how the", file=sys.stderr)
+        print("swift:dropdown row came to assert JasSwift lacked a filter it had", file=sys.stderr)
+        print("shipped for months, and cost a seat an evening rebuilding it.", file=sys.stderr)
+        return 1
+
     if not found:
         counts = ", ".join(f"{p} {len(v)}" for p, v in sorted(per_port.items()))
-        n_ex = sum(1 for v in exemptions.values() if v)
+        n_ex = sum(1 for v in exemptions.values() if v["reason"])
+        n_claims = sum(len(v["asserts"]) for v in exemptions.values())
         print(f"widget-kind dispatch: {len(kinds)} canonical kinds, all dispatched "
               f"by every active port ({counts})"
-              + (f", {n_ex} declared exemption(s)" if n_ex else "") + ".")
+              + (f", {n_ex} declared exemption(s) whose {n_claims} justifying "
+                 f"claim(s) all still hold" if n_ex else "") + ".")
         return 0
 
     print(f"ERROR: {len(found)} widget kind(s) are declared in the workspace and "
