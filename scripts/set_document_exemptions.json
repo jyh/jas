@@ -1,0 +1,32 @@
+{
+  "_doc": [
+    "CALLERS OF `set_document` THIS GATE CANNOT SEE A BRACKET FOR.",
+    "See scripts/check_set_document_bracketing.py.",
+    "",
+    "EVERY ROW HERE IS A QUESTION, NOT A CLEARANCE, and the wording says so. The",
+    "gate is FUNCTION-SCOPED: it asks whether the enclosing function opens a",
+    "transaction before the call. The type tools open theirs one frame up, in",
+    "`ensure_snapshot`, which is a legitimate pattern the gate structurally cannot",
+    "follow.",
+    "",
+    "So these five are PROBABLY fine and NOT ONE OF THEM HAS BEEN TRACED. Writing",
+    "'safe, bracketed by the caller' here would be the confident-and-wrong row this",
+    "project caught itself writing four times this week -- most recently the panic",
+    "that motivated this gate, where a call that had been legal for six weeks was",
+    "assumed to still be.",
+    "",
+    "WHAT THE ROWS BUY MEANWHILE: a NEW unbracketed caller reds immediately. That",
+    "is the direction that matters, and it works from the first run.",
+    "",
+    "TO RETIRE A ROW: trace every path into that function and confirm each opens a",
+    "transaction, or convert the write to `set_document_unbracketed` with the",
+    "matching NonUndoableIntent."
+  ],
+  "exemptions": {
+    "jas_dioxus/src/interpreter/renderer.rs::apply_doc_set_field": "UNTRACED. A generic `doc.set` effect write. Whether every dispatch path into it opens a transaction first is not established.",
+    "jas_dioxus/src/tools/type_on_path_tool.rs::sync_to_model": "The bracket is opened ONE FRAME UP by `ensure_snapshot` (begin_txn, idempotent while open) and this gate is function-scoped, so it cannot see it. NOT individually verified: whether EVERY call path reaches ensure_snapshot first is untraced.",
+    "jas_dioxus/src/tools/type_on_path_tool.rs::paste_text": "As sync_to_model above; same tool, same pattern, same untraced question.",
+    "jas_dioxus/src/tools/type_tool.rs::sync_to_model": "As type_on_path_tool::sync_to_model.",
+    "jas_dioxus/src/tools/type_tool.rs::paste_text": "As above."
+  }
+}

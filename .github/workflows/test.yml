@@ -68,6 +68,13 @@ jobs:
       # as an instance with an explanatory comment and no rule. Verified by hand
       # against all three historical sightings before wiring -- three of three.
       - run: python scripts/check_path_keying.py --self-test && python scripts/check_path_keying.py
+      # Every `set_document` caller sits inside a transaction. The runtime
+      # debug_assert for this landed 2026-06-19 without sweeping existing
+      # callers, and one stray call panicked every debug build's Layers panel
+      # for six weeks -- poisoning the RefCell so every later event failed too.
+      # A runtime assertion only fires if someone runs the debug build and
+      # reaches the line; this is the same claim on every build.
+      - run: python scripts/check_set_document_bracketing.py --self-test && python scripts/check_set_document_bracketing.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -255,6 +262,8 @@ jobs:
           python scripts/check_action_implementations.py
           python scripts/check_path_keying.py --self-test
           python scripts/check_path_keying.py
+          python scripts/check_set_document_bracketing.py --self-test
+          python scripts/check_set_document_bracketing.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves
