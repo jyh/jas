@@ -2893,25 +2893,66 @@ fn run_yaml_effects(
 /// native write already ran, so the port state is current; this only
 /// runs the extra declared effects. No-op when there is no commit
 /// behavior (the common case).
-fn run_input_commit_behavior(
-    el: &serde_json::Value,
+/// Resolve a behavior's declared `params` against a context.
+///
+/// EXTRACTED, not copied. These rules were inline in
+/// `build_mouse_event_handler` and nowhere else, so wiring a second behavior
+/// site needed them in two places -- and a resolution rule written twice is the
+/// hazard this project has spent the week naming. Both callers use this now.
+///
+/// The `Null` arm's bare-identifier fallback is load-bearing and easy to lose:
+/// YAML `{ tool: selection }` means the STRING "selection", not a lookup of an
+/// undefined `selection`.
+fn resolve_behavior_params(
+    decl: &serde_json::Map<String, serde_json::Value>,
+    ctx: &serde_json::Value,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut out = serde_json::Map::new();
+    for (k, v) in decl {
+        let Some(expr_str) = v.as_str() else {
+            out.insert(k.clone(), v.clone());
+            continue;
+        };
+        match expr::eval(expr_str, ctx) {
+            Value::Color(c) => { out.insert(k.clone(), serde_json::Value::String(c)); }
+            Value::Str(sv) => { out.insert(k.clone(), serde_json::Value::String(sv)); }
+            Value::Number(n) => { out.insert(k.clone(), serde_json::json!(n)); }
+            Value::Bool(b) => { out.insert(k.clone(), serde_json::json!(b)); }
+            Value::Null => {
+                if expr_str.chars().all(|c| c.is_alphanumeric() || c == '_')
+                    && !expr_str.is_empty()
+                {
+                    out.insert(k.clone(), serde_json::Value::String(expr_str.to_string()));
+                } else {
+                    out.insert(k.clone(), serde_json::Value::Null);
+                }
+            }
+            Value::List(l) => { out.insert(k.clone(), serde_json::Value::Array(l)); }
+            Value::Path(indices) => {
+                out.insert(k.clone(), serde_json::json!({
+                    "__path__": indices.iter().map(|&i| i as u64).collect::<Vec<_>>()
+                }));
+            }
+            Value::Closure { .. } => { out.insert(k.clone(), serde_json::Value::Null); }
+        }
+    }
+    out
+}
+
+/// The context a text input's behavior is evaluated against: the render context
+/// with the widget's own bound field already holding the value being committed,
+/// plus `event.value`.
+///
+/// Separated out so the trap can be TESTED. `lp_search_input` declares
+/// `params: { query: "panel.search_query" }` -- naming the field it is itself
+/// editing -- so without this patch the declared parameter resolves to the
+/// PREVIOUS keystroke and search lags by one, while every test that dispatches
+/// the action directly still passes.
+fn patch_ctx_for_input(
+    render_ctx: &serde_json::Value,
     field: &str,
     committed: &serde_json::Value,
-    render_ctx: &serde_json::Value,
-    st: &mut crate::workspace::app_state::AppState,
-) {
-    let commit_behaviors: Vec<&serde_json::Value> = el
-        .get("behavior")
-        .and_then(|b| b.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter(|b| b.get("event").and_then(|e| e.as_str()) == Some("commit"))
-                .collect()
-        })
-        .unwrap_or_default();
-    if commit_behaviors.is_empty() {
-        return;
-    }
+) -> serde_json::Value {
     let mut cs = render_ctx.clone();
     if let serde_json::Value::Object(root) = &mut cs {
         if let Some(serde_json::Value::Object(p)) = root.get_mut("panel") {
@@ -2919,9 +2960,74 @@ fn run_input_commit_behavior(
         }
         root.insert("event".into(), serde_json::json!({ "value": committed }));
     }
-    for b in &commit_behaviors {
+    cs
+}
+
+fn run_input_commit_behavior(
+    el: &serde_json::Value,
+    field: &str,
+    committed: &serde_json::Value,
+    render_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    run_input_behavior(el, field, committed, render_ctx, st, "commit");
+}
+
+/// Run a text input's declared behavior for `event`, against a context in which
+/// the widget's own bound field already holds the value being committed.
+///
+/// THE PATCHED CONTEXT IS THE POINT, and it is why this must not be replaced by
+/// a bare `dispatch_action` at the call site. `layers.yaml` declares
+///
+/// ```text
+/// behavior: [{ event: input, action: set_layers_search,
+///              params: { query: "panel.search_query" } }]
+/// ```
+///
+/// — SELF-REFERENTIAL: the parameter names the very field being edited. Evaluated
+/// against the raw render context that expression yields the PREVIOUS value, so
+/// the search would lag exactly one keystroke while every test that dispatches
+/// the action directly still passed. Patching `panel.<field>` first is what makes
+/// the declared spelling mean what it reads as.
+///
+/// Generalized from a commit-only, effects-only hook on 2026-07-30 (council
+/// Q3.1). It handled `event: commit` and ran `effects` alone, so a widget
+/// declaring `event: input` with an `action:` — which `lp_search_input` has
+/// always declared — was simply never run, and both ports reached around the
+/// declared route with native code instead.
+fn run_input_behavior(
+    el: &serde_json::Value,
+    field: &str,
+    committed: &serde_json::Value,
+    render_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+    event: &str,
+) {
+    let behaviors: Vec<&serde_json::Value> = el
+        .get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter(|b| b.get("event").and_then(|e| e.as_str()) == Some(event))
+                .collect()
+        })
+        .unwrap_or_default();
+    if behaviors.is_empty() {
+        return;
+    }
+    let cs = patch_ctx_for_input(render_ctx, field, committed);
+    for b in &behaviors {
         if let Some(effects) = b.get("effects").and_then(|e| e.as_array()) {
             run_yaml_effects(effects, &cs, st);
+        }
+        // ...and the ACTION half, which this hook never ran. Params are
+        // evaluated against the patched context, so a self-referential param
+        // resolves to the new value rather than the stale one.
+        if let Some(action) = b.get("action").and_then(|a| a.as_str()) {
+            let empty = serde_json::Map::new();
+            let decl = b.get("params").and_then(|p| p.as_object()).unwrap_or(&empty);
+            let params = resolve_behavior_params(decl, &cs);
+            let _ = dispatch_action(action, &params, st);
         }
     }
 }
@@ -4387,37 +4493,7 @@ fn build_mouse_event_handler(
 
         // Resolve params against context
         let raw_params = b.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
-        let mut resolved_params = serde_json::Map::new();
-        for (k, v) in &raw_params {
-            if let Some(expr_str) = v.as_str() {
-                let result = expr::eval(expr_str, ctx);
-                match result {
-                    Value::Color(c) => { resolved_params.insert(k.clone(), serde_json::Value::String(c)); }
-                    Value::Str(s) => { resolved_params.insert(k.clone(), serde_json::Value::String(s)); }
-                    Value::Number(n) => { resolved_params.insert(k.clone(), serde_json::json!(n)); }
-                    Value::Bool(b) => { resolved_params.insert(k.clone(), serde_json::json!(b)); }
-                    Value::Null => {
-                        // If expression evaluated to null but the original was a bare
-                        // identifier (no dots/operators), treat it as a literal string.
-                        // YAML `{ tool: selection }` means param is the string "selection".
-                        if expr_str.chars().all(|c| c.is_alphanumeric() || c == '_') && !expr_str.is_empty() {
-                            resolved_params.insert(k.clone(), serde_json::Value::String(expr_str.to_string()));
-                        } else {
-                            resolved_params.insert(k.clone(), serde_json::Value::Null);
-                        }
-                    }
-                    Value::List(l) => { resolved_params.insert(k.clone(), serde_json::Value::Array(l)); }
-                    Value::Path(indices) => {
-                        resolved_params.insert(k.clone(), serde_json::json!({
-                            "__path__": indices.iter().map(|&i| i as u64).collect::<Vec<_>>()
-                        }));
-                    }
-                    Value::Closure { .. } => { resolved_params.insert(k.clone(), serde_json::Value::Null); }
-                };
-            } else {
-                resolved_params.insert(k.clone(), v.clone());
-            }
-        }
+        let resolved_params = resolve_behavior_params(&raw_params, ctx);
         resolved_actions.push((action, resolved_params, effects, condition));
     }
 
@@ -6416,6 +6492,21 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
     let panel_kind = rctx.panel_kind;
     // Special case: layers panel search binding
     let is_search = bind_expr == "panel.search_query";
+    // Does this widget DECLARE `event: input`? That declaration -- not an id --
+    // is what makes an input commit live (council Q3.1).
+    let has_input_behavior = el
+        .get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|arr| arr.iter().any(|b| {
+            b.get("event").and_then(|e| e.as_str()) == Some("input")
+        }))
+        .unwrap_or(false);
+    let el_for_input = el.clone();
+    let ctx_for_input = ctx.clone();
+    let field_for_input = bind_expr
+        .strip_prefix("panel.")
+        .unwrap_or(bind_expr)
+        .to_string();
     // Read live value from AppState if search
     let value = if is_search {
         app.borrow().layers_search_query.clone()
@@ -6605,13 +6696,31 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
                 }
             },
             oninput: move |evt: Event<FormData>| {
-                // The layers-panel search input still commits live, so
-                // the tree filters as the user types. All other text
-                // inputs commit on change (Enter / blur) to match the
-                // number_input convention.
+                // A text input that DECLARES `event: input` commits live; every
+                // other one commits on change (Enter / blur), matching the
+                // number_input convention. The rule is the widget's own
+                // declaration -- not an id check. `is_search` below is the old
+                // hard-coded exception, kept only until the tree reads the
+                // declared bind (council Q3.1 step 2b); the declared route runs
+                // FIRST so the two can be compared live before the bypass goes.
+                let v = evt.value();
+                if has_input_behavior {
+                    let a = app_for_input.clone();
+                    let el_in = el_for_input.clone();
+                    let ctx_in = ctx_for_input.clone();
+                    let f = field_for_input.clone();
+                    let vv = v.clone();
+                    spawn(async move {
+                        let mut st = a.borrow_mut();
+                        run_input_behavior(
+                            &el_in, &f, &serde_json::Value::String(vv),
+                            &ctx_in, &mut st, "input");
+                        drop(st);
+                        revision += 1;
+                    });
+                }
                 if is_search {
                     let a = app_for_input.clone();
-                    let v = evt.value();
                     spawn(async move {
                         a.borrow_mut().layers_search_query = v;
                         revision += 1;
@@ -10800,6 +10909,51 @@ mod tests {
         assert_eq!(clamp_to_declared(-50.0, None, None), -50.0);
         assert_eq!(clamp_to_declared(1e9, Some(1.0), None), 1e9);
         assert_eq!(clamp_to_declared(0.0, Some(1.0), None), 1.0);
+    }
+
+    /// A SELF-REFERENTIAL PARAM MUST RESOLVE TO THE NEW VALUE.
+    ///
+    /// `layers.yaml` declares the search input's behavior as
+    /// `{ event: input, action: set_layers_search,
+    ///    params: { query: "panel.search_query" } }` -- the parameter names the
+    /// very field being edited. Evaluated against the raw render context that
+    /// yields the PREVIOUS keystroke, so the tree would filter one character
+    /// behind forever, and no test that dispatched `set_layers_search` directly
+    /// would ever see it: the bug lives entirely in which context the params
+    /// are resolved against.
+    ///
+    /// So this pins the two halves together -- the patch, and the resolution --
+    /// rather than either alone.
+    #[test]
+    fn a_self_referential_param_resolves_to_the_committed_value() {
+        let ctx = serde_json::json!({ "panel": { "search_query": "ol" } });
+        let decl: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_value(serde_json::json!({ "query": "panel.search_query" }))
+                .unwrap();
+
+        // Against the RAW context: the stale value. This is the defect.
+        let stale = resolve_behavior_params(&decl, &ctx);
+        assert_eq!(stale.get("query").and_then(|v| v.as_str()), Some("ol"));
+
+        // Against the PATCHED context: the keystroke just typed.
+        let patched = patch_ctx_for_input(
+            &ctx, "search_query", &serde_json::Value::String("old".into()));
+        let fresh = resolve_behavior_params(&decl, &patched);
+        assert_eq!(fresh.get("query").and_then(|v| v.as_str()), Some("old"),
+                   "the declared param must see the value being committed, not \
+                    the one it is replacing");
+
+        // `event.value` is published too, the other spelling a behavior may use.
+        assert_eq!(patched.pointer("/event/value").and_then(|v| v.as_str()),
+                   Some("old"));
+        // And the patch must not disturb anything else in scope.
+        let ctx2 = serde_json::json!({
+            "panel": { "search_query": "a", "other": 1 }, "global": { "z": true }
+        });
+        let p2 = patch_ctx_for_input(
+            &ctx2, "search_query", &serde_json::Value::String("b".into()));
+        assert_eq!(p2.pointer("/panel/other").and_then(|v| v.as_i64()), Some(1));
+        assert_eq!(p2.pointer("/global/z").and_then(|v| v.as_bool()), Some(true));
     }
 
     /// THE LAYERS TYPE FILTER READS THE ELEMENT, NOT ITS LABEL.
