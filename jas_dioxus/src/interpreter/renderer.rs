@@ -8671,6 +8671,21 @@ struct TreeRow {
     is_container: bool,
     display_name: String,
     is_named: bool,
+    /// True when this row survives only because a DESCENDANT needs it.
+    ///
+    /// A tree cannot draw a child without its parent row, so both the type
+    /// filter and the search carry ancestors of surviving rows. Those rows are
+    /// scaffolding, not content: JYH ruled 2026-07-30 that they are CARRIED,
+    /// NEVER MATCHED, and render dimmed.
+    ///
+    /// `layers.yaml` has declared this convention since April -- "ancestor
+    /// nodes of matching elements are shown to preserve tree context but are
+    /// DIMMED" -- with a `node.search_ancestor_only` variable in SCHEMA.md and
+    /// an `opacity` bind in `row_template`. No port implemented it, and none
+    /// ever could: `row_template` is read by NO port, since both draw tree rows
+    /// natively. The bind has never executed anywhere.
+    ancestor_only: bool,
+
     /// The token the type filter matches, derived from the ELEMENT.
     ///
     /// Kept as its own field rather than recovered from `display_name`,
@@ -8862,6 +8877,7 @@ fn tree_flatten_rc_children(
             is_renaming,
             is_collapsed,
             is_panel_selected,
+            ancestor_only: false,
             type_value: tree_type_value(child),
             layer_color: current_layer_color.clone(),
             visibility_str: vis_str.to_string(),
@@ -8934,6 +8950,7 @@ fn tree_flatten_layers(
             is_renaming,
             is_collapsed,
             is_panel_selected,
+            ancestor_only: false,
             type_value: tree_type_value(elem),
             layer_color: layer_color.clone(),
             visibility_str: vis_str.to_string(),
@@ -9110,6 +9127,13 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             rows.iter().map(|r| (r.path.as_slice(), r.type_value)),
             &hidden_types,
         );
+        // Present on its OWN account = its type is checked. Anything else that
+        // survived is here only to reach a descendant.
+        for r in rows.iter_mut() {
+            if hidden_types.contains(r.type_value) {
+                r.ancestor_only = true;
+            }
+        }
         rows.retain(|r| keep.contains(&r.path));
     }
 
@@ -9127,7 +9151,13 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     // Apply search filter: keep rows whose name matches, plus their ancestors.
     if !search_query.is_empty() {
         let matching_paths: std::collections::HashSet<Vec<usize>> = rows.iter()
-            .filter(|r| r.display_name.to_lowercase().contains(&search_query))
+            // ANCESTORS ARE CARRIED, NEVER MATCHED. A row present only to
+            // reach a descendant is not a candidate for matching -- otherwise a
+            // group named "sunset" would answer a search for "sun" while the
+            // type filter says containers are not content, and the artist would
+            // see a group row and none of the circles they asked for.
+            .filter(|r| !r.ancestor_only
+                        && r.display_name.to_lowercase().contains(&search_query))
             .map(|r| r.path.clone())
             .collect();
         // Include all ancestor paths of matching rows
@@ -9135,6 +9165,11 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
         for p in &matching_paths {
             for i in 1..p.len() {
                 include.insert(p[..i].to_vec());
+            }
+        }
+        for r in rows.iter_mut() {
+            if !matching_paths.contains(&r.path) {
+                r.ancestor_only = true;
             }
         }
         rows.retain(|r| include.contains(&r.path));
@@ -9418,7 +9453,15 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     let indent_px = row.depth * 16;
                     let indent_style = format!("width:{}px;flex-shrink:0;display:inline-block", indent_px);
                     let name_color = if row.is_named { "var(--jas-text,#ccc)" } else { "var(--jas-text-dim,#999)" };
-                    let name_style = format!("flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:{name_color}");
+                    // A row carried only to reach a descendant is SCAFFOLDING,
+                    // not content -- ruled 2026-07-30, and the convention
+                    // layers.yaml has declared since April ("ancestor nodes ...
+                    // are shown to preserve tree context but are DIMMED",
+                    // `opacity: if node.search_ancestor_only then 0.5 else 1.0`).
+                    // That bind has never executed in any port, because
+                    // `row_template` is read by none of them.
+                    let row_opacity = if row.ancestor_only { "0.5" } else { "1.0" };
+                    let name_style = format!("flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;color:{name_color};opacity:{row_opacity}");
                     let sq_bg = if row.is_selected { &row.layer_color } else { "transparent" };
                     let sq_style = format!("width:12px;height:12px;border:1px solid var(--jas-border,#555);flex-shrink:0;background:{sq_bg}");
                     let eye_svg = row.eye_icon_svg.clone();
@@ -11084,6 +11127,42 @@ mod tests {
         assert_eq!(clamp_to_declared(-50.0, None, None), -50.0);
         assert_eq!(clamp_to_declared(1e9, Some(1.0), None), 1e9);
         assert_eq!(clamp_to_declared(0.0, Some(1.0), None), 1.0);
+    }
+
+    /// ANCESTORS ARE CARRIED, NEVER MATCHED.
+    ///
+    /// JYH's ruling, council 2026-07-30. A row present only because a
+    /// descendant needs it is scaffolding, and scaffolding must not answer a
+    /// search: otherwise a group named "sunset" satisfies a search for "sun"
+    /// while the type filter says containers are not content, and an artist who
+    /// asked for circles named sun sees a group row and no circles.
+    ///
+    /// The predicate is `!ancestor_only && label contains query`, and this pins
+    /// the first half -- the half that is easy to drop, because without it
+    /// every test still passes on documents whose containers happen not to
+    /// match.
+    #[test]
+    fn a_carried_ancestor_cannot_satisfy_a_search() {
+        // Two rows: a group named "sunset" carried by the type filter, and a
+        // circle named "moon" that is content.
+        let carried = |name: &str, anc: bool| (name.to_string(), anc);
+        let rows = vec![carried("sunset", true), carried("moon", false)];
+        let q = "sun";
+
+        let matched: Vec<&str> = rows.iter()
+            .filter(|(n, anc)| !anc && n.to_lowercase().contains(q))
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert!(matched.is_empty(),
+                "the carried group must not match, though its label contains the query");
+
+        // With the guard dropped -- the shape this test exists to forbid.
+        let naive: Vec<&str> = rows.iter()
+            .filter(|(n, _)| n.to_lowercase().contains(q))
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert_eq!(naive, vec!["sunset"],
+                   "without the ancestor guard the scaffolding answers instead");
     }
 
     /// A PREFIXED ATTRIBUTE OBLIGES THE ROOT SVG TO DECLARE ITS PREFIX.

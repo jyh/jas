@@ -3995,6 +3995,17 @@ struct FlatRow: Identifiable {
     let isContainer: Bool
     let isCollapsed: Bool
     let layerColor: String
+    /// True when this row survives only because a DESCENDANT needs it.
+    ///
+    /// Both filters carry ancestors of surviving rows, because a tree cannot
+    /// draw a child without its parent. Those rows are scaffolding, not
+    /// content: JYH ruled 2026-07-30 that they are CARRIED, NEVER MATCHED, and
+    /// render dimmed. Twin of jas_dioxus's `TreeRow::ancestor_only`.
+    ///
+    /// layers.yaml has declared the convention since April and no port ever
+    /// implemented it — the `opacity` bind lives in `row_template`, which NO
+    /// port reads, so it has never executed anywhere.
+    var ancestorOnly: Bool = false
 }
 
 struct TreeViewContent: View {
@@ -4091,6 +4102,11 @@ struct TreeViewContent: View {
             let keep = layersTypeFilterKeep(
                 result.map { (path: $0.path, typeValue: layersTypeValue($0.elem)) },
                 hidden: hidden)
+            // Present on its OWN account = its type is checked. Anything else
+            // that survived is here only to reach a descendant.
+            for i in result.indices where hidden.contains(layersTypeValue(result[i].elem)) {
+                result[i].ancestorOnly = true
+            }
             result = result.filter { keep.contains($0.path) }
         }
         // Isolation filter
@@ -4107,13 +4123,21 @@ struct TreeViewContent: View {
         // Search filter
         let q = searchQuery.lowercased()
         if !q.isEmpty {
+            // ANCESTORS ARE CARRIED, NEVER MATCHED. Scaffolding must not
+            // answer a search, or a group named "sunset" satisfies a query for
+            // "sun" while the type filter says containers are not content —
+            // and an artist asking for circles named sun gets a group row and
+            // no circles.
             let matching = Set(result.filter {
                 let (n, _) = elementDisplayName($0.elem)
-                return n.lowercased().contains(q)
+                return !$0.ancestorOnly && n.lowercased().contains(q)
             }.map { $0.path })
             var keep = matching
             for p in matching {
                 for i in 1..<p.count { keep.insert(Array(p.prefix(i))) }
+            }
+            for i in result.indices where !matching.contains(result[i].path) {
+                result[i].ancestorOnly = true
             }
             result = result.filter { keep.contains($0.path) }
         }
@@ -4456,6 +4480,11 @@ struct TreeViewContent: View {
                 SwiftUI.Text(name)
                     .font(.system(size: 11))
                     .foregroundColor(isNamed ? SwiftUI.Color.white : SwiftUI.Color.gray)
+                    // A row carried only to reach a descendant is SCAFFOLDING,
+                    // not content. The convention layers.yaml has declared
+                    // since April and no port has ever run:
+                    // `opacity: if node.search_ancestor_only then 0.5 else 1.0`.
+                    .opacity(row.ancestorOnly ? 0.5 : 1.0)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -4696,6 +4725,11 @@ struct TreeViewContent: View {
                 SwiftUI.Text(name)
                     .font(.system(size: 11))
                     .foregroundColor(isNamed ? SwiftUI.Color.white : SwiftUI.Color.gray)
+                    // A row carried only to reach a descendant is SCAFFOLDING,
+                    // not content. The convention layers.yaml has declared
+                    // since April and no port has ever run:
+                    // `opacity: if node.search_ancestor_only then 0.5 else 1.0`.
+                    .opacity(row.ancestorOnly ? 0.5 : 1.0)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)

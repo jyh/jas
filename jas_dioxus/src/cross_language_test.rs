@@ -6518,10 +6518,29 @@ mod tests {
                 rows.iter().map(|(p, t)| (p.as_slice(), t.as_str())),
                 &hidden,
             );
-            let mut got: Vec<Vec<usize>> = keep.into_iter().collect();
+            let mut got: Vec<Vec<usize>> = keep.iter().cloned().collect();
             got.sort();
 
             assert_eq!(got, want, "vector `{name}`");
+
+            // SCAFFOLDING vs CONTENT. A surviving row whose own type is hidden
+            // is here only to reach a descendant -- carried, never matched, and
+            // rendered dimmed (JYH, council 2026-07-30). Derived in the fixture
+            // as `keep \ visible`, recomputed here, so the two cannot drift.
+            let mut want_anc: Vec<Vec<usize>> = v["expected_ancestor_only"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `expected_ancestor_only`"))
+                .iter()
+                .map(|p| p.as_array().expect("path not an array").iter()
+                    .map(|n| n.as_u64().expect("path entry not a number") as usize)
+                    .collect())
+                .collect();
+            want_anc.sort();
+            let mut got_anc: Vec<Vec<usize>> = keep.iter()
+                .filter(|k| rows.iter().any(|(p, t)| p == *k && hidden.contains(t.as_str())))
+                .cloned()
+                .collect();
+            got_anc.sort();
+            assert_eq!(got_anc, want_anc, "vector `{name}`: ancestor-only set");
         }
     }
 }

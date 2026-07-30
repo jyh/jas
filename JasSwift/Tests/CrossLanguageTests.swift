@@ -4440,6 +4440,18 @@ private func wireUnhex(_ s: String) -> Data {
 
         let got = layersTypeFilterKeep(rows, hidden: hidden)
 
+        // SCAFFOLDING vs CONTENT. A surviving row whose own type is hidden is
+        // here only to reach a descendant — carried, never matched, and
+        // rendered dimmed (JYH, council 2026-07-30). The fixture DERIVES this
+        // as `keep \ visible` rather than hand-writing it, so it cannot drift
+        // from the keep-set it describes.
+        let wantAncestorOnly = Set((v["expected_ancestor_only"] as! [[Int]]))
+        let gotAncestorOnly = Set(got.filter { path in
+            rows.contains { $0.path == path && hidden.contains($0.typeValue) }
+        })
+        #expect(gotAncestorOnly == wantAncestorOnly,
+                "vector `\(name)`: ancestor-only set — kept \(gotAncestorOnly.sorted { $0.lexicographicallyPrecedes($1) }), expected \(wantAncestorOnly.sorted { $0.lexicographicallyPrecedes($1) })")
+
         #expect(got == want,
                 "vector `\(name)`: kept \(got.sorted { $0.lexicographicallyPrecedes($1) }), expected \(want.sorted { $0.lexicographicallyPrecedes($1) })")
     }
