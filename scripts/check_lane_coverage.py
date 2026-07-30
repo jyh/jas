@@ -54,7 +54,45 @@ EXEMPT: dict[str, str] = {}
 
 # Anti-vacuity floors. A scan that found nothing reports no gaps, which is
 # indistinguishable from a scan that found everything in order.
-MIN_CHECK_SCRIPTS = 17
+def _tracked_check_scripts() -> int:
+    """How many `scripts/check_*.py` GIT knows about.
+
+    DERIVED, and derived from a DIFFERENT ORACLE than the one it guards. This
+    gate discovers its subjects with a filesystem glob; the floor exists to
+    catch that glob silently matching less. Computing the floor from the same
+    glob would be circular -- it would agree with any breakage, which is worse
+    than a stale number because it looks maintained.
+
+    `git ls-files` is an independent index and emits POSIX paths on every
+    platform, so it is also separator-clean (see check_path_keying.py).
+
+    WHY DERIVE THIS ONE AT ALL. It is a pure coverage count -- the number
+    encodes no decision, only "how many gates exist" -- and it was bumped FOUR
+    TIMES on 2026-07-30 alone, once wrongly (17 read off the CI job count
+    instead of the script count). This repo's own record on hand-typed floors
+    is that two of four replacement numbers were wrong on the first attempt
+    (65b6218). A count nobody has to restate is a count nobody can get wrong.
+
+    NOT EVERY FLOOR SHOULD BECOME THIS. Two kinds must stay hand-typed:
+      * a floor guarding a PARSE (MIN_RUST_ARMS, EXPECTED_PATH_NAMES) -- there
+        is no independent oracle, so deriving it is the circularity above;
+      * a floor encoding a DECISION (EXPECTED_TOKENS, EXPECTED_MENU,
+        MIN_LOG_ONLY) -- adding an element kind SHOULD force someone to rule on
+        whether the menu offers it. There the friction is the feature, and
+        automating it away would delete the ruling.
+    """
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["git", "ls-files", "scripts/check_*.py"],
+            cwd=pathlib.Path(__file__).resolve().parent.parent,
+            capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return 0
+    return len([l for l in out.splitlines() if l.strip()])
+
+
+MIN_CHECK_SCRIPTS = _tracked_check_scripts()
 #
 # EXACT, NOT SLACK. This was a hand-set floor with room to spare until
 # 2026-07-29, when the jas/windows seat proved the hole by mutation: it set a
@@ -290,12 +328,16 @@ def self_test():
         (20, 1, True),                       # a truncated workflow parse
         (MIN_CHECK_SCRIPTS - 1, 20, True),   # just under
         (MIN_CHECK_SCRIPTS, MIN_JOBS, False),  # exactly at both lines
-        # The real tree, RE-MEASURED as each gate lands: 14 scripts when this
-        # case was written, 15 once check_layers_type_filter.py joined. The
-        # exact floor is what forced this line to be updated rather than
-        # letting a stale measurement read as a current one -- which is the
-        # whole argument for exactness, demonstrated on this gate's own fixture.
-        (17, 17, False),
+        # The real tree, DERIVED. This line read `(14, 17, False)` when it was
+        # written, then 15, then 16, then 17 -- re-measured by hand every time a
+        # gate landed, and wrong once on the way (17 taken off the CI job count
+        # rather than the script count). Deriving the floor removed the number
+        # from the constant and left it here, in the fixture, which is exactly
+        # how a hand-typed number survives being "removed".
+        #
+        # So the fixture is derived too. It now asserts the RELATION -- the real
+        # tree sits at the floor -- rather than restating the measurement.
+        (MIN_CHECK_SCRIPTS, MIN_JOBS + 12, False),
     ]:
         if below_floor(n_scripts, n_j) != want_rejected:
             verb = "reject" if want_rejected else "accept"
