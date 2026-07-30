@@ -6649,7 +6649,6 @@ mod tests {
         assert!(disagreements.is_empty(),
                 "{} NEW container-seeded disagreement(s) out of {checked} \
                  seeded ({} known) -- an operation answered differently for a \
-                 group than for its sole member -- an operation answered differently for a \
                  group than for its sole member, which is the shape all eight \
                  of the 2026-07-29 defects wore:\n  {}",
                 disagreements.len(), seen_known.len(), disagreements.join("\n  "));
