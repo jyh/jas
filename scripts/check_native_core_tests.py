@@ -82,13 +82,15 @@ CRATE = REPO / "jas_dioxus"
 # which is the exact defect class this repo treats as most serious, sitting in
 # the file that exists to police it. Now `count != floor`, both directions.
 #
-# AND THE FIX EARNED ITSELF ON ITS FIRST RUN. It immediately red on a drift that
-# was ALREADY on `arc2-section20` and had nothing to do with the commit that
-# fixed it: the pin read 1830 while the tree carried 1832. Two native tests had
-# been added and the pin never raised, silently, on the integration branch --
-# which is exactly the drift the comment claimed to prevent and the code did not.
-# Re-pinned to the measured 1832.
-FLOOR = 1832
+# AND THE FIX EARNED ITSELF ON ITS FIRST RUN, on drift that was not mine. It red
+# on `arc2-section20` where the pin read 1830 and the tree carried 1832; rebased
+# onto main the same drift is 1830 vs 1833. Native tests were added three times
+# and the pin was never raised, silently -- and the council record even states
+# "Native lib tests 1833", so the number WAS measured and reported while the pin
+# stayed put, because the code never asked for it. That is exactly the drift the
+# comment above claimed to prevent and the one-sided check did not.
+# Re-pinned to main's measured 1833.
+FLOOR = 1833
 
 
 def parse_test_count(listing: str) -> int:
