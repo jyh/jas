@@ -6,6 +6,9 @@ edition = "2024"
 [lib]
 name = "jas_dioxus"
 path = "src/lib.rs"
+# cdylib for the S-A boundary spike (feature = "ffi"). rlib stays first so
+# every existing consumer -- bins, tests, benches -- is unaffected.
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "jas_dioxus"
@@ -44,6 +47,8 @@ harness = false
 
 [features]
 default = ["web"]
+# The extern "C" surface for a native shell. Additive and off by default.
+ffi = []
 web = ["dep:dioxus", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:dioxus-logger", "dep:console_error_panic_hook"]
 
 [dependencies]
