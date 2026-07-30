@@ -1372,19 +1372,37 @@ public enum Element: Equatable {
     /// generated element like any other. Mirrors the reference
     /// implementation's `common_mut().name = ...`.
     public func withName(_ name: String?) -> Element {
+        // AN EMPTY NAME IS NOT A NAME, for every kind. jas_dioxus's rename
+        // commit is `if val.is_empty() { None } else { Some(val) }` and writes
+        // `common.name` for any element type (LYR-091), so an unnamed element
+        // is one whose name is absent -- which is what drives the `<Type>`
+        // fallback label in the Layers tree.
+        //
+        // This normalized for NOBODY until 2026-07-30, and its `.layer` arm
+        // assigned `v.name` directly rather than routing through
+        // `Layer.withName`, bypassing the one `normalizedName` the codebase
+        // already had. Harmless only because rename was gated to Layers and the
+        // layer path called `Layer.withName` itself; opening rename to every
+        // kind (council O4) would have made clearing a name store
+        // `Optional("")` here and `None` there -- two ports disagreeing about
+        // whether an element is NAMED, which the tree label, the bracket
+        // fallback and the type filter all read.
+        let n = Layer.normalizedName(name)
         switch self {
-        case .line(var v): v.name = name; return .line(v)
-        case .rect(var v): v.name = name; return .rect(v)
-        case .circle(var v): v.name = name; return .circle(v)
-        case .ellipse(var v): v.name = name; return .ellipse(v)
-        case .polyline(var v): v.name = name; return .polyline(v)
-        case .polygon(var v): v.name = name; return .polygon(v)
-        case .path(var v): v.name = name; return .path(v)
-        case .text(var v): v.name = name; return .text(v)
-        case .textPath(var v): v.name = name; return .textPath(v)
-        case .group(var v): v.name = name; return .group(v)
-        case .layer(var v): v.name = name; return .layer(v)
-        case .live(let v): return .live(v.withName(name))
+        case .line(var v): v.name = n; return .line(v)
+        case .rect(var v): v.name = n; return .rect(v)
+        case .circle(var v): v.name = n; return .circle(v)
+        case .ellipse(var v): v.name = n; return .ellipse(v)
+        case .polyline(var v): v.name = n; return .polyline(v)
+        case .polygon(var v): v.name = n; return .polygon(v)
+        case .path(var v): v.name = n; return .path(v)
+        case .text(var v): v.name = n; return .text(v)
+        case .textPath(var v): v.name = n; return .textPath(v)
+        case .group(var v): v.name = n; return .group(v)
+        // Through Layer.withName, so the layer path cannot drift from the
+        // normalization it owns.
+        case .layer(let v): return .layer(v.withName(n))
+        case .live(let v): return .live(v.withName(n))
         }
     }
 

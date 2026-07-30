@@ -4349,17 +4349,18 @@ struct TreeViewContent: View {
             // Name — inline TextField when renaming, Text otherwise
             if renamingPath == path {
                 TextField("", text: $editingName, onCommit: {
+                    // ANY element kind, not just Layer (council O4, 2026-07-30).
+                    // `Element.withName` is clone-then-mutate for every case and
+                    // normalizes the empty string to nil, matching jas_dioxus's
+                    // `elem.common_mut().name = if empty { None } else { Some }`.
+                    // A rename speaks to the NAME and preserves the rest — the
+                    // rebuild this pattern replaced named 6 of Layer's 11 stored
+                    // fields and destroyed id, blend mode, mask and both opacity
+                    // flags on every rename.
                     let e = model.document.getElement(path)
-                    if case .layer(let le) = e {
-                        // Clone-then-mutate: a rename speaks to the NAME.
-                        // The rebuild this replaced named 6 of Layer's 11
-                        // stored fields, so renaming a layer destroyed its
-                        // `id`, blend mode, mask and both opacity flags — the
-                        // Swift copy-site omission class.
-                        let newLayer = le.withName(editingName)
-                        // Undoable rename: editDocument self-brackets one step.
-                        model.editDocument(model.document.replaceElement(path, with: .layer(newLayer)))
-                    }
+                    // Undoable rename: editDocument self-brackets one step.
+                    model.editDocument(
+                        model.document.replaceElement(path, with: e.withName(editingName)))
                     renamingPath = nil
                 })
                 .textFieldStyle(.plain)
@@ -4374,10 +4375,12 @@ struct TreeViewContent: View {
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .onTapGesture(count: 2) {
-                        if case .layer(let le) = elem {
-                            editingName = le.name ?? ""
-                            renamingPath = path
-                        }
+                        // Double-click renames ANY row. `elementDisplayName`
+                        // has always SHOWN every element's name, so gating the
+                        // edit to Layers meant this port displayed a name it
+                        // refused to let you change.
+                        editingName = elem.name ?? ""
+                        renamingPath = path
                     }
             }
             // Select square
@@ -4574,17 +4577,18 @@ struct TreeViewContent: View {
             // Name — inline TextField when renaming, Text otherwise
             if renamingPath == path {
                 TextField("", text: $editingName, onCommit: {
+                    // ANY element kind, not just Layer (council O4, 2026-07-30).
+                    // `Element.withName` is clone-then-mutate for every case and
+                    // normalizes the empty string to nil, matching jas_dioxus's
+                    // `elem.common_mut().name = if empty { None } else { Some }`.
+                    // A rename speaks to the NAME and preserves the rest — the
+                    // rebuild this pattern replaced named 6 of Layer's 11 stored
+                    // fields and destroyed id, blend mode, mask and both opacity
+                    // flags on every rename.
                     let e = model.document.getElement(path)
-                    if case .layer(let le) = e {
-                        // Clone-then-mutate: a rename speaks to the NAME.
-                        // The rebuild this replaced named 6 of Layer's 11
-                        // stored fields, so renaming a layer destroyed its
-                        // `id`, blend mode, mask and both opacity flags — the
-                        // Swift copy-site omission class.
-                        let newLayer = le.withName(editingName)
-                        // Undoable rename: editDocument self-brackets one step.
-                        model.editDocument(model.document.replaceElement(path, with: .layer(newLayer)))
-                    }
+                    // Undoable rename: editDocument self-brackets one step.
+                    model.editDocument(
+                        model.document.replaceElement(path, with: e.withName(editingName)))
                     renamingPath = nil
                 })
                 .textFieldStyle(.plain)
@@ -4601,10 +4605,12 @@ struct TreeViewContent: View {
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .onTapGesture(count: 2) {
-                        if case .layer(let le) = elem {
-                            editingName = le.name ?? ""
-                            renamingPath = path
-                        }
+                        // Double-click renames ANY row. `elementDisplayName`
+                        // has always SHOWN every element's name, so gating the
+                        // edit to Layers meant this port displayed a name it
+                        // refused to let you change.
+                        editingName = elem.name ?? ""
+                        renamingPath = path
                     }
             }
             // Select square
