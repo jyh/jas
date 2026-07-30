@@ -1,0 +1,107 @@
+{
+  "_doc": [
+    "ACTIONS WHOSE DECLARED EFFECTS ARE A `- log:` STUB, classified.",
+    "See scripts/check_action_implementations.py.",
+    "",
+    "TWO SECTIONS, and they mean different things.",
+    "",
+    "`known_divergences` -- an action implemented in ONE active port. Every row",
+    "is a PRIME DIRECTIVE VIOLATION that is ruled and scheduled, not accepted.",
+    "Each carries `asserts` verified on every run, written so they go RED WHEN",
+    "THE DIVERGENCE IS FIXED: the row cannot outlive the defect it describes.",
+    "Ruled at council 2026-07-30 (O1); queued as Stubb's first stones.",
+    "",
+    "`bypassed` -- declared, named by no dispatch table, but the FEATURE works",
+    "natively behind another entry point. EMPTY ON PURPOSE. 32 actions have no",
+    "dispatch entry and that bucket MIXES unbuilt with bypassed; the known",
+    "bypassed family is the Layers row controls (eye/lock/twirl/rename/select),",
+    "which live in `lp_tree.row_template` -- a widget NO port reads, since both",
+    "draw tree rows natively. They are not listed because separating them needs",
+    "TRACING, and this file's author tried to shortcut it by guessing native",
+    "function names and got one of three. A row added on a guess is the",
+    "confident-and-wrong claim this mechanism exists to prevent."
+  ],
+  "known_divergences": {
+    "save_as": {
+      "reason": "File > Save As does NOTHING in jas_dioxus: menu_bar.rs routes it through the pass-through arm to dispatch_action, i.e. the log stub. JasSwift implements it fully (NSSavePanel -> SVG -> markSaved). Galling detail: clipboard.rs's save_file_via_picker is COMPLETE (File System Access API, with a download fallback for Firefox/Safari) and called from nowhere. Council O1.1, first stone.",
+      "asserts": [
+        {
+          "file": "jas_dioxus/src/workspace/menu_bar.rs",
+          "contains": "\"save_as\" | \"revert\" | \"quit\"",
+          "why": "The pass-through arm. Wiring save_as removes it from this list, this assert reds, and the row must go."
+        }
+      ]
+    },
+    "revert": {
+      "reason": "Same pass-through arm as save_as; works in JasSwift (confirm alert -> re-parse -> one undo step). Council O1.2.",
+      "asserts": [
+        {
+          "file": "jas_dioxus/src/workspace/menu_bar.rs",
+          "contains": "\"save_as\" | \"revert\" | \"quit\"",
+          "why": "As above -- one arm, two actions, one expiry."
+        }
+      ]
+    },
+    "delete_symbol_orphan_confirm_ok": {
+      "reason": "Native intercept in jas_dioxus's dispatch_action; no JasSwift handler. Found by this gate on its first run -- the one divergence the hand spot-check missed.",
+      "asserts": [
+        {
+          "file": "JasSwift/Sources/Panels/SymbolsPanel.swift",
+          "lacks": "delete_symbol_orphan_confirm_ok",
+          "why": "Reds when JasSwift gains the handler."
+        }
+      ]
+    },
+    "sort_swatches_by_name": {
+      "reason": "The whole Swatches hamburger menu is a Swift no-op against a working Rust verb. jas_dioxus implements sort_swatches_by_name natively in panels/swatches_panel.rs; JasSwift's SwatchesPanel.dispatch falls to `default: runYamlActionByName(cmd, ...)`, which runs the bare log effect. Five verbs, one cause. Council O1.3, second stone.",
+      "asserts": [
+        {
+          "file": "JasSwift/Sources/Panels/SwatchesPanel.swift",
+          "lacks": "case \"sort_swatches_by_name\"",
+          "why": "Reds when JasSwift implements the verb, forcing this row out."
+        }
+      ]
+    },
+    "select_all_unused_swatches": {
+      "reason": "The whole Swatches hamburger menu is a Swift no-op against a working Rust verb. jas_dioxus implements select_all_unused_swatches natively in panels/swatches_panel.rs; JasSwift's SwatchesPanel.dispatch falls to `default: runYamlActionByName(cmd, ...)`, which runs the bare log effect. Five verbs, one cause. Council O1.3, second stone.",
+      "asserts": [
+        {
+          "file": "JasSwift/Sources/Panels/SwatchesPanel.swift",
+          "lacks": "case \"select_all_unused_swatches\"",
+          "why": "Reds when JasSwift implements the verb, forcing this row out."
+        }
+      ]
+    },
+    "add_used_colors": {
+      "reason": "The whole Swatches hamburger menu is a Swift no-op against a working Rust verb. jas_dioxus implements add_used_colors natively in panels/swatches_panel.rs; JasSwift's SwatchesPanel.dispatch falls to `default: runYamlActionByName(cmd, ...)`, which runs the bare log effect. Five verbs, one cause. Council O1.3, second stone.",
+      "asserts": [
+        {
+          "file": "JasSwift/Sources/Panels/SwatchesPanel.swift",
+          "lacks": "case \"add_used_colors\"",
+          "why": "Reds when JasSwift implements the verb, forcing this row out."
+        }
+      ]
+    },
+    "delete_swatch": {
+      "reason": "The whole Swatches hamburger menu is a Swift no-op against a working Rust verb. jas_dioxus implements delete_swatch natively in panels/swatches_panel.rs; JasSwift's SwatchesPanel.dispatch falls to `default: runYamlActionByName(cmd, ...)`, which runs the bare log effect. Five verbs, one cause. Council O1.3, second stone.",
+      "asserts": [
+        {
+          "file": "JasSwift/Sources/Panels/SwatchesPanel.swift",
+          "lacks": "case \"delete_swatch\"",
+          "why": "Reds when JasSwift implements the verb, forcing this row out."
+        }
+      ]
+    },
+    "duplicate_swatch": {
+      "reason": "The whole Swatches hamburger menu is a Swift no-op against a working Rust verb. jas_dioxus implements duplicate_swatch natively in panels/swatches_panel.rs; JasSwift's SwatchesPanel.dispatch falls to `default: runYamlActionByName(cmd, ...)`, which runs the bare log effect. Five verbs, one cause. Council O1.3, second stone.",
+      "asserts": [
+        {
+          "file": "JasSwift/Sources/Panels/SwatchesPanel.swift",
+          "lacks": "case \"duplicate_swatch\"",
+          "why": "Reds when JasSwift implements the verb, forcing this row out."
+        }
+      ]
+    }
+  },
+  "bypassed": {}
+}

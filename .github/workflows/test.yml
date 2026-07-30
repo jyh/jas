@@ -56,6 +56,13 @@ jobs:
       # -- correct the day it was written, broken by the later commit that let
       # every element carry a name. Reds on that historical block.
       - run: python scripts/check_layers_type_filter.py --self-test && python scripts/check_layers_type_filter.py
+      # Every log-only action must say which port implements it natively, and the
+      # two must AGREE. Found 8 one-port divergences on its first run, including
+      # File>Save As doing nothing in jas_dioxus. Its self-test anchors are
+      # hand-verified against the live tree because the predicted failure mode is
+      # misreading two hand-written switches -- which it did, three times, before
+      # the anchors were satisfied.
+      - run: python scripts/check_action_implementations.py --self-test && python scripts/check_action_implementations.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -239,6 +246,8 @@ jobs:
           python scripts/check_widget_kind_dispatch.py
           python scripts/check_layers_type_filter.py --self-test
           python scripts/check_layers_type_filter.py
+          python scripts/check_action_implementations.py --self-test
+          python scripts/check_action_implementations.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves
