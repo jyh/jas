@@ -6,3 +6,4 @@
 //! ruling, because the frozen contract has leaf-paint verbs and no element verb.
 
 pub mod convert;
+pub mod device;
