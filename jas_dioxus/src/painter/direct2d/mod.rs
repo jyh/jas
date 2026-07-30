@@ -7,4 +7,5 @@
 
 pub mod convert;
 pub mod device;
+pub mod geometry;
 pub mod painter;

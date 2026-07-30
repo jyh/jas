@@ -25,10 +25,12 @@ use windows::core::Result;
 use windows::Win32::Graphics::Direct2D::Common::{D2D1_COLOR_F, D2D_RECT_F};
 use windows::Win32::Graphics::Direct2D::{
     ID2D1Brush, ID2D1RenderTarget, ID2D1SolidColorBrush, ID2D1StrokeStyle,
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_ELLIPSE, D2D1_LAYER_OPTIONS_NONE,
+    D2D1_LAYER_PARAMETERS,
 };
 use windows_numerics::Matrix3x2;
 
-use super::convert;
+use super::{convert, geometry};
 use crate::geometry::element::Color;
 use crate::painter::{
     BlendMode, Brush, EllipseArc, FillRule, Mask, Painter, PathCommand, Rect, StrokeStyle,
@@ -110,6 +112,34 @@ impl<'a> Direct2DPainter<'a> {
     }
 }
 
+/// The ONLY ellipse form built here, and the measurement behind that.
+///
+/// B1's matrix called full axis-aligned "100% of today's traffic" and partial
+/// arcs "emitted by no production call site and covered by no golden". I checked
+/// the 14 recorded scenes: 11 arcs, ALL full sweep, none rotated, none ccw.
+/// B1 confirmed.
+///
+/// (My first probe said the opposite. The corpus emits 4 decimal places, so a
+/// full sweep records as 6.2832 against 2 pi = 6.283185 -- a 1.5e-5 gap that a
+/// 1e-6 tolerance calls "partial". Comparing anything to this corpus needs the
+/// corpus's own precision, not f64's. That applies to the replay harness too.)
+///
+/// A partial or rotated arc returns None rather than drawing a full ellipse:
+/// silently closing an arc is exactly the "looks almost right" failure.
+fn full_ellipse(a: &EllipseArc) -> Option<D2D1_ELLIPSE> {
+    const TAU: f64 = std::f64::consts::TAU;
+    // Match the corpus's 4-decimal emission, not f64 precision.
+    let full = (a.end - a.start).abs();
+    if (full - TAU).abs() > 5e-5 || a.rotation != 0.0 {
+        return None;
+    }
+    Some(D2D1_ELLIPSE {
+        point: windows_numerics::Vector2 { X: a.cx as f32, Y: a.cy as f32 },
+        radiusX: a.rx as f32,
+        radiusY: a.ry as f32,
+    })
+}
+
 fn d2d_rect(r: Rect) -> D2D_RECT_F {
     D2D_RECT_F { left: r.x as f32, top: r.y as f32, right: (r.x + r.w) as f32, bottom: (r.y + r.h) as f32 }
 }
@@ -173,13 +203,72 @@ impl<'a> Painter for Direct2DPainter<'a> {
         self.group_alphas.pop();
     }
 
-    fn fill_path(&mut self, _p: &[PathCommand], _w: FillRule, _b: &Brush, _a: f64) {
-        // next increment: ID2D1PathGeometry + sink walker
+    fn fill_path(&mut self, path: &[PathCommand], winding: FillRule, brush: &Brush, paint_alpha: f64) {
+        let a = self.effective_alpha(paint_alpha);
+        let Some(b) = self.brush(brush, a) else { return };
+        let Ok(f) = (unsafe { self.rt.GetFactory() }) else { return };
+        if let Ok(Some(g)) = geometry::build(&f, path, winding) {
+            unsafe { self.rt.FillGeometry(&g, &b, None) };
+        }
     }
-    fn stroke_path(&mut self, _p: &[PathCommand], _b: &Brush, _s: &StrokeStyle, _a: f64) {}
-    fn fill_ellipse_arc(&mut self, _e: &EllipseArc, _w: FillRule, _b: &Brush, _a: f64) {}
-    fn stroke_ellipse_arc(&mut self, _e: &EllipseArc, _b: &Brush, _s: &StrokeStyle, _a: f64) {}
-    fn clip(&mut self, _p: &[PathCommand], _w: FillRule) {}
+
+    fn stroke_path(&mut self, path: &[PathCommand], brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
+        let a = self.effective_alpha(paint_alpha);
+        let Some(b) = self.brush(brush, a) else { return };
+        let Ok(f) = (unsafe { self.rt.GetFactory() }) else { return };
+        // A stroked path carries no fill rule; NonZero is the contract default
+        // and the rule is irrelevant to stroking.
+        if let Ok(Some(g)) = geometry::build(&f, path, FillRule::NonZero) {
+            let ss = self.stroke_style(stroke, stroke.width);
+            unsafe { self.rt.DrawGeometry(&g, &b, stroke.width as f32, ss.as_ref()) };
+        }
+    }
+
+    fn fill_ellipse_arc(&mut self, arc: &EllipseArc, _winding: FillRule, brush: &Brush, paint_alpha: f64) {
+        let a = self.effective_alpha(paint_alpha);
+        let Some(b) = self.brush(brush, a) else { return };
+        let Some(e) = full_ellipse(arc) else { return };
+        unsafe { self.rt.FillEllipse(&e, &b) };
+    }
+
+    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
+        let a = self.effective_alpha(paint_alpha);
+        let Some(b) = self.brush(brush, a) else { return };
+        let Some(e) = full_ellipse(arc) else { return };
+        let ss = self.stroke_style(stroke, stroke.width);
+        unsafe { self.rt.DrawEllipse(&e, &b, stroke.width as f32, ss.as_ref()) };
+    }
+
+    /// NESTED, ARBITRARY-PATH CLIP. D2D has no cheap form: `PushAxisAlignedClip`
+    /// takes rects only, so an arbitrary path needs a LAYER -- one offscreen
+    /// clear, render and blend-back per call. B1 priced it and today's traffic
+    /// is four call sites, all stroke-alignment, nesting depth 1.
+    ///
+    /// The contract has no `unclip`: a clip is undone by the enclosing
+    /// `pop_state`, which is why the pop is recorded on the current frame.
+    fn clip(&mut self, path: &[PathCommand], winding: FillRule) {
+        let Ok(f) = (unsafe { self.rt.GetFactory() }) else { return };
+        let Ok(Some(g)) = geometry::build(&f, path, winding) else { return };
+        // D2D1_LAYER_PARAMETERS, not ...1: the v1 struct is what
+        // ID2D1RenderTarget::PushLayer takes. The `1` variant belongs to
+        // ID2D1DeviceContext, which the WIC target can be QueryInterface'd to
+        // (B1 route (a)) -- needed for masks later, not for a geometric clip.
+        let params = D2D1_LAYER_PARAMETERS {
+            contentBounds: D2D_RECT_F { left: f32::MIN, top: f32::MIN, right: f32::MAX, bottom: f32::MAX },
+            geometricMask: unsafe { std::mem::transmute_copy(&g) },
+            maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+            maskTransform: Matrix3x2::identity(),
+            opacity: 1.0,
+            opacityBrush: std::mem::ManuallyDrop::new(None),
+            layerOptions: D2D1_LAYER_OPTIONS_NONE,
+        };
+        unsafe { self.rt.PushLayer(&params, None) };
+        // If no frame is open the clip lasts to EndDraw, which is the contract's
+        // own shape -- record it only when there is a frame to unwind it.
+        if let Some(fr) = self.frames.last_mut() {
+            fr.opened.push(Pop::Layer);
+        }
+    }
     fn draw_text_run(&mut self, _r: &TextRun, _b: &Brush, _a: f64) {}
 
     fn push_mask_layer(&mut self, _mask: Mask) {
@@ -298,6 +387,83 @@ mod tests {
         unsafe { t.target().GetTransform(&mut m) };
         assert_eq!((m.M31, m.M32), (0.0, 0.0), "pop_state restores");
         let _ = ident;
+    }
+
+    /// fill_path paints the interior of a closed triangle and nothing outside.
+    #[test]
+    fn fill_path_paints_a_triangle() {
+        let buf = draw(16, 16, |p| {
+            p.fill_path(&[
+                PathCommand::MoveTo { x: 1.0, y: 1.0 },
+                PathCommand::LineTo { x: 15.0, y: 1.0 },
+                PathCommand::LineTo { x: 1.0, y: 15.0 },
+                PathCommand::ClosePath,
+            ], FillRule::NonZero, &red(), 1.0);
+        });
+        assert_eq!(px(&buf, 16, 3, 3), [0, 0, 255, 255], "well inside the triangle");
+        assert_eq!(px(&buf, 16, 14, 14), [0, 0, 0, 0], "the cut-off corner stays clear");
+    }
+
+    /// A full-sweep ellipse fills. This is 100% of the recorded traffic.
+    #[test]
+    fn fill_ellipse_arc_paints_a_full_circle() {
+        let arc = EllipseArc {
+            cx: 8.0, cy: 8.0, rx: 6.0, ry: 6.0, rotation: 0.0,
+            start: 0.0, end: std::f64::consts::TAU, ccw: false,
+        };
+        let buf = draw(16, 16, |p| p.fill_ellipse_arc(&arc, FillRule::NonZero, &red(), 1.0));
+        assert_eq!(px(&buf, 16, 8, 8), [0, 0, 255, 255], "centre filled");
+        assert_eq!(px(&buf, 16, 0, 0), [0, 0, 0, 0], "corner outside the circle");
+    }
+
+    /// THE REFUSAL THAT MATTERS MORE THAN THE DRAW. A partial arc must paint
+    /// NOTHING rather than silently closing into a full ellipse -- an arc drawn
+    /// as a disc is the "looks almost right" failure, and no golden compares
+    /// pixels to catch it.
+    #[test]
+    fn a_partial_arc_paints_nothing_rather_than_a_full_ellipse() {
+        let half = EllipseArc {
+            cx: 8.0, cy: 8.0, rx: 6.0, ry: 6.0, rotation: 0.0,
+            start: 0.0, end: std::f64::consts::PI, ccw: false,
+        };
+        let buf = draw(16, 16, |p| p.fill_ellipse_arc(&half, FillRule::NonZero, &red(), 1.0));
+        assert!(buf.chunks(4).all(|q| q == [0, 0, 0, 0]),
+                "a partial arc must not become a disc");
+    }
+
+    /// The corpus rounds to 4 decimals, so a full sweep arrives as 6.2832 --
+    /// 1.5e-5 short of TAU. A tolerance tuned to f64 would classify every
+    /// recorded circle as partial and draw nothing at all. This pins the
+    /// tolerance to the corpus's own precision.
+    #[test]
+    fn a_corpus_rounded_full_sweep_still_counts_as_full() {
+        let rounded = EllipseArc {
+            cx: 8.0, cy: 8.0, rx: 6.0, ry: 6.0, rotation: 0.0,
+            start: 0.0, end: 6.2832, ccw: false,
+        };
+        let buf = draw(16, 16, |p| p.fill_ellipse_arc(&rounded, FillRule::NonZero, &red(), 1.0));
+        assert_eq!(px(&buf, 16, 8, 8), [0, 0, 255, 255],
+                   "6.2832 is how the corpus spells a full circle");
+    }
+
+    /// clip restricts a later fill, and pop_state undoes it.
+    #[test]
+    fn clip_restricts_the_fill_and_pop_state_releases_it() {
+        let ident = Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 0.0, f: 0.0 };
+        let buf = draw(16, 16, |p| {
+            p.push_state(ident);
+            p.clip(&[
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 8.0, y: 0.0 },
+                PathCommand::LineTo { x: 8.0, y: 8.0 },
+                PathCommand::LineTo { x: 0.0, y: 8.0 },
+                PathCommand::ClosePath,
+            ], FillRule::NonZero);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 }, &red(), 1.0);
+            p.pop_state();
+        });
+        assert_eq!(px(&buf, 16, 4, 4), [0, 0, 255, 255], "inside the clip");
+        assert_eq!(px(&buf, 16, 12, 12), [0, 0, 0, 0], "outside the clip is untouched");
     }
 
     /// Masks must REFUSE, not draw something plausible. A backend that quietly
