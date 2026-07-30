@@ -6451,6 +6451,210 @@ mod tests {
         assert_workspace_fixture("shortcut_structure", &json);
     }
 
+    /// CONTAINER-SEEDED EQUIVALENCE: an operation on a group must equal the
+    /// same operation on its sole member.
+    ///
+    /// Council O3.1. Candidate 3 of `QUEUE-finding-defects-better.md`, scored
+    /// by Starbuck at arbitration as reaching 5 of the 8 known defects
+    /// outright — the highest of the four candidates, and the ONLY one that
+    /// reaches premises nobody wrote down, because it needs no one to have
+    /// anticipated anything.
+    ///
+    /// THE LAW. Every one of those eight defects fired on the same input: A
+    /// SELECTED CONTAINER. Each was a function that answered correctly for a
+    /// leaf and wrongly — or silently not at all — for a group wrapping that
+    /// same leaf. So: take a corpus case, wrap its selected element in a
+    /// single-child group, run the identical action against the identical
+    /// selection path (wrapping IN PLACE leaves the path unchanged, and the
+    /// group is now what is selected), and require the two results to agree
+    /// once the wrapper is removed.
+    ///
+    /// NO GOLDEN IS INVOLVED, which is what makes this cheap and what makes it
+    /// reach defects nobody predicted. It compares the app against ITSELF under
+    /// a transformation that must not matter. A shared defect — both ports
+    /// wrong identically, which was six of the original eight — is invisible to
+    /// every differential gate we own and visible here.
+    #[cfg(feature = "web")]
+    #[test]
+    fn an_operation_on_a_group_equals_the_same_operation_on_its_member() {
+        use crate::geometry::element::{CommonProps, Element, GroupElem};
+
+        // Actions whose MEANING changes with a container, so the relation does
+        // not hold and saying so is not a cop-out. Each needs a reason.
+        const EXEMPT: &[(&str, &str)] = &[
+            ("group", "wrapping the target is the operation's own subject"),
+            ("ungroup", "likewise, in reverse"),
+            ("ungroup_all", "likewise"),
+            ("promote_to_concept", "container identity is the payload"),
+            ("make_instance", "same"),
+            ("new_symbol", "same"),
+            ("place_instance", "same"),
+        ];
+
+        /// Wrap the element at `path` in a single-child group, marked so it can
+        /// be found again after the operation has run.
+        fn wrap_at(doc: &mut crate::document::document::Document, path: &[usize]) -> bool {
+            if path.len() != 2 { return false; }        // top-level child only
+            let Some(layer) = doc.layers.get_mut(path[0]) else { return false };
+            let Some(kids) = layer.children_mut() else { return false };
+            let Some(slot) = kids.get_mut(path[1]) else { return false };
+            let inner = (**slot).clone();
+            if inner.is_group_or_layer() { return false; }   // leaves only
+            *slot = std::rc::Rc::new(Element::Group(GroupElem {
+                children: vec![std::rc::Rc::new(inner)],
+                common: CommonProps { name: Some("__seed_wrapper__".into()),
+                                      ..CommonProps::default() },
+                isolated_blending: false,
+                knockout_group: false,
+            }));
+            true
+        }
+
+        /// Remove the wrappers again, so the two documents are comparable.
+        fn unwrap_seeds(el: &Element) -> Element {
+            let mut out = el.clone();
+            if let Some(kids) = out.children_mut() {
+                let mut next: Vec<std::rc::Rc<Element>> = Vec::with_capacity(kids.len());
+                for k in kids.iter() {
+                    let cleaned = unwrap_seeds(k);
+                    let is_seed = matches!(&cleaned, Element::Group(g)
+                        if g.common.name.as_deref() == Some("__seed_wrapper__"));
+                    if is_seed {
+                        if let Element::Group(g) = &cleaned {
+                            for gc in &g.children { next.push(gc.clone()); }
+                        }
+                    } else {
+                        next.push(std::rc::Rc::new(cleaned));
+                    }
+                }
+                *kids = next;
+            }
+            out
+        }
+
+        // KNOWN DISAGREEMENTS, untriaged. Landing these as a pinned list
+        // rather than as a lowered floor is deliberate: the valuable direction
+        // is that a NEW disagreement reds, and that works from the first run.
+        // Each row is a QUESTION, not an accepted answer, and saying so is the
+        // point -- declaring them "artifacts" on reasoning alone would be the
+        // confident-and-wrong row this project keeps catching itself writing.
+        //
+        //   menu_lock / menu_hide: the flag lands on the WRAPPER and this
+        //   comparison strips it. Lock and visibility CASCADE
+        //   (`effective_locked` / `effective_visibility`), so the artist-visible
+        //   result is probably identical and only the stored JSON differs --
+        //   SUSPECTED artifact of the relation, NOT VERIFIED.
+        //
+        //   the five boolean ops: a boolean CONSUMES its selection to build a
+        //   compound shape. Whether operating on a group should consume the
+        //   group or its contents is a real semantic question that
+        //   transcripts/BOOLEAN.md may already answer; nobody has looked.
+        //
+        // Triage is queued. Removing a row here requires either a fix or a
+        // recorded ruling.
+        const KNOWN: &[&str] = &[
+            "make_compound_shape.json::make_compound_shape_two_rects",
+            "boolean.json::boolean_union_overlapping_rects",
+            "boolean.json::boolean_subtract_front_overlapping_rects",
+            "boolean.json::boolean_intersection_overlapping_rects",
+            "boolean.json::boolean_exclude_overlapping_rects",
+            "menu_object_ops.json::menu_lock_two_rects",
+            "menu_object_ops.json::menu_hide_two_rects",
+        ];
+
+        let mut checked = 0usize;
+        let mut disagreements: Vec<String> = Vec::new();
+        let mut seen_known: Vec<String> = Vec::new();
+
+        for fname in ACTION_FIXTURES {
+            let raw = read_fixture(&format!("actions/{fname}"));
+            let cases: serde_json::Value = match serde_json::from_str(&raw) {
+                Ok(v) => v, Err(_) => continue,
+            };
+            let Some(arr) = cases.as_array() else { continue };
+            for tc in arr {
+                let Some(setup) = tc["setup_svg"].as_str() else { continue };
+                let sel = match tc["selection"].as_array() { Some(s) => s, None => continue };
+                if sel.is_empty() { continue; }
+                // EVERY selected leaf gets wrapped, not just a lone one. The
+                // first cut required a single target and seeded ZERO cases --
+                // the corpus is overwhelmingly two- and three-target
+                // selections, and the anti-vacuity floor is the only reason
+                // that was noticed rather than reported as a clean run.
+                //
+                // Wrapping IN PLACE is what makes multi-target safe: each
+                // wrapper takes the slot its element occupied, so no index
+                // moves and every selection path stays valid and now names a
+                // group.
+                let paths: Vec<Vec<usize>> = sel.iter()
+                    .filter_map(|p| p.as_array())
+                    .map(|p| p.iter().filter_map(|n| n.as_u64()).map(|n| n as usize).collect())
+                    .collect();
+                let acts = tc["actions"].as_array().cloned().unwrap_or_default();
+                if acts.iter().any(|a| {
+                    let n = a["action"].as_str().unwrap_or("");
+                    EXEMPT.iter().any(|(e, _)| *e == n)
+                }) { continue; }
+
+                let svg = read_fixture(&format!("svg/{setup}"));
+                let mut wrapped_doc = svg_to_document(&svg);
+                let mut any = false;
+                for path in &paths {
+                    if wrap_at(&mut wrapped_doc, path) { any = true; }
+                }
+                if !any { continue; }
+                let wrapped_svg = document_to_svg(&wrapped_doc);
+
+                let plain = crate::recorder::replay::run_action_case(tc, &svg);
+                let seeded = crate::recorder::replay::run_action_case(tc, &wrapped_svg);
+
+                let mut plain_doc = plain.tabs[plain.active_tab].model.document().clone();
+                let mut seeded_doc = seeded.tabs[seeded.active_tab].model.document().clone();
+                plain_doc.layers = plain_doc.layers.iter().map(unwrap_seeds).collect();
+                seeded_doc.layers = seeded_doc.layers.iter().map(unwrap_seeds).collect();
+
+                checked += 1;
+                let a = document_to_test_json(&plain_doc);
+                let b = document_to_test_json(&seeded_doc);
+                if a != b {
+                    let name = tc["name"].as_str().unwrap_or("<unnamed>");
+                    let key = format!("{fname}::{name}");
+                    if KNOWN.contains(&key.as_str()) {
+                        seen_known.push(key);
+                    } else {
+                        disagreements.push(key);
+                    }
+                }
+            }
+        }
+
+        // Anti-vacuity: a walk that seeded nothing proves nothing, and would
+        // read exactly like a clean tree.
+        assert!(checked >= 20,
+                "only {checked} case(s) were container-seeded -- below the floor. \
+                 A transform that silently applies to nothing reports no \
+                 disagreements, which is indistinguishable from agreement.");
+
+        // A KNOWN row that stopped disagreeing is a row that must go -- the
+        // same expiry discipline the exemption ledgers carry, so a fix cannot
+        // leave a stale question behind.
+        let vanished: Vec<&str> = KNOWN.iter()
+            .filter(|k| !seen_known.iter().any(|s| s == *k))
+            .copied()
+            .collect();
+        assert!(vanished.is_empty(),
+                "{} known disagreement(s) no longer disagree -- delete the rows: {:?}",
+                vanished.len(), vanished);
+
+        assert!(disagreements.is_empty(),
+                "{} NEW container-seeded disagreement(s) out of {checked} \
+                 seeded ({} known) -- an operation answered differently for a \
+                 group than for its sole member -- an operation answered differently for a \
+                 group than for its sole member, which is the shape all eight \
+                 of the 2026-07-29 defects wore:\n  {}",
+                disagreements.len(), seen_known.len(), disagreements.join("\n  "));
+    }
+
     /// THE LAYERS TYPE FILTER, driven from the shared corpus.
     ///
     /// `test_fixtures/view_state/layers_type_filter.json` is the single
