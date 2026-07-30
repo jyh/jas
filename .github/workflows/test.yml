@@ -45,6 +45,11 @@ jobs:
       # own descendant. Four producers had to be closed before this could pass
       # at all, and it reds on the pre-§20 tree with 13 violations.
       - run: python scripts/check_selection_invariant.py --self-test && python scripts/check_selection_invariant.py
+      # Every ACTIVE PORT must dispatch every canonical widget kind, or carry an
+      # exemption row with a reason. JasSwift was missing three, all declared in
+      # the shipping workspace; the Layers element-type filter shipped as the
+      # placeholder TEXT "Filter by element type". Port six's table starts empty.
+      - run: python scripts/check_widget_kind_dispatch.py --self-test && python scripts/check_widget_kind_dispatch.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -224,6 +229,8 @@ jobs:
           python scripts/check_element_dispatch.py
           python scripts/check_selection_invariant.py --self-test
           python scripts/check_selection_invariant.py
+          python scripts/check_widget_kind_dispatch.py --self-test
+          python scripts/check_widget_kind_dispatch.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves

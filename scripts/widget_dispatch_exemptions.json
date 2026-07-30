@@ -1,0 +1,28 @@
+{
+  "_doc": [
+    "PER-PORT WIDGET-KIND DISPATCH EXEMPTIONS. See",
+    "scripts/check_widget_kind_dispatch.py for what this gates and why.",
+    "",
+    "A row excuses ONE port failing to dispatch ONE kind, and needs a NON-EMPTY",
+    "reason -- a blank one excuses nothing (self-test case (d)). Keyed",
+    "'port:kind'.",
+    "",
+    "Two classes live here and they are not alike:",
+    "  * the SENTINEL, which no port should ever dispatch;",
+    "  * REAL GAPS, scheduled but unbuilt. Each of those is a feature JasSwift",
+    "    does not have, and the missing dispatch arm is its most visible",
+    "    symptom rather than its cause.",
+    "",
+    "Removing a row is how you claim a kind is done. Do not remove one until",
+    "the ACTIONS its behaviour dispatches also exist in that port -- an arm",
+    "alone ships a control that looks functional and does nothing, which is",
+    "worse than the placeholder it replaces."
+  ],
+  "exemptions": {
+    "rust:placeholder": "THE SENTINEL, not a widget kind. `placeholder` is what the canonical set calls the fallback a port renders for an unknown or undispatched kind; dispatching it would be circular. Exempt in every port, permanently. (This is also the 37-vs-38 discrepancy between two independent counts of the same list.)",
+    "swift:placeholder": "THE SENTINEL. As rust:placeholder -- permanent, not debt.",
+    "swift:dropdown": "REAL GAP, and larger than a dispatch arm: the Layers panel's element-type filter is UNBUILT in JasSwift. jas_dioxus backs it with native `AppState.layers_hidden_types` plus tree filtering (renderer.rs ~8900); JasSwift has neither the state nor the filtering. Adding only the arm would open a menu that changes nothing. Artist-visible today as the literal placeholder text 'Filter by element type' beside the Layers search box -- which appeared in a screenshot to the Captain on 2026-07-29 and was read by nobody. Found by the jas/windows seat counting dispatch arms.",
+    "swift:icon_button_group": "REAL GAP. The Artboard Options orientation control (portrait/landscape). The widget is absent AND so is the action its behaviour dispatches -- `toggle_artboard_orientation` does not exist in JasSwift, though it is declared in workspace/dialogs/artboard_options.yaml. Both halves are needed; the arm alone would present a working-looking toggle that no-ops.",
+    "swift:reference_point_widget": "REAL GAP. The Artboard Options 3x3 anchor grid ('exactly one anchor active; changes X / Y display, not storage'). As icon_button_group: the widget is absent AND `set_artboard_reference_point` does not exist in JasSwift. Needs the artboard reference-point model, not a switch case."
+  }
+}
