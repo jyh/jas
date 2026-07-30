@@ -80,6 +80,25 @@ def _tracked_check_scripts() -> int:
         MIN_LOG_ONLY) -- adding an element kind SHOULD force someone to rule on
         whether the menu offers it. There the friction is the feature, and
         automating it away would delete the ruling.
+
+    A DERIVED FLOOR MUST FAIL CLOSED. The first cut of this returned 0 when the
+    oracle was unreachable, and the vacuity rule is `n_scripts < floor` -- at 0
+    that is False for every possible tree, so A REPOSITORY WITH ZERO CHECK
+    SCRIPTS WOULD BE JUDGED NOT VACUOUS. An anti-vacuity floor that vanishes
+    when its oracle does is worse than no floor, because it still reads as one.
+
+    Flask proved it by mutation rather than by reading (letter 14 §2),
+    monkeypatching subprocess.run to raise: `normal: 19 / git gone: 0`. He then
+    corrected his own finding before sending it -- `--self-test` DOES red in
+    that state, because its cases are built from `MIN_CHECK_SCRIPTS - 1` and at
+    0 that is -1, which collapses loudly. So the narrow true claim was "fails
+    open ON ITS OWN, and is rescued by the self-test running beside it", not
+    "fails open". Both lanes do pair them.
+
+    That rescue is real but incidental -- nobody designed it, and it protects
+    only the invocation that happens to carry --self-test. A local run, or a
+    future lane written from memory, gets the silent pass. So the oracle is
+    load-bearing and its absence is an ERROR, not a zero.
     """
     import subprocess
     try:
@@ -87,9 +106,19 @@ def _tracked_check_scripts() -> int:
             ["git", "ls-files", "scripts/check_*.py"],
             cwd=pathlib.Path(__file__).resolve().parent.parent,
             capture_output=True, text=True, check=True).stdout
-    except (OSError, subprocess.CalledProcessError):
-        return 0
-    return len([l for l in out.splitlines() if l.strip()])
+    except (OSError, subprocess.CalledProcessError) as e:
+        raise RuntimeError(
+            f"cannot derive MIN_CHECK_SCRIPTS: `git ls-files` is unavailable "
+            f"({e}). This floor is DERIVED from git's index, and a floor of 0 "
+            f"would pass any tree including an empty one. Refusing to run "
+            f"rather than guarding nothing.") from e
+    n = len([l for l in out.splitlines() if l.strip()])
+    if n == 0:
+        raise RuntimeError(
+            "cannot derive MIN_CHECK_SCRIPTS: `git ls-files scripts/check_*.py` "
+            "matched nothing. Either the pathspec stopped matching or this is "
+            "not the repo -- both make the floor vacuous. Refusing to run.")
+    return n
 
 
 MIN_CHECK_SCRIPTS = _tracked_check_scripts()
@@ -343,14 +372,39 @@ def self_test():
             verb = "reject" if want_rejected else "accept"
             failures.append(f"  floor: {n_scripts} scripts / {n_j} jobs should {verb}")
 
+    # THE DERIVED FLOOR MUST FAIL CLOSED, proven by mutation rather than by
+    # reading -- Flask's method, applied to the hole Flask found (letter 14 §2).
+    # Before this, an unreachable oracle yielded 0, and `n < 0` is False for
+    # every tree, so the anti-vacuity floor silently stopped guarding. The
+    # self-test happened to red anyway; that rescue was incidental and covered
+    # only invocations that carry --self-test.
+    import subprocess as _sp
+    for name, fake in (
+        ("oracle unreachable", lambda *a, **k: (_ for _ in ()).throw(OSError("no git"))),
+        ("oracle matches nothing", lambda *a, **k: _sp.CompletedProcess(a, 0, "", "")),
+    ):
+        real = _sp.run
+        _sp.run = fake
+        try:
+            got = _tracked_check_scripts()
+            failures.append(f"  fail-closed/{name}: returned {got!r} instead of raising "
+                            f"-- a floor of 0 passes every tree, including an empty one")
+        except RuntimeError:
+            pass                      # correct: refuses to run rather than guard nothing
+        except Exception as e:        # noqa: BLE001 -- any other escape is also a failure
+            failures.append(f"  fail-closed/{name}: raised {type(e).__name__}, want RuntimeError")
+        finally:
+            _sp.run = real
+
     if failures:
         print("SELF-TEST FAILED -- the gate does not detect what it claims:")
         print("\n".join(failures))
         return 1
     print("self-test: 4 gap-classes detected, comment/exempt/args/multiline "
           "classes clean, unresolvable platforms refused, anti-vacuity floor "
-          f"holds at {MIN_CHECK_SCRIPTS} scripts / {MIN_JOBS} jobs "
-          "-- gate proven RED where it must be.")
+          f"holds at {MIN_CHECK_SCRIPTS} scripts / {MIN_JOBS} jobs, and the "
+          "derived floor FAILS CLOSED when its oracle is unreachable or "
+          "matches nothing -- gate proven RED where it must be.")
     return 0
 
 
