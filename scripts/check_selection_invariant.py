@@ -58,7 +58,27 @@ FIXTURES = REPO / "test_fixtures"
 # Anti-vacuity floors. A walk that found no selections reports no violations,
 # which is indistinguishable from a clean corpus.
 MIN_FILES = 200
-MIN_SELECTIONS = 40
+MIN_SELECTIONS = 66
+#
+# EXACT, NOT SLACK. This was a hand-set floor with room to spare until
+# 2026-07-29, when the jas/windows seat proved the hole by mutation: it set a
+# test-count floor 1.6% below reality, gated six tests off, and the gate went
+# GREEN. Its sentence is the rule now --
+#
+#     "A floor with slack is a floor with a hole exactly the size of the slack,
+#      and the hole admits precisely the move the assertion exists to forbid."
+#
+# Here the floor is the ONLY guard: if the walk silently reached fewer
+# selection arrays, the unvisited ones report no violations and the gate
+# passes. Nothing else would notice. This was the worst of the five (40
+# against a real 66 -- 26 selections could have gone unwatched).
+#
+# Adding to the set means raising this number in the same commit. That friction
+# is the feature: the number is a claim about coverage, and a claim nobody has
+# to restate is a claim nobody rechecks. (The model is
+# check_preservation_corpus.py, whose floor is DERIVED from per-vector `n_min`
+# declarations and therefore cannot drift at all -- prefer that shape where the
+# data can declare itself.)
 
 
 def paths_of(sel):

@@ -65,7 +65,27 @@ LEDGER = REPO / "scripts" / "widget_dispatch_exemptions.json"
 
 # Anti-vacuity floor: if the canonical set or a port's arm count collapses, the
 # comparison reports no gaps, which is indistinguishable from full coverage.
-MIN_KINDS = 30
+MIN_KINDS = 38
+#
+# EXACT, NOT SLACK. This was a hand-set floor with room to spare until
+# 2026-07-29, when the jas/windows seat proved the hole by mutation: it set a
+# test-count floor 1.6% below reality, gated six tests off, and the gate went
+# GREEN. Its sentence is the rule now --
+#
+#     "A floor with slack is a floor with a hole exactly the size of the slack,
+#      and the hole admits precisely the move the assertion exists to forbid."
+#
+# The floor is the ONLY guard for the CANONICAL set: kinds the parse misses
+# are never compared against any port, so a port missing one of them
+# passes. (MIN_ARMS below keeps its slack deliberately -- a partial arm
+# parse OVER-reports gaps, which is loud, not silent.)
+#
+# Adding to the set means raising this number in the same commit. That friction
+# is the feature: the number is a claim about coverage, and a claim nobody has
+# to restate is a claim nobody rechecks. (The model is
+# check_preservation_corpus.py, whose floor is DERIVED from per-vector `n_min`
+# declarations and therefore cannot drift at all -- prefer that shape where the
+# data can declare itself.)
 MIN_ARMS = 25
 
 PORTS = {
