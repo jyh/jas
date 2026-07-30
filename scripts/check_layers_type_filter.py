@@ -93,13 +93,15 @@ LAYERS_YAML = REPO / "workspace" / "panels" / "layers.yaml"
 # Tokens a port answers that the filter menu does not offer, each with a
 # reason. A row here is a claim that the gap is INTENDED and SHARED.
 UNOFFERABLE: dict[str, str] = {
-    "live": (
-        "No `items` entry offers it, so a live element (Compound Shape, "
-        "Reference, Recorded, Generated) cannot be hidden in EITHER port. "
-        "Spelled identically on both sides so this stays a shared gap by "
-        "agreement rather than becoming a divergence the moment someone adds "
-        "the menu option -- at which point BOTH ports already answer it."
-    ),
+    # EMPTY, and that is a result. `live` sat here from 2026-07-29, declared as
+    # a shared gap: no menu item offered it, so a live element could not be
+    # hidden in either port. Council Q1.2 added the Compound Shape entry, this
+    # gate's stale-row arm red on its own declaration, and the row was deleted.
+    #
+    # It mattered more than a tidy-up. Under the CHECKED semantics JYH ruled,
+    # a type the menu cannot offer can never be CHECKED -- so a gap that was
+    # merely benign under unchecked semantics would have made every live
+    # element vanish the instant any filter was applied.
 }
 
 # Anti-vacuity floors, EXACT rather than slack. Flask's law, proved by
@@ -109,7 +111,7 @@ UNOFFERABLE: dict[str, str] = {
 # feature -- adding an element kind should force the menu decision, not slip
 # past a `>=`.
 EXPECTED_TOKENS = 12   # the eleven menu types plus `live`
-EXPECTED_MENU = 11
+EXPECTED_MENU = 12   # eleven leaf/container types plus `live`
 
 # Identifiers that mean "the row's label" in either port. Their presence
 # anywhere in a filter block is the defect returning.
@@ -175,7 +177,11 @@ def menu_values(doc: object) -> list[str]:
                 items = node.get("items")
                 if not isinstance(items, list):
                     raise ParseFailure("lp_filter_button has no `items` list")
-                found.append([str(i["value"]) for i in items if "value" in i])
+                # Only `type: toggle` items name an element TYPE. The "All"
+                # item is an action that resets the filter -- counting it as a
+                # type would demand that some element answer "__all__".
+                found.append([str(i["value"]) for i in items
+                              if "value" in i and i.get("type") == "toggle"])
             for v in node.values():
                 walk(v)
         elif isinstance(node, list):
@@ -318,12 +324,13 @@ func caller() {
 '''
 
 MENU_OK = {"body": [{"id": "lp_filter_button", "items": [
-    {"label": "Layer", "value": "layer"}, {"label": "Group", "value": "group"},
-    {"label": "Path", "value": "path"}, {"label": "Rectangle", "value": "rectangle"},
-    {"label": "Circle", "value": "circle"}, {"label": "Ellipse", "value": "ellipse"},
-    {"label": "Polyline", "value": "polyline"}, {"label": "Polygon", "value": "polygon"},
-    {"label": "Text", "value": "text"}, {"label": "Text Path", "value": "text_path"},
-    {"label": "Line", "value": "line"},
+    {"label": "Layer", "value": "layer", "type": "toggle"}, {"label": "Group", "value": "group", "type": "toggle"},
+    {"label": "Path", "value": "path", "type": "toggle"}, {"label": "Rectangle", "value": "rectangle", "type": "toggle"},
+    {"label": "Circle", "value": "circle", "type": "toggle"}, {"label": "Ellipse", "value": "ellipse", "type": "toggle"},
+    {"label": "Polyline", "value": "polyline", "type": "toggle"}, {"label": "Polygon", "value": "polygon", "type": "toggle"},
+    {"label": "Text", "value": "text", "type": "toggle"}, {"label": "Text Path", "value": "text_path", "type": "toggle"},
+    {"label": "Line", "value": "line", "type": "toggle"},
+    {"label": "Compound Shape", "value": "live", "type": "toggle"},
 ]}]}
 
 
@@ -367,7 +374,7 @@ def self_test() -> int:
     # (e) A menu entry no element answers: a control that hides nothing.
     menu_ghost = {"body": [{"id": "lp_filter_button",
                             "items": MENU_OK["body"][0]["items"] + [
-                                {"label": "Mesh", "value": "mesh"}]}]}
+                                {"label": "Mesh", "value": "mesh", "type": "toggle"}]}]}
     check("e/ghost menu item", RUST_OK, SWIFT_OK, menu_ghost, True)
 
     # (f) A new token the menu cannot offer and UNOFFERABLE does not declare.
@@ -381,16 +388,18 @@ def self_test() -> int:
                            'case .live: return "live"\n    case .mesh: return "mesh"'),
           MENU_OK, True)
 
-    # (g) `live` PROMOTED to the menu must red until UNOFFERABLE drops it --
-    #     the stale-exemption arm. Without this, a declared gap outlives the
-    #     gap and becomes a lie that reads as a decision. That is exactly how
-    #     `swift:dropdown` in widget_dispatch_exemptions.json came to assert
-    #     JasSwift "has neither the state nor the filtering" months after it
-    #     had both, and it cost this seat an evening building what existed.
-    menu_live = {"body": [{"id": "lp_filter_button",
-                           "items": MENU_OK["body"][0]["items"] + [
-                               {"label": "Live", "value": "live"}]}]}
-    check("g/stale UNOFFERABLE", RUST_OK, SWIFT_OK, menu_live, True)
+    # (g) A DECLARED-UNOFFERABLE token that the menu now offers must red until
+    #     the row is deleted. This arm fired for real on 2026-07-30: `live` sat
+    #     in UNOFFERABLE as a declared shared gap, council Q1.2 added the
+    #     Compound Shape entry, and the gate refused its own stale declaration.
+    #     Driven here with a synthetic row, since UNOFFERABLE is empty now.
+    saved = dict(UNOFFERABLE)
+    UNOFFERABLE["line"] = "synthetic: pretend `line` is unofferable"
+    try:
+        check("g/stale UNOFFERABLE", RUST_OK, SWIFT_OK, MENU_OK, True)
+    finally:
+        UNOFFERABLE.clear()
+        UNOFFERABLE.update(saved)
 
     # (h) REFUSE rather than pass when the shape is gone. A rename that this
     #     gate cannot follow must not read as a clean tree.
@@ -461,9 +470,11 @@ def main() -> int:
     for p in problems:
         print(f"  * {p}", file=sys.stderr)
     print(file=sys.stderr)
-    print("layers.yaml: \"Unchecking a type hides all elements of that type "
-          "from the tree.\" ALL of that type -- a rectangle the artist named "
-          "\"roof\" is still a rectangle.", file=sys.stderr)
+    print("layers.yaml, in the CHECKED semantics ruled 2026-07-30: \"a checked "
+          "type lists all its elements, plus their ancestors; nothing checked "
+          "is the same as checking everything.\" The filter reads the ELEMENT, "
+          "never its label -- a circle the artist named \"<Rectangle>\" is "
+          "still a circle.", file=sys.stderr)
     return 1
 
 

@@ -2177,6 +2177,37 @@
         }
       ]
     },
+    "solo_layers_type_filter": {
+      "description": "Show ONLY the given element type: replace the whole type filter with that one type. Bound to Alt-click on a type in the filter dropdown, mirroring the ratified Option-click solo gesture on the Layers eye button \u2014 the artist has already learned \"click toggles, Option isolates\" on the control immediately beside this one. A second Alt-click on the same, already-soloed type restores the unfiltered tree, exactly as a second Option-click on the eye un-solos.\n",
+      "category": "layers",
+      "params": {
+        "element_type": {
+          "type": "string"
+        }
+      },
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "layers",
+            "key": "type_filter",
+            "value": "if panel.type_filter.length == 1 and panel.type_filter[0] == param.element_type then [] else [param.element_type]"
+          }
+        }
+      ]
+    },
+    "clear_layers_type_filter": {
+      "description": "Restore the unfiltered tree \u2014 the \"All\" item at the top of the filter dropdown. An empty filter means every type is listed (layers.yaml \u00a7state.type_filter), so this is a one-click return to the default and the reason the all-unchecked state is never something an artist has to reach by unticking eleven boxes.\n",
+      "category": "layers",
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "layers",
+            "key": "type_filter",
+            "value": "[]"
+          }
+        }
+      ]
+    },
     "open_layer_options": {
       "description": "Open the Layer Options dialog for an existing layer (edit mode) or for creating a new layer (create mode). In edit mode, the target layer's current name / visibility / locked state are resolved via element_at(path_from_id(layer_id)) and passed as dialog params so the dialog's init: block populates the inputs. In create mode, layer_id is null and the dialog's defaults take effect (name \"Layer N\", color preset, visible+preview+unlocked).\n",
       "category": "layers",
@@ -15994,11 +16025,17 @@
                 "type": "dropdown",
                 "icon": "filter",
                 "summary": "Filter by element type",
-                "description": "Dropdown with checkboxes for each element type. Unchecking a type hides all elements of that type from the tree. Filtering composes with the search field.\n",
+                "description": "Dropdown of element types, in CHECKED semantics (ruled by JYH, council 2026-07-30): a checked type lists all its elements, plus their ancestors. Nothing checked \u2014 the default \u2014 is the same as checking everything, so the panel opens unfiltered and an artist never has to reach the empty state by unticking every box.\nPlain click toggles a type. ALT-CLICK SOLOS it (show only that type), mirroring the Option-click solo on the eye button so the gesture is learned once; a second Alt-click on a soloed type restores the full tree. The \"All\" item at the top restores the default in one click.\nFiltering composes with the search field, and the two are INDEPENDENT AXES: search matches the displayed label as literal text, this matches the ELEMENT's type. A circle the artist named \"<Rectangle>\" is still a circle.\nThe previous wording \u2014 \"unchecking a type hides all elements of that type\" \u2014 was false for containers, which are kept whenever a descendant survives because a tree cannot draw a child without its parent row. Stated as checking rather than unchecking, the ancestor rule stops being an exception and becomes half the definition.\n",
                 "style": {
                   "size": 20
                 },
                 "items": [
+                  {
+                    "label": "All",
+                    "value": "__all__",
+                    "type": "action",
+                    "action": "clear_layers_type_filter"
+                  },
                   {
                     "label": "Layer",
                     "value": "layer",
@@ -16053,6 +16090,11 @@
                     "label": "Line",
                     "value": "line",
                     "type": "toggle"
+                  },
+                  {
+                    "label": "Compound Shape",
+                    "value": "live",
+                    "type": "toggle"
                   }
                 ],
                 "behavior": [
@@ -16062,6 +16104,17 @@
                     "params": {
                       "element_type": "item.value"
                     }
+                  },
+                  {
+                    "event": "alt_toggle",
+                    "action": "solo_layers_type_filter",
+                    "params": {
+                      "element_type": "item.value"
+                    }
+                  },
+                  {
+                    "event": "select_all_types",
+                    "action": "clear_layers_type_filter"
                   }
                 ]
               }

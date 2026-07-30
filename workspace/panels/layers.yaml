@@ -476,11 +476,37 @@ content:
           icon: filter
           summary: "Filter by element type"
           description: >
-            Dropdown with checkboxes for each element type. Unchecking a
-            type hides all elements of that type from the tree. Filtering
-            composes with the search field.
+            Dropdown of element types, in CHECKED semantics (ruled by JYH,
+            council 2026-07-30): a checked type lists all its elements, plus
+            their ancestors. Nothing checked — the default — is the same as
+            checking everything, so the panel opens unfiltered and an artist
+            never has to reach the empty state by unticking every box.
+
+            Plain click toggles a type. ALT-CLICK SOLOS it (show only that
+            type), mirroring the Option-click solo on the eye button so the
+            gesture is learned once; a second Alt-click on a soloed type
+            restores the full tree. The "All" item at the top restores the
+            default in one click.
+
+            Filtering composes with the search field, and the two are
+            INDEPENDENT AXES: search matches the displayed label as literal
+            text, this matches the ELEMENT's type. A circle the artist named
+            "<Rectangle>" is still a circle.
+
+            The previous wording — "unchecking a type hides all elements of
+            that type" — was false for containers, which are kept whenever a
+            descendant survives because a tree cannot draw a child without its
+            parent row. Stated as checking rather than unchecking, the ancestor
+            rule stops being an exception and becomes half the definition.
           style: { size: 20 }
           items:
+            # FIRST, and deliberately: the one-click way back to the default.
+            # An artist wanting "just the circles" Alt-clicks Circle; wanting
+            # everything again, they click All. Neither requires unticking ten
+            # boxes, which is what a pure checkbox list would demand and what
+            # made CHECKED semantics awkward before the convenience layer was
+            # ruled (council Q1.5).
+            - { label: "All", value: __all__, type: action, action: clear_layers_type_filter }
             - { label: "Layer",     value: layer,     type: toggle }
             - { label: "Group",     value: group,     type: toggle }
             - { label: "Path",      value: path,      type: toggle }
@@ -492,10 +518,28 @@ content:
             - { label: "Text",      value: text,      type: toggle }
             - { label: "Text Path", value: text_path, type: toggle }
             - { label: "Line",      value: line,      type: toggle }
+            # Compound shapes, references, recorded and generated elements all
+            # answer the type token `live`. Under CHECKED semantics a type the
+            # menu cannot offer can never be checked -- so without this entry
+            # every live element would vanish the moment any filter was active.
+            # Both ports have answered `live` since 2026-07-29; only the menu
+            # was missing (council Q1.2).
+            - { label: "Compound Shape", value: live, type: toggle }
           behavior:
+            # PLAIN CLICK toggles one type in or out of the set.
             - event: toggle
               action: toggle_layers_type_filter
               params: { element_type: "item.value" }
+            # ALT-CLICK SOLOS it — show only that type. The same gesture the
+            # eye button already uses for solo (see §Visibility), so the artist
+            # learns it once. A second Alt-click on a soloed type restores the
+            # full tree.
+            - event: alt_toggle
+              action: solo_layers_type_filter
+              params: { element_type: "item.value" }
+            # The "All" item restores the default.
+            - event: select_all_types
+              action: clear_layers_type_filter
 
     # ── Separator ──
 

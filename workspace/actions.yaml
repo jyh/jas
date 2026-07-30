@@ -1914,6 +1914,35 @@ actions:
       # the missing primitive (council Q3.2, 2026-07-30).
       - list_toggle: { target: "panel.type_filter", value: "param.element_type" }
 
+  solo_layers_type_filter:
+    description: >
+      Show ONLY the given element type: replace the whole type filter with
+      that one type. Bound to Alt-click on a type in the filter dropdown,
+      mirroring the ratified Option-click solo gesture on the Layers eye
+      button — the artist has already learned "click toggles, Option isolates"
+      on the control immediately beside this one. A second Alt-click on the
+      same, already-soloed type restores the unfiltered tree, exactly as a
+      second Option-click on the eye un-solos.
+    category: layers
+    params:
+      element_type: { type: string }
+    effects:
+      - set_panel_state:
+          panel: layers
+          key: type_filter
+          value: "if panel.type_filter.length == 1 and panel.type_filter[0] == param.element_type then [] else [param.element_type]"
+
+  clear_layers_type_filter:
+    description: >
+      Restore the unfiltered tree — the "All" item at the top of the filter
+      dropdown. An empty filter means every type is listed (layers.yaml
+      §state.type_filter), so this is a one-click return to the default and
+      the reason the all-unchecked state is never something an artist has to
+      reach by unticking eleven boxes.
+    category: layers
+    effects:
+      - set_panel_state: { panel: layers, key: type_filter, value: "[]" }
+
   # Layer Options dialog
 
   open_layer_options:
