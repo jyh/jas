@@ -239,6 +239,25 @@ def main():
               "indistinguishable from a clean tree.", file=sys.stderr)
         return 1
 
+    # THE SECOND LOOP. A row whose caller became bracketed is never visited by
+    # the walk above -- it stops being a finding -- so its exemption would
+    # outlive the condition it describes forever. Flask's finding (letter 11
+    # §2), swept across every gate by check_gate_consistency.py, which caught
+    # this file: I wrote these five rows the same afternoon I read his letter
+    # about the omission, and omitted it.
+    keys = {f"{f[0]}::{f[2]}" for f in unbracketed}
+    obsolete = sorted(k for k in ex if k not in keys)
+    if obsolete:
+        print(f"ERROR: {len(obsolete)} exemption row(s) name a caller that is "
+              f"now bracketed (or gone). Delete them:", file=sys.stderr)
+        for k in obsolete:
+            print(f"  {k}", file=sys.stderr)
+        print(file=sys.stderr)
+        print("An exemption must not outlive the condition it describes -- that "
+              "is the whole reason these rows are questions and not "
+              "clearances.", file=sys.stderr)
+        return 1
+
     undeclared = [f for f in unbracketed if f"{f[0]}::{f[2]}" not in ex]
     if not undeclared:
         print(f"set_document bracketing: {total} caller(s), all inside a "
