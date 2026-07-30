@@ -22,11 +22,14 @@
 //! compounding, i.e. would be WRONG. There is a test for that below.
 
 use windows::core::Result;
-use windows::Win32::Graphics::Direct2D::Common::{D2D1_COLOR_F, D2D_RECT_F};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D1_COLOR_F, D2D1_GRADIENT_STOP, D2D_RECT_F,
+};
 use windows::Win32::Graphics::Direct2D::{
     ID2D1Brush, ID2D1RenderTarget, ID2D1SolidColorBrush, ID2D1StrokeStyle,
-    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_ELLIPSE, D2D1_LAYER_OPTIONS_NONE,
-    D2D1_LAYER_PARAMETERS,
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP,
+    D2D1_GAMMA_2_2, D2D1_LAYER_OPTIONS_NONE, D2D1_LAYER_PARAMETERS,
+    D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES,
 };
 use windows_numerics::Matrix3x2;
 
@@ -89,14 +92,56 @@ impl<'a> Direct2DPainter<'a> {
         unsafe { self.rt.CreateSolidColorBrush(&col, None) }
     }
 
-    /// Only solid brushes in this increment. Gradients are expressible (B1:
-    /// `CreateLinearGradientBrush` / `CreateRadialGradientBrush` over an
-    /// `ID2D1GradientStopCollection`) and are the next increment; returning None
-    /// here is honest about what is built rather than silently painting black.
+    /// GAMMA_2_2, NOT GAMMA_1_0 -- a divergence pin, not a default.
+    ///
+    /// CSS gradients interpolate in sRGB (gamma-encoded) space. D2D's
+    /// `D2D1_GAMMA_1_0` interpolates LINEARLY, which is a different and visibly
+    /// lighter midpoint on any two-stop gradient. Nothing in the corpus compares
+    /// gradient pixels, so picking the wrong one would never go red.
+    fn stops(&self, stops: &[crate::painter::ColorStop], alpha: f64)
+        -> Option<windows::Win32::Graphics::Direct2D::ID2D1GradientStopCollection>
+    {
+        let v: Vec<D2D1_GRADIENT_STOP> = stops.iter().map(|s| {
+            let (r, g, b, a) = s.color.to_rgba();
+            D2D1_GRADIENT_STOP {
+                position: s.offset as f32,
+                color: D2D1_COLOR_F { r: r as f32, g: g as f32, b: b as f32, a: (a * alpha) as f32 },
+            }
+        }).collect();
+        unsafe { self.rt.CreateGradientStopCollection(&v, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) }.ok()
+    }
+
     fn brush(&self, b: &Brush, alpha: f64) -> Option<ID2D1Brush> {
         match b {
             Brush::Solid(c) => self.solid(*c, alpha).ok().map(|s| s.into()),
-            Brush::Linear(_) | Brush::Radial(_) => None,
+            Brush::Linear(g) => {
+                let sc = self.stops(&g.stops, alpha)?;
+                let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                    startPoint: windows_numerics::Vector2 { X: g.x0 as f32, Y: g.y0 as f32 },
+                    endPoint: windows_numerics::Vector2 { X: g.x1 as f32, Y: g.y1 as f32 },
+                };
+                unsafe { self.rt.CreateLinearGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
+            }
+            Brush::Radial(g) => {
+                // D2D radial is ONE circle plus an origin offset; the contract
+                // (like canvas createRadialGradient) is TWO circles. They
+                // coincide only when the inner radius is 0. Refuse otherwise
+                // rather than drawing a plausible-but-wrong gradient -- every
+                // radial in the corpus has r0 = 0.
+                if g.r0 != 0.0 {
+                    return None;
+                }
+                let sc = self.stops(&g.stops, alpha)?;
+                let props = D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
+                    center: windows_numerics::Vector2 { X: g.x1 as f32, Y: g.y1 as f32 },
+                    gradientOriginOffset: windows_numerics::Vector2 {
+                        X: (g.x0 - g.x1) as f32, Y: (g.y0 - g.y1) as f32,
+                    },
+                    radiusX: g.r1 as f32,
+                    radiusY: g.r1 as f32,
+                };
+                unsafe { self.rt.CreateRadialGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
+            }
         }
     }
 
