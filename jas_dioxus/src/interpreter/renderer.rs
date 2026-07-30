@@ -8494,6 +8494,12 @@ struct TreeRow {
     is_container: bool,
     display_name: String,
     is_named: bool,
+    /// The token the type filter matches, derived from the ELEMENT.
+    ///
+    /// Kept as its own field rather than recovered from `display_name`,
+    /// because a display name is a PRESENTATION of the element and the type
+    /// is a FACT about it — see `tree_type_value`.
+    type_value: &'static str,
     is_selected: bool,
     is_renaming: bool,
     is_layer: bool,
@@ -8552,6 +8558,79 @@ fn tree_type_label(elem: &GeoElement) -> &'static str {
             crate::geometry::live::LiveVariant::Generated(_) => "Generated",
         },
     }
+}
+
+/// The token the Layers type filter matches an element against, in the
+/// spelling `workspace/panels/layers.yaml`'s `lp_filter_button` uses for its
+/// `items` values.
+///
+/// DERIVED FROM THE ELEMENT, NEVER FROM ITS DISPLAY NAME. Until 2026-07-29
+/// the filter recovered this by parsing the row label: `<Rectangle>` was
+/// matched apart, and anything else fell through to `""`. That worked by
+/// construction while only Layers could carry a name — and the commit that
+/// let EVERY element carry one ("Tree row reads common.name; drop the
+/// is_layer rename gate") silently made every NAMED element unfilterable,
+/// because its label is then "roof" rather than `<Rectangle>` and `""`
+/// matches nothing hidden. The gate that could have caught it was deferred
+/// in `transcripts/LAYERS_TESTS.md` (LYR-091) for the exact reason that
+/// naming a non-layer was impossible at the time; nobody revisited it when
+/// it became possible.
+///
+/// The general shape, worth more than the instance: a display name is a
+/// PRESENTATION of an element and its type is a FACT about it, so reading
+/// the fact back out of the presentation is lossy the moment presentation
+/// gains a second form. `layers.yaml` is precise about this where it means
+/// names — search matches "whose name (or auto-generated type name like
+/// `<Path>`)" — and the filter clause says only *type*, and *all*.
+///
+/// JasSwift's `typeValue` has always matched on the element; this brings
+/// this port to it rather than the other way round.
+fn tree_type_value(elem: &GeoElement) -> &'static str {
+    match elem {
+        GeoElement::Line(_) => "line",
+        GeoElement::Rect(_) => "rectangle",
+        GeoElement::Circle(_) => "circle",
+        GeoElement::Ellipse(_) => "ellipse",
+        GeoElement::Polyline(_) => "polyline",
+        GeoElement::Polygon(_) => "polygon",
+        GeoElement::Path(_) => "path",
+        GeoElement::Text(_) => "text",
+        GeoElement::TextPath(_) => "text_path",
+        GeoElement::Group(_) => "group",
+        GeoElement::Layer(_) => "layer",
+        // No `items` entry offers "live", so a Live element cannot be hidden
+        // in either port today. Spelled the same as JasSwift's `.live` arm so
+        // that stays a SHARED gap rather than becoming a divergence the
+        // moment the menu gains the option.
+        GeoElement::Live(_) => "live",
+    }
+}
+
+/// Paths surviving the Layers type filter, given each row as
+/// `(path, type_value)`.
+///
+/// An ancestor of a surviving row is kept even when its own type is hidden:
+/// a tree cannot draw a child without its parent row. That makes hiding a
+/// CONTAINER type inoperative whenever any descendant survives, which is a
+/// deliberate consequence and not obviously what `layers.yaml`'s "hides all
+/// elements of that type" intends. JasSwift does the identical thing, so it
+/// is a shared question for council rather than a divergence.
+fn tree_type_filter_keep<'a>(
+    rows: impl IntoIterator<Item = (&'a [usize], &'a str)>,
+    hidden: &TreeHashSet<String>,
+) -> TreeHashSet<Vec<usize>> {
+    let visible: TreeHashSet<Vec<usize>> = rows
+        .into_iter()
+        .filter(|(_, ty)| !hidden.contains(*ty))
+        .map(|(path, _)| path.to_vec())
+        .collect();
+    let mut keep = visible.clone();
+    for p in &visible {
+        for i in 1..p.len() {
+            keep.insert(p[..i].to_vec());
+        }
+    }
+    keep
 }
 
 /// Build a fitted-viewBox SVG thumbnail for a single element.
@@ -8665,6 +8744,7 @@ fn tree_flatten_rc_children(
             is_layer,
             is_collapsed,
             is_panel_selected,
+            type_value: tree_type_value(child),
             layer_color: current_layer_color.clone(),
             visibility_str: vis_str.to_string(),
         });
@@ -8738,6 +8818,7 @@ fn tree_flatten_layers(
             is_layer,
             is_collapsed,
             is_panel_selected,
+            type_value: tree_type_value(elem),
             layer_color: layer_color.clone(),
             visibility_str: vis_str.to_string(),
         });
@@ -8896,44 +8977,18 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     // Apply type filter: hide rows whose element type is in hidden_types.
     // Ancestor containers are preserved so descendants of visible types
     // remain reachable.
-    let hidden_types: std::collections::HashSet<String> = rctx.app.borrow()
+    //
+    // Each row's type comes from `TreeRow::type_value`, set from the element
+    // itself at flatten time. It used to be parsed back out of the row's
+    // display name, which stopped working the day every element could be
+    // named — see `tree_type_value` for that history.
+    let hidden_types: TreeHashSet<String> = rctx.app.borrow()
         .layers_hidden_types.iter().cloned().collect();
     if !hidden_types.is_empty() {
-        fn type_value(tl: &str) -> &'static str {
-            match tl {
-                "Line" => "line", "Rectangle" => "rectangle", "Circle" => "circle",
-                "Ellipse" => "ellipse", "Polyline" => "polyline", "Polygon" => "polygon",
-                "Path" => "path", "Text" => "text", "Text Path" => "text_path",
-                "Group" => "group", "Layer" => "layer", _ => "",
-            }
-        }
-        // Determine which paths to keep: rows whose type is not hidden,
-        // plus ancestor paths of those rows.
-        let visible_paths: std::collections::HashSet<Vec<usize>> = rows.iter()
-            .filter(|r| {
-                // Use the display_name's content to find the type label.
-                // display_name is either "<Layer>" or "Layer 1", so check both.
-                let type_hint = if r.is_layer { "layer" } else {
-                    // Extract from display_name if it's in angle brackets
-                    let n = &r.display_name;
-                    if n.starts_with('<') && n.ends_with('>') {
-                        let inner = &n[1..n.len()-1];
-                        type_value(inner)
-                    } else {
-                        // Named layer already checked
-                        ""
-                    }
-                };
-                !hidden_types.contains(type_hint)
-            })
-            .map(|r| r.path.clone())
-            .collect();
-        let mut keep = visible_paths.clone();
-        for p in &visible_paths {
-            for i in 1..p.len() {
-                keep.insert(p[..i].to_vec());
-            }
-        }
+        let keep = tree_type_filter_keep(
+            rows.iter().map(|r| (r.path.as_slice(), r.type_value)),
+            &hidden_types,
+        );
         rows.retain(|r| keep.contains(&r.path));
     }
 
@@ -10814,6 +10869,121 @@ mod tests {
         assert_eq!(clamp_to_declared(-50.0, None, None), -50.0);
         assert_eq!(clamp_to_declared(1e9, Some(1.0), None), 1e9);
         assert_eq!(clamp_to_declared(0.0, Some(1.0), None), 1.0);
+    }
+
+    /// THE LAYERS TYPE FILTER READS THE ELEMENT, NOT ITS LABEL.
+    ///
+    /// `layers.yaml` (`lp_filter_button`): "Unchecking a type hides all
+    /// elements of that type from the tree." ALL of that type — a rectangle
+    /// the artist has named "roof" is still a rectangle.
+    ///
+    /// This port used to recover the type by parsing the row label, matching
+    /// `<Rectangle>` apart and letting everything else fall to `""`. That was
+    /// correct by construction only while Layers alone could be named; once
+    /// every element could, a named element's label became its name, `""`
+    /// matched nothing hidden, and NAMING AN ELEMENT EXEMPTED IT FROM THE
+    /// FILTER. JasSwift's `typeValue` matched on the element throughout, so
+    /// this was a one-port defect and the fix converges the two.
+    ///
+    /// Twin: `JasSwift/Tests/Panels/LayersTypeFilterTests.swift`.
+    #[test]
+    fn the_type_filter_reads_the_element_not_its_label() {
+        use crate::geometry::element::{CommonProps, Element, CircleElem, LayerElem, RectElem};
+        use crate::geometry::live::{CompoundOperation, CompoundShape, LiveVariant};
+
+        fn named(name: Option<&str>) -> CommonProps {
+            CommonProps { name: name.map(String::from), ..CommonProps::default() }
+        }
+        fn rect(name: Option<&str>) -> Element {
+            Element::Rect(RectElem {
+                x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+                fill: None, stroke: None, common: named(name),
+                fill_gradient: None, stroke_gradient: None,
+            })
+        }
+        fn circle(name: Option<&str>) -> Element {
+            Element::Circle(CircleElem {
+                cx: 0.0, cy: 0.0, r: 5.0,
+                fill: None, stroke: None, common: named(name),
+                fill_gradient: None, stroke_gradient: None,
+            })
+        }
+        fn layer(children: Vec<Element>) -> Element {
+            Element::Layer(LayerElem {
+                children: children.into_iter().map(std::rc::Rc::new).collect(),
+                common: named(Some("Layer 1")),
+                isolated_blending: false,
+                knockout_group: false,
+            })
+        }
+
+        // ── The mapping itself, including the two spellings that used to be
+        //    recoverable from a label and the one that never was.
+        assert_eq!(tree_type_value(&rect(None)), "rectangle");
+        assert_eq!(tree_type_value(&rect(Some("roof"))), "rectangle",
+                   "a name must not change an element's TYPE");
+        assert_eq!(tree_type_value(&circle(Some("sun"))), "circle");
+        assert_eq!(tree_type_value(&layer(vec![])), "layer");
+        // Spelled to match JasSwift's `.live` arm. No menu item offers it, so
+        // Live is unfilterable in BOTH ports -- a shared gap by agreement
+        // rather than a divergence waiting to happen.
+        assert_eq!(
+            tree_type_value(&Element::Live(LiveVariant::CompoundShape(CompoundShape {
+                operation: CompoundOperation::Union,
+                operands: vec![], fill: None, stroke: None,
+                common: named(Some("prow")),
+            }))),
+            "live"
+        );
+
+        // ── End to end through the flattener, which is where the defect was
+        //    reachable: an UNNAMED and a NAMED rectangle beside a circle.
+        let layers = vec![layer(vec![
+            rect(None),
+            rect(Some("roof")),
+            circle(None),
+        ])];
+        let empty = TreeHashSet::new();
+        let rows = tree_flatten_layers(&layers, &empty, &empty, &[], &None);
+
+        let hide_rects: TreeHashSet<String> = ["rectangle".to_string()].into_iter().collect();
+        let keep = tree_type_filter_keep(
+            rows.iter().map(|r| (r.path.as_slice(), r.type_value)),
+            &hide_rects,
+        );
+        let surviving: Vec<&str> = rows.iter()
+            .filter(|r| keep.contains(&r.path))
+            .map(|r| r.type_value)
+            .collect();
+
+        // The layer survives as an ancestor of the circle; BOTH rectangles go.
+        assert_eq!(surviving, vec!["layer", "circle"],
+                   "the named rectangle escaped the filter -- this is the defect");
+        assert!(!rows.iter().filter(|r| keep.contains(&r.path))
+                    .any(|r| r.display_name == "roof"),
+                "the row labelled `roof` must be gone; it is a rectangle");
+
+        // ── The ancestor rule, stated as its own claim: hiding the CONTAINER
+        //    type does NOT remove it while a descendant survives, because a
+        //    tree cannot draw a child without its parent row. Deliberate, and
+        //    identical in JasSwift -- council owns whether it is what
+        //    "hides all elements of that type" ought to mean.
+        let hide_layers: TreeHashSet<String> = ["layer".to_string()].into_iter().collect();
+        let keep = tree_type_filter_keep(
+            rows.iter().map(|r| (r.path.as_slice(), r.type_value)),
+            &hide_layers,
+        );
+        assert!(keep.contains(&vec![0]),
+                "the layer is retained as an ancestor of its visible children");
+
+        // ── An empty hidden set is not this function's business, but a set
+        //    naming a type nothing has must not remove anything.
+        let hide_text: TreeHashSet<String> = ["text".to_string()].into_iter().collect();
+        let keep = tree_type_filter_keep(
+            rows.iter().map(|r| (r.path.as_slice(), r.type_value)),
+            &hide_text,
+        );
+        assert_eq!(keep.len(), rows.len(), "no row is a Text element");
     }
 
     #[test]

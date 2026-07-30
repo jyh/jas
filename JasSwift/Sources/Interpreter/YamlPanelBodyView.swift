@@ -259,10 +259,25 @@ struct YamlElementView: View {
             case "icon":
                 renderIcon()
             // Two of the three previously-undispatched kinds. `dropdown` stays
-            // absent on purpose — see scripts/widget_dispatch_exemptions.json:
-            // its feature (the Layers element-type filter) needs native state and
-            // tree filtering, and an arm without them opens a menu that changes
-            // nothing, which is worse than a visible placeholder.
+            // absent — see scripts/widget_dispatch_exemptions.json for the row
+            // and its machine-checked justification.
+            //
+            // AN EARLIER VERSION OF THIS COMMENT WAS WRONG, and the way it was
+            // wrong is worth keeping: it said the Layers element-type filter
+            // "needs native state and tree filtering", implying this port had
+            // neither. It has both, and has for months — `hiddenTypes`,
+            // `layersTypeValue`, `layersTypeFilterKeep`. The false clause came
+            // from the exemption row, was copied here, and then the two agreed
+            // with each other; a seat read them and set out to build what
+            // already shipped. Consensus among copies is not evidence.
+            //
+            // The real gap: this port draws the search field and the filter
+            // menu NATIVELY inside `renderTreeView`, which `layers.yaml`
+            // already declares as `lp_search_input` + `lp_filter_button`. So
+            // the artist gets the search box twice and two filter controls, the
+            // YAML one an inert placeholder. jas_dioxus renders both from the
+            // YAML and duplicates neither. Adding an arm here alone would give
+            // a THIRD control; the fix is to delete the native pair.
             case "icon_button_group":
                 renderIconButtonGroup()
             case "reference_point_widget":
@@ -3701,6 +3716,64 @@ func elementDisplayName(_ elem: Element) -> (String, Bool) {
     return ("<\(elementTypeLabel(elem))>", false)
 }
 
+/// The token the Layers type filter matches an element against, in the
+/// spelling `workspace/panels/layers.yaml`'s `lp_filter_button` uses for its
+/// `items` values.
+///
+/// DERIVED FROM THE ELEMENT, NEVER FROM ITS DISPLAY NAME. This port has always
+/// matched on the element; jas_dioxus recovered the type by parsing the row
+/// label until 2026-07-29, matching `<Rectangle>` apart and letting anything
+/// else fall through to `""`, so over there NAMING AN ELEMENT EXEMPTED IT FROM
+/// THE FILTER. `layers.yaml` says "Unchecking a type hides all elements of
+/// that type" — all of them, whatever the artist has called them.
+///
+/// The general shape is worth more than the instance: a display name is a
+/// PRESENTATION of an element and its type is a FACT about it, so recovering
+/// the fact from the presentation is lossy the moment presentation gains a
+/// second form — which is precisely what `elementDisplayName` above did when
+/// every element became nameable.
+///
+/// `.live` answers "live", which no menu item offers, so a live element is
+/// unfilterable in BOTH ports. Spelled identically on both sides so that
+/// stays a shared gap by agreement rather than a divergence waiting on
+/// whoever adds the option.
+/// Internal rather than `private` so `LayersTypeFilterTests` can assert it.
+func layersTypeValue(_ elem: Element) -> String {
+    switch elem {
+    case .line: return "line"
+    case .rect: return "rectangle"
+    case .circle: return "circle"
+    case .ellipse: return "ellipse"
+    case .polyline: return "polyline"
+    case .polygon: return "polygon"
+    case .path: return "path"
+    case .text: return "text"
+    case .textPath: return "text_path"
+    case .group: return "group"
+    case .layer: return "layer"
+    case .live: return "live"
+    }
+}
+
+/// Paths surviving the Layers type filter, given each row as its path and the
+/// token `layersTypeValue` answered for it.
+///
+/// An ancestor of a surviving row is kept even when its own type is hidden: a
+/// tree cannot draw a child without its parent row. That makes hiding a
+/// CONTAINER type inoperative whenever any descendant survives, which is not
+/// obviously what `layers.yaml`'s "hides all elements of that type" intends.
+/// jas_dioxus's `tree_type_filter_keep` does the identical thing, so it is a
+/// shared question for council rather than a divergence.
+func layersTypeFilterKeep(_ rows: [(path: ElementPath, typeValue: String)],
+                          hidden: Set<String>) -> Set<ElementPath> {
+    let visible = Set(rows.filter { !hidden.contains($0.typeValue) }.map { $0.path })
+    var keep = visible
+    for p in visible {
+        for i in 1..<max(p.count, 1) { keep.insert(Array(p.prefix(i))) }
+    }
+    return keep
+}
+
 private func visIcon(_ vis: Visibility) -> String {
     switch vis {
     case .preview: return "\u{25C9}"
@@ -3865,22 +3938,10 @@ struct TreeViewContent: View {
         }
     }
 
-    private func typeValue(_ elem: Element) -> String {
-        switch elem {
-        case .line: return "line"
-        case .rect: return "rectangle"
-        case .circle: return "circle"
-        case .ellipse: return "ellipse"
-        case .polyline: return "polyline"
-        case .polygon: return "polygon"
-        case .path: return "path"
-        case .text: return "text"
-        case .textPath: return "text_path"
-        case .group: return "group"
-        case .layer: return "layer"
-        case .live: return "live"
-        }
-    }
+    // The type token and the keep-set both live at module scope now, beside
+    // `elementDisplayName`, so `LayersTypeFilterTests` can assert them — see
+    // `layersTypeValue`. A private method here could only be reached by
+    // rendering the view.
 
     private func flatten(_ doc: Document) -> [FlatRow] {
         var out: [FlatRow] = []
@@ -3914,11 +3975,9 @@ struct TreeViewContent: View {
         var result = rows
         // Type filter
         if !hiddenTypes.isEmpty {
-            let visible = Set(result.filter { !hiddenTypes.contains(typeValue($0.elem)) }.map { $0.path })
-            var keep = visible
-            for p in visible {
-                for i in 1..<p.count { keep.insert(Array(p.prefix(i))) }
-            }
+            let keep = layersTypeFilterKeep(
+                result.map { (path: $0.path, typeValue: layersTypeValue($0.elem)) },
+                hidden: hiddenTypes)
             result = result.filter { keep.contains($0.path) }
         }
         // Isolation filter

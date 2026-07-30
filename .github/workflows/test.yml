@@ -50,6 +50,12 @@ jobs:
       # the shipping workspace; the Layers element-type filter shipped as the
       # placeholder TEXT "Filter by element type". Port six's table starts empty.
       - run: python scripts/check_widget_kind_dispatch.py --self-test && python scripts/check_widget_kind_dispatch.py
+      # One vocabulary for the Layers type filter, spoken identically by the
+      # YAML and both active ports, and derived from the ELEMENT. jas_dioxus
+      # parsed the row LABEL, so naming an element exempted it from the filter
+      # -- correct the day it was written, broken by the later commit that let
+      # every element carry a name. Reds on that historical block.
+      - run: python scripts/check_layers_type_filter.py --self-test && python scripts/check_layers_type_filter.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -231,6 +237,8 @@ jobs:
           python scripts/check_selection_invariant.py
           python scripts/check_widget_kind_dispatch.py --self-test
           python scripts/check_widget_kind_dispatch.py
+          python scripts/check_layers_type_filter.py --self-test
+          python scripts/check_layers_type_filter.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves

@@ -54,7 +54,7 @@ EXEMPT: dict[str, str] = {}
 
 # Anti-vacuity floors. A scan that found nothing reports no gaps, which is
 # indistinguishable from a scan that found everything in order.
-MIN_CHECK_SCRIPTS = 14
+MIN_CHECK_SCRIPTS = 15
 #
 # EXACT, NOT SLACK. This was a hand-set floor with room to spare until
 # 2026-07-29, when the jas/windows seat proved the hole by mutation: it set a
@@ -290,7 +290,12 @@ def self_test():
         (20, 1, True),                       # a truncated workflow parse
         (MIN_CHECK_SCRIPTS - 1, 20, True),   # just under
         (MIN_CHECK_SCRIPTS, MIN_JOBS, False),  # exactly at both lines
-        (14, 17, False),                     # the real tree, measured 2026-07-29
+        # The real tree, RE-MEASURED as each gate lands: 14 scripts when this
+        # case was written, 15 once check_layers_type_filter.py joined. The
+        # exact floor is what forced this line to be updated rather than
+        # letting a stale measurement read as a current one -- which is the
+        # whole argument for exactness, demonstrated on this gate's own fixture.
+        (15, 17, False),
     ]:
         if below_floor(n_scripts, n_j) != want_rejected:
             verb = "reject" if want_rejected else "accept"
