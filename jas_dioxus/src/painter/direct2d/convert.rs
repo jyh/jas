@@ -30,18 +30,29 @@ use windows::Win32::Graphics::Direct2D::Common::{
 /// map. Picking `_MITER` produces long spikes on acute joins that no other port
 /// draws — visible, silent, and gated by nothing.
 pub fn line_join(join: LineJoin) -> D2D1_LINE_JOIN {
-    todo!("B1: map LineJoin")
+    match join {
+        LineJoin::Miter => D2D1_LINE_JOIN_MITER_OR_BEVEL,
+        LineJoin::Round => D2D1_LINE_JOIN_ROUND,
+        LineJoin::Bevel => D2D1_LINE_JOIN_BEVEL,
+    }
 }
 
 pub fn line_cap(cap: LineCap) -> D2D1_CAP_STYLE {
-    todo!("B1: map LineCap")
+    match cap {
+        LineCap::Butt => D2D1_CAP_STYLE_FLAT,
+        LineCap::Round => D2D1_CAP_STYLE_ROUND,
+        LineCap::Square => D2D1_CAP_STYLE_SQUARE,
+    }
 }
 
 /// `FillRule::NonZero` -> WINDING, `EvenOdd` -> ALTERNATE.
 ///
 /// Must be set on the sink BEFORE the first `BeginFigure`; D2D ignores it after.
 pub fn fill_mode(rule: FillRule) -> D2D1_FILL_MODE {
-    todo!("B1: map FillRule")
+    match rule {
+        FillRule::NonZero => D2D1_FILL_MODE_WINDING,
+        FillRule::EvenOdd => D2D1_FILL_MODE_ALTERNATE,
+    }
 }
 
 /// THE DASH-UNIT CONVERSION, and the trap inside it.
@@ -59,7 +70,16 @@ pub fn fill_mode(rule: FillRule) -> D2D1_FILL_MODE {
 ///
 /// `emit_width` is therefore a REQUIRED separate argument, not a convenience.
 pub fn dash_multiples(dash: &[f64], emit_width: f64) -> Vec<f32> {
-    todo!("B1: convert dash units")
+    // A zero (hairline) width would divide to inf. D2D renders width 0 as a
+    // one-pixel hairline, so treat the divisor as 1.0 there: the dash pattern
+    // is then in device-ish units, which is the closest defined behaviour and
+    // is finite. Never emit inf/NaN into a COM struct.
+    let divisor = if emit_width.is_finite() && emit_width > 0.0 {
+        emit_width
+    } else {
+        1.0
+    };
+    dash.iter().map(|d| (d / divisor) as f32).collect()
 }
 
 /// Build the D2D stroke-style properties for a contract `StrokeStyle`.
@@ -68,7 +88,24 @@ pub fn dash_multiples(dash: &[f64], emit_width: f64) -> Vec<f32> {
 /// `lineCap`, while D2D defaults `dashCap` to FLAT independently. Leaving it
 /// default makes every round-capped dashed stroke draw square dashes.
 pub fn stroke_properties(style: &StrokeStyle) -> D2D1_STROKE_STYLE_PROPERTIES {
-    todo!("B1: stroke properties")
+    let cap = line_cap(style.cap);
+    D2D1_STROKE_STYLE_PROPERTIES {
+        startCap: cap,
+        endCap: cap,
+        // NOT the D2D default of FLAT: canvas dashes inherit lineCap.
+        dashCap: cap,
+        lineJoin: line_join(style.join),
+        miterLimit: style.miter as f32,
+        dashStyle: if style.dash.is_empty() {
+            D2D1_DASH_STYLE_SOLID
+        } else {
+            D2D1_DASH_STYLE_CUSTOM
+        },
+        // The contract carries no dash PHASE. Canvas2D has lineDashOffset and
+        // StrokeStyle does not, so there is nothing to pass here -- a contract
+        // gap named by B1, not something this backend can invent.
+        dashOffset: 0.0,
+    }
 }
 
 #[cfg(test)]

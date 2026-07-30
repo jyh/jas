@@ -28,7 +28,7 @@ repair stay repaired.
 WHAT IT ASSERTS
 ---------------
 1. `cargo test --no-default-features --lib --no-run` exits 0.
-2. The native lib test target contains AT LEAST `FLOOR` tests.
+2. The native lib test target contains EXACTLY `FLOOR` tests.
 
 WHY (2) IS NOT OPTIONAL
 -----------------------
@@ -36,8 +36,7 @@ Assertion (1) alone is trivially satisfiable by deleting tests or by wrapping
 every offending test in `#[cfg(feature = "web")]`. That "fix" turns the gate
 green while REDUCING what is verified natively -- the precise outcome this gate
 exists to prevent. The floor is the anti-vacuity half, and it is the half that
-does the work. It may be RAISED when the native surface grows; lowering it is a
-deliberate act that should arrive with a written reason.
+does the work. It is EXACT in both directions -- see the note on FLOOR.
 
 WHAT IT DOES NOT COVER
 ----------------------
@@ -76,7 +75,20 @@ CRATE = REPO / "jas_dioxus"
 # So: adding native tests REQUIRES raising this number, and that friction is the
 # feature -- it makes every change to native coverage a visible, deliberate line
 # in a diff. Lowering it should arrive with a written reason.
-FLOOR = 1830
+#
+# CORRECTED 2026-07-30: the comment above said that from day one and the CODE DID
+# NOT DO IT -- the check was `count < floor`, so ADDING tests passed silently and
+# only removals red. My own gate's documentation was wider than its behaviour,
+# which is the exact defect class this repo treats as most serious, sitting in
+# the file that exists to police it. Now `count != floor`, both directions.
+#
+# AND THE FIX EARNED ITSELF ON ITS FIRST RUN. It immediately red on a drift that
+# was ALREADY on `arc2-section20` and had nothing to do with the commit that
+# fixed it: the pin read 1830 while the tree carried 1832. Two native tests had
+# been added and the pin never raised, silently, on the integration branch --
+# which is exactly the drift the comment claimed to prevent and the code did not.
+# Re-pinned to the measured 1832.
+FLOOR = 1832
 
 
 def parse_test_count(listing: str) -> int:
@@ -101,11 +113,18 @@ def verdict(build_ok: bool, count: int, floor: int) -> tuple[bool, str]:
         )
     if count < floor:
         return False, (
-            f"only {count} tests in the native lib test target, floor is {floor} -- "
-            "the target builds but too little is verified natively. If tests were "
-            "deliberately gated behind `web`, say why and lower the floor on purpose"
+            f"only {count} tests in the native lib test target, pinned at {floor} -- "
+            "the target builds but LESS is verified natively than before. If tests were "
+            "deliberately gated behind `web`, say why and lower the pin on purpose"
         )
-    return True, f"native lib test target builds; {count} tests (floor {floor})"
+    if count > floor:
+        return False, (
+            f"{count} tests in the native lib test target, pinned at {floor} -- "
+            f"{count - floor} MORE than pinned. That is almost always good news; raise "
+            "the pin in the same commit that adds them. The pin is exact on purpose: a "
+            "one-sided floor lets native coverage drift without anyone deciding to"
+        )
+    return True, f"native lib test target builds; {count} tests (pinned at {floor})"
 
 
 def run() -> int:
@@ -152,8 +171,11 @@ def self_test() -> int:
         ("build fails, zero tests", False, 0, False),
         ("builds but empty", True, 0, False),
         ("builds, one short of floor", True, FLOOR - 1, False),
-        ("builds, exactly at floor", True, FLOOR, True),
-        ("builds, comfortably above", True, FLOOR + 500, True),
+        ("builds, exactly at the pin", True, FLOOR, True),
+        # BOTH directions red. Before 2026-07-30 this case expected PASS, which
+        # is what let the pin drift upward unnoticed.
+        ("builds, one MORE than pinned", True, FLOOR + 1, False),
+        ("builds, comfortably above", True, FLOOR + 500, False),
     ]
     failures = []
     for label, build_ok, count, expect in cases:
