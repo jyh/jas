@@ -214,6 +214,56 @@ def below_floor(n_kinds, arm_counts):
     return n_kinds < MIN_KINDS or any(n < MIN_ARMS for n in arm_counts)
 
 
+def unexcused_kinds(kinds, per_port):
+    """Every (port, kind) a port does not dispatch, BEFORE exemptions apply.
+
+    Needed by `stale_exemptions`, which asks the question this gate could not
+    previously ask at all.
+    """
+    return {
+        (port, kind)
+        for port, handled in per_port.items()
+        for kind in kinds - handled
+    }
+
+
+def stale_exemptions(kinds, per_port, exemptions):
+    """Exemption rows whose gap has CLOSED -- the port now dispatches the kind.
+
+    FLASK'S FINDING (jas/windows, letter 11, 2026-07-30), and it is a hole no
+    claim machinery could have covered:
+
+        The gate iterates GAPS and asks "is this excused?". It never iterates
+        EXEMPTIONS and asks "is this still needed?"
+
+    A row whose condition has closed is never VISITED, because the kind stopped
+    being a gap -- so its `asserts` are never evaluated and it can outlive its
+    own justification indefinitely. That is exactly how `swift:dropdown` came to
+    assert JasSwift "has neither the state nor the filtering" for months after
+    JasSwift shipped both, and adding `{file, contains|lacks}` claims did not
+    fix it: the claim was never reached to be checked.
+
+    The repair is this second loop, and it needs no new vocabulary. Note the
+    sentinel rows are unaffected by construction: `placeholder` is the fallback
+    kind no port dispatches, so it never stops being a gap.
+
+    Written after the same idea was independently built into the sibling gate
+    (`retired`, check_action_implementations.py) and NOT back-ported here --
+    which is its own small lesson about fixing an instance rather than a class.
+    """
+    open_gaps = unexcused_kinds(kinds, per_port)
+    known_ports = set(per_port)
+    out = []
+    for key in sorted(exemptions):
+        port, _, kind = key.partition(":")
+        if port not in known_ports:
+            continue          # a row for a port this run did not scan
+        if (port, kind) not in open_gaps:
+            out.append((key, f"{port} now dispatches \"{kind}\" -- the gap this "
+                             f"row excuses has CLOSED, so the row is obsolete"))
+    return out
+
+
 def gaps(kinds, per_port, exemptions):
     """(port, kind) pairs a port does not dispatch and has not excused.
 
@@ -326,6 +376,30 @@ def self_test():
     claims_red("l/no file", {"reason": "r", "asserts": [{"contains": "x"}]}, True)
     claims_red("l/no predicate", {"reason": "r", "asserts": [{"file": "a.swift"}]}, True)
 
+    # (n) FLASK'S CASE: an exemption whose gap has CLOSED. No assert can reach
+    #     this -- the row is never visited once the kind stops being a gap --
+    #     which is why it needs its own loop and its own self-test arm.
+    closed = stale_exemptions(kinds, {"swift": set(kinds)},
+                              {"swift:dropdown": normalise_row("a reason")})
+    if not closed:
+        failures.append("  n: an exemption whose port now dispatches the kind must be STALE")
+    elif "CLOSED" not in closed[0][1]:
+        failures.append(f"  n: message should say the gap closed, got {closed[0][1]}")
+    #     ...and it must stay silent while the gap is genuinely open.
+    if stale_exemptions(kinds, {"swift": kinds - {"dropdown"}},
+                        {"swift:dropdown": normalise_row("a reason")}):
+        failures.append("  n: an OPEN gap's exemption must not be called stale")
+    #     The sentinel is safe by construction -- but ONLY because `placeholder`
+    #     is itself a canonical kind that no port dispatches, so it never stops
+    #     being a gap. The first draft of this arm used a `kinds` set without
+    #     `placeholder` in it and the sentinel came back STALE, which is the
+    #     honest warning: were `placeholder` ever dropped from the canonical
+    #     set, both permanent rows would be reported obsolete every run.
+    sentinel_kinds = kinds | {"placeholder"}
+    if stale_exemptions(sentinel_kinds, {"swift": sentinel_kinds - {"placeholder"}},
+                        {"swift:placeholder": normalise_row("THE SENTINEL")}):
+        failures.append("  n: the sentinel row must never be reported stale")
+
     # (m) THE LIVE LEDGER's own justifications must hold right now. This is the
     #     production assertion, run here too so `--self-test` alone catches a
     #     row that has gone stale.
@@ -397,7 +471,10 @@ def main():
 
     # An exemption's ARGUMENT is checked before its effect is honoured, because
     # a stale argument is worse than a missing one: it reads as a decision.
-    stale = verify_asserts(exemptions, read_repo_file)
+    # Flask's loop FIRST: a row whose gap has closed is obsolete whatever its
+    # claims say, and it is the case no assert can reach.
+    stale = stale_exemptions(kinds, per_port, exemptions) \
+        + verify_asserts(exemptions, read_repo_file)
     if stale:
         print(f"ERROR: {len(stale)} exemption justification(s) in "
               f"{LEDGER.relative_to(REPO).as_posix()} no longer hold.",
