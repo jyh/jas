@@ -61,9 +61,22 @@ REPO = Path(__file__).resolve().parent.parent
 CRATE = REPO / "jas_dioxus"
 
 # Anti-vacuity floor: the native lib test target must carry at least this many
-# tests. Measured after the 2026-07-29 repair; raise it when the native surface
-# grows, and never lower it without a written reason.
-FLOOR = 2000
+# tests.
+#
+# Measured 1830 immediately after the 2026-07-29 repair (from 0 -- the target did
+# not build at all).
+#
+# TIGHT, deliberately, in the shape the preservation gate already uses in this
+# repo ("14 against a floor of 14"). A first attempt set it to 1800 for ~1.6% of
+# slack; a mutation then gated `painter::tests` off, the native count fell to
+# 1824, and THE GATE STILL PASSED. A floor with slack is a floor with a hole
+# exactly the size of the slack, and the hole admits precisely the move this
+# assertion exists to forbid.
+#
+# So: adding native tests REQUIRES raising this number, and that friction is the
+# feature -- it makes every change to native coverage a visible, deliberate line
+# in a diff. Lowering it should arrive with a written reason.
+FLOOR = 1830
 
 
 def parse_test_count(listing: str) -> int:

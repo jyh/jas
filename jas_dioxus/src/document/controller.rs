@@ -5627,7 +5627,9 @@ mod tests {
         // id exists, is offset by (24, 24) via its common.transform, and
         // is the selection. Source keeps its position. This pins the op
         // composition the Object-menu handler performs.
-        use crate::tools::tool::PASTE_OFFSET;
+        // `crate::tool_consts`, not `crate::tools::tool` — `tools` is gated behind
+        // `feature = "web"`, and a document-layer test must build natively.
+        use crate::tool_consts::PASTE_OFFSET;
         let mut model = Model::default();
         Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
         // The just-added element is selected at [0,0] (kind=All).

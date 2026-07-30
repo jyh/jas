@@ -3581,7 +3581,7 @@ mod tests {
         // (signed), jas:space-before, jas:space-after.
         use crate::geometry::tspan::Tspan;
         let mut doc = Document::default();
-        let mut t = crate::tools::text_edit::empty_text_elem(10.0, 20.0, 0.0, 0.0);
+        let mut t = crate::geometry::element::empty_text_elem(10.0, 20.0, 0.0, 0.0);
         let mut wrapper = Tspan::default_tspan();
         wrapper.id = 0;
         wrapper.jas_role = Some("paragraph".into());
@@ -3620,7 +3620,7 @@ mod tests {
         // paragraph attrs round-trips through the document SVG.
         use crate::geometry::tspan::Tspan;
         let mut doc = Document::default();
-        let mut t = crate::tools::text_edit::empty_text_elem(10.0, 20.0, 0.0, 0.0);
+        let mut t = crate::geometry::element::empty_text_elem(10.0, 20.0, 0.0, 0.0);
         let mut wrapper = Tspan::default_tspan();
         wrapper.id = 0;
         wrapper.jas_role = Some("paragraph".into());
@@ -3662,7 +3662,7 @@ mod tests {
         // with the role attribute preserved.
         use crate::geometry::tspan::Tspan;
         let mut doc = Document::default();
-        let mut t = crate::tools::text_edit::empty_text_elem(10.0, 20.0, 0.0, 0.0);
+        let mut t = crate::geometry::element::empty_text_elem(10.0, 20.0, 0.0, 0.0);
         t.tspans = vec![
             Tspan {
                 id: 0,
@@ -3696,7 +3696,7 @@ mod tests {
         // emitted SVG preserves each rotate value (emits separate
         // <tspan rotate="N">x</tspan> elements).
         let mut doc = Document::default();
-        let mut t = crate::tools::text_edit::empty_text_elem(10.0, 20.0, 0.0, 0.0);
+        let mut t = crate::geometry::element::empty_text_elem(10.0, 20.0, 0.0, 0.0);
         use crate::geometry::tspan::Tspan;
         t.tspans = vec![
             Tspan { id: 0, content: "a".into(), rotate: Some(45.0),
@@ -3724,7 +3724,7 @@ mod tests {
         // paragraph wrapper round-trip through document SVG.
         use crate::geometry::tspan::Tspan;
         let mut doc = Document::default();
-        let mut t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        let mut t = crate::geometry::element::empty_text_elem(0.0, 0.0, 0.0, 0.0);
         let mut wrapper = Tspan::default_tspan();
         wrapper.id = 0;
         wrapper.jas_role = Some("paragraph".into());
@@ -3775,7 +3775,7 @@ mod tests {
         // paragraph wrapper round-trip through document SVG.
         use crate::geometry::tspan::Tspan;
         let mut doc = Document::default();
-        let mut t = crate::tools::text_edit::empty_text_elem(0.0, 0.0, 0.0, 0.0);
+        let mut t = crate::geometry::element::empty_text_elem(0.0, 0.0, 0.0, 0.0);
         let mut wrapper = Tspan::default_tspan();
         wrapper.id = 0;
         wrapper.jas_role = Some("paragraph".into());

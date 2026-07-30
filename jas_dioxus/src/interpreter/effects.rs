@@ -10505,6 +10505,11 @@ mod tests {
     // law: the value is a pure expression composed by concatenation
     // (`param.library + "/" + param.brush_slug`). A literal-{{}} template
     // (the pre-fix bug) would leave the un-expanded string on the element.
+    // web-gated ON PURPOSE, not to make a native build pass: this test drives
+    // `AppState`/`TabState` and `renderer::dispatch_action`, i.e. the app shell
+    // and the Dioxus renderer. There is no frontend in a `--no-default-features`
+    // build for it to drive. Every other test in this module runs natively.
+    #[cfg(feature = "web")]
     #[test]
     fn brush_tile_click_applies_composed_brush_id_via_action() {
         use crate::document::document::Document;

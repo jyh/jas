@@ -1,4 +1,8 @@
 mod algorithms;
+// Mirrors lib.rs: the bin re-declares the module tree as its own crate root, so
+// the two non-web-gated leaves that `tools` re-exports must be declared here too.
+mod text_measure;
+mod tool_consts;
 mod canvas;
 #[cfg(test)]
 mod cross_language_test;
