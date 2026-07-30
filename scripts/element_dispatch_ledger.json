@@ -16,7 +16,27 @@
     "Five defects wore this shape in one week, every one invisible in Rust (where",
     "doc.set_selection expands containers) and live in JasSwift (which does not).",
     "LAYER_STRUCTURE.md section 20 removes that expansion, at which point every",
-    "remaining site goes live in Rust too."
+    "remaining site goes live in Rust too.",
+    "",
+    "OWED TO THIS LEDGER: FALSIFIABLE CLAIMS. As of 2026-07-29 a row's `reason`,",
+    "`artist_visible` and `evidence` are checked for PRESENCE and non-blankness,",
+    "never for truth -- and two of this seat's first three `owed` rows named a",
+    "production read path that did not exist. The sibling gate",
+    "check_widget_kind_dispatch.py now carries the fix: each exemption states its",
+    "argument as {file, contains|lacks} claims that are VERIFIED every run, so an",
+    "argument cannot outlive the condition it describes. See `verify_asserts`",
+    "there; the reusable law is in widget_dispatch_exemptions.json's _doc.",
+    "",
+    "NOT ADOPTED HERE YET, deliberately and with a trigger rather than an",
+    "open-ended someday. The one surviving `owed` row rests on a claim about the",
+    "PRINT path ('the PDF/print exporter has NO counter-scale'), and pinning that",
+    "as a machine-checked anchor means tracing the exporter properly. Guessing the",
+    "anchor would produce exactly the confident-and-wrong row this mechanism",
+    "exists to prevent, which is a poor way to introduce it.",
+    "",
+    "TRIGGER: adopt `asserts` on the NEXT `owed` row added or resolved, whichever",
+    "comes first. At that moment someone is already reading the print path with",
+    "reason to be sure."
   ],
   "sites": {
     "rust:jas_dioxus/src/geometry/element.rs::with_fill_gradient": {
