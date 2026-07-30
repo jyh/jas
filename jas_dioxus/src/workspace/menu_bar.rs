@@ -55,6 +55,9 @@ pub(crate) fn MenuBarView(
                             };
                             download_file(&filename, &svg);
                             tab.model.mark_saved();
+                            // What was just written becomes the version Revert
+                            // returns to (council O1.2).
+                            tab.saved_svg = Some(svg.clone());
                         }
                     }));
                 }
@@ -420,13 +423,37 @@ pub(crate) fn MenuBarView(
                     // this port while JasSwift implemented it fully.
                     save_document_as(app_for_menu.clone(), revision_for_menu);
                 }
-                // `revert` STAYS here, and stays a no-op, deliberately. Swift's
-                // revert re-reads the file from disk by path; a browser has no
-                // path to re-read, so the equivalent needs a design decision
-                // (retain the saved SVG bytes, or rewind the journal to
-                // `saved_journal_head`) rather than a wiring change. Council
-                // O1.2; its ledger row says so.
-                "revert" | "quit" | "promote_to_concept"
+                "revert" => {
+                    // JasSwift re-reads the file from disk by path. A browser
+                    // has no path, so the saved bytes are retained on the tab
+                    // (`TabState::saved_svg`) and re-parsed -- JYH's ruling at
+                    // council 2026-07-30, chosen over rewinding the journal so
+                    // both ports round-trip through SVG identically.
+                    (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        if !crate::workspace::clipboard::can_revert(st) {
+                            return;
+                        }
+                        let name = st
+                            .tab()
+                            .map(|t| t.model.filename.clone())
+                            .unwrap_or_default();
+                        // Swift raises an NSAlert with Revert / Cancel; the
+                        // browser's own confirm is the same contract.
+                        let ok = web_sys::window()
+                            .and_then(|w| {
+                                w.confirm_with_message(&format!(
+                                    "Revert to the saved version of \"{name}\"?\n\
+                                     All current modifications will be lost."
+                                ))
+                                .ok()
+                            })
+                            .unwrap_or(false);
+                        if ok {
+                            crate::workspace::clipboard::apply_revert(st);
+                        }
+                    }));
+                }
+                "quit" | "promote_to_concept"
                 | "zoom_in" | "zoom_out" | "zoom_to_actual_size"
                 | "fit_active_artboard" | "fit_all_artboards" | "fit_in_window" => {
                     let action = cmd.to_string();

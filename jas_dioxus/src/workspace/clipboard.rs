@@ -599,6 +599,8 @@ pub(crate) fn apply_save_as_outcome(st: &mut AppState, chosen: Option<&str>) -> 
     let Some(tab) = st.tab_mut() else { return false };
     tab.model.filename = name;
     tab.model.mark_saved();
+    // What was just written becomes the version Revert returns to.
+    tab.saved_svg = Some(document_to_svg(tab.model.document()));
     true
 }
 
@@ -892,7 +894,9 @@ pub(crate) fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>
             );
             let model = Model::new(doc, Some(filename.clone()));
             let mut st = app3.borrow_mut();
-            st.add_tab(TabState::with_model(model));
+            // The bytes just read ARE the saved version -- this is what Revert
+            // returns to, standing in for the file JasSwift re-reads by path.
+            st.add_tab(TabState::with_model_and_saved(model, Some(text.clone())));
             drop(st);
             revision3 += 1;
         }) as Box<dyn FnMut(web_sys::Event)>);
@@ -1022,5 +1026,137 @@ mod save_as_tests {
         assert_eq!(svg_filename_for(""), "drawing.svg");
         assert_eq!(svg_filename_for("   "), "drawing.svg");
         assert_eq!(svg_filename_for("  hull  "), "hull.svg");
+    }
+}
+
+/// Whether File > Revert should be offered.
+///
+/// Both conditions are JasSwift's, transliterated: the document must have
+/// unsaved changes, and there must be a saved version to return to. Swift
+/// spells the second `!model.filename.hasPrefix("Untitled-")`, because on disk
+/// a never-saved document has no file; here it is `saved_svg.is_none()`,
+/// because in a browser a never-opened, never-saved document has no bytes.
+#[cfg(feature = "web")]
+pub(crate) fn can_revert(st: &AppState) -> bool {
+    match st.tab() {
+        Some(tab) => tab.model.is_modified() && tab.saved_svg.is_some(),
+        None => false,
+    }
+}
+
+/// Apply a confirmed Revert: re-parse the saved SVG and install it as ONE
+/// undoable transaction, then mark the document clean.
+///
+/// Returns whether anything changed.
+///
+/// ONE TRANSACTION, matching JasSwift's `model.editDocument(newDoc)`, whose
+/// comment says "self-brackets one undo step" — so the artist can undo a
+/// revert. Rewinding the journal to `saved_journal_head` would have produced N
+/// undo steps and a different mechanism; JYH ruled for re-parsing the saved
+/// bytes at council 2026-07-30 precisely so both ports round-trip through SVG
+/// identically, lossiness included.
+#[cfg(feature = "web")]
+pub(crate) fn apply_revert(st: &mut AppState) -> bool {
+    if !can_revert(st) {
+        return false;
+    }
+    let Some(svg) = st.tab().and_then(|t| t.saved_svg.clone()) else { return false };
+    let doc = svg_to_document(&svg);
+    let Some(tab) = st.tab_mut() else { return false };
+    tab.model.with_txn(|m| m.set_document(doc));
+    tab.model.mark_saved();
+    true
+}
+
+#[cfg(test)]
+mod revert_tests {
+    use super::*;
+
+    fn tab_with_saved(saved: Option<&str>) -> AppState {
+        let mut st = AppState::new();
+        st.tabs.clear();
+        let mut model = Model::new(Document::default(), None);
+        model.filename = "hull.svg".into();
+        st.tabs.push(TabState::with_model_and_saved(
+            model, saved.map(String::from)));
+        st.active_tab = 0;
+        st
+    }
+
+    fn dirty(st: &mut AppState) {
+        let doc = Document {
+            layers: vec![GeoElement::Layer(LayerElem {
+                children: vec![],
+                common: CommonProps::default(),
+                isolated_blending: false,
+                knockout_group: false,
+            })],
+            ..Document::default()
+        };
+        st.tab_mut().unwrap().model.with_txn(|m| m.set_document(doc));
+    }
+
+    /// A baseline with IDENTIFIABLE content. An empty `<svg/>` would parse to
+    /// the at-least-one-layer invariant, i.e. the same shape the dirtying edit
+    /// produces -- a fixture that cannot tell the two states apart proves
+    /// nothing, which is how the first draft of this test passed its real
+    /// assertions and failed on a claim it could not make.
+    const SAVED: &str = r#"<svg xmlns="http://www.w3.org/2000/svg"><rect x="1" y="2" width="3" height="4"/></svg>"#;
+
+    /// BOTH of Revert's guards, because either one alone would offer it in a
+    /// state where it means nothing.
+    #[test]
+    fn revert_is_offered_only_with_changes_and_a_saved_version() {
+        // Clean document with a saved version: nothing to revert TO.
+        let st = tab_with_saved(Some(SAVED));
+        assert!(!can_revert(&st), "an unmodified document has nothing to revert");
+
+        // Modified but never saved: no saved version to return to. This is
+        // JasSwift's `Untitled-` guard, in the form a browser can express.
+        let mut st = tab_with_saved(None);
+        dirty(&mut st);
+        assert!(!can_revert(&st),
+                "a never-saved document has no baseline -- Revert must stay dark");
+
+        // Both conditions: offered.
+        let mut st = tab_with_saved(Some(SAVED));
+        dirty(&mut st);
+        assert!(can_revert(&st));
+    }
+
+    /// A revert discards the changes, leaves the document CLEAN, and is itself
+    /// ONE undo step -- so the artist can take it back.
+    #[test]
+    fn revert_restores_the_baseline_as_one_undoable_step() {
+        let mut st = tab_with_saved(Some(SAVED));
+        dirty(&mut st);
+        let head_before = st.tab().unwrap().model.journal_head();
+
+        assert!(apply_revert(&mut st));
+
+        let tab = st.tab().unwrap();
+        assert!(!tab.model.is_modified(), "a completed revert leaves the document clean");
+        assert_eq!(tab.model.journal_head(), head_before + 1,
+                   "exactly ONE transaction, matching JasSwift's editDocument -- \
+                    the artist must be able to undo a revert");
+        // Compared in canonical SVG, the house's document equality (Document
+        // is not PartialEq).
+        assert_eq!(document_to_svg(tab.model.document()),
+                   document_to_svg(&svg_to_document(SAVED)),
+                   "the document must equal the parsed baseline -- the dirtying \
+                    edit is gone and the saved rect is back");
+    }
+
+    /// Refusing is not the same as failing: a revert that cannot run must
+    /// change nothing at all.
+    #[test]
+    fn a_refused_revert_changes_nothing() {
+        let mut st = tab_with_saved(None);
+        dirty(&mut st);
+        let head = st.tab().unwrap().model.journal_head();
+        assert!(!apply_revert(&mut st));
+        assert_eq!(st.tab().unwrap().model.journal_head(), head);
+        assert!(st.tab().unwrap().model.is_modified(),
+                "a refused revert must leave the changes intact");
     }
 }

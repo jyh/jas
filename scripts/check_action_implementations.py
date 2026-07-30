@@ -421,10 +421,10 @@ def self_test() -> int:
         # here, now asserting the repaired state, is what stops the repair
         # silently regressing.
         "save_as": "native_both",
-        # Still divergent: Swift re-reads the file from disk by path, which a
-        # browser cannot do, so this one needs a design decision and not a
-        # wiring change. Council O1.2.
-        "revert": "DIVERGENT:swift",
+        # revert followed save_as out of the divergence list once JYH ruled
+        # how a browser should name "the saved version": the tab retains the
+        # bytes it was opened from or last saved as, and revert re-parses them.
+        "revert": "native_both",
         # verified: swatches_panel.rs:77 real body; SwatchesPanel.swift routes
         # everything to runYamlActionByName
         "sort_swatches_by_name": "DIVERGENT:rust",

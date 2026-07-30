@@ -75,6 +75,22 @@ pub(crate) use crate::document::model::EditingTarget;
 pub(crate) struct TabState {
     pub(crate) model: Model,
     pub(crate) tools: HashMap<ToolKind, Box<dyn CanvasTool>>,
+    /// The SVG this document was last opened from or saved as — "the saved
+    /// version", for Revert.
+    ///
+    /// JasSwift's revert re-reads the file FROM DISK BY PATH. A browser has no
+    /// path to re-read, so the saved bytes are retained here instead and
+    /// re-parsed on revert. JYH ruled this the reasonable path at council
+    /// 2026-07-30, over rewinding the journal: it mirrors Swift's round-trip
+    /// exactly, SVG lossiness included, which is what the prime directive asks
+    /// for. The cost is heap — roughly a second copy of the document while the
+    /// tab is open — and NOT browser storage quota, which it would only touch
+    /// if session persistence retained it too.
+    ///
+    /// `None` means never opened and never saved, which is Revert's own guard:
+    /// there is no saved version to return to. Same condition JasSwift spells
+    /// as `!model.filename.hasPrefix("Untitled-")`.
+    pub(crate) saved_svg: Option<String>,
 }
 
 impl TabState {
@@ -83,6 +99,12 @@ impl TabState {
     }
 
     pub(crate) fn with_model(model: Model) -> Self {
+        Self::with_model_and_saved(model, None)
+    }
+
+    /// As [`with_model`], recording the SVG the document came from — the
+    /// baseline Revert returns to. `open_file_dialog` supplies it.
+    pub(crate) fn with_model_and_saved(model: Model, saved_svg: Option<String>) -> Self {
         let mut tools: HashMap<ToolKind, Box<dyn CanvasTool>> = HashMap::new();
         tools.insert(ToolKind::Selection, yaml_tool("selection"));
         tools.insert(ToolKind::PartialSelection, yaml_tool("partial_selection"));
@@ -128,7 +150,7 @@ impl TabState {
         // stand-in: a tab being constructed has no Artboards-panel selection
         // yet, so `current_artboard` is the first board by its own rule.
         model.center_view_on_current_artboard(&[]);
-        Self { model, tools }
+        Self { model, tools, saved_svg }
     }
 }
 
