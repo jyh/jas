@@ -63,6 +63,11 @@ jobs:
       # misreading two hand-written switches -- which it did, three times, before
       # the anchors were satisfied.
       - run: python scripts/check_action_implementations.py --self-test && python scripts/check_action_implementations.py
+      # No shared-Python gate may KEY on a stringified path: str(Path) yields
+      # backslashes on Windows, and three gates were broken that way, each fixed
+      # as an instance with an explanatory comment and no rule. Verified by hand
+      # against all three historical sightings before wiring -- three of three.
+      - run: python scripts/check_path_keying.py --self-test && python scripts/check_path_keying.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -248,6 +253,8 @@ jobs:
           python scripts/check_layers_type_filter.py
           python scripts/check_action_implementations.py --self-test
           python scripts/check_action_implementations.py
+          python scripts/check_path_keying.py --self-test
+          python scripts/check_path_keying.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves
