@@ -55,7 +55,24 @@ ONCE, by a human or a review, in `element_dispatch_ledger.json`:
   * `owed`       -- a container DOES reach here, and the result is wrong or
     silently nothing. Known debt: recorded, counted, and NOT failed on, so the
     ledger can carry honest work-in-progress rather than tempting anyone to
-    mislabel it.
+    mislabel it. The row must carry `artist_visible` AND `evidence`, and the
+    evidence must say whether the consequence was DRIVEN or merely inferred --
+    see below.
+
+AN ASYMMETRY THIS GATE SHIPPED WITH, and the reason `owed` now needs evidence.
+Every `leaf_only` verdict met an adversary when the ledger was first written, on
+the argument that a wrong `leaf_only` writes "nothing to see here" permanently.
+The three `owed` rows were written by one seat, unchecked -- and each asserted an
+ARTIST-VISIBLE consequence that had never been traced to a production path. When
+they were finally traced (2026-07-29), **two of the three were wrong**: both
+gradient rows claimed "a group reads back empty" when in fact the Gradient panel
+has no production read path in EITHER port, so a gradient-filled LEAF shows the
+same declared defaults a group does. Fixing those accessors would have changed
+nothing an artist can see, and the fix would have been reported as a success.
+
+A wrong `owed` row is not harmless. It sends the next person to repair code that
+is not the problem, and it makes the gate's output a mix of verified and
+unverified claims wearing one label.
 
 The distinction between the first two is the one that earns its keep. Both leave
 this function never seeing a container, but for OPPOSITE reasons: the eyedropper
@@ -433,7 +450,14 @@ def self_test():
     # being looked for.
     for row, ok in [
         ({"verdict": "leaf_only", "reason": "containers handled in map_paintable"}, True),
-        ({"verdict": "owed", "reason": "a scaled group leaves member strokes alone"}, True),
+        ({"verdict": "owed", "reason": "a scaled group leaves member strokes alone",
+          "artist_visible": "canvas looks right, print does not",
+          "evidence": "driven in both ports 2026-07-29"}, True),
+        # An `owed` row with no artist_visible, or none saying on what evidence,
+        # is the shape that shipped two wrong claims.
+        ({"verdict": "owed", "reason": "x", "evidence": "driven"}, False),
+        ({"verdict": "owed", "reason": "x", "artist_visible": "strokes stay thin"}, False),
+        ({"verdict": "owed", "reason": "x", "artist_visible": "y", "evidence": "  "}, False),
         ({"verdict": "unhandled", "reason": "no container answer",
           "unreached_because": "recognize_element returns None"}, True),
         # An `unhandled` row WITHOUT its gate named is the whole point of the
@@ -475,6 +499,14 @@ def row_valid(row):
         why = row.get("unreached_because")
         if not isinstance(why, str) or not why.strip():
             return False
+    # An `owed` row asserts something an ARTIST can see. It must say what, and it
+    # must say on what evidence -- two of the first three such rows asserted a
+    # consequence nobody had traced, and both were wrong.
+    if row["verdict"] == "owed":
+        for field in ("artist_visible", "evidence"):
+            v = row.get(field)
+            if not isinstance(v, str) or not v.strip():
+                return False
     return True
 
 

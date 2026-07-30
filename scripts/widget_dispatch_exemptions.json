@@ -1,0 +1,105 @@
+{
+  "_doc": [
+    "PER-PORT WIDGET-KIND DISPATCH EXEMPTIONS. See",
+    "scripts/check_widget_kind_dispatch.py for what this gates and why.",
+    "",
+    "A row excuses ONE port failing to dispatch ONE kind, and needs a NON-EMPTY",
+    "reason -- a blank one excuses nothing (self-test case (d)). Keyed",
+    "'port:kind'.",
+    "",
+    "EVERY ROW'S REASON MUST BE FALSIFIABLE. A row carries `asserts`, each a",
+    "{file, contains|lacks} claim the gate VERIFIES on every run; a row may",
+    "omit them only by declaring `permanent: true`. This is not ceremony --",
+    "it is the correction for a defect this very file committed. The",
+    "swift:dropdown row used to assert 'JasSwift has neither the state nor the",
+    "filtering'. Both clauses were false for months: the state (@State",
+    "hiddenTypes), the tokens (layersTypeValue) and the filter",
+    "(layersTypeFilterKeep) were all shipping. On 2026-07-29 this seat read the",
+    "row, believed it, and set out to BUILD what already existed -- and the",
+    "false clause had by then been copied into a source comment beside the",
+    "dispatch default, so two places agreed with each other and neither was",
+    "checked. Consensus among copies is not evidence.",
+    "",
+    "The general law, third sighting in three days: A HUMAN-READABLE CLAIM IN A",
+    "MACHINE-READ FILE IS A CLAIM NOBODY RECHECKS. The other two were the",
+    "jas/windows seat's anti-vacuity floor with slack, and two of three `owed`",
+    "rows in element_dispatch_ledger.json that named a read path which did not",
+    "exist. Same shape every time: the machine checks the part it can parse and",
+    "the part that does the reasoning goes stale in silence.",
+    "",
+    "Two classes live here and they are not alike:",
+    "  * the SENTINEL, which no port should ever dispatch;",
+    "  * REAL GAPS, scheduled but unbuilt. Each of those is a feature JasSwift",
+    "    does not have, and the missing dispatch arm is its most visible",
+    "    symptom rather than its cause.",
+    "",
+    "Removing a row is how you claim a kind is done. Do not remove one until",
+    "the ACTIONS its behaviour dispatches also exist in that port -- an arm",
+    "alone ships a control that looks functional and does nothing, which is",
+    "worse than the placeholder it replaces."
+  ],
+  "exemptions": {
+    "rust:placeholder": {
+      "permanent": true,
+      "reason": "THE SENTINEL, not a widget kind. `placeholder` is what the canonical set calls the fallback a port renders for an unknown or undispatched kind; dispatching it would be circular. Exempt in every port, permanently. (This is also the 37-vs-38 discrepancy between two independent counts of the same list.)",
+      "asserts": []
+    },
+    "swift:placeholder": {
+      "permanent": true,
+      "reason": "THE SENTINEL. As rust:placeholder -- permanent, not debt.",
+      "asserts": []
+    },
+    "swift:dropdown": {
+      "reason": "REAL GAP, and the THIRD reading of it -- the first two were both wrong, which is why this row now carries asserts. (i) Until 2026-07-29 it claimed JasSwift had 'neither the state nor the filtering'. False for months. (ii) Its replacement said the fix was to delete Swift's native pair and 'render from the YAML like jas_dioxus'. A refuter showed that path DOES NOT EXIST in either port. What is actually true, verified structurally: JasSwift draws the search field and filter menu NATIVELY inside `renderTreeView`, while `layers.yaml` separately declares `lp_search_input` + `lp_filter_button`, so the artist sees the search box TWICE plus the literal grey text '[Filter by element type]' from `renderPlaceholder`. The YAML search field is not inert -- it stores and redisplays text and filters nothing, which this file's own doctrine calls worse than a placeholder. BUT jas_dioxus is not the generic reference: `render_layers_filter_dropdown` opens with `if id != \"lp_filter_button\" { return render_placeholder(...) }` and then reaches straight into `AppState.layers_hidden_types`, and its `render_text_input` special-cases `bind_expr == \"panel.search_query\"` to get live filtering. Both ports IGNORE the declared wiring: `toggle_layers_type_filter`'s only effect is `- log:` (a documentation stub -- no list-mutating effect exists anywhere in the vocabulary), and `lp_tree` declares `bind.search_query` and `bind.type_filter` which NEITHER port honours -- the string `search_query` appears in zero Swift source files. So a generic `dropdown` arm dispatching the DECLARED behaviour would ship an inert filter, and an id-gated one would merely relocate the leak into a second port. Three tiers, for council: (1) delete Swift's native pair, add an id-gated arm mirroring Rust plus an `is_search` live-commit exception, and promote `searchQuery`/`hiddenTypes` out of `TreeViewContent`'s view-lived @State -- Class S, retires this row honestly, does NOT close the genericity leak; (2) give the action a real list-toggle effect and make both trees honour the two binds -- a SPEC change across both ports, the live reference interpreter and fixtures; (3) hide `lp_search_bar` in Swift only -- rejected, it diverges from a widget tree the shared golden pins as visible. Recommended: (1) now, (2) scheduled. Note also `@State showFilterMenu` is dead (one occurrence) where Rust keeps a live `layers_filter_dropdown_open`.",
+      "asserts": [
+        {
+          "file": "JasSwift/Sources/Interpreter/YamlPanelBodyView.swift",
+          "lacks": "case \"dropdown\"",
+          "why": "The gap itself. If the arm lands, this row must be re-argued or removed."
+        },
+        {
+          "file": "JasSwift/Sources/Interpreter/YamlPanelBodyView.swift",
+          "contains": "func layersTypeValue",
+          "why": "Kills the old false clause for good: the type tokens exist in this port. If this vanishes, the claim above is wrong again and the row must be rewritten."
+        },
+        {
+          "file": "JasSwift/Sources/Interpreter/YamlPanelBodyView.swift",
+          "contains": "TextField(\"Search...\"",
+          "why": "The native duplicate the reason is ABOUT. When the native search field is deleted in favour of the YAML widget, this assert fails -- which is the point: the exemption cannot outlive the condition it describes."
+        },
+        {
+          "file": "jas_dioxus/src/interpreter/renderer.rs",
+          "contains": "\"dropdown\" => render_layers_filter_dropdown",
+          "why": "The comparison the reason rests on. If jas_dioxus stops rendering the control from the YAML, this stops being a one-port divergence and the row needs new words."
+        },
+        {
+          "file": "jas_dioxus/src/interpreter/renderer.rs",
+          "contains": "if id != \"lp_filter_button\"",
+          "why": "The correction the second reading missed: jas_dioxus's `dropdown` arm is ID-GATED and refuses every other widget, so it is not a generic renderer to converge on. If someone generalises it, tier (1) below stops being parity-with-Rust and this row must be rewritten a fourth time."
+        },
+        {
+          "file": "workspace/actions.yaml",
+          "contains": "- log: \"toggle_layers_type_filter\"",
+          "why": "THE TIER-2 EXPIRY TRIGGER, and the reason this row exists at all. The declared action is a documentation stub, so no port can honour the spec's wiring and both must reach into state natively. The day it gains real effects, this assert fires and the genericity argument above becomes actionable -- which is exactly the premise-expiry failure this mechanism exists to catch, pointed forward instead of backward for once."
+        }
+      ]
+    }
+  },
+  "_related_gaps": [
+    "NOT exemptions -- gaps this gate does not and should not police, recorded",
+    "here because this is where the person who cares will be standing.",
+    "",
+    "toggle_artboard_orientation: declared in workspace/actions.yaml ('Swap",
+    "dialog.width <-> dialog.height around the current reference-point anchor')",
+    "with a bare `log` effect marked '(native)'. UNIMPLEMENTED IN BOTH ACTIVE",
+    "PORTS -- so the icon_button_group widget now renders in both and the buttons",
+    "swap nothing in either. A SHARED spec-vs-implementation gap, not a per-port",
+    "defect, and therefore invisible to every differential gate we own. Found",
+    "2026-07-29 while tracing why the Swift widget was missing.",
+    "",
+    "set_artboard_reference_point: NO GAP. Pure YAML (a generic set_panel_state",
+    "effect), handled in both ports. Recorded because an earlier reading of this",
+    "ledger claimed the action was 'absent from Swift' -- that claim came from",
+    "grepping a name which is not supposed to appear in either port's source."
+  ]
+}

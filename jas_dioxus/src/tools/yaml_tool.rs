@@ -5276,22 +5276,30 @@ mod tests {
         tool.on_press(&mut model, 5.0, 5.0, false, false);
         tool.on_release(&mut model, 5.0, 5.0, false, false);
         let sel = &model.document().selection;
-        // Per the layers-panel selection-square convention, container
-        // hits expand to include the container plus all descendants.
-        // Group at [0, 0] + its single child rect at [0, 0, 0] → 2 entries.
+        // ONLY THE NAMED PATH (§20, implemented 2026-07-29). This assertion
+        // used to require TWO entries -- the group AND its child -- "per the
+        // layers-panel selection-square convention", because `doc.set_selection`
+        // expanded containers so the panel would mark descendant rows. That put
+        // a fact about how a panel DRAWS into the document's selection, and it
+        // is the root of eight defects: `copy_selection` read the group and its
+        // member as PEERS and copied each, damaging the source.
         assert_eq!(
-            sel.len(), 2,
-            "click inside group should select group + all descendants; got {:?}",
+            sel.len(), 1,
+            "click inside a group selects the GROUP ALONE; got {:?}",
             sel.iter().map(|s| &s.path).collect::<Vec<_>>(),
         );
-        assert!(
-            sel.iter().any(|s| s.path == vec![0, 0]),
-            "selection should include the group path [0, 0]",
-        );
-        assert!(
-            sel.iter().any(|s| s.path == vec![0, 0, 0]),
-            "selection should include the inner rect path [0, 0, 0]",
-        );
+        assert_eq!(sel[0].path, vec![0, 0], "and that path is the group's");
+
+        // THE 'AS IF' SURVIVES, which is the half that matters to the artist
+        // (JYH, council 2026-07-29: "it should be as if the children are
+        // selected too"). The child's row is still marked -- the shorthand is
+        // expanded at the point of USE, not written into the model.
+        let paths: Vec<_> = sel.iter().map(|s| s.path.clone()).collect();
+        use crate::document::controller::path_is_selected_or_under;
+        assert!(path_is_selected_or_under(&paths, &vec![0, 0]),
+                "the group's own row is marked");
+        assert!(path_is_selected_or_under(&paths, &vec![0, 0, 0]),
+                "and so is its child's -- the panel shows the whole subtree");
     }
 
     #[test]

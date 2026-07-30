@@ -268,3 +268,93 @@ struct StrokePanelWeightTests {
         #expect(viaGroup?.width == 5, "and that answer is the first leaf's")
     }
 }
+
+/// THE LAYERS-PANEL MARKER IS ANCESTOR-AWARE. RULED 2026-07-29.
+///
+/// JYH at council: *"when we select a group on the canvas, it should be as if
+/// the children are selected too… almost as if the container were shorthand for
+/// 'select all these at once'."*
+///
+/// AS IF is the design. The shorthand is expanded at the point of USE — here for
+/// the panel marker, `mapPaintable`/`forEachPaintable` for operations — rather
+/// than by writing descendants into `doc.selection`, which is where all eight
+/// container defects came from. Twin: Rust `the_panel_marker_is_ancestor_aware`.
+@Suite("Ancestor-aware panel marker")
+struct PanelMarkerTests {
+    @Test func aSelectedGroupMarksItsMembersRows() {
+        let sel: [ElementPath] = [[0, 1]]
+        #expect(pathIsSelectedOrUnder(sel, [0, 1]), "the group's own row")
+        #expect(pathIsSelectedOrUnder(sel, [0, 1, 0]), "a member's row")
+        #expect(pathIsSelectedOrUnder(sel, [0, 1, 2, 5]), "a member two levels down")
+    }
+
+    @Test func itDoesNotMarkAncestorsOrSiblings() {
+        let sel: [ElementPath] = [[0, 1]]
+        #expect(!pathIsSelectedOrUnder(sel, [0]), "the containing layer is NOT marked")
+        #expect(!pathIsSelectedOrUnder(sel, [0, 0]), "a sibling is not marked")
+    }
+
+    /// Element-wise, never a string prefix: [0,1] must not match [0,10].
+    @Test func itComparesPathElementsNotPrefixes() {
+        let sel: [ElementPath] = [[0, 1]]
+        #expect(!pathIsSelectedOrUnder(sel, [0, 10]), "[0,10] is not under [0,1]")
+        #expect(!pathIsSelectedOrUnder(sel, [0, 11, 3]), "nor is [0,11,3]")
+        #expect(!pathIsSelectedOrUnder([ElementPath](), [0, 1]),
+                "an empty selection marks nothing")
+    }
+}
+
+/// THE EXTEND SEAMS CANNOT BUILD AN ANCESTOR+DESCENDANT SELECTION.
+///
+/// Twin of Rust `the_extend_seams_cannot_build_an_ancestor_descendant_selection`.
+/// §20 removed the two producers that WROTE the shape, and the corpus census then
+/// read zero — but the extend seams still just appended, so shift-clicking a
+/// group and then a member inside it rebuilt it. Measured in Rust:
+/// `[[0,0], [0,0,1]]`, via the verb shift-click actually runs.
+@Suite("Extend seams preserve the selection invariant")
+struct ExtendSeamInvariantTests {
+
+    private func rect(_ x: Double) -> Element {
+        .rect(Rect(x: x, y: 0, width: 10, height: 10))
+    }
+
+    private func model() -> Model {
+        let g = Element.group(Group(children: [rect(0), rect(20)]))
+        return Model(document: Document(layers: [Layer(name: "L", children: [g, rect(40)])]))
+    }
+
+    /// A member of an already-selected group adds nothing — it is already in
+    /// play under the Captain's "as if". Subtracting one member from a selected
+    /// group is partial group selection, which §16.3 does not permit.
+    @Test func aMemberOfASelectedGroupAddsNothing() {
+        let m = model()
+        let ctrl = Controller(model: m)
+        ctrl.addToSelection([0, 0])
+        ctrl.addToSelection([0, 0, 1])
+        #expect(m.document.selection.map(\.path) == [[0, 0]],
+                "got \(m.document.selection.map(\.path))")
+    }
+
+    /// The mirror: selecting the group SUBSUMES members already selected —
+    /// "the outermost wins", as `moveSelection` already applies.
+    @Test func selectingTheGroupSubsumesItsMembers() {
+        let m = model()
+        let ctrl = Controller(model: m)
+        ctrl.addToSelection([0, 0, 0])
+        ctrl.addToSelection([0, 0, 1])
+        ctrl.addToSelection([0, 0])
+        #expect(m.document.selection.map(\.path) == [[0, 0]],
+                "got \(m.document.selection.map(\.path))")
+    }
+
+    /// And nothing else changes — a fix that made the seam inert would pass the
+    /// two tests above.
+    @Test func disjointPathsStillAccumulate() {
+        let m = model()
+        let ctrl = Controller(model: m)
+        ctrl.addToSelection([0, 0])
+        ctrl.addToSelection([0, 1])
+        #expect(m.document.selection.map(\.path) == [[0, 0], [0, 1]],
+                "got \(m.document.selection.map(\.path))")
+    }
+}

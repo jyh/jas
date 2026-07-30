@@ -993,6 +993,7 @@ mod tests {
                          "operations/boolean_collapse_default.json",
                          "operations/lock_inheritance.json",
                          "operations/lock_toggle_no_materialization.json",
+                         "operations/lock_selection_no_materialization.json",
                          "operations/select_all_top_level.json",
                          "operations/paste_layers.json",
                          "operations/paste_locked_layers.json"] {
@@ -1153,6 +1154,7 @@ mod tests {
         "blob_transform_merge.json",
     ];
 
+    #[cfg(feature = "web")]
     /// Run a gesture fixture and return the resulting Model. Resolves
     /// the fixture's `setup_svg` file reference, then delegates to the
     /// SHARED corpus replay path (`recorder::replay::run_gesture_case`)
@@ -1164,10 +1166,12 @@ mod tests {
         crate::recorder::replay::run_gesture_case(tc, &setup_svg)
     }
 
+    #[cfg(feature = "web")]
     fn run_gesture_test(tc: &serde_json::Value) -> String {
         document_to_test_json(run_gesture_model(tc).document())
     }
 
+    #[cfg(feature = "web")]
     /// Mirror of `assert_operation_test`: replay the gesture and compare
     /// the canonical document JSON against the pinned golden, dumping
     /// EXPECTED/ACTUAL on mismatch.
@@ -1187,6 +1191,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn gesture_corpus() {
         for fixture in GESTURE_FIXTURES {
@@ -1199,6 +1204,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// Bootstrap helper: generate expected JSON for gesture tests.
     /// Run with: cargo test generate_gesture_expected -- --ignored --nocapture
     #[test]
@@ -1246,6 +1252,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// PATH B — Alt pressed MID-drag (the user's exact gesture): drag
     /// the original, then hold Option, then keep dragging the copy,
     /// then release. Must collapse to ONE undo step.
@@ -1262,6 +1269,7 @@ mod tests {
         })).document())
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn gesture_alt_mid_drag_copy_is_one_undo_step() {
         // two_rects.svg: rect[0] spans doc 0..72; press (36,36) hits its center.
@@ -1300,6 +1308,7 @@ mod tests {
         assert_eq!(model.journal_head(), 0, "cursor back at origin");
     }
 
+    #[cfg(feature = "web")]
     /// PATH A — Alt held AT press (drag-to-duplicate from the start).
     #[test]
     fn gesture_alt_at_press_copy_is_one_undo_step() {
@@ -1467,6 +1476,7 @@ mod tests {
         "lock_inheritance_actions.json",
     ];
 
+    #[cfg(feature = "web")]
     /// Run an action fixture and return the resulting `AppState`.
     /// Resolves the fixture's `setup_svg` file reference, then delegates
     /// to the SHARED corpus replay path
@@ -1480,6 +1490,7 @@ mod tests {
         crate::recorder::replay::run_action_case(tc, &setup_svg)
     }
 
+    #[cfg(feature = "web")]
     /// Serialize the document the action sequence produced (mirrors
     /// `run_gesture_test`).
     fn run_action_test(tc: &serde_json::Value) -> String {
@@ -1487,6 +1498,7 @@ mod tests {
         document_to_test_json(st.tabs[st.active_tab].model.document())
     }
 
+    #[cfg(feature = "web")]
     /// OPTIONAL second assertion: `expected_panel_state`.
     ///
     /// The document is not the only thing an action moves. A `fill_stroke`
@@ -1540,6 +1552,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// OPTIONAL third assertion: `expected_view`.
     ///
     /// View state — `zoom_level`, `view_offset_x`, `view_offset_y` — is
@@ -1590,6 +1603,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// Mirror of `assert_gesture_test`: replay the action sequence and
     /// compare the canonical document JSON against the pinned golden,
     /// dumping EXPECTED/ACTUAL on mismatch. Then apply the case's optional
@@ -1613,6 +1627,7 @@ mod tests {
         assert_action_view(tc, &st);
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn action_corpus() {
         for fixture in ACTION_FIXTURES {
@@ -1625,6 +1640,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// Bootstrap helper: generate expected JSON for action tests.
     /// Run with: cargo test generate_action_expected -- --ignored --nocapture
     #[test]
@@ -1670,6 +1686,7 @@ mod tests {
     /// Key-resolution fixture files under `test_fixtures/keys/`.
     const KEY_FIXTURES: &[&str] = &["key_resolution.json"];
 
+    #[cfg(feature = "web")]
     /// Resolve every chord in a fixture group against the once-loaded
     /// bundle `shortcuts` table and return the canonical result array.
     /// Delegates to the SHARED corpus replay path
@@ -1680,6 +1697,7 @@ mod tests {
         crate::recorder::replay::run_key_group_json(group)
     }
 
+    #[cfg(feature = "web")]
     /// Replay a key fixture group and compare the canonical result array
     /// against the pinned golden, dumping EXPECTED/ACTUAL on mismatch.
     fn assert_key_test(group: &serde_json::Value) {
@@ -1697,6 +1715,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn key_corpus() {
         for fixture in KEY_FIXTURES {
@@ -1709,6 +1728,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// Bootstrap helper: generate expected JSON for key tests.
     /// Run with: cargo test generate_key_expected -- --ignored --nocapture
     #[test]
@@ -2525,6 +2545,7 @@ mod tests {
         vectors
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn preservation_invariants() {
         let json_str = read_fixture("preservation/preservation_invariants.json");
@@ -5521,6 +5542,7 @@ mod tests {
         s
     }
 
+    #[cfg(feature = "web")]
     /// The StrokePanelState a fixture panel map describes (its defaults
     /// block plus the vector's overrides).
     fn stroke_panel_from_attrs(attrs: &serde_json::Value)
@@ -5563,6 +5585,7 @@ mod tests {
         serde_json::Value::Object(out)
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn stroke_apply_panel_edit_corpus() {
         use crate::geometry::element::{Color, Stroke};
@@ -5655,6 +5678,7 @@ mod tests {
     // unchanged. That is the whole point of the law, so the corpus states it
     // directly rather than re-listing whole attribute sets.
 
+    #[cfg(feature = "web")]
     /// A fixture attribute map as `CharacterAttrs`. Every key is present in
     /// the merged map (the corpus's `element_defaults` names all sixteen),
     /// so no port's element-constructor defaults leak into the corpus.
@@ -5682,6 +5706,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// A fixture panel map as `CharacterPanelState`. Unlike the Stroke
     /// corpus there is no panel-vs-global scope question: every Character
     /// control binds `panel.<field>` only.
@@ -5711,6 +5736,7 @@ mod tests {
         cp
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn character_apply_panel_edit_corpus() {
         use crate::workspace::app_state::{character_with_group, CharacterEditGroup};
@@ -5774,6 +5800,7 @@ mod tests {
     // the Auto value gets materialised instead (see
     // `character_panel_post_write` / the nullable-clear path).
 
+    #[cfg(feature = "web")]
     /// `CharacterPanelState::default()` as a field-name -> value map, so the
     /// struct can be compared against the bundle key by key.
     ///
@@ -5824,6 +5851,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn character_panel_defaults_match_the_workspace() {
         let bundle = std::fs::read_to_string("../workspace/workspace.json")
@@ -6421,5 +6449,79 @@ mod tests {
     fn shortcut_structure() {
         let json = shortcut_structure_json();
         assert_workspace_fixture("shortcut_structure", &json);
+    }
+
+    /// THE LAYERS TYPE FILTER, driven from the shared corpus.
+    ///
+    /// `test_fixtures/view_state/layers_type_filter.json` is the single
+    /// definition of this algorithm; the twin reader is
+    /// `layersTypeFilterMatchesTheSharedCorpus` in
+    /// JasSwift/Tests/CrossLanguageTests.swift.
+    ///
+    /// It exists because this filter had NO test on either side for months while
+    /// the two ports disagreed: jas_dioxus derived each row's type by parsing its
+    /// display label, so a NAMED element escaped the filter entirely. Per-port
+    /// unit tests now pin each half, but two hand-written suites agree today and
+    /// drift later — the corpus is what makes them answer to one source.
+    ///
+    /// The rows carry TYPES, not labels. A vector spelled as display names would
+    /// re-enact the defect inside the corpus meant to prevent it.
+    #[test]
+    fn layers_type_filter_matches_the_shared_corpus() {
+        use crate::algorithms::layers_filter::type_filter_keep;
+        use std::collections::HashSet;
+
+        let raw = read_fixture("view_state/layers_type_filter.json");
+        let doc: serde_json::Value = serde_json::from_str(&raw)
+            .expect("layers_type_filter.json is not valid JSON");
+
+        let vectors = doc["vectors"].as_array().expect("no `vectors` array");
+        let min = doc["min_vectors"].as_u64().expect("no `min_vectors`") as usize;
+        // Anti-vacuity, EXACT rather than slack: a reader that walked zero
+        // vectors asserts nothing and is indistinguishable from a clean run.
+        // The floor is declared BY THE DATA, which is the shape
+        // check_preservation_corpus.py established -- a floor the fixture states
+        // about itself cannot drift out of step with it.
+        assert_eq!(
+            vectors.len(), min,
+            "walked {} vector(s) against a declared floor of {}",
+            vectors.len(), min
+        );
+
+        for v in vectors {
+            let name = v["name"].as_str().unwrap_or("<unnamed>");
+            let rows: Vec<(Vec<usize>, String)> = v["rows"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `rows`"))
+                .iter()
+                .map(|r| (
+                    r["path"].as_array().expect("row has no `path`").iter()
+                        .map(|n| n.as_u64().expect("path entry not a number") as usize)
+                        .collect(),
+                    r["type"].as_str().expect("row has no `type`").to_string(),
+                ))
+                .collect();
+            let hidden: HashSet<String> = v["hidden"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `hidden`"))
+                .iter()
+                .map(|t| t.as_str().expect("hidden entry not a string").to_string())
+                .collect();
+            let mut want: Vec<Vec<usize>> = v["expected_keep"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `expected_keep`"))
+                .iter()
+                .map(|p| p.as_array().expect("expected path not an array").iter()
+                    .map(|n| n.as_u64().expect("path entry not a number") as usize)
+                    .collect())
+                .collect();
+            want.sort();
+
+            let keep = type_filter_keep(
+                rows.iter().map(|(p, t)| (p.as_slice(), t.as_str())),
+                &hidden,
+            );
+            let mut got: Vec<Vec<usize>> = keep.into_iter().collect();
+            got.sort();
+
+            assert_eq!(got, want, "vector `{name}`");
+        }
     }
 }

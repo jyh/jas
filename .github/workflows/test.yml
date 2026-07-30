@@ -41,6 +41,21 @@ jobs:
       # containers, or carry a ledger row saying why not. Five defects wore
       # that shape in one week, all invisible in Rust and live in JasSwift.
       - run: python scripts/check_element_dispatch.py --self-test && python scripts/check_element_dispatch.py
+      # §16.4 asserted over the corpus: no selection holds an element AND its
+      # own descendant. Four producers had to be closed before this could pass
+      # at all, and it reds on the pre-§20 tree with 13 violations.
+      - run: python scripts/check_selection_invariant.py --self-test && python scripts/check_selection_invariant.py
+      # Every ACTIVE PORT must dispatch every canonical widget kind, or carry an
+      # exemption row with a reason. JasSwift was missing three, all declared in
+      # the shipping workspace; the Layers element-type filter shipped as the
+      # placeholder TEXT "Filter by element type". Port six's table starts empty.
+      - run: python scripts/check_widget_kind_dispatch.py --self-test && python scripts/check_widget_kind_dispatch.py
+      # One vocabulary for the Layers type filter, spoken identically by the
+      # YAML and both active ports, and derived from the ELEMENT. jas_dioxus
+      # parsed the row LABEL, so naming an element exempted it from the filter
+      # -- correct the day it was written, broken by the later commit that let
+      # every element carry a name. Reds on that historical block.
+      - run: python scripts/check_layers_type_filter.py --self-test && python scripts/check_layers_type_filter.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -218,6 +233,12 @@ jobs:
           python scripts/check_lane_coverage.py
           python scripts/check_element_dispatch.py --self-test
           python scripts/check_element_dispatch.py
+          python scripts/check_selection_invariant.py --self-test
+          python scripts/check_selection_invariant.py
+          python scripts/check_widget_kind_dispatch.py --self-test
+          python scripts/check_widget_kind_dispatch.py
+          python scripts/check_layers_type_filter.py --self-test
+          python scripts/check_layers_type_filter.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves
@@ -249,6 +270,16 @@ jobs:
       - name: Rust tests
         run: cd jas_dioxus && cargo test
 
+      # The native half of the same claim. Windows is the platform that would
+      # ship a frontend-less core, so this lane is where the assertion earns its
+      # keep: on 2026-07-29 `cargo test --no-default-features --lib` exited 101
+      # here while `cargo check` exited 0, and the divergent text-width arm it
+      # was hiding had been live for as long as the gate had not existed.
+      - name: Native core tests (no web feature)
+        run: |
+          python scripts/check_native_core_tests.py --self-test
+          python scripts/check_native_core_tests.py
+
       # SINGLE-LANE ORACLE, deliberately without --require-comparisons: there is
       # no Swift toolchain on Windows, so no lane-vs-lane comparison is possible
       # here. The cross-language job below documents this as the legitimate mode
@@ -270,6 +301,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cd jas_dioxus && cargo test
+      # The core must also build and pass WITHOUT the `web` feature. D1
+      # (2026-07-29) keeps this core for port six, so it has to be verifiable on
+      # a platform with no frontend. Runs in this lane and in the Windows lane;
+      # check_lane_coverage.py enforces the pair.
+      - name: Native core tests (no web feature)
+        run: |
+          python3 scripts/check_native_core_tests.py --self-test
+          python3 scripts/check_native_core_tests.py
 
   # The shared reference interpreter lives in workspace_interpreter/ — the
   # exact modules (effects, state_store, scope, doc_primitives, loader, expr)

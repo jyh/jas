@@ -108,7 +108,25 @@ MARKER = "encoding-exempt"
 # 50 rather than 96: high enough that an empty or badly truncated scan cannot
 # pass, low enough that deleting genuinely dead scripts does not red the build
 # and tempt someone to lower it. Raise it if the tree grows a lot.
-MIN_TRACKED_FILES = 50
+MIN_TRACKED_FILES = 102
+#
+# EXACT, NOT SLACK. This was a hand-set floor with room to spare until
+# 2026-07-29, when the jas/windows seat proved the hole by mutation: it set a
+# test-count floor 1.6% below reality, gated six tests off, and the gate went
+# GREEN. Its sentence is the rule now --
+#
+#     "A floor with slack is a floor with a hole exactly the size of the slack,
+#      and the hole admits precisely the move the assertion exists to forbid."
+#
+# The floor is the ONLY guard: violations inside files the scan never
+# opened are simply not reported.
+#
+# Adding to the set means raising this number in the same commit. That friction
+# is the feature: the number is a claim about coverage, and a claim nobody has
+# to restate is a claim nobody rechecks. (The model is
+# check_preservation_corpus.py, whose floor is DERIVED from per-vector `n_min`
+# declarations and therefore cannot drift at all -- prefer that shape where the
+# data can declare itself.)
 
 
 def below_floor(n_files):
@@ -321,7 +339,7 @@ def self_test():
         (1, True),                        # a badly truncated scan
         (MIN_TRACKED_FILES - 1, True),    # just under the line
         (MIN_TRACKED_FILES, False),       # exactly at it
-        (96, False),                      # the real tree, measured 2026-07-28
+        (102, False),                     # the real tree, measured 2026-07-29
     ]:
         if below_floor(n) != want_rejected:
             verb = "reject" if want_rejected else "accept"

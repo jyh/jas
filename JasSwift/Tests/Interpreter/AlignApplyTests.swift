@@ -126,7 +126,24 @@ private func rectXAt(_ model: Model, path: ElementPath) -> Double {
         "boolean_intersection_compound", "boolean_exclude_compound",
         // Repeat / Reset (phases 9i + 9j).
         "repeat_boolean_operation", "reset_boolean_panel",
+        // The Gradient panel's write path, registered 2026-07-29. `applySetEffects`
+        // had ALWAYS looked this key up after a gradient_* write, and nothing had
+        // ever registered it — so the `if let` failed silently and every
+        // Gradient-panel edit was a no-op against the document, while jas_dioxus
+        // applied the same path correctly. Note what this list ALREADY contained:
+        // `apply_active_color` and `apply_active_tool` were both here, so the
+        // gradient hook was the ONLY missing one of the three.
+        "apply_gradient_panel",
     ]
+    // THIS ASSERTION IS THE REGISTRY GATE IN EMBRYO, and it is worth saying so.
+    // It compares the built map against a HAND-MAINTAINED literal, which catches
+    // an unexpected ADDITION (it caught the line above) but cannot catch the
+    // failure that actually shipped: a key LOOKED UP in `applySetEffects` with no
+    // registration anywhere. That needs the two sides derived — every
+    // `platformEffects["…"]` lookup must have a registration or a declared
+    // exemption naming its native fallback. Offered to the jas/windows seat,
+    // where a third port's registry starts empty and every missing hook is a
+    // silent no-op (letter 11, 2026-07-29).
     #expect(Set(effects.keys) == expected)
 }
 

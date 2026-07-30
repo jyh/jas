@@ -2668,6 +2668,30 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         "distribute_vertical_spacing", "distribute_horizontal_spacing",
     ]
     var effects: [String: PlatformEffect] = [
+        // THE GRADIENT PANEL'S WRITE PATH, and it was NEVER REGISTERED.
+        //
+        // `applySetEffects` looks up platformEffects["apply_gradient_panel"]
+        // after any gradient_* render-key write. No site in JasSwift/Sources
+        // registered that key, so the `if let` failed silently and EVERY
+        // Gradient-panel edit was a no-op against the document — while
+        // jas_dioxus wired the same path and applied it correctly, recursing
+        // into group members. A prime-directive violation, and one that
+        // presented as "the panel is wired" because nothing errored.
+        //
+        // `applyGradientPanelToSelection` already existed, already mirrored
+        // Rust's `AppState::apply_gradient_panel_to_selection`, and was
+        // reachable only from GradientPanelSyncTests — the FOURTH shape of the
+        // same dead-code hazard found on 2026-07-29, and the subtlest: not "no
+        // callers" but ONE CALLER BEHIND A HOOK NOBODY INSTALLS. Grepping the
+        // function name finds the definition and its test and tells you nothing.
+        //
+        // Registered HERE because all four production panel-effect sites build
+        // their map through this one function.
+        "apply_gradient_panel": { _, _, store in
+            applyGradientPanelToSelection(store: store,
+                                          controller: Controller(model: model))
+            return nil
+        },
         "snapshot": { _, _, _ in
             // OP_LOG.md Increment 1: NO-OP on this map. These panel actions
             // (align / boolean / swatch) are dispatched through `runEffects`

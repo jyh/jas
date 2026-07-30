@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- S-A boundary spike. Console, not WinUI, deliberately: gate (i) is
+       "builds headless from the CLI on kenai, cargo + dotnet, no Visual
+       Studio", and a GUI project would make that unanswerable. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>jas_ffi_spike</AssemblyName>
+    <RootNamespace>JasFfiSpike</RootNamespace>
+    <!-- The P/Invoke surface is deliberately blittable; no marshaller magic. -->
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- Letter 13 section 2C: "the csproj invokes cargo from an MSBuild target".
+       Whether THAT works headless is the substance of gate (i), so it is wired
+       here rather than assumed, and it is opt-in via -p:BuildRustCore=true so a
+       plain `dotnet build` stays fast once the cdylib exists. -->
+  <Target Name="BuildRustCore" BeforeTargets="Build" Condition="'$(BuildRustCore)' == 'true'">
+    <Exec Command="cargo build --no-default-features --features ffi --lib"
+          WorkingDirectory="$(MSBuildProjectDirectory)/../../jas_dioxus" />
+  </Target>
+
+</Project>

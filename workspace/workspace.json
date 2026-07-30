@@ -13365,7 +13365,7 @@
         {
           "label": "Create New Swatch...",
           "disabled": true,
-          "description": "Disabled; will be enabled when the Swatches panel is implemented."
+          "description": "Disabled. The stated reason USED to be \"when the Swatches panel is implemented\" \u2014 that landed, so the reason expired and was corrected 2026-07-29. The live blocker is one step further on: the `new_swatch` action itself is real (it opens the Swatch Options dialog in create mode, seeded from the active colour), but that dialog's OK button runs `swatch_options_confirm`, whose entire effect list is `- log:`. So enabling this item would open a dialog that cannot commit \u2014 a control that looks functional and does nothing, which this project holds to be worse than a visible placeholder. ENABLE WHEN `swatch_options_confirm` gains real effects, not before.\n"
         },
         "separator",
         {

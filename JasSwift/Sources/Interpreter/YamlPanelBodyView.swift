@@ -258,6 +258,30 @@ struct YamlElementView: View {
                 renderTabs()
             case "icon":
                 renderIcon()
+            // Two of the three previously-undispatched kinds. `dropdown` stays
+            // absent — see scripts/widget_dispatch_exemptions.json for the row
+            // and its machine-checked justification.
+            //
+            // AN EARLIER VERSION OF THIS COMMENT WAS WRONG, and the way it was
+            // wrong is worth keeping: it said the Layers element-type filter
+            // "needs native state and tree filtering", implying this port had
+            // neither. It has both, and has for months — `hiddenTypes`,
+            // `layersTypeValue`, `layersTypeFilterKeep`. The false clause came
+            // from the exemption row, was copied here, and then the two agreed
+            // with each other; a seat read them and set out to build what
+            // already shipped. Consensus among copies is not evidence.
+            //
+            // The real gap: this port draws the search field and the filter
+            // menu NATIVELY inside `renderTreeView`, which `layers.yaml`
+            // already declares as `lp_search_input` + `lp_filter_button`. So
+            // the artist gets the search box twice and two filter controls, the
+            // YAML one an inert placeholder. jas_dioxus renders both from the
+            // YAML and duplicates neither. Adding an arm here alone would give
+            // a THIRD control; the fix is to delete the native pair.
+            case "icon_button_group":
+                renderIconButtonGroup()
+            case "reference_point_widget":
+                renderReferencePointWidget()
             default:
                 renderPlaceholder()
             }
@@ -2220,6 +2244,20 @@ struct YamlElementView: View {
     /// a field bound to a non-writable expression (a foreach `p.value`) needs
     /// this path. No-op when the widget has no `change` behavior.
     private func handleChangeBehavior(value: Double) {
+        handleChangeBehavior(eventValue: value)
+    }
+
+    /// As `handleChangeBehavior(value:)` but for a STRING-valued change.
+    ///
+    /// `icon_button_group` and `reference_point_widget` dispatch `change` with a
+    /// string `event.value` (an orientation, a 3×3 anchor name), which the Double
+    /// entry point cannot express. Both funnel into one implementation so the
+    /// action / effect / params resolution stays in a single place.
+    private func handleChangeBehavior(stringValue: String) {
+        handleChangeBehavior(eventValue: stringValue)
+    }
+
+    private func handleChangeBehavior(eventValue value: Any) {
         guard let model = model else { return }
         guard let behavior = element["behavior"] as? [[String: Any]] else { return }
         let ws = WorkspaceData.load()
@@ -2730,6 +2768,134 @@ struct YamlElementView: View {
                         flipAlong: (brush["flip_along"] as? Bool) ?? false,
                         strokeWeight: 14.0)
     }
+
+    // MARK: - icon_button_group / reference_point_widget (added 2026-07-29)
+    //
+    // Both kinds were UNDISPATCHED and fell through to `renderPlaceholder()`,
+    // which renders the widget's `summary` text. Found by the jas/windows seat
+    // counting dispatch arms against the 38 canonical kinds in
+    // `workspace_interpreter/widget_tree.py`.
+    //
+    // BOTH ARE WIDGET-ONLY GAPS, which took tracing to establish and contradicted
+    // this seat's first reading:
+    //   * `set_artboard_reference_point` is PURE YAML — a generic
+    //     `set_panel_state` effect, already handled here. Nothing native was ever
+    //     missing; the claim that it was "absent from Swift" came from grepping a
+    //     name that is not supposed to appear in either port's source.
+    //   * `toggle_artboard_orientation` is unimplemented in BOTH ports — its YAML
+    //     effect is a bare `log` marked "(native)" for work never done. Rendering
+    //     the control therefore MATCHES jas_dioxus exactly: both show the buttons,
+    //     neither swaps the dimensions. That is a shared gap, not a Swift defect.
+    //
+    // Written using only constructs this file already demonstrates. `Group` is
+    // NOT among them: bare `Group` here resolves to jas's DOCUMENT Group
+    // (`Element.group(Group(children:))`), so `Group { }` calls the model's
+    // initialiser, the enclosing label fails to typecheck, and `ForEach` reports
+    // a bogus `Binding` overload a dozen lines from the cause. `if`/`else` in a
+    // ViewBuilder needs no wrapper.
+
+    /// `icon_button_group` — a segmented row of icon buttons, exactly one active,
+    /// dispatching `change` with the chosen option's `value`.
+    ///
+    /// Declared at `workspace/dialogs/artboard_options.yaml` (portrait /
+    /// landscape). Twin: Rust `render_icon_button_group`.
+    @ViewBuilder
+    private func renderIconButtonGroup() -> some View {
+        let options = (element["options"] as? [[String: Any]]) ?? []
+        let bindMap = element["bind"] as? [String: Any]
+        let valueExpr = bindMap?["value"] as? String
+        let current = iconGroupCurrentValue(valueExpr)
+        let isDisabled = evalBindDisabled()
+        let writeTarget = valueExpr.flatMap { writeBackTarget($0) }
+
+        HStack(spacing: 1) {
+            ForEach(0..<options.count, id: \.self) { i in
+                let opt = options[i]
+                let value = (opt["value"] as? String) ?? ""
+                let iconName = (opt["icon"] as? String) ?? ""
+                let active = value == current
+                Button(action: {
+                    // Write the bound target when it is writable (the radio-row
+                    // pattern above), THEN fire `change` — the YAML action is what
+                    // applies, and for orientation that action is the shared stub.
+                    if let t = writeTarget {
+                        commitWidgetWrite(target: t, value: value)
+                    }
+                    handleChangeBehavior(stringValue: value)
+                }) {
+                    HStack(spacing: 0) {
+                        if let theme = theme, !iconName.isEmpty,
+                           WorkspaceIconCache.shared.lookup(iconName) != nil {
+                            WorkspaceIcon(name: iconName, size: 14, tint: theme.text)
+                        } else {
+                            SwiftUI.Color.clear.frame(width: 14, height: 14)
+                        }
+                    }
+                    .frame(width: 26, height: 22)
+                    .background(active ? SwiftUI.Color(white: 0.31) : SwiftUI.Color.clear)
+                }
+                .buttonStyle(.plain)
+                .disabled(isDisabled)
+            }
+        }
+        .opacity(isDisabled ? 0.4 : 1.0)
+    }
+
+    /// The `icon_button_group`'s currently-active option value. Split out so the
+    /// view body stays a chain of plain `let`s, which is what this file's other
+    /// option-list widgets do.
+    private func iconGroupCurrentValue(_ expr: String?) -> String {
+        guard let e = expr else { return "" }
+        if case .string(let v) = evaluate(e, context: context) { return v }
+        return ""
+    }
+
+    /// `reference_point_widget` — a 3×3 anchor grid, exactly one cell active,
+    /// dispatching `change` with the anchor name.
+    ///
+    /// Its own YAML description states the contract: "3×3 grid; exactly one
+    /// anchor active. Changes X / Y display, not storage." Twin: Rust
+    /// `render_reference_point_widget`.
+    @ViewBuilder
+    private func renderReferencePointWidget() -> some View {
+        let bindMap = element["bind"] as? [String: Any]
+        let valueExpr = bindMap?["value"] as? String
+        // "center" is the widget's declared default anchor, matching Rust.
+        let current = valueExpr == nil ? "center" : {
+            let v = iconGroupCurrentValue(valueExpr)
+            return v.isEmpty ? "center" : v
+        }()
+        let writeTarget = valueExpr.flatMap { writeBackTarget($0) }
+        // Row-major, matching Rust's ordering so the ports agree on which cell
+        // is which.
+        let rows = referencePointAnchorRows
+
+        VStack(spacing: 2) {
+            ForEach(0..<rows.count, id: \.self) { r in
+                HStack(spacing: 2) {
+                    ForEach(rows[r], id: \.self) { anchor in
+                        Button(action: {
+                            if let t = writeTarget {
+                                commitWidgetWrite(target: t, value: anchor)
+                            }
+                            handleChangeBehavior(stringValue: anchor)
+                        }) {
+                            SwiftUI.Rectangle()
+                                .fill(anchor == current
+                                      ? SwiftUI.Color.accentColor
+                                      : SwiftUI.Color(white: 0.35))
+                                .frame(width: 10, height: 10)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    /// The 3×3 reference-point anchors, ROW-MAJOR, matching Rust's ordering so
+    /// the two ports agree on which cell is which.
+    private var referencePointAnchorRows: [[String]] { referencePointAnchorRowsForTest }
 
     // MARK: - Placeholder
 
@@ -3550,6 +3716,64 @@ func elementDisplayName(_ elem: Element) -> (String, Bool) {
     return ("<\(elementTypeLabel(elem))>", false)
 }
 
+/// The token the Layers type filter matches an element against, in the
+/// spelling `workspace/panels/layers.yaml`'s `lp_filter_button` uses for its
+/// `items` values.
+///
+/// DERIVED FROM THE ELEMENT, NEVER FROM ITS DISPLAY NAME. This port has always
+/// matched on the element; jas_dioxus recovered the type by parsing the row
+/// label until 2026-07-29, matching `<Rectangle>` apart and letting anything
+/// else fall through to `""`, so over there NAMING AN ELEMENT EXEMPTED IT FROM
+/// THE FILTER. `layers.yaml` says "Unchecking a type hides all elements of
+/// that type" — all of them, whatever the artist has called them.
+///
+/// The general shape is worth more than the instance: a display name is a
+/// PRESENTATION of an element and its type is a FACT about it, so recovering
+/// the fact from the presentation is lossy the moment presentation gains a
+/// second form — which is precisely what `elementDisplayName` above did when
+/// every element became nameable.
+///
+/// `.live` answers "live", which no menu item offers, so a live element is
+/// unfilterable in BOTH ports. Spelled identically on both sides so that
+/// stays a shared gap by agreement rather than a divergence waiting on
+/// whoever adds the option.
+/// Internal rather than `private` so `LayersTypeFilterTests` can assert it.
+func layersTypeValue(_ elem: Element) -> String {
+    switch elem {
+    case .line: return "line"
+    case .rect: return "rectangle"
+    case .circle: return "circle"
+    case .ellipse: return "ellipse"
+    case .polyline: return "polyline"
+    case .polygon: return "polygon"
+    case .path: return "path"
+    case .text: return "text"
+    case .textPath: return "text_path"
+    case .group: return "group"
+    case .layer: return "layer"
+    case .live: return "live"
+    }
+}
+
+/// Paths surviving the Layers type filter, given each row as its path and the
+/// token `layersTypeValue` answered for it.
+///
+/// An ancestor of a surviving row is kept even when its own type is hidden: a
+/// tree cannot draw a child without its parent row. That makes hiding a
+/// CONTAINER type inoperative whenever any descendant survives, which is not
+/// obviously what `layers.yaml`'s "hides all elements of that type" intends.
+/// jas_dioxus's `tree_type_filter_keep` does the identical thing, so it is a
+/// shared question for council rather than a divergence.
+func layersTypeFilterKeep(_ rows: [(path: ElementPath, typeValue: String)],
+                          hidden: Set<String>) -> Set<ElementPath> {
+    let visible = Set(rows.filter { !hidden.contains($0.typeValue) }.map { $0.path })
+    var keep = visible
+    for p in visible {
+        for i in 1..<max(p.count, 1) { keep.insert(Array(p.prefix(i))) }
+    }
+    return keep
+}
+
 private func visIcon(_ vis: Visibility) -> String {
     switch vis {
     case .preview: return "\u{25C9}"
@@ -3714,22 +3938,10 @@ struct TreeViewContent: View {
         }
     }
 
-    private func typeValue(_ elem: Element) -> String {
-        switch elem {
-        case .line: return "line"
-        case .rect: return "rectangle"
-        case .circle: return "circle"
-        case .ellipse: return "ellipse"
-        case .polyline: return "polyline"
-        case .polygon: return "polygon"
-        case .path: return "path"
-        case .text: return "text"
-        case .textPath: return "text_path"
-        case .group: return "group"
-        case .layer: return "layer"
-        case .live: return "live"
-        }
-    }
+    // The type token and the keep-set both live at module scope now, beside
+    // `elementDisplayName`, so `LayersTypeFilterTests` can assert them — see
+    // `layersTypeValue`. A private method here could only be reached by
+    // rendering the view.
 
     private func flatten(_ doc: Document) -> [FlatRow] {
         var out: [FlatRow] = []
@@ -3763,11 +3975,9 @@ struct TreeViewContent: View {
         var result = rows
         // Type filter
         if !hiddenTypes.isEmpty {
-            let visible = Set(result.filter { !hiddenTypes.contains(typeValue($0.elem)) }.map { $0.path })
-            var keep = visible
-            for p in visible {
-                for i in 1..<p.count { keep.insert(Array(p.prefix(i))) }
-            }
+            let keep = layersTypeFilterKeep(
+                result.map { (path: $0.path, typeValue: layersTypeValue($0.elem)) },
+                hidden: hiddenTypes)
             result = result.filter { keep.contains($0.path) }
         }
         // Isolation filter
@@ -4089,7 +4299,13 @@ struct TreeViewContent: View {
     private func rowView(row: FlatRow, selectedPaths: Set<ElementPath>) -> some View {
         let elem = row.elem
         let path = row.path
-        let isSelected = selectedPaths.contains(path)
+        // AT OR UNDER a selected path, not an exact match: selecting a group
+        // marks its members' rows too (RULED 2026-07-29). The shorthand is
+        // expanded here rather than in the stored selection. The identical
+        // line in `treeRows_OLD` is deliberately NOT changed — it and its
+        // only caller `treeRows_DEPRECATED` are unreferenced dead code, and
+        // touching it would imply it is live.
+        let isSelected = pathIsSelectedOrUnder(selectedPaths, path)
         let isPanelSelected = panelSelection.contains(path)
         let (name, isNamed) = elementDisplayName(elem)
         let vis = elem.visibility

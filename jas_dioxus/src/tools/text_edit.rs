@@ -591,26 +591,11 @@ pub fn char_to_byte(s: &str, char_idx: usize) -> usize {
         .unwrap_or(s.len())
 }
 
-/// Build a new Text element with empty content at (x, y) using sensible
-/// defaults. Used when the user clicks the type tool on empty canvas.
-pub fn empty_text_elem(x: f64, y: f64, width: f64, height: f64) -> TextElem {
-    use crate::geometry::element::{Color, CommonProps, Fill};
-    TextElem::from_string(
-        x,
-        y,
-        "",
-        "sans-serif",
-        16.0,
-        "normal",
-        "normal",
-        "none",
-        width,
-        height,
-        Some(Fill::new(Color::BLACK)),
-        None,
-        CommonProps::default(),
-    )
-}
+/// Build a new Text element with empty content at (x, y) using the house
+/// defaults. Defined in `crate::geometry::element` — beside `TextElem`, and NOT
+/// gated behind `feature = "web"` — and re-exported here so existing
+/// `tools::text_edit::empty_text_elem` paths keep resolving.
+pub use crate::geometry::element::empty_text_elem;
 
 /// Build a new TextPath element with empty content along `d`.
 pub fn empty_text_path_elem(d: Vec<crate::geometry::element::PathCommand>) -> TextPathElem {

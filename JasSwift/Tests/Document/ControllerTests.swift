@@ -105,13 +105,31 @@ private func makeSelectionCtrl() -> Controller {
 @Test func controllerSelectElementInGroup() {
     let ctrl = makeSelectionCtrl()
     ctrl.selectElement([0, 1, 0])
-    #expect(selPaths(ctrl.document.selection) == [[0, 1], [0, 1, 0], [0, 1, 1]])
+    // THE GROUP ALONE (§20, 2026-07-29). Clicking a child still selects the
+    // group — that is what the artist sees, and it is unchanged. What changed
+    // is that the group's SIBLINGS are no longer written into the selection
+    // alongside it: that shape is what `copySelection` misreads as "copy the
+    // group, then copy each member INTO the source".
+    #expect(selPaths(ctrl.document.selection) == [[0, 1]])
+    // THE 'AS IF' SURVIVES — every member's row is still marked in the panel.
+    let sel = ctrl.document.selection.map(\.path)
+    #expect(pathIsSelectedOrUnder(sel, [0, 1, 0]) && pathIsSelectedOrUnder(sel, [0, 1, 1]),
+            "both members' rows stay marked")
 }
 
 @Test func controllerSelectElementInGroupOtherChild() {
     let ctrl = makeSelectionCtrl()
     ctrl.selectElement([0, 1, 1])
-    #expect(selPaths(ctrl.document.selection) == [[0, 1], [0, 1, 0], [0, 1, 1]])
+    // THE GROUP ALONE (§20, 2026-07-29). Clicking a child still selects the
+    // group — that is what the artist sees, and it is unchanged. What changed
+    // is that the group's SIBLINGS are no longer written into the selection
+    // alongside it: that shape is what `copySelection` misreads as "copy the
+    // group, then copy each member INTO the source".
+    #expect(selPaths(ctrl.document.selection) == [[0, 1]])
+    // THE 'AS IF' SURVIVES — every member's row is still marked in the panel.
+    let sel = ctrl.document.selection.map(\.path)
+    #expect(pathIsSelectedOrUnder(sel, [0, 1, 0]) && pathIsSelectedOrUnder(sel, [0, 1, 1]),
+            "both members' rows stay marked")
 }
 
 @Test func controllerSelectElementNotifies() {

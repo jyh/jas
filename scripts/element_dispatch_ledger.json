@@ -16,7 +16,27 @@
     "Five defects wore this shape in one week, every one invisible in Rust (where",
     "doc.set_selection expands containers) and live in JasSwift (which does not).",
     "LAYER_STRUCTURE.md section 20 removes that expansion, at which point every",
-    "remaining site goes live in Rust too."
+    "remaining site goes live in Rust too.",
+    "",
+    "OWED TO THIS LEDGER: FALSIFIABLE CLAIMS. As of 2026-07-29 a row's `reason`,",
+    "`artist_visible` and `evidence` are checked for PRESENCE and non-blankness,",
+    "never for truth -- and two of this seat's first three `owed` rows named a",
+    "production read path that did not exist. The sibling gate",
+    "check_widget_kind_dispatch.py now carries the fix: each exemption states its",
+    "argument as {file, contains|lacks} claims that are VERIFIED every run, so an",
+    "argument cannot outlive the condition it describes. See `verify_asserts`",
+    "there; the reusable law is in widget_dispatch_exemptions.json's _doc.",
+    "",
+    "NOT ADOPTED HERE YET, deliberately and with a trigger rather than an",
+    "open-ended someday. The one surviving `owed` row rests on a claim about the",
+    "PRINT path ('the PDF/print exporter has NO counter-scale'), and pinning that",
+    "as a machine-checked anchor means tracing the exporter properly. Guessing the",
+    "anchor would produce exactly the confident-and-wrong row this mechanism",
+    "exists to prevent, which is a poor way to introduce it.",
+    "",
+    "TRIGGER: adopt `asserts` on the NEXT `owed` row added or resolved, whichever",
+    "comes first. At that moment someone is already reading the print path with",
+    "reason to be sure."
   ],
   "sites": {
     "rust:jas_dioxus/src/geometry/element.rs::with_fill_gradient": {
@@ -60,14 +80,18 @@
       "handled_at": "document/controller.rs::selection_stroke_summary via element.rs::for_each_paintable"
     },
     "rust:jas_dioxus/src/geometry/element.rs::fill_gradient": {
-      "verdict": "owed",
-      "reason": "An accessor with NO summary twin. fill and stroke gained one on 2026-07-29; the gradient readers did not, so a selected group still reports no gradient even when every member carries the same one.",
-      "artist_visible": "set a gradient on a group, and the Gradient panel reads back empty"
+      "verdict": "unhandled",
+      "reason": "Containers have NO answer here, and it costs nothing today because NOTHING in production asks. This row previously read `owed` with the consequence \"set a gradient on a group, and the Gradient panel reads back empty\" -- written by this seat WITHOUT tracing the read path, and DISPROVEN when it was traced. The Gradient panel has no production read path in EITHER port: its panel.* scope is the declared gradient.yaml defaults for every selection, so a gradient-filled LEAF, a solid leaf and a group all display linear / 0 deg / 100% / classic / black->white, byte-identical (driven, both ports). Not a container defect, and not 'empty' either -- a plausible default an artist could mistake for the real value.",
+      "unreached_because": "The only non-render production reader would be AppState::sync_gradient_panel_from_selection, which the Rust compiler reports as never used -- its three call sites all sit inside #[cfg(test)] mod tests (renderer.rs:10740). The Swift twin syncGradientPanelFromSelection is likewise called only from Tests/Interpreter/GradientPanelSyncTests.swift. The accessor's remaining production reader is the RENDER path, where returning None for a group is CORRECT -- a group has no fill of its own to paint.",
+      "becomes_owed_when": "the Gradient panel gains a production read path (a live panel-override block, as the Color and Stroke panels have) -- at which point a container summary twin is needed here, alongside selection_fill_summary.",
+      "evidence": "driven in both ports by an adversarially-verified trace, 2026-07-29"
     },
     "rust:jas_dioxus/src/geometry/element.rs::stroke_gradient": {
-      "verdict": "owed",
-      "reason": "As fill_gradient: no summary twin recurses for gradients.",
-      "artist_visible": "set a stroke gradient on a group, and the panel reads back empty"
+      "verdict": "unhandled",
+      "reason": "As fill_gradient, and disproven the same way. A stroke-gradient LEAF does not round-trip either: through the accessor plus the test-only sync it round-trips perfectly (radial / 37 deg / 250% / smooth / dither / across), and through the path the application actually uses it shows the gradient.yaml defaults -- identical to what a group shows. The two answers differ by WHICH PATH YOU ASK, which is the whole finding.",
+      "unreached_because": "the same test-only sync function; the Gradient panel's read direction is unbuilt in both ports.",
+      "becomes_owed_when": "the Gradient panel gains a production read path.",
+      "evidence": "driven in both ports by an adversarially-verified trace, 2026-07-29"
     },
     "rust:jas_dioxus/src/geometry/element.rs::control_points": {
       "verdict": "leaf_only",
@@ -81,8 +105,9 @@
     },
     "rust:jas_dioxus/src/document/op_apply.rs::scale_elem_stroke_width": {
       "verdict": "owed",
-      "reason": "A container reaches here through the transform trio and its members' stroke widths are left untouched. A prerequisite for the transform box (transcripts/TRANSFORM_BOX.md section 9), not an independent defect.",
-      "artist_visible": "scale a group 2x with scale_strokes on, and its strokes stay thin"
+      "reason": "THE ONE OF THIS SEAT'S THREE `owed` CLAIMS THAT SURVIVED TRACING. A container reaches here through the transform trio and its members' stored stroke widths are left untouched. Sharpened by the trace: the canvas renderer DELIBERATELY counter-scales descendant stroke widths by the ancestor-transform chain (render.rs:558 / CanvasSubwindow.swift:325), so scale_strokes ON and OFF are literally INDISTINGUISHABLE on canvas for a selected group -- not merely a stored/rendered mismatch. The closed variant list also misses Element::Live, so a compound-shape LEAF is missed too, and there the ports DIVERGE (Swift bakes, Rust does not) -- a prime-directive violation independent of containers. Prerequisite for the transform box (transcripts/TRANSFORM_BOX.md section 9).",
+      "artist_visible": "Scale a group 2x with scale_strokes on and the canvas looks correct while the stored numbers disagree -- but the PDF/print exporter has NO counter-scale, so the same document prints with unscaled member strokes. Canvas and print disagree.",
+      "evidence": "driven in both ports, and adversarially verified; the print-path exception was found by the refuter, not the tracer, 2026-07-29"
     },
     "rust:jas_dioxus/src/algorithms/shape_recognize.rs::template_appearance": {
       "verdict": "unhandled",
