@@ -9,6 +9,10 @@ pub mod tool_consts;
 // build, and it lived in web-gated `tools` while being the only definition,
 // which is how the native arm drifted. `tools::text_measure` re-exports it.
 pub mod text_measure;
+// The extern "C" boundary for a native shell (S-A). Behind `feature = "ffi"`,
+// so the default web build and the wasm target never see it.
+#[cfg(feature = "ffi")]
+pub mod ffi;
 #[cfg(feature = "web")]
 pub mod canvas;
 #[cfg(test)]
