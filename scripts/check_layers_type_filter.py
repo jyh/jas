@@ -223,7 +223,7 @@ def scan(rust_src: str, swift_src: str, yaml_doc: object,
         "rust_labels": label_reads(
             _brace_block(rust_filter_src, "if !hidden_types.is_empty()")),
         "swift_labels": label_reads(
-            _brace_block(swift_src, "if !hiddenTypes.isEmpty")),
+            _brace_block(swift_src, "if !hidden.isEmpty")),
     }
 
 
@@ -315,10 +315,11 @@ func layersTypeValue(_ elem: Element) -> String {
     }
 }
 func caller() {
-    if !hiddenTypes.isEmpty {
+    let hidden = layersHiddenFromChecked(checkedTypes)
+    if !hidden.isEmpty {
         let keep = layersTypeFilterKeep(
             result.map { (path: $0.path, typeValue: layersTypeValue($0.elem)) },
-            hidden: hiddenTypes)
+            hidden: hidden)
     }
 }
 '''

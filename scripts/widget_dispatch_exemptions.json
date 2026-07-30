@@ -36,7 +36,9 @@
     "Removing a row is how you claim a kind is done. Do not remove one until",
     "the ACTIONS its behaviour dispatches also exist in that port -- an arm",
     "alone ships a control that looks functional and does nothing, which is",
-    "worse than the placeholder it replaces."
+    "worse than the placeholder it replaces.",
+    "",
+    "RETIRED 2026-07-30: swift:dropdown. Four readings, each corrected rather than overwritten, and it is worth keeping the shape of them. (i) 'JasSwift has neither the state nor the filtering' -- false for months, and it sent a seat to rebuild what shipped. (ii) 'render from the YAML like jas_dioxus' -- that path existed in neither port. (iii) 'the vocabulary has no list-mutating effect' -- true when written, closed hours later by list_toggle, and THIS ROW'S OWN ASSERT ANNOUNCED IT. (iv) 'JasSwift draws the menu natively' -- true until council Q3.2 deleted the native menu and added the generic arm. Both mechanisms then fired independently: the `lacks: case \"dropdown\"` assert, and Flask's structural loop noticing the kind was no longer a gap at all. A row that could not be wrong could not have been corrected three times."
   ],
   "exemptions": {
     "rust:placeholder": {
@@ -48,26 +50,6 @@
       "permanent": true,
       "reason": "THE SENTINEL. As rust:placeholder -- permanent, not debt.",
       "asserts": []
-    },
-    "swift:dropdown": {
-      "reason": "REAL GAP, FOURTH READING -- and the previous three are why this row carries asserts. (i) It claimed JasSwift had 'neither the state nor the filtering': false for months. (ii) It claimed the fix was to render from the YAML 'like jas_dioxus': that path existed in neither port. (iii) It recorded the blocker as `toggle_layers_type_filter` being a `- log:` stub with no list-mutating effect in the vocabulary -- TRUE WHEN WRITTEN THIS MORNING, and no longer: council Q3.2 added `list_toggle` to the reference interpreter and gave the action real effects, and THIS ROW'S OWN ASSERT FIRED to say so. That is the mechanism pointed forward for once, exactly as the retired assert predicted. WHAT REMAINS: JasSwift still does not dispatch widget kind `dropdown`. It draws the filter menu natively inside `renderTreeView`, hardcoding the eleven (label, value) pairs, while `layers.yaml` declares them as `lp_filter_button.items` -- so the artist sees the YAML widget as the inert grey placeholder '[Filter by element type]' beside a working native menu. The blocker is no longer the vocabulary; it is that the arm and the convenience layer JYH ruled (plain click toggles, Alt-click solos mirroring the eye button's ratified gesture, an 'All' item) are one change to one widget, in progress. Retiring this row means deleting the native menu, not adding an arm beside it.",
-      "asserts": [
-        {
-          "file": "JasSwift/Sources/Interpreter/YamlPanelBodyView.swift",
-          "lacks": "case \"dropdown\"",
-          "why": "The gap itself. When the generic arm lands, this row must go."
-        },
-        {
-          "file": "JasSwift/Sources/Interpreter/YamlPanelBodyView.swift",
-          "contains": "func layersTypeValue",
-          "why": "Kills reading (i) for good: the type tokens exist in this port."
-        },
-        {
-          "file": "workspace/actions.yaml",
-          "contains": "list_toggle: { target: \"panel.type_filter\"",
-          "why": "Reading (iii) is CLOSED: the action has real effects now. If someone reverts it to a stub, this reds and the blocker is back."
-        }
-      ]
     }
   },
   "_related_gaps": [

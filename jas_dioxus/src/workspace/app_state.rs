@@ -243,7 +243,16 @@ pub(crate) struct AppState {
     /// Type names: layer, group, path, rect, circle, ellipse, polyline,
     /// polygon, text, textpath, line. When empty (default), all types
     /// are shown. When non-empty, matching element types are hidden.
-    pub(crate) layers_hidden_types: std::collections::HashSet<String>,
+    /// The CHECKED element types for the Layers filter -- `panel.type_filter`
+    /// in layers.yaml, whose declared default is `[]`.
+    ///
+    /// Renamed from `layers_hidden_types` at council Q3.2: JYH ruled the filter
+    /// in CHECKED semantics, so this holds what the artist ticked, not what is
+    /// suppressed. EMPTY MEANS EVERYTHING SHOWN, which is both the declared
+    /// default and the ruling's single exception -- see
+    /// `algorithms::layers_filter::hidden_from_checked`, which is where the
+    /// complement is taken and the only place that knows the difference.
+    pub(crate) layers_type_filter: std::collections::HashSet<String>,
     /// Whether the type filter dropdown is open.
     pub(crate) layers_filter_dropdown_open: bool,
 
@@ -1461,7 +1470,7 @@ impl AppState {
             layers_search_query: String::new(),
             layers_isolation_stack: Vec::new(),
             layers_solo_state: None,
-            layers_hidden_types: std::collections::HashSet::new(),
+            layers_type_filter: std::collections::HashSet::new(),
             layers_filter_dropdown_open: false,
             artboards_panel_selection: Vec::new(),
             artboards_panel_anchor: None,

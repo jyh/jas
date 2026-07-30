@@ -91,3 +91,79 @@ pub fn type_filter_keep<'a>(
     }
     keep
 }
+
+/// Every type token the filter menu can offer, in `layers.yaml` order.
+///
+/// The CHECKED set is what the artist manipulates and what
+/// `panel.type_filter` stores; the keep-computation below wants the
+/// complement. This list is the universe that complement is taken against, so
+/// it must match `lp_filter_button.items` exactly —
+/// `scripts/check_layers_type_filter.py` asserts that against the shipping YAML
+/// and against both ports, in the same run.
+pub const ALL_TYPE_TOKENS: [&str; 12] = [
+    "layer", "group", "path", "rectangle", "circle", "ellipse",
+    "polyline", "polygon", "text", "text_path", "line", "live",
+];
+
+/// The hidden-type set implied by a CHECKED set.
+///
+/// JYH's ruling, council 2026-07-30: *a checked type lists all its elements,
+/// plus their ancestors; nothing checked — the default — is the same as
+/// checking everything.*
+///
+/// Stated that way the ancestor rule stops being an awkward exception and
+/// becomes half the definition. And the algorithm did not have to move: checked
+/// and unchecked are COMPLEMENTS over the menu, so the shipping keep-set was
+/// already computing the ruled rule. The implementation was never wrong — the
+/// spec sentence was, and it is rewritten.
+///
+/// The empty case is the exception and it is load-bearing: an empty filter must
+/// mean EVERYTHING, not nothing. Without it, unticking the last box would blank
+/// the panel, and `type_filter`'s declared default of `[]` would render an empty
+/// tree on first open.
+pub fn hidden_from_checked(checked: &HashSet<String>) -> HashSet<String> {
+    if checked.is_empty() {
+        return HashSet::new();
+    }
+    ALL_TYPE_TOKENS
+        .iter()
+        .filter(|t| !checked.contains(**t))
+        .map(|t| t.to_string())
+        .collect()
+}
+
+#[cfg(test)]
+mod checked_semantics_tests {
+    use super::*;
+
+    fn set(v: &[&str]) -> HashSet<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// THE EXCEPTION, and the reason it exists. `type_filter` defaults to `[]`,
+    /// so without this the panel would open with an empty tree.
+    #[test]
+    fn nothing_checked_hides_nothing() {
+        assert!(hidden_from_checked(&HashSet::new()).is_empty());
+    }
+
+    /// Checking one type hides the other eleven.
+    #[test]
+    fn checking_one_type_hides_the_rest() {
+        let hidden = hidden_from_checked(&set(&["circle"]));
+        assert_eq!(hidden.len(), ALL_TYPE_TOKENS.len() - 1);
+        assert!(!hidden.contains("circle"));
+        assert!(hidden.contains("rectangle"));
+        // `live` is in the universe now (council Q1.2). Before the Compound
+        // Shape menu entry landed it was not, so a live element could never be
+        // checked and would have vanished under ANY filter.
+        assert!(hidden.contains("live"));
+    }
+
+    /// Checking everything is the same as checking nothing, observably.
+    #[test]
+    fn checking_every_type_hides_nothing() {
+        let all = set(&ALL_TYPE_TOKENS);
+        assert!(hidden_from_checked(&all).is_empty());
+    }
+}

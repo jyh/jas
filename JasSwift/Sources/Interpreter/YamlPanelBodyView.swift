@@ -278,6 +278,8 @@ struct YamlElementView: View {
             // YAML one an inert placeholder. jas_dioxus renders both from the
             // YAML and duplicates neither. Adding an arm here alone would give
             // a THIRD control; the fix is to delete the native pair.
+            case "dropdown":
+                renderDropdown()
             case "icon_button_group":
                 renderIconButtonGroup()
             case "reference_point_widget":
@@ -2844,6 +2846,67 @@ struct YamlElementView: View {
     /// The `icon_button_group`'s currently-active option value. Split out so the
     /// view body stays a chain of plain `let`s, which is what this file's other
     /// option-list widgets do.
+    /// A `dropdown` widget: a menu of toggle items over one panel-state list,
+    /// rendered from the YAML's own `items` (council Q3.2, 2026-07-30).
+    ///
+    /// GENERIC, and that is the point. This port drew the Layers type filter as
+    /// a hardcoded eleven-pair SwiftUI `Menu` inside `renderTreeView`, while
+    /// `layers.yaml` declared the same eleven as `lp_filter_button.items` and
+    /// this dispatch fell through to a grey `[Filter by element type]`
+    /// placeholder beside it. Adding a type to the YAML would have appeared in
+    /// jas_dioxus and silently not here.
+    ///
+    /// CHECKED SEMANTICS: a ticked item means "list this type". Nothing ticked
+    /// is the default and means everything, so the "All" row carries the tick
+    /// instead of eleven meaningless ones. ALT-CLICK SOLOS, mirroring the
+    /// Option-click solo on the eye button in this same panel.
+    private func renderDropdown() -> AnyView {
+        let items = (element["items"] as? [[String: Any]]) ?? []
+        let bindKey = "type_filter"
+        let panelId = "layers_panel_content"
+        guard let model = model else { return AnyView(EmptyView()) }
+        let store = model.stateStore
+        let checked = Set((store.getPanel(panelId, bindKey) as? [String]) ?? [])
+        let showingAll = checked.isEmpty
+
+        return AnyView(Menu {
+            Button(action: {
+                store.setPanel(panelId, bindKey, [String]())
+                model.panelStateVersion += 1
+            }) {
+                SwiftUI.Text(showingAll ? "✓ All" : "All")
+            }
+            SwiftUI.Divider()
+            ForEach(items.indices, id: \.self) { i in
+                let label = (items[i]["label"] as? String) ?? ""
+                let value = (items[i]["value"] as? String) ?? ""
+                if (items[i]["type"] as? String) == "toggle" {
+                    Button(action: {
+                        var next = checked
+                        // Option held: SOLO. A second Alt-click on an
+                        // already-soloed type restores the full tree, exactly
+                        // as a second Option-click un-solos the eye.
+                        if NSEvent.modifierFlags.contains(.option) {
+                            next = (next.count == 1 && next.contains(value)) ? [] : [value]
+                        } else if next.contains(value) {
+                            next.remove(value)
+                        } else {
+                            next.insert(value)
+                        }
+                        store.setPanel(panelId, bindKey, Array(next).sorted())
+                        model.panelStateVersion += 1
+                    }) {
+                        SwiftUI.Text(checked.contains(value) ? "✓ \(label)" : label)
+                    }
+                }
+            }
+        } label: {
+            SwiftUI.Text("▾").font(.system(size: 11))
+        }
+        .menuStyle(.borderlessButton)
+        .frame(width: 20))
+    }
+
     private func iconGroupCurrentValue(_ expr: String?) -> String {
         guard let e = expr else { return "" }
         if case .string(let v) = evaluate(e, context: context) { return v }
@@ -3755,6 +3818,28 @@ func layersTypeValue(_ elem: Element) -> String {
     }
 }
 
+/// Every type token the filter menu can offer, in `layers.yaml` order. The twin
+/// of jas_dioxus's `ALL_TYPE_TOKENS`; `scripts/check_layers_type_filter.py`
+/// asserts both against the shipping YAML in one run.
+let layersAllTypeTokens: [String] = [
+    "layer", "group", "path", "rectangle", "circle", "ellipse",
+    "polyline", "polygon", "text", "text_path", "line", "live",
+]
+
+/// The hidden-type set implied by a CHECKED set.
+///
+/// JYH's ruling, council 2026-07-30: a checked type lists all its elements plus
+/// their ancestors; nothing checked — the default — is the same as checking
+/// everything. Checked and unchecked are complements over the menu, so the
+/// keep-computation below did not move; only the state's MEANING did.
+///
+/// The empty case is load-bearing: `type_filter` defaults to `[]`, so without
+/// it the panel would open showing nothing.
+func layersHiddenFromChecked(_ checked: Set<String>) -> Set<String> {
+    if checked.isEmpty { return [] }
+    return Set(layersAllTypeTokens.filter { !checked.contains($0) })
+}
+
 /// Paths surviving the Layers type filter, given each row as its path and the
 /// token `layersTypeValue` answered for it.
 ///
@@ -3913,12 +3998,20 @@ struct TreeViewContent: View {
     @State private var editingName: String = ""
     @State private var dragSource: ElementPath? = nil
     @State private var dragTarget: ElementPath? = nil
-    @State private var searchQuery: String = ""
+    /// `panel.search_query` / `panel.type_filter`, read from the store rather
+    /// than held in view-lived `@State`. lp_tree DECLARES both binds and this
+    /// port honoured neither -- it drew its own search field and its own menu
+    /// into a state no YAML write could reach (council Q3.1 / Q3.2).
+    private var searchQuery: String {
+        (model.stateStore.getPanel("layers_panel_content", "search_query") as? String) ?? ""
+    }
+    private var checkedTypes: Set<String> {
+        Set((model.stateStore.getPanel("layers_panel_content", "type_filter")
+             as? [String]) ?? [])
+    }
     @State private var isolationStack: [ElementPath] = []
     @State private var soloState: (path: ElementPath, saved: [ElementPath: Visibility])? = nil
-    @State private var hiddenTypes: Set<String> = []
     @State private var showLayerOptionsFor: ElementPath? = nil
-    @State private var showFilterMenu: Bool = false
     @FocusState private var treeFocused: Bool
     // Tracks current modifier keys from an NSEvent monitor (macOS).
     @State private var modifierFlags: NSEvent.ModifierFlags = []
@@ -3974,10 +4067,15 @@ struct TreeViewContent: View {
     private func applyFilters(_ rows: [FlatRow]) -> [FlatRow] {
         var result = rows
         // Type filter
-        if !hiddenTypes.isEmpty {
+        // `panel.type_filter` holds the CHECKED types (JYH, council
+        // 2026-07-30); the keep-computation wants their complement. Empty stays
+        // empty -- nothing checked means everything shown, the ruling's one
+        // exception and the declared default.
+        let hidden = layersHiddenFromChecked(checkedTypes)
+        if !hidden.isEmpty {
             let keep = layersTypeFilterKeep(
                 result.map { (path: $0.path, typeValue: layersTypeValue($0.elem)) },
-                hidden: hiddenTypes)
+                hidden: hidden)
             result = result.filter { keep.contains($0.path) }
         }
         // Isolation filter
@@ -4026,42 +4124,12 @@ struct TreeViewContent: View {
         let rows = applyFilters(flatten(doc))
         let firstSelected = selectedPaths.sorted(by: { $0.lexicographicallyPrecedes($1) }).first
         return VStack(spacing: 0) {
-            // Search/filter bar
-            HStack(spacing: 4) {
-                TextField("Search...", text: $searchQuery)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11))
-                    .padding(.horizontal, 4)
-                Menu {
-                    let types: [(String, String)] = [
-                        ("Layer", "layer"), ("Group", "group"),
-                        ("Path", "path"), ("Rectangle", "rectangle"),
-                        ("Circle", "circle"), ("Ellipse", "ellipse"),
-                        ("Polyline", "polyline"), ("Polygon", "polygon"),
-                        ("Text", "text"), ("Text Path", "text_path"),
-                        ("Line", "line"),
-                    ]
-                    ForEach(types, id: \.1) { (label, value) in
-                        Button(action: {
-                            if hiddenTypes.contains(value) { hiddenTypes.remove(value) }
-                            else { hiddenTypes.insert(value) }
-                        }) {
-                            if hiddenTypes.contains(value) {
-                                SwiftUI.Text(label)
-                            } else {
-                                SwiftUI.Text("✓ \(label)")
-                            }
-                        }
-                    }
-                } label: {
-                    SwiftUI.Text("▾").font(.system(size: 11))
-                }
-                .menuStyle(.borderlessButton)
-                .frame(width: 20)
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 2)
-            .background(SwiftUI.Color(white: 0.14))
+            // NO SEARCH BAR HERE. `layers.yaml` declares `lp_search_bar` --
+            // `lp_search_input` plus `lp_filter_button` -- as siblings of this
+            // tree, and this view used to draw its OWN copies of both. The
+            // artist saw the search box twice and two filter controls, one of
+            // them the inert grey placeholder the YAML widget rendered as.
+            // Council Q3.2: the declared widgets are the only ones now.
 
             if !isolationStack.isEmpty {
                 breadcrumbBar

@@ -9090,8 +9090,13 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     // itself at flatten time. It used to be parsed back out of the row's
     // display name, which stopped working the day every element could be
     // named — see `tree_type_value` for that history.
-    let hidden_types: TreeHashSet<String> = rctx.app.borrow()
-        .layers_hidden_types.iter().cloned().collect();
+    // `panel.type_filter` holds the CHECKED types (council 2026-07-30); the
+    // keep-computation wants their complement. Empty stays empty -- nothing
+    // checked means everything shown, which is the ruling's one exception and
+    // the declared default.
+    let checked: TreeHashSet<String> = rctx.app.borrow()
+        .layers_type_filter.iter().cloned().collect();
+    let hidden_types = crate::algorithms::layers_filter::hidden_from_checked(&checked);
     if !hidden_types.is_empty() {
         let keep = tree_type_filter_keep(
             rows.iter().map(|r| (r.path.as_slice(), r.type_value)),
@@ -10616,8 +10621,13 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
         });
     };
 
-    let hidden_types: std::collections::HashSet<String> = rctx.app.borrow()
-        .layers_hidden_types.iter().cloned().collect();
+    // The CHECKED set. Empty is the default and means everything is listed,
+    // so with an empty set NO type box is ticked and the "All" row carries the
+    // tick instead -- the panel reads as a mode ("All" / "these types") rather
+    // than eleven boxes that are all on and all meaningless.
+    let checked_types: std::collections::HashSet<String> = rctx.app.borrow()
+        .layers_type_filter.iter().cloned().collect();
+    let showing_all = checked_types.is_empty();
 
     let close_app = rctx.app.clone();
     let mut close_rev = rctx.revision;
@@ -10649,13 +10659,39 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                         }
                         div {
                             style: "position:absolute;top:22px;right:0;background:var(--jas-pane-bg,#2a2a2a);border:1px solid var(--jas-border,#555);border-radius:2px;padding:4px 0;min-width:140px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
+                            {
+                                // "All" -- one click back to the default. With
+                                // an empty filter this is the ticked row, which
+                                // is what stops CHECKED semantics reading as
+                                // eleven switched-off boxes over a full tree.
+                                let all_app = rctx.app.clone();
+                                let mut all_rev = close_rev;
+                                let all_mark = if showing_all { "☑" } else { "☐" };
+                                let all_key = "all-row";
+                                rsx! {
+                                    div {
+                                        key: "{all_key}",
+                                        style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--jas-border,#555);margin-bottom:2px;",
+                                        onclick: move |evt: Event<MouseData>| {
+                                            evt.stop_propagation();
+                                            let a = all_app.clone();
+                                            spawn(async move {
+                                                a.borrow_mut().layers_type_filter.clear();
+                                                all_rev += 1;
+                                            });
+                                        },
+                                        span { "{all_mark}" }
+                                        span { "All" }
+                                    }
+                                }
+                            }
                             for (label, value) in items.iter() {
                                 {
                                     let item_app = rctx.app.clone();
                                     let mut item_rev = close_rev;
                                     let v = value.clone();
                                     let v_for_key = v.clone();
-                                    let checked = !hidden_types.contains(&v);
+                                    let checked = checked_types.contains(&v);
                                     let check_mark = if checked { "☑" } else { "☐" };
                                     rsx! {
                                         div {
@@ -10663,14 +10699,28 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                                             style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;",
                                             onclick: move |evt: Event<MouseData>| {
                                                 evt.stop_propagation();
+                                                // ALT-CLICK SOLOS, mirroring the
+                                                // eye button's ratified
+                                                // Option-click solo in this same
+                                                // panel. A second Alt-click on an
+                                                // already-soloed type restores
+                                                // the full tree, as un-solo does.
+                                                let alt = evt.data().modifiers().alt();
                                                 let a = item_app.clone();
                                                 let vv = v.clone();
                                                 spawn(async move {
                                                     let mut st = a.borrow_mut();
-                                                    if st.layers_hidden_types.contains(&vv) {
-                                                        st.layers_hidden_types.remove(&vv);
+                                                    if alt {
+                                                        let soloed = st.layers_type_filter.len() == 1
+                                                            && st.layers_type_filter.contains(&vv);
+                                                        st.layers_type_filter.clear();
+                                                        if !soloed {
+                                                            st.layers_type_filter.insert(vv);
+                                                        }
+                                                    } else if st.layers_type_filter.contains(&vv) {
+                                                        st.layers_type_filter.remove(&vv);
                                                     } else {
-                                                        st.layers_hidden_types.insert(vv);
+                                                        st.layers_type_filter.insert(vv);
                                                     }
                                                     item_rev += 1;
                                                 });
