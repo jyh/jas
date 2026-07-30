@@ -193,6 +193,10 @@ public class WorkspaceState: ObservableObject {
     /// (``liveFillStrokeValues`` and the colour writers, which only ever
     /// receive a `Model`) all see ONE tier.
     public let appDefaults = AppDefaults()
+    /// One editable swatch-library tier for the whole app, adopted into every
+    /// canvas below. Per-canvas would fork the libraries per tab, which
+    /// jas_dioxus does not do.
+    public let swatchLibraries = AppSwatchLibraries()
     @Published public var workspaceLayout: WorkspaceLayout
     @Published public var appConfig: AppConfig
     @Published public var theme: Theme
@@ -286,6 +290,9 @@ public class WorkspaceState: ObservableObject {
     /// install would silently reintroduce the per-document tier this ruling
     /// removed. Idempotent and O(open tabs), on a structural change only.
     private func adoptAppDefaults() {
+        for entry in canvases where entry.model.swatchLibraries !== swatchLibraries {
+            entry.model.swatchLibraries = swatchLibraries
+        }
         for entry in canvases where entry.model.appDefaults !== appDefaults {
             entry.model.appDefaults = appDefaults
         }

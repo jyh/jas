@@ -31,56 +31,6 @@
           "why": "Reds when JasSwift gains the handler."
         }
       ]
-    },
-    "sort_swatches_by_name": {
-      "reason": "The whole Swatches hamburger menu is a Swift no-op against a working Rust verb. jas_dioxus implements sort_swatches_by_name natively in panels/swatches_panel.rs; JasSwift's SwatchesPanel.dispatch falls to `default: runYamlActionByName(cmd, ...)`, which runs the bare log effect. Five verbs, one cause. Council O1.3, second stone.",
-      "asserts": [
-        {
-          "file": "JasSwift/Sources/Panels/SwatchesPanel.swift",
-          "lacks": "case \"sort_swatches_by_name\"",
-          "why": "Reds when JasSwift implements the verb, forcing this row out."
-        }
-      ]
-    },
-    "select_all_unused_swatches": {
-      "reason": "The whole Swatches hamburger menu is a Swift no-op against a working Rust verb. jas_dioxus implements select_all_unused_swatches natively in panels/swatches_panel.rs; JasSwift's SwatchesPanel.dispatch falls to `default: runYamlActionByName(cmd, ...)`, which runs the bare log effect. Five verbs, one cause. Council O1.3, second stone.",
-      "asserts": [
-        {
-          "file": "JasSwift/Sources/Panels/SwatchesPanel.swift",
-          "lacks": "case \"select_all_unused_swatches\"",
-          "why": "Reds when JasSwift implements the verb, forcing this row out."
-        }
-      ]
-    },
-    "add_used_colors": {
-      "reason": "The whole Swatches hamburger menu is a Swift no-op against a working Rust verb. jas_dioxus implements add_used_colors natively in panels/swatches_panel.rs; JasSwift's SwatchesPanel.dispatch falls to `default: runYamlActionByName(cmd, ...)`, which runs the bare log effect. Five verbs, one cause. Council O1.3, second stone.",
-      "asserts": [
-        {
-          "file": "JasSwift/Sources/Panels/SwatchesPanel.swift",
-          "lacks": "case \"add_used_colors\"",
-          "why": "Reds when JasSwift implements the verb, forcing this row out."
-        }
-      ]
-    },
-    "delete_swatch": {
-      "reason": "The whole Swatches hamburger menu is a Swift no-op against a working Rust verb. jas_dioxus implements delete_swatch natively in panels/swatches_panel.rs; JasSwift's SwatchesPanel.dispatch falls to `default: runYamlActionByName(cmd, ...)`, which runs the bare log effect. Five verbs, one cause. Council O1.3, second stone.",
-      "asserts": [
-        {
-          "file": "JasSwift/Sources/Panels/SwatchesPanel.swift",
-          "lacks": "case \"delete_swatch\"",
-          "why": "Reds when JasSwift implements the verb, forcing this row out."
-        }
-      ]
-    },
-    "duplicate_swatch": {
-      "reason": "The whole Swatches hamburger menu is a Swift no-op against a working Rust verb. jas_dioxus implements duplicate_swatch natively in panels/swatches_panel.rs; JasSwift's SwatchesPanel.dispatch falls to `default: runYamlActionByName(cmd, ...)`, which runs the bare log effect. Five verbs, one cause. Council O1.3, second stone.",
-      "asserts": [
-        {
-          "file": "JasSwift/Sources/Panels/SwatchesPanel.swift",
-          "lacks": "case \"duplicate_swatch\"",
-          "why": "Reds when JasSwift implements the verb, forcing this row out."
-        }
-      ]
     }
   },
   "bypassed": {}

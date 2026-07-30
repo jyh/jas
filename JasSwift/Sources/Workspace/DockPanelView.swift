@@ -232,7 +232,11 @@ public struct PanelGroupView: View {
         // true no matter what the user had chosen (CPTRIAGE).
         var stateMap = buildLiveStateMap(ws: ws, model: model)
         let icons = ws.icons()
-        let swatchLibs = ws.swatchLibraries()
+        // The MUTABLE tier, falling back to the shipped bundle only when there
+        // is no model. Reading `ws.swatchLibraries()` here is what made every
+        // swatch mutation invisible: the verbs would edit app state and the
+        // panel would keep rendering the 216 shipped colours forever.
+        let swatchLibs = model?.swatchLibraries.libs ?? ws.swatchLibraries()
         var panelMap: [String: Any]
         if let store = model?.stateStore {
             if !store.hasPanel(contentId) {

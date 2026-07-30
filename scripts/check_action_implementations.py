@@ -425,9 +425,10 @@ def self_test() -> int:
         # how a browser should name "the saved version": the tab retains the
         # bytes it was opened from or last saved as, and revert re-parses them.
         "revert": "native_both",
-        # verified: swatches_panel.rs:77 real body; SwatchesPanel.swift routes
-        # everything to runYamlActionByName
-        "sort_swatches_by_name": "DIVERGENT:rust",
+        # sort_swatches_by_name was DIVERGENT:rust until council O1.3 built
+        # JasSwift's five verbs (2026-07-30). The anchor moves with the fix, and
+        # now asserts the REPAIRED state so it cannot silently regress.
+        "sort_swatches_by_name": "native_both",
         # THE TWO CLASSES THAT PRODUCED FALSE DIVERGENCES on the first
         # production run, anchored so they cannot regress:
         #   guard arm -- jas_dioxus routes panel toggles through

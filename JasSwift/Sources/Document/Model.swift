@@ -362,6 +362,13 @@ public class Model: ObservableObject {
     /// time. The VALUES it carries publish through ``appDefaultFill`` /
     /// ``appDefaultStroke`` below.
     public var appDefaults = AppDefaults()
+
+    /// App-global editable swatch libraries — the twin of jas_dioxus's
+    /// `AppState.swatch_libraries`. Carried here, like `appDefaults`, so
+    /// `SwatchesPanel.dispatch(model:)` and `buildPanelCtx(model:)` — which
+    /// only ever receive a Model — can reach it. Not `@Published`: a plumbing
+    /// reference swapped once at adoption time, exactly as `appDefaults` is.
+    public var swatchLibraries = AppSwatchLibraries()
     /// The APP-level default fill / stroke — the tier BELOW ``defaultFill`` /
     /// ``defaultStroke``, which are per-document (Rust's `Model.default_fill`,
     /// seeded `nil` / black, exactly as above). Mirrors Rust's
