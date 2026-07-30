@@ -2170,7 +2170,10 @@
       },
       "effects": [
         {
-          "log": "toggle_layers_type_filter"
+          "list_toggle": {
+            "target": "panel.type_filter",
+            "value": "param.element_type"
+          }
         }
       ]
     },

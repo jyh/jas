@@ -1905,7 +1905,14 @@ actions:
     params:
       element_type: { type: string }
     effects:
-      - log: "toggle_layers_type_filter"
+      # Set membership: add the type if absent, remove it if present.
+      # This carried a bare `- log:` from the day it was written, because no
+      # effect in the vocabulary could express "unchecked" -- `list_push`
+      # prepends and models a most-recently-used list, not a set. So BOTH
+      # active ports reached around the declared action and mutated their own
+      # native state, and the declared route has never run. `list_toggle` is
+      # the missing primitive (council Q3.2, 2026-07-30).
+      - list_toggle: { target: "panel.type_filter", value: "param.element_type" }
 
   # Layer Options dialog
 

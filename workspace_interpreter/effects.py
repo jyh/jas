@@ -927,6 +927,28 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                                unique=unique, max_length=max_length)
         return
 
+    # list_toggle: { target, value } -- set membership, the checkbox primitive
+    if "list_toggle" in effect:
+        lt = effect["list_toggle"]
+        target = lt.get("target", "")
+        parts = target.split(".", 1)
+        from workspace_interpreter.expr_types import Value as _V, ValueType
+        eval_ctx = store.eval_context(ctx)
+        result = evaluate(
+            str(lt.get("value", "null")) if lt.get("value") is not None else "",
+            eval_ctx)
+        if result.type == ValueType.PATH:
+            value = {"__path__": list(result.value)}
+        elif result.type == ValueType.CLOSURE:
+            value = result
+        else:
+            value = result.value
+        if len(parts) == 2 and parts[0] == "panel":
+            panel_id = store.get_active_panel_id()
+            if panel_id:
+                store.list_toggle(panel_id, parts[1], value)
+        return
+
     # dispatch: action_name or { action, params }
     if "dispatch" in effect:
         d = effect["dispatch"]

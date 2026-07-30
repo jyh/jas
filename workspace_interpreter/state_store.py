@@ -504,6 +504,37 @@ class StateStore:
         scope[key] = lst
         self._notify_panel(panel_id, key, lst)
 
+    def list_toggle(self, panel_id: str, key: str, value):
+        """Add `value` to a panel-state list, or remove it if already present.
+
+        The membership primitive a CHECKBOX SET needs, and the one the effect
+        vocabulary was missing. `list_push` prepends (with an optional `unique`
+        that moves an existing entry to the front) -- it models a
+        most-recently-used list, not a set, and cannot express "unchecked".
+
+        Added for the Layers type filter (council Q3.2, 2026-07-30), whose
+        `toggle_layers_type_filter` had carried a bare `- log:` stub since it
+        was written: no effect in the vocabulary could say what it meant, so
+        BOTH active ports reached around the declared action and mutated their
+        own native state instead.
+
+        Appends rather than prepends: this is a set, and stable order keeps the
+        panel-state goldens from churning on every click.
+        """
+        scope = self._panels.get(panel_id)
+        if scope is None:
+            return
+        lst = scope.get(key)
+        if not isinstance(lst, list):
+            lst = []
+        lst = list(lst)  # copy
+        if value in lst:
+            lst.remove(value)
+        else:
+            lst.append(value)
+        scope[key] = lst
+        self._notify_panel(panel_id, key, lst)
+
     # ── Subscriptions ────────────────────────────────────────
 
     def subscribe(self, keys: list[str] | None, callback: Callable):
