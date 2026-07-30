@@ -122,7 +122,16 @@ def load_sources():
             ["git", "ls-files", "jas_dioxus/src/*.rs", "jas_dioxus/src/**/*.rs"],
             cwd=REPO, capture_output=True, text=True, check=True).stdout.split()
     except (OSError, subprocess.CalledProcessError):
-        listed = [str(p.relative_to(REPO)) for p in SRC.rglob("*.rs")]
+        # `.as_posix()`, not `str()`: these relpaths are KEYED (they go into
+        # the exemption ledger's "file::fn" keys), so backslashes on Windows
+        # would miss every declared row both ways at once.
+        #
+        # CAUGHT BY check_path_keying.py, about an hour after I wired that gate
+        # into CI. Fourth sighting of the class this week, committed by the
+        # author of the gate that catches it, while writing a gate about a
+        # different class of the same failure. That is the argument for gating
+        # a CLASS rather than fixing instances, made against me.
+        listed = [p.relative_to(REPO).as_posix() for p in SRC.rglob("*.rs")]
     for rel in listed:
         try:
             out[rel] = (REPO / rel).read_text(encoding="utf-8")
