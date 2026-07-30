@@ -1860,6 +1860,32 @@ fn apply_set_panel_state_with_ctx(
     let key = sps.get("key").and_then(|v| v.as_str()).unwrap_or("");
     // Layers panel: layers_panel_selection lives on AppState, not the
     // stroke panel. Handle here so YAML actions can clear it.
+    // The Layers search string. `set_layers_search` declares
+    // `set_panel_state {panel: layers, key: search_query, value: "param.query"}`
+    // -- a generic effect that has existed, correct, in all three runtimes while
+    // NEITHER active port dispatched the action that carries it. jas_dioxus
+    // instead special-cased the widget by ID (`bind_expr == "panel.search_query"`)
+    // and wrote this same field directly. Council Q3.1 stage B: the declared
+    // route writes it, and the id-check goes.
+    //
+    // Storage stays `AppState.layers_search_query` for now; making `lp_tree`
+    // read its declared `bind.search_query` is the next step and is plumbing.
+    if key == "search_query" {
+        let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
+        let resolved = if let Some(expr_str) = val.as_str() {
+            // `param.query` needs the ACTION's context -- resolving against an
+            // empty scope would silently store "" on every keystroke.
+            let ctx = match action_ctx {
+                Some(c) => c.clone(),
+                None => serde_json::json!({}),
+            };
+            super::effects::value_to_json(&super::expr::eval(expr_str, &ctx))
+        } else {
+            val.clone()
+        };
+        st.layers_search_query = resolved.as_str().unwrap_or("").to_string();
+        return;
+    }
     if key == "layers_panel_selection" {
         let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
         let resolved = if let Some(expr_str) = val.as_str() {
@@ -6494,6 +6520,20 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
     let is_search = bind_expr == "panel.search_query";
     // Does this widget DECLARE `event: input`? That declaration -- not an id --
     // is what makes an input commit live (council Q3.1).
+    // See the `key:` comment below -- a live-commit input must not key on its
+    // own value, or it remounts itself out from under the caret.
+    let dom_key = if el
+        .get("behavior")
+        .and_then(|b| b.as_array())
+        .map(|arr| arr.iter().any(|b| {
+            b.get("event").and_then(|e| e.as_str()) == Some("input")
+        }))
+        .unwrap_or(false)
+    {
+        format!("{id}-live")
+    } else {
+        format!("{id}-{value}")
+    };
     let has_input_behavior = el
         .get("behavior")
         .and_then(|b| b.as_array())
@@ -6546,7 +6586,25 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
             // fires (text inputs commit on Enter/blur, not per
             // keystroke), so the remount only happens on external
             // updates and doesn't interrupt typing.
-            key: "{id}-{value}",
+            //
+            // THAT PREMISE IS FALSE FOR A LIVE-COMMIT INPUT, and the
+            // Layers search box has violated it since the day it was
+            // written -- it has always committed per keystroke, first
+            // through a hard-coded id check and now through its
+            // declared `event: input`. So its value changed on every
+            // character, so its key changed, so Dioxus remounted the
+            // node mid-word and the artist lost focus after EVERY
+            // LETTER. Typing "bg" meant type b, click, type g.
+            //
+            // Found by JYH typing in it, 2026-07-30. No test could see
+            // it: focus is a DOM property of a wasm-hosted node.
+            //
+            // For a live-commit input the USER is the source of truth
+            // between renders, so there is nothing to force into the
+            // DOM and the key must stay stable. The remount-on-external
+            // -write behaviour is preserved for every buffered input,
+            // which is all the others.
+            key: "{dom_key}",
             id: "{id}",
             r#type: "text",
             placeholder: "{placeholder}",
@@ -6705,27 +6763,37 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
                 // FIRST so the two can be compared live before the bypass goes.
                 let v = evt.value();
                 if has_input_behavior {
-                    let a = app_for_input.clone();
-                    let el_in = el_for_input.clone();
-                    let ctx_in = ctx_for_input.clone();
-                    let f = field_for_input.clone();
-                    let vv = v.clone();
-                    spawn(async move {
-                        let mut st = a.borrow_mut();
+                    // SYNCHRONOUS, and inside the tightest possible borrow.
+                    //
+                    // The first cut of this ran the behavior inside
+                    // `spawn(async move { ... })` while holding
+                    // `app.borrow_mut()`, and JYH hit `RefCell already
+                    // borrowed` at the canvas act closure (app.rs:576). The
+                    // bypass this replaced only ever held a borrow for ONE
+                    // STATEMENT (`a.borrow_mut().layers_search_query = v;`), so
+                    // running the whole YAML effect+action pipeline under a
+                    // borrow -- from a deferred task, whose ordering against
+                    // render and canvas work is not the handler's to reason
+                    // about -- was a genuinely new shape.
+                    //
+                    // `build_mouse_event_handler` does exactly this work
+                    // (effects + action, under one borrow) synchronously in the
+                    // event handler and has been sound in production for
+                    // months. Matching the proven shape rather than inventing a
+                    // second one.
+                    {
+                        let mut st = app_for_input.borrow_mut();
                         run_input_behavior(
-                            &el_in, &f, &serde_json::Value::String(vv),
-                            &ctx_in, &mut st, "input");
-                        drop(st);
-                        revision += 1;
-                    });
+                            &el_for_input, &field_for_input,
+                            &serde_json::Value::String(v.clone()),
+                            &ctx_for_input, &mut st, "input");
+                    } // borrow ends here, before anything can re-enter
+                    revision += 1;
                 }
-                if is_search {
-                    let a = app_for_input.clone();
-                    spawn(async move {
-                        a.borrow_mut().layers_search_query = v;
-                        revision += 1;
-                    });
-                }
+                // (the id-checked write that used to live here is gone --
+                // the declared `event: input` behavior above is the only
+                // writer now, council Q3.1 stage B)
+                let _ = v;
             },
         }
     }
