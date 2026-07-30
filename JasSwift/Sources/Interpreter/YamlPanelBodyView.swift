@@ -258,6 +258,15 @@ struct YamlElementView: View {
                 renderTabs()
             case "icon":
                 renderIcon()
+            // Two of the three previously-undispatched kinds. `dropdown` stays
+            // absent on purpose — see scripts/widget_dispatch_exemptions.json:
+            // its feature (the Layers element-type filter) needs native state and
+            // tree filtering, and an arm without them opens a menu that changes
+            // nothing, which is worse than a visible placeholder.
+            case "icon_button_group":
+                renderIconButtonGroup()
+            case "reference_point_widget":
+                renderReferencePointWidget()
             default:
                 renderPlaceholder()
             }
@@ -2220,6 +2229,20 @@ struct YamlElementView: View {
     /// a field bound to a non-writable expression (a foreach `p.value`) needs
     /// this path. No-op when the widget has no `change` behavior.
     private func handleChangeBehavior(value: Double) {
+        handleChangeBehavior(eventValue: value)
+    }
+
+    /// As `handleChangeBehavior(value:)` but for a STRING-valued change.
+    ///
+    /// `icon_button_group` and `reference_point_widget` dispatch `change` with a
+    /// string `event.value` (an orientation, a 3×3 anchor name), which the Double
+    /// entry point cannot express. Both funnel into one implementation so the
+    /// action / effect / params resolution stays in a single place.
+    private func handleChangeBehavior(stringValue: String) {
+        handleChangeBehavior(eventValue: stringValue)
+    }
+
+    private func handleChangeBehavior(eventValue value: Any) {
         guard let model = model else { return }
         guard let behavior = element["behavior"] as? [[String: Any]] else { return }
         let ws = WorkspaceData.load()
@@ -2730,6 +2753,134 @@ struct YamlElementView: View {
                         flipAlong: (brush["flip_along"] as? Bool) ?? false,
                         strokeWeight: 14.0)
     }
+
+    // MARK: - icon_button_group / reference_point_widget (added 2026-07-29)
+    //
+    // Both kinds were UNDISPATCHED and fell through to `renderPlaceholder()`,
+    // which renders the widget's `summary` text. Found by the jas/windows seat
+    // counting dispatch arms against the 38 canonical kinds in
+    // `workspace_interpreter/widget_tree.py`.
+    //
+    // BOTH ARE WIDGET-ONLY GAPS, which took tracing to establish and contradicted
+    // this seat's first reading:
+    //   * `set_artboard_reference_point` is PURE YAML — a generic
+    //     `set_panel_state` effect, already handled here. Nothing native was ever
+    //     missing; the claim that it was "absent from Swift" came from grepping a
+    //     name that is not supposed to appear in either port's source.
+    //   * `toggle_artboard_orientation` is unimplemented in BOTH ports — its YAML
+    //     effect is a bare `log` marked "(native)" for work never done. Rendering
+    //     the control therefore MATCHES jas_dioxus exactly: both show the buttons,
+    //     neither swaps the dimensions. That is a shared gap, not a Swift defect.
+    //
+    // Written using only constructs this file already demonstrates. `Group` is
+    // NOT among them: bare `Group` here resolves to jas's DOCUMENT Group
+    // (`Element.group(Group(children:))`), so `Group { }` calls the model's
+    // initialiser, the enclosing label fails to typecheck, and `ForEach` reports
+    // a bogus `Binding` overload a dozen lines from the cause. `if`/`else` in a
+    // ViewBuilder needs no wrapper.
+
+    /// `icon_button_group` — a segmented row of icon buttons, exactly one active,
+    /// dispatching `change` with the chosen option's `value`.
+    ///
+    /// Declared at `workspace/dialogs/artboard_options.yaml` (portrait /
+    /// landscape). Twin: Rust `render_icon_button_group`.
+    @ViewBuilder
+    private func renderIconButtonGroup() -> some View {
+        let options = (element["options"] as? [[String: Any]]) ?? []
+        let bindMap = element["bind"] as? [String: Any]
+        let valueExpr = bindMap?["value"] as? String
+        let current = iconGroupCurrentValue(valueExpr)
+        let isDisabled = evalBindDisabled()
+        let writeTarget = valueExpr.flatMap { writeBackTarget($0) }
+
+        HStack(spacing: 1) {
+            ForEach(0..<options.count, id: \.self) { i in
+                let opt = options[i]
+                let value = (opt["value"] as? String) ?? ""
+                let iconName = (opt["icon"] as? String) ?? ""
+                let active = value == current
+                Button(action: {
+                    // Write the bound target when it is writable (the radio-row
+                    // pattern above), THEN fire `change` — the YAML action is what
+                    // applies, and for orientation that action is the shared stub.
+                    if let t = writeTarget {
+                        commitWidgetWrite(target: t, value: value)
+                    }
+                    handleChangeBehavior(stringValue: value)
+                }) {
+                    HStack(spacing: 0) {
+                        if let theme = theme, !iconName.isEmpty,
+                           WorkspaceIconCache.shared.lookup(iconName) != nil {
+                            WorkspaceIcon(name: iconName, size: 14, tint: theme.text)
+                        } else {
+                            SwiftUI.Color.clear.frame(width: 14, height: 14)
+                        }
+                    }
+                    .frame(width: 26, height: 22)
+                    .background(active ? SwiftUI.Color(white: 0.31) : SwiftUI.Color.clear)
+                }
+                .buttonStyle(.plain)
+                .disabled(isDisabled)
+            }
+        }
+        .opacity(isDisabled ? 0.4 : 1.0)
+    }
+
+    /// The `icon_button_group`'s currently-active option value. Split out so the
+    /// view body stays a chain of plain `let`s, which is what this file's other
+    /// option-list widgets do.
+    private func iconGroupCurrentValue(_ expr: String?) -> String {
+        guard let e = expr else { return "" }
+        if case .string(let v) = evaluate(e, context: context) { return v }
+        return ""
+    }
+
+    /// `reference_point_widget` — a 3×3 anchor grid, exactly one cell active,
+    /// dispatching `change` with the anchor name.
+    ///
+    /// Its own YAML description states the contract: "3×3 grid; exactly one
+    /// anchor active. Changes X / Y display, not storage." Twin: Rust
+    /// `render_reference_point_widget`.
+    @ViewBuilder
+    private func renderReferencePointWidget() -> some View {
+        let bindMap = element["bind"] as? [String: Any]
+        let valueExpr = bindMap?["value"] as? String
+        // "center" is the widget's declared default anchor, matching Rust.
+        let current = valueExpr == nil ? "center" : {
+            let v = iconGroupCurrentValue(valueExpr)
+            return v.isEmpty ? "center" : v
+        }()
+        let writeTarget = valueExpr.flatMap { writeBackTarget($0) }
+        // Row-major, matching Rust's ordering so the ports agree on which cell
+        // is which.
+        let rows = referencePointAnchorRows
+
+        VStack(spacing: 2) {
+            ForEach(0..<rows.count, id: \.self) { r in
+                HStack(spacing: 2) {
+                    ForEach(rows[r], id: \.self) { anchor in
+                        Button(action: {
+                            if let t = writeTarget {
+                                commitWidgetWrite(target: t, value: anchor)
+                            }
+                            handleChangeBehavior(stringValue: anchor)
+                        }) {
+                            SwiftUI.Rectangle()
+                                .fill(anchor == current
+                                      ? SwiftUI.Color.accentColor
+                                      : SwiftUI.Color(white: 0.35))
+                                .frame(width: 10, height: 10)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    /// The 3×3 reference-point anchors, ROW-MAJOR, matching Rust's ordering so
+    /// the two ports agree on which cell is which.
+    private var referencePointAnchorRows: [[String]] { referencePointAnchorRowsForTest }
 
     // MARK: - Placeholder
 

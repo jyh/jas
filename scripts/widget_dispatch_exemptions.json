@@ -21,8 +21,23 @@
   "exemptions": {
     "rust:placeholder": "THE SENTINEL, not a widget kind. `placeholder` is what the canonical set calls the fallback a port renders for an unknown or undispatched kind; dispatching it would be circular. Exempt in every port, permanently. (This is also the 37-vs-38 discrepancy between two independent counts of the same list.)",
     "swift:placeholder": "THE SENTINEL. As rust:placeholder -- permanent, not debt.",
-    "swift:dropdown": "REAL GAP, and larger than a dispatch arm: the Layers panel's element-type filter is UNBUILT in JasSwift. jas_dioxus backs it with native `AppState.layers_hidden_types` plus tree filtering (renderer.rs ~8900); JasSwift has neither the state nor the filtering. Adding only the arm would open a menu that changes nothing. Artist-visible today as the literal placeholder text 'Filter by element type' beside the Layers search box -- which appeared in a screenshot to the Captain on 2026-07-29 and was read by nobody. Found by the jas/windows seat counting dispatch arms.",
-    "swift:icon_button_group": "REAL GAP. The Artboard Options orientation control (portrait/landscape). The widget is absent AND so is the action its behaviour dispatches -- `toggle_artboard_orientation` does not exist in JasSwift, though it is declared in workspace/dialogs/artboard_options.yaml. Both halves are needed; the arm alone would present a working-looking toggle that no-ops.",
-    "swift:reference_point_widget": "REAL GAP. The Artboard Options 3x3 anchor grid ('exactly one anchor active; changes X / Y display, not storage'). As icon_button_group: the widget is absent AND `set_artboard_reference_point` does not exist in JasSwift. Needs the artboard reference-point model, not a switch case."
-  }
+    "swift:dropdown": "REAL GAP, and larger than a dispatch arm: the Layers panel's element-type filter is UNBUILT in JasSwift. jas_dioxus backs it with native `AppState.layers_hidden_types` plus tree filtering (renderer.rs ~8900); JasSwift has neither the state nor the filtering. Adding only the arm would open a menu that changes nothing. Artist-visible today as the literal placeholder text 'Filter by element type' beside the Layers search box -- which appeared in a screenshot to the Captain on 2026-07-29 and was read by nobody. Found by the jas/windows seat counting dispatch arms."
+  },
+  "_related_gaps": [
+    "NOT exemptions -- gaps this gate does not and should not police, recorded",
+    "here because this is where the person who cares will be standing.",
+    "",
+    "toggle_artboard_orientation: declared in workspace/actions.yaml ('Swap",
+    "dialog.width <-> dialog.height around the current reference-point anchor')",
+    "with a bare `log` effect marked '(native)'. UNIMPLEMENTED IN BOTH ACTIVE",
+    "PORTS -- so the icon_button_group widget now renders in both and the buttons",
+    "swap nothing in either. A SHARED spec-vs-implementation gap, not a per-port",
+    "defect, and therefore invisible to every differential gate we own. Found",
+    "2026-07-29 while tracing why the Swift widget was missing.",
+    "",
+    "set_artboard_reference_point: NO GAP. Pure YAML (a generic set_panel_state",
+    "effect), handled in both ports. Recorded because an earlier reading of this",
+    "ledger claimed the action was 'absent from Swift' -- that claim came from",
+    "grepping a name which is not supposed to appear in either port's source."
+  ]
 }
