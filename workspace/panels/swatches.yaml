@@ -104,10 +104,18 @@ menu:
   - label: "Select All Unused"
     action: select_all_unused_swatches
     description: >
-      Select every swatch in the panel whose color does not appear
-      anywhere in the current document as a fill or stroke color on
-      any object. Useful for identifying swatches that can be safely
+      Select every swatch IN THE SELECTED LIBRARY whose color does not
+      appear anywhere in the current document as a fill or stroke color
+      on any object. Useful for identifying swatches that can be safely
       deleted. The selection replaces any existing selection.
+      Scoped to the selected library, not to every library the panel
+      happens to have open — ruled by JYH at council 2026-07-30. This
+      sentence previously said "in the panel", which reads as every open
+      library and disagreed with the only implementation that exists
+      (jas_dioxus scans `selected_library` alone). The neighbouring verbs
+      are all library-scoped already — Delete Swatch, Add Used Colors and
+      Sort by Name each say "the selected library" — so the panel's own
+      vocabulary was consistent and this one sentence was the outlier.
   - label: "Add Used Colors"
     action: add_used_colors
     description: >
