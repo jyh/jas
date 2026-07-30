@@ -89,8 +89,26 @@ CRATE = REPO / "jas_dioxus"
 # "Native lib tests 1833", so the number WAS measured and reported while the pin
 # stayed put, because the code never asked for it. That is exactly the drift the
 # comment above claimed to prevent and the one-sided check did not.
-# Re-pinned to main's measured 1833.
-FLOOR = 1833
+# Re-pinned to main's measured 1833, then 1836 an hour later.
+#
+# AND THAT IS THE PROBLEM. Three bumps in one session -- 1830, 1832, 1833, 1836 --
+# is exactly the churn council O3.3 (DERIVEDFLOOR, 8031ebbc) exists to abolish.
+# Starbuck's argument there: "a floor computed from the tree cannot go slack, and
+# this repo's record on hand-typed floors is that TWO OF FOUR replacement numbers
+# were wrong on the first attempt." MIN_CHECK_SCRIPTS was bumped four times in one
+# day and wrong once. This constant is the same species and is heading the same way.
+#
+# THE EXACT PIN WAS THE RIGHT FIX TO A ONE-SIDED CHECK AND IS THE WRONG INSTRUMENT.
+# The property actually wanted is derivable and needs no number at all: *no test
+# that COULD run natively is gated behind `web`* -- i.e. every `#[cfg(feature =
+# "web")]` on a test item OUTSIDE the five web-gated modules is declared with a
+# reason, the `check_widget_kind_dispatch` shape. That cannot drift, because
+# nothing restates it.
+#
+# Queued rather than done here so it does not derail B1, and recorded in the
+# windows ledger so it cannot quietly expire -- which is the failure mode this
+# whole week has been about.
+FLOOR = 1836
 
 
 def parse_test_count(listing: str) -> int:
