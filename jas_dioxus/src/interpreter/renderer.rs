@@ -8763,7 +8763,15 @@ fn tree_preview_svg(elem: &GeoElement) -> String {
     let vb = format!("{} {} {} {}", x - pad, y - pad, w + 2.0 * pad, h + 2.0 * pad);
     let inner = crate::geometry::svg::element_svg(elem, "");
     format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{vb}" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;">{inner}</svg>"#
+        // DECLARES xmlns:inkscape, because `element_svg` emits
+        // `inkscape:label` for any element that HAS a name. Without it every
+        // named element's row thumbnail is XML with an undeclared namespace
+        // prefix -- which a strict parser rejects outright, and which this
+        // codebase already learned once for the `jas:` prefix (see the
+        // xmlns:jas assertion in CrossLanguageTests). It surfaced the day
+        // renaming became easy in both ports: the thumbnails only carry a
+        // label once elements have names.
+        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="{vb}" preserveAspectRatio="xMidYMid meet" style="display:block;width:100%;height:100%;">{inner}</svg>"#
     )
 }
 
@@ -11076,6 +11084,51 @@ mod tests {
         assert_eq!(clamp_to_declared(-50.0, None, None), -50.0);
         assert_eq!(clamp_to_declared(1e9, Some(1.0), None), 1e9);
         assert_eq!(clamp_to_declared(0.0, Some(1.0), None), 1.0);
+    }
+
+    /// A PREFIXED ATTRIBUTE OBLIGES THE ROOT SVG TO DECLARE ITS PREFIX.
+    ///
+    /// `element_svg` emits `inkscape:label` for any element that has a name.
+    /// The Layers row thumbnail wraps that output in a minimal `<svg>` which
+    /// declared only the default namespace, so every named element produced XML
+    /// with an undeclared prefix -- invalid, and rejected outright by a strict
+    /// parser rather than degraded.
+    ///
+    /// It stayed invisible because thumbnails only carry a label once elements
+    /// HAVE names, and naming every element only became easy in both ports on
+    /// 2026-07-30. JYH renamed three things and the console filled with
+    /// namespace errors.
+    ///
+    /// The codebase had already learned this exact lesson for the `jas:`
+    /// prefix -- `CrossLanguageTests` asserts that a `jas:`-prefixed attribute
+    /// obliges `xmlns:jas`, and records that an undeclared prefix "makes the
+    /// strict parser reject the whole file". The lesson was pinned for one
+    /// prefix and not for the class.
+    #[test]
+    fn a_named_elements_thumbnail_declares_every_prefix_it_uses() {
+        use crate::geometry::element::{CommonProps, Element, RectElem};
+        let named = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { name: Some("Hello".into()), ..CommonProps::default() },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let svg = tree_preview_svg(&named);
+        assert!(svg.contains("inkscape:label"),
+                "fixture must actually exercise the prefix, or it proves nothing");
+        assert!(svg.contains("xmlns:inkscape="),
+                "an inkscape:-prefixed attribute obliges the root <svg> to \
+                 declare xmlns:inkscape; emitted: {svg}");
+
+        // EVERY prefix, not just the one that bit us. If a serializer starts
+        // emitting `sodipodi:` or `jas:` into a thumbnail, this fails rather
+        // than shipping invalid XML for a second time.
+        for prefix in ["inkscape", "sodipodi", "jas"] {
+            if svg.contains(&format!("{prefix}:")) && !svg.contains(&format!("xmlns:{prefix}=")) {
+                panic!("thumbnail uses the `{prefix}:` prefix without declaring \
+                        xmlns:{prefix}; emitted: {svg}");
+            }
+        }
     }
 
     /// A SELF-REFERENTIAL PARAM MUST RESOLVE TO THE NEW VALUE.

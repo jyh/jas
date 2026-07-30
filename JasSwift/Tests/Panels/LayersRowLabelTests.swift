@@ -69,3 +69,42 @@ import Testing
         #expect(!isNamed)
     }
 }
+
+/// A PREFIXED ATTRIBUTE OBLIGES THE ROOT SVG TO DECLARE ITS PREFIX.
+///
+/// The element serializer emits `inkscape:label` for any element that has a
+/// name. The Layers row thumbnail wrapped that in a minimal `<svg>` declaring
+/// only the default namespace, so every named element produced XML with an
+/// undeclared prefix — invalid, and rejected whole by a strict parser rather
+/// than degraded.
+///
+/// Invisible until naming was easy. Thumbnails only carry a label once elements
+/// HAVE names, and any-element rename landed in this port on 2026-07-30; JYH
+/// renamed three things and the console filled with namespace errors.
+///
+/// This codebase had already learned the lesson for ONE prefix: CrossLanguageTests
+/// asserts that a `jas:`-prefixed attribute obliges `xmlns:jas`, recording that
+/// an undeclared prefix "makes the strict parser reject the whole file". Pinned
+/// for that prefix, never for the class. Twin:
+/// `a_named_elements_thumbnail_declares_every_prefix_it_uses` in
+/// jas_dioxus/src/interpreter/renderer.rs.
+@Suite struct LayersThumbnailNamespaceTests {
+
+    @Test func aNamedElementsThumbnailDeclaresEveryPrefixItUses() {
+        let named = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, name: "Hello"))
+        let svg = buildPreviewSvg(named)
+
+        #expect(svg.contains("inkscape:label"),
+                "the fixture must actually exercise the prefix, or it proves nothing")
+        #expect(svg.contains("xmlns:inkscape="),
+                "an inkscape:-prefixed attribute obliges the root <svg> to declare xmlns:inkscape; emitted: \(svg)")
+
+        // EVERY prefix, not only the one that bit us: if a serializer starts
+        // emitting sodipodi: or jas: into a thumbnail, this fails rather than
+        // shipping invalid XML a second time.
+        for prefix in ["inkscape", "sodipodi", "jas"] where svg.contains("\(prefix):") {
+            #expect(svg.contains("xmlns:\(prefix)="),
+                    "thumbnail uses the \(prefix): prefix without declaring xmlns:\(prefix); emitted: \(svg)")
+        }
+    }
+}

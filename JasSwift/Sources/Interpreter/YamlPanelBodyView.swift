@@ -3876,7 +3876,10 @@ private func cycleVisibility(_ vis: Visibility) -> Visibility {
 }
 
 /// Build a fitted-viewBox SVG fragment for a single element.
-private func buildPreviewSvg(_ elem: Element) -> String {
+/// Internal rather than `private` so `LayersThumbnailNamespaceTests` can
+/// assert its output. Being unreachable is why the undeclared-prefix defect
+/// shipped: nothing could look at what this function emitted.
+func buildPreviewSvg(_ elem: Element) -> String {
     let b = elem.bounds
     let w = b.width, h = b.height
     if !w.isFinite || !h.isFinite || w <= 0 || h <= 0 {
@@ -3885,7 +3888,12 @@ private func buildPreviewSvg(_ elem: Element) -> String {
     let pad = max(max(w, h) * 0.02, 0.5)
     let vb = "\(b.x - pad) \(b.y - pad) \(w + 2 * pad) \(h + 2 * pad)"
     let inner = elementSvg(elem, indent: "")
-    return #"<svg xmlns="http://www.w3.org/2000/svg" viewBox=""# + vb + #"" preserveAspectRatio="xMidYMid meet">"# + inner + "</svg>"
+    // DECLARES xmlns:inkscape: the element serializer emits `inkscape:label`
+    // for any NAMED element, and an undeclared prefix is invalid XML that a
+    // strict parser rejects whole. Same lesson this codebase already recorded
+    // for `jas:`; found by JYH when console noise appeared right after
+    // renaming became possible on every element.
+    return #"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox=""# + vb + #"" preserveAspectRatio="xMidYMid meet">"# + inner + "</svg>"
 }
 
 /// SwiftUI view that renders an element as a fitted SVG thumbnail.
@@ -3995,6 +4003,13 @@ struct TreeViewContent: View {
     @State private var panelSelection: Set<ElementPath> = []
     @State private var panelSelectionAnchor: ElementPath? = nil
     @State private var renamingPath: ElementPath? = nil
+    /// The rename field must TAKE the keyboard when it appears. jas_dioxus sets
+    /// `autofocus` on its rename input AND calls `.focus()` explicitly, with a
+    /// comment noting the browser blocks autofocus when something else already
+    /// holds focus. SwiftUI has the same problem and no default answer: without
+    /// this the field appears, looks editable, and swallows every keystroke
+    /// because focus is still on the tree.
+    @FocusState private var renameFieldFocused: Bool
     @State private var editingName: String = ""
     @State private var dragSource: ElementPath? = nil
     @State private var dragTarget: ElementPath? = nil
@@ -4434,6 +4449,8 @@ struct TreeViewContent: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 11))
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .focused($renameFieldFocused)
+                .onAppear { renameFieldFocused = true }
                 .onExitCommand { renamingPath = nil }
             } else {
                 SwiftUI.Text(name)
@@ -4442,6 +4459,14 @@ struct TreeViewContent: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // WITHOUT THIS the tap target is the glyphs alone: a Text
+                    // stretched by `.frame(maxWidth: .infinity)` does not accept
+                    // taps across the space it occupies, so double-clicking a
+                    // short name -- or anywhere right of it -- did nothing.
+                    // renderColorSwatch in this same file has carried
+                    // `.contentShape(Rectangle())` for its double-tap all along;
+                    // the tree row never got it.
+                    .contentShape(Rectangle())
                     .onTapGesture(count: 2) {
                         // Double-click renames ANY row. `elementDisplayName`
                         // has always SHOWN every element's name, so gating the
@@ -4662,6 +4687,8 @@ struct TreeViewContent: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 11))
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .focused($renameFieldFocused)
+                .onAppear { renameFieldFocused = true }
                 .onExitCommand {
                     renamingPath = nil
                 }
@@ -4672,6 +4699,14 @@ struct TreeViewContent: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    // WITHOUT THIS the tap target is the glyphs alone: a Text
+                    // stretched by `.frame(maxWidth: .infinity)` does not accept
+                    // taps across the space it occupies, so double-clicking a
+                    // short name -- or anywhere right of it -- did nothing.
+                    // renderColorSwatch in this same file has carried
+                    // `.contentShape(Rectangle())` for its double-tap all along;
+                    // the tree row never got it.
+                    .contentShape(Rectangle())
                     .onTapGesture(count: 2) {
                         // Double-click renames ANY row. `elementDisplayName`
                         // has always SHOWN every element's name, so gating the
