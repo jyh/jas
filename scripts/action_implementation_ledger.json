@@ -22,23 +22,13 @@
     "confident-and-wrong claim this mechanism exists to prevent."
   ],
   "known_divergences": {
-    "save_as": {
-      "reason": "File > Save As does NOTHING in jas_dioxus: menu_bar.rs routes it through the pass-through arm to dispatch_action, i.e. the log stub. JasSwift implements it fully (NSSavePanel -> SVG -> markSaved). Galling detail: clipboard.rs's save_file_via_picker is COMPLETE (File System Access API, with a download fallback for Firefox/Safari) and called from nowhere. Council O1.1, first stone.",
-      "asserts": [
-        {
-          "file": "jas_dioxus/src/workspace/menu_bar.rs",
-          "contains": "\"save_as\" | \"revert\" | \"quit\"",
-          "why": "The pass-through arm. Wiring save_as removes it from this list, this assert reds, and the row must go."
-        }
-      ]
-    },
     "revert": {
-      "reason": "Same pass-through arm as save_as; works in JasSwift (confirm alert -> re-parse -> one undo step). Council O1.2.",
+      "reason": "Menu > File > Revert is a no-op in jas_dioxus; JasSwift implements it (confirm alert -> re-read the file -> one undoable transaction -> markSaved). NOT merely unwired: Swift re-reads FROM DISK BY PATH, and a browser has no path to re-read. The equivalent needs a decision -- retain the saved SVG bytes on the tab and re-parse them (mirrors Swift's round-trip exactly, including its lossiness) or rewind the journal to `saved_journal_head` (no round-trip, but a different mechanism). Council O1.2, next step. NOTE ON THIS ROW'S HISTORY: its first assert was shared with save_as (both named the same pass-through arm), so wiring save_as expired a claim about a defect that is still live. A claim must be about ONE thing, or it expires for the wrong reason.",
       "asserts": [
         {
           "file": "jas_dioxus/src/workspace/menu_bar.rs",
-          "contains": "\"save_as\" | \"revert\" | \"quit\"",
-          "why": "As above -- one arm, two actions, one expiry."
+          "contains": "\"revert\" | \"quit\" | \"promote_to_concept\"",
+          "why": "revert is still in the pass-through arm. Implementing it removes it from this list and reds the row."
         }
       ]
     },

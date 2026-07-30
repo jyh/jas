@@ -565,6 +565,165 @@ pub(crate) fn selection_to_svg(st: &AppState) -> Option<String> {
 /// folder + filename; the file is written directly without going
 /// through Downloads. Falls back to `download_file`-style anchor click
 /// on browsers without `showSaveFilePicker` (Firefox, Safari).
+/// The filename a Save should offer, given the model's current one.
+///
+/// Mirrors the `"save"` menu arm's rule so Save and Save As cannot disagree
+/// about what a document is called.
+pub(crate) fn svg_filename_for(current: &str) -> String {
+    let base = if current.trim().is_empty() { "drawing" } else { current.trim() };
+    if base.to_ascii_lowercase().ends_with(".svg") {
+        base.to_string()
+    } else {
+        format!("{base}.svg")
+    }
+}
+
+/// Apply the OUTCOME of a Save As to the model. `chosen` is `None` when the
+/// artist cancelled — the picker dialog, or the fallback name prompt.
+///
+/// Returns whether anything changed.
+///
+/// A CANCELLED SAVE MUST CHANGE NOTHING, and that is the whole reason this is a
+/// separate function with its own tests. `save_file_via_picker` was
+/// fire-and-forget: it could not tell success from cancellation, so the naive
+/// wiring — call the picker, then `mark_saved()` — would mark a document saved
+/// that was never written. That silently disarms the unsaved-changes guard, and
+/// the artist loses work at the next close. JasSwift has always had this right,
+/// because `NSSavePanel.runModal()` returns and it checks the result.
+///
+/// On success both fields move, matching JasSwift's `saveModelAs`: the document
+/// is clean AND it is now called what the artist called it.
+pub(crate) fn apply_save_as_outcome(st: &mut AppState, chosen: Option<&str>) -> bool {
+    let Some(name) = chosen else { return false };
+    let name = svg_filename_for(name);
+    let Some(tab) = st.tab_mut() else { return false };
+    tab.model.filename = name;
+    tab.model.mark_saved();
+    true
+}
+
+/// File > Save As.
+///
+/// Wired 2026-07-30 (council O1.1). Until then this port's Save As did
+/// NOTHING: `menu_bar.rs` routed it through the pass-through arm into
+/// `dispatch_action`, whose declared effect is a bare `- log:`. JasSwift
+/// implemented it fully the whole time, so it was a one-port, artist-visible
+/// divergence — and `save_file_via_picker` below had been sitting complete and
+/// called from nowhere.
+///
+/// TWO PATHS, ONE SEMANTICS. Chromium has `showSaveFilePicker`, so the artist
+/// gets a real OS dialog and the file is written where they choose. Firefox and
+/// Safari do not, so they are asked for a NAME and the file lands in Downloads.
+/// Both paths mean the same thing: name it and it saves, cancel and nothing
+/// happens. Nothing escapes the browser sandbox in either case.
+///
+/// THE CANCEL IS THE WHOLE DIFFICULTY. The picker is asynchronous, so this
+/// awaits it rather than firing and forgetting, and applies the outcome through
+/// [`apply_save_as_outcome`] — which is separately tested, because marking a
+/// cancelled save as saved would disarm the unsaved-changes guard and lose the
+/// artist's work at the next close.
+#[cfg(feature = "web")]
+pub(crate) fn save_document_as(app: Rc<RefCell<AppState>>, mut revision: Signal<u64>) {
+    let (svg, suggested) = {
+        let st = app.borrow();
+        let Some(tab) = st.tab() else { return };
+        (
+            document_to_svg(tab.model.document()),
+            svg_filename_for(&tab.model.filename),
+        )
+    };
+
+    wasm_bindgen_futures::spawn_local(async move {
+        let chosen = pick_save_target(&suggested, &svg).await;
+        if chosen.is_none() {
+            return; // cancelled: the document stays exactly as it was
+        }
+        let mut st = app.borrow_mut();
+        if apply_save_as_outcome(&mut st, chosen.as_deref()) {
+            drop(st);
+            revision += 1;
+        }
+    });
+}
+
+/// Ask the browser for a save target, write the content, and answer with the
+/// chosen name — or `None` if the artist cancelled.
+///
+/// Returns the NAME rather than a path: the File System Access API never
+/// discloses the directory, and the download fallback has no path at all. The
+/// name is what the artist typed and what the title bar should show, which is
+/// the same thing JasSwift stores (it keeps `url.path`, so the two ports agree
+/// on the leaf name and differ only in what they can know).
+#[cfg(feature = "web")]
+async fn pick_save_target(suggested: &str, content: &str) -> Option<String> {
+    use wasm_bindgen_futures::JsFuture;
+
+    let window = web_sys::window()?;
+    let has_picker = js_sys::Reflect::get(&window, &JsValue::from_str("showSaveFilePicker"))
+        .map(|v| v.is_function())
+        .unwrap_or(false);
+
+    if !has_picker {
+        // Firefox / Safari: no OS dialog exists, so ask for the name instead
+        // and download under it. Degraded in DESTINATION, not in meaning.
+        let typed = window
+            .prompt_with_message_and_default("Save as", suggested)
+            .ok()
+            .flatten()?;
+        let name = typed.trim().to_string();
+        if name.is_empty() {
+            return None;
+        }
+        let name = svg_filename_for(&name);
+        download_file(&name, content);
+        return Some(name);
+    }
+
+    let opts = js_sys::Object::new();
+    js_sys::Reflect::set(&opts, &"suggestedName".into(), &suggested.into()).ok()?;
+    let picker = js_sys::Reflect::get(&window, &JsValue::from_str("showSaveFilePicker")).ok()?;
+    let picker: js_sys::Function = picker.dyn_into().ok()?;
+    let promise: js_sys::Promise = picker.call1(&window, &opts).ok()?.dyn_into().ok()?;
+
+    // A rejected promise is the artist pressing Cancel (an AbortError). It is
+    // not an error condition and must not be reported as one.
+    let handle = JsFuture::from(promise).await.ok()?;
+
+    let create = js_sys::Reflect::get(&handle, &"createWritable".into()).ok()?;
+    let create: js_sys::Function = create.dyn_into().ok()?;
+    let writable = JsFuture::from(
+        create.call0(&handle).ok()?.dyn_into::<js_sys::Promise>().ok()?,
+    )
+    .await
+    .ok()?;
+
+    let write = js_sys::Reflect::get(&writable, &"write".into()).ok()?;
+    let write: js_sys::Function = write.dyn_into().ok()?;
+    JsFuture::from(
+        write
+            .call1(&writable, &JsValue::from_str(content))
+            .ok()?
+            .dyn_into::<js_sys::Promise>()
+            .ok()?,
+    )
+    .await
+    .ok()?;
+
+    let close = js_sys::Reflect::get(&writable, &"close".into()).ok()?;
+    let close: js_sys::Function = close.dyn_into().ok()?;
+    JsFuture::from(close.call0(&writable).ok()?.dyn_into::<js_sys::Promise>().ok()?)
+        .await
+        .ok()?;
+
+    // The handle knows the leaf name the artist chose; fall back to the
+    // suggestion if the property is missing on some implementation.
+    let name = js_sys::Reflect::get(&handle, &"name".into())
+        .ok()
+        .and_then(|v| v.as_string())
+        .unwrap_or_else(|| suggested.to_string());
+    Some(name)
+}
+
 pub(crate) fn save_file_via_picker(filename: &str, content: &str, mime_type: &str) {
     let fname_json = serde_json::to_string(filename).unwrap_or_else(|_| "\"download\"".into());
     let data_json = serde_json::to_string(content).unwrap_or_else(|_| "\"\"".into());
@@ -769,4 +928,99 @@ pub(crate) fn find_panel(layout: &super::workspace::WorkspaceLayout, kind: super
         }
     }
     None
+}
+
+#[cfg(test)]
+mod save_as_tests {
+    use super::*;
+
+    /// SAVE AS IS THE ONE FILE OPERATION THAT CAN LOSE WORK BY SUCCEEDING TOO
+    /// EAGERLY.
+    ///
+    /// `save_file_via_picker` shipped complete and called from nowhere, so File
+    /// > Save As did nothing at all in this port while JasSwift implemented it
+    /// fully (council O1.1, 2026-07-30). The tempting wiring is one line — call
+    /// the picker, then `mark_saved()`. It is wrong: the picker is asynchronous
+    /// and the artist may cancel it, and a document marked saved that was never
+    /// written will close without warning and take the work with it.
+    ///
+    /// So the outcome is applied from a function that is told whether a name
+    /// was actually chosen, and these tests pin both answers. The browser
+    /// halves — the File System Access picker, and the `prompt` fallback for
+    /// Firefox/Safari — cannot be reached from a unit test and are verified by
+    /// hand; that is exactly why the decision logic is separated out to where a
+    /// test CAN reach it.
+    /// A one-tab AppState holding a fresh model, built the way
+    /// `copy_payload_tests` builds one: `AppState::new()` alone carries no tab.
+    fn state_with_tab(filename: &str) -> AppState {
+        let mut st = AppState::new();
+        st.tabs.clear();
+        let mut model = Model::new(Document::default(), None);
+        model.filename = filename.to_string();
+        st.tabs.push(TabState::with_model(model));
+        st.active_tab = 0;
+        st
+    }
+
+    /// Commit a real edit, so `is_modified` is true. Setting a default document
+    /// over a default document moves no transaction and modifies nothing.
+    fn dirty(st: &mut AppState) {
+        let doc = Document {
+            layers: vec![GeoElement::Layer(LayerElem {
+                children: vec![],
+                common: CommonProps::default(),
+                isolated_blending: false,
+                knockout_group: false,
+            })],
+            ..Document::default()
+        };
+        st.tab_mut().unwrap().model.with_txn(|m| m.set_document(doc.clone()));
+    }
+
+    #[test]
+    fn a_cancelled_save_as_changes_nothing() {
+        let mut st = state_with_tab("hull.svg");
+        dirty(&mut st);
+        let before = st.tab().unwrap().model.filename.clone();
+        assert!(st.tab().unwrap().model.is_modified(),
+                "fixture must start modified or it proves nothing");
+
+        let changed = apply_save_as_outcome(&mut st, None);
+
+        assert!(!changed, "a cancelled Save As must report no change");
+        assert_eq!(st.tab().unwrap().model.filename, before, "the name must not move");
+        assert!(st.tab().unwrap().model.is_modified(),
+                "a cancelled Save As must leave the document MODIFIED -- marking it \
+                 clean disarms the close-without-saving guard and loses the work");
+    }
+
+    /// The other half, so the rule cannot become "never mark saved".
+    #[test]
+    fn a_completed_save_as_renames_and_cleans() {
+        let mut st = state_with_tab("hull.svg");
+        dirty(&mut st);
+        assert!(st.tab().unwrap().model.is_modified(), "fixture must start modified");
+
+        let changed = apply_save_as_outcome(&mut st, Some("hull study"));
+
+        assert!(changed);
+        assert_eq!(st.tab().unwrap().model.filename, "hull study.svg",
+                   "the document takes the artist's name, with the extension \
+                    supplied -- JasSwift's saveModelAs sets model.filename too");
+        assert!(!st.tab().unwrap().model.is_modified(),
+                "a completed Save As leaves the document clean");
+    }
+
+    /// Save and Save As must not disagree about what a document is called.
+    #[test]
+    fn the_extension_rule_matches_the_save_arm() {
+        assert_eq!(svg_filename_for("drawing"), "drawing.svg");
+        assert_eq!(svg_filename_for("drawing.svg"), "drawing.svg");
+        // Case-insensitively, so an artist typing .SVG does not get .SVG.svg.
+        assert_eq!(svg_filename_for("Drawing.SVG"), "Drawing.SVG");
+        // An empty or whitespace name is not a name.
+        assert_eq!(svg_filename_for(""), "drawing.svg");
+        assert_eq!(svg_filename_for("   "), "drawing.svg");
+        assert_eq!(svg_filename_for("  hull  "), "hull.svg");
+    }
 }

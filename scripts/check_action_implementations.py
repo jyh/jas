@@ -414,9 +414,16 @@ def self_test() -> int:
         "undo": "native_both",
         # verified: neither port contains the string at all
         "toggle_artboard_orientation": "dead_both",
-        # verified: Rust has it ONLY in the pass-through arm (menu_bar.rs:415);
-        # Swift `case "save_as": saveAs()` -> NSSavePanel, writes SVG
-        "save_as": "DIVERGENT:swift",
+        # save_as was DIVERGENT:swift when this gate was written and is
+        # native_both since council O1.1 wired jas_dioxus's picker. The anchor
+        # MOVED WITH THE FIX -- an anchor is a claim about the tree like any
+        # other, and this one expired the moment the defect did. Keeping it
+        # here, now asserting the repaired state, is what stops the repair
+        # silently regressing.
+        "save_as": "native_both",
+        # Still divergent: Swift re-reads the file from disk by path, which a
+        # browser cannot do, so this one needs a design decision and not a
+        # wiring change. Council O1.2.
         "revert": "DIVERGENT:swift",
         # verified: swatches_panel.rs:77 real body; SwatchesPanel.swift routes
         # everything to runYamlActionByName

@@ -7,7 +7,7 @@ use dioxus::prelude::*;
 use super::app_state::{Act, AppHandle, AppState, TabState};
 use super::clipboard::{
     clipboard_read_and_paste, clipboard_write, download_bytes, download_file,
-    open_file_dialog, selection_to_svg,
+    open_file_dialog, save_document_as, selection_to_svg,
 };
 // SaveAsDialog import removed — workspace save-as now uses YAML dialog system
 use super::theme::*;
@@ -412,7 +412,21 @@ pub(crate) fn MenuBarView(
                 // the generic action pipeline (all are defined in actions.yaml).
                 // These take no params and do not open dialogs today, so the
                 // deferred-effect return is intentionally ignored.
-                "save_as" | "revert" | "quit" | "promote_to_concept"
+                "save_as" => {
+                    // Real handler as of council O1.1. This used to sit in the
+                    // pass-through list below, which routes to
+                    // `dispatch_action` -- and `save_as`'s declared effect is a
+                    // bare `- log:`, so File > Save As did nothing at all in
+                    // this port while JasSwift implemented it fully.
+                    save_document_as(app_for_menu.clone(), revision_for_menu);
+                }
+                // `revert` STAYS here, and stays a no-op, deliberately. Swift's
+                // revert re-reads the file from disk by path; a browser has no
+                // path to re-read, so the equivalent needs a design decision
+                // (retain the saved SVG bytes, or rewind the journal to
+                // `saved_journal_head`) rather than a wiring change. Council
+                // O1.2; its ledger row says so.
+                "revert" | "quit" | "promote_to_concept"
                 | "zoom_in" | "zoom_out" | "zoom_to_actual_size"
                 | "fit_active_artboard" | "fit_all_artboards" | "fit_in_window" => {
                     let action = cmd.to_string();
