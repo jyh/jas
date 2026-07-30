@@ -9598,11 +9598,60 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                         let mut new_doc = tab.model.document().clone();
                                         if layer_idx < new_doc.layers.len() {
                                             new_doc.selected_layer = layer_idx;
-                                            tab.model.set_document(new_doc);
+                                            // UNBRACKETED, and that is the whole
+                                            // point: syncing selected_layer is a
+                                            // selection-adjacent write, not an
+                                            // undoable edit -- clicking a Layers
+                                            // row must not cost an undo step.
+                                            //
+                                            // This called `set_document` from
+                                            // 2026-05-01, when that was legal.
+                                            // The OP_LOG consolidation added the
+                                            // in_txn debug_assert on 2026-06-19
+                                            // and did not sweep the existing
+                                            // callers, so from that day a click
+                                            // on any Layers row PANICKED a debug
+                                            // build. Every neighbouring write in
+                                            // this panel (eye, lock, twirl,
+                                            // visibility, selection) is properly
+                                            // bracketed with begin_txn/commit_txn
+                                            // -- this was the only stray one.
+                                            //
+                                            // It is a debug_assert, so release
+                                            // falls through to the self-bracketing
+                                            // path and CI never saw it. Only a
+                                            // human clicking a `dx serve` build
+                                            // could find it, and JYH did.
+                                            tab.model.set_document_unbracketed(
+                                                new_doc,
+                                                crate::document::model::NonUndoableIntent::ActiveLayer,
+                                            );
                                         }
                                     }
                                 }
                             }
+                            // RELEASE THE APPSTATE BORROW BEFORE THE SIGNAL
+                            // WRITE. `row_rev += 1` re-renders, and the render
+                            // reads AppState -- so bumping it while `st` is
+                            // still alive is a re-entrant borrow. JYH hit it by
+                            // clicking a Layers row: it surfaced twice with
+                            // different faces, `RefCell already borrowed` at
+                            // the canvas act closure (app.rs:576) and inside
+                            // dioxus-core's own listener dispatch
+                            // (events.rs:665, where it borrows the callback to
+                            // invoke it). One cause, two symptoms.
+                            //
+                            // The breadcrumb handler a few lines up has always
+                            // been correct by accident of style -- it writes
+                            // `a.borrow_mut().field = x;`, whose temporary drops
+                            // at the semicolon, and only then bumps its signal.
+                            //
+                            // This handler is the one that reproduces, and the
+                            // likely reason it is this one is the DOCUMENT write
+                            // above (`tab.model.set_document`): the other sites
+                            // holding a borrow across their signal write touch
+                            // panel state only.
+                            drop(st);
                             row_rev += 1;
                         });
                     };

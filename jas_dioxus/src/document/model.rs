@@ -93,6 +93,26 @@ pub enum NonUndoableIntent {
     /// Per-tick write inside a drag gesture; undo is captured once at the
     /// gesture boundary.
     LiveDrag,
+    /// The active layer moved -- the document differs ONLY in
+    /// `selected_layer`.
+    ///
+    /// Clicking a row in the Layers panel makes that layer active so the next
+    /// drawn shape lands in it. That is a CURSOR move, not artwork, and it must
+    /// not cost an undo step.
+    ///
+    /// A separate variant rather than widening `Selection`, whose validator
+    /// deliberately pins `selected_layer` as a field that must NOT differ.
+    /// Weakening a stated invariant to admit a new case is how invariants stop
+    /// meaning anything; adding a case says what is actually happening.
+    ///
+    /// FOUND THE HARD WAY (2026-07-30): the Layers row click wrote this through
+    /// plain `set_document` from 2026-05-01, when that was legal. The OP_LOG
+    /// consolidation added the `in_txn` assert on 2026-06-19 without sweeping
+    /// existing callers, so every Layers row click panicked a debug build --
+    /// and being a `debug_assert`, release fell through to the self-bracketing
+    /// path, which silently spent an undo step on a click instead. Neither
+    /// behaviour was intended and no test could see either.
+    ActiveLayer,
     /// Test-fixture seeding. Unreachable from production: debug-asserted
     /// against `cfg!(test)`.
     TestOnly,
@@ -197,6 +217,19 @@ struct Checkpoint {
 /// site that does should surface here for review. Only ever CALLED from a
 /// `debug_assert!` (debug/CI builds); compiled unconditionally because
 /// `debug_assert!` still type-checks its condition in release.
+/// As [`differs_only_in_selection`], for the active-layer cursor: everything
+/// must match EXCEPT `selected_layer`. Selection itself must also be equal --
+/// a write that moves both is two changes and wants two intents, or a bracket.
+fn differs_only_in_active_layer(old: &Document, new: &Document) -> bool {
+    old.selection == new.selection
+        && old.layers == new.layers
+        && old.symbols == new.symbols
+        && old.artboards == new.artboards
+        && old.artboard_options == new.artboard_options
+        && old.document_setup == new.document_setup
+        && old.print_preferences == new.print_preferences
+}
+
 fn differs_only_in_selection(old: &Document, new: &Document) -> bool {
     old.layers == new.layers
         && old.symbols == new.symbols
@@ -563,6 +596,14 @@ impl Model {
                     "NonUndoableIntent::Selection write differs from the old \
                      document outside selection state: reclassify the intent \
                      (or bracket the edit) instead of widening Selection.",
+                );
+            }
+            NonUndoableIntent::ActiveLayer => {
+                debug_assert!(
+                    differs_only_in_active_layer(&self.document, &doc),
+                    "NonUndoableIntent::ActiveLayer write differs from the old \
+                     document outside `selected_layer`: reclassify the intent \
+                     (or bracket the edit) instead of widening ActiveLayer.",
                 );
             }
             NonUndoableIntent::PreviewReapply | NonUndoableIntent::LiveDrag => {}
