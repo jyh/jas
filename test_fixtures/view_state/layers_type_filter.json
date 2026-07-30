@@ -35,145 +35,586 @@
     "It is pinned here so that whatever the council rules moves deliberately and",
     "in one place. If the ruling changes it, THIS FILE is the edit."
   ],
-  "min_vectors": 12,
+  "min_vectors": 14,
   "vectors": [
     {
       "name": "named_leaf_is_filtered",
       "doc": "THE DEFECT. Two rectangles, one named 'roof', beside a circle. Hiding `rectangle` must remove BOTH. jas_dioxus kept the named one because its label was 'roof' rather than '<Rectangle>'.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 0], "type": "rectangle"},
-        {"path": [0, 1], "type": "rectangle", "name": "roof"},
-        {"path": [0, 2], "type": "circle"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "rectangle"
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "type": "rectangle",
+          "name": "roof"
+        },
+        {
+          "path": [
+            0,
+            2
+          ],
+          "type": "circle"
+        }
       ],
-      "hidden": ["rectangle"],
-      "expected_keep": [[0], [0, 2]]
+      "hidden": [
+        "rectangle"
+      ],
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          2
+        ]
+      ]
     },
     {
       "name": "a_name_is_not_a_type",
       "doc": "Every row named, none unnamed. Under the old label parse EVERY hint came out empty and the filter was a total no-op -- the worst case, and the one an artist who names their work would hit every time.",
       "rows": [
-        {"path": [0], "type": "layer", "name": "Sketch"},
-        {"path": [0, 0], "type": "rectangle", "name": "roof"},
-        {"path": [0, 1], "type": "circle", "name": "sun"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer",
+          "name": "Sketch"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "rectangle",
+          "name": "roof"
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "type": "circle",
+          "name": "sun"
+        }
       ],
-      "hidden": ["rectangle"],
-      "expected_keep": [[0], [0, 1]]
+      "hidden": [
+        "rectangle"
+      ],
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          1
+        ]
+      ]
     },
     {
       "name": "empty_name_is_not_a_name",
       "doc": "An empty string is not a name -- it falls back to the bracket label in `elementDisplayName` / `tree_elem_display_name`. It must not perturb the TYPE either way.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 0], "type": "rectangle", "name": ""}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "rectangle",
+          "name": ""
+        }
       ],
-      "hidden": ["rectangle"],
-      "expected_keep": [[0]]
+      "hidden": [
+        "rectangle"
+      ],
+      "expected_keep": [
+        [
+          0
+        ]
+      ]
     },
     {
       "name": "nothing_hidden_keeps_everything",
       "doc": "The identity case. Both ports guard on a non-empty hidden set before calling, so production never passes this -- pinned anyway, because a function whose identity case is undefined is a function whose guard is load-bearing and unstated.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 0], "type": "rectangle"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "rectangle"
+        }
       ],
       "hidden": [],
-      "expected_keep": [[0], [0, 0]]
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
     },
     {
       "name": "hidden_type_nothing_has",
       "doc": "Hiding `text` in a document with no Text element removes nothing. Guards against a filter that drops rows it cannot classify -- which is exactly what the label parse did to named rows, in reverse.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 0], "type": "rectangle"},
-        {"path": [0, 1], "type": "circle"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "rectangle"
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "type": "circle"
+        }
       ],
-      "hidden": ["text"],
-      "expected_keep": [[0], [0, 0], [0, 1]]
+      "hidden": [
+        "text"
+      ],
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          1
+        ]
+      ]
     },
     {
       "name": "every_leaf_hidden_layer_survives_on_its_own_type",
       "doc": "Both leaves hidden. The layer survives because ITS OWN type is not hidden -- NOT because it is an ancestor, since nothing under it survives. The two reasons a container can be kept are distinguished here on purpose; a filter that conflated them would pass the ancestor vectors below by accident.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 0], "type": "rectangle"},
-        {"path": [0, 1], "type": "circle"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "rectangle"
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "type": "circle"
+        }
       ],
-      "hidden": ["rectangle", "circle"],
-      "expected_keep": [[0]]
+      "hidden": [
+        "rectangle",
+        "circle"
+      ],
+      "expected_keep": [
+        [
+          0
+        ]
+      ]
     },
     {
       "name": "container_kept_as_ancestor_of_a_survivor",
       "council": "R1",
       "doc": "Hiding `group` does NOT remove the group, because its rectangle survives and a tree cannot draw a child without its parent row. So unchecking Group is very nearly a no-op today, while layers.yaml says it 'hides all elements of that type'. Identical in both ports.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 0], "type": "group"},
-        {"path": [0, 0, 0], "type": "rectangle"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "group"
+        },
+        {
+          "path": [
+            0,
+            0,
+            0
+          ],
+          "type": "rectangle"
+        }
       ],
-      "hidden": ["group"],
-      "expected_keep": [[0], [0, 0], [0, 0, 0]]
+      "hidden": [
+        "group"
+      ],
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ]
+      ]
     },
     {
       "name": "container_removed_when_its_whole_subtree_is_hidden",
       "council": "R1",
       "doc": "The other half of the same rule, and what makes it a REACHABILITY rule rather than an exemption: hide the container AND its only descendant type, and the container does disappear.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 0], "type": "group"},
-        {"path": [0, 0, 0], "type": "rectangle"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "group"
+        },
+        {
+          "path": [
+            0,
+            0,
+            0
+          ],
+          "type": "rectangle"
+        }
       ],
-      "hidden": ["group", "rectangle"],
-      "expected_keep": [[0]]
+      "hidden": [
+        "group",
+        "rectangle"
+      ],
+      "expected_keep": [
+        [
+          0
+        ]
+      ]
     },
     {
       "name": "ancestor_chain_two_levels_deep",
       "council": "R1",
       "doc": "The keep-set walks EVERY proper prefix, not just the immediate parent. A one-level implementation would drop the middle group and orphan the survivor.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 0], "type": "group"},
-        {"path": [0, 0, 0], "type": "group"},
-        {"path": [0, 0, 0, 0], "type": "circle"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "group"
+        },
+        {
+          "path": [
+            0,
+            0,
+            0
+          ],
+          "type": "group"
+        },
+        {
+          "path": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "type": "circle"
+        }
       ],
-      "hidden": ["group", "rectangle"],
-      "expected_keep": [[0], [0, 0], [0, 0, 0], [0, 0, 0, 0]]
+      "hidden": [
+        "group",
+        "rectangle"
+      ],
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
     },
     {
       "name": "sibling_containers_resolve_independently",
       "council": "R1",
       "doc": "Two groups under one layer: one holds a survivor, one does not. The first is kept as an ancestor, the second removed. A keep-set computed per-container rather than per-surviving-row would keep both.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 0], "type": "group"},
-        {"path": [0, 0, 0], "type": "rectangle"},
-        {"path": [0, 1], "type": "group"},
-        {"path": [0, 1, 0], "type": "circle"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "group"
+        },
+        {
+          "path": [
+            0,
+            0,
+            0
+          ],
+          "type": "rectangle"
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "type": "group"
+        },
+        {
+          "path": [
+            0,
+            1,
+            0
+          ],
+          "type": "circle"
+        }
       ],
-      "hidden": ["group", "rectangle"],
-      "expected_keep": [[0], [0, 1], [0, 1, 0]]
+      "hidden": [
+        "group",
+        "rectangle"
+      ],
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1,
+          0
+        ]
+      ]
     },
     {
       "name": "sibling_index_is_compared_elementwise",
       "doc": "Paths are prefixes ELEMENT-WISE, never as joined strings: [0,1] is not an ancestor of [0,10]. A string-prefix implementation would keep [0,1] as an ancestor of the surviving [0,10] and the wrong row would stay on screen. Same hazard `check_selection_invariant.py` guards for selections.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 1], "type": "rectangle"},
-        {"path": [0, 10], "type": "circle"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "type": "rectangle"
+        },
+        {
+          "path": [
+            0,
+            10
+          ],
+          "type": "circle"
+        }
       ],
-      "hidden": ["rectangle"],
-      "expected_keep": [[0], [0, 10]]
+      "hidden": [
+        "rectangle"
+      ],
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          10
+        ]
+      ]
     },
     {
       "name": "the_filter_is_uniform_over_tokens_the_menu_restricts",
       "doc": "A live element answers `live`. The FUNCTION honours that token like any other -- this vector proves it, by feeding it in and expecting the row gone. What no live element can be hidden BY is the menu, whose eleven `lp_filter_button` items do not include it, so `live` cannot reach the hidden set in production. Keeping the restriction in the MENU rather than as a special case in the filter is what makes this a declared shared gap (UNOFFERABLE in scripts/check_layers_type_filter.py) instead of a divergence: the day the menu gains the option, both ports already work. If a port ever special-cased live elements here, this vector moves.",
       "rows": [
-        {"path": [0], "type": "layer"},
-        {"path": [0, 0], "type": "live"},
-        {"path": [0, 1], "type": "rectangle"}
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "live"
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "type": "rectangle"
+        }
       ],
-      "hidden": ["live"],
-      "expected_keep": [[0], [0, 1]]
+      "hidden": [
+        "live"
+      ],
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "name": "a_circle_named_rectangle_is_still_a_circle",
+      "doc": "THE RULING IN ITS STRONGEST FORM (JYH, 2026-07-30): the auto-generated label `<Path>` / `<Circle>` is NOT an indicator of type -- it is just a name, and rename accepts any string, brackets included. So an artist can name a circle '<Rectangle>', and it is STILL A CIRCLE: hidden when Circle is hidden, untouched when Rectangle is. Search, by contrast, treats the same label as literal text ('ath' matches '<Path>' and 'math' alike). Two axes -- name and type -- and neither may be derived from the other.",
+      "rows": [
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "circle",
+          "name": "<Rectangle>"
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "type": "rectangle"
+        }
+      ],
+      "hidden": [
+        "rectangle"
+      ],
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          0
+        ]
+      ]
+    },
+    {
+      "name": "and_hiding_circle_takes_it_despite_its_name",
+      "doc": "The other half of the same ruling: hide Circle and the '<Rectangle>'-named circle goes, its real rectangle sibling stays. Together with the vector above, these two pin that the filter is a pure function of the type channel -- the name channel cannot save an element from its type nor condemn it to another's.",
+      "rows": [
+        {
+          "path": [
+            0
+          ],
+          "type": "layer"
+        },
+        {
+          "path": [
+            0,
+            0
+          ],
+          "type": "circle",
+          "name": "<Rectangle>"
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "type": "rectangle"
+        }
+      ],
+      "hidden": [
+        "circle"
+      ],
+      "expected_keep": [
+        [
+          0
+        ],
+        [
+          0,
+          1
+        ]
+      ]
     }
   ]
 }
