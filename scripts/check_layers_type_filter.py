@@ -79,7 +79,14 @@ import sys
 import yaml
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-RUST = REPO / "jas_dioxus" / "src" / "interpreter" / "renderer.rs"
+# The TOKENS live in the ungated algorithms layer (moved there 2026-07-29 so the
+# shared corpus reader can drive them in a native build -- see
+# check_native_core_tests.py, which insisted and was right). The FILTER BLOCK
+# that consumes them is still in the web-gated renderer, so this gate reads two
+# Rust files. The split is deliberate: the label-reading regression this gate
+# forbids can only appear at the CONSUMING site.
+RUST_TOKENS = REPO / "jas_dioxus" / "src" / "algorithms" / "layers_filter.rs"
+RUST_FILTER = REPO / "jas_dioxus" / "src" / "interpreter" / "renderer.rs"
 SWIFT = REPO / "JasSwift" / "Sources" / "Interpreter" / "YamlPanelBodyView.swift"
 LAYERS_YAML = REPO / "workspace" / "panels" / "layers.yaml"
 
@@ -187,9 +194,15 @@ def label_reads(block: str) -> list[str]:
     return sorted({ident for ident in LABEL_IDENTS if ident in block})
 
 
-def scan(rust_src: str, swift_src: str, yaml_doc: object) -> dict:
-    """All four claims, as data, so the self-test can drive them directly."""
-    rust = type_tokens(rust_src, "fn tree_type_value")
+def scan(rust_src: str, swift_src: str, yaml_doc: object,
+         rust_filter_src: str | None = None) -> dict:
+    """All four claims, as data, so the self-test can drive them directly.
+
+    `rust_filter_src` defaults to `rust_src`, so a self-test case that supplies
+    one Rust string still exercises both halves.
+    """
+    rust_filter_src = rust_src if rust_filter_src is None else rust_filter_src
+    rust = type_tokens(rust_src, "pub fn type_value")
     swift = type_tokens(swift_src, "func layersTypeValue")
     menu = menu_values(yaml_doc)
     return {
@@ -202,7 +215,7 @@ def scan(rust_src: str, swift_src: str, yaml_doc: object) -> dict:
         "undeclared_unofferable": sorted((rust | swift) - set(menu) - set(UNOFFERABLE)),
         "stale_unofferable": sorted(set(UNOFFERABLE) & set(menu)),
         "rust_labels": label_reads(
-            _brace_block(rust_src, "if !hidden_types.is_empty()")),
+            _brace_block(rust_filter_src, "if !hidden_types.is_empty()")),
         "swift_labels": label_reads(
             _brace_block(swift_src, "if !hiddenTypes.isEmpty")),
     }
@@ -253,20 +266,20 @@ def failures(r: dict) -> list[str]:
 # --------------------------------------------------------------------------
 
 RUST_OK = '''
-fn tree_type_value(elem: &GeoElement) -> &'static str {
+pub fn type_value(elem: &Element) -> &'static str {
     match elem {
-        GeoElement::Line(_) => "line",
-        GeoElement::Rect(_) => "rectangle",
-        GeoElement::Circle(_) => "circle",
-        GeoElement::Ellipse(_) => "ellipse",
-        GeoElement::Polyline(_) => "polyline",
-        GeoElement::Polygon(_) => "polygon",
-        GeoElement::Path(_) => "path",
-        GeoElement::Text(_) => "text",
-        GeoElement::TextPath(_) => "text_path",
-        GeoElement::Group(_) => "group",
-        GeoElement::Layer(_) => "layer",
-        GeoElement::Live(_) => "live",
+        Element::Line(_) => "line",
+        Element::Rect(_) => "rectangle",
+        Element::Circle(_) => "circle",
+        Element::Ellipse(_) => "ellipse",
+        Element::Polyline(_) => "polyline",
+        Element::Polygon(_) => "polygon",
+        Element::Path(_) => "path",
+        Element::Text(_) => "text",
+        Element::TextPath(_) => "text_path",
+        Element::Group(_) => "group",
+        Element::Layer(_) => "layer",
+        Element::Live(_) => "live",
     }
 }
 fn caller() {
@@ -362,8 +375,8 @@ def self_test() -> int:
     #     rather than letting it become silently unfilterable the way `live`
     #     did before anyone wrote it down.
     check("f/undeclared gap",
-          RUST_OK.replace('GeoElement::Live(_) => "live",',
-                          'GeoElement::Live(_) => "live",\n        GeoElement::Mesh(_) => "mesh",'),
+          RUST_OK.replace('Element::Live(_) => "live",',
+                          'Element::Live(_) => "live",\n        Element::Mesh(_) => "mesh",'),
           SWIFT_OK.replace('case .live: return "live"',
                            'case .live: return "live"\n    case .mesh: return "mesh"'),
           MENU_OK, True)
@@ -381,7 +394,7 @@ def self_test() -> int:
 
     # (h) REFUSE rather than pass when the shape is gone. A rename that this
     #     gate cannot follow must not read as a clean tree.
-    check("h/renamed away", RUST_OK.replace("fn tree_type_value", "fn tree_kind_token"),
+    check("h/renamed away", RUST_OK.replace("pub fn type_value", "pub fn kind_token"),
           SWIFT_OK, MENU_OK, True)
     check("i/no filter block", RUST_OK.replace("if !hidden_types.is_empty()",
                                                "if !hidden.is_empty()"),
@@ -393,7 +406,7 @@ def self_test() -> int:
     # (k) The floors, which are the only guard on a parse that silently
     #     shrinks. Drop ONE arm from each port and the vocabularies still
     #     agree -- nothing above would notice.
-    check("k/floor", RUST_OK.replace('        GeoElement::Line(_) => "line",\n', ""),
+    check("k/floor", RUST_OK.replace('        Element::Line(_) => "line",\n', ""),
           SWIFT_OK.replace('    case .line: return "line"\n', ""),
           {"body": [{"id": "lp_filter_button", "items": [
               i for i in MENU_OK["body"][0]["items"] if i["value"] != "line"]}]},
@@ -417,9 +430,10 @@ def main() -> int:
 
     try:
         result = scan(
-            RUST.read_text(encoding="utf-8"),
+            RUST_TOKENS.read_text(encoding="utf-8"),
             SWIFT.read_text(encoding="utf-8"),
             yaml.safe_load(LAYERS_YAML.read_text(encoding="utf-8")),
+            RUST_FILTER.read_text(encoding="utf-8"),
         )
     except (OSError, ParseFailure, yaml.YAMLError) as e:
         print(f"ERROR: cannot read the type-filter vocabulary: {e}",

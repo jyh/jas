@@ -30,6 +30,7 @@ pub mod text_layout_paragraph;
 pub mod offset_path;
 pub mod hyphenator;
 pub mod knuth_plass;
+pub mod layers_filter;
 pub mod magic_wand;
 pub mod eyedropper;
 pub mod transform_apply;

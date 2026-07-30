@@ -4392,3 +4392,55 @@ private func wireUnhex(_ s: String) -> Data {
         #expect(q.toolOrigin == "blob_brush", "tool origin did not survive the SVG round trip")
     }
 }
+
+/// THE LAYERS TYPE FILTER, driven from the shared corpus.
+///
+/// `test_fixtures/view_state/layers_type_filter.json` is the single definition
+/// of this algorithm; the twin reader is
+/// `layers_type_filter_matches_the_shared_corpus` in
+/// jas_dioxus/src/cross_language_test.rs.
+///
+/// It exists because this filter had NO test on either side for months while the
+/// two ports disagreed. jas_dioxus derived each row's type by parsing its
+/// DISPLAY LABEL, so an element the artist had NAMED escaped the filter
+/// entirely; this port always matched on the element. Neither behaviour was
+/// watched, because in jas_dioxus the filter was inline in a render function and
+/// here it was a private method on a SwiftUI view — reachable only by rendering
+/// it.
+///
+/// Per-port value tests now pin each half (`LayersTypeFilterTests` here). This
+/// one exists for a different reason: two hand-written suites agree on the day
+/// they are written and drift afterwards. The corpus is what makes both ports
+/// answer to ONE source.
+///
+/// The rows carry TYPES, not labels — a vector spelled as display names would
+/// re-enact the defect inside the corpus meant to prevent it.
+@Test func layersTypeFilterMatchesTheSharedCorpus() throws {
+    let raw = readFixture("view_state/layers_type_filter.json")
+    let root = try JSONSerialization.jsonObject(
+        with: Data(raw.utf8)) as! [String: Any]
+    let vectors = root["vectors"] as! [[String: Any]]
+    let minVectors = root["min_vectors"] as! Int
+
+    // Anti-vacuity, EXACT rather than slack: a reader that walked zero vectors
+    // asserts nothing and is indistinguishable from a clean run. The floor is
+    // declared BY THE DATA, so it cannot drift out of step with the fixture it
+    // describes — the shape check_preservation_corpus.py established.
+    #expect(vectors.count == minVectors,
+            "walked \(vectors.count) vector(s) against a declared floor of \(minVectors)")
+
+    for v in vectors {
+        let name = v["name"] as? String ?? "<unnamed>"
+        let rows: [(path: ElementPath, typeValue: String)] =
+            (v["rows"] as! [[String: Any]]).map {
+                (path: $0["path"] as! [Int], typeValue: $0["type"] as! String)
+            }
+        let hidden = Set((v["hidden"] as! [String]))
+        let want = Set((v["expected_keep"] as! [[Int]]))
+
+        let got = layersTypeFilterKeep(rows, hidden: hidden)
+
+        #expect(got == want,
+                "vector `\(name)`: kept \(got.sorted { $0.lexicographicallyPrecedes($1) }), expected \(want.sorted { $0.lexicographicallyPrecedes($1) })")
+    }
+}

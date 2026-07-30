@@ -6450,4 +6450,78 @@ mod tests {
         let json = shortcut_structure_json();
         assert_workspace_fixture("shortcut_structure", &json);
     }
+
+    /// THE LAYERS TYPE FILTER, driven from the shared corpus.
+    ///
+    /// `test_fixtures/view_state/layers_type_filter.json` is the single
+    /// definition of this algorithm; the twin reader is
+    /// `layersTypeFilterMatchesTheSharedCorpus` in
+    /// JasSwift/Tests/CrossLanguageTests.swift.
+    ///
+    /// It exists because this filter had NO test on either side for months while
+    /// the two ports disagreed: jas_dioxus derived each row's type by parsing its
+    /// display label, so a NAMED element escaped the filter entirely. Per-port
+    /// unit tests now pin each half, but two hand-written suites agree today and
+    /// drift later — the corpus is what makes them answer to one source.
+    ///
+    /// The rows carry TYPES, not labels. A vector spelled as display names would
+    /// re-enact the defect inside the corpus meant to prevent it.
+    #[test]
+    fn layers_type_filter_matches_the_shared_corpus() {
+        use crate::algorithms::layers_filter::type_filter_keep;
+        use std::collections::HashSet;
+
+        let raw = read_fixture("view_state/layers_type_filter.json");
+        let doc: serde_json::Value = serde_json::from_str(&raw)
+            .expect("layers_type_filter.json is not valid JSON");
+
+        let vectors = doc["vectors"].as_array().expect("no `vectors` array");
+        let min = doc["min_vectors"].as_u64().expect("no `min_vectors`") as usize;
+        // Anti-vacuity, EXACT rather than slack: a reader that walked zero
+        // vectors asserts nothing and is indistinguishable from a clean run.
+        // The floor is declared BY THE DATA, which is the shape
+        // check_preservation_corpus.py established -- a floor the fixture states
+        // about itself cannot drift out of step with it.
+        assert_eq!(
+            vectors.len(), min,
+            "walked {} vector(s) against a declared floor of {}",
+            vectors.len(), min
+        );
+
+        for v in vectors {
+            let name = v["name"].as_str().unwrap_or("<unnamed>");
+            let rows: Vec<(Vec<usize>, String)> = v["rows"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `rows`"))
+                .iter()
+                .map(|r| (
+                    r["path"].as_array().expect("row has no `path`").iter()
+                        .map(|n| n.as_u64().expect("path entry not a number") as usize)
+                        .collect(),
+                    r["type"].as_str().expect("row has no `type`").to_string(),
+                ))
+                .collect();
+            let hidden: HashSet<String> = v["hidden"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `hidden`"))
+                .iter()
+                .map(|t| t.as_str().expect("hidden entry not a string").to_string())
+                .collect();
+            let mut want: Vec<Vec<usize>> = v["expected_keep"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `expected_keep`"))
+                .iter()
+                .map(|p| p.as_array().expect("expected path not an array").iter()
+                    .map(|n| n.as_u64().expect("path entry not a number") as usize)
+                    .collect())
+                .collect();
+            want.sort();
+
+            let keep = type_filter_keep(
+                rows.iter().map(|(p, t)| (p.as_slice(), t.as_str())),
+                &hidden,
+            );
+            let mut got: Vec<Vec<usize>> = keep.into_iter().collect();
+            got.sort();
+
+            assert_eq!(got, want, "vector `{name}`");
+        }
+    }
 }

@@ -8502,7 +8502,6 @@ struct TreeRow {
     type_value: &'static str,
     is_selected: bool,
     is_renaming: bool,
-    is_layer: bool,
     is_collapsed: bool,
     is_panel_selected: bool,
     layer_color: String,
@@ -8560,78 +8559,13 @@ fn tree_type_label(elem: &GeoElement) -> &'static str {
     }
 }
 
-/// The token the Layers type filter matches an element against, in the
-/// spelling `workspace/panels/layers.yaml`'s `lp_filter_button` uses for its
-/// `items` values.
-///
-/// DERIVED FROM THE ELEMENT, NEVER FROM ITS DISPLAY NAME. Until 2026-07-29
-/// the filter recovered this by parsing the row label: `<Rectangle>` was
-/// matched apart, and anything else fell through to `""`. That worked by
-/// construction while only Layers could carry a name — and the commit that
-/// let EVERY element carry one ("Tree row reads common.name; drop the
-/// is_layer rename gate") silently made every NAMED element unfilterable,
-/// because its label is then "roof" rather than `<Rectangle>` and `""`
-/// matches nothing hidden. The gate that could have caught it was deferred
-/// in `transcripts/LAYERS_TESTS.md` (LYR-091) for the exact reason that
-/// naming a non-layer was impossible at the time; nobody revisited it when
-/// it became possible.
-///
-/// The general shape, worth more than the instance: a display name is a
-/// PRESENTATION of an element and its type is a FACT about it, so reading
-/// the fact back out of the presentation is lossy the moment presentation
-/// gains a second form. `layers.yaml` is precise about this where it means
-/// names — search matches "whose name (or auto-generated type name like
-/// `<Path>`)" — and the filter clause says only *type*, and *all*.
-///
-/// JasSwift's `typeValue` has always matched on the element; this brings
-/// this port to it rather than the other way round.
-fn tree_type_value(elem: &GeoElement) -> &'static str {
-    match elem {
-        GeoElement::Line(_) => "line",
-        GeoElement::Rect(_) => "rectangle",
-        GeoElement::Circle(_) => "circle",
-        GeoElement::Ellipse(_) => "ellipse",
-        GeoElement::Polyline(_) => "polyline",
-        GeoElement::Polygon(_) => "polygon",
-        GeoElement::Path(_) => "path",
-        GeoElement::Text(_) => "text",
-        GeoElement::TextPath(_) => "text_path",
-        GeoElement::Group(_) => "group",
-        GeoElement::Layer(_) => "layer",
-        // No `items` entry offers "live", so a Live element cannot be hidden
-        // in either port today. Spelled the same as JasSwift's `.live` arm so
-        // that stays a SHARED gap rather than becoming a divergence the
-        // moment the menu gains the option.
-        GeoElement::Live(_) => "live",
-    }
-}
-
-/// Paths surviving the Layers type filter, given each row as
-/// `(path, type_value)`.
-///
-/// An ancestor of a surviving row is kept even when its own type is hidden:
-/// a tree cannot draw a child without its parent row. That makes hiding a
-/// CONTAINER type inoperative whenever any descendant survives, which is a
-/// deliberate consequence and not obviously what `layers.yaml`'s "hides all
-/// elements of that type" intends. JasSwift does the identical thing, so it
-/// is a shared question for council rather than a divergence.
-fn tree_type_filter_keep<'a>(
-    rows: impl IntoIterator<Item = (&'a [usize], &'a str)>,
-    hidden: &TreeHashSet<String>,
-) -> TreeHashSet<Vec<usize>> {
-    let visible: TreeHashSet<Vec<usize>> = rows
-        .into_iter()
-        .filter(|(_, ty)| !hidden.contains(*ty))
-        .map(|(path, _)| path.to_vec())
-        .collect();
-    let mut keep = visible.clone();
-    for p in &visible {
-        for i in 1..p.len() {
-            keep.insert(p[..i].to_vec());
-        }
-    }
-    keep
-}
+// The Layers type filter lives in `algorithms::layers_filter` -- a PURE
+// function of paths and type tokens, moved out of this web-gated module so the
+// shared corpus reader can drive it in a native build (and so port six's native
+// frontend can use it without linking the web renderer).
+// `check_native_core_tests.py` is what insisted, and it was right.
+use crate::algorithms::layers_filter::{type_filter_keep as tree_type_filter_keep,
+                                      type_value as tree_type_value};
 
 /// Build a fitted-viewBox SVG thumbnail for a single element.
 /// Returns an empty string for zero-extent or degenerate bounds.
@@ -8741,7 +8675,6 @@ fn tree_flatten_rc_children(
             is_named,
             is_selected,
             is_renaming,
-            is_layer,
             is_collapsed,
             is_panel_selected,
             type_value: tree_type_value(child),
@@ -8779,7 +8712,6 @@ fn tree_flatten_layers(
         let is_selected = crate::document::controller::path_is_selected_or_under(
             selected_paths, &path);
         let is_renaming = renaming_path.as_ref() == Some(&path);
-        let is_layer = elem.is_layer();
         let is_collapsed = collapsed_paths.contains(&path);
         let is_panel_selected = panel_selection.contains(&path);
         let layer_color = LAYER_COLORS[i % LAYER_COLORS.len()].to_string();
@@ -8815,7 +8747,6 @@ fn tree_flatten_layers(
             is_named,
             is_selected,
             is_renaming,
-            is_layer,
             is_collapsed,
             is_panel_selected,
             type_value: tree_type_value(elem),
