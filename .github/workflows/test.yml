@@ -262,6 +262,16 @@ jobs:
       - name: Rust tests
         run: cd jas_dioxus && cargo test
 
+      # The native half of the same claim. Windows is the platform that would
+      # ship a frontend-less core, so this lane is where the assertion earns its
+      # keep: on 2026-07-29 `cargo test --no-default-features --lib` exited 101
+      # here while `cargo check` exited 0, and the divergent text-width arm it
+      # was hiding had been live for as long as the gate had not existed.
+      - name: Native core tests (no web feature)
+        run: |
+          python scripts/check_native_core_tests.py --self-test
+          python scripts/check_native_core_tests.py
+
       # SINGLE-LANE ORACLE, deliberately without --require-comparisons: there is
       # no Swift toolchain on Windows, so no lane-vs-lane comparison is possible
       # here. The cross-language job below documents this as the legitimate mode
@@ -283,6 +293,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cd jas_dioxus && cargo test
+      # The core must also build and pass WITHOUT the `web` feature. D1
+      # (2026-07-29) keeps this core for port six, so it has to be verifiable on
+      # a platform with no frontend. Runs in this lane and in the Windows lane;
+      # check_lane_coverage.py enforces the pair.
+      - name: Native core tests (no web feature)
+        run: |
+          python3 scripts/check_native_core_tests.py --self-test
+          python3 scripts/check_native_core_tests.py
 
   # The shared reference interpreter lives in workspace_interpreter/ — the
   # exact modules (effects, state_store, scope, doc_primitives, loader, expr)

@@ -1154,6 +1154,7 @@ mod tests {
         "blob_transform_merge.json",
     ];
 
+    #[cfg(feature = "web")]
     /// Run a gesture fixture and return the resulting Model. Resolves
     /// the fixture's `setup_svg` file reference, then delegates to the
     /// SHARED corpus replay path (`recorder::replay::run_gesture_case`)
@@ -1165,10 +1166,12 @@ mod tests {
         crate::recorder::replay::run_gesture_case(tc, &setup_svg)
     }
 
+    #[cfg(feature = "web")]
     fn run_gesture_test(tc: &serde_json::Value) -> String {
         document_to_test_json(run_gesture_model(tc).document())
     }
 
+    #[cfg(feature = "web")]
     /// Mirror of `assert_operation_test`: replay the gesture and compare
     /// the canonical document JSON against the pinned golden, dumping
     /// EXPECTED/ACTUAL on mismatch.
@@ -1188,6 +1191,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn gesture_corpus() {
         for fixture in GESTURE_FIXTURES {
@@ -1200,6 +1204,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// Bootstrap helper: generate expected JSON for gesture tests.
     /// Run with: cargo test generate_gesture_expected -- --ignored --nocapture
     #[test]
@@ -1247,6 +1252,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// PATH B — Alt pressed MID-drag (the user's exact gesture): drag
     /// the original, then hold Option, then keep dragging the copy,
     /// then release. Must collapse to ONE undo step.
@@ -1263,6 +1269,7 @@ mod tests {
         })).document())
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn gesture_alt_mid_drag_copy_is_one_undo_step() {
         // two_rects.svg: rect[0] spans doc 0..72; press (36,36) hits its center.
@@ -1301,6 +1308,7 @@ mod tests {
         assert_eq!(model.journal_head(), 0, "cursor back at origin");
     }
 
+    #[cfg(feature = "web")]
     /// PATH A — Alt held AT press (drag-to-duplicate from the start).
     #[test]
     fn gesture_alt_at_press_copy_is_one_undo_step() {
@@ -1468,6 +1476,7 @@ mod tests {
         "lock_inheritance_actions.json",
     ];
 
+    #[cfg(feature = "web")]
     /// Run an action fixture and return the resulting `AppState`.
     /// Resolves the fixture's `setup_svg` file reference, then delegates
     /// to the SHARED corpus replay path
@@ -1481,6 +1490,7 @@ mod tests {
         crate::recorder::replay::run_action_case(tc, &setup_svg)
     }
 
+    #[cfg(feature = "web")]
     /// Serialize the document the action sequence produced (mirrors
     /// `run_gesture_test`).
     fn run_action_test(tc: &serde_json::Value) -> String {
@@ -1488,6 +1498,7 @@ mod tests {
         document_to_test_json(st.tabs[st.active_tab].model.document())
     }
 
+    #[cfg(feature = "web")]
     /// OPTIONAL second assertion: `expected_panel_state`.
     ///
     /// The document is not the only thing an action moves. A `fill_stroke`
@@ -1541,6 +1552,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// OPTIONAL third assertion: `expected_view`.
     ///
     /// View state — `zoom_level`, `view_offset_x`, `view_offset_y` — is
@@ -1591,6 +1603,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// Mirror of `assert_gesture_test`: replay the action sequence and
     /// compare the canonical document JSON against the pinned golden,
     /// dumping EXPECTED/ACTUAL on mismatch. Then apply the case's optional
@@ -1614,6 +1627,7 @@ mod tests {
         assert_action_view(tc, &st);
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn action_corpus() {
         for fixture in ACTION_FIXTURES {
@@ -1626,6 +1640,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// Bootstrap helper: generate expected JSON for action tests.
     /// Run with: cargo test generate_action_expected -- --ignored --nocapture
     #[test]
@@ -1671,6 +1686,7 @@ mod tests {
     /// Key-resolution fixture files under `test_fixtures/keys/`.
     const KEY_FIXTURES: &[&str] = &["key_resolution.json"];
 
+    #[cfg(feature = "web")]
     /// Resolve every chord in a fixture group against the once-loaded
     /// bundle `shortcuts` table and return the canonical result array.
     /// Delegates to the SHARED corpus replay path
@@ -1681,6 +1697,7 @@ mod tests {
         crate::recorder::replay::run_key_group_json(group)
     }
 
+    #[cfg(feature = "web")]
     /// Replay a key fixture group and compare the canonical result array
     /// against the pinned golden, dumping EXPECTED/ACTUAL on mismatch.
     fn assert_key_test(group: &serde_json::Value) {
@@ -1698,6 +1715,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn key_corpus() {
         for fixture in KEY_FIXTURES {
@@ -1710,6 +1728,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// Bootstrap helper: generate expected JSON for key tests.
     /// Run with: cargo test generate_key_expected -- --ignored --nocapture
     #[test]
@@ -2526,6 +2545,7 @@ mod tests {
         vectors
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn preservation_invariants() {
         let json_str = read_fixture("preservation/preservation_invariants.json");
@@ -5522,6 +5542,7 @@ mod tests {
         s
     }
 
+    #[cfg(feature = "web")]
     /// The StrokePanelState a fixture panel map describes (its defaults
     /// block plus the vector's overrides).
     fn stroke_panel_from_attrs(attrs: &serde_json::Value)
@@ -5564,6 +5585,7 @@ mod tests {
         serde_json::Value::Object(out)
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn stroke_apply_panel_edit_corpus() {
         use crate::geometry::element::{Color, Stroke};
@@ -5656,6 +5678,7 @@ mod tests {
     // unchanged. That is the whole point of the law, so the corpus states it
     // directly rather than re-listing whole attribute sets.
 
+    #[cfg(feature = "web")]
     /// A fixture attribute map as `CharacterAttrs`. Every key is present in
     /// the merged map (the corpus's `element_defaults` names all sixteen),
     /// so no port's element-constructor defaults leak into the corpus.
@@ -5683,6 +5706,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     /// A fixture panel map as `CharacterPanelState`. Unlike the Stroke
     /// corpus there is no panel-vs-global scope question: every Character
     /// control binds `panel.<field>` only.
@@ -5712,6 +5736,7 @@ mod tests {
         cp
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn character_apply_panel_edit_corpus() {
         use crate::workspace::app_state::{character_with_group, CharacterEditGroup};
@@ -5775,6 +5800,7 @@ mod tests {
     // the Auto value gets materialised instead (see
     // `character_panel_post_write` / the nullable-clear path).
 
+    #[cfg(feature = "web")]
     /// `CharacterPanelState::default()` as a field-name -> value map, so the
     /// struct can be compared against the bundle key by key.
     ///
@@ -5825,6 +5851,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "web")]
     #[test]
     fn character_panel_defaults_match_the_workspace() {
         let bundle = std::fs::read_to_string("../workspace/workspace.json")

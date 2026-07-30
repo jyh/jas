@@ -1221,6 +1221,33 @@ impl TextElem {
     }
 }
 
+/// Build a new Text element with empty content at (x, y) using the house
+/// defaults. Used when the user clicks the type tool on empty canvas.
+///
+/// Lives here rather than in `tools::text_edit` because it is a pure
+/// constructor over `TextElem` — defined in this module — with no UI
+/// dependency, while `tools` is gated behind `feature = "web"`. That gating by
+/// association is what stopped `geometry::svg`'s own round-trip tests from
+/// building natively; see `scripts/check_native_core_tests.py`.
+/// `tools::text_edit` re-exports it, so existing call sites are unchanged.
+pub fn empty_text_elem(x: f64, y: f64, width: f64, height: f64) -> TextElem {
+    TextElem::from_string(
+        x,
+        y,
+        "",
+        "sans-serif",
+        16.0,
+        "normal",
+        "normal",
+        "none",
+        width,
+        height,
+        Some(Fill::new(Color::BLACK)),
+        None,
+        CommonProps::default(),
+    )
+}
+
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TextPathElem {
     pub d: Vec<PathCommand>,
@@ -1557,18 +1584,27 @@ impl Element {
                     } else {
                         content_str.split('\n').collect()
                     };
-                    #[cfg(feature = "web")]
+                    // CHARWIDTH (2026-07-29): ONE arm, both builds. This used to
+                    // be two — the `web` arm called the shared measurer, and the
+                    // non-`web` arm reimplemented the width law wrongly TWICE
+                    // over: it used APPROX_CHAR_WIDTH_FACTOR (0.6) where the
+                    // shared measurer's host fallback is 0.55, so every native
+                    // text bound came out ~9% too wide; and it counted `l.len()`,
+                    // i.e. UTF-8 BYTES, where the measurer counts chars, so any
+                    // non-ASCII content inflated the box further.
+                    //
+                    // `point_text_bounds_width_matches_real_measurer_not_stub`
+                    // exists to forbid exactly the 0.6 stub and had never been
+                    // able to run where the stub lived — `tools` is web-gated, so
+                    // the whole native test target failed to build until today.
+                    // The divergence survived because the only platform that
+                    // could see it could not compile the test that watches it.
                     let max_width = {
-                        let font = crate::tools::text_measure::font_string(
+                        let font = crate::text_measure::font_string(
                             &e.font_style, &e.font_weight, e.font_size, &e.font_family);
-                        let measure = crate::tools::text_measure::make_measurer(&font, e.font_size);
+                        let measure = crate::text_measure::make_measurer(&font, e.font_size);
                         lines.iter().map(|l| measure(l)).fold(0.0_f64, f64::max)
                     };
-                    #[cfg(not(feature = "web"))]
-                    let max_width = lines
-                        .iter()
-                        .map(|l| l.len() as f64 * e.font_size * APPROX_CHAR_WIDTH_FACTOR)
-                        .fold(0.0_f64, f64::max);
                     let height = lines.len() as f64 * e.font_size;
                     (e.x, e.y, max_width, height)
                 }

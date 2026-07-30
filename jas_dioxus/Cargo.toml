@@ -19,6 +19,11 @@ path = "src/bin/svg_roundtrip.rs"
 [[bin]]
 name = "workspace_roundtrip"
 path = "src/bin/workspace_roundtrip.rs"
+# It calls `jas_dioxus::workspace::*`, and `workspace` is `feature = "web"`-gated
+# at the crate root. Without this, `cargo build --no-default-features` failed
+# with ten E0433s from one cause. `svg_roundtrip` and `algorithm_roundtrip`
+# deliberately carry no such line: both build natively and should keep doing so.
+required-features = ["web"]
 
 [[bin]]
 name = "algorithm_roundtrip"

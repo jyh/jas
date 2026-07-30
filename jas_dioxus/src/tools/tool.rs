@@ -11,14 +11,14 @@ use web_sys::CanvasRenderingContext2d;
 
 use crate::document::model::Model;
 
-/// Shared tool constants.
-pub const HIT_RADIUS: f64 = 8.0;
-pub const HANDLE_DRAW_SIZE: f64 = 10.0;
-pub const DRAG_THRESHOLD: f64 = 4.0;
-pub const PASTE_OFFSET: f64 = 24.0;
-pub const POLYGON_SIDES: usize = 5;
-pub const ERASER_SIZE: f64 = 2.0;
-pub const SMOOTH_SIZE: f64 = 100.0;
+/// Shared tool constants. Defined in `crate::tool_consts` — which is NOT gated
+/// behind `feature = "web"` — and re-exported here so every existing
+/// `crate::tools::tool::PASTE_OFFSET` path keeps resolving. Their value tests
+/// moved with them, so they run in a native build.
+pub use crate::tool_consts::{
+    DRAG_THRESHOLD, ERASER_SIZE, HANDLE_DRAW_SIZE, HIT_RADIUS, PASTE_OFFSET, POLYGON_SIDES,
+    SMOOTH_SIZE,
+};
 
 /// The active tool type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -506,40 +506,8 @@ mod tests {
         assert_eq!(ToolKind::Polygon.shortcut(), None);
     }
 
-    #[test]
-    fn hit_radius_value() {
-        assert_eq!(HIT_RADIUS, 8.0);
-    }
-
-    #[test]
-    fn handle_draw_size_value() {
-        assert_eq!(HANDLE_DRAW_SIZE, 10.0);
-    }
-
-    #[test]
-    fn drag_threshold_value() {
-        assert_eq!(DRAG_THRESHOLD, 4.0);
-    }
-
-    #[test]
-    fn paste_offset_value() {
-        assert_eq!(PASTE_OFFSET, 24.0);
-    }
-
-    #[test]
-    fn polygon_sides_value() {
-        assert_eq!(POLYGON_SIDES, 5);
-    }
-
-    #[test]
-    fn eraser_size_value() {
-        assert_eq!(ERASER_SIZE, 2.0);
-    }
-
-    #[test]
-    fn smooth_size_value() {
-        assert_eq!(SMOOTH_SIZE, 100.0);
-    }
+    // The seven constant-value tests moved to `crate::tool_consts` with the
+    // constants themselves, so they run without the `web` feature.
 
     // Toolbar layout tests (verifying constants from app.rs)
 
