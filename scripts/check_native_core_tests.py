@@ -108,7 +108,7 @@ CRATE = REPO / "jas_dioxus"
 # Queued rather than done here so it does not derail B1, and recorded in the
 # windows ledger so it cannot quietly expire -- which is the failure mode this
 # whole week has been about.
-FLOOR = 1836
+FLOOR = 1839
 
 
 def parse_test_count(listing: str) -> int:
