@@ -3150,4 +3150,119 @@ mod tests {
             "subtract should not be associative; got equal regions"
         );
     }
+
+    // ----------------- Sweep-queue tie order (cross-port) -----------------
+    //
+    // `event_less` is a STRICT WEAK ordering, not a total one: it ties when
+    // two events share a point, a direction, a collinear opposite endpoint
+    // AND a polygon id. `run_boolean_sweep` orders the queue with a STABLE
+    // `sort_by`, so a tie keeps ascending event index (the queue starts as
+    // 0..events.len()). JasSwift's `sort` is documented as not guaranteed
+    // stable, so Boolean.swift spells the same rule out; these vectors are
+    // the twin of `booleanSweepQueueTieOrder` in
+    // JasSwift/Tests/Algorithms/BooleanTests.swift and pin the byte-exact
+    // rings both ports must produce.
+    //
+    // No other vector here or in the shared corpus reaches the tie, and it
+    // is not cosmetic: pop the tied pair the other way and the region comes
+    // out WRONG (area 1.5 instead of 2.0 for the difference below), not
+    // merely rotated.
+
+    /// Subject carries TWO rings touching along x = 3, y in [2,3]:
+    ///   R1 = [2,3] x [1,3]   R2 = [3,4] x [2,3]
+    /// Both own a vertex at (3,3), and the vertical edge arriving there
+    /// from below is collinear in each — R1's from (3,1), R2's from (3,2).
+    /// So the two RIGHT events at (3,3) match on point, on direction, on
+    /// orientation (signed area 0) and on polygon id: a full tie.
+    fn tie_subject() -> PolygonSet {
+        vec![
+            vec![(2.0, 1.0), (3.0, 1.0), (3.0, 3.0), (2.0, 3.0)],
+            vec![(3.0, 2.0), (4.0, 2.0), (4.0, 3.0), (3.0, 3.0)],
+        ]
+    }
+
+    fn tie_clipping() -> PolygonSet {
+        vec![vec![(1.0, 2.0), (3.0, 2.0), (3.0, 5.0), (1.0, 5.0)]]
+    }
+
+    #[test]
+    fn boolean_sweep_queue_tie_is_actually_forced() {
+        // Guard the vector itself: if a future `event_less` gains a further
+        // tie-break this stops being a tie test and must be rebuilt rather
+        // than silently passing for the wrong reason.
+        let mut sweep = Sweep::new();
+        sweep.add_polygon_set(&tie_subject(), PolygonId::Subject);
+        sweep.add_polygon_set(&tie_clipping(), PolygonId::Clipping);
+        let mut ties: Vec<(usize, usize)> = Vec::new();
+        for i in 0..sweep.events.len() {
+            for j in (i + 1)..sweep.events.len() {
+                if !event_less(&sweep.events, i, j) && !event_less(&sweep.events, j, i) {
+                    ties.push((i, j));
+                }
+            }
+        }
+        assert_eq!(
+            ties.len(),
+            1,
+            "expected exactly one event_less tie, got {ties:?}"
+        );
+        for &e in &[ties[0].0, ties[0].1] {
+            assert_eq!(sweep.events[e].point, (3.0, 3.0));
+            assert!(!sweep.events[e].is_left);
+            assert_eq!(sweep.events[e].polygon as u8, PolygonId::Subject as u8);
+        }
+    }
+
+    #[test]
+    fn boolean_sweep_queue_tie_order() {
+        // DIFFERENCE. Subject region is the 1x2 plus the 1x1 = area 3; the
+        // clip covers x in [1,3], y in [2,5]; so subject minus clip is
+        // [2,3]x[1,2] (area 1) plus [3,4]x[2,3] (area 1) = area 2.
+        //
+        // run_boolean_sweep, not boolean_subtract: the normalizer would
+        // fuse the two touching subject rings into one L before the sweep
+        // ever saw them, and the tie with it.
+        let out = run_boolean_sweep(&tie_subject(), &tie_clipping(), Operation::Difference);
+        assert!(
+            (polygon_set_area(&out) - 2.0).abs() < EPS,
+            "expected area 2, got {} (rings {out:?})",
+            polygon_set_area(&out)
+        );
+        assert_eq!(out.len(), 2);
+        let mut got: Vec<Ring> = out.iter().map(rotated).collect();
+        got.sort_by(|x, y| {
+            x[0].0
+                .partial_cmp(&y[0].0)
+                .unwrap()
+                .then(x[0].1.partial_cmp(&y[0].1).unwrap())
+        });
+        // Both rings are squares. Pop the tie the other way and the second
+        // becomes the TRIANGLE (2,1) (3,1) (3,2) — a wrong region.
+        assert_eq!(got[0], vec![(2.0, 1.0), (3.0, 1.0), (3.0, 2.0), (2.0, 2.0)]);
+        assert_eq!(got[1], vec![(3.0, 2.0), (4.0, 2.0), (4.0, 3.0), (3.0, 3.0)]);
+    }
+
+    #[test]
+    fn boolean_sweep_queue_tie_order_union() {
+        // UNION of the same pair: the L-shaped subject plus the clip
+        // rectangle. Area 3 + 6 - 1 = 8, one ring.
+        let out = run_boolean_sweep(&tie_subject(), &tie_clipping(), Operation::Union);
+        assert!((polygon_set_area(&out) - 8.0).abs() < EPS);
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            rotated(&out[0]),
+            vec![
+                (1.0, 2.0),
+                (2.0, 2.0),
+                (2.0, 1.0),
+                (3.0, 1.0),
+                (3.0, 2.0),
+                (4.0, 2.0),
+                (4.0, 3.0),
+                (3.0, 3.0),
+                (3.0, 5.0),
+                (1.0, 5.0),
+            ]
+        );
+    }
 }

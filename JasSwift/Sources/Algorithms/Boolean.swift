@@ -452,8 +452,26 @@ func runBooleanSweep(_ a: BoolPolygonSet, _ b: BoolPolygonSet, _ op: BoolOperati
 
     // Build the priority queue. Sorted descending by event_less so the
     // smallest is at the back where popLast() removes it in O(1).
+    //
+    // Tie-break on the event index. Rust's `sort_by` is STABLE, so events
+    // its comparator calls Equal keep their original order — and the
+    // original order here is ascending index, because the queue starts as
+    // 0..<events.count. Swift's `sort` is NOT guaranteed stable, so
+    // without this the two ports may pop a tied pair in opposite orders.
+    // The tie is REACHABLE and it is not cosmetic: eventLess ties when two
+    // events share a point, a direction, a collinear opposite endpoint AND
+    // a polygon id, which is exactly what two rings of the SAME operand
+    // touching along an edge or at a vertex produce; feeding the sweep the
+    // other order changes which edges enter the result and yields a WRONG
+    // REGION, not merely a rotated ring (see booleanSweepQueueTieOrder in
+    // Tests/Algorithms/BooleanTests.swift, and the twin Rust case).
+    // Mirrors the tie-breaks in BooleanNormalize.swift and Planar.swift.
     var queue: [Int] = Array(0..<sweep.events.count)
-    queue.sort { eventLess(sweep.events, $1, $0) }
+    queue.sort { a, b in
+        if eventLess(sweep.events, b, a) { return true }
+        if eventLess(sweep.events, a, b) { return false }
+        return a < b
+    }
 
     var processed: [Int] = []
     processed.reserveCapacity(queue.count * 2)
@@ -674,8 +692,27 @@ func handleCollinear(_ events: inout [BoolSweepEvent], _ queue: inout [Int],
     }
 
     // Case D — neither coincide. Sort the four endpoints by event order.
-    var endpoints = [e1, e1r, e2, e2r]
-    endpoints.sort { eventLess(events, $0, $1) }
+    //
+    // Tie-break on the SLOT in the [e1, e1r, e2, e2r] quad, not on the
+    // event index: Rust's `sort_by` is STABLE, so a pair its comparator
+    // calls Equal keeps its position in that literal, and the event
+    // indices sitting in those positions are in no particular order.
+    // Swift's `sort` is not guaranteed stable, so the order is sorted
+    // explicitly rather than left to the sort's discretion. Case D is
+    // reached only after cases A-C have ruled out coinciding endpoints,
+    // so a conforming call should never present a tie here (a 20k-vector
+    // fuzz over tie-carrying operands produced none) — but "should never"
+    // is the sort of guarantee worth writing down rather than depending
+    // on silently, exactly as at the outgoing-span tie-break in
+    // BooleanNormalize.swift.
+    let quad = [e1, e1r, e2, e2r]
+    var slots = [0, 1, 2, 3]
+    slots.sort { i, j in
+        if eventLess(events, quad[i], quad[j]) { return true }
+        if eventLess(events, quad[j], quad[i]) { return false }
+        return i < j
+    }
+    let endpoints = slots.map { quad[$0] }
     let first = endpoints[0]
     let second = endpoints[1]
     let third = endpoints[2]

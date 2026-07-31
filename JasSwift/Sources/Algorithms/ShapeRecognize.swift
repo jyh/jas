@@ -201,8 +201,17 @@ public func recognize(_ points: [Pt], _ cfg: RecognizeConfig) -> RecognizedShape
         }
     }
 
-    candidates.sort { $0.0 < $1.0 }
-    return candidates.first?.1
+    // Tie-break on the candidate index. Rust's `sort_by` is STABLE, so
+    // fits scoring an EQUAL residual keep the order they were appended in
+    // — and both ports append in the same order, so that order is the
+    // shared rule. Swift's `sort` is not guaranteed stable, and only the
+    // first survives, so a tie here does not reorder a list: it decides
+    // WHICH SHAPE the gesture becomes. Mirrors the tie-breaks in
+    // Boolean.swift, BooleanNormalize.swift and Planar.swift.
+    let ordered = candidates.enumerated().sorted { l, r in
+        l.element.0 != r.element.0 ? l.element.0 < r.element.0 : l.offset < r.offset
+    }
+    return ordered.first?.element.1
 }
 
 /// Recognize from a path that may contain Beziers.

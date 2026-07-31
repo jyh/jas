@@ -684,3 +684,91 @@ private func ringsEqualT(_ a: BoolRing, _ b: BoolRing) -> Bool {
     #expect(kept.count == 1)
     #expect(ringsEqualT(kept[0], clean))
 }
+
+// MARK: - Sweep-queue tie order (cross-port)
+//
+// The Martinez sweep pops events from a queue sorted by `eventLess`.
+// `eventLess` is a STRICT WEAK ordering, not a total one: it ties when two
+// events share a point, a direction, a collinear opposite endpoint AND a
+// polygon id. Rust orders a tie with a STABLE `sort_by` (queue starts as
+// 0..n, so a tie keeps ascending index); Swift's `sort` is documented as
+// not guaranteed stable, so Boolean.swift spells the same rule out.
+//
+// The vectors below FORCE that tie — no other vector in this file or in the
+// shared corpus reaches it — and pin the exact rings, because the tie order
+// decides which edges enter the result: pop the other way and the region
+// itself is wrong, not just the vertex rotation.
+
+/// The tie-forcing operand pair, shared by the three checks below.
+///
+/// Subject carries TWO rings that touch along x = 3, y in [2,3]:
+///   R1 = [2,3] x [1,3]   R2 = [3,4] x [2,3]
+/// Both own a vertex at (3,3), and the vertical edge arriving there from
+/// below is collinear in each — R1's from (3,1), R2's from (3,2). So the
+/// two RIGHT events at (3,3) match on point, on direction, on orientation
+/// (signed area 0) and on polygon id (both subject): a full eventLess tie.
+private let tieSubject: BoolPolygonSet = [
+    [(2.0, 1.0), (3.0, 1.0), (3.0, 3.0), (2.0, 3.0)],
+    [(3.0, 2.0), (4.0, 2.0), (4.0, 3.0), (3.0, 3.0)],
+]
+private let tieClipping: BoolPolygonSet = [
+    [(1.0, 2.0), (3.0, 2.0), (3.0, 5.0), (1.0, 5.0)],
+]
+
+@Test func booleanSweepQueueTieIsActuallyForced() {
+    // Guard the vector itself: if a future eventLess gains a further
+    // tie-break, this stops being a tie test and must be rebuilt rather
+    // than silently passing for the wrong reason.
+    var sweep = BoolSweep()
+    sweep.addPolygonSet(tieSubject, .subject)
+    sweep.addPolygonSet(tieClipping, .clipping)
+    var ties: [(Int, Int)] = []
+    for i in 0..<sweep.events.count {
+        for j in (i + 1)..<sweep.events.count
+        where !eventLess(sweep.events, i, j) && !eventLess(sweep.events, j, i) {
+            ties.append((i, j))
+        }
+    }
+    #expect(ties.count == 1)
+    guard let (i, j) = ties.first else { return }
+    // Both members are the right event at (3,3), both subject.
+    for e in [i, j] {
+        #expect(sweep.events[e].point == (3.0, 3.0))
+        #expect(sweep.events[e].isLeft == false)
+        #expect(sweep.events[e].polygon == .subject)
+    }
+}
+
+@Test func booleanSweepQueueTieOrder() {
+    // DIFFERENCE. Subject region is the 1x2 plus the 1x1 = area 3; the
+    // clip covers x in [1,3], y in [2,5]; so subject minus clip is
+    // [2,3]x[1,2] (area 1) plus [3,4]x[2,3] (area 1) = area 2.
+    //
+    // runBooleanSweep, not booleanSubtract: the normalizer would fuse the
+    // two touching subject rings into one L before the sweep ever sees
+    // them, and the tie with it.
+    let out = runBooleanSweep(tieSubject, tieClipping, .difference)
+    #expect(abs(polygonSetArea(out) - 2.0) < EPS)
+    #expect(out.count == 2)
+    let got = out.map { rotatedT($0) }.sorted { x, y in
+        if x[0].0 != y[0].0 { return x[0].0 < y[0].0 }
+        return x[0].1 < y[0].1
+    }
+    // Both rings are squares. Pop the tie the other way and the second
+    // becomes the TRIANGLE (2,1) (3,1) (3,2) — area 1.5 overall, a wrong
+    // region, which is why this is pinned vertex for vertex.
+    #expect(ringsEqualT(got[0], [(2.0, 1.0), (3.0, 1.0), (3.0, 2.0), (2.0, 2.0)]))
+    #expect(ringsEqualT(got[1], [(3.0, 2.0), (4.0, 2.0), (4.0, 3.0), (3.0, 3.0)]))
+}
+
+@Test func booleanSweepQueueTieOrderUnion() {
+    // UNION of the same pair: the L-shaped subject plus the clip
+    // rectangle. Area 3 + 6 - 1 = 8, one ring.
+    let out = runBooleanSweep(tieSubject, tieClipping, .union)
+    #expect(abs(polygonSetArea(out) - 8.0) < EPS)
+    #expect(out.count == 1)
+    #expect(ringsEqualT(rotatedT(out[0]), [
+        (1.0, 2.0), (2.0, 2.0), (2.0, 1.0), (3.0, 1.0), (3.0, 2.0), (4.0, 2.0),
+        (4.0, 3.0), (3.0, 3.0), (3.0, 5.0), (1.0, 5.0),
+    ]))
+}
