@@ -4086,14 +4086,26 @@ private let seedExempt: [String: String] = [
 /// reasoned-out "probably an artifact", which is the confident-and-wrong shape
 /// this codebase keeps catching itself writing.
 ///
-/// Triage is owned by the jas/windows seat (letter 14 §5), which will read
+/// Triage is owned by the jas/windows seat (letter 14 §5), which reads
 /// transcripts/BOOLEAN.md before forming a view.
+///
+/// THE FOUR `boolean.json` ROWS ARE GONE, and they went the way this comment
+/// demands: a FIX, not a reasoned-out artifact. Triage (jas/windows seat,
+/// 2026-07-30) read BOOLEAN.md and found both halves settled — §Operand rules
+/// admits a GROUP as an operand, §Operand and paint rules gives the result the
+/// frontmost operand's paint — so the implementation was applying a settled
+/// rule to leaves only. The measured diff was exactly two fields, `fill` and
+/// `name`: the boolean seam read `Element.fill`/`Element.stroke` raw (`nil` for
+/// a container) and ran its unanimity over the WRAPPERS rather than over what
+/// spoke. See `booleanPaintSource` in Document/Controller.swift.
+///
+/// THE THREE THAT STAY are artifacts of the seeding relation itself, verified
+/// rather than assumed: `make_compound_shape` RETAINS its operands, so the
+/// wrapper group is still present in the result by construction, and
+/// `menu_lock` / `menu_hide` write the flag onto the element the path names —
+/// the wrapper — which is a different element from the leaf underneath it.
 private let seedKnown: Set<String> = [
     "make_compound_shape.json::make_compound_shape_two_rects",
-    "boolean.json::boolean_union_overlapping_rects",
-    "boolean.json::boolean_subtract_front_overlapping_rects",
-    "boolean.json::boolean_intersection_overlapping_rects",
-    "boolean.json::boolean_exclude_overlapping_rects",
     "menu_object_ops.json::menu_lock_two_rects",
     "menu_object_ops.json::menu_hide_two_rects",
 ]

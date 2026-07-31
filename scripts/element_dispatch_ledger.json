@@ -71,13 +71,13 @@
     },
     "rust:jas_dioxus/src/geometry/element.rs::fill": {
       "verdict": "leaf_only",
-      "reason": "An accessor for an element's OWN fill, and a container genuinely has none. The container answer belongs to the SUMMARY that reads a selection, and as of 2026-07-29 selection_fill_summary recurses to paintable leaves, so a group reads back its members' common value or Mixed.",
-      "handled_at": "document/controller.rs::selection_fill_summary via element.rs::for_each_paintable"
+      "reason": "An accessor for an element's OWN fill, and a container genuinely has none. The container answer belongs to a RESOLUTION beside it, never to this arm: widening fill() would change render, hit-test and panel semantics at once. PREMISE EXPIRY, 2026-07-30 (Flask's TRIAGE): this row used to name the selection summary alone, and the summary is only ONE consumer -- controller.rs holds eight non-test .fill() sites, SIX of which read a possibly-container element, and a destructive boolean on a group therefore produced UNPAINTED artwork. The claim is what expired, not the verdict; the fix was to resolve at the call sites via element.rs::resolved_fill (first_paintable, the single-value twin of for_each_paintable), not to widen this accessor. A NEW caller that reads a possibly-container element's fill must resolve too -- this row does not cover it in advance.",
+      "handled_at": "element.rs::first_paintable / resolved_fill (the boolean and compound-shape paint sites in document/controller.rs, all six) and document/controller.rs::selection_fill_summary (the panels), both via element.rs::for_each_paintable"
     },
     "rust:jas_dioxus/src/geometry/element.rs::stroke": {
       "verdict": "leaf_only",
-      "reason": "As fill: the container answer lives in selection_stroke_summary.",
-      "handled_at": "document/controller.rs::selection_stroke_summary via element.rs::for_each_paintable"
+      "reason": "As fill, and audited rather than assumed to mirror it: stroke() has the identical ten arms and the identical `_ => None`, and controller.rs holds nine non-test .stroke() sites, six of them reading a possibly-container element -- EACH ONE LINE BELOW its fill() twin. Same premise expiry, same fix: resolve at the call site via element.rs::resolved_stroke, never widen the accessor.",
+      "handled_at": "element.rs::first_paintable / resolved_stroke (the boolean and compound-shape paint sites in document/controller.rs, all six), document/controller.rs::selection_stroke_summary and ::selection_stroke_for_panel (the panels), both via element.rs::for_each_paintable"
     },
     "rust:jas_dioxus/src/geometry/element.rs::fill_gradient": {
       "verdict": "unhandled",

@@ -166,6 +166,146 @@ struct PaintRecursionTests {
     }
 }
 
+/// A BOOLEAN OVER A CONTAINER OPERAND PAINTS ITS RESULT.
+///
+/// BOTH HALVES OF THE SPEC ARE SETTLED, so the implementation had no room to
+/// decline: BOOLEAN.md §Operand rules — *"operands can be paths, GROUPS, text,
+/// or nested LiveElements"* — makes a group a legitimate operand, and
+/// BOOLEAN.md §Operand and paint rules — *"all operands are consumed. The
+/// result is a single path, painted with the FRONTMOST OPERAND'S fill, stroke,
+/// opacity, and blend mode"* — says what it wears. Select a group and a shape,
+/// click Union, and the result came out UNPAINTED, UNSTROKED, and wearing the
+/// container's name: `Element.fill` / `Element.stroke` answer `nil` for a
+/// container (rightly — a group carries no paint of its own), and the boolean
+/// seam read them raw.
+///
+/// The repair is the one this repo already built for exactly this shape:
+/// `forEachPaintable`'s ruling that *a selected CONTAINER speaks for its
+/// members, at any depth*, so "the frontmost operand's fill" resolves to THE
+/// FRONTMOST OPERAND'S FIRST PAINTABLE LEAF — the same resolution
+/// `selectionStrokeForPanel` makes for the Weight field. `fill`/`stroke`
+/// themselves are NOT widened; they are read at render, hit-test and panel
+/// seams where a container answering with a member's paint would be wrong.
+///
+/// FILL AND STROKE TOGETHER. They are the same defect written twice, one line
+/// apart, at every one of the six container-reading sites; repairing only
+/// `fill` leaves an operation that looks fixed in a screenshot.
+///
+/// This is the corpus-wide container-seeding relation
+/// (`anOperationOnAGroupEqualsTheSameOperationOnItsMember`) stated directly:
+/// `op(group[leaf], …) == op(leaf, …)`. That harness carried the four
+/// `boolean.json` rows as KNOWN disagreements; they are deleted with this fix.
+@Suite("Boolean paint over a container operand")
+struct BooleanContainerPaintTests {
+
+    private static let red = Color(r: 1, g: 0, b: 0, a: 1)
+    private static let blue = Color(r: 0, g: 0, b: 1, a: 1)
+
+    private func leaf(_ x: Double, _ color: Color, _ width: Double) -> Element {
+        .rect(Rect(x: x, y: 0, width: 100, height: 100,
+                   fill: Fill(color: color),
+                   stroke: Stroke(color: color, width: width)))
+    }
+
+    /// The same two operands in both spellings: bare leaves, and each leaf
+    /// alone inside a group. The two wrappers share ONE name deliberately —
+    /// asserting-sources unanimity read over the CONTAINERS carries that name
+    /// onto the product, which is the "wearing the container's name" half of
+    /// the defect and is invisible if the wrappers disagree.
+    private func model(wrapped: Bool) -> Model {
+        let a = leaf(0, Self.red, 2)
+        let b = leaf(50, Self.blue, 7)
+        let kids: [Element] = wrapped
+            ? [.group(Group(children: [a], name: "wrap")),
+               .group(Group(children: [b], name: "wrap"))]
+            : [a, b]
+        let doc = Document(layers: [Layer(name: "L", children: kids)])
+        return Model(document: doc.replacing(selection: [
+            ElementSelection.all([0, 0]), ElementSelection.all([0, 1]),
+        ]))
+    }
+
+    private func destructive(_ op: String, wrapped: Bool) -> Element {
+        let m = model(wrapped: wrapped)
+        Controller(model: m).applyDestructiveBoolean(op)
+        return m.document.getElement([0, 0])
+    }
+
+    /// One paint triple per result, so a mismatch names the field.
+    private func paint(_ e: Element) -> String {
+        "fill=\(e.fill.map { "\($0.color)" } ?? "nil") "
+            + "stroke=\(e.stroke.map { "\($0.color)@\($0.width)" } ?? "nil") "
+            + "name=\(e.name ?? "nil")"
+    }
+
+    /// THE RELATION, over every op whose KNOWN row this fix retires. Written as
+    /// an equality against the bare-leaf spelling rather than against literals:
+    /// a fix that painted the container case with something *else* would pass a
+    /// literal assertion for `fill` alone.
+    @Test func aBooleanOverAGroupWrappedOperandMatchesTheBareLeaf() {
+        for op in ["union", "subtract_front", "intersection", "exclude"] {
+            let bare = destructive(op, wrapped: false)
+            let viaGroup = destructive(op, wrapped: true)
+            #expect(paint(bare) == paint(viaGroup),
+                    "\(op): bare [\(paint(bare))] vs grouped [\(paint(viaGroup))]")
+        }
+    }
+
+    /// MANDATORY GEOMETRY PAIRING (§3.1): a paint-only battery cannot tell a
+    /// working op from one that returned its input, and the container arm is
+    /// exactly where a rewrite could quietly swap the operand for its leaf and
+    /// lose the other members' area. The union of x∈[0,100] and x∈[50,150] must
+    /// still span the full 150.
+    @Test func theContainerArmStillUnionsTheWholeOperand() {
+        guard case .polygon(let p) = destructive("union", wrapped: true) else {
+            Issue.record("union of two overlapping rects is a single-ring polygon")
+            return
+        }
+        #expect(p.points.map(\.0).max() == 150,
+                "the grouped union spans both operands; got \(p.points)")
+    }
+
+    /// The frontmost operand is the LAST in path order — [0,1], the blue one —
+    /// so a fix that resolved the BACKMOST container would pass the equality
+    /// above only by breaking the bare case too.
+    @Test func theResolvedPaintIsTheFrontmostOperandsAndNotTheBackmosts() {
+        let e = destructive("union", wrapped: true)
+        #expect(e.fill?.color == Self.blue, "got \(e.fill?.color as Any)")
+        #expect(e.stroke?.width == 7, "got \(e.stroke?.width as Any)")
+        #expect(e.name == nil,
+                "the product does not wear the container's name; got \(e.name ?? "nil")")
+    }
+
+    /// SUBTRACT_FRONT's survivor keeps ITS OWN paint (BOOLEAN.md), so the
+    /// resolution has to happen per-survivor, not once for the frontmost.
+    @Test func aSurvivorResolvesItsOwnPaint() {
+        let e = destructive("subtract_front", wrapped: true)
+        #expect(e.fill?.color == Self.red, "the survivor is the red one; got \(e.fill?.color as Any)")
+        #expect(e.stroke?.width == 2, "and its own weight; got \(e.stroke?.width as Any)")
+    }
+
+    /// The LIVE sibling: `makeCompoundShape` copies the frontmost operand's
+    /// paint onto the wrapper by the same rule and had the same hole, so an
+    /// Alt-click Shape Mode over a group produced an invisible compound.
+    /// (Its container-seeding row stays KNOWN: a compound RETAINS its operands,
+    /// so the wrapper is still visible in the result by construction.)
+    @Test func aCompoundShapeOverAGroupWrappedOperandIsPainted() {
+        let m = model(wrapped: true)
+        Controller(model: m).makeCompoundShape(operation: .union)
+        let e = m.document.getElement([0, 0])
+        #expect(e.fill?.color == Self.blue, "got \(e.fill?.color as Any)")
+        #expect(e.stroke?.width == 7, "got \(e.stroke?.width as Any)")
+    }
+
+    /// ANTI-VACUITY for the whole suite: the bare-leaf spelling must be painted
+    /// in the first place. If the fixture ever decayed to unpainted rects the
+    /// equality test would pass on `nil == nil`.
+    @Test func theBareSpellingIsPaintedToBeginWith() {
+        let e = destructive("union", wrapped: false)
+        #expect(e.fill != nil && e.stroke != nil, "fixture is painted: \(paint(e))")
+    }
+}
+
 /// A SELECTED CONTAINER SUMMARISES ITS MEMBERS' PAINT.
 ///
 /// Twin of Rust `a_selected_container_summarises_its_members_paint`. The two

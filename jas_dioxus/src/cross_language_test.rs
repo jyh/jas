@@ -6614,32 +6614,48 @@ mod tests {
             out
         }
 
-        // KNOWN DISAGREEMENTS, untriaged. Landing these as a pinned list
-        // rather than as a lowered floor is deliberate: the valuable direction
-        // is that a NEW disagreement reds, and that works from the first run.
-        // Each row is a QUESTION, not an accepted answer, and saying so is the
-        // point -- declaring them "artifacts" on reasoning alone would be the
-        // confident-and-wrong row this project keeps catching itself writing.
+        // KNOWN DISAGREEMENTS. Landing these as a pinned list rather than as a
+        // lowered floor is deliberate: the valuable direction is that a NEW
+        // disagreement reds, and that works from the first run. Each row was
+        // filed as a QUESTION, not an accepted answer -- declaring them
+        // "artifacts" on reasoning alone would be the confident-and-wrong row
+        // this project keeps catching itself writing.
+        //
+        // TRIAGED 2026-07-30 (Flask, seat `TRIAGE-container-seeded-seven.md`),
+        // by reproducing each one and READING THE BYTES rather than arguing.
+        // The theory that all seven were artifacts DID NOT SURVIVE: three are,
+        // four were a real defect and are now fixed.
         //
         //   menu_lock / menu_hide: the flag lands on the WRAPPER and this
-        //   comparison strips it. Lock and visibility CASCADE
-        //   (`effective_locked` / `effective_visibility`), so the artist-visible
-        //   result is probably identical and only the stored JSON differs --
-        //   SUSPECTED artifact of the relation, NOT VERIFIED.
+        //   comparison strips it -- measured, `"locked":true` vs `false` and
+        //   `"invisible"` vs `"preview"`. Both CASCADE (`effective_locked` /
+        //   `effective_visibility`), so the artist-visible result is identical.
+        //   CONFIRMED artifact.
         //
-        //   the five boolean ops: a boolean CONSUMES its selection to build a
-        //   compound shape. Whether operating on a group should consume the
-        //   group or its contents is a real semantic question that
-        //   transcripts/BOOLEAN.md may already answer; nobody has looked.
+        //   make_compound_shape: the group version carries one extra nesting
+        //   level, because the wrapper survived as a compound-shape OPERAND --
+        //   which BOOLEAN.md §operands explicitly permits -- and `unwrap_seeds`
+        //   does not recurse into a LiveElement's operands. The relation is
+        //   comparing two structures that are correctly different. CONFIRMED
+        //   artifact.
         //
-        // Triage is queued. Removing a row here requires either a fix or a
-        // recorded ruling.
+        //   THE FOUR BOOLEAN ROWS ARE GONE, and their absence is the gate:
+        //   union / subtract_front / intersection / exclude on a container
+        //   produced UNPAINTED, UNSTROKED artwork wearing the container's name
+        //   (`"fill":null, "name":"__seed_wrapper__"`). Not a semantic question
+        //   -- BOOLEAN.md settles both halves, §operands making a group a
+        //   legitimate operand and §paint taking "the frontmost operand's fill,
+        //   stroke, opacity and blend mode" -- but an implementation that could
+        //   not apply the settled rule to a container, because `fill()` and
+        //   `stroke()` both end `_ => None`. Fixed at every one of the six
+        //   container-reading paint sites plus the `common` reads beside them;
+        //   see `operand_leaves` / `source_common` /
+        //   `geometry::element::resolved_fill` and the unit twins in
+        //   controller.rs (`a_boolean_over_a_grouped_operand_paints_like_the_bare_leaf`).
+        //
+        // Removing a row here still requires either a fix or a recorded ruling.
         const KNOWN: &[&str] = &[
             "make_compound_shape.json::make_compound_shape_two_rects",
-            "boolean.json::boolean_union_overlapping_rects",
-            "boolean.json::boolean_subtract_front_overlapping_rects",
-            "boolean.json::boolean_intersection_overlapping_rects",
-            "boolean.json::boolean_exclude_overlapping_rects",
             "menu_object_ops.json::menu_lock_two_rects",
             "menu_object_ops.json::menu_hide_two_rects",
         ];
