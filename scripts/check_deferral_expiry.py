@@ -73,14 +73,23 @@ MARKER = re.compile(r"<!--\s*expires-when:\s*(\{.*?\})\s*-->", re.S)
 MIN_DECLARED = 1
 
 
+# A marker spanning several lines inside a `#`-comment block carries a comment
+# lead on every continuation line, which lands INSIDE the JSON. Stripped before
+# parsing. Anchored at line start, so a `#` inside a JSON string (a colour like
+# "#fff") is untouched — and JSON strings cannot contain a literal newline, so
+# there is no line whose start is inside one.
+COMMENT_LEAD = re.compile(r"^[ \t]*#[ \t]?", re.M)
+
+
 def declarations(sources):
     """[(relpath, line, claim_dict)] for every expiry marker found."""
     out = []
     for rel, text in sorted(sources.items()):
         for m in MARKER.finditer(text):
             line = text[:m.start()].count("\n") + 1
+            body = COMMENT_LEAD.sub("", m.group(1))
             try:
-                out.append((rel, line, json.loads(m.group(1))))
+                out.append((rel, line, json.loads(body)))
             except json.JSONDecodeError as e:
                 out.append((rel, line, {"__malformed__": str(e)}))
     return out
@@ -104,6 +113,16 @@ def expired(decls, read_file):
             out.append((where, f"names {target}, which is not readable -- a renamed "
                                f"file must not silently retire a deferral"))
             continue
+        # A DECLARATION MUST NOT BE ITS OWN EVIDENCE. When a marker sits in the
+        # very file it makes a claim about -- which is the normal case once
+        # `workspace/**/*.yaml` is in scope, since a tool's deferral is written
+        # in that tool's header -- the marker's own text is part of the file.
+        # A claim of `lacks: "event.modifiers.alt"` then reads as LAPSED the
+        # instant it is written, because the words are right there in the
+        # comment. The claim is about the CODE, so the declarations come out
+        # first. Caught by this gate on the first deferral ever written into a
+        # workspace YAML, which was mine.
+        src = MARKER.sub("", src)
         port = claim.get("port", "?")
         if "contains" in claim and claim["contains"] not in src:
             out.append((where, f"[{port}] expected {target} to CONTAIN "
@@ -126,12 +145,29 @@ def read_repo_file(rel):
 
 
 def load_sources():
+    """Every place a deferral can be WRITTEN, not just the prose ones.
+
+    The first cut globbed `transcripts/*.md` alone. That missed the one
+    population where deferrals matter most: `workspace/**/*.yaml` is the SPEC —
+    it is what every port compiles against — so a "reserved for a later phase"
+    there is a statement about shipped behaviour, not a note about a document.
+
+    Found by JYH hitting one. Shift-to-constrain had been deferred in
+    `ellipse.yaml`'s header since Phase 1 ("reserved for a later phase"); the
+    tool shipped, the phase never came, and the first anyone heard of it was an
+    artist unable to draw a circle. 39 such lines were sitting in 19 workspace
+    YAML files, none of them reachable by this gate.
+
+    An HTML comment is a legal YAML comment body, so the marker syntax needs no
+    change to work in both.
+    """
     out = {}
-    for p in sorted(TRANSCRIPTS.glob("*.md")):
-        try:
-            out[p.relative_to(REPO).as_posix()] = p.read_text(encoding="utf-8")
-        except OSError:
-            continue
+    for base, pat in ((TRANSCRIPTS, "*.md"), (REPO / "workspace", "**/*.yaml")):
+        for p in sorted(base.glob(pat)):
+            try:
+                out[p.relative_to(REPO).as_posix()] = p.read_text(encoding="utf-8")
+            except OSError:
+                continue
     return out
 
 

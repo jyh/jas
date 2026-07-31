@@ -7,6 +7,22 @@
 # rectangles are suppressed so a stray click doesn't deposit an
 # invisible shape.
 #
+# HOLDING SHIFT CONSTRAINS THE DRAG TO A SQUARE. The side is
+# max(|dx|, |dy|) — the shape follows the cursor's furthest reach — and
+# it grows into the quadrant being dragged toward, so the mousedown
+# point stays put as the anchor. A PURE HORIZONTAL drag (dy = 0) still
+# produces a square: the vertical direction has no sign to follow, so it
+# takes the positive branch and the shape extends downward.
+#
+# The constraint is applied WHERE THE CURSOR STATE IS WRITTEN, not where
+# it is read, so the overlay preview and the committed element cannot
+# disagree about what Shift means. ellipse.yaml carries the same seam.
+#
+# Alt to draw from the center is still unbuilt.
+# <!-- expires-when: {"port": "rust",
+#                     "file": "workspace/tools/rect.yaml",
+#                     "lacks": "event.modifiers.alt"} -->
+#
 # Fill and stroke are intentionally omitted from the add_element
 # spec — doc.add_element falls through to model.default_fill and
 # model.default_stroke (driven by the app's color panel). Native
@@ -35,6 +51,11 @@ state:
   # when the canvas has a non-zero pan / zoom transform.
   doc_start_x: { default: 0 }
   doc_start_y: { default: 0 }
+  # Document-space release point, AFTER any Shift constraint. Written at
+  # mouseup and read by the commit on the next step, so the committed
+  # geometry and the size guard both see the same constrained point.
+  doc_end_x: { default: 0 }
+  doc_end_y: { default: 0 }
 
 handlers:
 
@@ -56,8 +77,24 @@ handlers:
   on_mousemove:
     - if: "tool.rect.mode == 'drawing'"
       then:
-        - set: { tool.rect.cur_x: "event.x" }
-        - set: { tool.rect.cur_y: "event.y" }
+        # THE SHIFT CONSTRAINT LIVES HERE, on the write. Both branches
+        # read only `event` and `start_*`, never the sibling being
+        # written, so the two sets are order-independent -- and the
+        # overlay below stays unaware that Shift exists.
+        - set:
+            tool.rect.cur_x: >-
+              if event.modifiers.shift
+              then tool.rect.start_x + (if event.x >= tool.rect.start_x
+                   then max(abs(event.x - tool.rect.start_x), abs(event.y - tool.rect.start_y))
+                   else 0 - max(abs(event.x - tool.rect.start_x), abs(event.y - tool.rect.start_y)))
+              else event.x
+        - set:
+            tool.rect.cur_y: >-
+              if event.modifiers.shift
+              then tool.rect.start_y + (if event.y >= tool.rect.start_y
+                   then max(abs(event.y - tool.rect.start_y), abs(event.x - tool.rect.start_x))
+                   else 0 - max(abs(event.y - tool.rect.start_y), abs(event.x - tool.rect.start_x)))
+              else event.y
 
   on_mouseup:
     - if: "tool.rect.mode == 'drawing'"
@@ -65,16 +102,51 @@ handlers:
         # Zero-size suppression matches native behavior: a plain click
         # (release at the same point as press) should not create a
         # shape. 1-pixel threshold on both dimensions, screen-space.
-        - if: "abs(event.x - tool.rect.start_x) > 1 and abs(event.y - tool.rect.start_y) > 1"
+        # Re-apply the constraint at the release point, in BOTH spaces:
+        # screen for the size guard, document for the commit. The release
+        # can land somewhere no mousemove ever reported.
+        - set:
+            tool.rect.cur_x: >-
+              if event.modifiers.shift
+              then tool.rect.start_x + (if event.x >= tool.rect.start_x
+                   then max(abs(event.x - tool.rect.start_x), abs(event.y - tool.rect.start_y))
+                   else 0 - max(abs(event.x - tool.rect.start_x), abs(event.y - tool.rect.start_y)))
+              else event.x
+        - set:
+            tool.rect.cur_y: >-
+              if event.modifiers.shift
+              then tool.rect.start_y + (if event.y >= tool.rect.start_y
+                   then max(abs(event.y - tool.rect.start_y), abs(event.x - tool.rect.start_x))
+                   else 0 - max(abs(event.y - tool.rect.start_y), abs(event.x - tool.rect.start_x)))
+              else event.y
+        - set:
+            tool.rect.doc_end_x: >-
+              if event.modifiers.shift
+              then tool.rect.doc_start_x + (if event.doc_x >= tool.rect.doc_start_x
+                   then max(abs(event.doc_x - tool.rect.doc_start_x), abs(event.doc_y - tool.rect.doc_start_y))
+                   else 0 - max(abs(event.doc_x - tool.rect.doc_start_x), abs(event.doc_y - tool.rect.doc_start_y)))
+              else event.doc_x
+        - set:
+            tool.rect.doc_end_y: >-
+              if event.modifiers.shift
+              then tool.rect.doc_start_y + (if event.doc_y >= tool.rect.doc_start_y
+                   then max(abs(event.doc_y - tool.rect.doc_start_y), abs(event.doc_x - tool.rect.doc_start_x))
+                   else 0 - max(abs(event.doc_y - tool.rect.doc_start_y), abs(event.doc_x - tool.rect.doc_start_x)))
+              else event.doc_y
+        # MEASURED AGAINST THE CONSTRAINED POINT, not the raw event. A
+        # pure horizontal Shift-drag has a raw dy of 0, so testing the
+        # event would reject a 100-pixel square the artist had watched
+        # themselves draw.
+        - if: "abs(tool.rect.cur_x - tool.rect.start_x) > 1 and abs(tool.rect.cur_y - tool.rect.start_y) > 1"
           then:
             - "doc.snapshot": {}
             - "doc.add_element":
                 element:
                   type: rect
-                  x: "min(tool.rect.doc_start_x, event.doc_x)"
-                  y: "min(tool.rect.doc_start_y, event.doc_y)"
-                  width: "abs(event.doc_x - tool.rect.doc_start_x)"
-                  height: "abs(event.doc_y - tool.rect.doc_start_y)"
+                  x: "min(tool.rect.doc_start_x, tool.rect.doc_end_x)"
+                  y: "min(tool.rect.doc_start_y, tool.rect.doc_end_y)"
+                  width: "abs(tool.rect.doc_end_x - tool.rect.doc_start_x)"
+                  height: "abs(tool.rect.doc_end_y - tool.rect.doc_start_y)"
     - set: { tool.rect.mode: "'idle'" }
 
   on_keydown:

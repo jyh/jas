@@ -3190,6 +3190,8 @@ private let gestureFixtures = [
     "draw_rect_zoomed.json",
     "draw_line.json",
     "draw_ellipse.json",
+    "draw_ellipse_shift.json",
+    "draw_rect_shift.json",
     "draw_rounded_rect.json",
     "draw_polygon.json",
     "draw_star.json",

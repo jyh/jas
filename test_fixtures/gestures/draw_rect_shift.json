@@ -1,0 +1,24 @@
+[
+  {
+    "name": "draw_rect_shift_constrains_to_a_square",
+    "setup_svg": "circle_basic.svg",
+    "tool": "rect",
+    "events": [
+      {"kind": "press", "x": 10, "y": 20},
+      {"kind": "move", "x": 110, "y": 70, "dragging": true, "shift": true},
+      {"kind": "release", "x": 110, "y": 70, "shift": true}
+    ],
+    "expected_json": "draw_rect_shift_expected.json"
+  },
+  {
+    "name": "draw_rect_shift_up_left_drag_keeps_the_anchor",
+    "setup_svg": "circle_basic.svg",
+    "tool": "rect",
+    "events": [
+      {"kind": "press", "x": 210, "y": 220},
+      {"kind": "move", "x": 110, "y": 170, "dragging": true, "shift": true},
+      {"kind": "release", "x": 110, "y": 170, "shift": true}
+    ],
+    "expected_json": "draw_rect_shift_up_left_expected.json"
+  }
+]
