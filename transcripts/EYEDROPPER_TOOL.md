@@ -135,6 +135,28 @@ sub-toggles cover the surface defined in `STROKE.md`:
 | `state.eyedropper_stroke_profile` | profile + flipped |
 | `state.eyedropper_stroke_brush` | `jas:stroke-brush` |
 
+Two edges of this group are ruled rather than derived.
+
+**A stroke-less source still obeys the sub-toggles.** When the source has
+no stroke and the master is on, "no stroke" is a *value of the
+`stroke_color` attribute* — that sub-toggle covers "color, **none**,
+gradient, or pattern" — so it transfers only when `stroke_color` is
+ticked. With `stroke_color` off the target's stroke is left exactly as it
+was; the other seven sub-toggles have nothing to read off a stroke that
+isn't there and are no-ops, by the same rule that governs any missing
+source attribute. The master toggle alone never clears a stroke.
+
+**A fabricated stroke seeds from the app default** (RULED, JYH
+2026-07-31). When the target has no stroke and a ticked sub-toggle would
+write one of its fields — the artist ticked `stroke_dash`, say — a stroke
+must be fabricated to carry that field, and a stroke needs a colour and a
+width. Those two come from the APP's default stroke (`state.stroke_color`
+= `#000000`, `state.stroke_width` = 1.0), **never from the source**:
+taking them from the source would transfer two attributes the artist
+deliberately deselected. Refusing to fabricate at all — the Preservation
+Law's "what it cannot preserve it must not guess" — was considered and
+rejected on usability: an artist ticks dash, clicks, and nothing happens.
+
 ### Opacity
 
 Master toggle `state.eyedropper_opacity` plus two sub-toggles:

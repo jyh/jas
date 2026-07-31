@@ -5,9 +5,13 @@
 //! §Algorithm — port of `workspace_interpreter/dash_renderer.py`.
 //! Keep in lockstep on the conversion table and rounding rules.
 //!
-//! Phase 4 ships lines-only support (MoveTo / LineTo / ClosePath).
-//! Curve segments will join in a follow-up phase that adds De
-//! Casteljau subdivision; the API stays unchanged.
+//! Lines AND curves. A subpath is walked as a list of primitive
+//! segments (line / quad / cubic) between consecutive anchors —
+//! `arrow_trim`'s segment kernel, reused verbatim so the arc→parameter
+//! mapping and the de-Casteljau split are the same ones the arrowhead
+//! trim is pinned on. A dash that straddles a cubic is emitted as a
+//! cubic (DASH_ALIGN.md §subpath_between), not as a chord and not as a
+//! polyline.
 //!
 //! Output: a `Vec<Vec<PathCommand>>` where each inner `Vec` is one
 //! solid sub-path representing one dash. Sub-paths are emitted in
@@ -15,6 +19,7 @@
 //! existing solid-stroke pipeline (no `stroke-dasharray` /
 //! `setLineDash`).
 
+use crate::algorithms::arrow_trim::{build_segments, locate, Seg};
 use crate::geometry::element::PathCommand;
 
 const EPS: f64 = 1e-9;
@@ -49,13 +54,16 @@ pub fn expand_dashed_stroke(
     let subpaths = split_at_moveto(path);
     let mut result = Vec::new();
     for sp in &subpaths {
-        if !has_segments(sp) {
+        // No drawable segment (a bare MoveTo, or the S-4 bare ClosePath
+        // that establishes no anchor) -> no dash.
+        let segs = build_segments(sp);
+        if segs.is_empty() {
             continue;
         }
         if align_anchors {
-            result.extend(expand_align(sp, &pattern));
+            result.extend(expand_align(&segs, is_closed(sp), &pattern));
         } else {
-            result.extend(expand_preserve(sp, &pattern));
+            result.extend(expand_preserve(&segs, &pattern));
         }
     }
     result
@@ -82,90 +90,44 @@ fn split_at_moveto(path: &[PathCommand]) -> Vec<Vec<PathCommand>> {
     subs
 }
 
-fn has_segments(subpath: &[PathCommand]) -> bool {
-    subpath.iter().any(|c| matches!(
-        c,
-        PathCommand::LineTo { .. } | PathCommand::ClosePath
-    ))
-}
-
 fn is_closed(subpath: &[PathCommand]) -> bool {
     subpath.iter().any(|c| matches!(c, PathCommand::ClosePath))
 }
 
-fn anchor_points(subpath: &[PathCommand]) -> Vec<(f64, f64)> {
-    let mut pts = Vec::new();
-    for cmd in subpath {
-        match cmd {
-            PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => {
-                pts.push((*x, *y));
-            }
-            _ => {}
-        }
+/// Per-segment arc lengths plus their running total (`cum[0] = 0`,
+/// `cum[i + 1] = cum[i] + len(seg i)`). A line measures exactly; a curve
+/// measures as its `FLATTEN_STEPS` polyline, the house parameterization.
+fn seg_lengths_and_cum(segs: &[Seg]) -> (Vec<f64>, Vec<f64>) {
+    let lengths: Vec<f64> = segs.iter().map(Seg::arc_len).collect();
+    let mut cum = Vec::with_capacity(lengths.len() + 1);
+    cum.push(0.0);
+    let mut s = 0.0;
+    for &l in &lengths {
+        s += l;
+        cum.push(s);
     }
-    pts
-}
-
-fn seg_len(a: (f64, f64), b: (f64, f64)) -> f64 {
-    let dx = b.0 - a.0;
-    let dy = b.1 - a.1;
-    (dx * dx + dy * dy).sqrt()
+    (lengths, cum)
 }
 
 // ── Preserve mode ────────────────────────────────────────────────
 
-fn expand_preserve(
-    subpath: &[PathCommand],
-    pattern: &[f64],
-) -> Vec<Vec<PathCommand>> {
-    let anchors = anchor_points(subpath);
-    let anchors_walk: Vec<(f64, f64)> = if is_closed(subpath) {
-        let mut a = anchors.clone();
-        if !anchors.is_empty() {
-            a.push(anchors[0]);
-        }
-        a
-    } else {
-        anchors.clone()
-    };
-    if anchors_walk.len() < 2 {
-        return Vec::new();
-    }
-    let seg_lengths: Vec<f64> = anchors_walk
-        .windows(2)
-        .map(|w| seg_len(w[0], w[1]))
-        .collect();
-    let mut cum = vec![0.0];
-    let mut s = 0.0;
-    for &l in &seg_lengths {
-        s += l;
-        cum.push(s);
-    }
+fn expand_preserve(segs: &[Seg], pattern: &[f64]) -> Vec<Vec<PathCommand>> {
+    let (_, cum) = seg_lengths_and_cum(segs);
     let total = *cum.last().unwrap_or(&0.0);
     if total <= 0.0 {
         return Vec::new();
     }
-    emit_dashes(&anchors_walk, &cum, pattern, 0.0, 0.0, total)
+    emit_dashes(segs, &cum, pattern, 0.0, 0.0, total)
 }
 
 // ── Align mode ───────────────────────────────────────────────────
 
 fn expand_align(
-    subpath: &[PathCommand],
+    segs: &[Seg],
+    closed: bool,
     pattern: &[f64],
 ) -> Vec<Vec<PathCommand>> {
-    let anchors = anchor_points(subpath);
-    let closed = is_closed(subpath);
-    let anchors_walk: Vec<(f64, f64)> = if closed {
-        let mut a = anchors.clone();
-        if !anchors.is_empty() {
-            a.push(anchors[0]);
-        }
-        a
-    } else {
-        anchors.clone()
-    };
-    let n_segs = anchors_walk.len().saturating_sub(1);
+    let n_segs = segs.len();
     if n_segs == 0 {
         return Vec::new();
     }
@@ -173,18 +135,9 @@ fn expand_align(
     if base_period <= 0.0 {
         return Vec::new();
     }
-    let seg_lengths: Vec<f64> = anchors_walk
-        .windows(2)
-        .map(|w| seg_len(w[0], w[1]))
-        .collect();
+    let (seg_lengths, cum) = seg_lengths_and_cum(segs);
     if seg_lengths.iter().all(|&l| l <= 0.0) {
         return Vec::new();
-    }
-    let mut cum = vec![0.0];
-    let mut s = 0.0;
-    for &l in &seg_lengths {
-        s += l;
-        cum.push(s);
     }
 
     // Per-segment dash ranges in global arc-length.
@@ -220,7 +173,7 @@ fn expand_align(
 
     let mut result: Vec<Vec<PathCommand>> = Vec::new();
     for (gs, ge) in merged {
-        if let Some(sub) = subpath_between_wrapping(&anchors_walk, &cum, gs, ge, closed) {
+        if let Some(sub) = subpath_between_wrapping(segs, &cum, gs, ge, closed) {
             result.push(sub);
         }
     }
@@ -339,7 +292,7 @@ fn merge_adjacent_ranges(ranges: &[(f64, f64)]) -> Vec<(f64, f64)> {
 }
 
 fn subpath_between_wrapping(
-    anchors: &[(f64, f64)],
+    segs: &[Seg],
     cum: &[f64],
     t0: f64,
     t1: f64,
@@ -347,10 +300,10 @@ fn subpath_between_wrapping(
 ) -> Option<Vec<PathCommand>> {
     let total = *cum.last().unwrap_or(&0.0);
     if !closed || t1 <= total + EPS {
-        return subpath_between(anchors, cum, t0, t1.min(total));
+        return subpath_between(segs, cum, t0, t1.min(total));
     }
-    let head = subpath_between(anchors, cum, t0, total);
-    let tail = subpath_between(anchors, cum, 0.0, t1 - total);
+    let head = subpath_between(segs, cum, t0, total);
+    let tail = subpath_between(segs, cum, 0.0, t1 - total);
     match (head, tail) {
         (Some(h), Some(t)) => {
             // Drop tail's leading MoveTo.
@@ -369,8 +322,13 @@ fn subpath_between_wrapping(
     }
 }
 
+/// The stretch of the subpath between arc-lengths `t0` and `t1`, in the
+/// subpath's own primitives: the straddled ends are de-Casteljau splits
+/// of their segment, the segments fully inside are re-emitted verbatim.
+/// A cubic in, a cubic out — the dash follows the drawn geometry, never
+/// its chord.
 fn subpath_between(
-    anchors: &[(f64, f64)],
+    segs: &[Seg],
     cum: &[f64],
     t0: f64,
     t1: f64,
@@ -378,63 +336,50 @@ fn subpath_between(
     if t1 <= t0 + EPS {
         return None;
     }
-    let p0 = interpolate(anchors, cum, t0);
-    let p1 = interpolate(anchors, cum, t1);
-    let i = locate_segment(cum, t0);
-    let j = locate_segment(cum, t1);
-    let mut cmds: Vec<PathCommand> = Vec::with_capacity((j - i).saturating_add(2));
-    cmds.push(PathCommand::MoveTo { x: p0.0, y: p0.1 });
-    for k in (i + 1)..=j {
-        cmds.push(PathCommand::LineTo { x: anchors[k].0, y: anchors[k].1 });
+    let (i, local0) = locate(cum, t0);
+    let (j, local1) = locate(cum, t1);
+    let a0 = segs[i].param_at_arc(local0);
+    let a1 = segs[j].param_at_arc(local1);
+    let start = segs[i].point_at(a0);
+    let mut cmds: Vec<PathCommand> = Vec::with_capacity(j - i + 2);
+    cmds.push(PathCommand::MoveTo { x: start.0, y: start.1 });
+    if i == j {
+        cmds.push(segs[i].sub_command(a0, a1));
+    } else {
+        cmds.push(segs[i].sub_command(a0, 1.0));
+        for k in (i + 1)..j {
+            cmds.push(segs[k].full_command());
+        }
+        cmds.push(segs[j].sub_command(0.0, a1));
     }
-    let last = cmds.last().copied().unwrap();
-    let (last_x, last_y) = match last {
-        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (x, y),
-        _ => (p1.0, p1.1),
-    };
-    if (last_x - p1.0).abs() > 1e-9 || (last_y - p1.1).abs() > 1e-9 {
-        cmds.push(PathCommand::LineTo { x: p1.0, y: p1.1 });
+    // `t1` landing exactly on an anchor makes the final command a
+    // zero-length repeat of the point we just drew to; drop it, as the
+    // lines-only engine dropped its redundant trailing LineTo.
+    if cmds.len() >= 2 {
+        let last = cmd_endpoint(&cmds[cmds.len() - 1]);
+        let prev = cmd_endpoint(&cmds[cmds.len() - 2]);
+        if (last.0 - prev.0).abs() <= 1e-9 && (last.1 - prev.1).abs() <= 1e-9 {
+            cmds.pop();
+        }
     }
     Some(cmds)
 }
 
-fn interpolate(anchors: &[(f64, f64)], cum: &[f64], t: f64) -> (f64, f64) {
-    if t <= 0.0 {
-        return anchors[0];
+fn cmd_endpoint(cmd: &PathCommand) -> (f64, f64) {
+    match *cmd {
+        PathCommand::MoveTo { x, y }
+        | PathCommand::LineTo { x, y }
+        | PathCommand::CurveTo { x, y, .. }
+        | PathCommand::QuadTo { x, y, .. }
+        | PathCommand::SmoothCurveTo { x, y, .. }
+        | PathCommand::SmoothQuadTo { x, y }
+        | PathCommand::ArcTo { x, y, .. } => (x, y),
+        PathCommand::ClosePath => (f64::NAN, f64::NAN),
     }
-    let total = *cum.last().unwrap_or(&0.0);
-    if t >= total {
-        return *anchors.last().unwrap();
-    }
-    let i = locate_segment(cum, t);
-    let seg_l = cum[i + 1] - cum[i];
-    if seg_l <= 0.0 {
-        return anchors[i];
-    }
-    let alpha = (t - cum[i]) / seg_l;
-    let a = anchors[i];
-    let b = anchors[i + 1];
-    (a.0 + alpha * (b.0 - a.0), a.1 + alpha * (b.1 - a.1))
-}
-
-fn locate_segment(cum: &[f64], t: f64) -> usize {
-    let n = cum.len() - 1;
-    if t <= cum[0] {
-        return 0;
-    }
-    if t >= cum[cum.len() - 1] {
-        return n - 1;
-    }
-    for i in 0..n {
-        if cum[i] <= t && t < cum[i + 1] {
-            return i;
-        }
-    }
-    n - 1
 }
 
 fn emit_dashes(
-    anchors_walk: &[(f64, f64)],
+    segs: &[Seg],
     cum: &[f64],
     pattern: &[f64],
     period_offset: f64,
@@ -453,7 +398,7 @@ fn emit_dashes(
         let next_t = (t + remaining).min(t_end);
         let is_dash = cur_idx % 2 == 0;
         if is_dash && next_t > t + EPS {
-            if let Some(sub) = subpath_between(anchors_walk, cum, t, next_t) {
+            if let Some(sub) = subpath_between(segs, cum, t, next_t) {
                 out.push(sub);
             }
         }
@@ -591,6 +536,224 @@ mod tests {
         let r2 = expand_dashed_stroke(&path, &[12.0, 6.0], true);
         assert_eq!(r1, r2);
     }
+
+    // ── Curve segments (DASH_ALIGN.md walk_dashes / subpath_between) ──
+    //
+    // The checkers below never restate the renderer's arithmetic. They
+    // evaluate the ORIGINAL cubic from its Bernstein definition -- a
+    // different formulation from the de-Casteljau lerps the renderer
+    // splits with -- and assert that every point of every emitted dash
+    // lies on THAT curve. A renderer that walked the chord instead
+    // (the pre-fix behaviour, and the failure mode a lines-only engine
+    // degrades to when a LineTo keeps the subpath alive) puts the whole
+    // dash run on y == 0, which `bulge` catches.
+
+    /// The reference arc: a symmetric hump from (0,0) to (60,0) whose
+    /// height is exactly 30 at t = 0.5 (y(t) = 120 t (1-t)) and whose
+    /// chord is the straight segment y == 0. Any answer that collapses
+    /// the curve to its chord is therefore off by up to 30 units.
+    const ARC: [PathCommand; 2] = [
+        M { x: 0.0, y: 0.0 },
+        PathCommand::CurveTo { x1: 20.0, y1: 40.0, x2: 40.0, y2: 40.0, x: 60.0, y: 0.0 },
+    ];
+
+    /// Bernstein evaluation of the ARC cubic -- the mathematical
+    /// definition, independent of how the renderer subdivides.
+    fn arc_point(t: f64) -> (f64, f64) {
+        let (p0, p1, p2, p3) = ((0.0, 0.0), (20.0, 40.0), (40.0, 40.0), (60.0, 0.0));
+        let mt = 1.0 - t;
+        let b0 = mt * mt * mt;
+        let b1 = 3.0 * mt * mt * t;
+        let b2 = 3.0 * mt * t * t;
+        let b3 = t * t * t;
+        (
+            b0 * p0.0 + b1 * p1.0 + b2 * p2.0 + b3 * p3.0,
+            b0 * p0.1 + b1 * p1.1 + b2 * p2.1 + b3 * p3.1,
+        )
+    }
+
+    /// True distance from `p` to the ARC: a coarse scan of `arc_point`
+    /// to bracket the closest parameter, then a ternary search to
+    /// converge on it. Refining matters — a bare 4000-sample scan
+    /// bottoms out around 0.017 near the fast-moving ends, which would
+    /// force a slack tolerance and blunt the checker.
+    fn dist_to_arc(p: (f64, f64)) -> f64 {
+        let d_at = |t: f64| {
+            let q = arc_point(t);
+            ((q.0 - p.0).powi(2) + (q.1 - p.1).powi(2)).sqrt()
+        };
+        const N: usize = 2000;
+        let mut best_i = 0;
+        let mut best = f64::INFINITY;
+        for i in 0..=N {
+            let d = d_at(i as f64 / N as f64);
+            if d < best {
+                best = d;
+                best_i = i;
+            }
+        }
+        let mut lo = (best_i.saturating_sub(1)) as f64 / N as f64;
+        let mut hi = (best_i + 1).min(N) as f64 / N as f64;
+        for _ in 0..200 {
+            let m1 = lo + (hi - lo) / 3.0;
+            let m2 = hi - (hi - lo) / 3.0;
+            if d_at(m1) < d_at(m2) {
+                hi = m2;
+            } else {
+                lo = m1;
+            }
+        }
+        d_at(0.5 * (lo + hi)).min(best)
+    }
+
+    /// Every point the emitted sub-paths actually draw through: line
+    /// endpoints, and cubics sampled along their own Bernstein form.
+    /// Control points are excluded -- they need not lie on the curve.
+    fn drawn_points(subs: &[Vec<PathCommand>]) -> Vec<(f64, f64)> {
+        let mut out = Vec::new();
+        for sub in subs {
+            let mut cur = (0.0, 0.0);
+            for cmd in sub {
+                match *cmd {
+                    M { x, y } | L { x, y } => {
+                        out.push((x, y));
+                        cur = (x, y);
+                    }
+                    PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+                        for i in 0..=20 {
+                            let t = i as f64 / 20.0;
+                            let mt = 1.0 - t;
+                            let (b0, b1, b2, b3) = (
+                                mt * mt * mt,
+                                3.0 * mt * mt * t,
+                                3.0 * mt * t * t,
+                                t * t * t,
+                            );
+                            out.push((
+                                b0 * cur.0 + b1 * x1 + b2 * x2 + b3 * x,
+                                b0 * cur.1 + b1 * y1 + b2 * y2 + b3 * y,
+                            ));
+                        }
+                        cur = (x, y);
+                    }
+                    PathCommand::QuadTo { x1, y1, x, y } => {
+                        for i in 0..=20 {
+                            let t = i as f64 / 20.0;
+                            let mt = 1.0 - t;
+                            out.push((
+                                mt * mt * cur.0 + 2.0 * mt * t * x1 + t * t * x,
+                                mt * mt * cur.1 + 2.0 * mt * t * y1 + t * t * y,
+                            ));
+                        }
+                        cur = (x, y);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out
+    }
+
+    fn endpoint_of(cmd: &PathCommand) -> (f64, f64) {
+        match *cmd {
+            M { x, y } | L { x, y } => (x, y),
+            PathCommand::CurveTo { x, y, .. } => (x, y),
+            PathCommand::QuadTo { x, y, .. } => (x, y),
+            _ => (f64::NAN, f64::NAN),
+        }
+    }
+
+    /// THE ARTIST-VISIBLE DEFECT. Draw a curve, dash it, switch the
+    /// Stroke panel to align-to-anchors: the whole stroke disappears.
+    /// A bare open cubic has no LineTo and no ClosePath, so a
+    /// lines-only engine finds "no segments" and emits nothing.
+    #[test]
+    fn align_open_cubic_is_not_dropped() {
+        let r = expand_dashed_stroke(&ARC, &[12.0, 6.0], true);
+        assert!(!r.is_empty(), "an open cubic must still produce dashes");
+    }
+
+    /// Preserve mode drops it too -- the pure function is blind to
+    /// curves in BOTH modes. (Only align is artist-visible, because the
+    /// canvas renderer routes preserve mode to the platform's own dash
+    /// array and never calls this function.)
+    #[test]
+    fn preserve_open_cubic_is_not_dropped() {
+        let r = expand_dashed_stroke(&ARC, &[12.0, 6.0], false);
+        assert!(!r.is_empty(), "an open cubic must still produce dashes");
+    }
+
+    /// A closed cubic -- Z makes it look like it "has segments", but
+    /// the anchor walk then finds a single point and folds to nothing.
+    #[test]
+    fn align_closed_cubic_is_not_dropped() {
+        let mut path = ARC.to_vec();
+        path.push(Z);
+        let r = expand_dashed_stroke(&path, &[12.0, 6.0], true);
+        assert!(!r.is_empty(), "a closed cubic must still produce dashes");
+    }
+
+    /// The dashes must ride the curve, and they must be curves.
+    #[test]
+    fn align_open_cubic_dashes_ride_the_curve() {
+        let r = expand_dashed_stroke(&ARC, &[12.0, 6.0], true);
+        assert!(!r.is_empty());
+        for p in drawn_points(&r) {
+            let d = dist_to_arc(p);
+            assert!(d < 1e-6, "drawn point {p:?} is {d} off the curve");
+        }
+        let bulge = drawn_points(&r).iter().fold(0.0_f64, |m, p| m.max(p.1.abs()));
+        assert!(bulge > 20.0, "dashes hug the chord (max |y| = {bulge}), not the arc");
+        assert!(
+            r.iter().flatten().any(|c| matches!(c, PathCommand::CurveTo { .. })),
+            "a dash over a cubic must be emitted as a cubic (DASH_ALIGN.md subpath_between)"
+        );
+    }
+
+    /// EE boundary: a single open segment gets a full dash at each end,
+    /// so the run starts exactly at the curve start and finishes
+    /// exactly at the curve end.
+    #[test]
+    fn align_open_cubic_starts_and_ends_on_the_endpoints() {
+        let r = expand_dashed_stroke(&ARC, &[12.0, 6.0], true);
+        assert!(!r.is_empty());
+        let first = endpoint_of(&r[0][0]);
+        assert!(approx_eq(first.0, 0.0) && approx_eq(first.1, 0.0), "got {first:?}");
+        let last = endpoint_of(r.last().unwrap().last().unwrap());
+        assert!(approx_eq(last.0, 60.0) && approx_eq(last.1, 0.0), "got {last:?}");
+    }
+
+    /// The silent-wrong-answer sibling: a curve followed by a line
+    /// survives the "has segments" screen, so nothing vanishes -- the
+    /// curve is just quietly replaced by its chord. Arc length and
+    /// geometry are both wrong, and the curve's own endpoint is not
+    /// treated as an alignment anchor.
+    #[test]
+    fn align_cubic_then_line_keeps_the_curve_and_anchors_its_endpoint() {
+        let mut path = ARC.to_vec();
+        path.push(L { x: 90.0, y: 0.0 });
+        let r = expand_dashed_stroke(&path, &[12.0, 6.0], true);
+        assert!(!r.is_empty());
+
+        // Points on the cubic half must lie on the cubic.
+        let bulge = drawn_points(&r).iter().fold(0.0_f64, |m, p| m.max(p.1.abs()));
+        assert!(bulge > 20.0, "the cubic was flattened to its chord (max |y| = {bulge})");
+
+        // (60,0) is an interior anchor -> a dash is centered on it, so
+        // some sub-path crosses it rather than starting or ending there.
+        let mut spans = false;
+        for sub in &r {
+            for (idx, cmd) in sub.iter().enumerate() {
+                let p = endpoint_of(cmd);
+                if approx_eq(p.0, 60.0) && approx_eq(p.1, 0.0)
+                    && idx > 0 && idx < sub.len() - 1
+                {
+                    spans = true;
+                }
+            }
+        }
+        assert!(spans, "a dash must be centered on the curve's own endpoint anchor");
+    }
     // S-4: a leading ClosePath is a no-op. Ruled by JYH at the fleet
     // council, 2026-07-27. A subpath that is nothing but Z establishes
     // no anchor and produces no dash. Rust already behaved this way when
@@ -632,3 +795,4 @@ mod tests {
     }
 
 }
+

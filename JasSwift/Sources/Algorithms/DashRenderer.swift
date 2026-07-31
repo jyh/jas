@@ -4,8 +4,13 @@
 /// and `jas_dioxus/src/algorithms/dash_renderer.rs`. See DASH_ALIGN.md
 /// §Algorithm. Keep all four ports in lockstep.
 ///
-/// Phase 4 ships lines-only support (`.moveTo` / `.lineTo` /
-/// `.closePath`). Curve segments will join in a follow-up phase.
+/// Lines AND curves. A subpath is walked as a list of primitive
+/// segments (line / quad / cubic) between consecutive anchors —
+/// `ArrowTrim`'s segment kernel, reused verbatim so the arc→parameter
+/// mapping and the de-Casteljau split are the same ones the arrowhead
+/// trim is pinned on. A dash that straddles a cubic is emitted as a
+/// cubic (DASH_ALIGN.md §subpath_between), not as a chord and not as a
+/// polyline.
 ///
 /// Output: an array of sub-paths. Each sub-path is one solid dash;
 /// the caller draws each via the existing solid-stroke pipeline.
@@ -15,6 +20,8 @@ import Foundation
 private let EPS = 1e-9
 
 public enum DashRenderer {
+
+    private typealias Seg = ArrowTrim.Seg
 
     /// Expand a dashed stroke into a list of solid sub-paths.
     public static func expandDashedStroke(
@@ -39,11 +46,15 @@ public enum DashRenderer {
         let subpaths = splitAtMoveTo(path)
         var result: [[PathCommand]] = []
         for sp in subpaths {
-            guard hasSegments(sp) else { continue }
+            // No drawable segment (a bare moveTo, or the S-4 bare
+            // closePath that establishes no anchor) -> no dash.
+            let segs = ArrowTrim.buildSegments(sp)
+            guard !segs.isEmpty else { continue }
             if alignAnchors {
-                result.append(contentsOf: expandAlign(sp, pattern: pattern))
+                result.append(contentsOf:
+                    expandAlign(segs, closed: isClosed(sp), pattern: pattern))
             } else {
-                result.append(contentsOf: expandPreserve(sp, pattern: pattern))
+                result.append(contentsOf: expandPreserve(segs, pattern: pattern))
             }
         }
         return result
@@ -66,14 +77,6 @@ public enum DashRenderer {
         return subs
     }
 
-    private static func hasSegments(_ subpath: [PathCommand]) -> Bool {
-        for cmd in subpath {
-            if case .lineTo = cmd { return true }
-            if case .closePath = cmd { return true }
-        }
-        return false
-    }
-
     private static func isClosed(_ subpath: [PathCommand]) -> Bool {
         for cmd in subpath {
             if case .closePath = cmd { return true }
@@ -81,46 +84,28 @@ public enum DashRenderer {
         return false
     }
 
-    private static func anchorPoints(_ subpath: [PathCommand]) -> [(Double, Double)] {
-        var pts: [(Double, Double)] = []
-        for cmd in subpath {
-            switch cmd {
-            case .moveTo(let x, let y), .lineTo(let x, let y):
-                pts.append((x, y))
-            default:
-                break
-            }
-        }
-        return pts
-    }
-
-    private static func segLen(_ a: (Double, Double), _ b: (Double, Double)) -> Double {
-        let dx = b.0 - a.0
-        let dy = b.1 - a.1
-        return (dx*dx + dy*dy).squareRoot()
+    /// Per-segment arc lengths plus their running total (`cum[0] = 0`,
+    /// `cum[i + 1] = cum[i] + len(seg i)`). A line measures exactly; a
+    /// curve measures as its `elementFlattenSteps` polyline, the house
+    /// parameterization.
+    private static func segLengthsAndCum(_ segs: [Seg]) -> ([Double], [Double]) {
+        let lengths = segs.map { ArrowTrim.arcLen($0) }
+        var cum: [Double] = [0.0]
+        var s = 0.0
+        for l in lengths { s += l; cum.append(s) }
+        return (lengths, cum)
     }
 
     // MARK: - Preserve mode
 
     private static func expandPreserve(
-        _ subpath: [PathCommand],
+        _ segs: [Seg],
         pattern: [Double]
     ) -> [[PathCommand]] {
-        let anchors = anchorPoints(subpath)
-        var anchorsWalk = anchors
-        if isClosed(subpath), let first = anchors.first {
-            anchorsWalk.append(first)
-        }
-        guard anchorsWalk.count >= 2 else { return [] }
-        let segLengths = (0..<anchorsWalk.count - 1).map {
-            segLen(anchorsWalk[$0], anchorsWalk[$0 + 1])
-        }
-        var cum: [Double] = [0.0]
-        var s = 0.0
-        for l in segLengths { s += l; cum.append(s) }
+        let (_, cum) = segLengthsAndCum(segs)
         let total = cum.last ?? 0.0
         guard total > 0 else { return [] }
-        return emitDashes(anchorsWalk, cum: cum, pattern: pattern,
+        return emitDashes(segs, cum: cum, pattern: pattern,
                           periodOffset: 0.0, tStart: 0.0, tEnd: total)
     }
 
@@ -129,26 +114,16 @@ public enum DashRenderer {
     private enum BoundaryKind { case ii, ee, ei, ie }
 
     private static func expandAlign(
-        _ subpath: [PathCommand],
+        _ segs: [Seg],
+        closed: Bool,
         pattern: [Double]
     ) -> [[PathCommand]] {
-        let anchors = anchorPoints(subpath)
-        let closed = isClosed(subpath)
-        var anchorsWalk = anchors
-        if closed, let first = anchors.first {
-            anchorsWalk.append(first)
-        }
-        let nSegs = anchorsWalk.count > 0 ? anchorsWalk.count - 1 : 0
+        let nSegs = segs.count
         guard nSegs >= 1 else { return [] }
         let basePeriod = pattern.reduce(0, +)
         guard basePeriod > 0 else { return [] }
-        let segLengths = (0..<nSegs).map {
-            segLen(anchorsWalk[$0], anchorsWalk[$0 + 1])
-        }
+        let (segLengths, cum) = segLengthsAndCum(segs)
         if segLengths.allSatisfy({ $0 <= 0 }) { return [] }
-        var cum: [Double] = [0.0]
-        var s = 0.0
-        for l in segLengths { s += l; cum.append(s) }
 
         var allRanges: [(Double, Double)] = []
         for i in 0..<nSegs {
@@ -180,7 +155,7 @@ public enum DashRenderer {
 
         var result: [[PathCommand]] = []
         for (gs, ge) in merged {
-            if let sub = subpathBetweenWrapping(anchors: anchorsWalk, cum: cum,
+            if let sub = subpathBetweenWrapping(segs: segs, cum: cum,
                                                 t0: gs, t1: ge, closed: closed) {
                 result.append(sub)
             }
@@ -278,17 +253,17 @@ public enum DashRenderer {
     }
 
     private static func subpathBetweenWrapping(
-        anchors: [(Double, Double)],
+        segs: [Seg],
         cum: [Double],
         t0: Double, t1: Double,
         closed: Bool
     ) -> [PathCommand]? {
         let total = cum.last ?? 0.0
         if !closed || t1 <= total + EPS {
-            return subpathBetween(anchors: anchors, cum: cum, t0: t0, t1: min(t1, total))
+            return subpathBetween(segs: segs, cum: cum, t0: t0, t1: min(t1, total))
         }
-        let head = subpathBetween(anchors: anchors, cum: cum, t0: t0, t1: total)
-        let tail = subpathBetween(anchors: anchors, cum: cum, t0: 0.0, t1: t1 - total)
+        let head = subpathBetween(segs: segs, cum: cum, t0: t0, t1: total)
+        let tail = subpathBetween(segs: segs, cum: cum, t0: 0.0, t1: t1 - total)
         switch (head, tail) {
         case (.some(let h), .some(let t)):
             var combined = h
@@ -303,62 +278,64 @@ public enum DashRenderer {
         }
     }
 
+    /// The stretch of the subpath between arc-lengths `t0` and `t1`, in
+    /// the subpath's own primitives: the straddled ends are de-Casteljau
+    /// splits of their segment, the segments fully inside are re-emitted
+    /// verbatim. A cubic in, a cubic out — the dash follows the drawn
+    /// geometry, never its chord.
     private static func subpathBetween(
-        anchors: [(Double, Double)],
+        segs: [Seg],
         cum: [Double],
         t0: Double, t1: Double
     ) -> [PathCommand]? {
         if t1 <= t0 + EPS { return nil }
-        let p0 = interpolate(anchors: anchors, cum: cum, t: t0)
-        let p1 = interpolate(anchors: anchors, cum: cum, t: t1)
-        let i = locateSegment(cum: cum, t: t0)
-        let j = locateSegment(cum: cum, t: t1)
-        var cmds: [PathCommand] = [.moveTo(p0.0, p0.1)]
-        if j > i {
-            for k in (i + 1)...j {
-                cmds.append(.lineTo(anchors[k].0, anchors[k].1))
+        let (i, local0) = ArrowTrim.locate(cum, t0)
+        let (j, local1) = ArrowTrim.locate(cum, t1)
+        let a0 = ArrowTrim.paramAtArc(segs[i], local0)
+        let a1 = ArrowTrim.paramAtArc(segs[j], local1)
+        let start = ArrowTrim.pointAt(segs[i], a0)
+        var cmds: [PathCommand] = [.moveTo(start.0, start.1)]
+        if i == j {
+            cmds.append(ArrowTrim.subCommand(segs[i], a0, a1))
+        } else {
+            cmds.append(ArrowTrim.subCommand(segs[i], a0, 1.0))
+            if i + 1 < j {
+                for k in (i + 1)..<j { cmds.append(ArrowTrim.fullCommand(segs[k])) }
             }
+            cmds.append(ArrowTrim.subCommand(segs[j], 0.0, a1))
         }
-        let last = cmds.last!
-        var lastX = 0.0, lastY = 0.0
-        switch last {
-        case .moveTo(let x, let y), .lineTo(let x, let y):
-            lastX = x; lastY = y
-        default: break
-        }
-        if abs(lastX - p1.0) > 1e-9 || abs(lastY - p1.1) > 1e-9 {
-            cmds.append(.lineTo(p1.0, p1.1))
+        // `t1` landing exactly on an anchor makes the final command a
+        // zero-length repeat of the point we just drew to; drop it, as
+        // the lines-only engine dropped its redundant trailing lineTo.
+        if cmds.count >= 2 {
+            let last = cmdEndpoint(cmds[cmds.count - 1])
+            let prev = cmdEndpoint(cmds[cmds.count - 2])
+            if abs(last.0 - prev.0) <= 1e-9 && abs(last.1 - prev.1) <= 1e-9 {
+                cmds.removeLast()
+            }
         }
         return cmds
     }
 
-    private static func interpolate(
-        anchors: [(Double, Double)], cum: [Double], t: Double
-    ) -> (Double, Double) {
-        if t <= 0 { return anchors[0] }
-        let total = cum.last ?? 0.0
-        if t >= total { return anchors.last! }
-        let i = locateSegment(cum: cum, t: t)
-        let segL = cum[i + 1] - cum[i]
-        if segL <= 0 { return anchors[i] }
-        let alpha = (t - cum[i]) / segL
-        let a = anchors[i]
-        let b = anchors[i + 1]
-        return (a.0 + alpha * (b.0 - a.0), a.1 + alpha * (b.1 - a.1))
-    }
-
-    private static func locateSegment(cum: [Double], t: Double) -> Int {
-        let n = cum.count - 1
-        if t <= cum[0] { return 0 }
-        if t >= cum[cum.count - 1] { return n - 1 }
-        for i in 0..<n {
-            if cum[i] <= t && t < cum[i + 1] { return i }
+    private static func cmdEndpoint(_ cmd: PathCommand) -> (Double, Double) {
+        switch cmd {
+        case .moveTo(let x, let y), .lineTo(let x, let y),
+             .smoothQuadTo(let x, let y):
+            return (x, y)
+        case .curveTo(_, _, _, _, let x, let y),
+             .smoothCurveTo(_, _, let x, let y):
+            return (x, y)
+        case .quadTo(_, _, let x, let y):
+            return (x, y)
+        case .arcTo(_, _, _, _, _, let x, let y):
+            return (x, y)
+        case .closePath:
+            return (Double.nan, Double.nan)
         }
-        return n - 1
     }
 
     private static func emitDashes(
-        _ anchorsWalk: [(Double, Double)],
+        _ segs: [Seg],
         cum: [Double],
         pattern: [Double],
         periodOffset: Double,
@@ -374,7 +351,7 @@ public enum DashRenderer {
             let nextT = min(t + remaining, tEnd)
             let isDash = (curIdx % 2 == 0)
             if isDash && nextT > t + EPS {
-                if let sub = subpathBetween(anchors: anchorsWalk, cum: cum, t0: t, t1: nextT) {
+                if let sub = subpathBetween(segs: segs, cum: cum, t0: t, t1: nextT) {
                     out.append(sub)
                 }
             }

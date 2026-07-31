@@ -20,10 +20,17 @@
 import Foundation
 
 public enum ArrowTrim {
-    private typealias Pt = (Double, Double)
+    typealias Pt = (Double, Double)
     private static let eps = 1e-9
 
-    private enum Seg {
+    /// A single drawable segment, retaining its original curve form so the
+    /// trim can split it exactly.
+    ///
+    /// Shared with `DashRenderer`, which walks the same segment model so a
+    /// dashed curve and a trimmed curve agree on arc length, on the
+    /// arc→parameter mapping, and on the de-Casteljau split. One kernel, one
+    /// parameterization: whatever the corpus pins here holds for both.
+    enum Seg {
         case line(Pt, Pt)
         case quad(Pt, Pt, Pt)
         case cubic(Pt, Pt, Pt, Pt)
@@ -54,7 +61,7 @@ public enum ArrowTrim {
         }
     }
 
-    private static func pointAt(_ s: Seg, _ t: Double) -> Pt {
+    static func pointAt(_ s: Seg, _ t: Double) -> Pt {
         switch s {
         case .line(let p0, let p1):
             return lerp(p0, p1, t)
@@ -81,14 +88,14 @@ public enum ArrowTrim {
         }
     }
 
-    private static func arcLen(_ s: Seg) -> Double {
+    static func arcLen(_ s: Seg) -> Double {
         let pts = flatten(s)
         var total = 0.0
         for i in 1..<pts.count { total += dist(pts[i - 1], pts[i]) }
         return total
     }
 
-    private static func paramAtArc(_ s: Seg, _ target: Double) -> Double {
+    static func paramAtArc(_ s: Seg, _ target: Double) -> Double {
         if target <= 0.0 { return 0.0 }
         switch s {
         case .line(let p0, let p1):
@@ -145,7 +152,7 @@ public enum ArrowTrim {
     }
 
     // Sub-segment [t0, t1] as a PathCommand drawing FROM pointAt(t0) TO pointAt(t1).
-    private static func subCommand(_ s: Seg, _ t0: Double, _ t1: Double) -> PathCommand {
+    static func subCommand(_ s: Seg, _ t0: Double, _ t1: Double) -> PathCommand {
         switch s {
         case .line:
             let e = pointAt(s, t1)
@@ -159,7 +166,7 @@ public enum ArrowTrim {
         }
     }
 
-    private static func fullCommand(_ s: Seg) -> PathCommand {
+    static func fullCommand(_ s: Seg) -> PathCommand {
         switch s {
         case .line(_, let p1): return .lineTo(p1.0, p1.1)
         case .cubic(_, let p1, let p2, let p3):
@@ -169,7 +176,7 @@ public enum ArrowTrim {
         }
     }
 
-    private static func buildSegments(_ cmds: [PathCommand]) -> [Seg] {
+    static func buildSegments(_ cmds: [PathCommand]) -> [Seg] {
         var segs: [Seg] = []
         var cur: Pt = (0.0, 0.0)
         var subStart: Pt = (0.0, 0.0)
@@ -197,7 +204,7 @@ public enum ArrowTrim {
     }
 
     // Locate the segment straddling global arc distance `a`; returns (index, local).
-    private static func locate(_ cum: [Double], _ a: Double) -> (Int, Double) {
+    static func locate(_ cum: [Double], _ a: Double) -> (Int, Double) {
         let n = cum.count - 1
         if a <= cum[0] { return (0, 0.0) }
         if a >= cum[n] { return (n - 1, cum[n] - cum[n - 1]) }

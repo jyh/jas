@@ -110,12 +110,39 @@ private let minClosedBboxAspect = 0.10
 
 // MARK: - Public API
 
-/// Recognize from a raw polyline.
+/// Recognize from a raw polyline. Returns the best-fitting candidate:
+/// lowest residual wins, and an exact TIE is broken by the ruled
+/// precedence — see `recognizeCandidates`.
 public func recognize(_ points: [Pt], _ cfg: RecognizeConfig) -> RecognizedShape? {
-    if points.count < 3 { return nil }
+    // Lowest residual wins; EQUAL residuals are broken by the candidate's
+    // position in the list, which is the ruled precedence order. Spelled out
+    // rather than leaning on a sort's stability (Swift's `sort` is not
+    // stable, and Rust's `sort_by` is), because here a tie does not merely
+    // reorder a list — it decides WHICH SHAPE the artist's stroke becomes.
+    // Mirrors the selection in shape_recognize.rs.
+    let ordered = recognizeCandidates(points, cfg).enumerated().sorted { l, r in
+        l.element.0 != r.element.0 ? l.element.0 < r.element.0 : l.offset < r.offset
+    }
+    return ordered.first?.element.1
+}
+
+/// Every fit that lands within tolerance, paired with its residual, IN THE
+/// RULED PRECEDENCE ORDER (JYH, 2026-07-31):
+///
+///     line, scribble, circle/ellipse, rectangle, roundRect,
+///     triangle, lemniscate, arrow
+///
+/// That order is not decoration. `recognize` takes the lowest residual and
+/// breaks an exact tie by position in this list, so reordering the appends
+/// below silently changes what a freehand stroke commits as. The order is
+/// pinned by `candidateOrderFollowsTheRuledPrecedence` and by
+/// `tiedEllipseAndRectangleResolveToEllipse`; the Rust port appends in the
+/// same order and is pinned by the same two tests.
+public func recognizeCandidates(_ points: [Pt], _ cfg: RecognizeConfig) -> [(Double, RecognizedShape)] {
+    if points.count < 3 { return [] }
     let pts = resample(points, cfg.resampleN)
     let diag = bboxDiagOf(pts)
-    if diag < 1e-9 { return nil }
+    if diag < 1e-9 { return [] }
     let closed = isClosed(pts, cfg.closeGapFrac)
     let tolAbs = cfg.tolerance * diag
 
@@ -201,17 +228,7 @@ public func recognize(_ points: [Pt], _ cfg: RecognizeConfig) -> RecognizedShape
         }
     }
 
-    // Tie-break on the candidate index. Rust's `sort_by` is STABLE, so
-    // fits scoring an EQUAL residual keep the order they were appended in
-    // — and both ports append in the same order, so that order is the
-    // shared rule. Swift's `sort` is not guaranteed stable, and only the
-    // first survives, so a tie here does not reorder a list: it decides
-    // WHICH SHAPE the gesture becomes. Mirrors the tie-breaks in
-    // Boolean.swift, BooleanNormalize.swift and Planar.swift.
-    let ordered = candidates.enumerated().sorted { l, r in
-        l.element.0 != r.element.0 ? l.element.0 < r.element.0 : l.offset < r.offset
-    }
-    return ordered.first?.element.1
+    return candidates
 }
 
 /// Recognize from a path that may contain Beziers.

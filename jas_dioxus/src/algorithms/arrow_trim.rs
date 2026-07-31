@@ -32,8 +32,13 @@ type P = (f64, f64);
 
 /// A single drawable segment, retaining its original curve form so the trim can
 /// split it exactly.
+///
+/// Shared with `algorithms::dash_renderer`, which walks the same segment model
+/// so a dashed curve and a trimmed curve agree on arc length, on the
+/// arc→parameter mapping, and on the de-Casteljau split. One kernel, one
+/// parameterization: whatever the corpus pins here holds for both.
 #[derive(Clone, Copy)]
-enum Seg {
+pub(crate) enum Seg {
     Line { p0: P, p1: P },
     Quad { p0: P, p1: P, p2: P },
     Cubic { p0: P, p1: P, p2: P, p3: P },
@@ -50,12 +55,12 @@ fn dist(a: P, b: P) -> f64 {
 }
 
 impl Seg {
-    fn p0(&self) -> P {
+    pub(crate) fn p0(&self) -> P {
         match *self {
             Seg::Line { p0, .. } | Seg::Quad { p0, .. } | Seg::Cubic { p0, .. } => p0,
         }
     }
-    fn p1(&self) -> P {
+    pub(crate) fn p1(&self) -> P {
         match *self {
             Seg::Line { p1, .. } => p1,
             Seg::Quad { p2, .. } => p2,
@@ -64,7 +69,7 @@ impl Seg {
     }
 
     /// Point on the segment at parameter `t` in [0, 1].
-    fn point_at(&self, t: f64) -> P {
+    pub(crate) fn point_at(&self, t: f64) -> P {
         match *self {
             Seg::Line { p0, p1 } => lerp(p0, p1, t),
             Seg::Quad { p0, p1, p2 } => {
@@ -100,7 +105,7 @@ impl Seg {
         }
     }
 
-    fn arc_len(&self) -> f64 {
+    pub(crate) fn arc_len(&self) -> f64 {
         let pts = self.flatten();
         let mut total = 0.0;
         for w in pts.windows(2) {
@@ -111,7 +116,7 @@ impl Seg {
 
     /// Parameter `t` at arc distance `target` (in [0, arc_len]) from the segment
     /// start, using the same polyline the length is measured on.
-    fn param_at_arc(&self, target: f64) -> f64 {
+    pub(crate) fn param_at_arc(&self, target: f64) -> f64 {
         if target <= 0.0 {
             return 0.0;
         }
@@ -144,7 +149,7 @@ impl Seg {
     /// The sub-segment between parameters `t0` and `t1` (0 <= t0 <= t1 <= 1) as a
     /// PathCommand that draws FROM `point_at(t0)` TO `point_at(t1)`. The caller
     /// emits the MoveTo/joining point.
-    fn sub_command(&self, t0: f64, t1: f64) -> PathCommand {
+    pub(crate) fn sub_command(&self, t0: f64, t1: f64) -> PathCommand {
         match *self {
             Seg::Line { .. } => {
                 let e = self.point_at(t1);
@@ -164,7 +169,7 @@ impl Seg {
     }
 
     /// The whole segment as a PathCommand drawing to its endpoint.
-    fn full_command(&self) -> PathCommand {
+    pub(crate) fn full_command(&self) -> PathCommand {
         match *self {
             Seg::Line { p1, .. } => PathCommand::LineTo { x: p1.0, y: p1.1 },
             Seg::Cubic { p1, p2, p3, .. } => {
@@ -213,7 +218,7 @@ fn quad_between(p0: P, p1: P, p2: P, t0: f64, t1: f64) -> (P, P, P) {
 /// Parse path commands into drawable segments. `SmoothCurveTo`/`SmoothQuadTo`/
 /// `ArcTo` degrade to a line to their endpoint, matching `flatten_path_commands`
 /// (arrowheaded strokes are lines and explicit cubics/quads in practice).
-fn build_segments(cmds: &[PathCommand]) -> Vec<Seg> {
+pub(crate) fn build_segments(cmds: &[PathCommand]) -> Vec<Seg> {
     let mut segs = Vec::new();
     let mut cur: P = (0.0, 0.0);
     let mut sub_start: P = (0.0, 0.0);
@@ -254,7 +259,7 @@ fn build_segments(cmds: &[PathCommand]) -> Vec<Seg> {
 
 /// Locate the segment straddling global arc distance `a` and the local distance
 /// into it. `cum` has `segs.len() + 1` entries (leading 0).
-fn locate(cum: &[f64], a: f64) -> (usize, f64) {
+pub(crate) fn locate(cum: &[f64], a: f64) -> (usize, f64) {
     let n = cum.len() - 1;
     if a <= cum[0] {
         return (0, 0.0);

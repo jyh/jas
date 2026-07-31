@@ -216,6 +216,20 @@ public func applyEyedropperAppearance(
     return result
 }
 
+/// The stroke a fabrication starts from when a ticked sub-toggle would
+/// write a stroke attribute onto a target that has no stroke at all.
+///
+/// RULED (JYH 2026-07-31): the colour and width come from the APP's
+/// default stroke — `workspace/state.yaml`'s `stroke_color` (`#000000`)
+/// and `stroke_width` (1.0), the same pair `Model.defaultStroke` /
+/// `AppDefaults.stroke` are seeded with — and NEVER from the source.
+/// Seeding from the source transfers two attributes the artist
+/// deselected. (Refusing to fabricate at all was the alternative, and
+/// was rejected on usability: tick dash, click, nothing happens.)
+private func fabricatedStrokeBase() -> Stroke {
+    Stroke(color: .black, width: 1.0)
+}
+
 /// Helper for the Stroke group's per-sub-toggle apply. Mirrors the
 /// Rust apply_stroke_with_subs.
 private func applyStrokeWithSubs(
@@ -224,7 +238,15 @@ private func applyStrokeWithSubs(
     config: EyedropperConfig
 ) -> Element {
     guard let src = src else {
-        return withStroke(target, stroke: nil)
+        // Source had no stroke. That is not a licence to ignore the
+        // sub-toggles — this branch honours them exactly as the branch
+        // below does. "No stroke" is a value of the strokeColor
+        // attribute (EYEDROPPER_TOOL.md §Stroke: that sub-toggle covers
+        // "color, none, gradient, or pattern"), so it transfers only
+        // when strokeColor is ticked. Every other sub-toggle has
+        // nothing to read off a stroke that isn't there, and is a no-op
+        // per the spec's "source lacks the attribute → no-op" rule.
+        return config.strokeColor ? withStroke(target, stroke: nil) : target
     }
 
     let anyStrokeSub = config.strokeColor || config.strokeWeight
@@ -234,7 +256,11 @@ private func applyStrokeWithSubs(
         return target
     }
 
-    let existing = target.stroke ?? Stroke(color: src.color, width: src.width)
+    // The target's own stroke, or a fabrication from the app defaults
+    // when it has none — see `fabricatedStrokeBase`. The fields the
+    // ticked sub-toggles do NOT cover keep that base rather than a
+    // value smuggled in from the source.
+    let existing = target.stroke ?? fabricatedStrokeBase()
 
     let newStroke = Stroke(
         color: config.strokeColor ? src.color : existing.color,
