@@ -92,6 +92,55 @@ fn operand_leaves(elem: &Rc<Element>) -> Vec<Rc<Element>> {
     out
 }
 
+/// The opacity a boolean output inherits from an operand that MAY BE A
+/// CONTAINER: the COMPOSED opacity, `container.opacity x leaf.opacity`, run
+/// down the WHOLE chain of containers to the leaf `resolved_fill` /
+/// `resolved_stroke` speak with. A leaf answers with its own, unchanged.
+///
+/// RULED 2026-07-31 (BOARD-boolean-container-paint), the remainder
+/// CONTAINERPAINT recorded rather than guessed. THE PRINCIPLE: for a
+/// DESTRUCTIVE operation the result should LOOK LIKE WHAT IT CONSUMED. A group
+/// drawn at 0.5 x 0.8 = 0.4 came back as 0.5, so the artwork visibly changed
+/// density at the instant of clicking — nothing in BOOLEAN.md justifies that.
+///
+/// THE ASYMMETRY WITH FILL, which is why this is a different rule and not the
+/// same one: a container has NO fill of its own (`fill()` ends `_ => None`), so
+/// resolving to the member was the ONLY available answer and discarded nothing.
+/// A container DOES carry a real opacity — two true values exist, and the
+/// ruling COMBINES them instead of electing one.
+///
+/// THE HONEST LIMIT, recorded so that a later reader does not rediscover it as
+/// a bug: where a container holds SEVERAL members at DIFFERENT opacities, NO
+/// rule preserves appearance — flattening N differently-transparent shapes into
+/// one path is lossy by nature and no single number can stand for what the
+/// stack looked like. Composition is EXACT for the single-visible-member case
+/// and an APPROXIMATION otherwise. The choice was never correct-versus-
+/// incorrect; it is which approximation is least surprising, picked to be exact
+/// exactly where an artist will notice.
+///
+/// BLEND MODE IS OPEN and deliberately NOT touched here. Opacities multiply;
+/// blend modes do not compose at all, so the move that settles opacity is
+/// unavailable and no rule has been ruled. The product keeps the container's
+/// own mode — current behaviour, not the settled answer.
+///
+/// The container test is `children()`, which is `Some` for exactly the two
+/// kinds `first_paintable` recurses into, so the walk cannot drift from the one
+/// that chose the leaf whose paint the product wears.
+fn resolved_opacity(elem: &Element) -> f64 {
+    let own = elem.common().opacity;
+    let Some(children) = elem.children() else { return own };
+    match children
+        .iter()
+        .find(|c| crate::geometry::element::first_paintable(c).is_some())
+    {
+        Some(c) => own * resolved_opacity(c),
+        // An EMPTY container — or one holding only empty containers — speaks
+        // for nobody and contributes no rings either, so there is no second
+        // value to compose with and its own opacity is the whole answer.
+        None => own,
+    }
+}
+
 /// The `common` an output inherits from a source operand that MAY BE A
 /// CONTAINER. A leaf answers exactly as it always did.
 ///
@@ -113,12 +162,13 @@ fn operand_leaves(elem: &Rc<Element>) -> Vec<Rc<Element>> {
 /// product is id-less, which breaks a dangling reference LOUDLY instead of
 /// silently rebinding it (REFERENCE_GRAPH.md §3.7's whole concern).
 ///
-/// `opacity` and blend mode are the exception and stay the CONTAINER'S OWN: it
-/// genuinely carries them, which is exactly why `fill()`/`stroke()` return
-/// `None` for it and `common().opacity` does not. NAMED REMAINDER: the truthful
-/// answer is the COMPOSED opacity (container x member), and nothing in this
-/// pass composes them; a container at 100% wrapping a member at 50% still
-/// yields 100% here.
+/// `opacity` and blend mode are the exception, because a container genuinely
+/// CARRIES both — which is exactly why `fill()`/`stroke()` return `None` for it
+/// and `common().opacity` does not.
+///
+/// `opacity` COMPOSES, container x leaf, per [`resolved_opacity`]: the ruled
+/// answer to the remainder CONTAINERPAINT recorded here. Blend mode is still
+/// OPEN and stays the container's own.
 fn source_common(elem: &Rc<Element>) -> crate::geometry::element::CommonProps {
     if !elem.is_group_or_layer() {
         return elem.common().clone();
@@ -129,7 +179,7 @@ fn source_common(elem: &Rc<Element>) -> crate::geometry::element::CommonProps {
         1 => leaves[0].common().clone(),
         _ => merged_common(&leaves, &leaves[0]),
     };
-    common.opacity = elem.common().opacity;
+    common.opacity = resolved_opacity(elem);
     common.mode = elem.common().mode;
     common
 }
@@ -141,6 +191,10 @@ fn source_common(elem: &Rc<Element>) -> crate::geometry::element::CommonProps {
 /// PAINT rides from `front`: BOOLEAN.md §Operand and paint rules names four
 /// properties — fill, stroke, `opacity`, blend mode — as what a boolean op
 /// SPEAKS TO, and two of them (`opacity`, `mode`) live on `CommonProps`.
+/// `front` may be a CONTAINER, so `opacity` is read through
+/// [`resolved_opacity`] and COMPOSES (container x leaf) rather than taking the
+/// container's own value alone. `mode` does not compose — that question is
+/// OPEN — and stays `front`'s own.
 ///
 /// EVERYTHING ELSE follows UNANIMITY: when every source agrees, carrying the
 /// value IS preservation — well-defined, no winner elected — and when they
@@ -176,8 +230,9 @@ fn merged_common(
             .then_some(first)
     }
     let mut common = CommonProps {
-        // Paint, per the ratified four-property rule.
-        opacity: front.common().opacity,
+        // Paint, per the ratified four-property rule. COMPOSED for a container
+        // front; identical to `front.common().opacity` for a leaf.
+        opacity: resolved_opacity(front),
         mode: front.common().mode,
         ..CommonProps::default()
     };
@@ -1787,8 +1842,15 @@ impl Controller {
         // stroke, opacity and blend mode"; `fill()`/`stroke()` end `_ => None`
         // for a container, so the settled rule applied to a group produced a
         // compound shape with no paint at all. `resolved_fill`/`resolved_stroke`
-        // read the leaf the container speaks with. `opacity`/`mode` below stay
-        // the container's OWN — it carries those.
+        // read the leaf the container speaks with.
+        //
+        // `opacity` COMPOSES — container x leaf, `resolved_opacity` —
+        // because a container carries a REAL opacity where it carries no fill,
+        // so two true values exist and the ruling combines them (JYH
+        // 2026-07-31). A destructive op's product must look like what it
+        // consumed, and creation-time compound-shape paint follows the same
+        // rule per BOOLEAN.md. `mode` is OPEN — blend modes do not compose at
+        // all — and stays the container's OWN.
         let frontmost = elements.last().unwrap();
         let fill = crate::geometry::element::resolved_fill(frontmost);
         let stroke = crate::geometry::element::resolved_stroke(frontmost);
@@ -1801,7 +1863,7 @@ impl Controller {
                 .flatten()
         };
         let common = crate::geometry::element::CommonProps {
-            opacity: frontmost.common().opacity,
+            opacity: resolved_opacity(frontmost),
             mode: frontmost.common().mode,
             transform: unanimous_transform,
             ..crate::geometry::element::CommonProps::default()
@@ -5556,6 +5618,238 @@ mod tests {
         assert!(crate::geometry::element::first_paintable(&empty).is_none());
         assert!(crate::geometry::element::resolved_fill(&empty).is_none());
         assert!(crate::geometry::element::resolved_stroke(&empty).is_none());
+    }
+
+    // -------------------------------------------------------------------
+    // CONTAINER OPERANDS — OPACITY COMPOSES
+    // (BOARD-boolean-container-paint, JYH ruled 2026-07-31)
+    //
+    // The remainder CONTAINERPAINT recorded rather than guessed, now ruled.
+    //
+    //     result.opacity = container.opacity × frontmost-leaf.opacity
+    //
+    // THE ASYMMETRY THAT MAKES OPACITY A DIFFERENT QUESTION FROM FILL. A
+    // container has NO fill of its own — `fill()`/`stroke()` genuinely end
+    // `_ => None` — so resolving to the member was the ONLY available answer
+    // and nothing was discarded in choosing it. A container DOES carry a real
+    // opacity. Two true values exist, and the ruling COMBINES them instead of
+    // electing one.
+    //
+    // THE PRINCIPLE: for a DESTRUCTIVE operation, the result should LOOK LIKE
+    // WHAT IT CONSUMED. A group drawn at 0.5 × 0.8 = 0.4 came back as 0.5 —
+    // the artwork visibly changes density at the instant of clicking, which no
+    // reading of BOOLEAN.md §paint justifies.
+    //
+    // THE HONEST LIMIT, written down so a later reader does not rediscover it
+    // as a bug: where a container holds SEVERAL members at DIFFERENT
+    // opacities, NO rule preserves appearance — flattening N
+    // differently-transparent shapes into one path is lossy by nature.
+    // Composition is EXACT for the single-visible-member case and an
+    // APPROXIMATION otherwise. The choice was never correct-versus-incorrect;
+    // it is which approximation is least surprising, picked to be exact
+    // exactly where an artist will notice.
+    //
+    // BLEND MODE IS NOT RULED — see `..._blend_mode_is_open_and_unchanged`.
+    // -------------------------------------------------------------------
+
+    /// A rect carrying an OPACITY of its own, painted like the fixtures above
+    /// so a wrong operand is visible as well as a wrong number.
+    fn rect_at_opacity(x: f64, opacity: f64) -> Element {
+        let mut e = painted_rect(x, BLUE, Color::BLACK, 7.0);
+        e.common_mut().opacity = opacity;
+        e
+    }
+
+    /// A group carrying an opacity of its own.
+    fn group_at_opacity(opacity: f64, children: Vec<Element>) -> Element {
+        let mut g = make_group(children);
+        g.common_mut().opacity = opacity;
+        g
+    }
+
+    /// Two overlapping operands — an OPAQUE back leaf and whatever `front` is
+    /// — both selected. The back rect is fully opaque on purpose: every number
+    /// the assertions read then comes from the front operand alone.
+    fn boolean_over_front(front: Element) -> Model {
+        let back = rect_at_opacity(0.0, 1.0);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(back), Rc::new(front)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L0".to_string()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+            ],
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    /// The opacity of the first output of `op` over [opaque leaf, `front`].
+    fn front_operand_result_opacity(op: &str, front: Element) -> f64 {
+        let mut model = boolean_over_front(front);
+        Controller::apply_destructive_boolean(&mut model, op, &BooleanOptions::default());
+        let kids = model.document().layers[0].children().unwrap().to_vec();
+        assert_eq!(kids.len(), 1, "`{op}` must emit exactly one output here — \
+                                   a fixture that stopped producing one would \
+                                   make every assertion below vacuous");
+        kids[0].common().opacity
+    }
+
+    #[test]
+    fn a_boolean_over_a_grouped_operand_composes_the_two_opacities() {
+        // The consumed-operand arm (`merged_common`), across every N -> 1 op.
+        const CONTAINER: f64 = 0.5;
+        const LEAF: f64 = 0.8;
+        for op in ["union", "intersection", "exclude"] {
+            assert_eq!(
+                front_operand_result_opacity(
+                    op, group_at_opacity(CONTAINER, vec![rect_at_opacity(5.0, LEAF)])),
+                CONTAINER * LEAF,
+                "`{op}` over a group at {CONTAINER} holding a leaf at {LEAF} \
+                 must produce the COMPOSED opacity {}: the operand was drawn \
+                 at that density and a destructive op must look like what it \
+                 consumed. Taking the container's own value alone ({CONTAINER}) \
+                 makes the artwork jump the instant the artist clicks",
+                CONTAINER * LEAF,
+            );
+        }
+    }
+
+    #[test]
+    fn a_surviving_container_operand_composes_its_opacities_too() {
+        // The OTHER site: SUBTRACT_BACK / TRIM / DIVIDE / CROP keep "its own
+        // paint" per operand and read it through `source_common`, not
+        // `merged_common`. SUBTRACT_BACK is the arm where a FRONT container
+        // survives (the backmost is the cutter), so one op exercises the site.
+        const CONTAINER: f64 = 0.5;
+        const LEAF: f64 = 0.8;
+        assert_eq!(
+            front_operand_result_opacity(
+                "subtract_back",
+                group_at_opacity(CONTAINER, vec![rect_at_opacity(5.0, LEAF)])),
+            CONTAINER * LEAF,
+            "a SURVIVING container keeps its own paint, and a container's own \
+             opacity IS the composed one — the survivor arms must not disagree \
+             with the consumed arms about what a group is wearing",
+        );
+    }
+
+    #[test]
+    fn make_compound_shape_over_a_grouped_operand_composes_the_opacities() {
+        // The non-destructive twin. BOOLEAN.md applies the same paint rule at
+        // creation time, and this is the third and last site that reads an
+        // operand's opacity.
+        const CONTAINER: f64 = 0.5;
+        const LEAF: f64 = 0.8;
+        let mut model = boolean_over_front(
+            group_at_opacity(CONTAINER, vec![rect_at_opacity(5.0, LEAF)]));
+        Controller::make_compound_shape(&mut model);
+        let child = model.document().layers[0].children().unwrap()[0].clone();
+        assert_eq!(
+            child.common().opacity, CONTAINER * LEAF,
+            "a compound shape built from a GROUP operand must wear that \
+             group's composed opacity, exactly as the destructive arms do",
+        );
+    }
+
+    #[test]
+    fn a_container_at_full_opacity_yields_the_leafs_own() {
+        // DEGENERATE 1, and the one that keeps the container-seeded relation
+        // true: the seed wrapper is a DEFAULT group, so composing with it must
+        // be the identity. If this reds, every wrapped corpus case moves.
+        assert_eq!(
+            front_operand_result_opacity(
+                "union", group_at_opacity(1.0, vec![rect_at_opacity(5.0, 0.8)])),
+            0.8,
+            "a container at full opacity contributes nothing to the product; \
+             wrapping a leaf in a plain group must not change what it looks like",
+        );
+    }
+
+    #[test]
+    fn a_leaf_at_full_opacity_yields_the_containers_own() {
+        // DEGENERATE 2, the mirror — and the case CONTAINERPAINT's shipped
+        // behaviour already got right, which is why it looked settled.
+        assert_eq!(
+            front_operand_result_opacity(
+                "union", group_at_opacity(0.5, vec![rect_at_opacity(5.0, 1.0)])),
+            0.5,
+            "an opaque member contributes nothing either; the container's own \
+             value stands",
+        );
+    }
+
+    #[test]
+    fn a_nested_container_composes_the_whole_chain() {
+        // The product runs EVERY level, not one. A one-level implementation
+        // answers 0.5 × 0.8 = 0.4 here and looks plausible — an intermediate
+        // group's opacity is as real as the outermost one's, and dropping it
+        // is the same defect one level down.
+        const OUTER: f64 = 0.5;
+        const INNER: f64 = 0.5;
+        const LEAF: f64 = 0.8;
+        let front = group_at_opacity(
+            OUTER, vec![group_at_opacity(INNER, vec![rect_at_opacity(5.0, LEAF)])]);
+        assert_eq!(
+            front_operand_result_opacity("union", front),
+            OUTER * INNER * LEAF,
+            "the composition must run the whole container chain down to the \
+             leaf the paint came from: {OUTER} × {INNER} × {LEAF} = {}",
+            OUTER * INNER * LEAF,
+        );
+    }
+
+    #[test]
+    fn an_empty_container_operand_composes_with_nothing() {
+        // The degenerate end, matching `..._resolves_to_no_paint` above: an
+        // empty container speaks for nobody and contributes no rings, so there
+        // is no second value to compose with and its own opacity stands. The
+        // walk must not panic hunting for a leaf that is not there.
+        let mut model = boolean_over_front(group_at_opacity(0.5, vec![]));
+        Controller::apply_destructive_boolean(
+            &mut model, "union", &BooleanOptions::default());
+        let kids = model.document().layers[0].children().unwrap().to_vec();
+        assert_eq!(kids.len(), 1, "the union of the back rect with nothing is \
+                                   still the back rect");
+        assert_eq!(
+            kids[0].common().opacity, 0.5,
+            "an empty container has no member to compose with; its own opacity \
+             is the whole answer",
+        );
+    }
+
+    #[test]
+    fn a_container_operands_blend_mode_is_open_and_unchanged() {
+        // BLEND MODE IS NOT RULED. Opacities multiply; blend modes do not
+        // compose AT ALL, so the move that settles opacity is simply
+        // unavailable here. The product keeps the CONTAINER'S OWN mode —
+        // today's behaviour, pinned so that changing it is a RULING someone
+        // made, not a drift that arrived with an unrelated edit. Stubb's
+        // reading, not ruled: the container's mode wins when non-Normal, else
+        // the leaf's, because setting a mode on a GROUP is the more deliberate
+        // act. NAMED CONSEQUENCE of leaving it: a DEFAULT wrapper (mode
+        // Normal) around a leaf with a mode erases that leaf's mode from the
+        // product, so the container-seeded relation does not hold for blend
+        // mode. The corpus carries no blend modes, which is why nothing reds.
+        use crate::geometry::element::BlendMode;
+        let mut leaf = rect_at_opacity(5.0, 1.0);
+        leaf.common_mut().mode = BlendMode::Screen;
+        let mut front = group_at_opacity(1.0, vec![leaf]);
+        front.common_mut().mode = BlendMode::Multiply;
+        let mut model = boolean_over_front(front);
+        Controller::apply_destructive_boolean(
+            &mut model, "union", &BooleanOptions::default());
+        let child = model.document().layers[0].children().unwrap()[0].clone();
+        assert_eq!(
+            child.common().mode, BlendMode::Multiply,
+            "the container's own blend mode stands — OPEN, not settled",
+        );
     }
 
     #[test]
