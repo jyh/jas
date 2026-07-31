@@ -1308,6 +1308,573 @@ mod tests {
     }
 
     // ===============================================================
+    // THE CIRCLE INVARIANT — a Shift-constrained draw is SQUARE
+    // BIT-EXACTLY, at any zoom and any pan.
+    //
+    //     ellipse.rx == ellipse.ry        rect.width == rect.height
+    //
+    // Built as a CHECKER with a GENERATIVE lane rather than as more
+    // gesture vectors, because vectors are the wrong instrument here.
+    // DYADICSIDE fixed the cause (the constrained side is CARRIED in
+    // `doc_w`/`doc_h`, never RECOVERED by re-subtracting the anchor)
+    // but pinned it with two hand-picked drags, and the round trip
+    // `(anchor + side) - anchor` only loses an ulp when the sum crosses
+    // a binade — so most candidate vectors are exact BY LUCK and the
+    // original defect needed a SEARCHED-FOR vector to show itself.
+    //
+    // Three lanes, in the ruled order — the checker is the law, the
+    // corpus is its witnesses, the generative lane is its growing
+    // confidence:
+    //
+    //   `check_shift_constrain`      the predicate (the law)
+    //   `shift_constrain_witnesses`  the named corpus, deterministic
+    //   `shift_constrain_generative` fresh vectors, fresh seed each run
+    //
+    // All three read test_fixtures/properties/shift_constrain_square.json,
+    // whose `_doc` carries the full rationale. Mirrored in Swift as
+    // `checkShiftConstrain` / `shiftConstrainWitnesses` /
+    // `shiftConstrainGenerative` (JasSwift/Tests/CrossLanguageTests.swift).
+    // ---------------------------------------------------------------
+
+    /// One Shift-constrained draw, in the terms the checker takes: the
+    /// view it happens on and the two viewport points that bracket it.
+    #[cfg(feature = "web")]
+    #[derive(Clone, Copy, Debug)]
+    struct ShiftDraw {
+        zoom: f64,
+        offset_x: f64,
+        offset_y: f64,
+        press_x: f64,
+        press_y: f64,
+        release_x: f64,
+        release_y: f64,
+    }
+
+    #[cfg(feature = "web")]
+    impl ShiftDraw {
+        /// The gesture case this draw denotes: press, one dragging move
+        /// with Shift held, release at the same point with Shift held.
+        /// Shaped for `run_gesture_model`, so the checker drives the
+        /// PRODUCTION CanvasTool seam through the same shared replay
+        /// path the gesture corpus uses — not a private re-derivation
+        /// of what the tool would have done.
+        fn gesture_case(&self, tool: &str, setup_svg: &str, viewport: (f64, f64)) -> serde_json::Value {
+            serde_json::json!({
+                "name": format!("shift_constrain/{tool}"),
+                "setup_svg": setup_svg,
+                "tool": tool,
+                "view": {
+                    "zoom_level": self.zoom,
+                    "view_offset_x": self.offset_x,
+                    "view_offset_y": self.offset_y,
+                    "viewport_w": viewport.0,
+                    "viewport_h": viewport.1,
+                },
+                "events": [
+                    { "kind": "press", "x": self.press_x, "y": self.press_y },
+                    { "kind": "move", "x": self.release_x, "y": self.release_y,
+                      "dragging": true, "shift": true },
+                    { "kind": "release", "x": self.release_x, "y": self.release_y,
+                      "shift": true },
+                ],
+            })
+        }
+    }
+
+    /// THE CHECKER. Replay `draw` with `tool` and rule the committed
+    /// element legal: it must EXIST at `path`, and its two named fields
+    /// must be the SAME double.
+    ///
+    /// Returns `None` when legal, `Some(complaint)` when not — a
+    /// predicate rather than an assertion, so the generative lane can
+    /// collect several failures and report the shape of them instead of
+    /// aborting on the first.
+    ///
+    /// The equality is `==`, with no tolerance band, deliberately. A
+    /// circle is a circle only if the radii are the same double: the
+    /// model types the shape by comparing them and the 4-decimal-place
+    /// canonical golden cannot see a 1e-14 gap, so an "almost equal"
+    /// pair is exactly the defect this exists to catch.
+    ///
+    /// Mirrors Swift `checkShiftConstrain`.
+    #[cfg(feature = "web")]
+    fn check_shift_constrain(
+        draw: &ShiftDraw,
+        tool: &str,
+        fields: (&str, &str),
+        setup_svg: &str,
+        path: &Vec<usize>,
+        viewport: (f64, f64),
+    ) -> Option<String> {
+        let case = draw.gesture_case(tool, setup_svg, viewport);
+        let model = run_gesture_model(&case);
+        let Some(el) = model.document().get_element(path) else {
+            return Some(format!(
+                "{tool}: nothing was committed at path {path:?} — the 1-pixel \
+                 commit guard suppressed the draw, so this case asserts nothing"
+            ));
+        };
+        // `gesture_exact_field` panics on a field it does not carry —
+        // the same explicit table the `expected_exact` channel reads,
+        // so a fixture naming an unreadable field fails loudly.
+        let a = gesture_exact_field(el, fields.0);
+        let b = gesture_exact_field(el, fields.1);
+        if a == b {
+            return None;
+        }
+        Some(format!(
+            "{tool}: {} = {a:?} but {} = {b:?} (delta {:e}) — a Shift-constrained \
+             draw must be square BIT-EXACTLY; view zoom={:?} offset=({:?}, {:?}), \
+             press=({:?}, {:?}), release=({:?}, {:?})",
+            fields.0, fields.1, b - a,
+            draw.zoom, draw.offset_x, draw.offset_y,
+            draw.press_x, draw.press_y, draw.release_x, draw.release_y
+        ))
+    }
+
+    /// THE MUTANT — the PRE-DYADICSIDE spelling, kept so the checker's
+    /// teeth can be measured rather than assumed.
+    ///
+    /// This is NOT a second copy of the implementation; it is the BUG,
+    /// written down. Before DYADICSIDE the commit recovered the half-side
+    /// as `abs(doc_end - doc_start) / 2`, re-subtracting the anchor that
+    /// had just been added to it, and that round trip is not exact away
+    /// from a dyadic zoom. Returns the pair (x half-side, y half-side)
+    /// the old spelling would have committed; they differ exactly on the
+    /// vectors that spelling gets wrong.
+    ///
+    /// Used two ways: every witness asserts that the mutant's verdict
+    /// matches its recorded `discriminating` flag, and the generative
+    /// lane refuses a run in which too few of its fresh vectors could
+    /// have caught the bug. A checker that cannot fail the bug it was
+    /// written for is worth zero, so that is measured continuously.
+    ///
+    /// IF THE TOOLS' CONSTRAINT ARITHMETIC EVER CHANGES SHAPE, this must
+    /// be re-derived or deleted outright — a stale mutant measures
+    /// nothing while looking like it measures something. Spelled to
+    /// match the YAML step for step, including `0.0 - side` for the
+    /// negative branch (the expression language's `0 - max(...)`).
+    /// Mirrors Swift `dyadicsideMutant`.
+    #[cfg(feature = "web")]
+    fn dyadicside_mutant(draw: &ShiftDraw) -> (f64, f64) {
+        // doc = (screen - view_offset) / zoom — YamlTool::pointer_event_payload.
+        let doc_start_x = (draw.press_x - draw.offset_x) / draw.zoom;
+        let doc_start_y = (draw.press_y - draw.offset_y) / draw.zoom;
+        let doc_x = (draw.release_x - draw.offset_x) / draw.zoom;
+        let doc_y = (draw.release_y - draw.offset_y) / draw.zoom;
+        let side = (doc_x - doc_start_x).abs().max((doc_y - doc_start_y).abs());
+        let doc_end_x = doc_start_x + if doc_x >= doc_start_x { side } else { 0.0 - side };
+        let doc_end_y = doc_start_y + if doc_y >= doc_start_y { side } else { 0.0 - side };
+        (
+            (doc_end_x - doc_start_x).abs() / 2.0,
+            (doc_end_y - doc_start_y).abs() / 2.0,
+        )
+    }
+
+    /// Would the pre-DYADICSIDE spelling get this vector WRONG?
+    #[cfg(feature = "web")]
+    fn mutant_is_discriminating(draw: &ShiftDraw) -> bool {
+        let (a, b) = dyadicside_mutant(draw);
+        a != b
+    }
+
+    /// The shared property fixture, parsed once per test.
+    #[cfg(feature = "web")]
+    fn shift_constrain_fixture() -> serde_json::Value {
+        let raw = read_fixture("properties/shift_constrain_square.json");
+        serde_json::from_str(&raw)
+            .expect("properties/shift_constrain_square.json is not valid JSON")
+    }
+
+    /// `(tool id, (field a, field b))` pairs the fixture declares.
+    #[cfg(feature = "web")]
+    fn shift_constrain_tools(fx: &serde_json::Value) -> Vec<(String, (String, String))> {
+        fx["tools"]
+            .as_array()
+            .expect("property fixture must declare `tools`")
+            .iter()
+            .map(|t| {
+                let fields = t["fields"].as_array().expect("tool entry needs `fields`");
+                assert_eq!(fields.len(), 2, "a tool's `fields` names exactly the pair that must be equal");
+                (
+                    t["tool"].as_str().unwrap().to_string(),
+                    (
+                        fields[0].as_str().unwrap().to_string(),
+                        fields[1].as_str().unwrap().to_string(),
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    /// The fixture's setup / path / viewport, shared by both lanes.
+    #[cfg(feature = "web")]
+    fn shift_constrain_env(fx: &serde_json::Value) -> (String, Vec<usize>, (f64, f64)) {
+        let setup = fx["setup_svg"].as_str().unwrap().to_string();
+        let path: Vec<usize> = fx["element_path"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_u64().unwrap() as usize)
+            .collect();
+        let viewport = (
+            fx["viewport_w"].as_f64().unwrap(),
+            fx["viewport_h"].as_f64().unwrap(),
+        );
+        (setup, path, viewport)
+    }
+
+    /// LANE 2 — THE WITNESSES. Every named vector, against every tool,
+    /// deterministically, every run.
+    ///
+    /// Also asserts each witness's recorded `discriminating` flag
+    /// against the mutant, so the corpus proves its own teeth: nine of
+    /// the eleven vectors here would have caught the DYADICSIDE bug, and
+    /// this test says so out loud every run rather than trusting a
+    /// comment written the day they were searched for.
+    #[cfg(feature = "web")]
+    #[test]
+    fn shift_constrain_witnesses() {
+        let fx = shift_constrain_fixture();
+        let (setup, path, viewport) = shift_constrain_env(&fx);
+        let tools = shift_constrain_tools(&fx);
+        let witnesses = fx["witnesses"].as_array().expect("fixture needs `witnesses`");
+        assert!(!witnesses.is_empty(), "the witness corpus must not be empty");
+
+        let mut discriminating = 0usize;
+        let mut failures: Vec<String> = Vec::new();
+
+        for w in witnesses {
+            let name = w["name"].as_str().unwrap();
+            let press = w["press"].as_array().unwrap();
+            let release = w["release"].as_array().unwrap();
+            let draw = ShiftDraw {
+                zoom: w["zoom"].as_f64().unwrap(),
+                offset_x: w["view_offset_x"].as_f64().unwrap(),
+                offset_y: w["view_offset_y"].as_f64().unwrap(),
+                press_x: press[0].as_f64().unwrap(),
+                press_y: press[1].as_f64().unwrap(),
+                release_x: release[0].as_f64().unwrap(),
+                release_y: release[1].as_f64().unwrap(),
+            };
+
+            // The witness's claim about its own power, checked.
+            let claimed = w["discriminating"].as_bool().unwrap_or_else(|| {
+                panic!("witness '{name}' must record `discriminating`")
+            });
+            let actual = mutant_is_discriminating(&draw);
+            assert_eq!(
+                actual, claimed,
+                "witness '{name}' records discriminating={claimed}, but the \
+                 pre-DYADICSIDE mutant says {actual} (mutant halves {:?}). Either \
+                 the flag is stale or the mutant no longer models the old spelling.",
+                dyadicside_mutant(&draw)
+            );
+            if actual {
+                discriminating += 1;
+            }
+
+            for (tool, (fa, fb)) in &tools {
+                if let Some(why) =
+                    check_shift_constrain(&draw, tool, (fa, fb), &setup, &path, viewport)
+                {
+                    failures.push(format!("witness '{name}': {why}"));
+                }
+            }
+        }
+
+        assert!(
+            discriminating >= 2,
+            "the witness corpus has lost its teeth: only {discriminating} of {} \
+             vectors would catch the pre-DYADICSIDE spelling",
+            witnesses.len()
+        );
+        assert!(
+            failures.is_empty(),
+            "the circle invariant failed on {} witness/tool pair(s):\n  {}",
+            failures.len(),
+            failures.join("\n  ")
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // The seeded input stream. Spelled identically in Swift
+    // (`PropertyStream` / `propertySeed` / `shiftDrawSample`) so a seed
+    // that goes red in one port replays vector-for-vector in the other
+    // — pinned by `stream_pin` in the fixture.
+    // ---------------------------------------------------------------
+
+    /// The house LCG (Numerical Recipes constants, as in `boolean.rs`
+    /// and `shape_recognize.rs`), on a SplitMix64-finalized seed.
+    ///
+    /// The finalizer matters: raw LCG states for adjacent seeds differ
+    /// by only the multiplier, so `JAS_PROPERTY_SEED=1` and `=2` would
+    /// otherwise produce near-identical first draws — a trap for anyone
+    /// replaying by hand.
+    #[cfg(feature = "web")]
+    struct PropertyStream {
+        state: u64,
+    }
+
+    #[cfg(feature = "web")]
+    impl PropertyStream {
+        fn new(seed: u64) -> Self {
+            let mut z = seed;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+            PropertyStream { state: z ^ (z >> 31) }
+        }
+
+        /// Next draw, uniform in [0, 1).
+        fn u(&mut self) -> f64 {
+            self.state = self.state.wrapping_mul(1664525).wrapping_add(1013904223);
+            (self.state >> 11) as f64 / (1u64 << 53) as f64
+        }
+    }
+
+    #[cfg(feature = "web")]
+    fn lerp(lo: f64, hi: f64, u: f64) -> f64 {
+        lo + (hi - lo) * u
+    }
+
+    /// A signed magnitude in [lo, hi] from ONE draw: the low half of the
+    /// unit interval is the negative branch, the high half the positive
+    /// one, each rescaled back to [0, 1). Both rescalings are exact in
+    /// binary (Sterbenz on `u - 0.5`, and a multiply by 2), so the two
+    /// ports cannot disagree about them.
+    #[cfg(feature = "web")]
+    fn signed_magnitude(u: f64, lo: f64, hi: f64) -> f64 {
+        if u < 0.5 {
+            -(lo + (hi - lo) * (u * 2.0))
+        } else {
+            lo + (hi - lo) * ((u - 0.5) * 2.0)
+        }
+    }
+
+    /// Draw ONE Shift-constrained draw from the stream. Nine values, in
+    /// the order the fixture's `_generative_doc` records; both ports
+    /// must consume them in that order or the streams diverge.
+    ///
+    /// The drag is an OFFSET from the press, not an independent second
+    /// point, so `drag_min` guarantees the 1-pixel commit guard is
+    /// cleared and no rejection sampling is needed — every draw is a
+    /// real case. Mirrors Swift `shiftDrawSample`.
+    #[cfg(feature = "web")]
+    fn shift_draw_sample(st: &mut PropertyStream, cfg: &serde_json::Value) -> ShiftDraw {
+        let n = |k: &str| cfg[k].as_f64().unwrap_or_else(|| panic!("generative.{k} must be a number"));
+        let zoom = lerp(n("zoom_min"), n("zoom_max"), st.u());
+        let offset_x = lerp(n("offset_min"), n("offset_max"), st.u());
+        let offset_y = lerp(n("offset_min"), n("offset_max"), st.u());
+        let mut press_x = lerp(n("press_min"), n("press_max"), st.u());
+        let mut press_y = lerp(n("press_min"), n("press_max"), st.u());
+        let mut dx = signed_magnitude(st.u(), n("drag_min"), n("drag_max"));
+        let mut dy = signed_magnitude(st.u(), n("drag_min"), n("drag_max"));
+
+        // Axis lock: a pure horizontal or vertical Shift drag takes the
+        // other branch (the zero axis has no sign to follow, so it takes
+        // the positive one). A continuous generator produces an exact
+        // zero with probability zero, so it has to be asked for. At most
+        // one axis is zeroed — both would fail the commit guard.
+        let axis = st.u();
+        let p = n("axis_zero_p");
+        if axis < p {
+            dy = 0.0;
+        } else if axis < 2.0 * p {
+            dx = 0.0;
+        }
+
+        let mut release_x = press_x + dx;
+        let mut release_y = press_y + dy;
+
+        // Quantize lock: real pointer events are usually integral, and
+        // integral screen coordinates are a measurably different
+        // population (at zoom 0.1, 1/3 and 1.0 they are exact under the
+        // old spelling where continuous ones are not). Rounding shaves
+        // at most 1 px off the drag, and drag_min is 3, so the commit
+        // guard still holds.
+        if st.u() < n("quantize_p") {
+            press_x = press_x.round();
+            press_y = press_y.round();
+            release_x = release_x.round();
+            release_y = release_y.round();
+        }
+
+        ShiftDraw { zoom, offset_x, offset_y, press_x, press_y, release_x, release_y }
+    }
+
+    /// The seed for this run: `JAS_PROPERTY_SEED` if the environment
+    /// names one, otherwise the nanosecond clock. FRESH EVERY RUN is
+    /// the point — the lane exists to see vectors nobody chose.
+    /// Mirrors Swift `propertySeed`.
+    #[cfg(feature = "web")]
+    fn property_seed() -> u64 {
+        if let Ok(s) = std::env::var("JAS_PROPERTY_SEED") {
+            return s
+                .trim()
+                .parse::<u64>()
+                .unwrap_or_else(|e| panic!("JAS_PROPERTY_SEED={s:?} is not a u64: {e}"));
+        }
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x5EED_1234_ABCD_0001)
+    }
+
+    /// LANE 3 — THE GENERATIVE LANE. The same checker, on vectors nobody
+    /// chose, from a fresh seed every run.
+    ///
+    /// Three things are asserted, and the second and third are what keep
+    /// the lane from rotting into a no-op:
+    ///
+    ///   * every generated vector satisfies the circle invariant;
+    ///   * every generated vector actually COMMITTED an element (the
+    ///     count is checked against `cases`), so the guard can never
+    ///     quietly swallow the population;
+    ///   * at least `min_discriminating` of them are vectors the
+    ///     pre-DYADICSIDE spelling would get WRONG, measured live by the
+    ///     mutant — the lane's teeth, checked rather than assumed.
+    ///
+    /// A failure prints the seed. `JAS_PROPERTY_SEED=<that seed>`
+    /// replays the run exactly, here or in Swift.
+    #[cfg(feature = "web")]
+    #[test]
+    fn shift_constrain_generative() {
+        let fx = shift_constrain_fixture();
+        let (setup, path, viewport) = shift_constrain_env(&fx);
+        let tools = shift_constrain_tools(&fx);
+        let cfg = &fx["generative"];
+        let cases = cfg["cases"].as_u64().expect("generative.cases") as usize;
+        let min_discriminating =
+            cfg["min_discriminating"].as_u64().expect("generative.min_discriminating") as usize;
+
+        // The cross-language pin: both ports must draw the SAME vectors
+        // from the same seed, or a seed reported by one is meaningless
+        // in the other.
+        assert_stream_pin(&fx);
+
+        let seed = property_seed();
+        eprintln!(
+            "shift_constrain_generative: seed {seed} ({cases} cases x {} tools) — \
+             replay with JAS_PROPERTY_SEED={seed}",
+            tools.len()
+        );
+
+        let mut st = PropertyStream::new(seed);
+        let mut discriminating = 0usize;
+        let mut committed = 0usize;
+        let mut failures: Vec<String> = Vec::new();
+
+        for i in 0..cases {
+            let draw = shift_draw_sample(&mut st, cfg);
+            if mutant_is_discriminating(&draw) {
+                discriminating += 1;
+            }
+            for (tool, (fa, fb)) in &tools {
+                match check_shift_constrain(&draw, tool, (fa, fb), &setup, &path, viewport) {
+                    None => committed += 1,
+                    Some(why) => {
+                        // Cap the report: the first handful shows the
+                        // shape, and the seed reproduces the rest.
+                        if failures.len() < 8 {
+                            failures.push(format!("case {i}: {why}"));
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "seed {seed}: the circle invariant failed on generated vectors \
+             (showing up to 8):\n  {}\nReplay with JAS_PROPERTY_SEED={seed}",
+            failures.join("\n  ")
+        );
+        // Reached only when nothing failed, so every check committed.
+        assert_eq!(
+            committed,
+            cases * tools.len(),
+            "seed {seed}: only {committed} of {} generated draws committed an \
+             element — the generator has drifted below the 1-pixel commit guard \
+             and is asserting nothing",
+            cases * tools.len()
+        );
+        assert!(
+            discriminating >= min_discriminating,
+            "seed {seed}: only {discriminating} of {cases} generated vectors would \
+             catch the pre-DYADICSIDE spelling (floor {min_discriminating}). The \
+             generator has been narrowed or broken; a lane that cannot fail the bug \
+             it was written for is worth zero."
+        );
+        // Report the teeth on the SUCCESS path too. A floor that is only
+        // read when it trips hides a slow slide toward it; this number
+        // is the one to watch if the generator is ever retuned.
+        eprintln!(
+            "shift_constrain_generative: {discriminating}/{cases} generated vectors \
+             discriminate the pre-DYADICSIDE spelling (floor {min_discriminating})"
+        );
+    }
+
+    /// One pinned double, read as an IEEE-754 bit pattern in hex.
+    ///
+    /// NOT `as_f64()` on a decimal literal, and the reason is measured:
+    /// serde_json 1.0.149 with default features (what this crate builds
+    /// today) mis-parses 21397 of 199903 SHORTEST-ROUND-TRIP f64
+    /// literals by exactly 1 ulp — 10.7%. Rust's own `str::parse`,
+    /// Swift's `Double(String)` and Swift's JSONSerialization all read
+    /// the same literals correctly, so the error is one-sided and
+    /// invisible from the Swift arm. A decimal pin here would therefore
+    /// not be a shared value at all, and a bit-exactness gate built on
+    /// one would report phantom reds and phantom greens with equal
+    /// confidence. See the fixture's `_stream_pin_doc`.
+    #[cfg(feature = "web")]
+    fn pinned_f64(v: &serde_json::Value) -> f64 {
+        let s = v
+            .as_str()
+            .unwrap_or_else(|| panic!("stream_pin values are hex bit-pattern strings, got {v}"));
+        let hex = s.strip_prefix("0x").unwrap_or(s);
+        f64::from_bits(
+            u64::from_str_radix(hex, 16)
+                .unwrap_or_else(|e| panic!("stream_pin value {s:?} is not hex: {e}")),
+        )
+    }
+
+    /// Both ports draw the same vectors from the same seed. Compares the
+    /// first few cases of a FIXED seed against bit-pattern pins,
+    /// `==` on doubles. Mirrors Swift `assertStreamPin`.
+    #[cfg(feature = "web")]
+    fn assert_stream_pin(fx: &serde_json::Value) {
+        let pin = &fx["stream_pin"];
+        let seed = pin["seed"].as_u64().expect("stream_pin.seed");
+        let cfg = &fx["generative"];
+        let mut st = PropertyStream::new(seed);
+        for (i, want) in pin["cases"].as_array().unwrap().iter().enumerate() {
+            let got = shift_draw_sample(&mut st, cfg);
+            let press = want["press"].as_array().unwrap();
+            let release = want["release"].as_array().unwrap();
+            let expect: [(&str, f64, f64); 7] = [
+                ("zoom", got.zoom, pinned_f64(&want["zoom"])),
+                ("view_offset_x", got.offset_x, pinned_f64(&want["view_offset_x"])),
+                ("view_offset_y", got.offset_y, pinned_f64(&want["view_offset_y"])),
+                ("press_x", got.press_x, pinned_f64(&press[0])),
+                ("press_y", got.press_y, pinned_f64(&press[1])),
+                ("release_x", got.release_x, pinned_f64(&release[0])),
+                ("release_y", got.release_y, pinned_f64(&release[1])),
+            ];
+            for (field, g, w) in expect {
+                assert!(
+                    g == w,
+                    "stream_pin seed {seed} case {i}: {field} is {g:?} (bits {:#018x}), \
+                     expected EXACTLY {w:?} (bits {:#018x}). The two ports are no longer \
+                     fuzzing the same space, so every seed exchanged between them is \
+                     meaningless.",
+                    g.to_bits(),
+                    w.to_bits()
+                );
+            }
+        }
+    }
+
+    // ===============================================================
     // ALT-COPY drag gesture: ONE undo step (regression for the
     // "Ctrl+Z reverts the copy to the option-press position but does
     // not remove it" bug). The Selection tool's alt-drag-copy lays a

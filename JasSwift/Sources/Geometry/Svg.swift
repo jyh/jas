@@ -22,6 +22,112 @@ private func fmt(_ v: Double) -> String {
     return String(s[s.startIndex..<end])
 }
 
+/// THE MATRIX-ENTRY SPELLING RULE (JYH, R2, 2026-07-31). Print `v` so that
+/// reading it back yields the SAME Double, bit for bit:
+///
+///   1. NO EXPONENT NOTATION, ever — positional digits at any magnitude.
+///   2. EXACTLY ONE decimal point, always present.
+///   3. Shortest digit string that round-trips, with trailing fraction
+///      zeros stripped down to — but not past — ONE digit (`1` → `1.0`).
+///   4. `-0.0` keeps its sign, as `fmt` already does: `-0.0`.
+///
+/// SPELLED IDENTICALLY IN jas_dioxus — `fmt_matrix_entry` in
+/// `jas_dioxus/src/geometry/svg.rs`. The two comments cross-reference each
+/// other; neither may move without the other.
+///
+/// # Why matrix multipliers and not positions
+///
+/// `a`/`b`/`c`/`d` are MULTIPLIERS. 1e-4 of a multiplier is not 1e-4 of
+/// anything — it is 1e-4 × whatever it multiplies, so 0.15pt on a 5000pt
+/// element. Rotate 30°: `a = cos30 = 0.8660254037844387` printed at 4dp is
+/// `0.866`, and the reopened matrix has `a² + b² = 0.999956` — NO LONGER
+/// ORTHONORMAL, a 2.2e-5 shrink with a shear baked in. It COMPOUNDS, because
+/// every later transform composes onto the drifted one (the Rust twin's
+/// `op_apply.rs`, `matrix.multiply(&current)`): rotate a logo, save, reopen,
+/// rotate back, and it does not land on its guides.
+///
+/// A POSITION at 4dp is 0.0001pt, far below what any artist or renderer
+/// resolves. Same quantizer, two entirely different meanings — which is why
+/// `x`, `y`, `cx`, `rx`, path coordinates and the matrix's OWN TRANSLATION
+/// `e`/`f` all still go through `fmt`. `e`/`f` are positions that happen to
+/// live in a matrix; they are also the only two entries that cross the pt↔px
+/// conversion, which is not exactly invertible (`fl(4/3)` then ×0.75 loses an
+/// ulp for ~18% of values), so full precision would buy them long noisy digit
+/// strings and still not bit-exact reloading. At 4dp they SETTLE on the first
+/// save and never move again — see
+/// `aReopenedMatrixIsBitIdenticalOnEveryLaterSaveAndReopen`.
+///
+/// # Why this exact spelling, and not the language's own
+///
+/// This is a byte-level CROSS-PORT CONTRACT — the same artwork saved by
+/// either port must be the same file — and "shortest round-trip" is spelled
+/// three ways here. Rust's `Display` never uses exponent notation and never
+/// appends `.0`; Swift's `.description` and Python's `repr` do both, outside
+/// roughly [1e-4, 1e16). `1e-5` is `0.00001` in Rust and `1e-05` in Swift, so
+/// a default-spelled port pair would diverge in BYTES while agreeing in
+/// VALUE — the worst kind of divergence, invisible to a corpus that compares
+/// parsed documents. Rules 1 and 2 pin the intersection: **rule 1 is what
+/// Rust already does and Swift must be told to do** (hence the de-exponenting
+/// below), **rule 2 is what Swift already does and Rust must be told to do**
+/// (hence its lone `push_str(".0")`). A naive spelling also regresses `-0.0`
+/// to `-0`; rule 2 restores the sign and the point in one move.
+///
+/// A LONG FIXED PRECISION was measured and rejected: `serde_json` and
+/// `JSONSerialization` each mis-round a 19-significant-digit literal by
+/// exactly 1 ulp, so `%.17f` breaks BOTH ports' readers. Precision is not the
+/// same thing as fidelity.
+///
+/// THE SURFACE IS DELIBERATELY NARROW — matrix multipliers only, the two
+/// `matrix(...)` writers below and nothing else. That narrowness is the whole
+/// reason this is safe. Applying it corpus-wide would make byte-level float
+/// formatting a cross-language contract in the very layer that exists to
+/// detect contract breaks. DO NOT WIDEN IT.
+///
+/// Non-finite entries are excluded and keep their pre-existing behaviour
+/// (`fmt`): SVG's number grammar cannot express them at any precision, so
+/// `parseTransform` drops such a matrix on reload either way. A subnormal
+/// entry expands to ~330 positional characters; that is a bounded cost on a
+/// matrix already too singular to invert.
+///
+/// Internal rather than `private` — unlike every other helper in this file —
+/// so the spelling gate can address the rule directly: it fuzzes 200k bit
+/// patterns, and routing those through `documentToSvg` would spend a minute
+/// of test time to say something about one function. The clause tests still
+/// go through the emitted attribute, which is what pins the WRITERS to it.
+func fmtMatrixEntry(_ v: Double) -> String {
+    guard v.isFinite else { return fmt(v) }
+    // `description` is rules 2 and 3 already: the shortest digit string that
+    // round-trips (so never a strippable trailing zero), and always carrying
+    // a decimal point. Rule 1 is the one addition — Swift switches to
+    // exponent notation outside roughly [1e-4, 1e16), and we spell those
+    // digits back out positionally.
+    let s = v.description
+    guard let eIdx = s.firstIndex(where: { $0 == "e" || $0 == "E" }) else {
+        return s.contains(".") ? s : s + ".0"
+    }
+    guard let exp = Int(s[s.index(after: eIdx)...]) else { return s + ".0" }
+    var mantissa = String(s[s.startIndex..<eIdx])
+    let negative = mantissa.hasPrefix("-")
+    if negative || mantissa.hasPrefix("+") { mantissa.removeFirst() }
+    let halves = mantissa.split(separator: ".", maxSplits: 1,
+                                omittingEmptySubsequences: false)
+    let intDigits = String(halves[0])
+    let digits = intDigits + (halves.count > 1 ? String(halves[1]) : "")
+    // How many of `digits` fall to the LEFT of the point once the exponent
+    // is spent. Negative or zero ⇒ the value is a leading-zeros fraction.
+    let pointAt = intDigits.count + exp
+    var out: String
+    if pointAt <= 0 {
+        out = "0." + String(repeating: "0", count: -pointAt) + digits
+    } else if pointAt >= digits.count {
+        out = digits + String(repeating: "0", count: pointAt - digits.count) + ".0"
+    } else {
+        let cut = digits.index(digits.startIndex, offsetBy: pointAt)
+        out = String(digits[..<cut]) + "." + String(digits[cut...])
+    }
+    return negative ? "-" + out : out
+}
+
 private func colorStr(_ c: Color) -> String {
     let (cr, cg, cb, ca) = c.toRgba()
     // quantise8, so the emitted number is always in 0...255 — Rust's
@@ -91,18 +197,31 @@ private func strokeAttrs(_ stroke: Stroke?) -> String {
     return s
 }
 
+/// The `matrix(a,b,c,d,e,f)` value shared by the two writers that emit one —
+/// the standard `transform` attribute and the Symbols P4 private
+/// `data-jas-instance-transform`. ONE function, so the multipliers cannot
+/// gain precision at one site and silently keep 4dp at the other; see
+/// `fmtMatrixEntry` for why the six entries split two ways. Mirrors Rust's
+/// `matrix_value`.
+private func matrixValue(_ t: Transform) -> String {
+    "matrix(\(fmtMatrixEntry(t.a)),\(fmtMatrixEntry(t.b)),\(fmtMatrixEntry(t.c)),"
+        + "\(fmtMatrixEntry(t.d)),\(fmt(px(t.e))),\(fmt(px(t.f))))"
+}
+
+/// The render CTM.
 private func transformAttr(_ t: Transform?) -> String {
     guard let t = t else { return "" }
-    return " transform=\"matrix(\(fmt(t.a)),\(fmt(t.b)),\(fmt(t.c)),\(fmt(t.d)),\(fmt(px(t.e))),\(fmt(px(t.f))))\""
+    return " transform=\"\(matrixValue(t))\""
 }
 
 /// The Symbols P4 instance `transform` field (SYMBOLS.md §4 / Fork F2),
 /// emitted as data-jas-instance-transform in the same matrix format as
-/// `transformAttr` (e/f converted pt→px), and ONLY when set. Distinct from
-/// the render CTM, which rides the `transform` attr.
+/// `transformAttr`, and ONLY when set. Distinct from the render CTM, which
+/// rides the `transform` attr — but it is the SAME matrix value, hence the
+/// shared `matrixValue`.
 private func instanceTransformAttr(_ t: Transform?) -> String {
     guard let t = t else { return "" }
-    return " data-jas-instance-transform=\"matrix(\(fmt(t.a)),\(fmt(t.b)),\(fmt(t.c)),\(fmt(t.d)),\(fmt(px(t.e))),\(fmt(px(t.f))))\""
+    return " data-jas-instance-transform=\"\(matrixValue(t))\""
 }
 
 private func opacityAttr(_ o: Double) -> String {
