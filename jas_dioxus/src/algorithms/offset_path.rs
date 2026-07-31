@@ -3,7 +3,22 @@
 //! Flattens a path to a polyline, computes normals at each sample point,
 //! evaluates the width profile, and builds a filled polygon representing
 //! the stroke outline.
+//!
+//! # The `web` gate is on the three DRAWING functions, not on the module
+//!
+//! Until 2026-07-30 `algorithms/mod.rs` gated this whole file behind `web`,
+//! for one import: `web_sys::CanvasRenderingContext2d`, used by
+//! `render_variable_width_path`, `render_variable_width_line`, and
+//! `render_from_samples`. Everything else here -- path sampling, normals,
+//! `smoothstep`, and the width-profile evaluator -- is arithmetic, and all six
+//! of the module's tests exercise the arithmetic. Not one touches a canvas.
+//!
+//! So the width-profile law was verified in exactly one build, while the
+//! variable-width stroke it defines is a document property every port has to
+//! agree on. The gate now sits on the three functions that genuinely need a
+//! rendering context.
 
+#[cfg(feature = "web")]
 use web_sys::CanvasRenderingContext2d;
 use crate::geometry::element::{
     PathCommand, StrokeWidthPoint, LineCap, flatten_path_commands,
@@ -119,6 +134,7 @@ fn evaluate_width_at(points: &[StrokeWidthPoint], t: f64) -> (f64, f64) {
 }
 
 /// Render a variable-width stroke for a path element.
+#[cfg(feature = "web")]
 pub fn render_variable_width_path(
     ctx: &CanvasRenderingContext2d,
     cmds: &[PathCommand],
@@ -131,6 +147,7 @@ pub fn render_variable_width_path(
 }
 
 /// Render a variable-width stroke for a line element.
+#[cfg(feature = "web")]
 pub fn render_variable_width_line(
     ctx: &CanvasRenderingContext2d,
     x1: f64, y1: f64, x2: f64, y2: f64,
@@ -142,6 +159,7 @@ pub fn render_variable_width_line(
     render_from_samples(ctx, &samples, width_points, stroke_color, linecap);
 }
 
+#[cfg(feature = "web")]
 fn render_from_samples(
     ctx: &CanvasRenderingContext2d,
     samples: &[PathSample],

@@ -4881,15 +4881,12 @@ mod tests {
     // (requires "web" feature for workspace module)
     // ---------------------------------------------------------------
 
-    #[cfg(feature = "web")]
     use crate::workspace::test_json::{
         workspace_to_test_json, test_json_to_workspace,
         state_defaults_json, shortcut_structure_json,
     };
-    #[cfg(feature = "web")]
     use crate::workspace::workspace::WorkspaceLayout;
 
-    #[cfg(feature = "web")]
     fn assert_workspace_fixture(name: &str, json: &str) {
         let expected = read_fixture(&format!("expected/{}.json", name));
         let expected = expected.trim();
@@ -4902,7 +4899,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "web")]
     #[test]
     fn workspace_default_layout() {
         let layout = WorkspaceLayout::default_layout();
@@ -4910,7 +4906,6 @@ mod tests {
         assert_workspace_fixture("workspace_default", &json);
     }
 
-    #[cfg(feature = "web")]
     #[test]
     fn workspace_default_with_panes() {
         let mut layout = WorkspaceLayout::default_layout();
@@ -4919,7 +4914,6 @@ mod tests {
         assert_workspace_fixture("workspace_default_with_panes", &json);
     }
 
-    #[cfg(feature = "web")]
     #[test]
     fn workspace_json_roundtrip() {
         for name in &["workspace_default", "workspace_default_with_panes"] {
@@ -4936,7 +4930,6 @@ mod tests {
     // Workspace operation equivalence tests
     // ---------------------------------------------------------------
 
-    #[cfg(feature = "web")]
     use crate::workspace::workspace::{PaneId, PaneKind};
 
     /// Harness shim over the RUNTIME layout-op dispatcher (OP_LOG.md §12, Fork
@@ -4948,7 +4941,6 @@ mod tests {
     /// document corpus replays through `op_apply`). Kept as a thin wrapper so the
     /// existing `LayoutOps::apply` / `op_world_layout_envelope` call sites read
     /// unchanged.
-    #[cfg(feature = "web")]
     fn apply_workspace_op(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         crate::workspace::layout_apply::layout_apply(layout, op);
     }
@@ -4963,9 +4955,7 @@ mod tests {
     /// round-trip. Conforming to `OpWorld` lets the layout fixture driver reuse
     /// the same `run_ops_test` runner the document world uses, so a third op
     /// vocabulary cannot entrench as a third bespoke driver.
-    #[cfg(feature = "web")]
     struct LayoutOps;
-    #[cfg(feature = "web")]
     impl OpWorld for LayoutOps {
         type State = WorkspaceLayout;
         fn apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) -> Vec<String> {
@@ -4986,7 +4976,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "web")]
     fn run_workspace_operation_test(tc: &serde_json::Value) -> String {
         let setup_name = tc["setup"].as_str().unwrap();
         let setup_json = read_fixture(&format!("expected/{}", setup_name));
@@ -4995,7 +4984,6 @@ mod tests {
         run_ops_test::<LayoutOps>(&mut layout, tc["ops"].as_array().unwrap())
     }
 
-    #[cfg(feature = "web")]
     fn assert_workspace_operation_test(tc: &serde_json::Value) {
         let name = tc["name"].as_str().unwrap();
         let expected_file = tc["expected_json"].as_str().unwrap();
@@ -5012,7 +5000,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "web")]
     fn run_workspace_operation_fixture(fixture: &str) {
         let json_str = read_fixture(fixture);
         let tests: serde_json::Value = serde_json::from_str(&json_str)
@@ -5023,7 +5010,6 @@ mod tests {
     }
 
     /// Bootstrap: generate expected JSON for workspace operation tests.
-    #[cfg(feature = "web")]
     #[test]
     #[ignore]
     fn generate_workspace_operation_expected() {
@@ -5044,13 +5030,11 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "web")]
     #[test]
     fn workspace_panel_ops() {
         run_workspace_operation_fixture("workspace_operations/panel_ops.json");
     }
 
-    #[cfg(feature = "web")]
     #[test]
     fn workspace_pane_ops() {
         run_workspace_operation_fixture("workspace_operations/pane_ops.json");
@@ -5063,7 +5047,6 @@ mod tests {
     /// `workspace_to_test_json` path. Together with `op_world_document_envelope`,
     /// this shows the SAME runner spans both vocabularies (the Fork-5 point) with
     /// NO layout journal / undo / gate.
-    #[cfg(feature = "web")]
     #[test]
     fn op_world_layout_envelope() {
         let mut layout = WorkspaceLayout::default_layout();
@@ -5154,7 +5137,6 @@ mod tests {
     /// wrong-typed params, and missing required `kind` must all SKIP. A
     /// well-formed op on the same layout must still mutate (sanity), confirming
     /// the harness ISN'T masking a no-op dispatcher.
-    #[cfg(feature = "web")]
     #[test]
     fn layout_apply_no_panic_on_malformed() {
         use crate::workspace::workspace::WorkspaceLayout;
@@ -5204,10 +5186,8 @@ mod tests {
     // Pane geometry algorithm test vectors
     // ---------------------------------------------------------------
 
-    #[cfg(feature = "web")]
     use crate::workspace::pane::{Pane, PaneConfig, EdgeSide};
 
-    #[cfg(feature = "web")]
     fn parse_edge_side(s: &str) -> EdgeSide {
         match s {
             "right" => EdgeSide::Right,
@@ -5217,7 +5197,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "web")]
     #[test]
     fn algorithm_pane_geometry_vectors() {
         use crate::workspace::pane::PaneLayout;
@@ -6437,14 +6416,12 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "web")]
     #[test]
     fn state_defaults() {
         let json = state_defaults_json();
         assert_workspace_fixture("state_defaults", &json);
     }
 
-    #[cfg(feature = "web")]
     #[test]
     fn shortcut_structure() {
         let json = shortcut_structure_json();

@@ -314,6 +314,16 @@ jobs:
           python scripts/check_native_core_tests.py --self-test
           python scripts/check_native_core_tests.py
 
+      # The anti-vacuity half of the step above, which used to be an exact pin
+      # on the test count and is now a property with no number in it: every
+      # `web` gate on a module or a test item is declared with a reason, and no
+      # declaration outlives its gate. Pure source scanning -- it needs no
+      # toolchain and would run anywhere -- but it belongs beside its sibling.
+      - name: Native test gating (nothing verifiable is hidden behind `web`)
+        run: |
+          python scripts/check_native_test_gating.py --self-test
+          python scripts/check_native_test_gating.py
+
       # SINGLE-LANE ORACLE, deliberately without --require-comparisons: there is
       # no Swift toolchain on Windows, so no lane-vs-lane comparison is possible
       # here. The cross-language job below documents this as the legitimate mode
@@ -343,6 +353,14 @@ jobs:
         run: |
           python3 scripts/check_native_core_tests.py --self-test
           python3 scripts/check_native_core_tests.py
+
+      # Its anti-vacuity partner. Runs in both lanes for the same reason the
+      # step above does: the ledger it reads is shared, so a row paid off on one
+      # platform must go stale on both.
+      - name: Native test gating (nothing verifiable is hidden behind `web`)
+        run: |
+          python3 scripts/check_native_test_gating.py --self-test
+          python3 scripts/check_native_test_gating.py
 
   # The shared reference interpreter lives in workspace_interpreter/ — the
   # exact modules (effects, state_store, scope, doc_primitives, loader, expr)

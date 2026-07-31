@@ -26,7 +26,9 @@ pub mod corpus_text_measure;
 pub mod polygon_metrics;
 pub mod text_layout;
 pub mod text_layout_paragraph;
-#[cfg(feature = "web")]
+// NOT gated: only three DRAWING functions inside need a canvas context, and
+// they carry the gate themselves. All six of its tests exercise the
+// width-profile arithmetic, which is a document law every port must agree on.
 pub mod offset_path;
 pub mod hyphenator;
 pub mod knuth_plass;
