@@ -4771,13 +4771,23 @@ private func wireUnhex(_ s: String) -> Data {
 }
 
 /// `<circle>` SURVIVES A ROUND TRIP even though the model no longer has a
-/// circle kind: the writer re-derives the tag from `rx == ry`.
+/// circle kind: the writer re-derives the tag from the radii AS THEY WILL BE
+/// PRINTED.
 ///
 /// The mirror is pinned too, and it is a REWRITE we accept rather than a
 /// property we achieved: an `<ellipse rx=20 ry=20>` comes back out as
 /// `<circle>`. Someone who authored that ellipse deliberately will see it
 /// change. That is the price of one kind, recorded so it is a decision and not
 /// a surprise.
+///
+/// THE SECOND HALF, added after the render-path audit, is the SUB-PRECISION
+/// case: the tag used to be decided by an exact `rx == ry` while the
+/// coordinates were printed at four decimals, so radii differing below the
+/// printed precision were written as `<ellipse rx="20" ry="20">` -- a file that
+/// reopens EXACTLY round. The tag flipped to `<circle>` on the very next save
+/// and the derived type token flipped with it. The twin is
+/// `round_ellipses_serialize_as_circle_and_squashed_ones_do_not` in
+/// jas_dioxus/src/cross_language_test.rs, over the same two fixtures.
 @Test func roundEllipsesSerializeAsCircleAndSquashedOnesDoNot() throws {
     let doc = svgToDocument(readFixture("svg/circle_ellipse_mix.svg"))
     let out = documentToSvg(doc)
@@ -4787,6 +4797,42 @@ private func wireUnhex(_ s: String) -> Data {
             "only the rx != ry shape should emit <ellipse>; got:\n\(out)")
     #expect(documentToSvg(svgToDocument(out)) == out,
             "svg -> doc -> svg is not idempotent")
+
+    // THE TAG DESCRIBES WHAT WAS PRINTED. Hand-derived expectations for
+    // `svg/ellipse_radii_below_print_precision.svg` (pt = px * 0.75, and the
+    // writer prints px at four decimals):
+    //   [0, 0] rx=20.00001px ry=20.00002px. The radii differ, but both print
+    //          "20.0000" -> "20". Written as an <ellipse> the file would say
+    //          rx == ry and reopen round, so the tag must be <circle> from the
+    //          start.
+    //   [0, 1] rx=20px ry=20.0002px. That difference IS printed, so this one
+    //          stays an <ellipse> on every trip -- the guard against a fix that
+    //          rounds harder than the writer does.
+    let sub = svgToDocument(
+        readFixture("svg/ellipse_radii_below_print_precision.svg"))
+    let out1 = documentToSvg(sub)
+    #expect(out1.components(separatedBy: "<circle").count - 1 == 1,
+            "radii differing below the printed precision must be written as <circle>; got:\n\(out1)")
+    #expect(out1.components(separatedBy: "<ellipse").count - 1 == 1,
+            "radii differing above the printed precision must stay <ellipse>; got:\n\(out1)")
+
+    // svg -> doc -> svg -> doc: what was written reads back as what was
+    // written, and the type token agrees with the tag.
+    let sub1 = svgToDocument(out1)
+    #expect(layersTypeValue(sub1.getElement([0, 0])) == "circle",
+            "the <circle> we wrote must read back as a round ellipse")
+    #expect(layersTypeValue(sub1.getElement([0, 1])) == "ellipse",
+            "the <ellipse> we wrote must read back squashed")
+
+    // ... and the next save does not move, in tag or in token.
+    let out2 = documentToSvg(sub1)
+    #expect(out2 == out1,
+            "the tag is not stable across save-and-reopen:\n\(out1)\n\(out2)")
+    let sub2 = svgToDocument(out2)
+    #expect(layersTypeValue(sub2.getElement([0, 0])) == "circle",
+            "type token flipped on the second trip")
+    #expect(layersTypeValue(sub2.getElement([0, 1])) == "ellipse",
+            "type token flipped on the second trip")
 }
 
 /// answer to ONE source.

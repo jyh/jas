@@ -371,6 +371,20 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             // so a file's `<circle>` elements survive a round trip even though
             // the model no longer has a circle kind.
             //
+            // THE TAG IS DECIDED FROM THE VALUES AS THEY WILL BE PRINTED, so
+            // the export is SELF-CONSISTENT: what we write is what we would
+            // read back. `fmt` prints four decimals, and an exact `rx == ry`
+            // test asked a question the file cannot answer -- radii differing
+            // below that precision (rx=5.00001, ry=5.00002) both print "5", so
+            // the element went out as `<ellipse rx="5" ry="5">`, a file that
+            // reopens EXACTLY round. The tag flipped to `<circle>` on the very
+            // next save, and the derived type token
+            // (`algorithms::layers_filter::type_value`) and the auto-generated
+            // label flipped with it. Comparing the PRINTED strings settles both
+            // directions at once: the `<circle>` we write re-reads round, and
+            // an `<ellipse>` we write re-reads squashed. JasSwift's
+            // `Sources/Geometry/Svg.swift` spells this the same way.
+            //
             // THE MIRROR IS A REWRITE WE ACCEPT: an author's deliberate
             // `<ellipse rx="5" ry="5">` comes back out as `<circle>`. That is
             // the price of one kind, and it is pinned by
@@ -387,16 +401,20 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             );
-            if e.rx == e.ry {
+            // The very strings the attributes will carry, so the tag cannot
+            // disagree with the numbers beside it.
+            let rx_txt = fmt(px(e.rx));
+            let ry_txt = fmt(px(e.ry));
+            if rx_txt == ry_txt {
                 format!(
                     "{}<circle cx=\"{}\" cy=\"{}\" r=\"{}\"{}/>\n",
-                    indent, fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.rx)), common_attrs,
+                    indent, fmt(px(e.cx)), fmt(px(e.cy)), rx_txt, common_attrs,
                 )
             } else {
                 format!(
                     "{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}/>\n",
                     indent, fmt(px(e.cx)), fmt(px(e.cy)),
-                    fmt(px(e.rx)), fmt(px(e.ry)), common_attrs,
+                    rx_txt, ry_txt, common_attrs,
                 )
             }
         }

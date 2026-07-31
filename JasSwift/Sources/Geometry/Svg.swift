@@ -363,17 +363,32 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         // kind. THE MIRROR IS A REWRITE WE ACCEPT: a deliberate
         // `<ellipse rx="5" ry="5">` comes back out as `<circle>`. That is the
         // price of one kind, pinned by the shared corpus so it stays a decision.
+        //
+        // THE TAG IS DECIDED FROM THE VALUES AS THEY WILL BE PRINTED, so the
+        // export is SELF-CONSISTENT: what we write is what we would read back.
+        // `fmt` prints four decimals, and an exact `rx == ry` test asked a
+        // question the file cannot answer -- radii differing below that
+        // precision (rx=5.00001, ry=5.00002) both print "5", so the element
+        // went out as `<ellipse rx="5" ry="5">`, a file that reopens EXACTLY
+        // round. The tag flipped to `<circle>` on the very next save, and the
+        // derived type token (`layersTypeValue`) and the auto-generated label
+        // flipped with it. Comparing the PRINTED strings settles both
+        // directions at once: the `<circle>` we write re-reads round, and an
+        // `<ellipse>` we write re-reads squashed. Rust twin:
+        // jas_dioxus/src/geometry/svg.rs, the Element::Ellipse arm.
         let common = "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))" +
             "\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
-        if v.rx == v.ry {
+        // The very strings the attributes will carry, so the tag cannot
+        // disagree with the numbers beside it.
+        let rxText = fmt(px(v.rx))
+        let ryText = fmt(px(v.ry))
+        if rxText == ryText {
             return "\(indent)<circle cx=\"\(fmt(px(v.cx)))\" cy=\"\(fmt(px(v.cy)))\"" +
-                " r=\"\(fmt(px(v.rx)))\"" + common
+                " r=\"\(rxText)\"" + common
         }
         return "\(indent)<ellipse cx=\"\(fmt(px(v.cx)))\" cy=\"\(fmt(px(v.cy)))\"" +
-            " rx=\"\(fmt(px(v.rx)))\" ry=\"\(fmt(px(v.ry)))\"" +
-            "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
+            " rx=\"\(rxText)\" ry=\"\(ryText)\"" + common
 
     case .polyline(let v):
         let ps = v.points.map { "\(fmt(px($0.0))),\(fmt(px($0.1)))" }.joined(separator: " ")
