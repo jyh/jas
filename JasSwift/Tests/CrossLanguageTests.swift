@@ -4488,7 +4488,7 @@ private func wireTagElements() -> [Element] {
         .group(Group(children: [])),
         .line(Line(x1: 0, y1: 0, x2: 1, y2: 1)),
         .rect(Rect(x: 0, y: 0, width: 1, height: 2)),
-        .circle(Circle(cx: 0, cy: 0, r: 1)),
+        .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 1)),
         .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 2)),
         .polyline(Polyline(points: [(0, 0), (1, 1)])),
         .polygon(Polygon(points: [(0, 0), (1, 1), (2, 0)])),
@@ -4651,6 +4651,61 @@ private func wireUnhex(_ s: String) -> Data {
 /// Per-port value tests now pin each half (`LayersTypeFilterTests` here). This
 /// one exists for a different reason: two hand-written suites agree on the day
 /// they are written and drift afterwards. The corpus is what makes both ports
+/// THE TYPE TOKEN IS DERIVED FROM THE ELEMENT, NOT FROM ITS TAG.
+///
+/// `test_fixtures/view_state/element_type_tokens.json` is the single
+/// definition; the twin reader is `element_type_tokens_match_the_shared_corpus`
+/// in jas_dioxus/src/cross_language_test.rs.
+///
+/// The model used to carry a `circle` kind AND an `ellipse` kind, and the token
+/// was whichever tag the SVG had — provenance, not geometry, since scaling
+/// composes a matrix onto `transform` and never touches the radii. JYH ruled
+/// 2026-07-30 that one round kind survives and `circle` becomes derived.
+///
+/// The decisive row is `[0, 1]`: an `<ellipse rx=20 ry=20>` and a `<circle
+/// r=20>` are the same shape, so they must answer the same token. Under the old
+/// tag-based rule they did not.
+@Test func elementTypeTokensMatchTheSharedCorpus() throws {
+    let raw = readFixture("view_state/element_type_tokens.json")
+    let spec = try JSONSerialization.jsonObject(with: raw.data(using: .utf8)!) as! [String: Any]
+    let setup = spec["setup_svg"] as! String
+    let doc = svgToDocument(readFixture("svg/\(setup)"))
+
+    let rows = spec["rows"] as! [[String: Any]]
+    let min = (spec["min_rows"] as! NSNumber).intValue
+    // Anti-vacuity declared BY THE DATA, so the floor cannot drift out of step
+    // with the corpus it guards.
+    #expect(rows.count == min,
+            "walked \(rows.count) row(s) against a declared floor of \(min)")
+
+    for row in rows {
+        let path = (row["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+        let want = row["token"] as! String
+        let why = row["why"] as? String ?? ""
+        #expect(layersTypeValue(doc.getElement(path)) == want,
+                "type token at \(path) should be \(want) — \(why)")
+    }
+}
+
+/// `<circle>` SURVIVES A ROUND TRIP even though the model no longer has a
+/// circle kind: the writer re-derives the tag from `rx == ry`.
+///
+/// The mirror is pinned too, and it is a REWRITE we accept rather than a
+/// property we achieved: an `<ellipse rx=20 ry=20>` comes back out as
+/// `<circle>`. Someone who authored that ellipse deliberately will see it
+/// change. That is the price of one kind, recorded so it is a decision and not
+/// a surprise.
+@Test func roundEllipsesSerializeAsCircleAndSquashedOnesDoNot() throws {
+    let doc = svgToDocument(readFixture("svg/circle_ellipse_mix.svg"))
+    let out = documentToSvg(doc)
+    #expect(out.components(separatedBy: "<circle").count - 1 == 2,
+            "both round shapes should emit <circle>; got:\n\(out)")
+    #expect(out.components(separatedBy: "<ellipse").count - 1 == 1,
+            "only the rx != ry shape should emit <ellipse>; got:\n\(out)")
+    #expect(documentToSvg(svgToDocument(out)) == out,
+            "svg -> doc -> svg is not idempotent")
+}
+
 /// answer to ONE source.
 ///
 /// The rows carry TYPES, not labels — a vector spelled as display names would

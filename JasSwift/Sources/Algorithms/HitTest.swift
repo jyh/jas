@@ -165,8 +165,6 @@ private func elementIntersectsRectLocal(_ elem: Element,
         return segmentsOfElement(elem).contains { s in
             segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
         }
-    case .circle(let v):
-        return circleIntersectsRect(v.cx, v.cy, v.r, rx, ry, rw, rh, filled: v.fill != nil)
     case .ellipse(let v):
         return ellipseIntersectsRect(v.cx, v.cy, v.rx, v.ry, rx, ry, rw, rh, filled: v.fill != nil)
     // A filled polyline paints as though its last point were joined back to
@@ -291,13 +289,6 @@ private func elementIntersectsPolygonLocal(_ elem: Element, _ poly: [(Double, Do
         return segmentsOfElement(elem).contains { s in
             segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
         }
-    case .circle(let v):
-        let filled = v.fill != nil
-        let segs = segmentsOfElement(elem)
-        let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
-        if endpoints.contains(where: { pointInPolygon($0.s, $0.t, poly) }) { return true }
-        if filled, poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
-        return segs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
     case .ellipse(let v):
         let filled = v.fill != nil
         let segs = segmentsOfElement(elem)

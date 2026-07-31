@@ -262,7 +262,7 @@ private func modelWith(_ children: [Element], selected: [ElementPath] = []) -> M
                             name: "n", id: "i"))),
         ("rect", .rect(Rect(x: 0, y: 0, width: 1, height: 1, fill: fill,
                             name: "n", id: "i"))),
-        ("circle", .circle(Circle(cx: 0, cy: 0, r: 1, fill: fill,
+        ("circle", .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 1, fill: fill,
                                   name: "n", id: "i"))),
         ("ellipse", .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 2, fill: fill,
                                      name: "n", id: "i"))),

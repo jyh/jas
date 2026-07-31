@@ -12,13 +12,13 @@
 //! `cargo test -p jas_dioxus regenerate_reference_goldens -- --ignored`.
 
 use super::{
-    circle_painter_inputs, element_needs_legacy, ellipse_painter_inputs, emit_element,
+    element_needs_legacy, ellipse_painter_inputs, emit_element,
     emit_shape_paint, line_painter_inputs, path_painter_inputs, polygon_painter_inputs,
     polyline_painter_inputs, rect_painter_inputs, ConvGeom, ShapePaint,
 };
 use crate::painter::recording::Command;
 use crate::geometry::element::{
-    Arrowhead, CircleElem, Color, CommonProps, Element, EllipseElem, Fill, FillRule, Gradient,
+    Arrowhead, Color, CommonProps, Element, EllipseElem, Fill, FillRule, Gradient,
     GradientStop, GradientType, GroupElem, LineElem, PathCommand, PathElem, PolygonElem,
     PolylineElem, RectElem, Stroke, StrokeAlign, StrokeWidthPoint, Transform,
 };
@@ -106,8 +106,8 @@ fn ref_shapes() -> Vec<Element> {
             fill: fill_op(red, 0.75), stroke: Some(stroke(Color::BLACK, 3.0)),
             common: common(), fill_gradient: None, stroke_gradient: None,
         }),
-        Element::Circle(CircleElem {
-            cx: 260.0, cy: 60.0, r: 40.0,
+        Element::Ellipse(EllipseElem {
+            cx: 260.0, cy: 60.0, rx: 40.0, ry: 40.0,
             fill: fill(red), stroke: Some(stroke(Color::BLACK, 2.0)),
             common: common(), fill_gradient: None, stroke_gradient: None,
         }),
@@ -175,8 +175,8 @@ fn ref_gradients() -> Vec<Element> {
             fill: fill(Color::WHITE), stroke: None,
             common: common(), fill_gradient: Some(linear_grad(30.0)), stroke_gradient: None,
         }),
-        Element::Circle(CircleElem {
-            cx: 220.0, cy: 60.0, r: 50.0,
+        Element::Ellipse(EllipseElem {
+            cx: 220.0, cy: 60.0, rx: 50.0, ry: 50.0,
             fill: fill(Color::WHITE), stroke: None,
             common: common(), fill_gradient: Some(radial_grad()), stroke_gradient: None,
         }),
@@ -565,18 +565,21 @@ fn ellipse_case() -> ShapePaint {
     ellipse_painter_inputs(&e, ellipse_bbox(&e)).expect("convertible ellipse")
 }
 
-fn circle_bbox(e: &CircleElem) -> (f64, f64, f64, f64) {
-    (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0)
+// A round ellipse. Kept as its own helper so the circle-shaped assertions below
+// stay legible after the circle KIND went away -- they are still about round
+// geometry, which did not.
+fn circle_bbox(e: &EllipseElem) -> (f64, f64, f64, f64) {
+    (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0)
 }
 
 fn circle_case() -> ShapePaint {
-    let e = CircleElem {
-        cx: 90.0, cy: 70.0, r: 45.0,
+    let e = EllipseElem {
+        cx: 90.0, cy: 70.0, rx: 45.0, ry: 45.0,
         fill: fill_op(Color::rgb(0.9, 0.3, 0.2), 0.7),
         stroke: Some(stroke(Color::BLACK, 2.5)),
         common: common(), fill_gradient: None, stroke_gradient: None,
     };
-    circle_painter_inputs(&e, circle_bbox(&e)).expect("convertible circle")
+    ellipse_painter_inputs(&e, circle_bbox(&e)).expect("convertible circle")
 }
 
 fn rect_case() -> ShapePaint {
@@ -662,9 +665,9 @@ fn rect_regular_dash_is_convertible() {
 
 // -- Circle ------------------------------------------------------------------
 
-fn plain_circle_elem() -> CircleElem {
-    CircleElem {
-        cx: 90.0, cy: 70.0, r: 45.0,
+fn plain_circle_elem() -> EllipseElem {
+    EllipseElem {
+        cx: 90.0, cy: 70.0, rx: 45.0, ry: 45.0,
         fill: fill(Color::rgb(0.9, 0.3, 0.2)),
         stroke: Some(stroke(Color::BLACK, 2.0)),
         common: common(), fill_gradient: None, stroke_gradient: None,
@@ -674,7 +677,7 @@ fn plain_circle_elem() -> CircleElem {
 #[test]
 fn circle_center_solid_is_convertible() {
     let e = plain_circle_elem();
-    let sp = circle_painter_inputs(&e, circle_bbox(&e)).expect("center circle converts");
+    let sp = ellipse_painter_inputs(&e, circle_bbox(&e)).expect("center circle converts");
     assert!(matches!(sp.geom, ConvGeom::Arc(_)), "circle lowers to an ellipse arc");
     assert!(sp.fill.is_some() && sp.stroke.is_some());
 }
@@ -685,7 +688,7 @@ fn circle_non_center_stroke_not_convertible() {
         let mut e = plain_circle_elem();
         e.stroke = Some(stroke_aligned(Color::BLACK, 4.0, align));
         assert!(
-            circle_painter_inputs(&e, circle_bbox(&e)).is_none(),
+            ellipse_painter_inputs(&e, circle_bbox(&e)).is_none(),
             "RP3: a {align:?}-aligned circle stroke stays legacy"
         );
     }
@@ -695,7 +698,7 @@ fn circle_non_center_stroke_not_convertible() {
 fn circle_freeform_gradient_not_convertible() {
     let mut e = plain_circle_elem();
     e.fill_gradient = Some(freeform_grad());
-    assert!(circle_painter_inputs(&e, circle_bbox(&e)).is_none());
+    assert!(ellipse_painter_inputs(&e, circle_bbox(&e)).is_none());
 }
 
 #[test]
@@ -705,7 +708,7 @@ fn circle_anchor_dash_renders_solid_and_converts() {
     // the circle stays convertible with an empty dash (equivalent, not excluded).
     let mut e = plain_circle_elem();
     e.stroke = Some(anchor_dash(3.0));
-    let sp = circle_painter_inputs(&e, circle_bbox(&e)).expect("anchor-dash circle still converts");
+    let sp = ellipse_painter_inputs(&e, circle_bbox(&e)).expect("anchor-dash circle still converts");
     assert!(sp.stroke.expect("stroke").style.dash.is_empty(), "anchor dash lowers to solid");
 }
 

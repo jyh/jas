@@ -795,7 +795,6 @@ fn inflate_bounds(bbox: Bounds, stroke: Option<&Stroke>) -> Bounds {
 pub enum Element {
     Line(LineElem),
     Rect(RectElem),
-    Circle(CircleElem),
     Ellipse(EllipseElem),
     Polyline(PolylineElem),
     Polygon(PolygonElem),
@@ -972,20 +971,6 @@ pub struct RectElem {
     pub height: f64,
     pub rx: f64,
     pub ry: f64,
-    pub fill: Option<Fill>,
-    pub stroke: Option<Stroke>,
-    pub common: CommonProps,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fill_gradient: Option<Box<Gradient>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stroke_gradient: Option<Box<Gradient>>,
-}
-
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct CircleElem {
-    pub cx: f64,
-    pub cy: f64,
-    pub r: f64,
     pub fill: Option<Fill>,
     pub stroke: Option<Stroke>,
     pub common: CommonProps,
@@ -1403,7 +1388,6 @@ impl Element {
         match self {
             Element::Line(e) => &e.common,
             Element::Rect(e) => &e.common,
-            Element::Circle(e) => &e.common,
             Element::Ellipse(e) => &e.common,
             Element::Polyline(e) => &e.common,
             Element::Polygon(e) => &e.common,
@@ -1420,7 +1404,6 @@ impl Element {
         match self {
             Element::Line(e) => &mut e.common,
             Element::Rect(e) => &mut e.common,
-            Element::Circle(e) => &mut e.common,
             Element::Ellipse(e) => &mut e.common,
             Element::Polyline(e) => &mut e.common,
             Element::Polygon(e) => &mut e.common,
@@ -1484,7 +1467,6 @@ impl Element {
     pub fn fill(&self) -> Option<&Fill> {
         match self {
             Element::Rect(e) => e.fill.as_ref(),
-            Element::Circle(e) => e.fill.as_ref(),
             Element::Ellipse(e) => e.fill.as_ref(),
             Element::Polyline(e) => e.fill.as_ref(),
             Element::Polygon(e) => e.fill.as_ref(),
@@ -1500,7 +1482,6 @@ impl Element {
         match self {
             Element::Line(e) => e.stroke.as_ref(),
             Element::Rect(e) => e.stroke.as_ref(),
-            Element::Circle(e) => e.stroke.as_ref(),
             Element::Ellipse(e) => e.stroke.as_ref(),
             Element::Polyline(e) => e.stroke.as_ref(),
             Element::Polygon(e) => e.stroke.as_ref(),
@@ -1518,7 +1499,6 @@ impl Element {
     pub fn fill_gradient(&self) -> Option<&Gradient> {
         match self {
             Element::Rect(e) => e.fill_gradient.as_deref(),
-            Element::Circle(e) => e.fill_gradient.as_deref(),
             Element::Ellipse(e) => e.fill_gradient.as_deref(),
             Element::Polyline(e) => e.fill_gradient.as_deref(),
             Element::Polygon(e) => e.fill_gradient.as_deref(),
@@ -1532,7 +1512,6 @@ impl Element {
         match self {
             Element::Line(e) => e.stroke_gradient.as_deref(),
             Element::Rect(e) => e.stroke_gradient.as_deref(),
-            Element::Circle(e) => e.stroke_gradient.as_deref(),
             Element::Ellipse(e) => e.stroke_gradient.as_deref(),
             Element::Polyline(e) => e.stroke_gradient.as_deref(),
             Element::Polygon(e) => e.stroke_gradient.as_deref(),
@@ -1555,10 +1534,6 @@ impl Element {
             Element::Rect(e) => {
                 inflate_bounds((e.x, e.y, e.width, e.height), e.stroke.as_ref())
             }
-            Element::Circle(e) => inflate_bounds(
-                (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0),
-                e.stroke.as_ref(),
-            ),
             Element::Ellipse(e) => inflate_bounds(
                 (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0),
                 e.stroke.as_ref(),
@@ -1628,7 +1603,6 @@ impl Element {
                 (min_x, min_y, (e.x2 - e.x1).abs(), (e.y2 - e.y1).abs())
             }
             Element::Rect(e) => (e.x, e.y, e.width, e.height),
-            Element::Circle(e) => (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0),
             Element::Ellipse(e) => (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0),
             Element::Polyline(e) => points_bounds(&e.points, None),
             Element::Polygon(e) => points_bounds(&e.points, None),
@@ -1921,7 +1895,7 @@ fn geometric_children_bounds(children: &[Rc<Element>]) -> Bounds {
 pub fn control_point_count(elem: &Element) -> usize {
     match elem {
         Element::Line(_) => 2,
-        Element::Rect(_) | Element::Circle(_) | Element::Ellipse(_) => 4,
+        Element::Rect(_) | Element::Ellipse(_) => 4,
         Element::Polygon(e) => e.points.len(),
         Element::Path(e) => path_anchor_points(&e.d).len(),
         Element::TextPath(e) => path_anchor_points(&e.d).len(),
@@ -1938,12 +1912,6 @@ pub fn control_points(elem: &Element) -> Vec<(f64, f64)> {
             (e.x + e.width, e.y),
             (e.x + e.width, e.y + e.height),
             (e.x, e.y + e.height),
-        ],
-        Element::Circle(e) => vec![
-            (e.cx, e.cy - e.r),
-            (e.cx + e.r, e.cy),
-            (e.cx, e.cy + e.r),
-            (e.cx - e.r, e.cy),
         ],
         Element::Ellipse(e) => vec![
             (e.cx, e.cy - e.ry),
@@ -2365,33 +2333,6 @@ pub fn move_control_points(
                     fill_gradient: e.fill_gradient.clone(),
                     stroke_gradient: e.stroke_gradient.clone(),
                 })
-            }
-        }
-        Element::Circle(e) => {
-            if kind.is_all(4) {
-                let mut new = e.clone();
-                new.cx += dx;
-                new.cy += dy;
-                Element::Circle(new)
-            } else {
-                let mut cps = [(e.cx, e.cy - e.r),
-                    (e.cx + e.r, e.cy),
-                    (e.cx, e.cy + e.r),
-                    (e.cx - e.r, e.cy)];
-                for i in 0..4 {
-                    if kind.contains(i) {
-                        cps[i].0 += dx;
-                        cps[i].1 += dy;
-                    }
-                }
-                let ncx = (cps[1].0 + cps[3].0) / 2.0;
-                let ncy = (cps[0].1 + cps[2].1) / 2.0;
-                let nr = (cps[1].0 - ncx).abs().max((cps[0].1 - ncy).abs());
-                let mut new = e.clone();
-                new.cx = ncx;
-                new.cy = ncy;
-                new.r = nr;
-                Element::Circle(new)
             }
         }
         Element::Ellipse(e) => {
@@ -2993,9 +2934,6 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
         Element::Rect(e) => Element::Rect(RectElem {
             x: e.x + dx, y: e.y + dy, ..e.clone()
         }),
-        Element::Circle(e) => Element::Circle(CircleElem {
-            cx: e.cx + dx, cy: e.cy + dy, ..e.clone()
-        }),
         Element::Ellipse(e) => Element::Ellipse(EllipseElem {
             cx: e.cx + dx, cy: e.cy + dy, ..e.clone()
         }),
@@ -3130,7 +3068,6 @@ pub fn map_paintable(elem: &Element, f: &dyn Fn(&Element) -> Element) -> Element
 pub fn with_fill_gradient(elem: &Element, gradient: Option<Box<Gradient>>) -> Element {
     match elem {
         Element::Rect(e) => Element::Rect(RectElem { fill_gradient: gradient, ..e.clone() }),
-        Element::Circle(e) => Element::Circle(CircleElem { fill_gradient: gradient, ..e.clone() }),
         Element::Ellipse(e) => Element::Ellipse(EllipseElem { fill_gradient: gradient, ..e.clone() }),
         Element::Polyline(e) => Element::Polyline(PolylineElem { fill_gradient: gradient, ..e.clone() }),
         Element::Polygon(e) => Element::Polygon(PolygonElem { fill_gradient: gradient, ..e.clone() }),
@@ -3146,7 +3083,6 @@ pub fn with_stroke_gradient(elem: &Element, gradient: Option<Box<Gradient>>) -> 
     match elem {
         Element::Line(e) => Element::Line(LineElem { stroke_gradient: gradient, ..e.clone() }),
         Element::Rect(e) => Element::Rect(RectElem { stroke_gradient: gradient, ..e.clone() }),
-        Element::Circle(e) => Element::Circle(CircleElem { stroke_gradient: gradient, ..e.clone() }),
         Element::Ellipse(e) => Element::Ellipse(EllipseElem { stroke_gradient: gradient, ..e.clone() }),
         Element::Polyline(e) => Element::Polyline(PolylineElem { stroke_gradient: gradient, ..e.clone() }),
         Element::Polygon(e) => Element::Polygon(PolygonElem { stroke_gradient: gradient, ..e.clone() }),
@@ -3160,7 +3096,6 @@ pub fn with_stroke_gradient(elem: &Element, gradient: Option<Box<Gradient>>) -> 
 pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
     match elem {
         Element::Rect(e) => Element::Rect(RectElem { fill, ..e.clone() }),
-        Element::Circle(e) => Element::Circle(CircleElem { fill, ..e.clone() }),
         Element::Ellipse(e) => Element::Ellipse(EllipseElem { fill, ..e.clone() }),
         Element::Polyline(e) => Element::Polyline(PolylineElem { fill, ..e.clone() }),
         Element::Polygon(e) => Element::Polygon(PolygonElem { fill, ..e.clone() }),
@@ -3292,7 +3227,6 @@ pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
     match elem {
         Element::Line(e) => Element::Line(LineElem { stroke, ..e.clone() }),
         Element::Rect(e) => Element::Rect(RectElem { stroke, ..e.clone() }),
-        Element::Circle(e) => Element::Circle(CircleElem { stroke, ..e.clone() }),
         Element::Ellipse(e) => Element::Ellipse(EllipseElem { stroke, ..e.clone() }),
         Element::Polyline(e) => Element::Polyline(PolylineElem { stroke, ..e.clone() }),
         Element::Polygon(e) => Element::Polygon(PolygonElem { stroke, ..e.clone() }),
@@ -3609,8 +3543,8 @@ mod tests {
     }
 
     fn circle(cx: f64, cy: f64, r: f64) -> Element {
-        Element::Circle(CircleElem {
-            cx, cy, r,
+        Element::Ellipse(EllipseElem {
+            cx, cy, rx: r, ry: r,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
                     fill_gradient: None,

@@ -13,7 +13,7 @@
 //!   - Accepts both raw pencil polylines and Bezier paths (via flatten).
 
 use crate::geometry::element::{
-    flatten_path_commands, CircleElem, CommonProps, Element, EllipseElem, Fill, LineElem,
+    flatten_path_commands, CommonProps, Element, EllipseElem, Fill, LineElem,
     PathCommand, PathElem, PolygonElem, PolylineElem, RectElem, Stroke,
 };
 
@@ -298,7 +298,6 @@ pub fn recognize_element(element: &Element, cfg: &RecognizeConfig) -> Option<(Sh
         // Everything else is already a clean shape or not path-like.
         Element::Line(_)
         | Element::Rect(_)
-        | Element::Circle(_)
         | Element::Ellipse(_)
         | Element::Polygon(_)
         | Element::Text(_)
@@ -318,7 +317,6 @@ fn template_appearance(e: &Element) -> (Option<Fill>, Option<Stroke>, CommonProp
     match e {
         Element::Line(l) => (None, l.stroke, l.common.clone()),
         Element::Rect(r) => (r.fill, r.stroke, r.common.clone()),
-        Element::Circle(c) => (c.fill, c.stroke, c.common.clone()),
         Element::Ellipse(e) => (e.fill, e.stroke, e.common.clone()),
         Element::Polyline(p) => (p.fill, p.stroke, p.common.clone()),
         Element::Polygon(p) => (p.fill, p.stroke, p.common.clone()),
@@ -376,10 +374,13 @@ pub fn recognized_to_element(shape: &RecognizedShape, template: &Element) -> Ele
                     fill_gradient: None,
             stroke_gradient: None,
         }),
-        RecognizedShape::Circle { cx, cy, r } => Element::Circle(CircleElem {
+        // The recogniser still RECOGNISES a circle -- that is a statement about
+        // the traced geometry. It just builds the one round kind.
+        RecognizedShape::Circle { cx, cy, r } => Element::Ellipse(EllipseElem {
             cx,
             cy,
-            r,
+            rx: r,
+            ry: r,
             fill,
             stroke,
             common,
@@ -2047,8 +2048,8 @@ mod tests {
 
     #[test]
     fn recognize_element_skips_circle() {
-        let elem = Element::Circle(CircleElem {
-            cx: 50.0, cy: 50.0, r: 30.0,
+        let elem = Element::Ellipse(EllipseElem {
+            cx: 50.0, cy: 50.0, rx: 30.0, ry: 30.0,
             fill: None, stroke: None, common: CommonProps::default(),
                     fill_gradient: None,
             stroke_gradient: None,
@@ -2084,7 +2085,7 @@ mod tests {
             fill_rule: crate::geometry::element::FillRule::NonZero,
         });
         match recognize_element(&elem, &RecognizeConfig::default()) {
-            Some((kind, Element::Circle(_))) => {
+            Some((kind, Element::Ellipse(_))) => {
                 assert_eq!(kind, ShapeKind::Circle);
             }
             other => panic!("expected (Circle, Circle), got {other:?}"),

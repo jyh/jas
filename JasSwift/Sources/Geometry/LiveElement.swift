@@ -992,8 +992,6 @@ public func elementToPolygonSetWith(
     case .polyline(let p):
         // Implicitly closed for even-odd fill.
         return p.points.isEmpty ? [] : [p.points]
-    case .circle(let c):
-        return [circleToRing(cx: c.cx, cy: c.cy, r: c.r, precision: precision)]
     case .ellipse(let e):
         return [ellipseToRing(cx: e.cx, cy: e.cy, rx: e.rx, ry: e.ry, precision: precision)]
     case .group(let g):

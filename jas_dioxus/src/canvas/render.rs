@@ -1388,45 +1388,6 @@ fn draw_element_body(
             }
             } // end `if !converted`: the PH2 painter route handled the paints
         }
-        Element::Circle(e) => {
-            // PH2 Painter conversion (capability-routed). RP3: a non-center
-            // stroke stays legacy — an ellipse arc carries no inside/outside
-            // clip. Freeform gradient and outline mode also fall through.
-            let converted = if outline {
-                false
-            } else if let Some(sp) = crate::painter::element_render::circle_painter_inputs(
-                e, (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0),
-            ) {
-                let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
-                crate::painter::element_render::emit_shape_paint(&mut painter, &sp, base_alpha);
-                true
-            } else {
-                false
-            };
-            if !converted {
-            let (mut fill_op, mut stroke_op, mut stroke_align) = (1.0, 1.0, StrokeAlign::Center);
-            if outline {
-                apply_outline_style(ctx);
-            } else {
-                let bbox = (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0);
-                fill_op = apply_fill(ctx, e.fill.as_ref(),
-                    e.fill_gradient.as_deref(), bbox);
-                (stroke_op, stroke_align) = apply_stroke_with_gradient(
-                    ctx, e.stroke.as_ref(),
-                    e.stroke_gradient.as_deref(), bbox);
-            }
-            ctx.begin_path();
-            ctx.arc(e.cx, e.cy, e.r, 0.0, std::f64::consts::TAU).ok();
-            if !outline && (e.fill.is_some() || e.fill_gradient.is_some()) {
-                ctx.set_global_alpha(base_alpha * fill_op);
-                ctx.fill();
-            }
-            if outline || e.stroke.is_some() {
-                ctx.set_global_alpha(base_alpha * stroke_op);
-                stroke_aligned(ctx, stroke_align);
-            }
-            } // end `if !converted`: the PH2 painter route handled the paints
-        }
         Element::Ellipse(e) => {
             // PH2 Painter conversion (capability-routed). RP3 as Circle: a
             // non-center stroke stays legacy. Freeform gradient / outline fall
@@ -2357,10 +2318,6 @@ fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
             } else {
                 ctx.rect(e.x, e.y, e.width, e.height);
             }
-        }
-        Element::Circle(e) => {
-            ctx.move_to(e.cx + e.r, e.cy);
-            ctx.arc(e.cx, e.cy, e.r, 0.0, std::f64::consts::TAU).ok();
         }
         Element::Ellipse(e) => {
             ctx.move_to(e.cx + e.rx, e.cy);

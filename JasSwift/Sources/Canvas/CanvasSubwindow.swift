@@ -287,7 +287,7 @@ func setCanvasCull(dirtyDoc: CGRect?, docToDevice: CGAffineTransform) {
 /// as a whole) are drawn unconditionally. "When in doubt, draw it."
 private func isCullableLeaf(_ e: Element) -> Bool {
     switch e {
-    case .rect, .circle, .ellipse, .polyline, .polygon, .path: return true
+    case .rect, .ellipse, .polyline, .polygon, .path: return true
     default: return false
     }
 }
@@ -1102,7 +1102,6 @@ private func elementOpacity(_ e: Element) -> Double {
     switch e {
     case .line(let v): return v.opacity
     case .rect(let v): return v.opacity
-    case .circle(let v): return v.opacity
     case .ellipse(let v): return v.opacity
     case .polyline(let v): return v.opacity
     case .polygon(let v): return v.opacity
@@ -1318,12 +1317,6 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
             fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: rect, outline: outline)
         }
 
-    case .circle(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
-        applyTransform(ctx, v.transform)
-        let rect = CGRect(x: v.cx - v.r, y: v.cy - v.r, width: v.r * 2, height: v.r * 2)
-        ctx.addEllipse(in: rect)
-        fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: rect, outline: outline)
 
     case .ellipse(let v):
         ctx.setAlpha(CGFloat(v.opacity))
@@ -2185,9 +2178,6 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
             ctx.addRect(CGRect(x: v.x, y: v.y, width: v.width, height: v.height))
         }
         ctx.strokePath()
-    case .circle(let v):
-        ctx.addEllipse(in: CGRect(x: v.cx - v.r, y: v.cy - v.r, width: v.r * 2, height: v.r * 2))
-        ctx.strokePath()
     case .ellipse(let v):
         ctx.addEllipse(in: CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2))
         ctx.strokePath()
@@ -2575,7 +2565,6 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjec
             switch node {
             case .line(let v): applyTransform(ctx, v.transform)
             case .rect(let v): applyTransform(ctx, v.transform)
-            case .circle(let v): applyTransform(ctx, v.transform)
             case .ellipse(let v): applyTransform(ctx, v.transform)
             case .polyline(let v): applyTransform(ctx, v.transform)
             case .polygon(let v): applyTransform(ctx, v.transform)

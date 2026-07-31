@@ -532,9 +532,6 @@ fn emit_element(out: &mut String, el: &Element, filter: &PrintLayers) {
             push_num(s, l.y2);
             s.push_str("l\n");
         }),
-        Element::Circle(c) => emit_paint(out, &c.common, c.fill.as_ref(), c.stroke.as_ref(), |s| {
-            emit_circle(s, c.cx, c.cy, c.r, c.r);
-        }),
         Element::Ellipse(e) => emit_paint(out, &e.common, e.fill.as_ref(), e.stroke.as_ref(), |s| {
             emit_circle(s, e.cx, e.cy, e.rx, e.ry);
         }),

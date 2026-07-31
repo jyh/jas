@@ -718,15 +718,6 @@ fn element_json(elem: &Element) -> String {
             o.num("x", e.x);
             o.num("y", e.y);
         }
-        Element::Circle(e) => {
-            o.str_val("type", "circle");
-            common_fields(&mut o, &e.common);
-            o.num("cx", e.cx);
-            o.num("cy", e.cy);
-            o.raw("fill", fill_json(&e.fill));
-            o.num("r", e.r);
-            o.raw("stroke", stroke_json(&e.stroke));
-        }
         Element::Ellipse(e) => {
             o.str_val("type", "ellipse");
             common_fields(&mut o, &e.common);
@@ -1512,7 +1503,6 @@ fn apply_extended_element_fields(elem: &mut Element, v: &serde_json::Value) {
             e.width_points = wp;
         }
         Element::Rect(e) => { e.fill_gradient = fg; e.stroke_gradient = sg; }
-        Element::Circle(e) => { e.fill_gradient = fg; e.stroke_gradient = sg; }
         Element::Ellipse(e) => { e.fill_gradient = fg; e.stroke_gradient = sg; }
         Element::Polyline(e) => { e.fill_gradient = fg; e.stroke_gradient = sg; }
         Element::Polygon(e) => { e.fill_gradient = fg; e.stroke_gradient = sg; }
@@ -1633,13 +1623,6 @@ fn parse_element_base(v: &serde_json::Value) -> Element {
             x: parse_f(&v["x"]), y: parse_f(&v["y"]),
             width: parse_f(&v["width"]), height: parse_f(&v["height"]),
             rx: parse_f(&v["rx"]), ry: parse_f(&v["ry"]),
-            fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
-            common,
-                    fill_gradient: None,
-            stroke_gradient: None,
-        }),
-        "circle" => Element::Circle(CircleElem {
-            cx: parse_f(&v["cx"]), cy: parse_f(&v["cy"]), r: parse_f(&v["r"]),
             fill: parse_fill(&v["fill"]), stroke: parse_stroke(&v["stroke"]),
             common,
                     fill_gradient: None,

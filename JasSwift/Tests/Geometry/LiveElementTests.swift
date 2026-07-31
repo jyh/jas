@@ -594,7 +594,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     clearRecomputeCacheForTest()
     setRecomputeCacheGeneration(3)
     let resolver = CellResolver()
-    resolver.set("p4c_c1", .circle(Circle(cx: 0, cy: 0, r: 100)))
+    resolver.set("p4c_c1", .ellipse(Ellipse(cx: 0, cy: 0, rx: 100, ry: 100)))
     let reference = ReferenceElem(target: ElementRef("p4c_c1"), name: nil)
 
     let coarse = 1.0

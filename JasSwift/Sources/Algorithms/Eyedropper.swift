@@ -40,7 +40,6 @@ public extension Element {
         switch self {
         case .line(let v): return v.opacity
         case .rect(let v): return v.opacity
-        case .circle(let v): return v.opacity
         case .ellipse(let v): return v.opacity
         case .polyline(let v): return v.opacity
         case .polygon(let v): return v.opacity
@@ -285,16 +284,6 @@ private func rebuildWithOpacityAndBlend(
         return .rect(Rect(
             x: v.x, y: v.y, width: v.width, height: v.height,
             rx: v.rx, ry: v.ry, fill: v.fill, stroke: v.stroke,
-            opacity: newOpacity ?? v.opacity, transform: v.transform,
-            locked: v.locked, visibility: v.visibility,
-            blendMode: newBlendMode ?? v.blendMode, mask: v.mask,
-            fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-            name: v.name, id: v.id
-        ))
-    case .circle(let v):
-        return .circle(Circle(
-            cx: v.cx, cy: v.cy, r: v.r,
-            fill: v.fill, stroke: v.stroke,
             opacity: newOpacity ?? v.opacity, transform: v.transform,
             locked: v.locked, visibility: v.visibility,
             blendMode: newBlendMode ?? v.blendMode, mask: v.mask,

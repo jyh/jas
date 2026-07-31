@@ -111,8 +111,8 @@ import Testing
         case (.rect(let a), .rect(let b)):
             #expect((b.x, b.y, b.width, b.height) == (a.x + dx, a.y + dy, a.width, a.height),
                     "\(kind) origin")
-        case (.circle(let a), .circle(let b)):
-            #expect((b.cx, b.cy, b.r) == (a.cx + dx, a.cy + dy, a.r), "\(kind) centre")
+        case (.ellipse(let a), .ellipse(let b)):
+            #expect((b.cx, b.cy, b.rx) == (a.cx + dx, a.cy + dy, a.rx), "\(kind) centre")
         case (.ellipse(let a), .ellipse(let b)):
             #expect((b.cx, b.cy, b.rx, b.ry) == (a.cx + dx, a.cy + dy, a.rx, a.ry),
                     "\(kind) centre")

@@ -1044,12 +1044,6 @@ private func packElementBase(_ elem: Element) -> MsgValue {
                       [vf64(e.x), vf64(e.y), vf64(e.width), vf64(e.height),
                        vf64(e.rx), vf64(e.ry),
                        packFill(e.fill), packStroke(e.stroke)])
-    case .circle(let e):
-        let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
-                                transform: e.transform, name: e.name, id: e.id)
-        return .array([vint(tagCircle)] + common +
-                      [vf64(e.cx), vf64(e.cy), vf64(e.r),
-                       packFill(e.fill), packStroke(e.stroke)])
     case .ellipse(let e):
         let common = packCommon(locked: e.locked, opacity: e.opacity, visibility: e.visibility,
                                 transform: e.transform, name: e.name, id: e.id)
@@ -1372,9 +1366,15 @@ private func unpackElement(_ v: MsgValue) throws -> Element {
                           opacity: opacity, transform: xform, locked: locked, visibility: vis,
                           blendMode: mode, mask: mask,
                           name: name, id: id))
+    // READ-ONLY LEGACY TAG. Nothing packs tag 3 since the one-round-kind
+    // migration (2026-07-30), but this is a PERSISTED USER FORMAT and a file
+    // saved before that day must still open. Read as equal radii, which is
+    // what it always meant. The canonical TEST json is deliberately NOT
+    // tolerant this way -- there a stray "circle" must fail loudly.
     case tagCircle:
-        return .circle(Circle(cx: try asF64(at(arr, 7)), cy: try asF64(at(arr, 8)),
-                              r: try asF64(at(arr, 9)),
+        let legacyR = try asF64(at(arr, 9))
+        return .ellipse(Ellipse(cx: try asF64(at(arr, 7)), cy: try asF64(at(arr, 8)),
+                              rx: legacyR, ry: legacyR,
                               fill: try unpackFill(at(arr, 10)), stroke: try unpackStroke(at(arr, 11)),
                               opacity: opacity, transform: xform, locked: locked, visibility: vis,
                               blendMode: mode, mask: mask,
@@ -1677,7 +1677,6 @@ package func elementTagLabel(_ elem: Element) -> String {
     case .group: return "group"
     case .line: return "line"
     case .rect: return "rect"
-    case .circle: return "circle"
     case .ellipse: return "ellipse"
     case .polyline: return "polyline"
     case .polygon: return "polygon"

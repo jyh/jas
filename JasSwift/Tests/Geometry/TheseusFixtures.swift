@@ -54,7 +54,7 @@ func mvPopulated() -> [(String, Element)] {
                             mask: mvProbe(2), fillGradient: mvGrad(30),
                             strokeGradient: mvGrad(60),
                             name: "my-rect", id: "rect-1"))),
-        ("circle", .circle(Circle(cx: 1, cy: 2, r: 3,
+        ("circle", .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 3,
                                   fill: mvFill, stroke: mvStroke,
                                   opacity: 0.42, transform: Transform.translate(7, 11),
                                   locked: true, visibility: .outline, blendMode: .multiply,
@@ -142,7 +142,7 @@ func mvMinimal() -> [(String, Element)] {
     [
         ("line", .line(Line(x1: 1, y1: 2, x2: 3, y2: 4))),
         ("rect", .rect(Rect(x: 1, y: 2, width: 3, height: 4))),
-        ("circle", .circle(Circle(cx: 1, cy: 2, r: 3))),
+        ("circle", .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 3))),
         ("ellipse", .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 4))),
         ("polyline", .polyline(Polyline(points: [(0, 0), (10, 10)]))),
         ("polygon", .polygon(Polygon(points: [(0, 0), (10, 0), (10, 10)]))),

@@ -89,7 +89,7 @@ private func populated() -> [(String, Element)] {
                             locked: true, visibility: .outline, blendMode: .multiply,
                             mask: probe(2), fillGradient: grad(30), strokeGradient: grad(60),
                             name: "my-rect", id: "rect-1"))),
-        ("circle", .circle(Circle(cx: 1, cy: 2, r: 3,
+        ("circle", .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 3,
                                   fill: richFill, stroke: richStroke,
                                   opacity: 0.42, transform: Transform.translate(7, 11),
                                   locked: true, visibility: .outline, blendMode: .multiply,
@@ -172,7 +172,7 @@ private func minimal() -> [(String, Element)] {
     [
         ("line", .line(Line(x1: 1, y1: 2, x2: 3, y2: 4))),
         ("rect", .rect(Rect(x: 1, y: 2, width: 3, height: 4))),
-        ("circle", .circle(Circle(cx: 1, cy: 2, r: 3))),
+        ("circle", .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 3))),
         ("ellipse", .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 4))),
         ("polyline", .polyline(Polyline(points: [(0, 0), (10, 10)]))),
         ("polygon", .polygon(Polygon(points: [(0, 0), (10, 0), (10, 10)]))),
@@ -476,7 +476,7 @@ private func expectOnlySubjectChanged(_ before: Any, _ after: Any,
     for (kind, e) in populated() {
         let after = withFillGradient(e, fillGradient: fresh)
         switch after {
-        case .rect, .circle, .ellipse, .polyline, .polygon, .path:
+        case .rect, .ellipse, .ellipse, .polyline, .polygon, .path:
             // Value pairing: the subject actually moved.
             #expect(after.fillGradient == fresh,
                     "withFillGradient did not set the gradient on \(kind)")
@@ -492,7 +492,7 @@ private func expectOnlySubjectChanged(_ before: Any, _ after: Any,
     for (kind, e) in populated() {
         let after = withFillGradient(e, fillGradient: nil)
         switch after {
-        case .rect, .circle, .ellipse, .polyline, .polygon, .path:
+        case .rect, .ellipse, .ellipse, .polyline, .polygon, .path:
             #expect(after.fillGradient == nil,
                     "withFillGradient(nil) did not clear the gradient on \(kind)")
             expectOnlySubjectChanged(payload(e), payload(after),
@@ -520,7 +520,7 @@ private func expectOnlySubjectChanged(_ before: Any, _ after: Any,
     for (kind, e) in populated() {
         let after = withStrokeGradient(e, strokeGradient: fresh)
         switch after {
-        case .line, .rect, .circle, .ellipse, .polyline, .polygon, .path:
+        case .line, .rect, .ellipse, .ellipse, .polyline, .polygon, .path:
             #expect(after.strokeGradient == fresh,
                     "withStrokeGradient did not set the gradient on \(kind)")
             expectOnlySubjectChanged(payload(e), payload(after),
@@ -534,7 +534,7 @@ private func expectOnlySubjectChanged(_ before: Any, _ after: Any,
     for (kind, e) in populated() {
         let after = withStrokeGradient(e, strokeGradient: nil)
         switch after {
-        case .line, .rect, .circle, .ellipse, .polyline, .polygon, .path:
+        case .line, .rect, .ellipse, .ellipse, .polyline, .polygon, .path:
             #expect(after.strokeGradient == nil,
                     "withStrokeGradient(nil) did not clear the gradient on \(kind)")
             expectOnlySubjectChanged(payload(e), payload(after),

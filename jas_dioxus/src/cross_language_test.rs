@@ -6228,7 +6228,7 @@ mod tests {
             Element::Rect(RectElem { x: 0.0, y: 0.0, width: 1.0, height: 2.0, rx: 0.0, ry: 0.0,
                                      fill: None, stroke: None, common: c(),
                                      fill_gradient: None, stroke_gradient: None }),
-            Element::Circle(CircleElem { cx: 0.0, cy: 0.0, r: 1.0, fill: None, stroke: None,
+            Element::Ellipse(EllipseElem { cx: 0.0, cy: 0.0, rx: 1.0, ry: 1.0, fill: None, stroke: None,
                                          common: c(), fill_gradient: None,
                                          stroke_gradient: None }),
             Element::Ellipse(EllipseElem { cx: 0.0, cy: 0.0, rx: 1.0, ry: 2.0, fill: None,
@@ -6654,6 +6654,72 @@ mod tests {
                  group than for its sole member, which is the shape all eight \
                  of the 2026-07-29 defects wore:\n  {}",
                 disagreements.len(), seen_known.len(), disagreements.join("\n  "));
+    }
+
+    /// THE TYPE TOKEN IS DERIVED FROM THE ELEMENT, NOT FROM ITS TAG.
+    ///
+    /// `test_fixtures/view_state/element_type_tokens.json` is the single
+    /// definition; the twin reader is `elementTypeTokensMatchTheSharedCorpus`
+    /// in JasSwift/Tests/CrossLanguageTests.swift.
+    ///
+    /// It exists because the model used to carry a `circle` kind AND an
+    /// `ellipse` kind, and the token was whichever tag the SVG had. That is
+    /// provenance: `apply_scale` composes a matrix onto `common.transform` and
+    /// never touches the radii, so a `circle` stayed typed `circle` while being
+    /// drawn as an egg. JYH ruled 2026-07-30 that one round kind survives and
+    /// `circle` becomes a DERIVED token.
+    ///
+    /// The decisive row is `[0, 1]`: an `<ellipse rx=20 ry=20>` and a
+    /// `<circle r=20>` are the same shape, so they must answer the same token.
+    /// Under the old tag-based rule they did not.
+    #[test]
+    fn element_type_tokens_match_the_shared_corpus() {
+        use crate::algorithms::layers_filter::type_value;
+
+        let raw = read_fixture("view_state/element_type_tokens.json");
+        let spec: serde_json::Value = serde_json::from_str(&raw)
+            .expect("element_type_tokens.json is not valid JSON");
+        let setup = spec["setup_svg"].as_str().expect("no `setup_svg`");
+        let doc = svg_to_document(&read_fixture(&format!("svg/{setup}")));
+
+        let rows = spec["rows"].as_array().expect("no `rows`");
+        let min = spec["min_rows"].as_u64().expect("no `min_rows`") as usize;
+        // Anti-vacuity declared BY THE DATA, so the floor cannot drift out of
+        // step with the corpus it guards.
+        assert_eq!(rows.len(), min,
+                   "walked {} row(s) against a declared floor of {}", rows.len(), min);
+
+        for row in rows {
+            let path: Vec<usize> = row["path"].as_array().unwrap()
+                .iter().map(|n| n.as_u64().unwrap() as usize).collect();
+            let want = row["token"].as_str().unwrap();
+            let why = row["why"].as_str().unwrap_or("");
+            let elem = doc.get_element(&path)
+                .unwrap_or_else(|| panic!("no element at {path:?}"));
+            assert_eq!(type_value(elem), want,
+                       "type token at {path:?} should be {want:?} -- {why}");
+        }
+    }
+
+    /// `<circle>` SURVIVES A ROUND TRIP even though the model no longer has a
+    /// circle kind: the writer re-derives the tag from `rx == ry`.
+    ///
+    /// The mirror is pinned too, and it is a REWRITE we accept rather than a
+    /// property we achieved: an `<ellipse rx=20 ry=20>` comes back out as
+    /// `<circle>`. Someone who authored that ellipse deliberately will see it
+    /// change. That is the price of one kind, recorded here so it is a decision
+    /// and not a surprise.
+    #[test]
+    fn round_ellipses_serialize_as_circle_and_squashed_ones_do_not() {
+        let doc = svg_to_document(&read_fixture("svg/circle_ellipse_mix.svg"));
+        let out = document_to_svg(&doc);
+        assert_eq!(out.matches("<circle").count(), 2,
+                   "both round shapes should emit <circle>; got:\n{out}");
+        assert_eq!(out.matches("<ellipse").count(), 1,
+                   "only the rx != ry shape should emit <ellipse>; got:\n{out}");
+        // And the re-read is stable -- a second trip must not oscillate.
+        assert_eq!(document_to_svg(&svg_to_document(&out)), out,
+                   "svg -> doc -> svg is not idempotent");
     }
 
     /// THE LAYERS TYPE FILTER, driven from the shared corpus.

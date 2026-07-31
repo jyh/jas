@@ -63,8 +63,8 @@ import Testing
 }
 
 @Test func geometricBoundsCircle() {
-    let c = Circle(cx: 50, cy: 50, r: 20)
-    let e = Element.circle(c)
+    let c = Ellipse(cx: 50, cy: 50, rx: 20, ry: 20)
+    let e = Element.ellipse(c)
     let b = e.geometricBounds
     #expect(b.x == 30 && b.y == 30 && b.width == 40 && b.height == 40)
 }
@@ -86,8 +86,8 @@ import Testing
 }
 
 @Test func geometricBoundsMatchesBoundsForUnstrokedShapes() {
-    let c = Circle(cx: 50, cy: 50, r: 20)
-    let e = Element.circle(c)
+    let c = Ellipse(cx: 50, cy: 50, rx: 20, ry: 20)
+    let e = Element.ellipse(c)
     let g = e.geometricBounds
     let p = e.bounds
     #expect(g.x == p.x && g.y == p.y && g.width == p.width && g.height == p.height)
@@ -121,13 +121,13 @@ import Testing
 }
 
 @Test func circleBounds() {
-    let c = Circle(cx: 50, cy: 50, r: 25)
+    let c = Ellipse(cx: 50, cy: 50, rx: 25, ry: 25)
     let b = c.bounds
     #expect(b.x == 25 && b.y == 25 && b.width == 50 && b.height == 50)
 }
 
 @Test func circleWithFillAndStroke() {
-    let c = Circle(cx: 50, cy: 50, r: 25,
+    let c = Ellipse(cx: 50, cy: 50, rx: 25, ry: 25,
                       fill: Fill(color: Color(r: 0, g: 1, b: 0)),
                       stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 3.0))
     #expect(c.fill?.color.toRgba().1 == 1.0)
@@ -285,7 +285,7 @@ import Testing
     let children: [Element] = [
         .line(Line(x1: 0, y1: 0, x2: 10, y2: 10)),
         .rect(Rect(x: 0, y: 0, width: 20, height: 20)),
-        .circle(Circle(cx: 50, cy: 50, r: 10)),
+        .ellipse(Ellipse(cx: 50, cy: 50, rx: 10, ry: 10)),
         .ellipse(Ellipse(cx: 50, cy: 50, rx: 10, ry: 5)),
         .polyline(Polyline(points: [(0, 0), (10, 10)])),
         .polygon(Polygon(points: [(0, 0), (10, 0), (5, 10)])),
@@ -320,7 +320,7 @@ import Testing
 @Test func layerBounds() {
     let layer = Layer(name: "Shapes", children: [
         .rect(Rect(x: 0, y: 0, width: 10, height: 10)),
-        .circle(Circle(cx: 50, cy: 50, r: 5)),
+        .ellipse(Ellipse(cx: 50, cy: 50, rx: 5, ry: 5)),
     ])
     let b = layer.bounds
     #expect(b.x == 0 && b.y == 0 && b.width == 55 && b.height == 55)
@@ -796,7 +796,7 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
 
 @Test func circleStrokeGradientFieldRoundtrips() {
     let g = Gradient(type: .radial)
-    let c = Circle(cx: 0, cy: 0, r: 10, strokeGradient: g)
+    let c = Ellipse(cx: 0, cy: 0, rx: 10, ry: 10, strokeGradient: g)
     #expect(c.strokeGradient == g)
     #expect(c.fillGradient == nil)
 }

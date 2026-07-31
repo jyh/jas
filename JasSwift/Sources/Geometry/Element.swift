@@ -819,7 +819,6 @@ public enum Element: Equatable {
     /// SVG \<rect\>
     case rect(Rect)
     /// SVG \<circle\>
-    case circle(Circle)
     /// SVG \<ellipse\>
     case ellipse(Ellipse)
     /// SVG \<polyline\>
@@ -844,7 +843,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.bounds
         case .rect(let v): return v.bounds
-        case .circle(let v): return v.bounds
         case .ellipse(let v): return v.bounds
         case .polyline(let v): return v.bounds
         case .polygon(let v): return v.bounds
@@ -867,7 +865,6 @@ public enum Element: Equatable {
             let minX = min(v.x1, v.x2), minY = min(v.y1, v.y2)
             return (minX, minY, abs(v.x2 - v.x1), abs(v.y2 - v.y1))
         case .rect(let v): return (v.x, v.y, v.width, v.height)
-        case .circle(let v): return (v.cx - v.r, v.cy - v.r, v.r * 2, v.r * 2)
         case .ellipse(let v): return (v.cx - v.rx, v.cy - v.ry, v.rx * 2, v.ry * 2)
         case .polyline(let v): return pointsBounds(v.points)
         case .polygon(let v): return pointsBounds(v.points)
@@ -885,7 +882,7 @@ public enum Element: Equatable {
     public var controlPointCount: Int {
         switch self {
         case .line: return 2
-        case .rect, .circle, .ellipse: return 4
+        case .rect, .ellipse: return 4
         case .polygon(let v): return v.points.count
         case .path(let v): return pathAnchorPoints(v.d).count
         case .textPath(let v): return pathAnchorPoints(v.d).count
@@ -900,9 +897,6 @@ public enum Element: Equatable {
         case .rect(let v):
             return [(v.x, v.y), (v.x + v.width, v.y),
                     (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
-        case .circle(let v):
-            return [(v.cx, v.cy - v.r), (v.cx + v.r, v.cy),
-                    (v.cx, v.cy + v.r), (v.cx - v.r, v.cy)]
         case .ellipse(let v):
             return [(v.cx, v.cy - v.ry), (v.cx + v.rx, v.cy),
                     (v.cx, v.cy + v.ry), (v.cx - v.rx, v.cy)]
@@ -980,24 +974,6 @@ public enum Element: Equatable {
                                        mask: v.mask, fillGradient: v.fillGradient,
                                        strokeGradient: v.strokeGradient,
                                        name: v.name, id: v.id))
-        case .circle(let v):
-            if kind.isAll(total: 4) {
-                var n = v
-                n.cx += dx; n.cy += dy
-                return .circle(n)
-            }
-            var cps = [(v.cx, v.cy - v.r), (v.cx + v.r, v.cy),
-                       (v.cx, v.cy + v.r), (v.cx - v.r, v.cy)]
-            for i in 0..<4 where kind.contains(i) {
-                cps[i] = (cps[i].0 + dx, cps[i].1 + dy)
-            }
-            let ncx = (cps[1].0 + cps[3].0) / 2
-            let ncy = (cps[0].1 + cps[2].1) / 2
-            var nc = v
-            nc.cx = ncx
-            nc.cy = ncy
-            nc.r = max(abs(cps[1].0 - ncx), abs(cps[0].1 - ncy))
-            return .circle(nc)
         case .ellipse(let v):
             if kind.isAll(total: 4) {
                 var n = v
@@ -1128,7 +1104,6 @@ public enum Element: Equatable {
         switch self {
         case .line: return nil
         case .rect(let v): return v.fill
-        case .circle(let v): return v.fill
         case .ellipse(let v): return v.fill
         case .polyline(let v): return v.fill
         case .polygon(let v): return v.fill
@@ -1146,7 +1121,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.stroke
         case .rect(let v): return v.stroke
-        case .circle(let v): return v.stroke
         case .ellipse(let v): return v.stroke
         case .polyline(let v): return v.stroke
         case .polygon(let v): return v.stroke
@@ -1165,7 +1139,6 @@ public enum Element: Equatable {
     public var fillGradient: Gradient? {
         switch self {
         case .rect(let v): return v.fillGradient
-        case .circle(let v): return v.fillGradient
         case .ellipse(let v): return v.fillGradient
         case .polyline(let v): return v.fillGradient
         case .polygon(let v): return v.fillGradient
@@ -1179,7 +1152,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.strokeGradient
         case .rect(let v): return v.strokeGradient
-        case .circle(let v): return v.strokeGradient
         case .ellipse(let v): return v.strokeGradient
         case .polyline(let v): return v.strokeGradient
         case .polygon(let v): return v.strokeGradient
@@ -1192,7 +1164,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.locked
         case .rect(let v): return v.locked
-        case .circle(let v): return v.locked
         case .ellipse(let v): return v.locked
         case .polyline(let v): return v.locked
         case .polygon(let v): return v.locked
@@ -1209,7 +1180,6 @@ public enum Element: Equatable {
         switch self {
         case .line(var v): v.locked = locked; return .line(v)
         case .rect(var v): v.locked = locked; return .rect(v)
-        case .circle(var v): v.locked = locked; return .circle(v)
         case .ellipse(var v): v.locked = locked; return .ellipse(v)
         case .polyline(var v): v.locked = locked; return .polyline(v)
         case .polygon(var v): v.locked = locked; return .polygon(v)
@@ -1229,7 +1199,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.visibility
         case .rect(let v): return v.visibility
-        case .circle(let v): return v.visibility
         case .ellipse(let v): return v.visibility
         case .polyline(let v): return v.visibility
         case .polygon(let v): return v.visibility
@@ -1248,7 +1217,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.blendMode
         case .rect(let v): return v.blendMode
-        case .circle(let v): return v.blendMode
         case .ellipse(let v): return v.blendMode
         case .polyline(let v): return v.blendMode
         case .polygon(let v): return v.blendMode
@@ -1266,7 +1234,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.opacity
         case .rect(let v): return v.opacity
-        case .circle(let v): return v.opacity
         case .ellipse(let v): return v.opacity
         case .polyline(let v): return v.opacity
         case .polygon(let v): return v.opacity
@@ -1284,7 +1251,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.mask
         case .rect(let v): return v.mask
-        case .circle(let v): return v.mask
         case .ellipse(let v): return v.mask
         case .polyline(let v): return v.mask
         case .polygon(let v): return v.mask
@@ -1302,7 +1268,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.transform
         case .rect(let v): return v.transform
-        case .circle(let v): return v.transform
         case .ellipse(let v): return v.transform
         case .polyline(let v): return v.transform
         case .polygon(let v): return v.transform
@@ -1324,7 +1289,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.id
         case .rect(let v): return v.id
-        case .circle(let v): return v.id
         case .ellipse(let v): return v.id
         case .polyline(let v): return v.id
         case .polygon(let v): return v.id
@@ -1351,7 +1315,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return v.name
         case .rect(let v): return v.name
-        case .circle(let v): return v.name
         case .ellipse(let v): return v.name
         case .polyline(let v): return v.name
         case .polygon(let v): return v.name
@@ -1391,7 +1354,6 @@ public enum Element: Equatable {
         switch self {
         case .line(var v): v.name = n; return .line(v)
         case .rect(var v): v.name = n; return .rect(v)
-        case .circle(var v): v.name = n; return .circle(v)
         case .ellipse(var v): v.name = n; return .ellipse(v)
         case .polyline(var v): v.name = n; return .polyline(v)
         case .polygon(var v): v.name = n; return .polygon(v)
@@ -1435,7 +1397,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return .line(v.withId(nil))
         case .rect(let v): return .rect(v.withId(nil))
-        case .circle(let v): return .circle(v.withId(nil))
         case .ellipse(let v): return .ellipse(v.withId(nil))
         case .polyline(let v): return .polyline(v.withId(nil))
         case .polygon(let v): return .polygon(v.withId(nil))
@@ -1476,7 +1437,6 @@ public enum Element: Equatable {
         switch self {
         case .line(let v): return .line(v.withId(id))
         case .rect(let v): return .rect(v.withId(id))
-        case .circle(let v): return .circle(v.withId(id))
         case .ellipse(let v): return .ellipse(v.withId(id))
         case .polyline(let v): return .polyline(v.withId(id))
         case .polygon(let v): return .polygon(v.withId(id))
@@ -1496,7 +1456,6 @@ public enum Element: Equatable {
         switch self {
         case .line(var v): v.visibility = visibility; return .line(v)
         case .rect(var v): v.visibility = visibility; return .rect(v)
-        case .circle(var v): v.visibility = visibility; return .circle(v)
         case .ellipse(var v): v.visibility = visibility; return .ellipse(v)
         case .polyline(var v): v.visibility = visibility; return .polyline(v)
         case .polygon(var v): v.visibility = visibility; return .polygon(v)
@@ -1630,9 +1589,6 @@ public enum Element: Equatable {
         case .rect(var v):
             v.x += dx; v.y += dy
             return .rect(v)
-        case .circle(var v):
-            v.cx += dx; v.cy += dy
-            return .circle(v)
         case .ellipse(var v):
             v.cx += dx; v.cy += dy
             return .ellipse(v)
@@ -1715,7 +1671,6 @@ public enum Element: Equatable {
         switch self {
         case .line(var v): v.transform = t; return .line(v)
         case .rect(var v): v.transform = t; return .rect(v)
-        case .circle(var v): v.transform = t; return .circle(v)
         case .ellipse(var v): v.transform = t; return .ellipse(v)
         case .polyline(var v): v.transform = t; return .polyline(v)
         case .polygon(var v): v.transform = t; return .polygon(v)
@@ -1749,11 +1704,6 @@ public enum Element: Equatable {
             v.transform = transform ?? v.transform
             v.blendMode = blendMode ?? v.blendMode
             return .rect(v)
-        case .circle(var v):
-            v.opacity = opacity ?? v.opacity
-            v.transform = transform ?? v.transform
-            v.blendMode = blendMode ?? v.blendMode
-            return .circle(v)
         case .ellipse(var v):
             v.opacity = opacity ?? v.opacity
             v.transform = transform ?? v.transform
@@ -1830,7 +1780,6 @@ public enum Element: Equatable {
 public func withFillGradient(_ element: Element, fillGradient: Gradient?) -> Element {
     switch element {
     case .rect(var v): v.fillGradient = fillGradient; return .rect(v)
-    case .circle(var v): v.fillGradient = fillGradient; return .circle(v)
     case .ellipse(var v): v.fillGradient = fillGradient; return .ellipse(v)
     case .polyline(var v): v.fillGradient = fillGradient; return .polyline(v)
     case .polygon(var v): v.fillGradient = fillGradient; return .polygon(v)
@@ -1850,7 +1799,6 @@ public func withStrokeGradient(_ element: Element, strokeGradient: Gradient?) ->
     switch element {
     case .line(var v): v.strokeGradient = strokeGradient; return .line(v)
     case .rect(var v): v.strokeGradient = strokeGradient; return .rect(v)
-    case .circle(var v): v.strokeGradient = strokeGradient; return .circle(v)
     case .ellipse(var v): v.strokeGradient = strokeGradient; return .ellipse(v)
     case .polyline(var v): v.strokeGradient = strokeGradient; return .polyline(v)
     case .polygon(var v): v.strokeGradient = strokeGradient; return .polygon(v)
@@ -1883,7 +1831,6 @@ public func withFill(_ element: Element, fill: Fill?) -> Element {
     case .line:
         return element
     case .rect(var v): v.fill = fill; v.fillGradient = nil; return .rect(v)
-    case .circle(var v): v.fill = fill; v.fillGradient = nil; return .circle(v)
     case .ellipse(var v): v.fill = fill; v.fillGradient = nil; return .ellipse(v)
     case .polyline(var v): v.fill = fill; v.fillGradient = nil; return .polyline(v)
     case .polygon(var v): v.fill = fill; v.fillGradient = nil; return .polygon(v)
@@ -1907,7 +1854,6 @@ public func withStroke(_ element: Element, stroke: Stroke?) -> Element {
     switch element {
     case .line(var v): v.stroke = stroke; return .line(v)
     case .rect(var v): v.stroke = stroke; return .rect(v)
-    case .circle(var v): v.stroke = stroke; return .circle(v)
     case .ellipse(var v): v.stroke = stroke; return .ellipse(v)
     case .polyline(var v): v.stroke = stroke; return .polyline(v)
     case .polygon(var v): v.stroke = stroke; return .polygon(v)
@@ -2061,7 +2007,6 @@ public func withMask(_ element: Element, mask: Mask?) -> Element {
     switch element {
     case .line(var v): v.mask = mask; return .line(v)
     case .rect(var v): v.mask = mask; return .rect(v)
-    case .circle(var v): v.mask = mask; return .circle(v)
     case .ellipse(var v): v.mask = mask; return .ellipse(v)
     case .polyline(var v): v.mask = mask; return .polyline(v)
     case .polygon(var v): v.mask = mask; return .polygon(v)
@@ -2471,50 +2416,6 @@ public struct Rect: Equatable {
 }
 
 /// SVG \<circle\> element.
-public struct Circle: Equatable {
-    public internal(set) var cx: Double, cy: Double, r: Double
-    /// User-visible name. None means unnamed → tree row shows <Type> fallback.
-    public internal(set) var name: String?
-    /// Stable, opaque element identity. Additive: None = no id yet, so
-    /// every existing document remains valid. See `Line.id`.
-    public internal(set) var id: String?
-    public internal(set) var fill: Fill?
-    public internal(set) var stroke: Stroke?
-    public internal(set) var opacity: Double
-    public internal(set) var transform: Transform?
-    public internal(set) var locked: Bool
-    public internal(set) var visibility: Visibility
-    public internal(set) var blendMode: BlendMode
-    public internal(set) var mask: Mask?
-    public internal(set) var fillGradient: Gradient?
-    public internal(set) var strokeGradient: Gradient?
-
-    public init(cx: Double, cy: Double, r: Double,
-                fill: Fill? = nil, stroke: Stroke? = nil,
-                opacity: Double = 1.0, transform: Transform? = nil,
-                locked: Bool = false,
-                visibility: Visibility = .preview,
-                blendMode: BlendMode = .normal,
-                mask: Mask? = nil,
-                fillGradient: Gradient? = nil,
-                strokeGradient: Gradient? = nil,
-                name: String? = nil,
-                id: String? = nil) {
-        self.name = name
-        self.id = id
-        self.cx = cx; self.cy = cy; self.r = r
-        self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
-        self.locked = locked
-        self.visibility = visibility
-        self.blendMode = blendMode
-        self.mask = mask
-        self.fillGradient = fillGradient
-        self.strokeGradient = strokeGradient
-    }
-
-    public var bounds: BBox { inflateBounds((cx - r, cy - r, r * 2, r * 2), stroke) }
-}
-
 /// SVG \<ellipse\> element.
 public struct Ellipse: Equatable {
     public internal(set) var cx: Double, cy: Double, rx: Double, ry: Double
@@ -3436,12 +3337,6 @@ extension Line {
 
 extension Rect {
     public func withId(_ id: String?) -> Rect {
-        var v = self; v.id = id; return v
-    }
-}
-
-extension Circle {
-    public func withId(_ id: String?) -> Circle {
         var v = self; v.id = id; return v
     }
 }

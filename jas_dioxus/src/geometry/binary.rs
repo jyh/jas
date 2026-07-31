@@ -154,7 +154,6 @@ pub fn element_tag_label(elem: &Element) -> &'static str {
         Element::Group(_) => "group",
         Element::Line(_) => "line",
         Element::Rect(_) => "rect",
-        Element::Circle(_) => "circle",
         Element::Ellipse(_) => "ellipse",
         Element::Polyline(_) => "polyline",
         Element::Polygon(_) => "polygon",
@@ -649,12 +648,6 @@ fn pack_element_base(elem: &Element) -> Vec<Value> {
                               vf64(e.rx), vf64(e.ry),
                               pack_fill(&e.fill), pack_stroke(&e.stroke)]
         }
-        Element::Circle(e) => {
-            let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
-            vec![vint(TAG_CIRCLE), locked, opacity, vis, xform, name, id,
-                              vf64(e.cx), vf64(e.cy), vf64(e.r),
-                              pack_fill(&e.fill), pack_stroke(&e.stroke)]
-        }
         Element::Ellipse(e) => {
             let (locked, opacity, vis, xform, name, id) = pack_common(&e.common);
             vec![vint(TAG_ELLIPSE), locked, opacity, vis, xform, name, id,
@@ -1092,13 +1085,25 @@ fn unpack_element(v: &Value) -> Result<Element, String> {
                     fill_gradient: None,
             stroke_gradient: None,
         }),
-        TAG_CIRCLE => Element::Circle(CircleElem {
-            cx: as_f64(at(arr, 7)?)?, cy: as_f64(at(arr, 8)?)?, r: as_f64(at(arr, 9)?)?,
-            fill: unpack_fill(at(arr, 10)?)?, stroke: unpack_stroke(at(arr, 11)?)?,
-            common,
-                    fill_gradient: None,
-            stroke_gradient: None,
-        }),
+        // READ-ONLY LEGACY TAG. The model lost its circle kind on 2026-07-30
+        // (one round kind, JYH), so nothing writes TAG_CIRCLE any more -- but
+        // this is a PERSISTED USER FORMAT, and a file saved before that day
+        // must still open. Read as an ellipse with equal radii, which is
+        // exactly what it always meant.
+        //
+        // The canonical TEST json is deliberately NOT tolerant this way: there
+        // a stray "circle" must fail loudly, because tolerance would let a port
+        // keep writing the old kind and call it agreement.
+        TAG_CIRCLE => {
+            let r = as_f64(at(arr, 9)?)?;
+            Element::Ellipse(EllipseElem {
+                cx: as_f64(at(arr, 7)?)?, cy: as_f64(at(arr, 8)?)?, rx: r, ry: r,
+                fill: unpack_fill(at(arr, 10)?)?, stroke: unpack_stroke(at(arr, 11)?)?,
+                common,
+                fill_gradient: None,
+                stroke_gradient: None,
+            })
+        }
         TAG_ELLIPSE => Element::Ellipse(EllipseElem {
             cx: as_f64(at(arr, 7)?)?, cy: as_f64(at(arr, 8)?)?,
             rx: as_f64(at(arr, 9)?)?, ry: as_f64(at(arr, 10)?)?,
@@ -1385,6 +1390,39 @@ pub fn binary_to_document(data: &[u8]) -> Result<Document, String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// THE LEGACY `TAG_CIRCLE` STILL READS, and reads as a round ellipse.
+    ///
+    /// The model lost its circle kind on 2026-07-30 (one round kind, JYH), so
+    /// nothing packs tag 3 any more -- which is why `circle` left
+    /// `binary_wire`'s `tag_arity` table: that table asserts what the PACKER
+    /// emits, and a claim there would describe deleted code.
+    ///
+    /// But this is a PERSISTED USER FORMAT. A file saved the day before the
+    /// migration must still open, and the read path that makes that true is
+    /// reachable by nothing else in the suite. Dropping the tag from one gate
+    /// without adding this one would have retired the guard along with the
+    /// claim -- the exact shape `check_gate_consistency.py` exists to catch.
+    #[test]
+    fn a_legacy_circle_tag_still_reads_as_a_round_ellipse() {
+        use rmpv::Value as V;
+        // [tag, locked, opacity, vis, xform, name, id, cx, cy, r, fill, stroke]
+        // -- the twelve slots the pre-migration writer emitted for tag 3.
+        let packed = V::Array(vec![
+            V::from(TAG_CIRCLE), V::Boolean(false), V::from(1.0), V::from(0i64),
+            V::Nil, V::Nil, V::Nil,
+            V::from(36.0), V::from(36.0), V::from(18.0),
+            V::Nil, V::Nil,
+        ]);
+        match unpack_element(&packed).expect("a legacy tag-3 circle must still load") {
+            Element::Ellipse(e) => {
+                assert_eq!((e.cx, e.cy), (36.0, 36.0));
+                assert_eq!(e.rx, 18.0, "r must land on rx");
+                assert_eq!(e.ry, 18.0, "and equally on ry -- it was a circle");
+            }
+            other => panic!("legacy tag 3 read as {other:?}, not a round ellipse"),
+        }
+    }
     use super::*;
 
     fn frame(payload_value: &Value) -> Vec<u8> {
@@ -1831,8 +1869,8 @@ mod tests {
     fn binary_round_trips_the_common_extension_on_every_tag() {
         let mode = BlendMode::HardLight;
         let mask = Some(Box::new(Mask {
-            subtree: Box::new(Element::Circle(CircleElem {
-                cx: 1.0, cy: 2.0, r: 3.0,
+            subtree: Box::new(Element::Ellipse(EllipseElem {
+                cx: 1.0, cy: 2.0, rx: 3.0, ry: 3.0,
                 fill: Some(Fill::new(Color::BLACK)),
                 stroke: None,
                 common: CommonProps::default(),
@@ -1895,8 +1933,8 @@ mod tests {
                 fill: None, stroke: None, common: common.clone(),
                 fill_gradient: None, stroke_gradient: None,
             }),
-            Element::Circle(CircleElem {
-                cx: 0.0, cy: 0.0, r: 1.0, fill: None, stroke: None,
+            Element::Ellipse(EllipseElem {
+                cx: 0.0, cy: 0.0, rx: 1.0, ry: 1.0, fill: None, stroke: None,
                 common: common.clone(), fill_gradient: None, stroke_gradient: None,
             }),
             Element::Ellipse(EllipseElem {

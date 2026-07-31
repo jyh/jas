@@ -21,7 +21,7 @@ import Testing
 
 @Test func multipleLayersDocument() {
     let l1 = Layer(name: "Background", children: [.rect(Rect(x: 0, y: 0, width: 10, height: 10))])
-    let l2 = Layer(name: "Foreground", children: [.circle(Circle(cx: 50, cy: 50, r: 5))])
+    let l2 = Layer(name: "Foreground", children: [.ellipse(Ellipse(cx: 50, cy: 50, rx: 5, ry: 5))])
     let doc = Document(layers: [l1, l2])
     let b = doc.bounds
     #expect(b.x == 0 && b.y == 0 && b.width == 55 && b.height == 55)
@@ -40,7 +40,7 @@ import Testing
 
 private func makeTestDoc() -> Document {
     let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
-    let circle = Element.circle(Circle(cx: 50, cy: 50, r: 5))
+    let circle = Element.ellipse(Ellipse(cx: 50, cy: 50, rx: 5, ry: 5))
     let line = Element.line(Line(x1: 0, y1: 0, x2: 1, y2: 1))
     let group = Element.group(Group(children: [line]))
     let layer0 = Layer(name: "L0", children: [rect, circle, group])
@@ -74,10 +74,10 @@ private func makeTestDoc() -> Document {
 @Test func getElementChild() {
     let doc = makeTestDoc()
     let elem = doc.getElement([0, 1])
-    if case .circle = elem {
+    if case .ellipse = elem {
         // ok
     } else {
-        Issue.record("Expected circle")
+        Issue.record("Expected a round ellipse")
     }
 }
 
@@ -111,7 +111,7 @@ private func makeTestDoc() -> Document {
     let doc = makeTestDoc()
     let newRect = Element.rect(Rect(x: 99, y: 99, width: 1, height: 1))
     let doc2 = doc.replaceElement([0, 0], with: newRect)
-    if case .circle = doc2.getElement([0, 1]) { } else { Issue.record("Expected circle") }
+    if case .ellipse = doc2.getElement([0, 1]) { } else { Issue.record("Expected a round ellipse") }
     if case .group = doc2.getElement([0, 2]) { } else { Issue.record("Expected group") }
 }
 

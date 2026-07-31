@@ -318,9 +318,6 @@ fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: 
                     .any(|&(x1, y1, x2, y2)| segment_intersects_rect(x1, y1, x2, y2, rx, ry, rw, rh))
             }
         }
-        Element::Circle(e) => {
-            circle_intersects_rect(e.cx, e.cy, e.r, rx, ry, rw, rh, e.fill.is_some())
-        }
         Element::Ellipse(e) => {
             ellipse_intersects_rect(e.cx, e.cy, e.rx, e.ry, rx, ry, rw, rh, e.fill.is_some())
         }
@@ -901,13 +898,13 @@ mod tests {
 
     // ---- element-level circle/ellipse hit-testing ----
 
-    use crate::geometry::element::{CircleElem, EllipseElem, Color, Fill};
+    use crate::geometry::element::{EllipseElem, Color, Fill};
 
     #[test]
     fn circle_element_intersects_rect_filled() {
-        let circle = Element::Circle(CircleElem {
+        let circle = Element::Ellipse(EllipseElem {
             common: CommonProps::default(),
-            cx: 5.0, cy: 5.0, r: 3.0,
+            cx: 5.0, cy: 5.0, rx: 3.0, ry: 3.0,
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
                     fill_gradient: None,
@@ -918,9 +915,9 @@ mod tests {
 
     #[test]
     fn circle_element_outside_rect() {
-        let circle = Element::Circle(CircleElem {
+        let circle = Element::Ellipse(EllipseElem {
             common: CommonProps::default(),
-            cx: 20.0, cy: 20.0, r: 3.0,
+            cx: 20.0, cy: 20.0, rx: 3.0, ry: 3.0,
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
                     fill_gradient: None,
@@ -931,9 +928,9 @@ mod tests {
 
     #[test]
     fn unfilled_circle_element_ring_miss() {
-        let circle = Element::Circle(CircleElem {
+        let circle = Element::Ellipse(EllipseElem {
             common: CommonProps::default(),
-            cx: 5.0, cy: 5.0, r: 100.0,
+            cx: 5.0, cy: 5.0, rx: 100.0, ry: 100.0,
             fill: None,
             stroke: None,
                     fill_gradient: None,

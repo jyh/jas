@@ -123,11 +123,6 @@ private func normalizeElement(_ elem: Element) -> Element {
                            fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                            opacity: e.opacity, transform: e.transform,
                            locked: e.locked, visibility: e.visibility, name: e.name, id: e.id))
-    case .circle(let e):
-        return .circle(Circle(cx: e.cx, cy: e.cy, r: e.r,
-                              fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
-                              opacity: e.opacity, transform: e.transform,
-                              locked: e.locked, visibility: e.visibility, name: e.name, id: e.id))
     case .ellipse(let e):
         return .ellipse(Ellipse(cx: e.cx, cy: e.cy, rx: e.rx, ry: e.ry,
                                 fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),

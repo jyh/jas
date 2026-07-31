@@ -971,10 +971,6 @@ private func emitElement(_ ctx: CGContext, _ el: Element, filter: PrintLayers) {
             ctx.move(to: CGPoint(x: l.x1, y: l.y1))
             ctx.addLine(to: CGPoint(x: l.x2, y: l.y2))
         }
-    case .circle(let c):
-        emitPaint(ctx, fill: c.fill, stroke: c.stroke, transform: c.transform) {
-            ctx.addEllipse(in: CGRect(x: c.cx - c.r, y: c.cy - c.r, width: 2 * c.r, height: 2 * c.r))
-        }
     case .ellipse(let e):
         emitPaint(ctx, fill: e.fill, stroke: e.stroke, transform: e.transform) {
             ctx.addEllipse(in: CGRect(x: e.cx - e.rx, y: e.cy - e.ry, width: 2 * e.rx, height: 2 * e.ry))

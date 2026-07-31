@@ -71,7 +71,7 @@
 //! - Curves. Bezier and elliptical arcs must be flattened to a
 //!   polyline before being passed in. The element-level adapter
 //!   that wires these functions to `Element::Path` /
-//!   `Element::Circle` / etc. lives elsewhere; this module is
+//!   `Element::Ellipse` / etc. lives elsewhere; this module is
 //!   pure geometry.
 //! - Self-intersecting input rings. The sweep itself assumes simple
 //!   rings; [`crate::algorithms::boolean_normalize`] is the pre-pass

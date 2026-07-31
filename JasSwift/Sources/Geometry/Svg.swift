@@ -357,13 +357,19 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             "\(rxy)\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
 
-    case .circle(let v):
-        return "\(indent)<circle cx=\"\(fmt(px(v.cx)))\" cy=\"\(fmt(px(v.cy)))\"" +
-            " r=\"\(fmt(px(v.r)))\"" +
-            "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
-            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
-
     case .ellipse(let v):
+        // THE TAG IS RE-DERIVED, not stored. Equal radii emit `<circle>`, so a
+        // file's circles survive a round trip though the model has no circle
+        // kind. THE MIRROR IS A REWRITE WE ACCEPT: a deliberate
+        // `<ellipse rx="5" ry="5">` comes back out as `<circle>`. That is the
+        // price of one kind, pinned by the shared corpus so it stays a decision.
+        let common = "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
+            "\(opacityAttr(v.opacity))\(transformAttr(v.transform))" +
+            "\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
+        if v.rx == v.ry {
+            return "\(indent)<circle cx=\"\(fmt(px(v.cx)))\" cy=\"\(fmt(px(v.cy)))\"" +
+                " r=\"\(fmt(px(v.rx)))\"" + common
+        }
         return "\(indent)<ellipse cx=\"\(fmt(px(v.cx)))\" cy=\"\(fmt(px(v.cy)))\"" +
             " rx=\"\(fmt(px(v.rx)))\" ry=\"\(fmt(px(v.ry)))\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))" +
@@ -1431,10 +1437,16 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
             name: name, id: id))
 
+    // ONE ROUND KIND (JYH, 2026-07-30). `<circle r>` is an ellipse whose radii
+    // are equal. A separate kind made the type PROVENANCE rather than geometry:
+    // scaling composes a matrix onto `transform` and never touches the radii,
+    // so a `circle` stayed typed `circle` while being drawn as an egg. The tag
+    // is re-derived on the way out, so `<circle>` still round-trips.
     case "circle":
-        return .circle(Circle(
+        let circleR = toPt(attrF(elem, "r"))
+        return .ellipse(Ellipse(
             cx: toPt(attrF(elem, "cx")), cy: toPt(attrF(elem, "cy")),
-            r: toPt(attrF(elem, "r")),
+            rx: circleR, ry: circleR,
             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
             name: name, id: id))
 

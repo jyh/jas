@@ -8733,7 +8733,15 @@ fn tree_type_label(elem: &GeoElement) -> &'static str {
     match elem {
         GeoElement::Line(_) => "Line",
         GeoElement::Rect(_) => "Rectangle",
-        GeoElement::Circle(_) => "Circle",
+        // DERIVED, so the auto-generated label agrees with the type token
+        // rather than contradicting it: a round ellipse reads `<Circle>`.
+        //
+        // This does NOT re-couple the two axes JYH separated on 2026-07-30.
+        // The label is still just a label -- a user-given name still wins, and
+        // the filter still reads the ELEMENT, never this string. They agree
+        // here because they are computed from the same fact, not because one
+        // is derived from the other.
+        GeoElement::Ellipse(e) if e.rx == e.ry => "Circle",
         GeoElement::Ellipse(_) => "Ellipse",
         GeoElement::Polyline(_) => "Polyline",
         GeoElement::Polygon(_) => "Polygon",
@@ -11272,7 +11280,7 @@ mod tests {
     /// Twin: `JasSwift/Tests/Panels/LayersTypeFilterTests.swift`.
     #[test]
     fn the_type_filter_reads_the_element_not_its_label() {
-        use crate::geometry::element::{CommonProps, Element, CircleElem, LayerElem, RectElem};
+        use crate::geometry::element::{CommonProps, Element, EllipseElem, LayerElem, RectElem};
         use crate::geometry::live::{CompoundOperation, CompoundShape, LiveVariant};
 
         fn named(name: Option<&str>) -> CommonProps {
@@ -11286,8 +11294,8 @@ mod tests {
             })
         }
         fn circle(name: Option<&str>) -> Element {
-            Element::Circle(CircleElem {
-                cx: 0.0, cy: 0.0, r: 5.0,
+            Element::Ellipse(EllipseElem {
+                cx: 0.0, cy: 0.0, rx: 5.0, ry: 5.0,
                 fill: None, stroke: None, common: named(name),
                 fill_gradient: None, stroke_gradient: None,
             })
