@@ -30,10 +30,17 @@
       "reason": "Panel VIEWS are Dioxus components and belong behind the gate, but the module also holds panel STRUCTURE and state that is plain data -- panel_menu.rs alone carries 8 tests and imports nothing from Dioxus or web_sys. 50 tests are invisible natively; an unknown fraction of them could come home.",
       "blocked_by": "Not yet split. Needs the treatment workspace/mod.rs got on 2026-07-30: gate per submodule, not per module. Measure first -- panel_menu.rs and panel_menu_state.rs are the candidates."
     },
-    "jas_dioxus/src/lib.rs::recorder": {
-      "kind": "debt",
-      "reason": "THE MOST EXPENSIVE ROW IN THIS FILE. recorder/replay.rs is the SHARED corpus replay path -- run_gesture_case and run_key_group_json, which the cross-language corpus, the record-stop fidelity check, and the corpus_replay bin all call, explicitly so that corpus replay and recording verification cannot drift apart. It is 332 lines with exactly TWO web-touching imports, both inside function bodies: crate::tools::tool::CanvasTool and crate::workspace::app_state::{AppState, TabState}. Because it is gated, the gesture, action and key corpora -- the instrument of the cross-port prime directive -- cannot run in a native build at all. 18 tests here, plus the 9 corpus tests below that it blocks.",
-      "blocked_by": "crate::tools::tool::CanvasTool (replay.rs:69) and crate::workspace::app_state (replay.rs:123). Splitting replay.rs so the key path is native is the cheapest first cut: run_key_group_json touches neither."
+    "jas_dioxus/src/recorder/mod.rs::core": {
+      "kind": "frontend",
+      "reason": "The recorder's live capture state -- it hooks the running app's four seams and holds the in-progress recording. There is no app to record in a --no-default-features build. (Was inside the whole-module `recorder` gate until 2026-07-31; that gate is gone and this one is what remains of it.)"
+    },
+    "jas_dioxus/src/recorder/mod.rs::fidelity": {
+      "kind": "frontend",
+      "reason": "The record-stop fidelity check, which replays a just-captured recording through the live app to prove the recording reproduces what the user did. It needs the app. Note that the SHARED path it replays through, recorder::replay, is now native -- so the thing being checked is verifiable natively even though the checker is not."
+    },
+    "jas_dioxus/src/recorder/mod.rs::hooks": {
+      "kind": "frontend",
+      "reason": "The capture hooks themselves, installed into the Dioxus event seams."
     },
     "jas_dioxus/src/lib.rs::tools": {
       "kind": "debt",
@@ -102,52 +109,42 @@
     "jas_dioxus/src/cross_language_test.rs::gesture_corpus": {
       "kind": "debt",
       "reason": "THE GESTURE CONFORMANCE CORPUS. Pure fixture replay against pinned goldens -- it drives no frontend of its own.",
-      "blocked_by": "crate::recorder::replay::run_gesture_case, via the run_gesture_model helper. See the recorder module row."
+      "blocked_by": "crate::recorder::replay::run_gesture_case, via run_gesture_model. replay.rs is NATIVE as of 2026-07-31; run_gesture_case itself is function-gated because it drives tools::tool::CanvasTool. It comes home with the `tools` split, not before."
     },
     "jas_dioxus/src/cross_language_test.rs::generate_gesture_expected": {
       "kind": "debt",
       "reason": "The #[ignore]d bootstrap generator for the gesture goldens; shares run_gesture_model with the corpus test above.",
-      "blocked_by": "crate::recorder::replay::run_gesture_case"
+      "blocked_by": "crate::recorder::replay::run_gesture_case, function-gated on tools::tool::CanvasTool."
     },
     "jas_dioxus/src/cross_language_test.rs::gesture_alt_mid_drag_copy_is_one_undo_step": {
       "kind": "debt",
       "reason": "PATH B of the alt-drag-copy undo law -- a document-level invariant, not a view assertion.",
-      "blocked_by": "crate::recorder::replay::run_gesture_case, via run_gesture_model and before_drag_oracle."
+      "blocked_by": "crate::recorder::replay::run_gesture_case, via run_gesture_model and before_drag_oracle; run_gesture_case is function-gated on tools::tool::CanvasTool."
     },
     "jas_dioxus/src/cross_language_test.rs::gesture_alt_at_press_copy_is_one_undo_step": {
       "kind": "debt",
       "reason": "PATH A of the same undo law.",
-      "blocked_by": "crate::recorder::replay::run_gesture_case"
+      "blocked_by": "crate::recorder::replay::run_gesture_case, function-gated on tools::tool::CanvasTool."
     },
     "jas_dioxus/src/cross_language_test.rs::action_corpus": {
       "kind": "debt",
       "reason": "THE ACTION CONFORMANCE CORPUS.",
-      "blocked_by": "crate::recorder::replay AND crate::workspace::app_state -- run_action_model needs both, so this one does not come home with a recorder split alone."
+      "blocked_by": "crate::workspace::app_state, via run_action_case. Predicted before the recorder split that this one would not come home with it, and confirmed after: the recorder split landed 2026-07-31 and this still needs the app shell."
     },
     "jas_dioxus/src/cross_language_test.rs::generate_action_expected": {
       "kind": "debt",
       "reason": "The #[ignore]d bootstrap generator for the action goldens.",
-      "blocked_by": "crate::recorder::replay and crate::workspace::app_state"
-    },
-    "jas_dioxus/src/cross_language_test.rs::key_corpus": {
-      "kind": "debt",
-      "reason": "THE KEY CONFORMANCE CORPUS, and the cheapest one to bring home: run_key_group_json touches neither CanvasTool nor AppState. Its subject, workspace::resolve_key, is already native.",
-      "blocked_by": "crate::recorder::replay::run_key_group_json -- gated only because the whole recorder module is."
-    },
-    "jas_dioxus/src/cross_language_test.rs::generate_key_expected": {
-      "kind": "debt",
-      "reason": "The #[ignore]d bootstrap generator for the key goldens.",
-      "blocked_by": "crate::recorder::replay::run_key_group_json"
+      "blocked_by": "crate::workspace::app_state, via run_action_case."
     },
     "jas_dioxus/src/cross_language_test.rs::preservation_invariants": {
       "kind": "debt",
       "reason": "The preservation invariants over the gesture corpus -- a document law with its own gate (check_preservation_corpus.py) watching the fixture side.",
-      "blocked_by": "crate::recorder::replay::run_gesture_case, via run_gesture_model."
+      "blocked_by": "crate::recorder::replay::run_gesture_case, via run_gesture_model; function-gated on tools::tool::CanvasTool."
     },
     "jas_dioxus/src/cross_language_test.rs::an_operation_on_a_group_equals_the_same_operation_on_its_member": {
       "kind": "debt",
       "reason": "CONTAINER-SEEDING -- the relation that found the seven, four of which turned out to be a real defect (a destructive boolean on a container produces unpainted artwork). It compares the app against itself under a transformation that must not matter, so it can see defects BOTH ports share, which no differential gate can. It runs in one build.",
-      "blocked_by": "crate::recorder in the unwrap_seeds helper."
+      "blocked_by": "crate::recorder::replay::run_action_case, which needs workspace::app_state. MEASURED 2026-07-31 by ungating it after the recorder split: the first guess, `crate::recorder in unwrap_seeds`, was wrong -- the recorder module is native now and this still does not build. It comes home only when action replay does, i.e. with the app shell."
     },
     "jas_dioxus/src/cross_language_test.rs::stroke_apply_panel_edit_corpus": {
       "kind": "debt",

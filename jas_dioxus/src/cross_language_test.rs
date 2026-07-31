@@ -1688,7 +1688,6 @@ mod tests {
     /// Key-resolution fixture files under `test_fixtures/keys/`.
     const KEY_FIXTURES: &[&str] = &["key_resolution.json"];
 
-    #[cfg(feature = "web")]
     /// Resolve every chord in a fixture group against the once-loaded
     /// bundle `shortcuts` table and return the canonical result array.
     /// Delegates to the SHARED corpus replay path
@@ -1699,7 +1698,6 @@ mod tests {
         crate::recorder::replay::run_key_group_json(group)
     }
 
-    #[cfg(feature = "web")]
     /// Replay a key fixture group and compare the canonical result array
     /// against the pinned golden, dumping EXPECTED/ACTUAL on mismatch.
     fn assert_key_test(group: &serde_json::Value) {
@@ -1717,7 +1715,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "web")]
     #[test]
     fn key_corpus() {
         for fixture in KEY_FIXTURES {
@@ -1730,7 +1727,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "web")]
     /// Bootstrap helper: generate expected JSON for key tests.
     /// Run with: cargo test generate_key_expected -- --ignored --nocapture
     #[test]
@@ -6430,6 +6426,7 @@ mod tests {
         assert_workspace_fixture("shortcut_structure", &json);
     }
 
+    #[cfg(feature = "web")]
     /// CONTAINER-SEEDED EQUIVALENCE: an operation on a group must equal the
     /// same operation on its sole member.
     ///
@@ -6453,7 +6450,6 @@ mod tests {
     /// a transformation that must not matter. A shared defect — both ports
     /// wrong identically, which was six of the original eight — is invisible to
     /// every differential gate we own and visible here.
-    #[cfg(feature = "web")]
     #[test]
     fn an_operation_on_a_group_equals_the_same_operation_on_its_member() {
         use crate::geometry::element::{CommonProps, Element, GroupElem};

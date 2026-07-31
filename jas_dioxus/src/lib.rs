@@ -28,7 +28,12 @@ pub mod geometry;
 pub mod painter;
 #[cfg(feature = "web")]
 pub mod panels;
-#[cfg(feature = "web")]
+// NOT gated as a whole. recorder/replay.rs is the SHARED corpus replay path --
+// the gesture, action and key corpora, the record-stop fidelity check and the
+// corpus_replay bin all call it, deliberately, so that corpus replay and
+// recording verification cannot drift apart. Gating the module gated that too,
+// so the instrument of the cross-port prime directive ran in exactly one build
+// configuration. The gate now lives per-submodule and per-function.
 pub mod recorder;
 #[cfg(feature = "web")]
 pub mod tools;
