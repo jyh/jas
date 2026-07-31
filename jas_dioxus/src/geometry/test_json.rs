@@ -2082,6 +2082,69 @@ mod tests {
         assert!(json.contains("\"selection\":[]"));
     }
 
+    /// CANONICAL TEST JSON IS STRICT, and that is a decision with a test now.
+    ///
+    /// The model lost its circle kind on 2026-07-30 (one round kind, JYH). The
+    /// PERSISTED binary format stays read-tolerant — `TAG_CIRCLE` still loads,
+    /// pinned by `binary.rs::a_legacy_circle_tag_still_reads_as_a_round_ellipse`,
+    /// because a file saved the day before the migration must still open.
+    ///
+    /// This format is the opposite and deliberately so. It had no test: the
+    /// strictness was real (`parse_element_base` ends in a panic) and nothing
+    /// pinned it, so someone could add a `"circle" => Element::Ellipse(…)` arm
+    /// "for compatibility" and no lane would red. That asymmetry — the
+    /// forgiving half measured, the strict half only reasoned — is what this
+    /// closes. Verified by adding exactly that arm: this test reds.
+    ///
+    /// **And the reason for strictness is not the one first written down.** The
+    /// migration note said tolerance here "would let a port keep writing the old
+    /// kind and it would read as agreement". It would not:
+    /// `assert_operation_test` compares `actual != expected` — the emitted
+    /// string against the pinned golden — so a port emitting `"type":"circle"`
+    /// fails on the string whatever the reader accepts. The WRITER side was
+    /// never the reader's job.
+    ///
+    /// What strictness actually buys is this: **a stale fixture INPUT is refused
+    /// rather than silently reinterpreted.** 51 goldens were rewritten in that
+    /// migration. A setup document that kept `"type":"circle"` would, under a
+    /// tolerant reader, quietly become a round ellipse and the test would PASS
+    /// while testing something other than what the fixture says. A passing test
+    /// measuring the wrong thing is worse than a failing one.
+    #[test]
+    #[should_panic(expected = "Unknown element type: circle")]
+    fn a_stale_circle_in_canonical_json_is_refused_not_reinterpreted() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"type":"circle","cx":36,"cy":36,"r":18}"#,
+        ).unwrap();
+        let _ = parse_element(&v);
+    }
+
+    /// The writer-side half of the same claim, so the pair is not left resting
+    /// on the reader: a round ellipse SERIALISES as `ellipse`. This is what
+    /// actually catches a port that kept the old kind — the golden comparison
+    /// is a string comparison, and this is the string.
+    #[test]
+    fn a_round_ellipse_serialises_as_ellipse_never_as_circle() {
+        let e = Element::Ellipse(EllipseElem {
+            cx: 36.0, cy: 36.0, rx: 18.0, ry: 18.0,
+            fill: None, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let mut doc = Document::default();
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: vec![Rc::new(e)],
+            common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        })];
+        let json = document_to_test_json(&doc);
+        assert!(json.contains("\"type\":\"ellipse\""),
+                "a round ellipse must serialise as ellipse: {json}");
+        assert!(!json.contains("\"type\":\"circle\""),
+                "nothing may emit the retired kind: {json}");
+    }
+
     /// The corpus JSON boundary must round-trip the fill rule, not just
     /// emit it. The serializer has written `fill_rule` since the rule
     /// joined PathElem, but `parse_element` hardcoded NonZero — so a
