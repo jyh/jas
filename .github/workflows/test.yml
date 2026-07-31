@@ -75,6 +75,13 @@ jobs:
       # A runtime assertion only fires if someone runs the debug build and
       # reaches the line; this is the same claim on every build.
       - run: python scripts/check_set_document_bracketing.py --self-test && python scripts/check_set_document_bracketing.py
+      # A deferral that states its own precondition gets that precondition
+      # checked. The narrow survivor of the premise-expiry proposal, which was
+      # scored 1-of-5 and 0-of-3 by two independent parties and ruled dead in
+      # general: a deferral is the ONE population where someone knew the premise
+      # was a premise and wrote it down. Per-port claims, because a cross-port
+      # premise checked by a single grep answers for the wrong port.
+      - run: python scripts/check_deferral_expiry.py --self-test && python scripts/check_deferral_expiry.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -264,6 +271,8 @@ jobs:
           python scripts/check_path_keying.py
           python scripts/check_set_document_bracketing.py --self-test
           python scripts/check_set_document_bracketing.py
+          python scripts/check_deferral_expiry.py --self-test
+          python scripts/check_deferral_expiry.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves

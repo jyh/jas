@@ -311,6 +311,8 @@ shows the last entered values.
   options that let the user transform fill patterns independently
   of geometry. Deferred until pattern fills exist in the document
   model. Memory: `project_transform_patterns_deferred.md`.
+  <!-- expires-when: {"port":"rust","file":"jas_dioxus/src/geometry/element.rs","lacks":"Pattern"} -->
+  <!-- expires-when: {"port":"swift","file":"JasSwift/Sources/Geometry/Element.swift","lacks":"case pattern"} -->
 - **Live effects** — when a live-effects model exists, Scale
   Strokes' label extends to "Scale Strokes & Effects" and the
   apply effect grows to scale effect parameters proportionally.

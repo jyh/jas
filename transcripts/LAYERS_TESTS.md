@@ -434,10 +434,19 @@ If any P0 here fails, stop and flag.
       Expect: "fg-rect" highlighted; parent "FG" rendered dimmed; other
               top-level layers hidden.
       — last: —
-      regression: deferred 2026-05-01 — only Layers are renameable in
-        the current UI, so we can't construct a named non-layer
-        descendant inside a non-matching container. Revisit when
-        Group/element names land.
+      UNBLOCKED 2026-07-30, and the history is the point. Deferred
+        2026-05-01 — "only Layers are renameable in the current UI, so we
+        can't construct a named non-layer descendant inside a non-matching
+        container. Revisit when Group/element names land."
+        They landed the NEXT DAY in jas_dioxus (2026-05-02) and on
+        2026-07-30 in JasSwift, and nobody revisited either time. The
+        dimming this row describes was itself unimplemented in every port
+        until 2026-07-30 — layers.yaml had declared it since April, with a
+        schema variable and an opacity bind living in `row_template`, a
+        widget NO port reads.
+        Both halves are done now. AWAITS A MANUAL PASS: the data and the
+        rendering are gated by test in both ports, but whether 0.5 opacity
+        reads as "context" rather than "disabled" is a question for eyes.
 
 - [x] **LYR-092** [wired] Clearing the search restores the full tree.
       Setup: Search active.
