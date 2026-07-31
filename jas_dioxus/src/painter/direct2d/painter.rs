@@ -33,7 +33,7 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows_numerics::Matrix3x2;
 
-use super::{convert, geometry};
+use super::{convert, geometry, text};
 use crate::geometry::element::Color;
 use crate::painter::{
     BlendMode, Brush, EllipseArc, FillRule, Mask, Painter, PathCommand, Rect, StrokeStyle,
@@ -314,7 +314,19 @@ impl<'a> Painter for Direct2DPainter<'a> {
             fr.opened.push(Pop::Layer);
         }
     }
-    fn draw_text_run(&mut self, _r: &TextRun, _b: &Brush, _a: f64) {}
+    /// FastRun only. `PlacedGlyphs` is 2b's shape and no recorded scene uses
+    /// it; refusing is honest rather than guessing an absolute-position mapping
+    /// that nothing exercises.
+    fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64) {
+        let a = self.effective_alpha(paint_alpha);
+        let Some(b) = self.brush(brush, a) else { return };
+        match run {
+            TextRun::FastRun { font, size, text: t, letter_spacing, x, y } => {
+                text::draw_fast_run(self.rt, &b, font, *size, t, *letter_spacing, *x, *y);
+            }
+            _ => {}
+        }
+    }
 
     fn push_mask_layer(&mut self, _mask: Mask) {
         unimplemented!(

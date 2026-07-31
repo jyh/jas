@@ -224,7 +224,7 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
                 let run = op.get("run").unwrap_or(&Value::Null);
                 match run.get("mode").and_then(Value::as_str) {
                     Some("fast_run") => {
-                        let _ = TextRun::FastRun {
+                        let tr = TextRun::FastRun {
                             font: run.get("font").and_then(Value::as_str).unwrap_or("").into(),
                             size: f(run, "size"),
                             text: run.get("text").and_then(Value::as_str).unwrap_or("").into(),
@@ -232,7 +232,10 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
                             x: f(run, "x"),
                             y: f(run, "y"),
                         };
-                        r.unsupported.push((cmd.into(), "DirectWrite text not built yet"));
+                        match op.get("brush").and_then(brush) {
+                            Some(br) => { p.draw_text_run(&tr, &br, a); r.drawn += 1; }
+                            None => r.unsupported.push((cmd.into(), "brush kind not understood")),
+                        }
                     }
                     _ => r.unsupported.push((cmd.into(), "PlacedGlyphs mode not built")),
                 }
@@ -293,15 +296,15 @@ mod tests {
         assert_eq!(n, 14, "the corpus is 14 scenes");
         assert!(r.total() >= 56, "all recorded ops accounted for, got {}", r.total());
 
-        // Exactly one command in the whole corpus is not yet drawable, and it
-        // is text. If this number moves, the message says which way.
-        let reasons: Vec<&str> = r.unsupported.iter().map(|(_, why)| *why).collect();
-        assert_eq!(
-            r.unsupported.len(), 1,
-            "expected only text outstanding, got {:?}", r.unsupported
+        // EVERY recorded command now draws. Nothing in the corpus is refused.
+        // Masks and non-Normal blend remain unimplemented by design -- the
+        // corpus simply contains none, which is itself a stated limit of this
+        // measurement rather than evidence they work.
+        assert!(
+            r.is_complete(),
+            "every recorded op should draw, outstanding: {:?}", r.unsupported
         );
-        assert_eq!(reasons[0], "DirectWrite text not built yet");
-        assert_eq!(r.drawn, r.total() - 1);
+        assert_eq!(r.drawn, r.total());
     }
 
     /// The harness must NOT report success on a command it silently dropped.

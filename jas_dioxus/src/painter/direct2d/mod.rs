@@ -10,3 +10,4 @@ pub mod device;
 pub mod geometry;
 pub mod painter;
 pub mod replay;
+pub mod text;
