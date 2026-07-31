@@ -678,5 +678,100 @@
       ],
       "expected_ancestor_only": []
     }
-  ]
+  ],
+  "menu": {
+    "_doc": [
+      "THE MENU IS NOT THE FILTER. Everything above is the keep-computation; this",
+      "block is the row above it -- how `lp_filter_button`'s declared `items`",
+      "become clickable rows, and what each KIND of row does when clicked.",
+      "",
+      "WHY IT EXISTS. On 2026-07-30 jas_dioxus's `render_layers_filter_dropdown`",
+      "collected every item that carried a `label` and a `value`, and NEVER LOOKED",
+      "AT ITS DECLARED `type`. The menu's first item is not a type at all --",
+      "",
+      "    { label: All, value: __all__, type: action,",
+      "      action: clear_layers_type_filter }",
+      "",
+      "-- so it rendered as a thirteenth checkbox, and clicking `All` CHECKED the",
+      "token `__all__`. Under the CHECKED semantics JYH ruled the same day, a",
+      "checked set hides the complement of itself over the menu, and no element",
+      "answers `__all__`, so the complement was the entire vocabulary and THE TREE",
+      "WENT BLANK. The one row whose whole purpose is 'show me everything again'",
+      "was the one row that showed nothing. `defect_if_the_action_row_were_a_toggle`",
+      "below is that state, pinned, so the partition stays load-bearing rather than",
+      "looking like tidiness.",
+      "",
+      "JasSwift's `renderDropdown` had dispatched on the declared type since the",
+      "day both were written, so this was a ONE-PORT defect in a pair written",
+      "together -- which is exactly the shape the corpus exists to close. Both",
+      "ports now answer this block through the code that renders the menu.",
+      "",
+      "THE ITEMS BELOW ARE A MINIATURE MENU, NOT THE SHIPPING ONE. What is pinned",
+      "here is the RULE -- dispatch on the declared type -- and the shipping menu's",
+      "own contents are held against both ports and the YAML by",
+      "scripts/check_layers_type_filter.py. Duplicating thirteen items here would",
+      "create a second truth that drifts. The `__all__` / `clear_layers_type_filter`",
+      "spellings are real, because that is the row that blanked the tree.",
+      "",
+      "A ROW THAT DECLARES NO TYPE IS NOT SILENTLY A TOGGLE. Reading `label` +",
+      "`value` as licence to render a checkbox IS the defect, so an item whose type",
+      "is absent or unrecognised renders as NEITHER kind. It disappears from the",
+      "menu, which is loud; the alternative failure is a blank tree, which is not.",
+      "A shipping item that lost its `type: toggle` would also drop the menu below",
+      "check_layers_type_filter.py's exact floor of twelve."
+    ],
+    "min_items": 5,
+    "min_action_vectors": 3,
+    "items": [
+      { "label": "All", "value": "__all__", "type": "action", "action": "clear_layers_type_filter" },
+      { "label": "Circle", "value": "circle", "type": "toggle" },
+      { "label": "Rectangle", "value": "rectangle", "type": "toggle" },
+      { "label": "Someday", "value": "someday", "type": "submenu" },
+      { "label": "Untyped", "value": "untyped" }
+    ],
+    "expected_toggle_values": ["circle", "rectangle"],
+    "expected_action_rows": [
+      { "label": "All", "value": "__all__", "action": "clear_layers_type_filter" }
+    ],
+    "tree": [
+      { "path": [0], "type": "layer" },
+      { "path": [0, 0], "type": "circle" },
+      { "path": [0, 1], "type": "rectangle" }
+    ],
+    "action_vectors": [
+      {
+        "name": "all_from_a_narrowed_filter_shows_everything",
+        "doc": "The gesture the defect broke: some types checked, click All, whole tree back. `expected_hidden_after` empty is the ruling's one exception -- nothing checked means everything checked -- and it is what makes the empty checked set safe to be the action's result.",
+        "action": "clear_layers_type_filter",
+        "checked_before": ["circle"],
+        "expected_checked_after": [],
+        "expected_hidden_after": [],
+        "expected_keep_after": [[0], [0, 0], [0, 1]]
+      },
+      {
+        "name": "all_is_idempotent",
+        "doc": "Clicking All when All is already in force is a no-op, not a toggle back to nothing. A row implemented as a checkbox would fail this on the SECOND click even if the first were special-cased.",
+        "action": "clear_layers_type_filter",
+        "checked_before": [],
+        "expected_checked_after": [],
+        "expected_hidden_after": [],
+        "expected_keep_after": [[0], [0, 0], [0, 1]]
+      },
+      {
+        "name": "an_action_this_port_does_not_know_is_refused_not_guessed",
+        "doc": "`expected_checked_after: null` means the port must answer NO RESULT -- not an empty set, which would silently turn every unrecognised action into 'show everything'. The row renders inert and the state is untouched. Guessing a meaning for an unknown token is how `__all__` became a type in the first place.",
+        "action": "no_such_action",
+        "checked_before": [],
+        "expected_checked_after": null,
+        "expected_hidden_after": [],
+        "expected_keep_after": [[0], [0, 0], [0, 1]]
+      }
+    ],
+    "defect_if_the_action_row_were_a_toggle": {
+      "doc": "THE SHIPPED REGRESSION, as a keep-set. Check `__all__` -- which is precisely what a toggle-rendered action row does on click -- and the hidden set becomes the ENTIRE menu vocabulary, because the complement of a token nothing answers is everything. Every row goes, including the layer, since no descendant survives to carry it. `expected_hidden_count` is the whole of ALL_TYPE_TOKENS / layersAllTypeTokens, counted rather than listed so this vector does not become a second copy of that list.",
+      "checked": ["__all__"],
+      "expected_hidden_count": 12,
+      "expected_keep": []
+    }
+  }
 }

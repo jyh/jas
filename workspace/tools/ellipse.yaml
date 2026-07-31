@@ -23,6 +23,11 @@
 # preview and the committed element cannot disagree about what Shift
 # means. Any later constraint (Alt, snapping) belongs at the same seam.
 #
+# The constrained SIDE is carried in state (`doc_w`/`doc_h`) rather than
+# recovered from the constrained point, because re-subtracting the anchor
+# is not exact in floating point away from a dyadic zoom. See the state
+# block below.
+#
 # The element type stays `ellipse` even when rx == ry. A circle is an
 # ellipse whose radii happen to be equal; emitting a `circle` element
 # would mean the TYPE changed when a later edit made them unequal, and
@@ -66,8 +71,33 @@ state:
   # Document-space release point, AFTER any Shift constraint. Written at
   # mouseup and read by the commit on the next step, so the committed
   # geometry and the guard below both see the same constrained point.
+  # These fix the shape's POSITION (which quadrant it grew into); the
+  # SIZE comes from doc_w / doc_h below.
   doc_end_x: { default: 0 }
   doc_end_y: { default: 0 }
+  # Document-space SIZE of the shape, written at mouseup beside doc_end_*.
+  #
+  # THE SIDE IS CARRIED, NEVER RECOVERED. The obvious commit expression is
+  # `abs(doc_end_x - doc_start_x) / 2`, which re-derives the radius by
+  # subtracting back the anchor that was just added to it. That round trip
+  # is not exact in binary floating point: at a zoom whose reciprocal is
+  # not a power of two the anchor is a non-dyadic number, `anchor + side`
+  # rounds when the sum crosses a binade, and the subtraction returns
+  # `side` off by one ulp — on ONE axis. Shift then produced an `ellipse`
+  # with rx != ry (a circle only at 100% zoom, which is why the hand smoke
+  # test passed). So the side is computed ONCE, here, and read DIRECTLY.
+  #
+  # Under Shift the two fields carry the SAME expression, so they are
+  # bit-identical and rx == ry exactly at every zoom. Unconstrained they
+  # are the two independent box dimensions, as before.
+  #
+  # The dashed overlay still derives its extent from cur_* the same way,
+  # deliberately: that round trip carries the same ulp, but in SCREEN
+  # space, where it is 1e-14 of a PIXEL — below anything a renderer or an
+  # artist can resolve — so the preview is left alone rather than growing
+  # a second carried value.
+  doc_w: { default: 0 }
+  doc_h: { default: 0 }
 
 handlers:
 
@@ -141,6 +171,20 @@ handlers:
                    then max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y))
                    else 0 - max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y)))
               else event.doc_y
+        # The SIZE, computed once from the raw event and never recovered
+        # from doc_end_* (see the state block). Under Shift both are the
+        # same expression down to the character, so they evaluate to the
+        # same double and the committed rx and ry are exactly equal.
+        - set:
+            tool.ellipse.doc_w: >-
+              if event.modifiers.shift
+              then max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y))
+              else abs(event.doc_x - tool.ellipse.doc_start_x)
+        - set:
+            tool.ellipse.doc_h: >-
+              if event.modifiers.shift
+              then max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y))
+              else abs(event.doc_y - tool.ellipse.doc_start_y)
         # Zero-size suppression matches rect.yaml: a plain click
         # (release at the same point as press) should not create a
         # shape. 1-pixel threshold on both dimensions, screen-space.
@@ -157,8 +201,8 @@ handlers:
                   type: ellipse
                   cx: "(tool.ellipse.doc_start_x + tool.ellipse.doc_end_x) / 2"
                   cy: "(tool.ellipse.doc_start_y + tool.ellipse.doc_end_y) / 2"
-                  rx: "abs(tool.ellipse.doc_end_x - tool.ellipse.doc_start_x) / 2"
-                  ry: "abs(tool.ellipse.doc_end_y - tool.ellipse.doc_start_y) / 2"
+                  rx: "tool.ellipse.doc_w / 2"
+                  ry: "tool.ellipse.doc_h / 2"
     - set: { tool.ellipse.mode: "'idle'" }
 
   on_keydown:

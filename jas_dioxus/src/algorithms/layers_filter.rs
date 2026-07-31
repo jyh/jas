@@ -144,6 +144,108 @@ pub fn hidden_from_checked(checked: &HashSet<String>) -> HashSet<String> {
         .collect()
 }
 
+/// What a `lp_filter_button` item DOES when clicked, read from its declared
+/// `type` and never inferred from the fields it happens to carry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MenuRowKind {
+    /// `type: toggle` — a type token that goes in or out of the CHECKED set.
+    Toggle,
+    /// `type: action` — a named behaviour, carried verbatim from the item's
+    /// `action` key and routed by `checked_after_action`.
+    Action(String),
+}
+
+/// One rendered row of the Layers filter menu.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuRow {
+    pub label: String,
+    pub value: String,
+    pub kind: MenuRowKind,
+}
+
+/// The menu rows a `lp_filter_button`-shaped `items` list declares, in
+/// declaration order.
+///
+/// WHY THIS FUNCTION EXISTS, and it is not tidiness. Until 2026-07-30
+/// `render_layers_filter_dropdown` built its rows by collecting every item that
+/// carried a `label` and a `value` — and the menu's FIRST item is not a type:
+///
+/// ```yaml
+/// - { label: "All", value: __all__, type: action, action: clear_layers_type_filter }
+/// ```
+///
+/// so `All` rendered as a checkbox. Clicking it CHECKED the token `__all__`,
+/// nothing answers `__all__`, and under CHECKED semantics the hidden set is the
+/// complement of the checked set over the menu — the whole vocabulary. The one
+/// row whose entire purpose is *show me everything again* was the row that
+/// showed nothing. JasSwift's `renderDropdown` dispatched on the declared type
+/// from the day both were written; this brings this port to it.
+///
+/// AN UNRECOGNISED OR ABSENT `type` YIELDS NO ROW. Treating the presence of
+/// `label` + `value` as licence to render a checkbox is the defect itself, so a
+/// kind this port does not know is dropped rather than guessed at. The failure
+/// that produces — an item missing from the menu — is loud and local; the one it
+/// replaces was a blank tree three layers away. A shipping item that lost its
+/// `type: toggle` would also fall under `check_layers_type_filter.py`'s exact
+/// floor of twelve menu values, so the drop cannot pass unseen.
+///
+/// Twin: `layersFilterMenuRows` in
+/// JasSwift/Sources/Interpreter/YamlPanelBodyView.swift. Both answer the `menu`
+/// block of `test_fixtures/view_state/layers_type_filter.json`.
+pub fn menu_rows(items: &[serde_json::Value]) -> Vec<MenuRow> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let label = item.get("label").and_then(|v| v.as_str())?;
+            let value = item.get("value").and_then(|v| v.as_str())?;
+            let kind = match item.get("type").and_then(|v| v.as_str()) {
+                Some("toggle") => MenuRowKind::Toggle,
+                Some("action") => MenuRowKind::Action(
+                    item.get("action").and_then(|v| v.as_str())?.to_string(),
+                ),
+                _ => return None,
+            };
+            Some(MenuRow { label: label.to_string(), value: value.to_string(), kind })
+        })
+        .collect()
+}
+
+/// The CHECKED set after invoking a declared menu action, or `None` when the
+/// action is not one this port knows.
+///
+/// `None` RATHER THAN A FALLBACK, deliberately. An unknown action answered with
+/// the empty set would turn every future typo into *show everything*, and an
+/// unknown action answered with the unchanged set would make a real action
+/// silently inert. Refusing lets the caller render the row without pretending it
+/// works — and guessing a meaning for a token nobody defined is the exact move
+/// that made `__all__` a type.
+///
+/// `checked` is unused today because the single declared action, `All`, does not
+/// read the current set. It is a parameter because the next one will: solo,
+/// invert, and *check every type* are all stated in `layers.yaml`'s vocabulary
+/// as functions of what is already checked.
+pub fn checked_after_action(action: &str, checked: &HashSet<String>) -> Option<HashSet<String>> {
+    let _ = checked;
+    match action {
+        // `layers.yaml`: "The 'All' item at the top restores the default in one
+        // click." The default is the empty set, which under the ruled semantics
+        // means everything is listed.
+        "clear_layers_type_filter" => Some(HashSet::new()),
+        _ => None,
+    }
+}
+
+/// Whether an action's effect is ALREADY IN FORCE — what the tick on an action
+/// row means, as against a toggle's tick, which means "this type is checked".
+///
+/// Stated as *invoking it would change nothing* rather than as a hand-written
+/// per-action predicate, so a new action cannot arrive with a tick rule that
+/// contradicts what its own invocation does. An unknown action is never in
+/// force: it is inert, not satisfied.
+pub fn action_is_in_force(action: &str, checked: &HashSet<String>) -> bool {
+    checked_after_action(action, checked).as_ref() == Some(checked)
+}
+
 #[cfg(test)]
 mod checked_semantics_tests {
     use super::*;

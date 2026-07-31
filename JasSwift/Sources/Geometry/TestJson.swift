@@ -1291,6 +1291,27 @@ package func parseElement(_ v: Any?) -> Element {
     return applyExtendedElementFields(parseElementBase(d), d)
 }
 
+/// THIS READER IS STRICT ON PURPOSE, and the reason is the READER'S OWN.
+///
+/// An unknown `type` traps (see the `default` arm below). In particular a
+/// stray `"circle"` -- the kind the model lost on 2026-07-30, one round kind,
+/// JYH -- is REFUSED here, even though `Binary.swift` still reads legacy
+/// `tagCircle` because .bin is a persisted user format.
+///
+/// The strictness protects against a STALE FIXTURE INPUT being silently
+/// REINTERPRETED. 51 goldens were rewritten that day; if one setup document
+/// had kept `"type":"circle"` and this reader were tolerant, it would quietly
+/// become a round ellipse and the test would PASS -- while testing something
+/// other than what the fixture says it tests. A passing test that tests the
+/// wrong thing is worse than a failing one.
+///
+/// THE REASON THIS COMMENT USED TO GIVE WAS WRONG, and it was refuted by
+/// MEASUREMENT rather than spotted by reading: Flask (the Windows seat)
+/// checked the corpus runners. They compare the produced canonical JSON as a
+/// STRING against a pinned golden, so a port that kept WRITING
+/// `"type":"circle"` fails on the string no matter what this reader tolerates.
+/// The writer side was never the reader's job. Correction adopted 2026-07-30.
+/// Mirrors `parse_element_base` in jas_dioxus/src/geometry/test_json.rs.
 private func parseElementBase(_ d: [String: Any]) -> Element {
     let typ = d["type"] as? String ?? ""
     let (opacity, transform, locked, visibility, name, id) = parseCommon(d)
@@ -1440,6 +1461,9 @@ private func parseElementBase(_ d: [String: Any]) -> Element {
         default:
             fatalError("Unknown live kind: \(kind)")
         }
+    // Strict by design -- a stale fixture is refused, never reinterpreted.
+    // See the doc comment on this function for why (and for the reason it
+    // does NOT give any more).
     default:
         fatalError("Unknown element type: \(typ)")
     }

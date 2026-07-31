@@ -18,6 +18,11 @@
 # it is read, so the overlay preview and the committed element cannot
 # disagree about what Shift means. ellipse.yaml carries the same seam.
 #
+# The constrained SIDE is carried in state (`doc_w`/`doc_h`) rather than
+# recovered from the constrained point, because re-subtracting the anchor
+# is not exact in floating point away from a dyadic zoom. See the state
+# block below.
+#
 # Alt to draw from the center is still unbuilt.
 # <!-- expires-when: {"port": "rust",
 #                     "file": "workspace/tools/rect.yaml",
@@ -54,8 +59,35 @@ state:
   # Document-space release point, AFTER any Shift constraint. Written at
   # mouseup and read by the commit on the next step, so the committed
   # geometry and the size guard both see the same constrained point.
+  # These fix the rectangle's POSITION (which quadrant it grew into); the
+  # SIZE comes from doc_w / doc_h below.
   doc_end_x: { default: 0 }
   doc_end_y: { default: 0 }
+  # Document-space SIZE of the rectangle, written at mouseup beside
+  # doc_end_*.
+  #
+  # THE SIDE IS CARRIED, NEVER RECOVERED. The obvious commit expression is
+  # `abs(doc_end_x - doc_start_x)`, which re-derives the side by
+  # subtracting back the anchor that was just added to it. That round trip
+  # is not exact in binary floating point: at a zoom whose reciprocal is
+  # not a power of two the anchor is a non-dyadic number, `anchor + side`
+  # rounds when the sum crosses a binade, and the subtraction returns
+  # `side` off by one ulp — on ONE axis. Shift then produced a rectangle
+  # whose width != height (a square only at 100% zoom, which is why the
+  # hand smoke test passed). So the side is computed ONCE, here, and read
+  # DIRECTLY.
+  #
+  # Under Shift the two fields carry the SAME expression, so they are
+  # bit-identical and width == height exactly at every zoom.
+  # Unconstrained they are the two independent box dimensions, as before.
+  #
+  # The dashed overlay still derives its extent from cur_* the same way,
+  # deliberately: that round trip carries the same ulp, but in SCREEN
+  # space, where it is 1e-14 of a PIXEL — below anything a renderer or an
+  # artist can resolve — so the preview is left alone rather than growing
+  # a second carried value.
+  doc_w: { default: 0 }
+  doc_h: { default: 0 }
 
 handlers:
 
@@ -133,6 +165,20 @@ handlers:
                    then max(abs(event.doc_y - tool.rect.doc_start_y), abs(event.doc_x - tool.rect.doc_start_x))
                    else 0 - max(abs(event.doc_y - tool.rect.doc_start_y), abs(event.doc_x - tool.rect.doc_start_x)))
               else event.doc_y
+        # The SIZE, computed once from the raw event and never recovered
+        # from doc_end_* (see the state block). Under Shift both are the
+        # same expression down to the character, so they evaluate to the
+        # same double and the committed width and height are exactly equal.
+        - set:
+            tool.rect.doc_w: >-
+              if event.modifiers.shift
+              then max(abs(event.doc_x - tool.rect.doc_start_x), abs(event.doc_y - tool.rect.doc_start_y))
+              else abs(event.doc_x - tool.rect.doc_start_x)
+        - set:
+            tool.rect.doc_h: >-
+              if event.modifiers.shift
+              then max(abs(event.doc_x - tool.rect.doc_start_x), abs(event.doc_y - tool.rect.doc_start_y))
+              else abs(event.doc_y - tool.rect.doc_start_y)
         # MEASURED AGAINST THE CONSTRAINED POINT, not the raw event. A
         # pure horizontal Shift-drag has a raw dy of 0, so testing the
         # event would reject a 100-pixel square the artist had watched
@@ -145,8 +191,8 @@ handlers:
                   type: rect
                   x: "min(tool.rect.doc_start_x, tool.rect.doc_end_x)"
                   y: "min(tool.rect.doc_start_y, tool.rect.doc_end_y)"
-                  width: "abs(tool.rect.doc_end_x - tool.rect.doc_start_x)"
-                  height: "abs(tool.rect.doc_end_y - tool.rect.doc_start_y)"
+                  width: "tool.rect.doc_w"
+                  height: "tool.rect.doc_h"
     - set: { tool.rect.mode: "'idle'" }
 
   on_keydown:

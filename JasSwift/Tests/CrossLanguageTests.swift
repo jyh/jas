@@ -3192,6 +3192,15 @@ private let gestureFixtures = [
     "draw_ellipse.json",
     "draw_ellipse_shift.json",
     "draw_rect_shift.json",
+    // SHIFTZOOM: the same two Shift drags at zoom 1.5, where the doc-space
+    // anchor is NOT dyadic. The pair above runs at zoom 1, where every anchor
+    // is an exact integer and a commit that RECOVERS the constrained side by
+    // re-subtracting the anchor happens to be exact — which is why
+    // SHIFTCONSTRAIN shipped a Shift that only drew a true circle/square at
+    // 100% zoom. Both cases carry `expected_exact`, since the 4-dp canonical
+    // golden cannot see the one-ulp gap between rx and ry.
+    "draw_ellipse_shift_zoomed.json",
+    "draw_rect_shift_zoomed.json",
     "draw_rounded_rect.json",
     "draw_polygon.json",
     "draw_star.json",
@@ -3392,15 +3401,75 @@ private func runGestureModel(_ tc: [String: Any]) -> Model {
     return model
 }
 
+/// Full-precision value of one named geometry field, for the `expected_exact`
+/// assertion below. Deliberately a short, explicit table rather than a
+/// reflective lookup: a fixture naming a field this list does not carry is a
+/// fixture bug, and saying so loudly beats silently asserting nothing. Mirrors
+/// Rust `gesture_exact_field`.
+private func gestureExactField(_ el: Element, _ field: String) -> Double? {
+    switch (el, field) {
+    case (.ellipse(let e), "cx"): return e.cx
+    case (.ellipse(let e), "cy"): return e.cy
+    case (.ellipse(let e), "rx"): return e.rx
+    case (.ellipse(let e), "ry"): return e.ry
+    case (.rect(let r), "x"): return r.x
+    case (.rect(let r), "y"): return r.y
+    case (.rect(let r), "width"): return r.width
+    case (.rect(let r), "height"): return r.height
+    default: return nil
+    }
+}
+
+/// OPTIONAL second assertion: `expected_exact`.
+///
+/// The canonical document JSON rounds every float to 4 decimal places, which is
+/// right for a cross-language golden but blind to a one-ulp defect.
+/// Shift-constrained drawing is exactly that kind of contract — a circle is a
+/// circle only if rx and ry are the SAME double, and at a non-dyadic zoom a
+/// commit that re-derives the radius from a coordinate misses by ~1e-14, which
+/// the golden cannot show. This block names an element by path and pins chosen
+/// fields at FULL precision.
+///
+/// The comparison is EXACT (`==` on Double), on the same reasoning as
+/// `assertActionView`: both ports run the same IEEE-754 double operations on the
+/// same inputs and the fixture literals are shortest-round-trip forms, so any
+/// difference is a real divergence, not a formatting artifact. Cases without the
+/// block are unaffected. Mirrors Rust `assert_gesture_exact`.
+private func assertGestureExact(_ tc: [String: Any], _ doc: Document) {
+    guard let exact = tc["expected_exact"] as? [String: Any] else { return }
+    let name = tc["name"] as! String
+    let path = (exact["path"] as! [NSNumber]).map { $0.intValue }
+    guard let el = doc.tryGetElement(path) else {
+        Issue.record("expected_exact: '\(name)' has no element at path \(path)")
+        return
+    }
+    let fields = exact["fields"] as! [String: NSNumber]
+    for (field, wantNum) in fields {
+        let want = wantNum.doubleValue
+        guard let got = gestureExactField(el, field) else {
+            Issue.record("expected_exact: field \(field) is not readable on this element kind")
+            continue
+        }
+        #expect(
+            got == want,
+            """
+            Gesture test '\(name)': element \(path) field \(field) is \(got), \
+            expected EXACTLY \(want) (delta \(got - want))
+            """)
+    }
+}
+
 /// Mirror of `assertOperationTest`: replay the gesture and compare the canonical
 /// document JSON against the pinned golden, dumping EXPECTED/ACTUAL on mismatch.
+/// Then apply the case's optional full-precision `expected_exact` pins.
 /// Mirrors Rust `assert_gesture_test`.
 private func assertGestureTest(_ tc: [String: Any]) {
     let name = tc["name"] as! String
     let expectedFile = tc["expected_json"] as! String
     let expected = readFixture("gestures/\(expectedFile)")
         .trimmingCharacters(in: .whitespacesAndNewlines)
-    let actual = documentToTestJson(runGestureModel(tc).document)
+    let document = runGestureModel(tc).document
+    let actual = documentToTestJson(document)
 
     if actual != expected {
         print("=== EXPECTED (\(name)) ===")
@@ -3409,6 +3478,8 @@ private func assertGestureTest(_ tc: [String: Any]) {
         print(actual)
     }
     #expect(actual == expected, "Gesture test '\(name)' failed: canonical JSON mismatch")
+
+    assertGestureExact(tc, document)
 }
 
 /// Inc-1 of the shared gesture-fixture corpus: replay each fixture's pointer
@@ -4750,4 +4821,97 @@ private func wireUnhex(_ s: String) -> Data {
         #expect(got == want,
                 "vector `\(name)`: kept \(got.sorted { $0.lexicographicallyPrecedes($1) }), expected \(want.sorted { $0.lexicographicallyPrecedes($1) })")
     }
+}
+
+/// THE FILTER MENU — which declared item becomes which KIND of row, and what
+/// each kind does when clicked.
+///
+/// Driven from the `menu` block of
+/// `test_fixtures/view_state/layers_type_filter.json`; the twin reader is
+/// `layers_filter_menu_matches_the_shared_corpus` in
+/// jas_dioxus/src/cross_language_test.rs.
+///
+/// THE DEFECT IT CLOSES was jas_dioxus's alone (shipped 2026-07-30):
+/// `render_layers_filter_dropdown` collected every item carrying a `label` and a
+/// `value` and never read its declared `type`, so the `All` row — an ACTION —
+/// rendered as a thirteenth checkbox and clicking it checked the token
+/// `__all__`, which no element answers, blanking the tree. `renderDropdown` here
+/// dispatched on the declared type from the day both were written.
+///
+/// THAT IS EXACTLY WHY THIS VECTOR IS SHARED RATHER THAN A RUST-SIDE FIX. The
+/// two ports were written the same day, one from the other, and disagreed within
+/// hours in a way neither port's own suite could see — the menu was private
+/// render code on both sides. Pinning the correct port costs one reader and buys
+/// the guarantee that this port cannot drift INTO the defect later.
+@Test func layersFilterMenuMatchesTheSharedCorpus() throws {
+    let raw = readFixture("view_state/layers_type_filter.json")
+    let root = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as! [String: Any]
+    let menu = root["menu"] as! [String: Any]
+
+    let items = menu["items"] as! [[String: Any]]
+    // Anti-vacuity declared BY THE DATA, exact rather than slack.
+    #expect(items.count == menu["min_items"] as! Int,
+            "walked \(items.count) menu item(s) against the declared floor")
+
+    let rows = layersFilterMenuRows(items)
+
+    // (1) THE PARTITION. An action-typed item is NOT a type toggle, and an item
+    //     that declares no type it recognises is neither.
+    let gotToggles = rows.filter { $0.kind == .toggle }.map { $0.value }
+    let wantToggles = menu["expected_toggle_values"] as! [String]
+    #expect(gotToggles == wantToggles,
+            "the toggle rows are not the declared toggle rows — an action row rendered as a checkbox is the 2026-07-30 defect")
+
+    let gotActions: [[String]] = rows.compactMap { r in
+        if case .action(let a) = r.kind { return [r.label, r.value, a] }
+        return nil
+    }
+    let wantActions: [[String]] = (menu["expected_action_rows"] as! [[String: Any]]).map {
+        [$0["label"] as! String, $0["value"] as! String, $0["action"] as! String]
+    }
+    #expect(gotActions == wantActions, "the action rows are not the declared action rows")
+
+    let tree: [(path: ElementPath, typeValue: String)] =
+        (menu["tree"] as! [[String: Any]]).map {
+            (path: $0["path"] as! [Int], typeValue: $0["type"] as! String)
+        }
+    func keepOf(_ hidden: Set<String>) -> Set<ElementPath> {
+        layersTypeFilterKeep(tree, hidden: hidden)
+    }
+
+    // (2) INVOKING THE ACTION yields the everything-visible state.
+    let vectors = menu["action_vectors"] as! [[String: Any]]
+    #expect(vectors.count == menu["min_action_vectors"] as! Int,
+            "walked \(vectors.count) action vector(s) against the declared floor")
+    for v in vectors {
+        let name = v["name"] as? String ?? "<unnamed>"
+        let action = v["action"] as! String
+        let before = Set(v["checked_before"] as! [String])
+
+        let got = layersCheckedAfterAction(action, before)
+        var effective: Set<String>
+        if v["expected_checked_after"] is NSNull {
+            #expect(got == nil,
+                    "vector `\(name)`: an action this port does not know must be REFUSED, not answered with a guess — got \(String(describing: got))")
+            effective = before
+        } else {
+            let want = Set(v["expected_checked_after"] as! [String])
+            #expect(got == want, "vector `\(name)`: checked set after")
+            effective = want
+        }
+
+        let hidden = layersHiddenFromChecked(effective)
+        #expect(hidden == Set(v["expected_hidden_after"] as! [String]),
+                "vector `\(name)`: hidden set after")
+        #expect(keepOf(hidden) == Set(v["expected_keep_after"] as! [[Int]]),
+                "vector `\(name)`: the tree after the click")
+    }
+
+    // (3) THE REGRESSION ITSELF, as the blank tree it produced in the other port.
+    let d = menu["defect_if_the_action_row_were_a_toggle"] as! [String: Any]
+    let hidden = layersHiddenFromChecked(Set(d["checked"] as! [String]))
+    #expect(hidden.count == d["expected_hidden_count"] as! Int,
+            "checking a token no element answers must hide the WHOLE vocabulary")
+    #expect(keepOf(hidden) == Set(d["expected_keep"] as! [[Int]]),
+            "the defect's blank tree is not what the fixture records")
 }

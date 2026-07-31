@@ -21690,6 +21690,12 @@
         },
         "doc_end_y": {
           "default": 0
+        },
+        "doc_w": {
+          "default": 0
+        },
+        "doc_h": {
+          "default": 0
         }
       },
       "handlers": {
@@ -21786,6 +21792,16 @@
                 }
               },
               {
+                "set": {
+                  "tool.ellipse.doc_w": "if event.modifiers.shift then max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y)) else abs(event.doc_x - tool.ellipse.doc_start_x)"
+                }
+              },
+              {
+                "set": {
+                  "tool.ellipse.doc_h": "if event.modifiers.shift then max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y)) else abs(event.doc_y - tool.ellipse.doc_start_y)"
+                }
+              },
+              {
                 "if": "abs(tool.ellipse.cur_x - tool.ellipse.start_x) > 1 and abs(tool.ellipse.cur_y - tool.ellipse.start_y) > 1",
                 "then": [
                   {
@@ -21797,8 +21813,8 @@
                         "type": "ellipse",
                         "cx": "(tool.ellipse.doc_start_x + tool.ellipse.doc_end_x) / 2",
                         "cy": "(tool.ellipse.doc_start_y + tool.ellipse.doc_end_y) / 2",
-                        "rx": "abs(tool.ellipse.doc_end_x - tool.ellipse.doc_start_x) / 2",
-                        "ry": "abs(tool.ellipse.doc_end_y - tool.ellipse.doc_start_y) / 2"
+                        "rx": "tool.ellipse.doc_w / 2",
+                        "ry": "tool.ellipse.doc_h / 2"
                       }
                     }
                   }
@@ -24054,6 +24070,12 @@
         },
         "doc_end_y": {
           "default": 0
+        },
+        "doc_w": {
+          "default": 0
+        },
+        "doc_h": {
+          "default": 0
         }
       },
       "handlers": {
@@ -24150,6 +24172,16 @@
                 }
               },
               {
+                "set": {
+                  "tool.rect.doc_w": "if event.modifiers.shift then max(abs(event.doc_x - tool.rect.doc_start_x), abs(event.doc_y - tool.rect.doc_start_y)) else abs(event.doc_x - tool.rect.doc_start_x)"
+                }
+              },
+              {
+                "set": {
+                  "tool.rect.doc_h": "if event.modifiers.shift then max(abs(event.doc_x - tool.rect.doc_start_x), abs(event.doc_y - tool.rect.doc_start_y)) else abs(event.doc_y - tool.rect.doc_start_y)"
+                }
+              },
+              {
                 "if": "abs(tool.rect.cur_x - tool.rect.start_x) > 1 and abs(tool.rect.cur_y - tool.rect.start_y) > 1",
                 "then": [
                   {
@@ -24161,8 +24193,8 @@
                         "type": "rect",
                         "x": "min(tool.rect.doc_start_x, tool.rect.doc_end_x)",
                         "y": "min(tool.rect.doc_start_y, tool.rect.doc_end_y)",
-                        "width": "abs(tool.rect.doc_end_x - tool.rect.doc_start_x)",
-                        "height": "abs(tool.rect.doc_end_y - tool.rect.doc_start_y)"
+                        "width": "tool.rect.doc_w",
+                        "height": "tool.rect.doc_h"
                       }
                     }
                   }

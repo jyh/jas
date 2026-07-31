@@ -1607,6 +1607,26 @@ pub fn parse_element(v: &serde_json::Value) -> Element {
     elem
 }
 
+/// THIS READER IS STRICT ON PURPOSE, and the reason is the READER'S OWN.
+///
+/// An unknown `type` panics (see the fall-through arm below). In particular
+/// a stray `"circle"` -- the kind the model lost on 2026-07-30, one round
+/// kind, JYH -- is REFUSED here, even though [`crate::geometry::binary`]
+/// still reads legacy TAG_CIRCLE because .bin is a persisted user format.
+///
+/// The strictness protects against a STALE FIXTURE INPUT being silently
+/// REINTERPRETED. 51 goldens were rewritten that day; if one setup document
+/// had kept `"type":"circle"` and this reader were tolerant, it would quietly
+/// become a round ellipse and the test would PASS -- while testing something
+/// other than what the fixture says it tests. A passing test that tests the
+/// wrong thing is worse than a failing one.
+///
+/// THE REASON THIS COMMENT USED TO GIVE WAS WRONG, and it was refuted by
+/// MEASUREMENT rather than spotted by reading: Flask (the Windows seat)
+/// checked the corpus runners. They compare the produced canonical JSON as a
+/// STRING against a pinned golden, so a port that kept WRITING
+/// `"type":"circle"` fails on the string no matter what this reader tolerates.
+/// The writer side was never the reader's job. Correction adopted 2026-07-30.
 fn parse_element_base(v: &serde_json::Value) -> Element {
     let typ = v["type"].as_str().unwrap_or("");
     let common = parse_common(v);
@@ -1798,6 +1818,9 @@ fn parse_element_base(v: &serde_json::Value) -> Element {
                 other => panic!("Unknown live kind: {}", other),
             }
         }
+        // Strict by design -- a stale fixture is refused, never reinterpreted.
+        // See the doc comment on this function for why (and for the reason it
+        // does NOT give any more).
         _ => panic!("Unknown element type: {}", typ),
     }
 }

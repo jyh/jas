@@ -10659,13 +10659,17 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
 
     let is_open = rctx.app.borrow().layers_filter_dropdown_open;
 
-    let items: Vec<(String, String)> = el.get("items")
+    // DISPATCH ON THE DECLARED `type`. This collected every item carrying a
+    // `label` and a `value` until 2026-07-30, which rendered the `All` ACTION as
+    // a thirteenth checkbox: clicking it checked `__all__`, no element answers
+    // `__all__`, and the complement of that over the menu is the whole
+    // vocabulary -- so the row meaning "show me everything" blanked the tree.
+    // The partition is shared with JasSwift and pinned by the `menu` block of
+    // test_fixtures/view_state/layers_type_filter.json.
+    use crate::algorithms::layers_filter::{action_is_in_force, MenuRowKind};
+    let rows = el.get("items")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|item| {
-            let label = item.get("label").and_then(|v| v.as_str())?;
-            let value = item.get("value").and_then(|v| v.as_str())?;
-            Some((label.to_string(), value.to_string()))
-        }).collect())
+        .map(|arr| crate::algorithms::layers_filter::menu_rows(arr))
         .unwrap_or_default();
 
     let toggle_app = rctx.app.clone();
@@ -10686,10 +10690,10 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
     // than eleven boxes that are all on and all meaningless.
     let checked_types: std::collections::HashSet<String> = rctx.app.borrow()
         .layers_type_filter.iter().cloned().collect();
-    let showing_all = checked_types.is_empty();
 
     let close_app = rctx.app.clone();
-    let mut close_rev = rctx.revision;
+    // Read, never written: each row copies it into its own `mut` counter.
+    let close_rev = rctx.revision;
 
     rsx! {
         div {
@@ -10718,74 +10722,95 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                         }
                         div {
                             style: "position:absolute;top:22px;right:0;background:var(--jas-pane-bg,#2a2a2a);border:1px solid var(--jas-border,#555);border-radius:2px;padding:4px 0;min-width:140px;z-index:10000;box-shadow:0 2px 8px rgba(0,0,0,0.5);",
-                            {
-                                // "All" -- one click back to the default. With
-                                // an empty filter this is the ticked row, which
-                                // is what stops CHECKED semantics reading as
-                                // eleven switched-off boxes over a full tree.
-                                let all_app = rctx.app.clone();
-                                let mut all_rev = close_rev;
-                                let all_mark = if showing_all { "☑" } else { "☐" };
-                                let all_key = "all-row";
-                                rsx! {
-                                    div {
-                                        key: "{all_key}",
-                                        style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--jas-border,#555);margin-bottom:2px;",
-                                        onclick: move |evt: Event<MouseData>| {
-                                            evt.stop_propagation();
-                                            let a = all_app.clone();
-                                            spawn(async move {
-                                                a.borrow_mut().layers_type_filter.clear();
-                                                all_rev += 1;
-                                            });
-                                        },
-                                        span { "{all_mark}" }
-                                        span { "All" }
-                                    }
-                                }
-                            }
-                            for (label, value) in items.iter() {
+                            // ONE LOOP, IN DECLARATION ORDER, each row rendered
+                            // as the KIND its `type` declares. The "All" row is
+                            // the menu's own first item now rather than a
+                            // hand-written twin of it -- which is also how the
+                            // defect hid: it was rendered here AND collected
+                            // into the toggle list, so the dropdown carried two
+                            // "All" rows, one of which blanked the tree.
+                            for row in rows.iter() {
                                 {
                                     let item_app = rctx.app.clone();
                                     let mut item_rev = close_rev;
-                                    let v = value.clone();
+                                    let v = row.value.clone();
                                     let v_for_key = v.clone();
-                                    let checked = checked_types.contains(&v);
-                                    let check_mark = if checked { "☑" } else { "☐" };
-                                    rsx! {
-                                        div {
-                                            key: "{v_for_key}",
-                                            style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;",
-                                            onclick: move |evt: Event<MouseData>| {
-                                                evt.stop_propagation();
-                                                // ALT-CLICK SOLOS, mirroring the
-                                                // eye button's ratified
-                                                // Option-click solo in this same
-                                                // panel. A second Alt-click on an
-                                                // already-soloed type restores
-                                                // the full tree, as un-solo does.
-                                                let alt = evt.data().modifiers().alt();
-                                                let a = item_app.clone();
-                                                let vv = v.clone();
-                                                spawn(async move {
-                                                    let mut st = a.borrow_mut();
-                                                    if alt {
-                                                        let soloed = st.layers_type_filter.len() == 1
-                                                            && st.layers_type_filter.contains(&vv);
-                                                        st.layers_type_filter.clear();
-                                                        if !soloed {
-                                                            st.layers_type_filter.insert(vv);
-                                                        }
-                                                    } else if st.layers_type_filter.contains(&vv) {
-                                                        st.layers_type_filter.remove(&vv);
-                                                    } else {
-                                                        st.layers_type_filter.insert(vv);
-                                                    }
-                                                    item_rev += 1;
-                                                });
-                                            },
-                                            span { "{check_mark}" }
-                                            span { "{label}" }
+                                    let label = row.label.clone();
+                                    match &row.kind {
+                                        // AN ACTION IS NOT A TYPE. Its tick means
+                                        // "already in force", not "checked": with
+                                        // an empty filter All is ticked, which is
+                                        // what stops CHECKED semantics reading as
+                                        // twelve switched-off boxes over a full
+                                        // tree.
+                                        MenuRowKind::Action(action) => {
+                                            let mark = if action_is_in_force(action, &checked_types) { "☑" } else { "☐" };
+                                            let act = action.clone();
+                                            rsx! {
+                                                div {
+                                                    key: "{v_for_key}",
+                                                    style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--jas-border,#555);margin-bottom:2px;",
+                                                    onclick: move |evt: Event<MouseData>| {
+                                                        evt.stop_propagation();
+                                                        let a = item_app.clone();
+                                                        let act = act.clone();
+                                                        spawn(async move {
+                                                            let mut st = a.borrow_mut();
+                                                            let current: std::collections::HashSet<String> =
+                                                                st.layers_type_filter.iter().cloned().collect();
+                                                            // An action this port does not know leaves the
+                                                            // state alone. Nothing is guessed here -- guessing
+                                                            // is what made `__all__` a type.
+                                                            if let Some(next) = crate::algorithms::layers_filter::checked_after_action(&act, &current) {
+                                                                st.layers_type_filter = next;
+                                                            }
+                                                            item_rev += 1;
+                                                        });
+                                                    },
+                                                    span { "{mark}" }
+                                                    span { "{label}" }
+                                                }
+                                            }
+                                        }
+                                        MenuRowKind::Toggle => {
+                                            let checked = checked_types.contains(&v);
+                                            let check_mark = if checked { "☑" } else { "☐" };
+                                            rsx! {
+                                                div {
+                                                    key: "{v_for_key}",
+                                                    style: "padding:3px 12px;font-size:11px;color:var(--jas-text,#ccc);cursor:pointer;display:flex;align-items:center;gap:6px;",
+                                                    onclick: move |evt: Event<MouseData>| {
+                                                        evt.stop_propagation();
+                                                        // ALT-CLICK SOLOS, mirroring the
+                                                        // eye button's ratified
+                                                        // Option-click solo in this same
+                                                        // panel. A second Alt-click on an
+                                                        // already-soloed type restores
+                                                        // the full tree, as un-solo does.
+                                                        let alt = evt.data().modifiers().alt();
+                                                        let a = item_app.clone();
+                                                        let vv = v.clone();
+                                                        spawn(async move {
+                                                            let mut st = a.borrow_mut();
+                                                            if alt {
+                                                                let soloed = st.layers_type_filter.len() == 1
+                                                                    && st.layers_type_filter.contains(&vv);
+                                                                st.layers_type_filter.clear();
+                                                                if !soloed {
+                                                                    st.layers_type_filter.insert(vv);
+                                                                }
+                                                            } else if st.layers_type_filter.contains(&vv) {
+                                                                st.layers_type_filter.remove(&vv);
+                                                            } else {
+                                                                st.layers_type_filter.insert(vv);
+                                                            }
+                                                            item_rev += 1;
+                                                        });
+                                                    },
+                                                    span { "{check_mark}" }
+                                                    span { "{label}" }
+                                                }
+                                            }
                                         }
                                     }
                                 }

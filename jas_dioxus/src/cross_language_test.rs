@@ -1047,6 +1047,16 @@ mod tests {
         "draw_ellipse.json",
         "draw_ellipse_shift.json",
         "draw_rect_shift.json",
+        // SHIFTZOOM: the same two Shift drags at zoom 1.5, where the
+        // doc-space anchor is NOT dyadic. The pair above runs at zoom 1,
+        // where every anchor is an exact integer and a commit that
+        // RECOVERS the constrained side by re-subtracting the anchor
+        // happens to be exact — which is why SHIFTCONSTRAIN shipped a
+        // Shift that only drew a true circle/square at 100% zoom. Both
+        // cases carry `expected_exact`, since the 4-dp canonical golden
+        // cannot see the one-ulp gap between rx and ry.
+        "draw_ellipse_shift_zoomed.json",
+        "draw_rect_shift_zoomed.json",
         "draw_rounded_rect.json",
         "draw_polygon.json",
         "draw_star.json",
@@ -1174,15 +1184,83 @@ mod tests {
     }
 
     #[cfg(feature = "web")]
+    /// Full-precision value of one named geometry field, for the
+    /// `expected_exact` assertion below. Deliberately a short, explicit
+    /// table rather than a reflective lookup: a fixture naming a field
+    /// this list does not carry is a fixture bug, and saying so loudly
+    /// beats silently asserting nothing.
+    fn gesture_exact_field(el: &crate::geometry::element::Element, field: &str) -> f64 {
+        use crate::geometry::element::Element;
+        match (el, field) {
+            (Element::Ellipse(e), "cx") => e.cx,
+            (Element::Ellipse(e), "cy") => e.cy,
+            (Element::Ellipse(e), "rx") => e.rx,
+            (Element::Ellipse(e), "ry") => e.ry,
+            (Element::Rect(r), "x") => r.x,
+            (Element::Rect(r), "y") => r.y,
+            (Element::Rect(r), "width") => r.width,
+            (Element::Rect(r), "height") => r.height,
+            _ => panic!("expected_exact: field {field:?} is not readable on {el:?}"),
+        }
+    }
+
+    #[cfg(feature = "web")]
+    /// OPTIONAL second assertion: `expected_exact`.
+    ///
+    /// The canonical document JSON rounds every float to 4 decimal
+    /// places, which is right for a cross-language golden but blind to a
+    /// one-ulp defect. Shift-constrained drawing is exactly that kind of
+    /// contract — a circle is a circle only if rx and ry are the SAME
+    /// double, and at a non-dyadic zoom a commit that re-derives the
+    /// radius from a coordinate misses by ~1e-14, which the golden
+    /// cannot show. This block names an element by path and pins chosen
+    /// fields at FULL precision.
+    ///
+    /// The comparison is EXACT (`==` on f64), on the same reasoning as
+    /// `assert_action_view`: both ports run the same IEEE-754 double
+    /// operations on the same inputs and the fixture literals are
+    /// shortest-round-trip forms, so any difference is a real
+    /// divergence, not a formatting artifact. Cases without the block
+    /// are unaffected. Mirrors Swift `assertGestureExact`.
+    fn assert_gesture_exact(tc: &serde_json::Value, doc: &crate::document::document::Document) {
+        let Some(exact) = tc.get("expected_exact") else { return };
+        let name = tc["name"].as_str().unwrap();
+        let path: Vec<usize> = exact["path"]
+            .as_array()
+            .expect("expected_exact.path must be an array")
+            .iter()
+            .map(|v| v.as_u64().expect("expected_exact.path entries must be integers") as usize)
+            .collect();
+        let el = doc
+            .get_element(&path)
+            .unwrap_or_else(|| panic!("expected_exact: '{name}' has no element at path {path:?}"));
+        let fields = exact["fields"]
+            .as_object()
+            .expect("expected_exact.fields must be an object");
+        for (field, want) in fields {
+            let want = want.as_f64().expect("expected_exact field values must be numbers");
+            let got = gesture_exact_field(el, field);
+            assert!(
+                got == want,
+                "Gesture test '{name}': element {path:?} field {field} is {got:?}, \
+                 expected EXACTLY {want:?} (delta {:e})",
+                got - want
+            );
+        }
+    }
+
+    #[cfg(feature = "web")]
     /// Mirror of `assert_operation_test`: replay the gesture and compare
     /// the canonical document JSON against the pinned golden, dumping
-    /// EXPECTED/ACTUAL on mismatch.
+    /// EXPECTED/ACTUAL on mismatch. Then apply the case's optional
+    /// full-precision `expected_exact` pins.
     fn assert_gesture_test(tc: &serde_json::Value) {
         let name = tc["name"].as_str().unwrap();
         let expected_file = tc["expected_json"].as_str().unwrap();
         let expected = read_fixture(&format!("gestures/{}", expected_file));
         let expected = expected.trim();
-        let actual = run_gesture_test(tc);
+        let model = run_gesture_model(tc);
+        let actual = document_to_test_json(model.document());
 
         if actual != expected {
             eprintln!("=== EXPECTED ({}) ===", name);
@@ -1191,6 +1269,8 @@ mod tests {
             eprintln!("{}", actual);
             panic!("Gesture test '{}' failed: canonical JSON mismatch", name);
         }
+
+        assert_gesture_exact(tc, model.document());
     }
 
     #[cfg(feature = "web")]
@@ -6813,5 +6893,169 @@ mod tests {
             got_anc.sort();
             assert_eq!(got_anc, want_anc, "vector `{name}`: ancestor-only set");
         }
+    }
+
+    /// THE FILTER MENU — which declared item becomes which KIND of row, and what
+    /// each kind does when clicked.
+    ///
+    /// Driven from the `menu` block of
+    /// `test_fixtures/view_state/layers_type_filter.json`; the twin reader is
+    /// `layersFilterMenuMatchesTheSharedCorpus` in
+    /// JasSwift/Tests/CrossLanguageTests.swift.
+    ///
+    /// THE DEFECT IT CLOSES (shipped 2026-07-30, this port only).
+    /// `render_layers_filter_dropdown` collected every item carrying a `label`
+    /// and a `value` and never read its declared `type`, so the `All` row — an
+    /// ACTION — rendered as a thirteenth checkbox. Clicking it checked the token
+    /// `__all__`, which no element answers, so under CHECKED semantics the
+    /// hidden set became the whole vocabulary and the tree went blank. JasSwift
+    /// dispatched on the declared type from the day both were written, so the
+    /// pair written together disagreed within hours: precisely what a shared
+    /// vector is for.
+    #[test]
+    fn layers_filter_menu_matches_the_shared_corpus() {
+        use crate::algorithms::layers_filter::{
+            checked_after_action, hidden_from_checked, menu_rows, type_filter_keep,
+            MenuRowKind,
+        };
+        use std::collections::HashSet;
+
+        let raw = read_fixture("view_state/layers_type_filter.json");
+        let doc: serde_json::Value = serde_json::from_str(&raw)
+            .expect("layers_type_filter.json is not valid JSON");
+        let menu = &doc["menu"];
+
+        let items = menu["items"].as_array().expect("no `menu.items`");
+        // Anti-vacuity declared BY THE DATA, exact rather than slack.
+        assert_eq!(
+            items.len(),
+            menu["min_items"].as_u64().expect("no `min_items`") as usize,
+            "walked {} menu item(s) against the declared floor",
+            items.len()
+        );
+
+        let rows = menu_rows(items);
+
+        // (1) THE PARTITION. An action-typed item is NOT a type toggle, and an
+        //     item that declares no type it recognises is neither.
+        let got_toggles: Vec<&str> = rows.iter()
+            .filter(|r| r.kind == MenuRowKind::Toggle)
+            .map(|r| r.value.as_str())
+            .collect();
+        let want_toggles: Vec<&str> = menu["expected_toggle_values"].as_array()
+            .expect("no `expected_toggle_values`")
+            .iter().map(|v| v.as_str().expect("toggle value not a string"))
+            .collect();
+        assert_eq!(got_toggles, want_toggles,
+                   "the toggle rows are not the declared toggle rows -- an \
+                    action row rendered as a checkbox is the 2026-07-30 defect");
+
+        let got_actions: Vec<(&str, &str, &str)> = rows.iter()
+            .filter_map(|r| match &r.kind {
+                MenuRowKind::Action(a) => Some((r.label.as_str(), r.value.as_str(), a.as_str())),
+                MenuRowKind::Toggle => None,
+            })
+            .collect();
+        let want_actions: Vec<(&str, &str, &str)> = menu["expected_action_rows"].as_array()
+            .expect("no `expected_action_rows`")
+            .iter()
+            .map(|v| (
+                v["label"].as_str().expect("action row has no `label`"),
+                v["value"].as_str().expect("action row has no `value`"),
+                v["action"].as_str().expect("action row has no `action`"),
+            ))
+            .collect();
+        assert_eq!(got_actions, want_actions,
+                   "the action rows are not the declared action rows");
+
+        let tree: Vec<(Vec<usize>, String)> = menu["tree"].as_array()
+            .expect("no `menu.tree`")
+            .iter()
+            .map(|r| (
+                r["path"].as_array().expect("tree row has no `path`").iter()
+                    .map(|n| n.as_u64().expect("path entry not a number") as usize)
+                    .collect(),
+                r["type"].as_str().expect("tree row has no `type`").to_string(),
+            ))
+            .collect();
+        let keep_of = |hidden: &HashSet<String>| {
+            let mut got: Vec<Vec<usize>> = type_filter_keep(
+                tree.iter().map(|(p, t)| (p.as_slice(), t.as_str())),
+                hidden,
+            ).into_iter().collect();
+            got.sort();
+            got
+        };
+        let paths_of = |key: &str, v: &serde_json::Value| -> Vec<Vec<usize>> {
+            let mut out: Vec<Vec<usize>> = v[key].as_array()
+                .unwrap_or_else(|| panic!("no `{key}`"))
+                .iter()
+                .map(|p| p.as_array().expect("path not an array").iter()
+                    .map(|n| n.as_u64().expect("path entry not a number") as usize)
+                    .collect())
+                .collect();
+            out.sort();
+            out
+        };
+
+        // (2) INVOKING THE ACTION yields the everything-visible state.
+        let vectors = menu["action_vectors"].as_array().expect("no `action_vectors`");
+        assert_eq!(
+            vectors.len(),
+            menu["min_action_vectors"].as_u64().expect("no `min_action_vectors`") as usize,
+            "walked {} action vector(s) against the declared floor",
+            vectors.len()
+        );
+        for v in vectors {
+            let name = v["name"].as_str().unwrap_or("<unnamed>");
+            let action = v["action"].as_str().expect("vector has no `action`");
+            let before: HashSet<String> = v["checked_before"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `checked_before`"))
+                .iter().map(|t| t.as_str().expect("not a string").to_string())
+                .collect();
+
+            let got = checked_after_action(action, &before);
+            let effective = if v["expected_checked_after"].is_null() {
+                assert!(got.is_none(),
+                        "vector `{name}`: an action this port does not know must \
+                         be REFUSED, not answered with a guess -- got {got:?}");
+                before.clone()
+            } else {
+                let want: HashSet<String> = v["expected_checked_after"].as_array()
+                    .expect("`expected_checked_after` is neither null nor an array")
+                    .iter().map(|t| t.as_str().expect("not a string").to_string())
+                    .collect();
+                assert_eq!(got.as_ref(), Some(&want), "vector `{name}`: checked set after");
+                want
+            };
+
+            let hidden = hidden_from_checked(&effective);
+            let mut got_hidden: Vec<String> = hidden.iter().cloned().collect();
+            got_hidden.sort();
+            let mut want_hidden: Vec<String> = v["expected_hidden_after"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `expected_hidden_after`"))
+                .iter().map(|t| t.as_str().expect("not a string").to_string())
+                .collect();
+            want_hidden.sort();
+            assert_eq!(got_hidden, want_hidden, "vector `{name}`: hidden set after");
+
+            assert_eq!(keep_of(&hidden), paths_of("expected_keep_after", v),
+                       "vector `{name}`: the tree after the click");
+        }
+
+        // (3) THE REGRESSION ITSELF, as the blank tree it produced.
+        let d = &menu["defect_if_the_action_row_were_a_toggle"];
+        let checked: HashSet<String> = d["checked"].as_array()
+            .expect("no `defect...checked`")
+            .iter().map(|t| t.as_str().expect("not a string").to_string())
+            .collect();
+        let hidden = hidden_from_checked(&checked);
+        assert_eq!(
+            hidden.len(),
+            d["expected_hidden_count"].as_u64().expect("no `expected_hidden_count`") as usize,
+            "checking a token no element answers must hide the WHOLE vocabulary"
+        );
+        assert_eq!(keep_of(&hidden), paths_of("expected_keep", d),
+                   "the defect's blank tree is not what the fixture records");
     }
 }
