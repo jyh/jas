@@ -32,5 +32,11 @@ pub mod panels;
 pub mod recorder;
 #[cfg(feature = "web")]
 pub mod tools;
-#[cfg(feature = "web")]
+// NOT gated as a whole. Nine of its seventeen submodules are pure data and pure
+// functions -- layout types, the layout-op dispatcher, pane geometry, key-chord
+// resolution, the menu structure, the fixture serializer -- and two of those are
+// pinned CROSS-LANGUAGE by corpora. Gating the module gated them too: 185 tests
+// that could run natively did not. The gate now lives per-submodule in
+// workspace/mod.rs, which explains each one. Same disease as CHARWIDTH, where a
+// shared law lived inside web-gated `tools` and the native arm drifted unwatched.
 pub mod workspace;

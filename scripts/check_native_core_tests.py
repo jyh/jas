@@ -108,7 +108,21 @@ CRATE = REPO / "jas_dioxus"
 # Queued rather than done here so it does not derail B1, and recorded in the
 # windows ledger so it cannot quietly expire -- which is the failure mode this
 # whole week has been about.
-FLOOR = 1839
+#
+# 2026-07-30, 1839 -> 2024. NOT drift, and not a native test written: the `web`
+# gate MOVED. `lib.rs` had `#[cfg(feature = "web")] pub mod workspace;`, which
+# put the entire workspace layer -- layout types, the layout-op dispatcher, pane
+# geometry, key-chord resolution, the menu structure, the fixture serializer --
+# out of a `--no-default-features` build, though nine of its seventeen
+# submodules import nothing from Dioxus, web_sys, or the app shell. 185 tests
+# that could always have run natively did not.
+#
+# THAT IS THIS GATE FINDING WHAT IT WAS BUILT TO FIND, and it is also the exact
+# argument for the derived form: a COUNT could never have told anyone those 185
+# tests existed. It went up by 185 and the only honest thing a count can say is
+# "185 more than yesterday". The property -- *no test that COULD run natively is
+# gated behind `web`* -- would have NAMED them, on the day the module was gated.
+FLOOR = 2024
 
 
 def parse_test_count(listing: str) -> int:
