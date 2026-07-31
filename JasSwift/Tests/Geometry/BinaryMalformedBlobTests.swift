@@ -722,7 +722,7 @@ private func onBigStack<T>(_ body: @escaping () -> T) -> T {
 @Test func aValidBlobStillRoundTripsAfterTheConversion() throws {
     let rect = Element.rect(Rect(x: 1, y: 2, width: 3, height: 4,
                                  fill: Fill(color: Color(r: 1, g: 0, b: 0))))
-    let circle = Element.circle(Circle(cx: 5, cy: 6, r: 7,
+    let circle = Element.ellipse(Ellipse(cx: 5, cy: 6, rx: 7, ry: 7,
                                        stroke: Stroke(color: Color(r: 0, g: 1, b: 0), width: 3)))
     let poly = Element.polyline(Polyline(points: [(0, 0), (1, 1), (2, 4)]))
     let path = Element.path(Path(

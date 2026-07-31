@@ -8,9 +8,32 @@
 # deposit an invisible shape.
 #
 # The committed element is `ellipse` with cx, cy at the bounding-box
-# center and rx, ry as half the box dimensions. Holding Shift to
-# constrain to a circle and Alt to draw from the center are reserved
-# for a later phase — Phase 1 mirrors rect.yaml's straight drag.
+# center and rx, ry as half the box dimensions.
+#
+# HOLDING SHIFT CONSTRAINS THE DRAG TO A CIRCLE. The square's side is
+# max(|dx|, |dy|) — the shape follows the cursor's furthest reach — and
+# it grows into the quadrant being dragged toward, so the mousedown
+# point stays put as the anchor. A PURE HORIZONTAL drag (dy = 0) still
+# produces a circle: the vertical direction has no sign to follow, so it
+# takes the positive branch and the shape extends downward.
+#
+# The constraint is applied WHERE THE CURSOR STATE IS WRITTEN, not where
+# it is read. That keeps the overlay below completely unaware of it —
+# `cur_x`/`cur_y` already carry the constrained point, so the dashed
+# preview and the committed element cannot disagree about what Shift
+# means. Any later constraint (Alt, snapping) belongs at the same seam.
+#
+# The element type stays `ellipse` even when rx == ry. A circle is an
+# ellipse whose radii happen to be equal; emitting a `circle` element
+# would mean the TYPE changed when a later edit made them unequal, and
+# the preservation law (ELEMENT IDENTITY) says an edit changes what it
+# speaks to and preserves the rest. Type is not one of the things a
+# radius edit gets to change.
+#
+# Alt to draw from the center is still unbuilt.
+# <!-- expires-when: {"port": "rust",
+#                     "file": "workspace/tools/ellipse.yaml",
+#                     "lacks": "event.modifiers.alt"} -->
 #
 # Fill and stroke are intentionally omitted from the add_element spec —
 # doc.add_element falls through to model.default_fill and
@@ -40,6 +63,11 @@ state:
   # when the canvas has a non-zero pan / zoom transform.
   doc_start_x: { default: 0 }
   doc_start_y: { default: 0 }
+  # Document-space release point, AFTER any Shift constraint. Written at
+  # mouseup and read by the commit on the next step, so the committed
+  # geometry and the guard below both see the same constrained point.
+  doc_end_x: { default: 0 }
+  doc_end_y: { default: 0 }
 
 handlers:
 
@@ -61,25 +89,76 @@ handlers:
   on_mousemove:
     - if: "tool.ellipse.mode == 'drawing'"
       then:
-        - set: { tool.ellipse.cur_x: "event.x" }
-        - set: { tool.ellipse.cur_y: "event.y" }
+        # THE SHIFT CONSTRAINT LIVES HERE, on the write. Both branches
+        # read only `event` and `start_*`, never the sibling being
+        # written, so the two sets are order-independent.
+        - set:
+            tool.ellipse.cur_x: >-
+              if event.modifiers.shift
+              then tool.ellipse.start_x + (if event.x >= tool.ellipse.start_x
+                   then max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y))
+                   else 0 - max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y)))
+              else event.x
+        - set:
+            tool.ellipse.cur_y: >-
+              if event.modifiers.shift
+              then tool.ellipse.start_y + (if event.y >= tool.ellipse.start_y
+                   then max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y))
+                   else 0 - max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y)))
+              else event.y
 
   on_mouseup:
     - if: "tool.ellipse.mode == 'drawing'"
       then:
+        # Re-apply the constraint at the release point, in BOTH spaces:
+        # screen for the size guard below, document for the commit. The
+        # release can land somewhere no mousemove reported.
+        - set:
+            tool.ellipse.cur_x: >-
+              if event.modifiers.shift
+              then tool.ellipse.start_x + (if event.x >= tool.ellipse.start_x
+                   then max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y))
+                   else 0 - max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y)))
+              else event.x
+        - set:
+            tool.ellipse.cur_y: >-
+              if event.modifiers.shift
+              then tool.ellipse.start_y + (if event.y >= tool.ellipse.start_y
+                   then max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y))
+                   else 0 - max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y)))
+              else event.y
+        - set:
+            tool.ellipse.doc_end_x: >-
+              if event.modifiers.shift
+              then tool.ellipse.doc_start_x + (if event.doc_x >= tool.ellipse.doc_start_x
+                   then max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y))
+                   else 0 - max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y)))
+              else event.doc_x
+        - set:
+            tool.ellipse.doc_end_y: >-
+              if event.modifiers.shift
+              then tool.ellipse.doc_start_y + (if event.doc_y >= tool.ellipse.doc_start_y
+                   then max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y))
+                   else 0 - max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y)))
+              else event.doc_y
         # Zero-size suppression matches rect.yaml: a plain click
         # (release at the same point as press) should not create a
         # shape. 1-pixel threshold on both dimensions, screen-space.
-        - if: "abs(event.x - tool.ellipse.start_x) > 1 and abs(event.y - tool.ellipse.start_y) > 1"
+        #
+        # MEASURED AGAINST THE CONSTRAINED POINT, not the raw event. A
+        # pure horizontal Shift-drag has a raw dy of 0, so testing the
+        # event would reject a 100-pixel circle the artist had watched
+        # themselves draw. `cur_*` is already constrained two steps up.
+        - if: "abs(tool.ellipse.cur_x - tool.ellipse.start_x) > 1 and abs(tool.ellipse.cur_y - tool.ellipse.start_y) > 1"
           then:
             - "doc.snapshot": {}
             - "doc.add_element":
                 element:
                   type: ellipse
-                  cx: "(tool.ellipse.doc_start_x + event.doc_x) / 2"
-                  cy: "(tool.ellipse.doc_start_y + event.doc_y) / 2"
-                  rx: "abs(event.doc_x - tool.ellipse.doc_start_x) / 2"
-                  ry: "abs(event.doc_y - tool.ellipse.doc_start_y) / 2"
+                  cx: "(tool.ellipse.doc_start_x + tool.ellipse.doc_end_x) / 2"
+                  cy: "(tool.ellipse.doc_start_y + tool.ellipse.doc_end_y) / 2"
+                  rx: "abs(tool.ellipse.doc_end_x - tool.ellipse.doc_start_x) / 2"
+                  ry: "abs(tool.ellipse.doc_end_y - tool.ellipse.doc_start_y) / 2"
     - set: { tool.ellipse.mode: "'idle'" }
 
   on_keydown:

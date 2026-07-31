@@ -31,7 +31,7 @@
 //! lowering concern the seam never carries — contract A5).
 
 use crate::geometry::element::{
-    Arrowhead, CircleElem, Color, Element, EllipseElem, Fill, FillRule, Gradient, GradientType,
+    Arrowhead, Color, Element, EllipseElem, Fill, FillRule, Gradient, GradientType,
     LineElem, PathCommand, PathElem, PolygonElem, PolylineElem, RectElem, Stroke, StrokeAlign,
     Visibility,
 };
@@ -96,7 +96,6 @@ pub fn element_needs_legacy(elem: &Element) -> bool {
     match elem {
         // RP3: an ellipse arc carries no align and can't be a clip path, so a
         // non-center circle/ellipse stroke stays legacy.
-        Element::Circle(e) => stroke_non_center(e.stroke.as_ref()),
         Element::Ellipse(e) => stroke_non_center(e.stroke.as_ref()),
         // The legacy Rect arm expands anchor-aligned dashing into sub-paths.
         Element::Rect(e) => e.stroke.as_ref().map(expands_anchor_dash).unwrap_or(false),
@@ -369,23 +368,10 @@ pub fn rect_painter_inputs(e: &RectElem, bbox: (f64, f64, f64, f64)) -> Option<S
     })
 }
 
-/// Convertible [`Circle`](Element::Circle) inputs, or `None`. RP3: a non-center
-/// stroke stays legacy (an ellipse arc can't carry the inside/outside clip).
-pub fn circle_painter_inputs(e: &CircleElem, bbox: (f64, f64, f64, f64)) -> Option<ShapePaint> {
-    if is_freeform(e.fill_gradient.as_deref()) || is_freeform(e.stroke_gradient.as_deref()) {
-        return None;
-    }
-    if stroke_non_center(e.stroke.as_ref()) {
-        return None;
-    }
-    Some(ShapePaint {
-        geom: ConvGeom::Arc(EllipseArc::circle(e.cx, e.cy, e.r)),
-        fill: conv_fill(e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, FillRule::NonZero),
-        stroke: conv_stroke(e.stroke.as_ref(), e.stroke_gradient.as_deref(), bbox),
-    })
-}
-
-/// Convertible [`Ellipse`](Element::Ellipse) inputs, or `None`. RP3 as Circle.
+/// Convertible [`Ellipse`](Element::Ellipse) inputs, or `None`. RP3: a
+/// non-center stroke stays legacy (an ellipse arc cannot carry the
+/// inside/outside clip). Equal radii come through here too -- the circle
+/// twin was deleted with the circle kind on 2026-07-30.
 pub fn ellipse_painter_inputs(e: &EllipseElem, bbox: (f64, f64, f64, f64)) -> Option<ShapePaint> {
     if is_freeform(e.fill_gradient.as_deref()) || is_freeform(e.stroke_gradient.as_deref()) {
         return None;
@@ -533,17 +519,6 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
                         emit_path_stroke(p, &path, &brush, s, eff);
                     }
                 }
-            }
-        }
-        Element::Circle(e) => {
-            let bbox = (e.cx - e.r, e.cy - e.r, e.r * 2.0, e.r * 2.0);
-            let arc = EllipseArc::circle(e.cx, e.cy, e.r);
-            if let Some((brush, op)) = fill_paint(e.fill.as_ref(), e.fill_gradient.as_deref(), bbox) {
-                p.fill_ellipse_arc(&arc, FillRule::NonZero, &brush, eff * op);
-            }
-            if let Some(s) = e.stroke.as_ref() {
-                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
-                p.stroke_ellipse_arc(&arc, &brush, &stroke_style(s, s.width), eff * s.opacity);
             }
         }
         Element::Ellipse(e) => {

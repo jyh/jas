@@ -1073,7 +1073,6 @@ pub(crate) fn element_to_polygon_set_with(
         Element::Polyline(p) => {
             if p.points.is_empty() { PolygonSet::new() } else { vec![p.points.clone()] }
         }
-        Element::Circle(c) => vec![circle_to_ring(c.cx, c.cy, c.r, precision)],
         Element::Ellipse(e) => vec![ellipse_to_ring(e.cx, e.cy, e.rx, e.ry, precision)],
         Element::Group(g) => {
             let mut out = PolygonSet::new();
@@ -2688,8 +2687,8 @@ mod tests {
         set_recompute_cache_generation(3);
 
         let resolver = CellResolver::new();
-        resolver.set("c1", Rc::new(Element::Circle(crate::geometry::element::CircleElem {
-            cx: 0.0, cy: 0.0, r: 100.0,
+        resolver.set("c1", Rc::new(Element::Ellipse(crate::geometry::element::EllipseElem {
+            cx: 0.0, cy: 0.0, rx: 100.0, ry: 100.0,
             fill: None, stroke: None, common: CommonProps::default(),
             fill_gradient: None, stroke_gradient: None,
         })));

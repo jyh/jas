@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape">
+    <circle cx="50" cy="50" r="20" fill="#ff0000"/>
+    <ellipse cx="150" cy="50" rx="20" ry="20" fill="#00ff00"/>
+    <ellipse cx="250" cy="50" rx="40" ry="20" fill="#0000ff"/>
+  </g>
+</svg>

@@ -27,7 +27,7 @@ import Testing
     private static let allKinds: [(String, Element)] = [
         ("line",     .line(Line(x1: 0, y1: 0, x2: 1, y2: 1))),
         ("rect",     .rect(Rect(x: 0, y: 0, width: 1, height: 1))),
-        ("circle",   .circle(Circle(cx: 0, cy: 0, r: 1))),
+        ("circle",   .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 1))),
         ("ellipse",  .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 1))),
         ("polyline", .polyline(Polyline(points: []))),
         ("polygon",  .polygon(Polygon(points: []))),

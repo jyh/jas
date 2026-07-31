@@ -568,7 +568,7 @@ private func assertClose(_ a: Double, _ b: Double, _ tol: Double, _ name: String
 }
 
 @Test func recognizeElementSkipsCircle() {
-    let elem = Element.circle(Circle(cx: 50, cy: 50, r: 30))
+    let elem = Element.ellipse(Ellipse(cx: 50, cy: 50, rx: 30, ry: 30))
     #expect(recognizeElement(elem, RecognizeConfig()) == nil)
 }
 
@@ -584,9 +584,11 @@ private func assertClose(_ a: Double, _ b: Double, _ tol: Double, _ name: String
     }
     let elem = Element.path(Path(d: d, fillRule: .nonzero))
     if let (kind, result) = recognizeElement(elem, RecognizeConfig()) {
+        // The RECOGNISER still recognises a circle; the ELEMENT it builds is
+        // the one round kind. Those are different axes and both are asserted.
         #expect(kind == .circle)
-        guard case .circle = result else {
-            Issue.record("expected Circle element"); return
+        guard case .ellipse = result else {
+            Issue.record("expected a round ellipse element"); return
         }
     } else {
         Issue.record("expected recognition result")

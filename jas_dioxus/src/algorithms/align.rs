@@ -511,7 +511,7 @@ pub fn distribute_horizontal_spacing(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::element::{CircleElem, CommonProps, Color, Fill, RectElem};
+    use crate::geometry::element::{EllipseElem, CommonProps, Color, Fill, RectElem};
     use std::rc::Rc;
 
     fn rect(x: f64, y: f64, w: f64, h: f64) -> Element {
@@ -526,8 +526,8 @@ mod tests {
     }
 
     fn circle(cx: f64, cy: f64, r: f64) -> Element {
-        Element::Circle(CircleElem {
-            cx, cy, r,
+        Element::Ellipse(EllipseElem {
+            cx, cy, rx: r, ry: r,
             fill: Some(Fill::new(Color::BLACK)),
             stroke: None,
             common: CommonProps::default(),

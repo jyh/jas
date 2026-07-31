@@ -580,7 +580,7 @@ private func makeLockedLayerCtrl(lockFirst: Bool) -> Controller {
 }
 
 @Test func circleControlPointPositions() {
-    let c = Element.circle(Circle(cx: 50, cy: 50, r: 10))
+    let c = Element.ellipse(Ellipse(cx: 50, cy: 50, rx: 10, ry: 10))
     let cps = c.controlPointPositions
     #expect(cps.count == 4)
     #expect(cps[0] == (50, 40))
@@ -641,11 +641,11 @@ private func makeLockedLayerCtrl(lockFirst: Bool) -> Controller {
 }
 
 @Test func moveCircleAllCPs() {
-    let circle = Element.circle(Circle(cx: 50, cy: 50, r: 10))
+    let circle = Element.ellipse(Ellipse(cx: 50, cy: 50, rx: 10, ry: 10))
     let moved = circle.moveControlPoints(.all, dx: 10, dy: -10)
-    if case .circle(let v) = moved {
-        #expect(v.cx == 60); #expect(v.cy == 40); #expect(v.r == 10)
-    } else { Issue.record("Expected circle") }
+    if case .ellipse(let v) = moved {
+        #expect(v.cx == 60); #expect(v.cy == 40); #expect(v.rx == 10)
+    } else { Issue.record("Expected a round ellipse") }
 }
 
 @Test func moveEllipseAllCPs() {
@@ -1321,13 +1321,13 @@ private func makeLockedLayerCtrl(lockFirst: Bool) -> Controller {
     ctrl.addElement(Element.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
     ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
     // Add a circle at [0,1].
-    ctrl.addElement(Element.circle(Circle(cx: 50, cy: 50, r: 20,
+    ctrl.addElement(Element.ellipse(Ellipse(cx: 50, cy: 50, rx: 20, ry: 20,
                                           fill: Fill(color: Color(r: 0, g: 0, b: 0)))))
     ctrl.redefine(masterId: "m1", [0, 1], refId: "i2")
     let doc = ctrl.document
     // The master is now the circle, keyed by m1.
     #expect(doc.symbols.count == 1)
-    if case .circle = doc.symbols[0] {} else { Issue.record("expected a Circle master") }
+    if case .ellipse = doc.symbols[0] {} else { Issue.record("expected a Circle master") }
     #expect(doc.symbols[0].id == "m1")
     // The selection's path is now an instance of m1.
     if case .live(.reference(let re)) = doc.getElement([0, 1]) {
@@ -1406,13 +1406,13 @@ private func makeLockedLayerCtrl(lockFirst: Bool) -> Controller {
 
 @Test func deleteSelectionSimple() {
     let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
-    let circle = Element.circle(Circle(cx: 50, cy: 50, r: 5))
+    let circle = Element.ellipse(Ellipse(cx: 50, cy: 50, rx: 5, ry: 5))
     let layer = Layer(name: "L0", children: [rect, circle])
     let doc = Document(layers: [layer],
                           selection: sel([0, 0]))
     let doc2 = doc.deleteSelection()
     #expect(doc2.layers[0].children.count == 1)
-    if case .circle = doc2.layers[0].children[0] { } else { Issue.record("Expected circle") }
+    if case .ellipse = doc2.layers[0].children[0] { } else { Issue.record("Expected a round ellipse") }
     #expect(doc2.selection.isEmpty)
 }
 

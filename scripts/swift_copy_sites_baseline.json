@@ -25,19 +25,8 @@
     "  * PLAIN DEBT. The rest are same-type copies that simply forget fields."
   ],
   "sites": {
-    "JasSwift/Sources/Algorithms/ShapeRecognize.swift::Circle": {
-      "sites": 1,
-      "missing": [
-        "blendMode",
-        "fillGradient",
-        "id",
-        "mask",
-        "name",
-        "strokeGradient"
-      ]
-    },
     "JasSwift/Sources/Algorithms/ShapeRecognize.swift::Ellipse": {
-      "sites": 1,
+      "sites": 2,
       "missing": [
         "blendMode",
         "fillGradient",
@@ -136,15 +125,6 @@
         "id",
         "mask",
         "name",
-        "strokeGradient"
-      ]
-    },
-    "JasSwift/Sources/Geometry/Normalize.swift::Circle": {
-      "sites": 1,
-      "missing": [
-        "blendMode",
-        "fillGradient",
-        "mask",
         "strokeGradient"
       ]
     },

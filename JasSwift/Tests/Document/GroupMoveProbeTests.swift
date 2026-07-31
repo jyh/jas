@@ -3,7 +3,7 @@ import Testing
 
 /// PROBE — does a GROUP selected as a single entry move when dragged?
 ///
-/// `Element.moveControlPoints` matches `.line`, `.rect`, `.circle`,
+/// `Element.moveControlPoints` matches `.line`, `.rect`, `.ellipse`,
 /// `.ellipse`, `.polygon`, `.path`, `.textPath`, `.text` and
 /// `.live(.reference)`, then falls to `default: return self`
 /// (Geometry/Element.swift:1081). There is no `.group` or `.layer` arm, and

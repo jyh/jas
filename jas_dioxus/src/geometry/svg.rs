@@ -366,27 +366,39 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 name_attr(&e.common.name),
             )
         }
-        Element::Circle(e) => {
-            format!(
-                "{}<circle cx=\"{}\" cy=\"{}\" r=\"{}\"{}{}{}{}{}{}/>\n",
-                indent,
-                fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.r)),
-                fill_attrs(&e.fill), stroke_attrs(&e.stroke),
-                opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
-                id_lock_attrs(&e.common.id, e.common.locked),
-                name_attr(&e.common.name),
-            )
-        }
         Element::Ellipse(e) => {
-            format!(
-                "{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}{}{}{}{}{}/>\n",
-                indent,
-                fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.rx)), fmt(px(e.ry)),
+            // THE TAG IS RE-DERIVED, not stored. Equal radii emit `<circle>`,
+            // so a file's `<circle>` elements survive a round trip even though
+            // the model no longer has a circle kind.
+            //
+            // THE MIRROR IS A REWRITE WE ACCEPT: an author's deliberate
+            // `<ellipse rx="5" ry="5">` comes back out as `<circle>`. That is
+            // the price of one kind, and it is pinned by
+            // `round_ellipses_serialize_as_circle_and_squashed_ones_do_not`
+            // so it stays a decision rather than a surprise.
+            //
+            // The transform is NOT consulted. It is emitted as its own
+            // attribute and survives either tag, and a `<circle transform>`
+            // re-reads to exactly what was written.
+            let common_attrs = format!(
+                "{}{}{}{}{}{}",
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke),
                 opacity_attr(e.common.opacity), transform_attr(&e.common.transform),
                 id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
-            )
+            );
+            if e.rx == e.ry {
+                format!(
+                    "{}<circle cx=\"{}\" cy=\"{}\" r=\"{}\"{}/>\n",
+                    indent, fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.rx)), common_attrs,
+                )
+            } else {
+                format!(
+                    "{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}/>\n",
+                    indent, fmt(px(e.cx)), fmt(px(e.cy)),
+                    fmt(px(e.rx)), fmt(px(e.ry)), common_attrs,
+                )
+            }
         }
         Element::Polyline(e) => {
             let ps: String = e.points.iter()
@@ -1727,16 +1739,26 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                     fill_gradient: None,
             stroke_gradient: None,
         })),
-        "circle" => Some(Element::Circle(CircleElem {
-            cx: pt(get_f(node, "cx", 0.0)),
-            cy: pt(get_f(node, "cy", 0.0)),
-            r: pt(get_f(node, "r", 0.0)),
-            fill: parse_fill(node),
-            stroke: parse_stroke(node),
-            common,
-                    fill_gradient: None,
-            stroke_gradient: None,
-        })),
+        // ONE ROUND KIND (JYH, 2026-07-30). `<circle r>` is an ellipse whose
+        // radii are equal. Keeping a separate kind made the type PROVENANCE
+        // rather than geometry -- `apply_scale` composes a matrix onto
+        // common.transform and never touches radii, so a `circle` stayed typed
+        // `circle` while drawn as an egg. The tag is re-derived on the way out,
+        // so `<circle>` still round-trips.
+        "circle" => {
+            let r = pt(get_f(node, "r", 0.0));
+            Some(Element::Ellipse(EllipseElem {
+                cx: pt(get_f(node, "cx", 0.0)),
+                cy: pt(get_f(node, "cy", 0.0)),
+                rx: r,
+                ry: r,
+                fill: parse_fill(node),
+                stroke: parse_stroke(node),
+                common,
+                fill_gradient: None,
+                stroke_gradient: None,
+            }))
+        }
         "ellipse" => Some(Element::Ellipse(EllipseElem {
             cx: pt(get_f(node, "cx", 0.0)),
             cy: pt(get_f(node, "cy", 0.0)),
@@ -2744,8 +2766,8 @@ mod tests {
     }
 
     fn make_circle(cx: f64, cy: f64, r: f64) -> Element {
-        Element::Circle(CircleElem {
-            cx, cy, r,
+        Element::Ellipse(EllipseElem {
+            cx, cy, rx: r, ry: r,
             fill: Some(Fill::new(Color::rgb(0.0, 0.0, 1.0))),
             stroke: None, common: CommonProps::default(),
                     fill_gradient: None,
@@ -2879,7 +2901,7 @@ mod tests {
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         assert_eq!(children.len(), 1);
-        assert!(matches!(&*children[0], Element::Circle(_)));
+        assert!(matches!(&*children[0], Element::Ellipse(_)));
     }
 
     #[test]

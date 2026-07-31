@@ -127,11 +127,6 @@ fn normalize_element(elem: &Element) -> Element {
             stroke: e.stroke.as_ref().map(normalize_stroke),
             ..e.clone()
         }),
-        Element::Circle(e) => Element::Circle(CircleElem {
-            fill: e.fill.as_ref().map(normalize_fill),
-            stroke: e.stroke.as_ref().map(normalize_stroke),
-            ..e.clone()
-        }),
         Element::Ellipse(e) => Element::Ellipse(EllipseElem {
             fill: e.fill.as_ref().map(normalize_fill),
             stroke: e.stroke.as_ref().map(normalize_stroke),

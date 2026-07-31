@@ -546,14 +546,6 @@ package func elementJson(_ elem: Element) -> String {
         o.num("width", e.width)
         o.num("x", e.x)
         o.num("y", e.y)
-    case .circle(let e):
-        o.str("type", "circle")
-        commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
-        o.num("cx", e.cx)
-        o.num("cy", e.cy)
-        o.raw("fill", fillJson(e.fill))
-        o.num("r", e.r)
-        o.raw("stroke", strokeJson(e.stroke))
     case .ellipse(let e):
         o.str("type", "ellipse")
         commonFields(o, e.opacity, e.transform, e.locked, e.visibility, e.name, e.id)
@@ -1317,11 +1309,6 @@ private func parseElementBase(_ d: [String: Any]) -> Element {
                           fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                           opacity: opacity, transform: transform, locked: locked,
                           visibility: visibility, name: name, id: id))
-    case "circle":
-        return .circle(Circle(cx: parseF(d["cx"]), cy: parseF(d["cy"]), r: parseF(d["r"]),
-                              fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
-                              opacity: opacity, transform: transform, locked: locked,
-                              visibility: visibility, name: name, id: id))
     case "ellipse":
         return .ellipse(Ellipse(cx: parseF(d["cx"]), cy: parseF(d["cy"]),
                                 rx: parseF(d["rx"]), ry: parseF(d["ry"]),

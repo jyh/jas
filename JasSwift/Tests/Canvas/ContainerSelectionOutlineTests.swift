@@ -60,7 +60,7 @@ struct ContainerSelectionOutlineTests {
     @Test func aLeafDoesNotUseTheContainerOutline() {
         #expect(containerSelectionOutlineRect(rect(0)) == nil,
                 "a rect strokes its own geometry")
-        #expect(containerSelectionOutlineRect(.circle(Circle(cx: 5, cy: 5, r: 5))) == nil,
+        #expect(containerSelectionOutlineRect(.ellipse(Ellipse(cx: 5, cy: 5, rx: 5, ry: 5))) == nil,
                 "a circle strokes its own geometry")
     }
 

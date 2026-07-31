@@ -68,7 +68,7 @@ private func everyTagElements(mode: BlendMode, mask: Mask?) -> [Element] {
     [
         .line(Line(x1: 0, y1: 0, x2: 1, y2: 1, blendMode: mode, mask: mask)),
         .rect(Rect(x: 0, y: 0, width: 1, height: 2, blendMode: mode, mask: mask)),
-        .circle(Circle(cx: 0, cy: 0, r: 1, blendMode: mode, mask: mask)),
+        .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 1, blendMode: mode, mask: mask)),
         .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 2, blendMode: mode, mask: mask)),
         .polyline(Polyline(points: [(0, 0), (1, 1)], blendMode: mode, mask: mask)),
         .polygon(Polygon(points: [(0, 0), (1, 1), (2, 0)], blendMode: mode, mask: mask)),
@@ -87,7 +87,7 @@ private func everyTagElements(mode: BlendMode, mask: Mask?) -> [Element] {
 
 @Test func binaryRoundTripsTheCommonExtensionOnEveryTag() throws {
     let mode = BlendMode.hardLight
-    let mask = Mask(subtreeElement: .circle(Circle(cx: 1, cy: 2, r: 3,
+    let mask = Mask(subtreeElement: .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 3,
                                                    fill: Fill(color: Color(r: 0, g: 0, b: 0)))),
                     clip: false, invert: true, disabled: true, linked: false,
                     unlinkTransform: nil)

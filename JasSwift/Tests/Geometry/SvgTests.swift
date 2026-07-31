@@ -66,7 +66,7 @@ import Testing
 
 @Test func svgCircle() {
     let doc = Document(layers: [Layer(children: [
-        .circle(Circle(cx: 36, cy: 36, r: 18,
+        .ellipse(Ellipse(cx: 36, cy: 36, rx: 18, ry: 18,
                           fill: Fill(color: Color(r: 0, g: 0, b: 1))))
     ])])
     let svg = documentToSvg(doc)
@@ -236,7 +236,7 @@ import Testing
                           stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
         ]),
         Layer(name: "L2", children: [
-            .circle(Circle(cx: 36, cy: 36, r: 18))
+            .ellipse(Ellipse(cx: 36, cy: 36, rx: 18, ry: 18))
         ]),
     ])
     let svg = documentToSvg(doc)
@@ -298,14 +298,14 @@ private func roundtrip(_ doc: Document) -> Document {
 
 @Test func svgImportCircle() {
     let doc = Document(layers: [Layer(children: [
-        .circle(Circle(cx: 36, cy: 36, r: 18,
+        .ellipse(Ellipse(cx: 36, cy: 36, rx: 18, ry: 18,
                           fill: Fill(color: Color(r: 0, g: 0, b: 1))))
     ])])
     let doc2 = roundtrip(doc)
-    if case .circle(let v) = doc2.layers[0].children[0] {
-        #expect(abs(v.r - 18) < 0.1)
+    if case .ellipse(let v) = doc2.layers[0].children[0] {
+        #expect(abs(v.rx - 18) < 0.1)
     } else {
-        Issue.record("Expected circle")
+        Issue.record("Expected a round ellipse")
     }
 }
 
@@ -507,7 +507,7 @@ private func roundtrip(_ doc: Document) -> Document {
                           stroke: Stroke(color: Color(r: 0, g: 0, b: 0))))
         ]),
         Layer(name: "L2", children: [
-            .circle(Circle(cx: 36, cy: 36, r: 18))
+            .ellipse(Ellipse(cx: 36, cy: 36, rx: 18, ry: 18))
         ]),
     ])
     let doc2 = roundtrip(doc)
@@ -533,7 +533,7 @@ private func roundtrip(_ doc: Document) -> Document {
     // round-trip, mirroring the existing name round-trip test.
     let doc = Document(layers: [Layer(children: [
         .rect(Rect(x: 0, y: 0, width: 72, height: 72, id: "rect-id-1")),
-        .circle(Circle(cx: 36, cy: 36, r: 18, id: "circ-id-2")),
+        .ellipse(Ellipse(cx: 36, cy: 36, rx: 18, ry: 18, id: "circ-id-2")),
     ])])
     let doc2 = roundtrip(doc)
     #expect(doc2.layers[0].children[0].id == "rect-id-1")

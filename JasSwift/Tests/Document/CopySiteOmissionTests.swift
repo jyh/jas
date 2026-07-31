@@ -100,7 +100,7 @@ struct CopySiteOmissionTests {
     /// reference resolved through it, REFERENCE_GRAPH.md §2.4), its blend mode
     /// and its mask.
     @Test func layersPanelDocSetKeepsLayerIdentity() {
-        let mask = Mask(subtreeElement: .circle(Circle(cx: 1, cy: 2, r: 3)))
+        let mask = Mask(subtreeElement: .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 3)))
         let styled = Layer(name: "Styled", children: [rect(0)],
                            opacity: 0.5,
                            blendMode: .screen,
@@ -140,8 +140,8 @@ struct CopySiteOmissionTests {
     /// natural place for a future in-app normalize pass, where the loss would
     /// hit live documents.
     @Test func normalizeKeepsGroupAndLayerAttributes() {
-        let gmask = Mask(subtreeElement: .circle(Circle(cx: 1, cy: 2, r: 3)))
-        let lmask = Mask(subtreeElement: .circle(Circle(cx: 4, cy: 5, r: 6)))
+        let gmask = Mask(subtreeElement: .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 3)))
+        let lmask = Mask(subtreeElement: .ellipse(Ellipse(cx: 4, cy: 5, rx: 6, ry: 6)))
         let g = Group(children: [rect(0)],
                       blendMode: .multiply,
                       isolatedBlending: true,
@@ -216,7 +216,7 @@ struct CopySiteOmissionTests {
     }
 
     @Test func characterApplyKeepsTextIdentityAndPaint() {
-        let mask = Mask(subtreeElement: .circle(Circle(cx: 1, cy: 2, r: 3)))
+        let mask = Mask(subtreeElement: .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 3)))
         let model = charApplyModel(.text(Text(
             x: 0, y: 0, content: "Headline",
             fontFamily: "serif", fontSize: 12,
@@ -238,7 +238,7 @@ struct CopySiteOmissionTests {
     }
 
     @Test func characterApplyKeepsTextPathIdentityAndPaint() {
-        let mask = Mask(subtreeElement: .circle(Circle(cx: 4, cy: 5, r: 6)))
+        let mask = Mask(subtreeElement: .ellipse(Ellipse(cx: 4, cy: 5, rx: 6, ry: 6)))
         let model = charApplyModel(.textPath(TextPath(
             d: [.moveTo(0, 0), .lineTo(100, 0)], content: "On a path",
             fontFamily: "serif", fontSize: 12,

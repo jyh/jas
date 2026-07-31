@@ -218,7 +218,7 @@ public func recognizeElement(_ element: Element, _ cfg: RecognizeConfig) -> (Sha
     switch element {
     case .path(let p): pts = flattenPathCommands(p.d)
     case .polyline(let p): pts = p.points
-    case .line, .rect, .circle, .ellipse, .polygon, .text, .textPath, .group, .layer, .live:
+    case .line, .rect, .ellipse, .polygon, .text, .textPath, .group, .layer, .live:
         return nil
     }
     guard let shape = recognize(pts, cfg) else { return nil }
@@ -244,9 +244,6 @@ private func templateAppearance(_ e: Element) -> Appearance {
     case .rect(let r):
         return Appearance(fill: r.fill, stroke: r.stroke, opacity: r.opacity,
                          transform: r.transform, locked: r.locked, visibility: r.visibility)
-    case .circle(let c):
-        return Appearance(fill: c.fill, stroke: c.stroke, opacity: c.opacity,
-                         transform: c.transform, locked: c.locked, visibility: c.visibility)
     case .ellipse(let e):
         return Appearance(fill: e.fill, stroke: e.stroke, opacity: e.opacity,
                          transform: e.transform, locked: e.locked, visibility: e.visibility)
@@ -285,8 +282,10 @@ public func recognizedToElement(_ shape: RecognizedShape, _ template: Element) -
         return .rect(Rect(x: x, y: y, width: w, height: h, rx: r, ry: r,
                           fill: a.fill, stroke: a.stroke, opacity: a.opacity,
                           transform: a.transform, locked: a.locked, visibility: a.visibility))
+    // The recogniser still RECOGNISES a circle -- a statement about the traced
+    // geometry. It just builds the one round kind.
     case .circle(let cx, let cy, let r):
-        return .circle(Circle(cx: cx, cy: cy, r: r,
+        return .ellipse(Ellipse(cx: cx, cy: cy, rx: r, ry: r,
                              fill: a.fill, stroke: a.stroke, opacity: a.opacity,
                              transform: a.transform, locked: a.locked, visibility: a.visibility))
     case .ellipse(let cx, let cy, let rx, let ry):

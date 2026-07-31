@@ -103,3 +103,49 @@ independently GUI-driven).**
   chromeless Chrome window is reliably drivable only right after it is opened
   (frontmost) — once other apps churn focus, synthetic clicks miss it. The user's
   own Chrome windows (e.g. WhatsApp) are correctly ignored by the `Jas` title match.
+
+---
+
+# Smoke test — Shift-constrain + one round kind (2026-07-30)
+
+Branch: `main` @ `715944d0`. Driver: **JYH, by hand, in JasSwift.**
+
+Hand-driven on purpose. Everything below is reachable only by drawing and
+clicking, and the two changes it covers landed the same afternoon with 20 gates
+and ~4100 tests green between them. Both were found or shaped by JYH clicking,
+which is the third time this week a defect arrived that way and the zeroth time
+one arrived from the suite.
+
+## What was checked, and why the suite cannot
+
+| # | check | result |
+|---|---|---|
+| 1 | Shift + ellipse drag draws a **circle**; Shift + rect draws a **square**; the dashed preview stays constrained *during* the drag | PASS |
+| 2 | Layers labels the Shift shape `<Circle>` and the dragged one `<Ellipse>`; the **Circle** filter keeps the round one and drops the other; **Ellipse** is the mirror | PASS |
+| 3 | Both shapes select by click and by rubber band (hit-test lost its circle arm) | PASS |
+| 4 | A circle scaled non-uniformly **looks** like an ellipse but **still answers `circle`** | PASS — accepted |
+| 5 | Save emits `<circle cx cy r/>` for the round shape; reopen keeps it round and labelled `<Circle>` | PASS |
+| 6 | An ellipse nudged toward equal radii starts answering `<Circle>` | not reproducible by hand |
+
+Item 1 is where the drag-preview seam is actually observable: the constraint is
+applied where the cursor state is WRITTEN, so the overlay and the committed
+element are computed from the same point and cannot disagree. Nothing in the
+corpus watches the preview — it is drawn, never serialized.
+
+## Two rulings that came out of the clicking
+
+**#4 is the honest limit, and JYH accepted it as drawn.** The token reads the
+radii AS AUTHORED and ignores `common.transform`, so a squashed circle still
+answers `circle`. That is deliberate and consistent: no type token accounts for
+transforms — a sheared rect is still `rectangle` — and making this the one token
+that consults the matrix would be a second rule nobody could predict from the
+first. Recorded here because it looks like a bug on screen and is not.
+
+**#6 turned out to be better news than the check was designed to find.** JYH
+could not reach exact radius equality by dragging. Since the token ignores
+transforms, *scaling can never flip it either* — so the ONLY way an element
+becomes a `<Circle>` is a deliberate Shift-draw. The float-equality edge the
+derived token appeared to expose is therefore essentially unreachable in
+practice, and the token is far more stable than its `rx == ry` spelling suggests.
+That is a property nobody would have predicted from reading the code; it took a
+hand on the mouse failing to do something.

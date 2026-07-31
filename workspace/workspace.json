@@ -21684,6 +21684,12 @@
         },
         "doc_start_y": {
           "default": 0
+        },
+        "doc_end_x": {
+          "default": 0
+        },
+        "doc_end_y": {
+          "default": 0
         }
       },
       "handlers": {
@@ -21744,12 +21750,12 @@
             "then": [
               {
                 "set": {
-                  "tool.ellipse.cur_x": "event.x"
+                  "tool.ellipse.cur_x": "if event.modifiers.shift then tool.ellipse.start_x + (if event.x >= tool.ellipse.start_x\n     then max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y))\n     else 0 - max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y)))\nelse event.x"
                 }
               },
               {
                 "set": {
-                  "tool.ellipse.cur_y": "event.y"
+                  "tool.ellipse.cur_y": "if event.modifiers.shift then tool.ellipse.start_y + (if event.y >= tool.ellipse.start_y\n     then max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y))\n     else 0 - max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y)))\nelse event.y"
                 }
               }
             ]
@@ -21760,7 +21766,27 @@
             "if": "tool.ellipse.mode == 'drawing'",
             "then": [
               {
-                "if": "abs(event.x - tool.ellipse.start_x) > 1 and abs(event.y - tool.ellipse.start_y) > 1",
+                "set": {
+                  "tool.ellipse.cur_x": "if event.modifiers.shift then tool.ellipse.start_x + (if event.x >= tool.ellipse.start_x\n     then max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y))\n     else 0 - max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y)))\nelse event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.ellipse.cur_y": "if event.modifiers.shift then tool.ellipse.start_y + (if event.y >= tool.ellipse.start_y\n     then max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y))\n     else 0 - max(abs(event.x - tool.ellipse.start_x), abs(event.y - tool.ellipse.start_y)))\nelse event.y"
+                }
+              },
+              {
+                "set": {
+                  "tool.ellipse.doc_end_x": "if event.modifiers.shift then tool.ellipse.doc_start_x + (if event.doc_x >= tool.ellipse.doc_start_x\n     then max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y))\n     else 0 - max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y)))\nelse event.doc_x"
+                }
+              },
+              {
+                "set": {
+                  "tool.ellipse.doc_end_y": "if event.modifiers.shift then tool.ellipse.doc_start_y + (if event.doc_y >= tool.ellipse.doc_start_y\n     then max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y))\n     else 0 - max(abs(event.doc_x - tool.ellipse.doc_start_x), abs(event.doc_y - tool.ellipse.doc_start_y)))\nelse event.doc_y"
+                }
+              },
+              {
+                "if": "abs(tool.ellipse.cur_x - tool.ellipse.start_x) > 1 and abs(tool.ellipse.cur_y - tool.ellipse.start_y) > 1",
                 "then": [
                   {
                     "doc.snapshot": {}
@@ -21769,10 +21795,10 @@
                     "doc.add_element": {
                       "element": {
                         "type": "ellipse",
-                        "cx": "(tool.ellipse.doc_start_x + event.doc_x) / 2",
-                        "cy": "(tool.ellipse.doc_start_y + event.doc_y) / 2",
-                        "rx": "abs(event.doc_x - tool.ellipse.doc_start_x) / 2",
-                        "ry": "abs(event.doc_y - tool.ellipse.doc_start_y) / 2"
+                        "cx": "(tool.ellipse.doc_start_x + tool.ellipse.doc_end_x) / 2",
+                        "cy": "(tool.ellipse.doc_start_y + tool.ellipse.doc_end_y) / 2",
+                        "rx": "abs(tool.ellipse.doc_end_x - tool.ellipse.doc_start_x) / 2",
+                        "ry": "abs(tool.ellipse.doc_end_y - tool.ellipse.doc_start_y) / 2"
                       }
                     }
                   }
@@ -24022,6 +24048,12 @@
         },
         "doc_start_y": {
           "default": 0
+        },
+        "doc_end_x": {
+          "default": 0
+        },
+        "doc_end_y": {
+          "default": 0
         }
       },
       "handlers": {
@@ -24082,12 +24114,12 @@
             "then": [
               {
                 "set": {
-                  "tool.rect.cur_x": "event.x"
+                  "tool.rect.cur_x": "if event.modifiers.shift then tool.rect.start_x + (if event.x >= tool.rect.start_x\n     then max(abs(event.x - tool.rect.start_x), abs(event.y - tool.rect.start_y))\n     else 0 - max(abs(event.x - tool.rect.start_x), abs(event.y - tool.rect.start_y)))\nelse event.x"
                 }
               },
               {
                 "set": {
-                  "tool.rect.cur_y": "event.y"
+                  "tool.rect.cur_y": "if event.modifiers.shift then tool.rect.start_y + (if event.y >= tool.rect.start_y\n     then max(abs(event.y - tool.rect.start_y), abs(event.x - tool.rect.start_x))\n     else 0 - max(abs(event.y - tool.rect.start_y), abs(event.x - tool.rect.start_x)))\nelse event.y"
                 }
               }
             ]
@@ -24098,7 +24130,27 @@
             "if": "tool.rect.mode == 'drawing'",
             "then": [
               {
-                "if": "abs(event.x - tool.rect.start_x) > 1 and abs(event.y - tool.rect.start_y) > 1",
+                "set": {
+                  "tool.rect.cur_x": "if event.modifiers.shift then tool.rect.start_x + (if event.x >= tool.rect.start_x\n     then max(abs(event.x - tool.rect.start_x), abs(event.y - tool.rect.start_y))\n     else 0 - max(abs(event.x - tool.rect.start_x), abs(event.y - tool.rect.start_y)))\nelse event.x"
+                }
+              },
+              {
+                "set": {
+                  "tool.rect.cur_y": "if event.modifiers.shift then tool.rect.start_y + (if event.y >= tool.rect.start_y\n     then max(abs(event.y - tool.rect.start_y), abs(event.x - tool.rect.start_x))\n     else 0 - max(abs(event.y - tool.rect.start_y), abs(event.x - tool.rect.start_x)))\nelse event.y"
+                }
+              },
+              {
+                "set": {
+                  "tool.rect.doc_end_x": "if event.modifiers.shift then tool.rect.doc_start_x + (if event.doc_x >= tool.rect.doc_start_x\n     then max(abs(event.doc_x - tool.rect.doc_start_x), abs(event.doc_y - tool.rect.doc_start_y))\n     else 0 - max(abs(event.doc_x - tool.rect.doc_start_x), abs(event.doc_y - tool.rect.doc_start_y)))\nelse event.doc_x"
+                }
+              },
+              {
+                "set": {
+                  "tool.rect.doc_end_y": "if event.modifiers.shift then tool.rect.doc_start_y + (if event.doc_y >= tool.rect.doc_start_y\n     then max(abs(event.doc_y - tool.rect.doc_start_y), abs(event.doc_x - tool.rect.doc_start_x))\n     else 0 - max(abs(event.doc_y - tool.rect.doc_start_y), abs(event.doc_x - tool.rect.doc_start_x)))\nelse event.doc_y"
+                }
+              },
+              {
+                "if": "abs(tool.rect.cur_x - tool.rect.start_x) > 1 and abs(tool.rect.cur_y - tool.rect.start_y) > 1",
                 "then": [
                   {
                     "doc.snapshot": {}
@@ -24107,10 +24159,10 @@
                     "doc.add_element": {
                       "element": {
                         "type": "rect",
-                        "x": "min(tool.rect.doc_start_x, event.doc_x)",
-                        "y": "min(tool.rect.doc_start_y, event.doc_y)",
-                        "width": "abs(event.doc_x - tool.rect.doc_start_x)",
-                        "height": "abs(event.doc_y - tool.rect.doc_start_y)"
+                        "x": "min(tool.rect.doc_start_x, tool.rect.doc_end_x)",
+                        "y": "min(tool.rect.doc_start_y, tool.rect.doc_end_y)",
+                        "width": "abs(tool.rect.doc_end_x - tool.rect.doc_start_x)",
+                        "height": "abs(tool.rect.doc_end_y - tool.rect.doc_start_y)"
                       }
                     }
                   }

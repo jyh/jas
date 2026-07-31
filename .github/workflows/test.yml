@@ -82,6 +82,7 @@ jobs:
       # was a premise and wrote it down. Per-port claims, because a cross-port
       # premise checked by a single grep answers for the wrong port.
       - run: python scripts/check_deferral_expiry.py --self-test && python scripts/check_deferral_expiry.py
+      - run: python scripts/check_gate_consistency.py --self-test && python scripts/check_gate_consistency.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -273,6 +274,8 @@ jobs:
           python scripts/check_set_document_bracketing.py
           python scripts/check_deferral_expiry.py --self-test
           python scripts/check_deferral_expiry.py
+          python scripts/check_gate_consistency.py --self-test
+          python scripts/check_gate_consistency.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves

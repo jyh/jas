@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "THE TYPE TOKEN IS DERIVED FROM THE ELEMENT, NOT FROM ITS TAG.",
+    "",
+    "Before 2026-07-30 the model carried BOTH a `circle` kind and an `ellipse`",
+    "kind, and the token was whichever one the SVG tag had produced. That is",
+    "PROVENANCE, not geometry: apply_scale composes a matrix onto",
+    "common.transform and never touches the radii, so a `circle` element stays",
+    "typed `circle` while being drawn as an egg, and an `ellipse` with equal",
+    "radii is round while answering `ellipse`. The Layers filter's Circle",
+    "checkbox therefore answered 'which tag did this arrive as', which is not a",
+    "question any artist asks.",
+    "",
+    "JYH ruled 2026-07-30: one round kind in the model. `circle` survives as a",
+    "DERIVED token -- rx == ry -- so the checkbox finally means 'is it round'.",
+    "",
+    "AS AUTHORED, DELIBERATELY. The token ignores common.transform, because NO",
+    "type token accounts for transforms: a sheared rect is still `rect`, a",
+    "rotated text is still `text`. Making `circle` the one token that consults",
+    "the matrix would be a second rule nobody could predict from the first."
+  ],
+  "setup_svg": "circle_ellipse_mix.svg",
+  "min_rows": 4,
+  "rows": [
+    {"path": [0], "token": "layer", "why": "the containing layer"},
+    {"path": [0, 0], "token": "circle",
+     "why": "authored as <circle r=20>; parses to an ellipse with rx == ry == 20, and reads back as round"},
+    {"path": [0, 1], "token": "circle",
+     "why": "authored as <ellipse rx=20 ry=20>; identical geometry, so it MUST answer identically -- this is the row the old tag-based token got wrong"},
+    {"path": [0, 2], "token": "ellipse",
+     "why": "rx != ry, genuinely not round"}
+  ]
+}

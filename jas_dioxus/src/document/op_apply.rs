@@ -1484,7 +1484,6 @@ fn scale_elem_stroke_width(elem: &mut crate::geometry::element::Element, factor:
     let strokes = match elem {
         Element::Line(e) => e.stroke.as_mut(),
         Element::Rect(e) => e.stroke.as_mut(),
-        Element::Circle(e) => e.stroke.as_mut(),
         Element::Ellipse(e) => e.stroke.as_mut(),
         Element::Polyline(e) => e.stroke.as_mut(),
         Element::Polygon(e) => e.stroke.as_mut(),

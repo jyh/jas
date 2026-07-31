@@ -3190,6 +3190,8 @@ private let gestureFixtures = [
     "draw_rect_zoomed.json",
     "draw_line.json",
     "draw_ellipse.json",
+    "draw_ellipse_shift.json",
+    "draw_rect_shift.json",
     "draw_rounded_rect.json",
     "draw_polygon.json",
     "draw_star.json",
@@ -3757,9 +3759,14 @@ private func assertActionView(_ tc: [String: Any], _ model: Model) {
 /// `LayersPanel.dispatchYamlAction` (the same generic dispatcher the UI menu
 /// invokes), passing the case's resolved params. Mirrors Rust `run_action_model`
 /// — state is reachable on the returned Model for cases that need it.
-private func runActionModel(_ tc: [String: Any]) -> Model {
-    let setupSvg = tc["setup_svg"] as! String
-    let model = actionModelFromSvg(setupSvg)
+/// - Parameter svgText: when non-nil, the case runs against THIS SVG instead of
+///   the one its `setup_svg` names. Only the container-seeding test passes it:
+///   that test needs the identical action sequence replayed against a document
+///   it has transformed, and re-reading the fixture would silently discard the
+///   transformation. Mirrors Rust's `run_action_case(tc, &svg)`.
+private func runActionModel(_ tc: [String: Any], svgText: String? = nil) -> Model {
+    let model = svgText.map { Model(document: svgToDocument($0)) }
+        ?? actionModelFromSvg(tc["setup_svg"] as! String)
     // Optional non-identity view seed (VIEWSEED) — must precede the dispatch
     // loop, since a view action reads the live zoom/pan.
     seedCaseView(model, tc)
@@ -3885,6 +3892,239 @@ private func assertActionTest(_ tc: [String: Any]) {
     #expect(actual == expected, "Action test '\(name)' failed: canonical JSON mismatch")
     assertActionPanelState(tc, model)
     assertActionView(tc, model)
+}
+
+// MARK: - Container-seeded metamorphic equivalence
+//
+// THE RELATION, and why it is worth a whole harness:
+//
+//     op(group[leaf], selected)  ==  op(leaf, selected), wrapper removed
+//
+// NO GOLDEN IS INVOLVED. Every other arm of this file compares JasSwift against
+// a Rust-authored pin, which can only ever find a DIVERGENCE. This one compares
+// the app against ITSELF under a transformation that must not matter, so it can
+// see a defect BOTH PORTS SHARE — and on 2026-07-29 both ports shared eight of
+// them at once, every one wearing this exact shape: a function that walked
+// `layers[i].children` and stopped, so a grouped element answered differently
+// from a loose one.
+//
+// The Rust twin is `an_operation_on_a_group_equals_the_same_operation_on_its_member`
+// in jas_dioxus/src/cross_language_test.rs. The two are deliberately NOT driven
+// from a shared expectations file: each port asks its own question of its own
+// dispatch, and where their KNOWN lists differ, the difference is a finding.
+//
+// MEASURED ON THE FIRST RUN, and worth stating precisely because it is easy to
+// over-read: this arm seeded 22 cases and disagreed on 7 — THE SAME COUNTS AND
+// THE SAME SEVEN KEYS as the Rust twin, which is why the list below could be
+// written from Rust's without a single edit. That is real cross-port evidence
+// (independent dispatch, independent language, same answer) and it is NOT a
+// verdict on whether the seven are defects. Two ports agreeing says the
+// behaviour follows the shared spec; it says nothing about whether the spec is
+// right. Triage still has to happen, and it is queued with the jas/windows seat.
+
+/// Marks a group this harness inserted, so it can be found and stripped again.
+/// A name rather than a flag because the wrapper must survive a full
+/// document → SVG → document round trip to reach the dispatch under test.
+private let seedWrapperName = "__seed_wrapper__"
+
+/// Container children, for the two kinds that have them. Local to the harness:
+/// the production accessors are file-private to their own modules, and a test
+/// that reached into them would be pinning an implementation detail rather than
+/// the relation.
+private func seedChildren(_ el: Element) -> [Element]? {
+    switch el {
+    case .group(let g): return g.children
+    case .layer(let l): return l.children
+    default: return nil
+    }
+}
+
+private func seedWithChildren(_ el: Element, _ kids: [Element]) -> Element {
+    switch el {
+    case .group(let g): return .group(g.withChildren(kids))
+    case .layer(let l): return .layer(l.withChildren(kids))
+    default: return el
+    }
+}
+
+/// Wrap the top-level element at `path` in a single-child group, IN PLACE.
+///
+/// In place is what makes multi-target selections safe: the wrapper takes the
+/// slot its element occupied, so no sibling index moves and every path in the
+/// case's `selection` stays valid while now naming a group. Returns nil when
+/// the path is not a wrappable leaf, and the caller skips the case.
+private func seedWrap(_ doc: Document, at path: [Int]) -> Document? {
+    guard path.count == 2, path[0] >= 0, path[0] < doc.layers.count else { return nil }
+    let layer = doc.layers[path[0]]
+    var kids = layer.children
+    guard path[1] >= 0, path[1] < kids.count else { return nil }
+    let inner = kids[path[1]]
+    // Leaves only. Wrapping a container would test a different relation
+    // (nesting depth) and muddy which one had failed.
+    if case .group = inner { return nil }
+    if case .layer = inner { return nil }
+    kids[path[1]] = .group(Group(children: [inner], name: seedWrapperName))
+    var layers = doc.layers
+    layers[path[0]] = layer.withChildren(kids)
+    return doc.replacing(layers: layers)
+}
+
+/// Remove the harness's wrappers, hoisting their children into the parent's
+/// slot, so the seeded result is comparable with the plain one.
+private func unwrapSeeds(_ el: Element) -> Element {
+    guard let kids = seedChildren(el) else { return el }
+    var next: [Element] = []
+    next.reserveCapacity(kids.count)
+    for k in kids {
+        let cleaned = unwrapSeeds(k)
+        if case .group(let g) = cleaned, g.name == seedWrapperName {
+            next.append(contentsOf: g.children)
+        } else {
+            next.append(cleaned)
+        }
+    }
+    return seedWithChildren(el, next)
+}
+
+private func unwrapSeeds(_ doc: Document) -> Document {
+    let layers: [Layer] = doc.layers.map { l in
+        if case .layer(let cleaned) = unwrapSeeds(.layer(l)) { return cleaned }
+        return l
+    }
+    return doc.replacing(layers: layers)
+}
+
+/// Actions whose MEANING changes with a container, so the relation genuinely
+/// does not hold. Each carries its reason: an exemption without one is a
+/// clearance, and this project has spent two days on what those cost.
+private let seedExempt: [String: String] = [
+    "group": "wrapping the target is the operation's own subject",
+    "ungroup": "likewise, in reverse",
+    "ungroup_all": "likewise",
+    "promote_to_concept": "container identity is the payload",
+    "make_instance": "same",
+    "new_symbol": "same",
+    "place_instance": "same",
+]
+
+/// KNOWN disagreements, untriaged, pinned as QUESTIONS rather than answers.
+///
+/// Landing these as a list rather than as a lowered floor is deliberate: the
+/// valuable direction is that a NEW disagreement reds, and that works from the
+/// first run. Removing a row requires a fix or a recorded ruling — never a
+/// reasoned-out "probably an artifact", which is the confident-and-wrong shape
+/// this codebase keeps catching itself writing.
+///
+/// Triage is owned by the jas/windows seat (letter 14 §5), which will read
+/// transcripts/BOOLEAN.md before forming a view.
+private let seedKnown: Set<String> = [
+    "make_compound_shape.json::make_compound_shape_two_rects",
+    "boolean.json::boolean_union_overlapping_rects",
+    "boolean.json::boolean_subtract_front_overlapping_rects",
+    "boolean.json::boolean_intersection_overlapping_rects",
+    "boolean.json::boolean_exclude_overlapping_rects",
+    "menu_object_ops.json::menu_lock_two_rects",
+    "menu_object_ops.json::menu_hide_two_rects",
+]
+
+/// Anti-vacuity floor: the number of cases the corpus can actually seed today
+/// is 22, and this sits just under it. Hand-typed on purpose — it guards a
+/// TRANSFORM, and the only oracle for "how many cases are seedable" is the
+/// seeding walk itself, so deriving it would agree with any breakage. That is
+/// the same rule check_lane_coverage.py states for which floors may be derived.
+private let seedFloor = 20
+
+/// The Swift twin of Rust's container-seeded equivalence test. See the MARK
+/// comment above for the relation and why it can see what a golden cannot.
+@Test func anOperationOnAGroupEqualsTheSameOperationOnItsMember() throws {
+    var checked = 0
+    var disagreements: [String] = []
+    var seenKnown: Set<String> = []
+
+    for fixture in actionFixtures {
+        let raw = readFixture("actions/\(fixture)")
+        guard let data = raw.data(using: .utf8),
+              let cases = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { continue }
+
+        for tc in cases {
+            guard let setupSvg = tc["setup_svg"] as? String,
+                  let selPaths = tc["selection"] as? [[Any]], !selPaths.isEmpty
+            else { continue }
+
+            let actions = tc["actions"] as? [[String: Any]] ?? []
+            let exempt = actions.contains { step in
+                guard let name = step["action"] as? String else { return false }
+                return seedExempt[name] != nil
+            }
+            if exempt { continue }
+
+            let svg = readFixture("svg/\(setupSvg)")
+
+            // EVERY selected leaf gets wrapped, not just a lone one. The Rust
+            // twin's first cut required a SINGLE target and seeded ZERO cases —
+            // the corpus is overwhelmingly two- and three-target — and only the
+            // anti-vacuity floor below stopped that being reported as a clean
+            // run. Repeating the mistake here would be free; the floor is why
+            // it would not be silent.
+            var wrapped = svgToDocument(svg)
+            var any = false
+            for raw in selPaths {
+                let path = raw.compactMap { ($0 as? NSNumber)?.intValue }
+                guard path.count == raw.count else { continue }
+                if let next = seedWrap(wrapped, at: path) { wrapped = next; any = true }
+            }
+            if !any { continue }
+
+            let plain = runActionModel(tc)
+            let seeded = runActionModel(tc, svgText: documentToSvg(wrapped))
+
+            checked += 1
+            let a = documentToTestJson(unwrapSeeds(plain.document))
+            let b = documentToTestJson(unwrapSeeds(seeded.document))
+            if a != b {
+                let key = "\(fixture)::\(tc["name"] as? String ?? "<unnamed>")"
+                if seedKnown.contains(key) { seenKnown.insert(key) }
+                else { disagreements.append(key) }
+            }
+        }
+    }
+
+    // ANTI-VACUITY. A walk that seeded nothing proves nothing and reads exactly
+    // like agreement. This floor is the only reason the Rust twin's zero-case
+    // first cut was caught, so it is not ceremony — it is the arm that has
+    // already earned its keep once.
+    #expect(
+        checked >= seedFloor,
+        """
+        only \(checked) case(s) were container-seeded, below the floor of \(seedFloor). A \
+        transform that silently applies to nothing reports no disagreements, \
+        which is indistinguishable from agreement.
+        """
+    )
+
+    // A KNOWN row that stopped disagreeing must GO — the same expiry discipline
+    // the exemption ledgers carry (check_gate_consistency.py), so that fixing
+    // one of these cannot leave a stale question standing behind it.
+    let vanished = seedKnown.subtracting(seenKnown).sorted()
+    #expect(
+        vanished.isEmpty,
+        """
+        \(vanished.count) known disagreement(s) no longer disagree — delete the \
+        rows from `seedKnown`: \(vanished.joined(separator: ", "))
+        """
+    )
+
+    #expect(
+        disagreements.isEmpty,
+        """
+        \(disagreements.count) NEW container-seeded disagreement(s) out of \
+        \(checked) seeded (\(seenKnown.count) known): an operation answered \
+        differently for a group than for its sole member, which is the shape \
+        all eight of the 2026-07-29 defects wore.
+          \(disagreements.sorted().joined(separator: "\n  "))
+        """
+    )
 }
 
 /// Inc-2 of the shared action-fixture corpus: replay each fixture's action
@@ -4248,7 +4488,7 @@ private func wireTagElements() -> [Element] {
         .group(Group(children: [])),
         .line(Line(x1: 0, y1: 0, x2: 1, y2: 1)),
         .rect(Rect(x: 0, y: 0, width: 1, height: 2)),
-        .circle(Circle(cx: 0, cy: 0, r: 1)),
+        .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 1)),
         .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 2)),
         .polyline(Polyline(points: [(0, 0), (1, 1)])),
         .polygon(Polygon(points: [(0, 0), (1, 1), (2, 0)])),
@@ -4411,6 +4651,61 @@ private func wireUnhex(_ s: String) -> Data {
 /// Per-port value tests now pin each half (`LayersTypeFilterTests` here). This
 /// one exists for a different reason: two hand-written suites agree on the day
 /// they are written and drift afterwards. The corpus is what makes both ports
+/// THE TYPE TOKEN IS DERIVED FROM THE ELEMENT, NOT FROM ITS TAG.
+///
+/// `test_fixtures/view_state/element_type_tokens.json` is the single
+/// definition; the twin reader is `element_type_tokens_match_the_shared_corpus`
+/// in jas_dioxus/src/cross_language_test.rs.
+///
+/// The model used to carry a `circle` kind AND an `ellipse` kind, and the token
+/// was whichever tag the SVG had — provenance, not geometry, since scaling
+/// composes a matrix onto `transform` and never touches the radii. JYH ruled
+/// 2026-07-30 that one round kind survives and `circle` becomes derived.
+///
+/// The decisive row is `[0, 1]`: an `<ellipse rx=20 ry=20>` and a `<circle
+/// r=20>` are the same shape, so they must answer the same token. Under the old
+/// tag-based rule they did not.
+@Test func elementTypeTokensMatchTheSharedCorpus() throws {
+    let raw = readFixture("view_state/element_type_tokens.json")
+    let spec = try JSONSerialization.jsonObject(with: raw.data(using: .utf8)!) as! [String: Any]
+    let setup = spec["setup_svg"] as! String
+    let doc = svgToDocument(readFixture("svg/\(setup)"))
+
+    let rows = spec["rows"] as! [[String: Any]]
+    let min = (spec["min_rows"] as! NSNumber).intValue
+    // Anti-vacuity declared BY THE DATA, so the floor cannot drift out of step
+    // with the corpus it guards.
+    #expect(rows.count == min,
+            "walked \(rows.count) row(s) against a declared floor of \(min)")
+
+    for row in rows {
+        let path = (row["path"] as! [Any]).map { ($0 as! NSNumber).intValue }
+        let want = row["token"] as! String
+        let why = row["why"] as? String ?? ""
+        #expect(layersTypeValue(doc.getElement(path)) == want,
+                "type token at \(path) should be \(want) — \(why)")
+    }
+}
+
+/// `<circle>` SURVIVES A ROUND TRIP even though the model no longer has a
+/// circle kind: the writer re-derives the tag from `rx == ry`.
+///
+/// The mirror is pinned too, and it is a REWRITE we accept rather than a
+/// property we achieved: an `<ellipse rx=20 ry=20>` comes back out as
+/// `<circle>`. Someone who authored that ellipse deliberately will see it
+/// change. That is the price of one kind, recorded so it is a decision and not
+/// a surprise.
+@Test func roundEllipsesSerializeAsCircleAndSquashedOnesDoNot() throws {
+    let doc = svgToDocument(readFixture("svg/circle_ellipse_mix.svg"))
+    let out = documentToSvg(doc)
+    #expect(out.components(separatedBy: "<circle").count - 1 == 2,
+            "both round shapes should emit <circle>; got:\n\(out)")
+    #expect(out.components(separatedBy: "<ellipse").count - 1 == 1,
+            "only the rx != ry shape should emit <ellipse>; got:\n\(out)")
+    #expect(documentToSvg(svgToDocument(out)) == out,
+            "svg -> doc -> svg is not idempotent")
+}
+
 /// answer to ONE source.
 ///
 /// The rows carry TYPES, not labels — a vector spelled as display names would

@@ -3738,8 +3738,12 @@ private func elementTypeLabel(_ elem: Element) -> String {
     switch elem {
     case .line: return "Line"
     case .rect: return "Rectangle"
-    case .circle: return "Circle"
-    case .ellipse: return "Ellipse"
+    // DERIVED, so the auto-generated label agrees with the type token rather
+    // than contradicting it: a round ellipse reads `<Circle>`. This does NOT
+    // re-couple the two axes JYH separated -- the label is still just a label,
+    // a user-given name still wins, and the filter still reads the ELEMENT.
+    // They agree because both are computed from the same fact.
+    case .ellipse(let e): return e.rx == e.ry ? "Circle" : "Ellipse"
     case .polyline: return "Polyline"
     case .polygon: return "Polygon"
     case .path: return "Path"
@@ -3805,8 +3809,17 @@ func layersTypeValue(_ elem: Element) -> String {
     switch elem {
     case .line: return "line"
     case .rect: return "rectangle"
-    case .circle: return "circle"
-    case .ellipse: return "ellipse"
+    // ONE ROUND KIND, so `circle` is DERIVED (JYH, 2026-07-30). Before that the
+    // token was whichever SVG tag the element arrived as, which is PROVENANCE:
+    // scaling composes a matrix onto `transform` and never touches radii, so a
+    // `circle` stayed typed `circle` while being drawn as an egg. The Circle
+    // checkbox answered "which tag was this" -- a question no artist asks.
+    //
+    // AS AUTHORED, DELIBERATELY: `transform` is not consulted. No other token
+    // accounts for transforms either -- a sheared rect is still `rectangle` --
+    // and making this the one token that reads the matrix would be a second
+    // rule nobody could predict from the first.
+    case .ellipse(let e): return e.rx == e.ry ? "circle" : "ellipse"
     case .polyline: return "polyline"
     case .polygon: return "polygon"
     case .path: return "path"

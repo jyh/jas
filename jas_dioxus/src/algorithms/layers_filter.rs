@@ -46,7 +46,19 @@ pub fn type_value(elem: &Element) -> &'static str {
     match elem {
         Element::Line(_) => "line",
         Element::Rect(_) => "rectangle",
-        Element::Circle(_) => "circle",
+        // ONE ROUND KIND, so `circle` is DERIVED (JYH, 2026-07-30). Before
+        // that the token was whichever SVG tag the element arrived as, which
+        // is PROVENANCE: `apply_scale` composes a matrix onto common.transform
+        // and never touches radii, so a `circle` stayed typed `circle` while
+        // being drawn as an egg. The Circle checkbox answered "which tag was
+        // this" -- a question no artist asks.
+        //
+        // AS AUTHORED, DELIBERATELY: common.transform is not consulted. No
+        // other token accounts for transforms either -- a sheared rect is
+        // still `rectangle`, a rotated text still `text` -- and making this the
+        // one token that reads the matrix would be a second rule nobody could
+        // predict from the first.
+        Element::Ellipse(e) if e.rx == e.ry => "circle",
         Element::Ellipse(_) => "ellipse",
         Element::Polyline(_) => "polyline",
         Element::Polygon(_) => "polygon",

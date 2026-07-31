@@ -136,7 +136,7 @@ struct UngroupAllPreservationTests {
     /// locked group came back nameless, id-less, unmasked, `.preview`,
     /// `.normal`-blended, with both opacity flags cleared.
     @Test func lockedGroupKeepsEveryAttribute() {
-        let mask = Mask(subtreeElement: .circle(Circle(cx: 1, cy: 2, r: 3)),
+        let mask = Mask(subtreeElement: .ellipse(Ellipse(cx: 1, cy: 2, rx: 3, ry: 3)),
                         clip: false, invert: true)
         let keeper = Group(children: [nest, rect(50)],
                            opacity: 0.5,
@@ -193,7 +193,7 @@ struct UngroupAllPreservationTests {
     /// its `id` DESTROYED, its `visibility` reset to `.preview` (a hidden layer
     /// REAPPEARED), its blend mode reset and its mask dropped.
     @Test func layerKeepsEveryAttribute() {
-        let mask = Mask(subtreeElement: .circle(Circle(cx: 4, cy: 5, r: 6)))
+        let mask = Mask(subtreeElement: .ellipse(Ellipse(cx: 4, cy: 5, rx: 6, ry: 6)))
         let styled = Layer(name: "Styled", children: [nest],
                            opacity: 0.25,
                            transform: .scale(2, 3),

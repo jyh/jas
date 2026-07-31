@@ -35,7 +35,7 @@ import Testing
     @Test func aNameDoesNotChangeAnElementsType() {
         #expect(layersTypeValue(rect(nil)) == "rectangle")
         #expect(layersTypeValue(rect("roof")) == "rectangle")
-        #expect(layersTypeValue(.circle(Circle(cx: 0, cy: 0, r: 5, name: "sun"))) == "circle")
+        #expect(layersTypeValue(.ellipse(Ellipse(cx: 0, cy: 0, rx: 5, ry: 5, name: "sun"))) == "circle")
         #expect(layersTypeValue(.group(Group(children: [], name: "mast"))) == "group")
         #expect(layersTypeValue(.layer(Layer(name: "Sketch", children: []))) == "layer")
         // An EMPTY name is not a name either, and must not perturb the type.
@@ -55,8 +55,12 @@ import Testing
         let answered: Set<String> = Set([
             Element.line(Line(x1: 0, y1: 0, x2: 1, y2: 1)),
             .rect(Rect(x: 0, y: 0, width: 1, height: 1)),
-            .circle(Circle(cx: 0, cy: 0, r: 1)),
+            // ONE ROUND AND ONE SQUASHED. Both tokens now come from the same
+            // KIND, so a fixture set with only round ellipses would leave
+            // `ellipse` unanswered -- which is exactly what this test caught
+            // during the 2026-07-30 migration.
             .ellipse(Ellipse(cx: 0, cy: 0, rx: 1, ry: 1)),
+            .ellipse(Ellipse(cx: 0, cy: 0, rx: 2, ry: 1)),
             .polyline(Polyline(points: [])),
             .polygon(Polygon(points: [])),
             .path(Path(d: [], fillRule: .nonzero)),

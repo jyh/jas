@@ -5558,8 +5558,8 @@ mod tests {
     // ----------------------------------------------------------------------
 
     fn make_circle(cx: f64, cy: f64, r: f64) -> Element {
-        Element::Circle(CircleElem {
-            cx, cy, r,
+        Element::Ellipse(EllipseElem {
+            cx, cy, rx: r, ry: r,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(),
                     fill_gradient: None,
@@ -5654,11 +5654,12 @@ mod tests {
     fn move_circle_all_cps_translates() {
         let c = make_circle(50.0, 50.0, 10.0);
         let moved = move_control_points(&c, &SelectionKind::All, 5.0, 7.0);
-        if let Element::Circle(c) = moved {
+        if let Element::Ellipse(c) = moved {
             assert_eq!(c.cx, 55.0);
             assert_eq!(c.cy, 57.0);
-            assert_eq!(c.r, 10.0);
-        } else { panic!("expected Circle"); }
+            assert_eq!(c.rx, 10.0);
+            assert_eq!(c.ry, 10.0);
+        } else { panic!("expected a round ellipse"); }
     }
 
     #[test]
@@ -6329,8 +6330,8 @@ mod tests {
         Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
         Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
         // Add a circle at [0,1].
-        Controller::add_element(&mut model, Element::Circle(CircleElem {
-            cx: 50.0, cy: 50.0, r: 20.0,
+        Controller::add_element(&mut model, Element::Ellipse(EllipseElem {
+            cx: 50.0, cy: 50.0, rx: 20.0, ry: 20.0,
             fill: Some(Fill::new(Color::BLACK)), stroke: None,
             common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
         }));
@@ -6338,7 +6339,7 @@ mod tests {
         let doc = model.document();
         // The master is now the circle, keyed by m1.
         assert_eq!(doc.symbols.len(), 1);
-        assert!(matches!(doc.symbols[0], Element::Circle(_)));
+        assert!(matches!(doc.symbols[0], Element::Ellipse(_)));
         assert_eq!(doc.symbols[0].common().id.as_deref(), Some("m1"));
         // The selection's path is now an instance of m1.
         let re = as_reference(doc, &vec![0, 1]);

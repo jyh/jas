@@ -109,7 +109,6 @@ public func mwElementOpacity(_ e: Element) -> Double {
     switch e {
     case .line(let v): return v.opacity
     case .rect(let v): return v.opacity
-    case .circle(let v): return v.opacity
     case .ellipse(let v): return v.opacity
     case .polyline(let v): return v.opacity
     case .polygon(let v): return v.opacity
