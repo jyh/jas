@@ -145,5 +145,546 @@
    "element": {"type": "path",
     "d": [{"cmd": "M", "x": 3.0, "y": 2.0}, {"cmd": "L", "x": 13.0, "y": 2.0}, {"cmd": "L", "x": 13.0, "y": 9.0}],
     "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
-   "args": [], "polygon": [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]], "expected": false}
+   "args": [], "polygon": [[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]], "expected": false},
+
+  {"name": "line_translate_marquee_crosses", "function": "element_intersects_rect",
+   "_comment": "TRANSFORM + ANTI-VACUITY FLOOR for the element-level families (element_intersects_rect / element_intersects_polygon), declared 2026-07-30. READ THIS BEFORE DELETING OR WEAKENING ANY VECTOR BELOW.\n\nWHAT THE TWO FUNCTIONS MEAN, which is what every `expected` below is derived from: an element is HIT when the selection region meets the element's PAINTED geometry in DOCUMENT space -- for a filled element the closed painted area, for an unfilled (stroke-only) element the outline curve alone -- where document space is the element's local geometry mapped FORWARD through common.transform. Stroke WIDTH is not part of the test (geometric outline only); every vector here keeps a margin far larger than its stroke so the question never arises.\n\nWHY THE BLOCK EXISTS. Before it, all 15 element-level vectors carried transform:null, so the inverse-map branch of element_intersects_rect -- which since 2bb65ca6 is the ONLY path a transformed element takes, marquee AND lasso -- was entered by not one corpus vector in any port. The per-port unit tests that do exercise it use only Line and Rect, the two kinds with real arms in element_intersects_polygon_local, so nothing anywhere could see a kind that reaches that function and yields nothing.\n\nTHE FLOOR. For every element kind this corpus can construct WITHOUT a document resolver -- line, rect, ellipse, polyline, polygon, path, text, text_path, group, layer, live/compound_shape -- the corpus must carry at least:\n  (a) one HIT and one MISS on the rect-marquee path under a NON-IDENTITY transform;\n  (b) one HIT and one MISS on the lasso-polygon path under a NON-IDENTITY transform;\n  (c) an IDENTITY-vs-NULL CONTROL PAIR -- the same element, the same region, one with transform {a:1,b:0,c:0,d:1,e:0,f:0} and one with transform null. An identity matrix moves no point, so the two are the same drawing and their expected values are equal BY CONSTRUCTION. A port that answers them differently is deciding on whether the field is present, not on geometry;\n  (d) for every kind that can be drawn stroke-only, a MISS whose region lies strictly INSIDE the outline and touches no ink. This is the vector that forbids a bounding-box shortcut, and it is also the one a vacuous arm passes for the wrong reason -- so it never counts as coverage on its own;\n  (e) a MARQUEE/LASSO EQUALITY TWIN: for at least one hit and one miss per kind, the same point set expressed once as a rect and once as its 4-point outline. The two entry points must agree about one region.\nA kind whose vectors all answer the same constant is VACUOUS and does not count as covered: an arm that can only ever say false satisfies every MISS in the corpus.\n\nDECLARED EXCLUSIONS, with their reasons -- these are NOT claimed as covered:\n  * live/reference, live/recorded, live/generated need an ElementResolver (a document, or the concept registry) that a standalone element fixture has no way to supply. Parsed alone their geometry is legitimately empty, so the only honest vectors here are the three resolver-less MISSes at the end of this block. Their real coverage -- a symbol instance is unhittable by marquee AND lasso in both active ports, transform or no transform, because segments_of_element returns [] for them and both catch-alls are segments-based -- belongs in a document-context corpus and is a NAMED OPEN GAP, not a silence.\n  * `circle` exists only in the reference (jas/geometry/element.py); neither active port's Element carries the kind, so it cannot be expressed in a shared corpus at all.\n  * A SINGULAR transform whose collapsed image still meets the region (scale(1,0) flattening a stroked shape onto a line that crosses the marquee, say) is deliberately NOT pinned here: whether a zero-area image paints is a ruling, not arithmetic. The one singular vector below keeps its region clear of the collapsed image so it needs no ruling.",
+   "why": "translate(100,50) maps the segment (0,0)-(20,0) to (100,50)-(120,50). The marquee is [110,120]x[45,55]; the sub-segment from (110,50) to (120,50) lies in it (50 is in [45,55]) -> the painted curve meets the region -> HIT.",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 20.0, "y2": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 50.0}, "locked": false, "visibility": "preview"},
+   "args": [110.0, 45.0, 10.0, 10.0], "expected": true},
+
+  {"name": "line_translate_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Same doc segment y=50, x in [100,120]. The marquee is [110,120]x[60,70]; y=50 is not in [60,70] and the segment has no other y -> disjoint -> MISS.",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 20.0, "y2": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 50.0}, "locked": false, "visibility": "preview"},
+   "args": [110.0, 60.0, 10.0, 10.0], "expected": false},
+
+  {"name": "line_translate_lasso_crosses", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of line_translate_marquee_crosses: the same point set [110,120]x[45,55] written as a 4-point outline. Same region, same drawing -> same answer, HIT.",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 20.0, "y2": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 50.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[110.0, 45.0], [120.0, 45.0], [120.0, 55.0], [110.0, 55.0]], "expected": true},
+
+  {"name": "line_translate_lasso_elsewhere", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of line_translate_marquee_elsewhere -> MISS.",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 20.0, "y2": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 50.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[110.0, 60.0], [120.0, 60.0], [120.0, 70.0], [110.0, 70.0]], "expected": false},
+
+  {"name": "line_rotate90_lasso_crosses", "function": "element_intersects_polygon",
+   "why": "rotate90 = {a:0,b:1,c:-1,d:0} maps (x,y) to (-y,x): (0,0)->(0,0) and (20,0)->(0,20), so the doc segment is x=0, y in [0,20]. The lasso is the box [-5,5]x[5,15]; the sub-segment x=0, y in [5,15] lies inside it -> HIT.",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 20.0, "y2": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[-5.0, 5.0], [5.0, 5.0], [5.0, 15.0], [-5.0, 15.0]], "expected": true},
+
+  {"name": "line_rotate90_lasso_elsewhere", "function": "element_intersects_polygon",
+   "why": "Same doc segment x=0, y in [0,20]. The lasso is [5,15]x[5,15]; x=0 is not in [5,15] -> MISS.",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 20.0, "y2": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[5.0, 5.0], [15.0, 5.0], [15.0, 15.0], [5.0, 15.0]], "expected": false},
+
+  {"name": "line_identity_marquee_crosses", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). Identity moves no point, so the doc segment is the local one, (0,0)-(20,0). The marquee [10,14]x[-5,5] contains the sub-segment from (10,0) to (14,0) -> HIT. Must equal line_null_marquee_crosses.",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 20.0, "y2": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [10.0, -5.0, 4.0, 10.0], "expected": true},
+
+  {"name": "line_null_marquee_crosses", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Same element with transform:null and the same marquee [10,14]x[-5,5] over the same segment (0,0)-(20,0) -> HIT. Equal to the identity leg by construction: an identity matrix and no matrix describe the same drawing.",
+   "element": {"type": "line", "x1": 0.0, "y1": 0.0, "x2": 20.0, "y2": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [10.0, -5.0, 4.0, 10.0], "expected": true},
+
+  {"name": "rect_filled_scale2_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "scale(2) maps the filled rect (0,0,20,10) to the doc rect [0,40]x[0,20]. The marquee [10,14]x[5,9] lies wholly inside that painted area (10>=0, 14<=40, 5>=0, 9<=20) -> HIT.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [10.0, 5.0, 4.0, 4.0], "expected": true},
+
+  {"name": "rect_filled_scale2_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Doc rect [0,40]x[0,20]; marquee [50,60]x[50,60]. 50 > 40 in x and 50 > 20 in y -> disjoint -> MISS.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [50.0, 50.0, 10.0, 10.0], "expected": false},
+
+  {"name": "rect_filled_scale2_lasso_inside_fill", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of rect_filled_scale2_marquee_inside_fill -> HIT.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[10.0, 5.0], [14.0, 5.0], [14.0, 9.0], [10.0, 9.0]], "expected": true},
+
+  {"name": "rect_filled_scale2_lasso_elsewhere", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of rect_filled_scale2_marquee_elsewhere -> MISS.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[50.0, 50.0], [60.0, 50.0], [60.0, 60.0], [50.0, 60.0]], "expected": false},
+
+  {"name": "rect_unfilled_rotate90_marquee_inside_outline", "function": "element_intersects_rect",
+   "why": "STROKE-ONLY INSIDE-MISS. rotate90 maps (x,y)->(-y,x), so the corners (0,0),(20,0),(20,10),(0,10) go to (0,0),(0,20),(-10,20),(-10,0): the doc outline is the boundary of [-10,0]x[0,20]. The marquee [-6,-4]x[8,10] sits strictly inside it -- 4 units clear of the x=-10 and x=0 edges, 8 and 10 clear of the y edges -- and an unfilled rect paints only its outline, so the region touches no ink -> MISS.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [-6.0, 8.0, 2.0, 2.0], "expected": false},
+
+  {"name": "rect_unfilled_rotate90_marquee_crosses_outline", "function": "element_intersects_rect",
+   "why": "Same doc outline, the boundary of [-10,0]x[0,20]. The marquee [-11,-9]x[8,10] straddles the x=-10 edge (-11 < -10 < -9) and that edge spans y in [0,20], covering [8,10] -> the outline passes through the region -> HIT.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [-11.0, 8.0, 2.0, 2.0], "expected": true},
+
+  {"name": "rect_unfilled_rotate90_lasso_inside_outline", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of rect_unfilled_rotate90_marquee_inside_outline -> MISS.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[-6.0, 8.0], [-4.0, 8.0], [-4.0, 10.0], [-6.0, 10.0]], "expected": false},
+
+  {"name": "rect_unfilled_rotate90_lasso_crosses_outline", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of rect_unfilled_rotate90_marquee_crosses_outline -> HIT.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[-11.0, 8.0], [-9.0, 8.0], [-9.0, 10.0], [-11.0, 10.0]], "expected": true},
+
+  {"name": "rect_filled_identity_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). Doc rect = local rect (0,0,20,10); the marquee [5,9]x[2,6] lies inside the fill -> HIT. Must equal rect_filled_null_marquee_inside_fill.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [5.0, 2.0, 4.0, 4.0], "expected": true},
+
+  {"name": "rect_filled_null_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Same rect, same marquee [5,9]x[2,6] inside the fill -> HIT.",
+   "element": {"type": "rect", "x": 0.0, "y": 0.0, "width": 20.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [5.0, 2.0, 4.0, 4.0], "expected": true},
+
+  {"name": "ellipse_filled_scale2_marquee_encloses", "function": "element_intersects_rect",
+   "why": "scale(2) maps the ellipse to centre (20,20) with semi-axes 12 and 8, so the doc shape occupies [8,32]x[12,28]. The marquee [0,40]x[0,40] contains that whole box, hence the whole painted disc, which is non-empty -> HIT. The headline case: a marquee that ENCLOSES the drawn shape.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [0.0, 0.0, 40.0, 40.0], "expected": true},
+
+  {"name": "ellipse_filled_scale2_lasso_encloses", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of ellipse_filled_scale2_marquee_encloses -> HIT.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[0.0, 0.0], [40.0, 0.0], [40.0, 40.0], [0.0, 40.0]], "expected": true},
+
+  {"name": "ellipse_unfilled_scale2_marquee_crosses_outline", "function": "element_intersects_rect",
+   "why": "Doc outline: centre (20,20), semi-axes 12 and 8. Its rightmost point is (20+12,20) = (32,20) and the marquee is [28,36]x[16,24], which contains it (28<=32<=36, 16<=20<=24). Genuinely a CROSSING, not a containment: (28,20) is inside the outline (((28-20)/12)^2 = 0.444 < 1) while (36,20) is outside (((36-20)/12)^2 = 1.78 > 1) -> HIT.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [28.0, 16.0, 8.0, 8.0], "expected": true},
+
+  {"name": "ellipse_unfilled_scale2_lasso_crosses_outline", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of ellipse_unfilled_scale2_marquee_crosses_outline -> HIT.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[28.0, 16.0], [36.0, 16.0], [36.0, 24.0], [28.0, 24.0]], "expected": true},
+
+  {"name": "ellipse_unfilled_scale2_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Doc shape spans [8,32]x[12,28]; marquee [100,110]x[100,110]. 100 > 32 -> disjoint -> MISS.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [100.0, 100.0, 10.0, 10.0], "expected": false},
+
+  {"name": "ellipse_unfilled_scale2_lasso_elsewhere", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of ellipse_unfilled_scale2_marquee_elsewhere -> MISS.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[100.0, 100.0], [110.0, 100.0], [110.0, 110.0], [100.0, 110.0]], "expected": false},
+
+  {"name": "ellipse_unfilled_scale2_marquee_inside_outline", "function": "element_intersects_rect",
+   "why": "STROKE-ONLY INSIDE-MISS. Doc outline: centre (20,20), semi-axes 12 and 8. Every corner of the marquee [18,22]x[18,22] is strictly inside it -- the farthest, (22,22), evaluates ((22-20)/12)^2 + ((22-20)/8)^2 = 0.0278 + 0.0625 = 0.0903 < 1 -- and the region is convex, so it never reaches the curve. An unfilled ellipse paints only that curve -> MISS. This is the vector that forbids a bounding-box repair.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [18.0, 18.0, 4.0, 4.0], "expected": false},
+
+  {"name": "ellipse_filled_scale2_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "Same region as ellipse_unfilled_scale2_marquee_inside_outline but FILLED, so the interior is painted and [18,22]x[18,22] (worst form value 0.0903 < 1) lies wholly within it -> HIT. The pair isolates fill from geometry: identical region, opposite answers.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [18.0, 18.0, 4.0, 4.0], "expected": true},
+
+  {"name": "ellipse_filled_scale2_marquee_bbox_corner_outside_fill", "function": "element_intersects_rect",
+   "why": "INVERSION PROBE. Doc ellipse: centre (20,20), semi-axes 12 and 8; its bounding box corner is (8,12). The marquee [8,10]x[12,14] sits in that corner, INSIDE the bbox but OUTSIDE the ellipse: the form ((x-20)/12)^2 + ((y-20)/8)^2 is convex with its minimum at the centre, so over the box it is minimised at the nearest corner (10,14), giving (10/12)^2 + (6/8)^2 = 0.6944 + 0.5625 = 1.2569 > 1. No point of the region is painted -> MISS. A bbox-shaped answer says HIT here, which is why this vector is in the floor.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [8.0, 12.0, 2.0, 2.0], "expected": false},
+
+  {"name": "ellipse_filled_scale2_lasso_bbox_corner_outside_fill", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of ellipse_filled_scale2_marquee_bbox_corner_outside_fill -> MISS.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[8.0, 12.0], [10.0, 12.0], [10.0, 14.0], [8.0, 14.0]], "expected": false},
+
+  {"name": "ellipse_filled_translate_marquee_encloses", "function": "element_intersects_rect",
+   "why": "translate(100,50) maps the ellipse to centre (110,60), semi-axes 6 and 4, occupying [104,116]x[56,64]. The marquee [100,120]x[50,70] contains that box entirely -> HIT.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 50.0}, "locked": false, "visibility": "preview"},
+   "args": [100.0, 50.0, 20.0, 20.0], "expected": true},
+
+  {"name": "ellipse_unfilled_translate_lasso_crosses_outline", "function": "element_intersects_polygon",
+   "why": "Doc outline: centre (110,60), semi-axes 6 and 4; its topmost point is (110,60-4) = (110,56), which lies in the lasso box [106,114]x[52,58]. A true crossing: (110,52) is outside (((52-60)/4)^2 = 4 > 1) and (110,58) is inside (((58-60)/4)^2 = 0.25 < 1) -> HIT.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 50.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[106.0, 52.0], [114.0, 52.0], [114.0, 58.0], [106.0, 58.0]], "expected": true},
+
+  {"name": "ellipse_unfilled_translate_marquee_inside_outline", "function": "element_intersects_rect",
+   "why": "STROKE-ONLY INSIDE-MISS under translate. Doc outline: centre (110,60), semi-axes 6 and 4. The marquee is [108,112]x[58,62]; its four corners all sit at offset (+-2,+-2) from the centre, giving (2/6)^2 + (2/4)^2 = 0.1111 + 0.25 = 0.3611 < 1 -- well inside -- so the convex region never meets the curve -> MISS.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 50.0}, "locked": false, "visibility": "preview"},
+   "args": [108.0, 58.0, 4.0, 4.0], "expected": false},
+
+  {"name": "ellipse_filled_rotate90_marquee_encloses", "function": "element_intersects_rect",
+   "why": "rotate90 maps (x,y) to (-y,x): the centre (10,10) goes to (-10,10), the local x semi-axis 6 becomes the doc y semi-axis and the local y semi-axis 4 becomes the doc x semi-axis. The doc ellipse is therefore centred (-10,10) with semi-axes 4 in x and 6 in y, occupying [-14,-6]x[4,16]. The marquee [-20,0]x[0,20] contains that box -> HIT.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [-20.0, 0.0, 20.0, 20.0], "expected": true},
+
+  {"name": "ellipse_filled_rotate90_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Same doc ellipse, spanning x in [-14,-6]. The marquee [0,4]x[0,4] starts at x=0 > -6 -> disjoint -> MISS.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [0.0, 0.0, 4.0, 4.0], "expected": false},
+
+  {"name": "ellipse_unfilled_rotate90_lasso_crosses_outline", "function": "element_intersects_polygon",
+   "why": "Doc outline centred (-10,10), semi-axes 4 in x and 6 in y; its leftmost point is (-14,10), inside the lasso box [-16,-12]x[8,12]. A true crossing: (-12,10) is inside (((-12+10)/4)^2 = 0.25 < 1), (-16,10) is outside (((-16+10)/4)^2 = 2.25 > 1) -> HIT.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[-16.0, 8.0], [-12.0, 8.0], [-12.0, 12.0], [-16.0, 12.0]], "expected": true},
+
+  {"name": "ellipse_filled_lasso_encloses_transform_null", "function": "element_intersects_polygon",
+   "why": "NO TRANSFORM AT ALL. The ellipse occupies [4,16]x[6,14] and the lasso is the box [0,20]x[0,20], which contains it -> HIT. element_intersects_polygon is the free-form selection entry point and reaches the same arm with transform:null, so this vector shows the hole is not a transform-only hole.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], "expected": true},
+
+  {"name": "ellipse_unfilled_lasso_crosses_outline_transform_null", "function": "element_intersects_polygon",
+   "why": "No transform. The outline's rightmost point is (16,10), inside the lasso box [14,18]x[8,12]. Crossing: (14,10) is inside (((14-10)/6)^2 = 0.444 < 1), (18,10) is outside (((18-10)/6)^2 = 1.78 > 1) -> HIT.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[14.0, 8.0], [18.0, 8.0], [18.0, 12.0], [14.0, 12.0]], "expected": true},
+
+  {"name": "ellipse_unfilled_marquee_crosses_outline_transform_null", "function": "element_intersects_rect",
+   "why": "EQUALITY TWIN of ellipse_unfilled_lasso_crosses_outline_transform_null: the identical point set [14,18]x[8,12] written as a marquee rect. Same region, same drawing -> same answer, HIT. The two entry points may not disagree about one region.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [14.0, 8.0, 4.0, 4.0], "expected": true},
+
+  {"name": "ellipse_unfilled_lasso_inside_outline_transform_null", "function": "element_intersects_polygon",
+   "why": "STROKE-ONLY INSIDE-MISS with no transform. The lasso box [9,11]x[9,11] has its farthest corners at offset (+-1,+-1) from the centre: (1/6)^2 + (1/4)^2 = 0.0278 + 0.0625 = 0.0903 < 1, so it is strictly inside and touches no ink -> MISS.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[9.0, 9.0], [11.0, 9.0], [11.0, 11.0], [9.0, 11.0]], "expected": false},
+
+  {"name": "ellipse_filled_marquee_encloses_transform_identity", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). An identity matrix moves no point, so the doc shape is exactly the local one: centre (10,10), semi-axes 6 and 4, occupying [4,16]x[6,14]. The marquee [0,20]x[0,20] contains it -> HIT. Must equal ellipse_filled_marquee_encloses_transform_null.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [0.0, 0.0, 20.0, 20.0], "expected": true},
+
+  {"name": "ellipse_filled_marquee_encloses_transform_null", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Byte-identical element and marquee to the identity leg but with transform:null. Same drawing, same region -> HIT. Answering these two differently is deciding on whether the field is present, not on geometry.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [0.0, 0.0, 20.0, 20.0], "expected": true},
+
+  {"name": "ellipse_filled_marquee_bbox_corner_outside_fill_transform_identity", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR, other direction (identity leg). Local ellipse centre (10,10), semi-axes 6 and 4; the marquee [4,5]x[6,7] sits in the bbox corner. The form is minimised over that box at its nearest corner (5,7): ((5-10)/6)^2 + ((7-10)/4)^2 = 0.6944 + 0.5625 = 1.2569 > 1, so no point of the region is painted -> MISS. Must equal the null leg.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [4.0, 6.0, 1.0, 1.0], "expected": false},
+
+  {"name": "ellipse_filled_marquee_bbox_corner_outside_fill_transform_null", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR, other direction (null leg). Same element, same marquee [4,5]x[6,7], same 1.2569 > 1 -> MISS.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [4.0, 6.0, 1.0, 1.0], "expected": false},
+
+  {"name": "ellipse_filled_singular_transform_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "The zero matrix {a:0,b:0,c:0,d:0,e:0,f:0} maps the entire plane to the single point (0,0), so the drawing has zero area and zero length wherever it lands. The marquee [10,30]x[10,30] does not even contain that collapse point (0 < 10) -> MISS on any reading. Deliberately kept clear of the collapsed image so the vector needs no ruling about whether a zero-measure image paints.",
+   "element": {"type": "ellipse", "cx": 10.0, "cy": 10.0, "rx": 6.0, "ry": 4.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 0.0, "b": 0.0, "c": 0.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [10.0, 10.0, 20.0, 20.0], "expected": false},
+
+  {"name": "polyline_filled_translate_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "translate(200,0) maps the implicitly-closed square [0,100]x[0,100] to [200,300]x[0,100]. The marquee [240,260]x[20,40] lies wholly inside that painted area -> HIT.",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 200.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [240.0, 20.0, 20.0, 20.0], "expected": true},
+
+  {"name": "polyline_filled_translate_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Doc fill spans [200,300]x[0,100]; marquee [400,410]x[400,410] -> disjoint -> MISS.",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 200.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [400.0, 400.0, 10.0, 10.0], "expected": false},
+
+  {"name": "polyline_filled_translate_lasso_inside_fill", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of polyline_filled_translate_marquee_inside_fill -> HIT.",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 200.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[240.0, 20.0], [260.0, 20.0], [260.0, 40.0], [240.0, 40.0]], "expected": true},
+
+  {"name": "polyline_filled_translate_lasso_elsewhere", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of polyline_filled_translate_marquee_elsewhere -> MISS.",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 200.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[400.0, 400.0], [410.0, 400.0], [410.0, 410.0], [400.0, 410.0]], "expected": false},
+
+  {"name": "polyline_unfilled_rotate90_marquee_on_missing_close", "function": "element_intersects_rect",
+   "why": "OPEN-RUN DISCRIMINATOR. rotate90 maps (x,y)->(-y,x), so the four points become (0,0), (-100,0), (-100,100), (0,100) and the UNFILLED run paints three segments: y=0 from x=-100 to 0, x=-100 from y=0 to 100, and y=100 from x=-100 to 0. The closing edge from (0,100) back to (0,0) -- the doc line x=0 -- is NOT painted, because a polyline's implicit close belongs to its fill, not its stroke. The marquee [-2,2]x[40,60] straddles exactly that unpainted line and is 40 units from y=0, 40 from y=100 and 98 from x=-100 -> MISS.",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [-2.0, 40.0, 4.0, 20.0], "expected": false},
+
+  {"name": "polyline_unfilled_rotate90_marquee_crosses_run", "function": "element_intersects_rect",
+   "why": "Same doc run. The marquee [-52,-48]x[-2,2] straddles the painted segment y=0, x in [-100,0] (0 is in [-2,2]; [-52,-48] is inside [-100,0]) -> HIT.",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [-52.0, -2.0, 4.0, 4.0], "expected": true},
+
+  {"name": "polyline_unfilled_rotate90_lasso_on_missing_close", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of polyline_unfilled_rotate90_marquee_on_missing_close -> MISS.",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[-2.0, 40.0], [2.0, 40.0], [2.0, 60.0], [-2.0, 60.0]], "expected": false},
+
+  {"name": "polyline_unfilled_rotate90_lasso_crosses_run", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of polyline_unfilled_rotate90_marquee_crosses_run -> HIT.",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[-52.0, -2.0], [-48.0, -2.0], [-48.0, 2.0], [-52.0, 2.0]], "expected": true},
+
+  {"name": "polyline_filled_identity_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). Doc fill = local fill, the closed square [0,100]^2; the marquee [40,60]x[20,40] lies inside it -> HIT.",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [40.0, 20.0, 20.0, 20.0], "expected": true},
+
+  {"name": "polyline_filled_null_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Same square, same marquee -> HIT.",
+   "element": {"type": "polyline", "points": [[0.0, 0.0], [0.0, 100.0], [100.0, 100.0], [100.0, 0.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [40.0, 20.0, 20.0, 20.0], "expected": true},
+
+  {"name": "polygon_filled_scale2_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "scale(2) maps the closed square ring [0,20]^2 to [0,40]^2. Filled, so the interior is painted; the marquee [10,14]x[10,14] lies wholly inside it -> HIT.",
+   "element": {"type": "polygon", "points": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [10.0, 10.0, 4.0, 4.0], "expected": true},
+
+  {"name": "polygon_filled_scale2_lasso_inside_fill", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of polygon_filled_scale2_marquee_inside_fill -> HIT.",
+   "element": {"type": "polygon", "points": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[10.0, 10.0], [14.0, 10.0], [14.0, 14.0], [10.0, 14.0]], "expected": true},
+
+  {"name": "polygon_unfilled_scale2_marquee_inside_outline", "function": "element_intersects_rect",
+   "why": "STROKE-ONLY INSIDE-MISS. Same doc ring, the boundary of [0,40]^2, but unfilled -- only the ring is painted. The marquee [10,14]x[10,14] is 10 units clear of the x=0 and y=0 edges and 26 clear of the x=40 and y=40 edges, so it touches no ink -> MISS. Identical region to polygon_filled_scale2_marquee_inside_fill, opposite answer: the difference is the fill.",
+   "element": {"type": "polygon", "points": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [10.0, 10.0, 4.0, 4.0], "expected": false},
+
+  {"name": "polygon_unfilled_scale2_lasso_inside_outline", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of polygon_unfilled_scale2_marquee_inside_outline -> MISS.",
+   "element": {"type": "polygon", "points": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[10.0, 10.0], [14.0, 10.0], [14.0, 14.0], [10.0, 14.0]], "expected": false},
+
+  {"name": "polygon_unfilled_scale2_marquee_crosses_outline", "function": "element_intersects_rect",
+   "why": "Doc ring = boundary of [0,40]^2. The marquee [38,42]x[10,14] straddles the x=40 edge (38 < 40 < 42) and that edge spans y in [0,40], covering [10,14] -> HIT.",
+   "element": {"type": "polygon", "points": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [38.0, 10.0, 4.0, 4.0], "expected": true},
+
+  {"name": "polygon_unfilled_scale2_lasso_crosses_outline", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of polygon_unfilled_scale2_marquee_crosses_outline -> HIT.",
+   "element": {"type": "polygon", "points": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[38.0, 10.0], [42.0, 10.0], [42.0, 14.0], [38.0, 14.0]], "expected": true},
+
+  {"name": "polygon_filled_scale2_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Doc square [0,40]^2 against marquee [100,110]^2 -> disjoint -> MISS.",
+   "element": {"type": "polygon", "points": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [100.0, 100.0, 10.0, 10.0], "expected": false},
+
+  {"name": "polygon_filled_identity_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). Doc square = local square [0,20]^2, filled; the marquee [5,9]x[5,9] lies wholly inside the painted area -> HIT.",
+   "element": {"type": "polygon", "points": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [5.0, 5.0, 4.0, 4.0], "expected": true},
+
+  {"name": "polygon_filled_null_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Same filled square [0,20]^2, same marquee [5,9]x[5,9] wholly inside the paint -> HIT. A marquee dropped inside a filled shape selects it; that is what a fill is.",
+   "element": {"type": "polygon", "points": [[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [5.0, 5.0, 4.0, 4.0], "expected": true},
+
+  {"name": "path_unfilled_translate_marquee_crosses_stroke", "function": "element_intersects_rect",
+   "why": "translate(0,30) maps the two painted segments to (0,30)-(20,30) and (20,30)-(20,40). The marquee [8,12]x[28,32] straddles the first (30 is in [28,32]; [8,12] is inside [0,20]) -> HIT.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 30.0}, "locked": false, "visibility": "preview"},
+   "args": [8.0, 28.0, 4.0, 4.0], "expected": true},
+
+  {"name": "path_unfilled_translate_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Doc segments span x in [0,20], y in [30,40]; marquee [100,105]x[100,105] -> disjoint -> MISS.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 30.0}, "locked": false, "visibility": "preview"},
+   "args": [100.0, 100.0, 5.0, 5.0], "expected": false},
+
+  {"name": "path_unfilled_translate_lasso_crosses_stroke", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of path_unfilled_translate_marquee_crosses_stroke -> HIT.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 30.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[8.0, 28.0], [12.0, 28.0], [12.0, 32.0], [8.0, 32.0]], "expected": true},
+
+  {"name": "path_unfilled_translate_lasso_elsewhere", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of path_unfilled_translate_marquee_elsewhere -> MISS.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "fill": null, "stroke": {"color": {"space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}, "width": 1.0, "linecap": "butt", "linejoin": "miter", "opacity": 1.0}, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 30.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[100.0, 100.0], [105.0, 100.0], [105.0, 105.0], [100.0, 105.0]], "expected": false},
+
+  {"name": "path_filled_scale2_marquee_encloses", "function": "element_intersects_rect",
+   "why": "scale(2) maps the implicitly-closed triangle (0,0),(20,0),(20,10) to (0,0),(40,0),(40,20). The marquee [-5,45]x[-5,25] contains all three vertices, hence the whole filled triangle -> HIT.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [-5.0, -5.0, 50.0, 30.0], "expected": true},
+
+  {"name": "path_filled_scale2_lasso_encloses", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of path_filled_scale2_marquee_encloses -> HIT.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[-5.0, -5.0], [45.0, -5.0], [45.0, 25.0], [-5.0, 25.0]], "expected": true},
+
+  {"name": "path_filled_scale2_marquee_inside_fill", "function": "element_intersects_rect",
+   "why": "Doc triangle (0,0),(40,0),(40,20); its hypotenuse from (0,0) to (40,20) is the line y = x/2, and the painted interior is y <= x/2 with x <= 40 and y >= 0. The marquee [30,34]x[4,8] is inside: its worst corner (30,8) needs 8 <= 30/2 = 15, true, and the other three are farther in -> HIT.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [30.0, 4.0, 4.0, 4.0], "expected": true},
+
+  {"name": "path_filled_marquee_inside_fill_transform_identity", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). Local filled triangle (0,0),(20,0),(20,10), hypotenuse y = x/2. The marquee [15,17]x[2,4] is inside: worst corner (15,4) needs 4 <= 15/2 = 7.5, true -> HIT.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [15.0, 2.0, 2.0, 2.0], "expected": true},
+
+  {"name": "path_filled_marquee_inside_fill_transform_null", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Same filled triangle, same marquee [15,17]x[2,4], same 4 <= 7.5 -> HIT.",
+   "element": {"type": "path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [15.0, 2.0, 2.0, 2.0], "expected": true},
+
+  {"name": "text_area_translate_marquee_overlaps_bounds", "function": "element_intersects_rect",
+   "why": "Area text (width 40 > 0, height 20 > 0) has box exactly (0,0,40,20). translate(100,100) puts it at [100,140]x[100,120]. The marquee [130,150]x[110,130] overlaps it on [130,140]x[110,120], a non-empty region -> HIT.",
+   "element": {"type": "text", "x": 0.0, "y": 0.0, "content": "Ab", "font_family": "sans-serif", "font_size": 10.0, "width": 40.0, "height": 20.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 100.0}, "locked": false, "visibility": "preview"},
+   "args": [130.0, 110.0, 20.0, 20.0], "expected": true},
+
+  {"name": "text_area_translate_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Doc box [100,140]x[100,120]; marquee [0,10]x[0,10]. 10 < 100 in both axes -> disjoint -> MISS.",
+   "element": {"type": "text", "x": 0.0, "y": 0.0, "content": "Ab", "font_family": "sans-serif", "font_size": 10.0, "width": 40.0, "height": 20.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 100.0}, "locked": false, "visibility": "preview"},
+   "args": [0.0, 0.0, 10.0, 10.0], "expected": false},
+
+  {"name": "text_area_translate_lasso_overlaps_bounds", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of text_area_translate_marquee_overlaps_bounds -> HIT.",
+   "element": {"type": "text", "x": 0.0, "y": 0.0, "content": "Ab", "font_family": "sans-serif", "font_size": 10.0, "width": 40.0, "height": 20.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 100.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[130.0, 110.0], [150.0, 110.0], [150.0, 130.0], [130.0, 130.0]], "expected": true},
+
+  {"name": "text_area_translate_lasso_elsewhere", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of text_area_translate_marquee_elsewhere -> MISS.",
+   "element": {"type": "text", "x": 0.0, "y": 0.0, "content": "Ab", "font_family": "sans-serif", "font_size": 10.0, "width": 40.0, "height": 20.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 100.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], "expected": false},
+
+  {"name": "text_area_rotate90_marquee_overlaps_bounds", "function": "element_intersects_rect",
+   "why": "rotate90 maps (x,y)->(-y,x), so the box [0,40]x[0,20] maps to the (still axis-aligned) box [-20,0]x[0,40]. The marquee [-10,-6]x[10,14] lies wholly inside it -> HIT.",
+   "element": {"type": "text", "x": 0.0, "y": 0.0, "content": "Ab", "font_family": "sans-serif", "font_size": 10.0, "width": 40.0, "height": 20.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [-10.0, 10.0, 4.0, 4.0], "expected": true},
+
+  {"name": "text_area_rotate90_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Same doc box [-20,0]x[0,40]; the marquee [10,14]x[10,14] has x >= 10 > 0 -> disjoint -> MISS.",
+   "element": {"type": "text", "x": 0.0, "y": 0.0, "content": "Ab", "font_family": "sans-serif", "font_size": 10.0, "width": 40.0, "height": 20.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [10.0, 10.0, 4.0, 4.0], "expected": false},
+
+  {"name": "text_area_identity_marquee_inside_bounds", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). Doc box = local box (0,0,40,20); marquee [10,14]x[5,9] inside -> HIT.",
+   "element": {"type": "text", "x": 0.0, "y": 0.0, "content": "Ab", "font_family": "sans-serif", "font_size": 10.0, "width": 40.0, "height": 20.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [10.0, 5.0, 4.0, 4.0], "expected": true},
+
+  {"name": "text_area_null_marquee_inside_bounds", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Same box, same marquee -> HIT.",
+   "element": {"type": "text", "x": 0.0, "y": 0.0, "content": "Ab", "font_family": "sans-serif", "font_size": 10.0, "width": 40.0, "height": 20.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [10.0, 5.0, 4.0, 4.0], "expected": true},
+
+  {"name": "text_path_scale2_marquee_overlaps_bounds", "function": "element_intersects_rect",
+   "why": "The text path's box is its path bounds, (0,0,20,10); scale(2) puts it at [0,40]x[0,20]. The marquee [30,50]x[10,30] overlaps on [30,40]x[10,20] -> HIT. Robust to either convention: the doc path itself passes through (40,20), which is inside the marquee.",
+   "element": {"type": "text_path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "content": "Ab", "start_offset": 0.0, "font_family": "sans-serif", "font_size": 10.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [30.0, 10.0, 20.0, 20.0], "expected": true},
+
+  {"name": "text_path_scale2_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Doc box [0,40]x[0,20]; marquee [100,110]^2 -> disjoint -> MISS.",
+   "element": {"type": "text_path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "content": "Ab", "start_offset": 0.0, "font_family": "sans-serif", "font_size": 10.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [100.0, 100.0, 10.0, 10.0], "expected": false},
+
+  {"name": "text_path_scale2_lasso_overlaps_bounds", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of text_path_scale2_marquee_overlaps_bounds -> HIT.",
+   "element": {"type": "text_path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "content": "Ab", "start_offset": 0.0, "font_family": "sans-serif", "font_size": 10.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[30.0, 10.0], [50.0, 10.0], [50.0, 30.0], [30.0, 30.0]], "expected": true},
+
+  {"name": "text_path_scale2_lasso_elsewhere", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of text_path_scale2_marquee_elsewhere -> MISS.",
+   "element": {"type": "text_path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "content": "Ab", "start_offset": 0.0, "font_family": "sans-serif", "font_size": 10.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[100.0, 100.0], [110.0, 100.0], [110.0, 110.0], [100.0, 110.0]], "expected": false},
+
+  {"name": "text_path_identity_marquee_inside_bounds", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). Doc box = local box (0,0,20,10); marquee [5,9]x[2,6] inside -> HIT. The reference splits this pair: its bbox arm lists Text|Group|Layer and TextPath is not a Text subclass, so the identity leg falls to a segments-based catch-all that has no segments for it.",
+   "element": {"type": "text_path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "content": "Ab", "start_offset": 0.0, "font_family": "sans-serif", "font_size": 10.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [5.0, 2.0, 4.0, 4.0], "expected": true},
+
+  {"name": "text_path_null_marquee_inside_bounds", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Same box, same marquee -> HIT.",
+   "element": {"type": "text_path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "content": "Ab", "start_offset": 0.0, "font_family": "sans-serif", "font_size": 10.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [5.0, 2.0, 4.0, 4.0], "expected": true},
+
+  {"name": "group_translate_marquee_overlaps_child", "function": "element_intersects_rect",
+   "why": "The group's box is its only child's, (0,0,10,10); translate(100,0) puts it at [100,110]x[0,10]. The marquee [105,125]x[5,25] overlaps on [105,110]x[5,10] -> HIT.",
+   "element": {"type": "group", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [105.0, 5.0, 20.0, 20.0], "expected": true},
+
+  {"name": "group_translate_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Doc box [100,110]x[0,10]; marquee [0,10]x[0,10]. 10 < 100 -> disjoint -> MISS.",
+   "element": {"type": "group", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [0.0, 0.0, 10.0, 10.0], "expected": false},
+
+  {"name": "group_translate_lasso_overlaps_child", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of group_translate_marquee_overlaps_child -> HIT.",
+   "element": {"type": "group", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[105.0, 5.0], [125.0, 5.0], [125.0, 25.0], [105.0, 25.0]], "expected": true},
+
+  {"name": "group_translate_lasso_elsewhere", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of group_translate_marquee_elsewhere -> MISS.",
+   "element": {"type": "group", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], "expected": false},
+
+  {"name": "group_identity_marquee_inside_bounds", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). Doc box = local box (0,0,10,10); marquee [2,6]x[2,6] inside -> HIT.",
+   "element": {"type": "group", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [2.0, 2.0, 4.0, 4.0], "expected": true},
+
+  {"name": "group_null_marquee_inside_bounds", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Same box, same marquee -> HIT.",
+   "element": {"type": "group", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [2.0, 2.0, 4.0, 4.0], "expected": true},
+
+  {"name": "layer_rotate90_marquee_overlaps_child", "function": "element_intersects_rect",
+   "why": "The layer's box is its only child's, (0,0,10,10). rotate90 maps (x,y)->(-y,x), taking the corners (0,0),(10,0),(10,10),(0,10) to (0,0),(0,10),(-10,10),(-10,0): the doc box is the axis-aligned [-10,0]x[0,10]. The marquee [-5,15]x[5,25] overlaps on [-5,0]x[5,10] -> HIT.",
+   "element": {"type": "layer", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [-5.0, 5.0, 20.0, 20.0], "expected": true},
+
+  {"name": "layer_rotate90_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Same doc box [-10,0]x[0,10]; marquee [50,55]^2 -> disjoint -> MISS.",
+   "element": {"type": "layer", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [50.0, 50.0, 5.0, 5.0], "expected": false},
+
+  {"name": "layer_rotate90_lasso_overlaps_child", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of layer_rotate90_marquee_overlaps_child -> HIT.",
+   "element": {"type": "layer", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[-5.0, 5.0], [15.0, 5.0], [15.0, 25.0], [-5.0, 25.0]], "expected": true},
+
+  {"name": "layer_rotate90_lasso_elsewhere", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of layer_rotate90_marquee_elsewhere -> MISS.",
+   "element": {"type": "layer", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[50.0, 50.0], [55.0, 50.0], [55.0, 55.0], [50.0, 55.0]], "expected": false},
+
+  {"name": "layer_identity_marquee_inside_bounds", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). Doc box = local box (0,0,10,10); marquee [2,6]x[2,6] inside -> HIT.",
+   "element": {"type": "layer", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [2.0, 2.0, 4.0, 4.0], "expected": true},
+
+  {"name": "layer_null_marquee_inside_bounds", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Same box, same marquee -> HIT.",
+   "element": {"type": "layer", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0, "rx": 0.0, "ry": 0.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [2.0, 2.0, 4.0, 4.0], "expected": true},
+
+  {"name": "live_compound_donut_scale2_marquee_in_hole", "function": "element_intersects_rect",
+   "why": "scale(2) maps the outer ring to the boundary of [0,200]^2 and the hole ring to the boundary of [60,140]^2. The marquee [80,120]x[80,120] sits strictly inside the hole -- 20 units clear of every hole edge -- so it meets neither ring, and there is no fill -> MISS. The scaled twin of the corpus's original live_compound_donut_marquee_in_hole.",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}, {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [80.0, 80.0, 40.0, 40.0], "expected": false},
+
+  {"name": "live_compound_donut_scale2_marquee_crosses_hole_ring", "function": "element_intersects_rect",
+   "why": "Same doc rings. The marquee [50,70]x[90,110] straddles the hole's left edge x=60 (50 < 60 < 70), and that edge spans y in [60,140], covering [90,110] -> HIT.",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}, {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [50.0, 90.0, 20.0, 20.0], "expected": true},
+
+  {"name": "live_compound_donut_scale2_lasso_in_hole", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of live_compound_donut_scale2_marquee_in_hole -> MISS.",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}, {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[80.0, 80.0], [120.0, 80.0], [120.0, 120.0], [80.0, 120.0]], "expected": false},
+
+  {"name": "live_compound_donut_scale2_lasso_crosses_hole_ring", "function": "element_intersects_polygon",
+   "why": "EQUALITY TWIN of live_compound_donut_scale2_marquee_crosses_hole_ring -> HIT.",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}, {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[50.0, 90.0], [70.0, 90.0], [70.0, 110.0], [50.0, 110.0]], "expected": true},
+
+  {"name": "live_compound_donut_scale2_marquee_elsewhere", "function": "element_intersects_rect",
+   "why": "Doc outer ring bounds [0,200]^2; marquee [300,310]^2 -> disjoint -> MISS.",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}, {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [300.0, 300.0, 10.0, 10.0], "expected": false},
+
+  {"name": "live_compound_donut_translate_lasso_crosses_outer_ring", "function": "element_intersects_polygon",
+   "why": "translate(300,0) maps the outer ring to the boundary of [300,400]x[0,100]. The lasso box [295,305]x[45,55] straddles that ring's left edge x=300, which spans y in [0,100], covering [45,55] -> HIT.",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}, {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 300.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[295.0, 45.0], [305.0, 45.0], [305.0, 55.0], [295.0, 55.0]], "expected": true},
+
+  {"name": "live_compound_donut_identity_marquee_crosses_hole_ring", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (identity leg). Doc rings = local rings; the marquee [25,35]x[45,55] straddles the hole's left edge x=30, which spans y in [30,70], covering [45,55] -> HIT.",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}, {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [25.0, 45.0, 10.0, 10.0], "expected": true},
+
+  {"name": "live_compound_donut_null_marquee_crosses_hole_ring", "function": "element_intersects_rect",
+   "why": "CONTROL PAIR (null leg). Same rings, same marquee -> HIT.",
+   "element": {"type": "live", "kind": "compound_shape", "operation": "subtract_front", "children": [{"type": "rect", "x": 0.0, "y": 0.0, "width": 100.0, "height": 100.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}, {"type": "rect", "x": 30.0, "y": 30.0, "width": 40.0, "height": 40.0, "rx": 0.0, "ry": 0.0, "fill": null, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"}], "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [25.0, 45.0, 10.0, 10.0], "expected": true},
+
+  {"name": "live_reference_unresolvable_translate_marquee_miss", "function": "element_intersects_rect",
+   "why": "DECLARED-EXCLUSION VECTOR, and it pins only what it can. A live/reference resolves its geometry through an ElementResolver -- a document. Parsed standalone, as this corpus must, the target 'no_such_symbol' resolves to nothing, so the instance draws nothing anywhere and any region misses it -> MISS, translate and all. THIS DOES NOT COVER THE KIND: with a RESOLVABLE target both active ports still answer MISS for every marquee and every lasso, transform or not, because segments_of_element returns [] for reference / recorded / generated and both the rect and the polygon catch-alls are segments-based. A symbol instance is unhittable. That is a NAMED OPEN GAP whose home is a document-context corpus.",
+   "element": {"type": "live", "kind": "reference", "target": "no_such_symbol", "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 100.0, "f": 100.0}, "locked": false, "visibility": "preview"},
+   "args": [0.0, 0.0, 400.0, 400.0], "expected": false},
+
+  {"name": "live_recorded_no_inputs_scale2_marquee_miss", "function": "element_intersects_rect",
+   "why": "DECLARED-EXCLUSION VECTOR (see live_reference_unresolvable_translate_marquee_miss). A live/recorded replays its recipe over resolved inputs; with no inputs and no ops there is nothing to replay, so the element draws nothing and every region misses it -> MISS. Does not cover the kind.",
+   "element": {"type": "live", "kind": "recorded", "inputs": [], "ops": [], "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [0.0, 0.0, 400.0, 400.0], "expected": false},
+
+  {"name": "live_generated_unknown_concept_rotate90_marquee_miss", "function": "element_intersects_rect",
+   "why": "DECLARED-EXCLUSION VECTOR (see live_reference_unresolvable_translate_marquee_miss). A live/generated evaluates a concept from the registry; 'no_such_concept' is not in it, so the generator yields no points, the element draws nothing, and every region misses it -> MISS. Does not cover the kind.",
+   "element": {"type": "live", "kind": "generated", "concept": "no_such_concept", "params": {}, "opacity": 1.0, "transform": {"a": 0.0, "b": 1.0, "c": -1.0, "d": 0.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
+   "args": [-400.0, -400.0, 800.0, 800.0], "expected": false}
 ]

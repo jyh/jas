@@ -147,6 +147,42 @@ fn element_intersects_polygon_local(elem: &Element, poly: &[(f64, f64)]) -> bool
                     .any(|&(x1, y1, x2, y2)| segment_intersects_polygon(x1, y1, x2, y2, poly))
             }
         }
+        // 2bb65ca6 (2026-04-10, "All: transform-aware hit-testing for marquee
+        // and polygon selection") is the commit that created this gap — by
+        // fixing a different one. Before it, both entry points tested an
+        // element's RAW coordinates, so a transformed element could not be
+        // marquee-selected at all. That commit inverse-maps the selection
+        // geometry into element-local space, which is right, and then routes
+        // the transformed RECT case in here, which is also right: the inverse
+        // image of a marquee is a parallelogram, not a box, so only a polygon
+        // test can answer it. What it did not do is check that this function
+        // covered every kind the rect function covered. It did not. Ellipse
+        // has a real arm over there (`ellipse_intersects_rect`) and had none
+        // here, so from that day forward giving an ellipse a transform — any
+        // transform, including the identity — swapped its exact answer for the
+        // catch-all's, which cannot see an ellipse at all:
+        // `segments_of_element` yields nothing for one, so the unfilled branch
+        // returned false for EVERY region, and the filled branch could only
+        // answer true when a region vertex happened to fall inside the local
+        // bounding box. Hence the two-way failure the corpus pins — a marquee
+        // that wholly ENCLOSES a transformed ellipse missed it (no vertex
+        // inside), while a marquee tucked into the empty corner of its
+        // bounding box hit it (vertex inside, no paint there).
+        //
+        // The class is a second dispatch path that does not enumerate the same
+        // universe as the first: the same shape as DISPATCHLEDGER, where
+        // element-dispatching functions were each missing the container kinds.
+        // A new path added beside an old one inherits the old one's
+        // obligations, and nothing in the type system says so — the catch-all
+        // absorbs the omission and answers plausibly instead of failing.
+        //
+        // Answered here the way the rect path answers it, by normalising away
+        // the radii, NOT by flattening the ellipse into segments: segments
+        // would answer a polygon's question rather than an ellipse's, and the
+        // answer would then drift with the flattening precision.
+        Element::Ellipse(e) => {
+            ellipse_intersects_polygon(e.cx, e.cy, e.rx, e.ry, poly, e.fill.is_some())
+        }
         Element::Text(_) | Element::TextPath(_) | Element::Group(_) | Element::Layer(_) => {
             let (bx, by, bw, bh) = elem.bounds();
             let corners = [
@@ -223,6 +259,86 @@ pub fn ellipse_intersects_rect(
     circle_intersects_rect(
         cx / erx, cy / ery, 1.0, rx / erx, ry / ery, rw / erx, rh / ery, filled,
     )
+}
+
+/// Squared distance from a point to the CLOSED segment (x1,y1)-(x2,y2).
+/// A zero-length segment degrades to the point-to-point distance.
+fn point_segment_dist_sq(px: f64, py: f64, x1: f64, y1: f64, x2: f64, y2: f64) -> f64 {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let len_sq = dx * dx + dy * dy;
+    let t = if len_sq <= 0.0 {
+        0.0
+    } else {
+        (((px - x1) * dx + (py - y1) * dy) / len_sq).clamp(0.0, 1.0)
+    };
+    let qx = x1 + t * dx;
+    let qy = y1 + t * dy;
+    (px - qx).powi(2) + (py - qy).powi(2)
+}
+
+/// The polygon-region counterpart of [`circle_intersects_rect`], with the
+/// same two semantics: `filled` asks whether the DISC meets the region,
+/// `!filled` asks whether the stroked RING does.
+///
+/// Both reduce to the same two numbers the rect version uses, only measured
+/// against a polygon instead of a box:
+///
+/// * `min_dist_sq` — the distance from the centre to the nearest point of the
+///   region. Zero when the centre is inside it, otherwise the distance to the
+///   nearest boundary edge. (The rect version gets this from a per-axis clamp,
+///   which is the same quantity for a box.)
+/// * `max_dist_sq` — the distance to the farthest point of the region, which
+///   is always attained at a polygon VERTEX: the region sits inside the convex
+///   hull of its vertices, distance-to-a-point is convex, and every vertex is
+///   itself in the region. (The rect version maxes over the four corners, the
+///   same statement for a box.)
+///
+/// A filled disc meets the region exactly when `min_dist_sq <= r²`. The ring
+/// meets it exactly when `min_dist_sq <= r² <= max_dist_sq`: the region then
+/// holds a point at most r from the centre and a point at least r from it, so
+/// — the region being connected — it holds one at exactly r, which is on the
+/// ring. A region swallowed whole by the disc fails the right-hand test, which
+/// is the "marquee inside the outline, touching nothing" miss.
+pub fn circle_intersects_polygon(
+    cx: f64, cy: f64, r: f64, poly: &[(f64, f64)], filled: bool,
+) -> bool {
+    if poly.is_empty() {
+        return false;
+    }
+    let mut min_dist_sq = if point_in_polygon(cx, cy, poly) { 0.0 } else { f64::INFINITY };
+    if min_dist_sq > 0.0 {
+        let n = poly.len();
+        for i in 0..n {
+            let j = (i + 1) % n;
+            let d = point_segment_dist_sq(cx, cy, poly[i].0, poly[i].1, poly[j].0, poly[j].1);
+            if d < min_dist_sq {
+                min_dist_sq = d;
+            }
+        }
+    }
+    if !filled {
+        let max_dist_sq = poly
+            .iter()
+            .map(|&(px, py)| (cx - px).powi(2) + (cy - py).powi(2))
+            .fold(f64::NEG_INFINITY, f64::max);
+        return min_dist_sq <= r * r && r * r <= max_dist_sq;
+    }
+    min_dist_sq <= r * r
+}
+
+/// Polygon-region counterpart of [`ellipse_intersects_rect`], derived the same
+/// way: divide both the ellipse and the region by the radii so the ellipse
+/// becomes the unit circle, then ask the circle question. An affine map of a
+/// polygon is a polygon, so nothing about the region is approximated.
+pub fn ellipse_intersects_polygon(
+    cx: f64, cy: f64, erx: f64, ery: f64, poly: &[(f64, f64)], filled: bool,
+) -> bool {
+    if erx == 0.0 || ery == 0.0 {
+        return false;
+    }
+    let unit: Vec<(f64, f64)> = poly.iter().map(|&(x, y)| (x / erx, y / ery)).collect();
+    circle_intersects_polygon(cx / erx, cy / ery, 1.0, &unit, filled)
 }
 
 // ---------------------------------------------------------------------------
@@ -358,6 +474,30 @@ fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: 
                     .iter()
                     .any(|&(px, py)| point_in_rect(px, py, rx, ry, rw, rh))
                 {
+                    return true;
+                }
+                // The marquee may lie WHOLLY INSIDE the fill: dropped in the
+                // middle of a filled polygon or path it touches no vertex and
+                // crosses no segment, yet every point of it is painted. The
+                // polygon-local twin of this arm has always carried that
+                // clause (`poly.iter().any(point_in_rect(bounds))`) and this
+                // one did not — so the corpus's `..._marquee_inside_fill`
+                // control pairs split on nothing but whether `transform` was
+                // present: the identity leg went through the polygon path and
+                // HIT, the null leg came here and MISSED.
+                //
+                // Same class as the ellipse gap in the polygon-local function
+                // above — two dispatch tables answering one question, one of
+                // them short a clause — and turned up by the same corpus. The
+                // comparand is the bounding box on both sides, so the two
+                // paths now agree by construction rather than by coincidence;
+                // a later move to a true point-in-fill test has to be made on
+                // both at once, deliberately.
+                let b = elem.bounds();
+                let corners = [
+                    (rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh),
+                ];
+                if corners.iter().any(|&(px, py)| point_in_rect(px, py, b.0, b.1, b.2, b.3)) {
                     return true;
                 }
                 segs.iter()
@@ -964,5 +1104,161 @@ mod tests {
             stroke_gradient: None,
         });
         assert!(!element_intersects_rect(&ellipse, 20.0, 20.0, 5.0, 5.0));
+    }
+
+    // ---- the transform-blind gap: an ellipse on the polygon-local path ----
+    //
+    // The identity/null pairs below are the load-bearing ones. Each pair is
+    // the SAME ellipse and the SAME region, differing only in whether
+    // `transform` is present — and `Transform::IDENTITY` moves no point, so
+    // an answer that differs across a pair is an answer about a struct field,
+    // not about geometry. Before the Ellipse arm existed they did differ:
+    // the identity leg was routed to `element_intersects_polygon_local`, whose
+    // catch-all cannot see an ellipse.
+
+    fn ellipse_at(
+        cx: f64, cy: f64, rx: f64, ry: f64, fill: Option<Fill>, transform: Option<Transform>,
+    ) -> Element {
+        Element::Ellipse(EllipseElem {
+            common: CommonProps { transform, ..CommonProps::default() },
+            cx, cy, rx, ry,
+            fill,
+            stroke: None,
+            fill_gradient: None,
+            stroke_gradient: None,
+        })
+    }
+
+    #[test]
+    fn filled_ellipse_enclosing_marquee_same_under_identity_and_none() {
+        // Ellipse (10,10) r 6x4 occupies [4,16]x[6,14]; the marquee swallows it.
+        let none = ellipse_at(10.0, 10.0, 6.0, 4.0, red_fill(), None);
+        let ident = ellipse_at(10.0, 10.0, 6.0, 4.0, red_fill(), Some(Transform::IDENTITY));
+        assert!(element_intersects_rect(&none, 0.0, 0.0, 20.0, 20.0));
+        assert!(element_intersects_rect(&ident, 0.0, 0.0, 20.0, 20.0));
+    }
+
+    #[test]
+    fn filled_ellipse_bbox_corner_is_not_a_hit_under_identity_or_none() {
+        // The marquee [4,5]x[6,7] sits in the bbox corner, outside the fill:
+        // ((4.5-10)/6)^2 + ((6.5-10)/4)^2 well over 1 at every point of it.
+        // The catch-all used to answer TRUE here (a region vertex is inside
+        // the local bbox), inverting the truth.
+        let none = ellipse_at(10.0, 10.0, 6.0, 4.0, red_fill(), None);
+        let ident = ellipse_at(10.0, 10.0, 6.0, 4.0, red_fill(), Some(Transform::IDENTITY));
+        assert!(!element_intersects_rect(&none, 4.0, 6.0, 1.0, 1.0));
+        assert!(!element_intersects_rect(&ident, 4.0, 6.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn unfilled_ellipse_ring_crossed_by_marquee_same_under_identity_and_none() {
+        // Marquee straddles the right vertex (16,10): min distance 0 (inside),
+        // farthest corner outside the ring.
+        let none = ellipse_at(10.0, 10.0, 6.0, 4.0, None, None);
+        let ident = ellipse_at(10.0, 10.0, 6.0, 4.0, None, Some(Transform::IDENTITY));
+        assert!(element_intersects_rect(&none, 14.0, 9.0, 4.0, 2.0));
+        assert!(element_intersects_rect(&ident, 14.0, 9.0, 4.0, 2.0));
+    }
+
+    #[test]
+    fn unfilled_ellipse_marquee_inside_outline_misses_under_identity_and_none() {
+        // Wholly inside the ring, touching nothing painted.
+        let none = ellipse_at(10.0, 10.0, 6.0, 4.0, None, None);
+        let ident = ellipse_at(10.0, 10.0, 6.0, 4.0, None, Some(Transform::IDENTITY));
+        assert!(!element_intersects_rect(&none, 9.0, 9.0, 2.0, 2.0));
+        assert!(!element_intersects_rect(&ident, 9.0, 9.0, 2.0, 2.0));
+    }
+
+    #[test]
+    fn scaled_filled_ellipse_enclosing_marquee_hits() {
+        // scale(2): the drawn ellipse is centre (20,20), semi-axes 12 and 8.
+        let e = ellipse_at(10.0, 10.0, 6.0, 4.0, red_fill(), Some(Transform::scale(2.0, 2.0)));
+        assert!(element_intersects_rect(&e, 0.0, 0.0, 40.0, 40.0));
+        // ... and the empty corner of its bounding box is still empty.
+        assert!(!element_intersects_rect(&e, 8.0, 12.0, 2.0, 2.0));
+    }
+
+    #[test]
+    fn filled_ellipse_lasso_encloses() {
+        let e = ellipse_at(10.0, 10.0, 6.0, 4.0, red_fill(), None);
+        let lasso = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)];
+        assert!(element_intersects_polygon(&e, &lasso));
+    }
+
+    #[test]
+    fn unfilled_ellipse_lasso_inside_outline_misses() {
+        let e = ellipse_at(10.0, 10.0, 6.0, 4.0, None, None);
+        let lasso = [(9.0, 9.0), (11.0, 9.0), (11.0, 11.0), (9.0, 11.0)];
+        assert!(!element_intersects_polygon(&e, &lasso));
+    }
+
+    #[test]
+    fn zero_radius_ellipse_never_hits_a_polygon() {
+        let e = ellipse_at(10.0, 10.0, 0.0, 4.0, red_fill(), None);
+        let lasso = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)];
+        assert!(!element_intersects_polygon(&e, &lasso));
+    }
+
+    // ---- circle_intersects_polygon agrees with circle_intersects_rect ----
+
+    #[test]
+    fn circle_polygon_matches_circle_rect_on_a_box() {
+        let box_poly = |rx: f64, ry: f64, rw: f64, rh: f64| {
+            [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)]
+        };
+        let cases = [
+            (5.0, 5.0, 3.0, 0.0, 0.0, 10.0, 10.0),   // box around a small disc
+            (20.0, 20.0, 3.0, 0.0, 0.0, 10.0, 10.0), // far away
+            (5.0, 5.0, 100.0, 4.0, 4.0, 2.0, 2.0),   // box swallowed by the disc
+            (5.0, 5.0, 5.0, 9.0, 4.0, 3.0, 2.0),     // box straddling the ring
+        ];
+        for &(cx, cy, r, rx, ry, rw, rh) in &cases {
+            for &filled in &[true, false] {
+                assert_eq!(
+                    circle_intersects_polygon(cx, cy, r, &box_poly(rx, ry, rw, rh), filled),
+                    circle_intersects_rect(cx, cy, r, rx, ry, rw, rh, filled),
+                    "circle ({cx},{cy}) r{r} vs box ({rx},{ry},{rw},{rh}) filled={filled}",
+                );
+            }
+        }
+    }
+
+    // ---- the second gap: a marquee wholly inside a filled catch-all shape ----
+
+    use crate::geometry::element::PolygonElem;
+
+    fn filled_square(transform: Option<Transform>) -> Element {
+        Element::Polygon(PolygonElem {
+            common: CommonProps { transform, ..CommonProps::default() },
+            points: vec![(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)],
+            fill: red_fill(),
+            stroke: None,
+            fill_gradient: None,
+            stroke_gradient: None,
+        })
+    }
+
+    #[test]
+    fn marquee_inside_filled_polygon_same_under_identity_and_none() {
+        // Touches no vertex, crosses no edge — but every point of it is painted.
+        assert!(element_intersects_rect(&filled_square(None), 5.0, 5.0, 4.0, 4.0));
+        assert!(element_intersects_rect(
+            &filled_square(Some(Transform::IDENTITY)), 5.0, 5.0, 4.0, 4.0
+        ));
+    }
+
+    #[test]
+    fn marquee_outside_filled_polygon_still_misses() {
+        assert!(!element_intersects_rect(&filled_square(None), 50.0, 50.0, 4.0, 4.0));
+        assert!(!element_intersects_rect(
+            &filled_square(Some(Transform::IDENTITY)), 50.0, 50.0, 4.0, 4.0
+        ));
+    }
+
+    #[test]
+    fn marquee_inside_unfilled_polygon_still_misses() {
+        let mut hollow = filled_square(None);
+        if let Element::Polygon(p) = &mut hollow { p.fill = None; }
+        assert!(!element_intersects_rect(&hollow, 5.0, 5.0, 4.0, 4.0));
     }
 }

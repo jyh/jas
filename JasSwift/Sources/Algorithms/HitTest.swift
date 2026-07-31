@@ -83,6 +83,66 @@ public func ellipseIntersectsRect(_ cx: Double, _ cy: Double, _ erx: Double, _ e
                                 filled: filled)
 }
 
+/// Squared distance from a point to the CLOSEST point of a segment (the
+/// segment as a solid one-dimensional set, so the foot of the perpendicular
+/// when it falls inside, an endpoint otherwise).
+private func pointSegmentDistanceSq(_ px: Double, _ py: Double,
+                                    _ x1: Double, _ y1: Double,
+                                    _ x2: Double, _ y2: Double) -> Double {
+    let dx = x2 - x1, dy = y2 - y1
+    let lenSq = dx * dx + dy * dy
+    if lenSq == 0 {
+        return (px - x1) * (px - x1) + (py - y1) * (py - y1)
+    }
+    var t = ((px - x1) * dx + (py - y1) * dy) / lenSq
+    t = max(0.0, min(1.0, t))
+    let qx = x1 + t * dx, qy = y1 + t * dy
+    return (px - qx) * (px - qx) + (py - qy) * (py - qy)
+}
+
+/// Ellipse against an arbitrary polygonal REGION — the exact counterpart of
+/// `ellipseIntersectsRect`, and the reason the ellipse survives a transform.
+///
+/// Same normalisation as the rect form: divide every x by rx and every y by
+/// ry, which carries the ellipse onto the UNIT CIRCLE and the polygon onto an
+/// affine image of itself.  Point-in-polygon and min/max are all preserved by
+/// that map, so the answer is the circle's.
+///
+/// Over a connected region the distance-to-centre function attains every value
+/// between its minimum and its maximum, so:
+///   - FILLED (the disc): hit iff the region reaches within r, i.e. `min <= 1`.
+///   - UNFILLED (the outline only): hit iff the region straddles the radius,
+///     i.e. `min <= 1 <= max` — a region wholly inside the outline misses, as
+///     does one wholly outside.
+/// The minimum is 0 when the centre is inside the polygon and otherwise the
+/// nearest approach of an edge; the maximum is always attained at a vertex
+/// (the region lies in the convex hull of its vertices and distance is convex).
+/// On an axis-aligned rectangle both reduce exactly to `circleIntersectsRect`'s
+/// clamped-closest-point and farthest-corner, which is what keeps the
+/// transformed and untransformed answers identical.
+public func ellipseIntersectsPolygon(_ cx: Double, _ cy: Double, _ erx: Double, _ ery: Double,
+                                     _ poly: [(Double, Double)], filled: Bool) -> Bool {
+    if erx == 0 || ery == 0 { return false }
+    if poly.isEmpty { return false }
+
+    let ncx = cx / erx, ncy = cy / ery
+    let p = poly.map { ($0.0 / erx, $0.1 / ery) }
+
+    var minSq = Double.infinity
+    var maxSq = 0.0
+    let n = p.count
+    for i in 0..<n {
+        let j = (i + 1) % n
+        minSq = min(minSq, pointSegmentDistanceSq(ncx, ncy, p[i].0, p[i].1, p[j].0, p[j].1))
+        let dx = ncx - p[i].0, dy = ncy - p[i].1
+        maxSq = max(maxSq, dx * dx + dy * dy)
+    }
+    if pointInPolygon(ncx, ncy, p) { minSq = 0.0 }
+
+    if filled { return minSq <= 1.0 }
+    return minSq <= 1.0 && 1.0 <= maxSq
+}
+
 // MARK: - Element-level queries
 
 public func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Double)] {
@@ -138,6 +198,45 @@ public func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Doub
     }
 }
 
+// MARK: - The two paths, and why they must answer alike
+//
+// TRANSFORM BLINDNESS, and the repair (2026-07-30).
+//
+// `2bb65ca6` (2026-04-10, "All: transform-aware hit-testing for marquee and
+// polygon selection") taught these two entry points about transforms, and in
+// doing so it BROKE them.  Before it, a marquee always reached
+// `elementIntersectsRectLocal`.  After it, an element carrying a transform has
+// its selection geometry inverse-mapped into local space and is routed to
+// `elementIntersectsPolygonLocal` instead — the marquee is no longer a
+// rectangle down there, so a rectangle-shaped test cannot serve it.  The
+// routing is right.  What was never checked is that the SECOND path covered
+// every kind the FIRST one did.  It did not:
+//
+//   - Ellipse had a real arm on the rect path (`ellipseIntersectsRect`) and
+//     NO arm on the polygon path.  It fell through to a body fed by
+//     `segmentsOfElement`, which yields nothing for an ellipse, so a
+//     transformed filled ellipse answered true only if a marquee corner
+//     happened to land in its bounding box (true where the paint is not, false
+//     where a marquee ENCLOSES the whole shape), and a transformed stroke-only
+//     ellipse answered false always.  It is now `ellipseIntersectsPolygon`.
+//   - Filled polygon / path / live had the "the region lies inside my paint"
+//     clause on the POLYGON path and not on the rect path — the inverse
+//     omission, in the other direction.  A marquee dropped strictly inside a
+//     filled shape with no transform selected nothing.
+//
+// The class is a COVERAGE-ASYMMETRY defect: a fix that adds a second dispatch
+// path for a new case makes that path the ONLY path for the case, and every
+// kind the new switch forgets is silently downgraded — no compiler error, no
+// crash, just a wrong answer for exactly the elements the fix was meant to
+// serve.  It is the hit-test cousin of the Swift copy-site omission class.
+// The standing guard is the control pair: for every kind, the same element and
+// the same region with `transform: nil` and with `transform: identity` must
+// agree, because identity moves no point.  Those pairs live in
+// test_fixtures/algorithms/hit_test.json and are shared with the Rust port.
+//
+// Read the two `*_Local` functions below as one specification in two dialects.
+// A change to an arm in either is a change owed to the other.
+
 public func elementIntersectsRect(_ elem: Element,
                                   _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
     if let t = elem.transform {
@@ -151,6 +250,20 @@ public func elementIntersectsRect(_ elem: Element,
         return elementIntersectsPolygonLocal(elem, corners)
     }
     return elementIntersectsRectLocal(elem, rx, ry, rw, rh)
+}
+
+/// "The selection region lies inside my paint", the clause a filled element
+/// needs when nothing of it crosses the region and nothing of the region
+/// touches its outline — a small marquee dropped in the middle of a big filled
+/// shape.  This is the rect-path mirror of the polygon path's
+/// `poly.contains { pointInRect($0, bounds) }`: same test, same bounding-box
+/// approximation of the fill, region corners instead of lasso vertices.  Keep
+/// the two spelled the same way; they are one clause with two callers.
+private func regionCornerInsideBounds(_ elem: Element,
+                                      _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
+    let b = elem.bounds
+    let corners = [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)]
+    return corners.contains { pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }
 }
 
 private func elementIntersectsRectLocal(_ elem: Element,
@@ -187,6 +300,7 @@ private func elementIntersectsRectLocal(_ elem: Element,
             if v.points.contains(where: { pointInRect($0.0, $0.1, rx, ry, rw, rh) }) {
                 return true
             }
+            if regionCornerInsideBounds(elem, rx, ry, rw, rh) { return true }
             return segmentsOfElement(elem).contains { s in
                 segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
             }
@@ -201,6 +315,7 @@ private func elementIntersectsRectLocal(_ elem: Element,
             if endpoints.contains(where: { pointInRect($0.s, $0.t, rx, ry, rw, rh) }) {
                 return true
             }
+            if regionCornerInsideBounds(elem, rx, ry, rw, rh) { return true }
             return segs.contains { s in
                 segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
             }
@@ -222,6 +337,7 @@ private func elementIntersectsRectLocal(_ elem: Element,
             if endpoints.contains(where: { pointInRect($0.s, $0.t, rx, ry, rw, rh) }) {
                 return true
             }
+            if regionCornerInsideBounds(elem, rx, ry, rw, rh) { return true }
         }
         return segs.contains { s in
             segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
@@ -289,13 +405,13 @@ private func elementIntersectsPolygonLocal(_ elem: Element, _ poly: [(Double, Do
         return segmentsOfElement(elem).contains { s in
             segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
         }
+    // The ellipse is CURVED, so it has no segments and never had any: the
+    // generic segments-plus-bounding-box body this arm used to carry was an
+    // empty suit.  `ellipseIntersectsPolygon` is the true test, and the exact
+    // counterpart of the rect path's `ellipseIntersectsRect` — see the note
+    // above `elementIntersectsRect` for how the two came to disagree.
     case .ellipse(let v):
-        let filled = v.fill != nil
-        let segs = segmentsOfElement(elem)
-        let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
-        if endpoints.contains(where: { pointInPolygon($0.s, $0.t, poly) }) { return true }
-        if filled, poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
-        return segs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
+        return ellipseIntersectsPolygon(v.cx, v.cy, v.rx, v.ry, poly, filled: v.fill != nil)
     case .polyline(let v):
         if v.fill != nil {
             let segs = segmentsOfElement(elem)

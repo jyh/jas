@@ -669,8 +669,25 @@ def self_test() -> int:
                 f"the derived watch list omits {must} — every one of these has "
                 f"already carried a truncated rebuild in this repo"
             )
-    if len(real) < 12:
-        fails.append(f"derived watch list has only {len(real)} types; expected >= 12")
+    # HAND-TYPED, AND IT MUST STAY THAT WAY. This floor guards the PARSE --
+    # "did element_payload_types actually find the payload structs?" -- and its
+    # only possible oracle is that same parse, so deriving it would agree with
+    # any breakage. Same reasoning as MIN_RUST_ARMS; see check_lane_coverage.py
+    # on which floors may be derived and which must not.
+    #
+    # 12 -> 11 on 2026-07-30: ONEROUNDKIND deleted the Circle kind (one round
+    # kind, JYH's ruling), so there are eleven watched types, not twelve.
+    #
+    # THE MISS IS THE POINT. This number went stale in the same commit that
+    # deleted the kind, and stayed stale through a full board run, because that
+    # run invoked every gate PLAIN and this floor lives only in --self-test.
+    # Premise expiry, in a hand-typed number, committed hours after building
+    # check_deferral_expiry.py -- and caught not by the author but by an agent
+    # told to run both arms of every gate. Run both arms.
+    EXPECTED_WATCHED = 11
+    if len(real) < EXPECTED_WATCHED:
+        fails.append(f"derived watch list has only {len(real)} types; "
+                     f"expected >= {EXPECTED_WATCHED}")
 
     # Independent second opinion: the memberwise init must be able to set every
     # stored property, so the two lists must agree as SETS. Catches a silently
