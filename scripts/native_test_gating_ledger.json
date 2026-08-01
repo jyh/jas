@@ -126,6 +126,16 @@
       "reason": "PATH A of the same undo law.",
       "blocked_by": "crate::recorder::replay::run_gesture_case, function-gated on tools::tool::CanvasTool."
     },
+    "jas_dioxus/src/cross_language_test.rs::shift_constrain_witnesses": {
+      "kind": "debt",
+      "reason": "THE NAMED WITNESS CORPUS of the Shift-constrain law -- deterministic, and it asserts each witness's recorded `discriminating` flag against the DYADICSIDE mutant every run, so the corpus proves its own teeth rather than trusting a comment. Pure fixture replay; it drives no frontend of its own.",
+      "blocked_by": "crate::recorder::replay::run_gesture_case, reached via check_shift_constrain -> run_gesture_model; run_gesture_case is function-gated on tools::tool::CanvasTool. MEASURED 2026-08-01 by ungating all 18 `web` gates in the cluster (cross_language_test.rs 1335-1860) and reading the compiler: the ONLY unresolved symbols were run_gesture_model (1x) and gesture_exact_field (2x), all three inside check_shift_constrain. Every test and helper in the cluster is otherwise native-ready -- gesture_exact_field is a pure match table over Element fields and is gated by neighbourhood alone. It comes home with the `tools` split, not before."
+    },
+    "jas_dioxus/src/cross_language_test.rs::shift_constrain_generative": {
+      "kind": "debt",
+      "reason": "THE GENERATIVE LANE of the same law -- fresh vectors on a fresh seed each run, asserting that at least `min_discriminating` of them are vectors the pre-DYADICSIDE spelling gets WRONG, measured live against the mutant. The third of the ruled three (predicate, witnesses, generative).",
+      "blocked_by": "Identical to shift_constrain_witnesses above -- same check_shift_constrain predicate, same run_gesture_case blocker, same measurement. It comes home with the `tools` split, not before."
+    },
     "jas_dioxus/src/cross_language_test.rs::action_corpus": {
       "kind": "debt",
       "reason": "THE ACTION CONFORMANCE CORPUS.",
