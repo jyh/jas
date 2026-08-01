@@ -1092,8 +1092,16 @@ fn unpack_element(v: &Value) -> Result<Element, String> {
         // exactly what it always meant.
         //
         // The canonical TEST json is deliberately NOT tolerant this way: there
-        // a stray "circle" must fail loudly, because tolerance would let a port
-        // keep writing the old kind and call it agreement.
+        // a stray "circle" must fail loudly, so that a STALE FIXTURE INPUT is
+        // REFUSED rather than silently reinterpreted as a round ellipse by a
+        // test that then PASSES while testing something other than what the
+        // fixture says. (The reason this comment used to give -- that
+        // tolerance would let a port keep WRITING the old kind and call it
+        // agreement -- was wrong: the corpus runners compare the produced
+        // canonical JSON as a STRING against a pinned golden, so the writer
+        // side was never the reader's job. Refuted by measurement, not by
+        // reading; correction from Flask, the Windows seat, adopted
+        // 2026-07-30.) See `parse_element_base` in geometry/test_json.rs.
         TAG_CIRCLE => {
             let r = as_f64(at(arr, 9)?)?;
             Element::Ellipse(EllipseElem {

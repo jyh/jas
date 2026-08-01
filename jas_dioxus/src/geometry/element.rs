@@ -3051,6 +3051,54 @@ pub fn for_each_paintable(elem: &Element, f: &mut dyn FnMut(&Element)) {
     }
 }
 
+/// The leaf a possibly-container element SPEAKS WITH when an operation reads
+/// its paint: itself when it is a leaf, its FIRST paintable leaf at any depth
+/// when it is a container, and `None` when it is an EMPTY container -- which
+/// has no member to speak for and contributes no geometry either.
+///
+/// The single-value twin of [`for_each_paintable`], deliberately identical in
+/// structure: the same two container arms, the same leaf arm, the same
+/// depth-first order. It cannot be written as a call to `for_each_paintable`
+/// because that callback takes a higher-ranked `&Element` which cannot escape
+/// the closure -- so the two must be kept in step by hand, and
+/// `first_paintable_agrees_with_for_each_paintable` is what keeps them there.
+///
+/// WHY THE FIRST rather than the frontmost member: it is the leaf
+/// `selection_fill_summary` already reports for that container, so the answer
+/// the Fill/Stroke panel shows for a selected group is the answer an operation
+/// on that group produces. A container whose members disagree reads `Mixed` in
+/// the panel and takes this leaf's paint in an operation; electing a different
+/// member would make the panel and the product tell the artist two stories.
+pub fn first_paintable(elem: &Element) -> Option<&Element> {
+    match elem {
+        Element::Group(e) => e.children.iter().find_map(|c| first_paintable(c)),
+        Element::Layer(e) => e.children.iter().find_map(|c| first_paintable(c)),
+        _ => Some(elem),
+    }
+}
+
+/// [`Element::fill`] RESOLVED THROUGH A CONTAINER: a leaf's own fill, or the
+/// fill of the leaf its container speaks with.
+///
+/// The accessors themselves stay leaf-only on purpose. `fill()` / `stroke()`
+/// are read by render, hit-test and the panels, and giving a container a paint
+/// OF ITS OWN would change all three at once; the container answer belongs
+/// here and in the selection summaries. See BOARD-boolean-container-fill:
+/// applying BOOLEAN.md's settled "the frontmost operand's fill" to a container
+/// through the bare accessor produced unpainted, unstroked artwork.
+pub fn resolved_fill(elem: &Element) -> Option<Fill> {
+    first_paintable(elem).and_then(|leaf| leaf.fill().copied())
+}
+
+/// [`Element::stroke`] resolved through a container. The twin of
+/// [`resolved_fill`], and it exists for the same reason in the same words:
+/// `stroke()` has the identical ten arms and the identical `_ => None`, and
+/// every caller that reads a possibly-container element's fill sits one line
+/// above one that reads its stroke.
+pub fn resolved_stroke(elem: &Element) -> Option<Stroke> {
+    first_paintable(elem).and_then(|leaf| leaf.stroke().copied())
+}
+
 pub fn map_paintable(elem: &Element, f: &dyn Fn(&Element) -> Element) -> Element {
     match elem {
         Element::Group(e) => Element::Group(GroupElem {
@@ -3348,6 +3396,55 @@ mod tests {
             "moving with an ALL selection must equal translating:\n{}",
             disagreed.join("\n")
         );
+    }
+
+    /// `first_paintable` is `for_each_paintable`'s first visit, and the two are
+    /// written separately because a higher-ranked closure argument cannot
+    /// escape. Nothing but this test keeps them in step: a container kind added
+    /// to one walk and forgotten in the other would make the panels summarise a
+    /// group the boolean ops cannot paint.
+    #[test]
+    fn first_paintable_agrees_with_for_each_paintable() {
+        use std::rc::Rc;
+        let rect = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 1.0, height: 1.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let group = |kids: Vec<Element>| Element::Group(GroupElem {
+            children: kids.into_iter().map(Rc::new).collect(),
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let layer = |kids: Vec<Element>| Element::Layer(LayerElem {
+            children: kids.into_iter().map(Rc::new).collect(),
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let cases: Vec<(&str, Element)> = vec![
+            ("leaf", rect(1.0)),
+            ("group of two", group(vec![rect(2.0), rect(3.0)])),
+            ("layer", layer(vec![rect(4.0)])),
+            ("nested", group(vec![group(vec![rect(5.0)]), rect(6.0)])),
+            // The degenerate ends: an empty container speaks for nobody, and a
+            // container holding only empty containers is the same answer one
+            // level down.
+            ("empty group", group(vec![])),
+            ("group of empties", group(vec![group(vec![]), layer(vec![])])),
+        ];
+        for (name, elem) in &cases {
+            let mut visited: Vec<f64> = Vec::new();
+            for_each_paintable(elem, &mut |leaf| {
+                if let Element::Rect(r) = leaf { visited.push(r.x) }
+            });
+            let first = first_paintable(elem).and_then(|l| match l {
+                Element::Rect(r) => Some(r.x),
+                _ => None,
+            });
+            assert_eq!(first, visited.first().copied(),
+                       "`{name}`: first_paintable must be for_each_paintable's \
+                        FIRST visit, and `None` exactly when it visits nothing");
+        }
     }
 
     /// Risk R9 (transcripts/CORPUS_CENSUS.md §7): a non-finite hue must be

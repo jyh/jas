@@ -302,12 +302,25 @@ extension PlanarGraph {
         }
         for vIdx in 0..<vertPts.count {
             let origin = vertPts[vIdx]
+            // Tie-break on the half-edge index. Rust's counterpart uses
+            // `sort_by`, which is STABLE, so equal angles keep insertion
+            // order — and insertion above is by ascending half-edge index.
+            // Swift's `sort` is NOT guaranteed stable, so without this the
+            // two ports could order a tie differently, and `next(e)` reads
+            // the neighbour by POSITION in this list, so a different order
+            // traces a different face. A conforming arrangement should
+            // never present a tie (two half-edges leaving one vertex at
+            // the same angle would be an unsplit collinear overlap), but
+            // "should never" is the sort of guarantee worth writing down
+            // rather than depending on silently — the same reasoning, and
+            // the same spelling, as the outgoing-span tie-break in
+            // BooleanNormalize.swift.
             outgoingAt[vIdx].sort { a, b in
                 let ta = vertPts[heOrigin[heTwin[a]]]
                 let tb = vertPts[heOrigin[heTwin[b]]]
                 let aa = atan2(ta.1 - origin.1, ta.0 - origin.0)
                 let ab = atan2(tb.1 - origin.1, tb.0 - origin.0)
-                return aa < ab
+                return aa == ab ? a < b : aa < ab
             }
         }
 

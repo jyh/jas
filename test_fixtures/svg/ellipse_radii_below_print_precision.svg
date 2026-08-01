@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape">
+    <ellipse cx="50" cy="50" rx="20.00001" ry="20.00002" fill="#ff0000"/>
+    <ellipse cx="150" cy="50" rx="20" ry="20.0002" fill="#00ff00"/>
+  </g>
+</svg>

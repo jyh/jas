@@ -2867,36 +2867,51 @@ struct YamlElementView: View {
         guard let model = model else { return AnyView(EmptyView()) }
         let store = model.stateStore
         let checked = Set((store.getPanel(panelId, bindKey) as? [String]) ?? [])
-        let showingAll = checked.isEmpty
+        // ONE LOOP, IN DECLARATION ORDER, each row rendered as the KIND its
+        // `type` declares. The "All" row is the menu's own first item rather
+        // than a hand-written twin of it, so its behaviour is the one
+        // `layers.yaml` declares (`action: clear_layers_type_filter`) instead of
+        // a literal that happens to agree.
+        let rows = layersFilterMenuRows(items)
 
         return AnyView(Menu {
-            Button(action: {
-                store.setPanel(panelId, bindKey, [String]())
-                model.panelStateVersion += 1
-            }) {
-                SwiftUI.Text(showingAll ? "✓ All" : "All")
-            }
-            SwiftUI.Divider()
-            ForEach(items.indices, id: \.self) { i in
-                let label = (items[i]["label"] as? String) ?? ""
-                let value = (items[i]["value"] as? String) ?? ""
-                if (items[i]["type"] as? String) == "toggle" {
+            ForEach(rows.indices, id: \.self) { i in
+                let row = rows[i]
+                switch row.kind {
+                // AN ACTION IS NOT A TYPE. Its tick means "already in force",
+                // not "checked": with an empty filter All is ticked, which is
+                // what stops CHECKED semantics reading as twelve switched-off
+                // boxes over a full tree.
+                case .action(let action):
+                    Button(action: {
+                        // An action this port does not know leaves the state
+                        // alone. Nothing is guessed here.
+                        if let next = layersCheckedAfterAction(action, checked) {
+                            store.setPanel(panelId, bindKey, Array(next).sorted())
+                            model.panelStateVersion += 1
+                        }
+                    }) {
+                        SwiftUI.Text(layersActionIsInForce(action, checked)
+                                     ? "✓ \(row.label)" : row.label)
+                    }
+                    SwiftUI.Divider()
+                case .toggle:
                     Button(action: {
                         var next = checked
                         // Option held: SOLO. A second Alt-click on an
                         // already-soloed type restores the full tree, exactly
                         // as a second Option-click un-solos the eye.
                         if NSEvent.modifierFlags.contains(.option) {
-                            next = (next.count == 1 && next.contains(value)) ? [] : [value]
-                        } else if next.contains(value) {
-                            next.remove(value)
+                            next = (next.count == 1 && next.contains(row.value)) ? [] : [row.value]
+                        } else if next.contains(row.value) {
+                            next.remove(row.value)
                         } else {
-                            next.insert(value)
+                            next.insert(row.value)
                         }
                         store.setPanel(panelId, bindKey, Array(next).sorted())
                         model.panelStateVersion += 1
                     }) {
-                        SwiftUI.Text(checked.contains(value) ? "✓ \(label)" : label)
+                        SwiftUI.Text(checked.contains(row.value) ? "✓ \(row.label)" : row.label)
                     }
                 }
             }
@@ -3870,6 +3885,96 @@ func layersTypeFilterKeep(_ rows: [(path: ElementPath, typeValue: String)],
         for i in 1..<max(p.count, 1) { keep.insert(Array(p.prefix(i))) }
     }
     return keep
+}
+
+/// What a `lp_filter_button` item DOES when clicked, read from its declared
+/// `type` and never inferred from the fields it happens to carry.
+enum LayersMenuRowKind: Equatable {
+    /// `type: toggle` — a type token that goes in or out of the CHECKED set.
+    case toggle
+    /// `type: action` — a named behaviour, carried verbatim from the item's
+    /// `action` key and routed by `layersCheckedAfterAction`.
+    case action(String)
+}
+
+/// One rendered row of the Layers filter menu.
+struct LayersMenuRow: Equatable {
+    let label: String
+    let value: String
+    let kind: LayersMenuRowKind
+}
+
+/// The menu rows a `lp_filter_button`-shaped `items` list declares, in
+/// declaration order.
+///
+/// This port has dispatched on the declared `type` since `renderDropdown` was
+/// written; jas_dioxus, written from it the same day, collected every item that
+/// carried a `label` and a `value` — so its `All` row (an ACTION) rendered as a
+/// thirteenth checkbox, clicking it checked the token `__all__`, and since
+/// nothing answers `__all__` the complement over the menu was the whole
+/// vocabulary and the tree went blank.
+///
+/// THE RULE MOVES OUT OF THE VIEW rather than being left correct-in-place,
+/// because correct-in-place is what it already was and nothing could see it: the
+/// menu was private render code in both ports, which is why they could disagree
+/// for as long as it took someone to click All. Extracted, both ports answer the
+/// `menu` block of `test_fixtures/view_state/layers_type_filter.json`.
+///
+/// AN UNRECOGNISED OR ABSENT `type` YIELDS NO ROW — reading `label` + `value` as
+/// licence to render a checkbox is the defect itself. A missing menu item is a
+/// loud, local failure; a blank tree is neither.
+///
+/// Twin: `menu_rows` in jas_dioxus/src/algorithms/layers_filter.rs.
+func layersFilterMenuRows(_ items: [[String: Any]]) -> [LayersMenuRow] {
+    items.compactMap { item in
+        guard let label = item["label"] as? String,
+              let value = item["value"] as? String else { return nil }
+        let kind: LayersMenuRowKind
+        switch item["type"] as? String {
+        case "toggle":
+            kind = .toggle
+        case "action":
+            guard let action = item["action"] as? String else { return nil }
+            kind = .action(action)
+        default:
+            return nil
+        }
+        return LayersMenuRow(label: label, value: value, kind: kind)
+    }
+}
+
+/// The CHECKED set after invoking a declared menu action, or `nil` when the
+/// action is not one this port knows.
+///
+/// `nil` RATHER THAN A FALLBACK, deliberately. An unknown action answered with
+/// the empty set would turn every future typo into *show everything*; answered
+/// with the unchanged set it would make a real action silently inert. Refusing
+/// lets the caller render the row without pretending it works — and guessing a
+/// meaning for a token nobody defined is the move that made `__all__` a type in
+/// the other port.
+///
+/// `checked` is unused today because the one declared action, `All`, does not
+/// read the current set. It is a parameter because the next one will: solo,
+/// invert and *check every type* are all functions of what is already checked.
+func layersCheckedAfterAction(_ action: String, _ checked: Set<String>) -> Set<String>? {
+    switch action {
+    // `layers.yaml`: "The 'All' item at the top restores the default in one
+    // click." The default is the empty set, which under the ruled semantics
+    // means everything is listed.
+    case "clear_layers_type_filter": return []
+    default: return nil
+    }
+}
+
+/// Whether an action's effect is ALREADY IN FORCE — what the tick on an action
+/// row means, as against a toggle's tick, which means "this type is checked".
+///
+/// Stated as *invoking it would change nothing* rather than as a hand-written
+/// per-action predicate, so a new action cannot arrive with a tick rule that
+/// contradicts what its own invocation does. An unknown action is never in
+/// force: it is inert, not satisfied.
+func layersActionIsInForce(_ action: String, _ checked: Set<String>) -> Bool {
+    layersCheckedAfterAction(action, checked) == checked
 }
 
 private func visIcon(_ vis: Visibility) -> String {

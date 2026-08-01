@@ -48,6 +48,20 @@ Each operation specifies which operands are consumed (removed from the document)
 
 For Alt/Option+click compound shapes, the same paint rule applies at creation time: the compound shape inherits the frontmost operand's paint. After creation the compound shape can be restyled like any other element.
 
+### Container operands
+
+The rules above name "the frontmost operand's fill, stroke, opacity, and blend mode", and that sentence was written when every operand was a LEAF. When an operand is a **container** — a group or a layer — the four properties do not answer alike, and the silence about which value wins is what produced the container-paint defect: a boolean over a group came out unpainted and unstroked, wearing the group's own identity. The clause below says what each property does, for the destructive operations (UNION, INTERSECTION, EXCLUDE, the SUBTRACT and CROP consumed operands) and for compound-shape creation alike. A compound shape is not a container for this purpose: it carries paint of its own on the wrapper.
+
+**Fill and stroke resolve to the frontmost operand's FIRST PAINTABLE LEAF** — its first paintable member in depth-first order, at any depth. The reason is a fact about the data model rather than a preference: a container has NO fill and NO stroke of its own, so the accessors answer nothing for it and the member's paint is the only available answer. The accessors are deliberately NOT widened to answer for a container — `fill()` and `stroke()` are read by render, hit-testing and the panels, and giving a container a paint of its own would change all three at once. The resolution therefore lives in the boolean's own read (`resolved_fill` / `resolved_stroke` in Rust, `booleanPaintSource` in Swift), and a test pins the bare accessors at "no paint" for a container so that the tempting one-line widening is not reintroduced. FIRST paintable member rather than frontmost member, because that is the leaf the Fill and Stroke panels already report for a selected container: the answer the panel shows and the paint the product wears must not tell the artist two different stories. An EMPTY container reaches no leaf and contributes no paint — it has no member to speak for, and no geometry either.
+
+**Opacity COMPOSES: `result.opacity = container.opacity × frontmost-leaf.opacity`** (ruled 2026-07-31). This is where the asymmetry with fill bites. A container carries a REAL opacity, so unlike fill there are two true values and one of them cannot simply be ignored. The principle is that a destructive operation's result should look like what it consumed: a group drawn at `0.5 × 0.8 = 0.4` that comes back as `0.5` visibly changes the artwork's density at the instant of clicking, which no reading of these rules justifies. Composition applies wherever these rules name an operand's opacity, compound-shape creation included.
+
+**The honest limit — recorded here so that a later reader does not rediscover it as a bug.** Where a container holds SEVERAL members at DIFFERENT opacities, no rule preserves appearance: flattening N differently-transparent shapes into one path is lossy by nature, and no single number can stand for what the stack looked like. Composition is EXACT for the single-visible-member case and an approximation otherwise. The choice was never "correct versus incorrect"; it is which approximation is least surprising, picked to be exact precisely where an artist will notice.
+
+**Blend mode is OPEN — it is not decided.** Opacities multiply, but blend modes do not compose at all, so the move that settles opacity is simply unavailable here and no rule has been ruled. Until one is, the product keeps the container's own mode; that is the current behavior, not the settled answer.
+
+Identity is not paint and is not settled by this clause: a consumed container's own `name` and `id` do not ride onto the product — the operands' MEMBERS vote, under the cardinality rules of `transcripts/EDIT_SEMANTICS_FREEZE.md` §3.6.
+
 ## Compound shapes (live, non-destructive)
 
 The four Shape Mode operations (UNION, SUBTRACT_FRONT, INTERSECTION, EXCLUDE) have two activation modes:

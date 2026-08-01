@@ -35,7 +35,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::geometry::element::{
-    BlendMode, Element, Fill, Stroke, StrokeWidthPoint, Visibility,
+    BlendMode, Color, Element, Fill, Stroke, StrokeWidthPoint, Visibility,
     with_fill, with_stroke, with_stroke_brush, with_width_points,
 };
 
@@ -271,19 +271,43 @@ pub fn apply_appearance(
     result
 }
 
+/// The stroke a fabrication starts from when a ticked sub-toggle would
+/// write a stroke attribute onto a target that has no stroke at all.
+///
+/// RULED (JYH 2026-07-31): the colour and width come from the APP's
+/// default stroke — `workspace/state.yaml`'s `stroke_color` (`#000000`)
+/// and `stroke_width` (1.0), the same pair `Model::new` seeds
+/// `default_stroke` / `app_default_stroke` with — and NEVER from the
+/// source. Seeding from the source transfers two attributes the artist
+/// deselected. (Refusing to fabricate at all was the alternative, and
+/// was rejected on usability: tick dash, click, nothing happens.)
+fn fabricated_stroke_base() -> Stroke {
+    Stroke::new(Color::BLACK, 1.0)
+}
+
 /// Helper for the Stroke group's per-sub-toggle apply. Uses the
-/// existing `with_stroke` helper; constructs a default Stroke when
-/// the target has none and at least one sub-toggle would copy a
-/// field.
+/// existing `with_stroke` helper; fabricates a stroke from the app
+/// defaults when the target has none and at least one sub-toggle would
+/// copy a field.
 fn apply_stroke_with_subs(
     target: &Element,
     src: Option<&Stroke>,
     config: &EyedropperConfig,
 ) -> Element {
     let Some(src_stroke) = src else {
-        // Source had no stroke. The master toggle is on (caller
-        // already gated), so "no stroke" propagates — write None.
-        return with_stroke(target, None);
+        // Source had no stroke. That is not a licence to ignore the
+        // sub-toggles — this branch honours them exactly as the `Some`
+        // branch below does. "No stroke" is a value of the stroke_color
+        // attribute (EYEDROPPER_TOOL.md §Stroke: that sub-toggle covers
+        // "color, none, gradient, or pattern"), so it transfers only
+        // when stroke_color is ticked. Every other sub-toggle has
+        // nothing to read off a stroke that isn't there, and is a no-op
+        // per the spec's "source lacks the attribute → no-op" rule.
+        return if config.stroke_color {
+            with_stroke(target, None)
+        } else {
+            target.clone()
+        };
     };
 
     let any_stroke_sub = config.stroke_color
@@ -297,12 +321,16 @@ fn apply_stroke_with_subs(
         return target.clone();
     }
 
-    // Start from target's existing stroke, or construct one with the
-    // source's color and width as a base when target had none.
+    // Start from target's existing stroke, or fabricate one from the
+    // app defaults when the target had none — see
+    // `fabricated_stroke_base`. Whatever the ticked sub-toggles copy
+    // below then lands on top of that base; the fields they do NOT
+    // cover keep the app default rather than a value smuggled in from
+    // the source.
     let mut new_stroke = target
         .stroke()
         .copied()
-        .unwrap_or_else(|| Stroke::new(src_stroke.color, src_stroke.width));
+        .unwrap_or_else(fabricated_stroke_base);
 
     if config.stroke_color {
         new_stroke.color = src_stroke.color;
@@ -468,6 +496,162 @@ mod tests {
         let out = apply_appearance(&target, &app, &cfg);
         assert_eq!(out.common().opacity, 0.4);
         assert_eq!(out.common().mode, BlendMode::Normal); // unchanged
+    }
+
+    /// A source stroke that is loud in every field the artist did NOT
+    /// tick, so a value leaking through from the source is unmistakable.
+    fn dashed_magenta_stroke() -> Stroke {
+        let mut s = Stroke::new(Color::rgb(1.0, 0.0, 1.0), 9.0);
+        s.dash_pattern = [6.0, 3.0, 0.0, 0.0, 0.0, 0.0];
+        s.dash_len = 2;
+        s
+    }
+
+    /// CASE 1, THE SEED — RULED (JYH 2026-07-31).
+    ///
+    /// Target has no stroke; source has a dashed one; the artist ticked
+    /// `stroke_dash` but deselected `stroke_color` and `stroke_weight`.
+    /// A dash needs a stroke to live on, so one is fabricated — and the
+    /// colour and width of that fabrication come from the APP's default
+    /// (`workspace/state.yaml`: `stroke_color: "#000000"`,
+    /// `stroke_width: 1.0`), never from the source. Sourcing them
+    /// transfers two attributes the artist switched off.
+    #[test]
+    fn fabricated_stroke_seeds_from_app_default_not_source() {
+        let src = rect_with(None, Some(dashed_magenta_stroke()));
+        let app = extract_appearance(&src);
+        let target = rect_with(Some(red_fill()), None); // no stroke at all
+        let cfg = EyedropperConfig {
+            fill: false,
+            stroke: true,
+            stroke_color: false,
+            stroke_weight: false,
+            stroke_cap_join: false,
+            stroke_align: false,
+            stroke_dash: true,
+            stroke_arrowheads: false,
+            stroke_brush: false,
+            stroke_profile: false,
+            opacity: false,
+            ..EyedropperConfig::default()
+        };
+
+        let out = apply_appearance(&target, &app, &cfg);
+        let s = out.stroke().expect("a ticked dash sub-toggle fabricates a stroke");
+
+        // The one attribute the artist ticked does come from the source.
+        assert_eq!(s.dash_len, 2);
+        assert_eq!(&s.dash_pattern[..2], &[6.0, 3.0]);
+
+        // The two the artist deselected come from the app default.
+        assert_eq!(s.color, Color::BLACK, "fabricated colour leaked from the source");
+        assert_eq!(s.width, 1.0, "fabricated width leaked from the source");
+    }
+
+    /// The seed is the app default even when NO loud sub-toggle is the
+    /// dash — `stroke_align` alone is enough to force a fabrication, and
+    /// it must not drag the source's paint along with it.
+    #[test]
+    fn fabricated_stroke_seeds_from_app_default_for_any_sub_toggle() {
+        let src = rect_with(None, Some(dashed_magenta_stroke()));
+        let app = extract_appearance(&src);
+        let target = rect_with(None, None);
+        let cfg = EyedropperConfig {
+            fill: false,
+            stroke: true,
+            stroke_color: false,
+            stroke_weight: false,
+            stroke_cap_join: false,
+            stroke_align: true,
+            stroke_dash: false,
+            stroke_arrowheads: false,
+            stroke_brush: false,
+            stroke_profile: false,
+            opacity: false,
+            ..EyedropperConfig::default()
+        };
+
+        let out = apply_appearance(&target, &app, &cfg);
+        let s = out.stroke().expect("a ticked align sub-toggle fabricates a stroke");
+        assert_eq!(s.align, StrokeAlign::Center); // source's align, which is Center
+        assert_eq!(s.color, Color::BLACK, "fabricated colour leaked from the source");
+        assert_eq!(s.width, 1.0, "fabricated width leaked from the source");
+    }
+
+    /// CASE 2, THE DEFECT. Master ON + source has NO stroke used to clear
+    /// the target outright, ignoring every sub-toggle — asymmetric with
+    /// the `Some` branch, which honours them. "No stroke" is a value of
+    /// the `stroke_color` attribute (EYEDROPPER_TOOL.md §Stroke: that
+    /// sub-toggle covers "color, none, gradient, or pattern"), so with
+    /// `stroke_color` OFF the artist never asked for the target's paint
+    /// to change, and nothing about the target's stroke may move.
+    #[test]
+    fn source_without_stroke_respects_stroke_color_off() {
+        let src = rect_with(Some(red_fill()), None); // source has no stroke
+        let app = extract_appearance(&src);
+        let target = rect_with(None, Some(blue_stroke()));
+        let cfg = EyedropperConfig {
+            fill: false,
+            stroke: true,
+            stroke_color: false, // every OTHER stroke sub-toggle stays ON
+            opacity: false,
+            ..EyedropperConfig::default()
+        };
+
+        let out = apply_appearance(&target, &app, &cfg);
+        assert_eq!(
+            out.stroke(),
+            Some(&blue_stroke()),
+            "a stroke-less source wiped the target with stroke_color off",
+        );
+    }
+
+    /// The same branch under EYE-112: master ON, source has no stroke,
+    /// EVERY stroke sub-toggle off → the target is left alone, exactly as
+    /// the `Some` branch's all-subs-off short-circuit leaves it alone.
+    #[test]
+    fn source_without_stroke_all_subs_off_leaves_target_alone() {
+        let src = rect_with(Some(red_fill()), None);
+        let app = extract_appearance(&src);
+        let target = rect_with(None, Some(blue_stroke()));
+        let cfg = EyedropperConfig {
+            fill: false,
+            stroke: true,
+            stroke_color: false,
+            stroke_weight: false,
+            stroke_cap_join: false,
+            stroke_align: false,
+            stroke_dash: false,
+            stroke_arrowheads: false,
+            stroke_brush: false,
+            stroke_profile: false,
+            opacity: false,
+            ..EyedropperConfig::default()
+        };
+
+        let out = apply_appearance(&target, &app, &cfg);
+        assert_eq!(out.stroke(), Some(&blue_stroke()));
+    }
+
+    /// EYE-111, the other half of the same branch, kept as a guard: with
+    /// `stroke_color` ON a stroke-less source still means "no stroke",
+    /// and the target's stroke goes. This passed before the CASE 2 repair
+    /// and must keep passing after it.
+    #[test]
+    fn source_without_stroke_clears_target_when_stroke_color_on() {
+        let src = rect_with(Some(red_fill()), None);
+        let app = extract_appearance(&src);
+        let target = rect_with(None, Some(blue_stroke()));
+        let cfg = EyedropperConfig {
+            fill: false,
+            stroke: true,
+            stroke_color: true,
+            opacity: false,
+            ..EyedropperConfig::default()
+        };
+
+        let out = apply_appearance(&target, &app, &cfg);
+        assert_eq!(out.stroke(), None);
     }
 
     #[test]

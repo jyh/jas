@@ -1047,6 +1047,16 @@ mod tests {
         "draw_ellipse.json",
         "draw_ellipse_shift.json",
         "draw_rect_shift.json",
+        // SHIFTZOOM: the same two Shift drags at zoom 1.5, where the
+        // doc-space anchor is NOT dyadic. The pair above runs at zoom 1,
+        // where every anchor is an exact integer and a commit that
+        // RECOVERS the constrained side by re-subtracting the anchor
+        // happens to be exact — which is why SHIFTCONSTRAIN shipped a
+        // Shift that only drew a true circle/square at 100% zoom. Both
+        // cases carry `expected_exact`, since the 4-dp canonical golden
+        // cannot see the one-ulp gap between rx and ry.
+        "draw_ellipse_shift_zoomed.json",
+        "draw_rect_shift_zoomed.json",
         "draw_rounded_rect.json",
         "draw_polygon.json",
         "draw_star.json",
@@ -1174,15 +1184,83 @@ mod tests {
     }
 
     #[cfg(feature = "web")]
+    /// Full-precision value of one named geometry field, for the
+    /// `expected_exact` assertion below. Deliberately a short, explicit
+    /// table rather than a reflective lookup: a fixture naming a field
+    /// this list does not carry is a fixture bug, and saying so loudly
+    /// beats silently asserting nothing.
+    fn gesture_exact_field(el: &crate::geometry::element::Element, field: &str) -> f64 {
+        use crate::geometry::element::Element;
+        match (el, field) {
+            (Element::Ellipse(e), "cx") => e.cx,
+            (Element::Ellipse(e), "cy") => e.cy,
+            (Element::Ellipse(e), "rx") => e.rx,
+            (Element::Ellipse(e), "ry") => e.ry,
+            (Element::Rect(r), "x") => r.x,
+            (Element::Rect(r), "y") => r.y,
+            (Element::Rect(r), "width") => r.width,
+            (Element::Rect(r), "height") => r.height,
+            _ => panic!("expected_exact: field {field:?} is not readable on {el:?}"),
+        }
+    }
+
+    #[cfg(feature = "web")]
+    /// OPTIONAL second assertion: `expected_exact`.
+    ///
+    /// The canonical document JSON rounds every float to 4 decimal
+    /// places, which is right for a cross-language golden but blind to a
+    /// one-ulp defect. Shift-constrained drawing is exactly that kind of
+    /// contract — a circle is a circle only if rx and ry are the SAME
+    /// double, and at a non-dyadic zoom a commit that re-derives the
+    /// radius from a coordinate misses by ~1e-14, which the golden
+    /// cannot show. This block names an element by path and pins chosen
+    /// fields at FULL precision.
+    ///
+    /// The comparison is EXACT (`==` on f64), on the same reasoning as
+    /// `assert_action_view`: both ports run the same IEEE-754 double
+    /// operations on the same inputs and the fixture literals are
+    /// shortest-round-trip forms, so any difference is a real
+    /// divergence, not a formatting artifact. Cases without the block
+    /// are unaffected. Mirrors Swift `assertGestureExact`.
+    fn assert_gesture_exact(tc: &serde_json::Value, doc: &crate::document::document::Document) {
+        let Some(exact) = tc.get("expected_exact") else { return };
+        let name = tc["name"].as_str().unwrap();
+        let path: Vec<usize> = exact["path"]
+            .as_array()
+            .expect("expected_exact.path must be an array")
+            .iter()
+            .map(|v| v.as_u64().expect("expected_exact.path entries must be integers") as usize)
+            .collect();
+        let el = doc
+            .get_element(&path)
+            .unwrap_or_else(|| panic!("expected_exact: '{name}' has no element at path {path:?}"));
+        let fields = exact["fields"]
+            .as_object()
+            .expect("expected_exact.fields must be an object");
+        for (field, want) in fields {
+            let want = want.as_f64().expect("expected_exact field values must be numbers");
+            let got = gesture_exact_field(el, field);
+            assert!(
+                got == want,
+                "Gesture test '{name}': element {path:?} field {field} is {got:?}, \
+                 expected EXACTLY {want:?} (delta {:e})",
+                got - want
+            );
+        }
+    }
+
+    #[cfg(feature = "web")]
     /// Mirror of `assert_operation_test`: replay the gesture and compare
     /// the canonical document JSON against the pinned golden, dumping
-    /// EXPECTED/ACTUAL on mismatch.
+    /// EXPECTED/ACTUAL on mismatch. Then apply the case's optional
+    /// full-precision `expected_exact` pins.
     fn assert_gesture_test(tc: &serde_json::Value) {
         let name = tc["name"].as_str().unwrap();
         let expected_file = tc["expected_json"].as_str().unwrap();
         let expected = read_fixture(&format!("gestures/{}", expected_file));
         let expected = expected.trim();
-        let actual = run_gesture_test(tc);
+        let model = run_gesture_model(tc);
+        let actual = document_to_test_json(model.document());
 
         if actual != expected {
             eprintln!("=== EXPECTED ({}) ===", name);
@@ -1191,6 +1269,8 @@ mod tests {
             eprintln!("{}", actual);
             panic!("Gesture test '{}' failed: canonical JSON mismatch", name);
         }
+
+        assert_gesture_exact(tc, model.document());
     }
 
     #[cfg(feature = "web")]
@@ -1223,6 +1303,573 @@ mod tests {
                 std::fs::write(&path, &actual)
                     .unwrap_or_else(|e| panic!("Failed to write {}: {}", path, e));
                 eprintln!("Generated: {} -> {}", name, expected_file);
+            }
+        }
+    }
+
+    // ===============================================================
+    // THE CIRCLE INVARIANT — a Shift-constrained draw is SQUARE
+    // BIT-EXACTLY, at any zoom and any pan.
+    //
+    //     ellipse.rx == ellipse.ry        rect.width == rect.height
+    //
+    // Built as a CHECKER with a GENERATIVE lane rather than as more
+    // gesture vectors, because vectors are the wrong instrument here.
+    // DYADICSIDE fixed the cause (the constrained side is CARRIED in
+    // `doc_w`/`doc_h`, never RECOVERED by re-subtracting the anchor)
+    // but pinned it with two hand-picked drags, and the round trip
+    // `(anchor + side) - anchor` only loses an ulp when the sum crosses
+    // a binade — so most candidate vectors are exact BY LUCK and the
+    // original defect needed a SEARCHED-FOR vector to show itself.
+    //
+    // Three lanes, in the ruled order — the checker is the law, the
+    // corpus is its witnesses, the generative lane is its growing
+    // confidence:
+    //
+    //   `check_shift_constrain`      the predicate (the law)
+    //   `shift_constrain_witnesses`  the named corpus, deterministic
+    //   `shift_constrain_generative` fresh vectors, fresh seed each run
+    //
+    // All three read test_fixtures/properties/shift_constrain_square.json,
+    // whose `_doc` carries the full rationale. Mirrored in Swift as
+    // `checkShiftConstrain` / `shiftConstrainWitnesses` /
+    // `shiftConstrainGenerative` (JasSwift/Tests/CrossLanguageTests.swift).
+    // ---------------------------------------------------------------
+
+    /// One Shift-constrained draw, in the terms the checker takes: the
+    /// view it happens on and the two viewport points that bracket it.
+    #[cfg(feature = "web")]
+    #[derive(Clone, Copy, Debug)]
+    struct ShiftDraw {
+        zoom: f64,
+        offset_x: f64,
+        offset_y: f64,
+        press_x: f64,
+        press_y: f64,
+        release_x: f64,
+        release_y: f64,
+    }
+
+    #[cfg(feature = "web")]
+    impl ShiftDraw {
+        /// The gesture case this draw denotes: press, one dragging move
+        /// with Shift held, release at the same point with Shift held.
+        /// Shaped for `run_gesture_model`, so the checker drives the
+        /// PRODUCTION CanvasTool seam through the same shared replay
+        /// path the gesture corpus uses — not a private re-derivation
+        /// of what the tool would have done.
+        fn gesture_case(&self, tool: &str, setup_svg: &str, viewport: (f64, f64)) -> serde_json::Value {
+            serde_json::json!({
+                "name": format!("shift_constrain/{tool}"),
+                "setup_svg": setup_svg,
+                "tool": tool,
+                "view": {
+                    "zoom_level": self.zoom,
+                    "view_offset_x": self.offset_x,
+                    "view_offset_y": self.offset_y,
+                    "viewport_w": viewport.0,
+                    "viewport_h": viewport.1,
+                },
+                "events": [
+                    { "kind": "press", "x": self.press_x, "y": self.press_y },
+                    { "kind": "move", "x": self.release_x, "y": self.release_y,
+                      "dragging": true, "shift": true },
+                    { "kind": "release", "x": self.release_x, "y": self.release_y,
+                      "shift": true },
+                ],
+            })
+        }
+    }
+
+    /// THE CHECKER. Replay `draw` with `tool` and rule the committed
+    /// element legal: it must EXIST at `path`, and its two named fields
+    /// must be the SAME double.
+    ///
+    /// Returns `None` when legal, `Some(complaint)` when not — a
+    /// predicate rather than an assertion, so the generative lane can
+    /// collect several failures and report the shape of them instead of
+    /// aborting on the first.
+    ///
+    /// The equality is `==`, with no tolerance band, deliberately. A
+    /// circle is a circle only if the radii are the same double: the
+    /// model types the shape by comparing them and the 4-decimal-place
+    /// canonical golden cannot see a 1e-14 gap, so an "almost equal"
+    /// pair is exactly the defect this exists to catch.
+    ///
+    /// Mirrors Swift `checkShiftConstrain`.
+    #[cfg(feature = "web")]
+    fn check_shift_constrain(
+        draw: &ShiftDraw,
+        tool: &str,
+        fields: (&str, &str),
+        setup_svg: &str,
+        path: &Vec<usize>,
+        viewport: (f64, f64),
+    ) -> Option<String> {
+        let case = draw.gesture_case(tool, setup_svg, viewport);
+        let model = run_gesture_model(&case);
+        let Some(el) = model.document().get_element(path) else {
+            return Some(format!(
+                "{tool}: nothing was committed at path {path:?} — the 1-pixel \
+                 commit guard suppressed the draw, so this case asserts nothing"
+            ));
+        };
+        // `gesture_exact_field` panics on a field it does not carry —
+        // the same explicit table the `expected_exact` channel reads,
+        // so a fixture naming an unreadable field fails loudly.
+        let a = gesture_exact_field(el, fields.0);
+        let b = gesture_exact_field(el, fields.1);
+        if a == b {
+            return None;
+        }
+        Some(format!(
+            "{tool}: {} = {a:?} but {} = {b:?} (delta {:e}) — a Shift-constrained \
+             draw must be square BIT-EXACTLY; view zoom={:?} offset=({:?}, {:?}), \
+             press=({:?}, {:?}), release=({:?}, {:?})",
+            fields.0, fields.1, b - a,
+            draw.zoom, draw.offset_x, draw.offset_y,
+            draw.press_x, draw.press_y, draw.release_x, draw.release_y
+        ))
+    }
+
+    /// THE MUTANT — the PRE-DYADICSIDE spelling, kept so the checker's
+    /// teeth can be measured rather than assumed.
+    ///
+    /// This is NOT a second copy of the implementation; it is the BUG,
+    /// written down. Before DYADICSIDE the commit recovered the half-side
+    /// as `abs(doc_end - doc_start) / 2`, re-subtracting the anchor that
+    /// had just been added to it, and that round trip is not exact away
+    /// from a dyadic zoom. Returns the pair (x half-side, y half-side)
+    /// the old spelling would have committed; they differ exactly on the
+    /// vectors that spelling gets wrong.
+    ///
+    /// Used two ways: every witness asserts that the mutant's verdict
+    /// matches its recorded `discriminating` flag, and the generative
+    /// lane refuses a run in which too few of its fresh vectors could
+    /// have caught the bug. A checker that cannot fail the bug it was
+    /// written for is worth zero, so that is measured continuously.
+    ///
+    /// IF THE TOOLS' CONSTRAINT ARITHMETIC EVER CHANGES SHAPE, this must
+    /// be re-derived or deleted outright — a stale mutant measures
+    /// nothing while looking like it measures something. Spelled to
+    /// match the YAML step for step, including `0.0 - side` for the
+    /// negative branch (the expression language's `0 - max(...)`).
+    /// Mirrors Swift `dyadicsideMutant`.
+    #[cfg(feature = "web")]
+    fn dyadicside_mutant(draw: &ShiftDraw) -> (f64, f64) {
+        // doc = (screen - view_offset) / zoom — YamlTool::pointer_event_payload.
+        let doc_start_x = (draw.press_x - draw.offset_x) / draw.zoom;
+        let doc_start_y = (draw.press_y - draw.offset_y) / draw.zoom;
+        let doc_x = (draw.release_x - draw.offset_x) / draw.zoom;
+        let doc_y = (draw.release_y - draw.offset_y) / draw.zoom;
+        let side = (doc_x - doc_start_x).abs().max((doc_y - doc_start_y).abs());
+        let doc_end_x = doc_start_x + if doc_x >= doc_start_x { side } else { 0.0 - side };
+        let doc_end_y = doc_start_y + if doc_y >= doc_start_y { side } else { 0.0 - side };
+        (
+            (doc_end_x - doc_start_x).abs() / 2.0,
+            (doc_end_y - doc_start_y).abs() / 2.0,
+        )
+    }
+
+    /// Would the pre-DYADICSIDE spelling get this vector WRONG?
+    #[cfg(feature = "web")]
+    fn mutant_is_discriminating(draw: &ShiftDraw) -> bool {
+        let (a, b) = dyadicside_mutant(draw);
+        a != b
+    }
+
+    /// The shared property fixture, parsed once per test.
+    #[cfg(feature = "web")]
+    fn shift_constrain_fixture() -> serde_json::Value {
+        let raw = read_fixture("properties/shift_constrain_square.json");
+        serde_json::from_str(&raw)
+            .expect("properties/shift_constrain_square.json is not valid JSON")
+    }
+
+    /// `(tool id, (field a, field b))` pairs the fixture declares.
+    #[cfg(feature = "web")]
+    fn shift_constrain_tools(fx: &serde_json::Value) -> Vec<(String, (String, String))> {
+        fx["tools"]
+            .as_array()
+            .expect("property fixture must declare `tools`")
+            .iter()
+            .map(|t| {
+                let fields = t["fields"].as_array().expect("tool entry needs `fields`");
+                assert_eq!(fields.len(), 2, "a tool's `fields` names exactly the pair that must be equal");
+                (
+                    t["tool"].as_str().unwrap().to_string(),
+                    (
+                        fields[0].as_str().unwrap().to_string(),
+                        fields[1].as_str().unwrap().to_string(),
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    /// The fixture's setup / path / viewport, shared by both lanes.
+    #[cfg(feature = "web")]
+    fn shift_constrain_env(fx: &serde_json::Value) -> (String, Vec<usize>, (f64, f64)) {
+        let setup = fx["setup_svg"].as_str().unwrap().to_string();
+        let path: Vec<usize> = fx["element_path"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_u64().unwrap() as usize)
+            .collect();
+        let viewport = (
+            fx["viewport_w"].as_f64().unwrap(),
+            fx["viewport_h"].as_f64().unwrap(),
+        );
+        (setup, path, viewport)
+    }
+
+    /// LANE 2 — THE WITNESSES. Every named vector, against every tool,
+    /// deterministically, every run.
+    ///
+    /// Also asserts each witness's recorded `discriminating` flag
+    /// against the mutant, so the corpus proves its own teeth: nine of
+    /// the eleven vectors here would have caught the DYADICSIDE bug, and
+    /// this test says so out loud every run rather than trusting a
+    /// comment written the day they were searched for.
+    #[cfg(feature = "web")]
+    #[test]
+    fn shift_constrain_witnesses() {
+        let fx = shift_constrain_fixture();
+        let (setup, path, viewport) = shift_constrain_env(&fx);
+        let tools = shift_constrain_tools(&fx);
+        let witnesses = fx["witnesses"].as_array().expect("fixture needs `witnesses`");
+        assert!(!witnesses.is_empty(), "the witness corpus must not be empty");
+
+        let mut discriminating = 0usize;
+        let mut failures: Vec<String> = Vec::new();
+
+        for w in witnesses {
+            let name = w["name"].as_str().unwrap();
+            let press = w["press"].as_array().unwrap();
+            let release = w["release"].as_array().unwrap();
+            let draw = ShiftDraw {
+                zoom: w["zoom"].as_f64().unwrap(),
+                offset_x: w["view_offset_x"].as_f64().unwrap(),
+                offset_y: w["view_offset_y"].as_f64().unwrap(),
+                press_x: press[0].as_f64().unwrap(),
+                press_y: press[1].as_f64().unwrap(),
+                release_x: release[0].as_f64().unwrap(),
+                release_y: release[1].as_f64().unwrap(),
+            };
+
+            // The witness's claim about its own power, checked.
+            let claimed = w["discriminating"].as_bool().unwrap_or_else(|| {
+                panic!("witness '{name}' must record `discriminating`")
+            });
+            let actual = mutant_is_discriminating(&draw);
+            assert_eq!(
+                actual, claimed,
+                "witness '{name}' records discriminating={claimed}, but the \
+                 pre-DYADICSIDE mutant says {actual} (mutant halves {:?}). Either \
+                 the flag is stale or the mutant no longer models the old spelling.",
+                dyadicside_mutant(&draw)
+            );
+            if actual {
+                discriminating += 1;
+            }
+
+            for (tool, (fa, fb)) in &tools {
+                if let Some(why) =
+                    check_shift_constrain(&draw, tool, (fa, fb), &setup, &path, viewport)
+                {
+                    failures.push(format!("witness '{name}': {why}"));
+                }
+            }
+        }
+
+        assert!(
+            discriminating >= 2,
+            "the witness corpus has lost its teeth: only {discriminating} of {} \
+             vectors would catch the pre-DYADICSIDE spelling",
+            witnesses.len()
+        );
+        assert!(
+            failures.is_empty(),
+            "the circle invariant failed on {} witness/tool pair(s):\n  {}",
+            failures.len(),
+            failures.join("\n  ")
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // The seeded input stream. Spelled identically in Swift
+    // (`PropertyStream` / `propertySeed` / `shiftDrawSample`) so a seed
+    // that goes red in one port replays vector-for-vector in the other
+    // — pinned by `stream_pin` in the fixture.
+    // ---------------------------------------------------------------
+
+    /// The house LCG (Numerical Recipes constants, as in `boolean.rs`
+    /// and `shape_recognize.rs`), on a SplitMix64-finalized seed.
+    ///
+    /// The finalizer matters: raw LCG states for adjacent seeds differ
+    /// by only the multiplier, so `JAS_PROPERTY_SEED=1` and `=2` would
+    /// otherwise produce near-identical first draws — a trap for anyone
+    /// replaying by hand.
+    #[cfg(feature = "web")]
+    struct PropertyStream {
+        state: u64,
+    }
+
+    #[cfg(feature = "web")]
+    impl PropertyStream {
+        fn new(seed: u64) -> Self {
+            let mut z = seed;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+            PropertyStream { state: z ^ (z >> 31) }
+        }
+
+        /// Next draw, uniform in [0, 1).
+        fn u(&mut self) -> f64 {
+            self.state = self.state.wrapping_mul(1664525).wrapping_add(1013904223);
+            (self.state >> 11) as f64 / (1u64 << 53) as f64
+        }
+    }
+
+    #[cfg(feature = "web")]
+    fn lerp(lo: f64, hi: f64, u: f64) -> f64 {
+        lo + (hi - lo) * u
+    }
+
+    /// A signed magnitude in [lo, hi] from ONE draw: the low half of the
+    /// unit interval is the negative branch, the high half the positive
+    /// one, each rescaled back to [0, 1). Both rescalings are exact in
+    /// binary (Sterbenz on `u - 0.5`, and a multiply by 2), so the two
+    /// ports cannot disagree about them.
+    #[cfg(feature = "web")]
+    fn signed_magnitude(u: f64, lo: f64, hi: f64) -> f64 {
+        if u < 0.5 {
+            -(lo + (hi - lo) * (u * 2.0))
+        } else {
+            lo + (hi - lo) * ((u - 0.5) * 2.0)
+        }
+    }
+
+    /// Draw ONE Shift-constrained draw from the stream. Nine values, in
+    /// the order the fixture's `_generative_doc` records; both ports
+    /// must consume them in that order or the streams diverge.
+    ///
+    /// The drag is an OFFSET from the press, not an independent second
+    /// point, so `drag_min` guarantees the 1-pixel commit guard is
+    /// cleared and no rejection sampling is needed — every draw is a
+    /// real case. Mirrors Swift `shiftDrawSample`.
+    #[cfg(feature = "web")]
+    fn shift_draw_sample(st: &mut PropertyStream, cfg: &serde_json::Value) -> ShiftDraw {
+        let n = |k: &str| cfg[k].as_f64().unwrap_or_else(|| panic!("generative.{k} must be a number"));
+        let zoom = lerp(n("zoom_min"), n("zoom_max"), st.u());
+        let offset_x = lerp(n("offset_min"), n("offset_max"), st.u());
+        let offset_y = lerp(n("offset_min"), n("offset_max"), st.u());
+        let mut press_x = lerp(n("press_min"), n("press_max"), st.u());
+        let mut press_y = lerp(n("press_min"), n("press_max"), st.u());
+        let mut dx = signed_magnitude(st.u(), n("drag_min"), n("drag_max"));
+        let mut dy = signed_magnitude(st.u(), n("drag_min"), n("drag_max"));
+
+        // Axis lock: a pure horizontal or vertical Shift drag takes the
+        // other branch (the zero axis has no sign to follow, so it takes
+        // the positive one). A continuous generator produces an exact
+        // zero with probability zero, so it has to be asked for. At most
+        // one axis is zeroed — both would fail the commit guard.
+        let axis = st.u();
+        let p = n("axis_zero_p");
+        if axis < p {
+            dy = 0.0;
+        } else if axis < 2.0 * p {
+            dx = 0.0;
+        }
+
+        let mut release_x = press_x + dx;
+        let mut release_y = press_y + dy;
+
+        // Quantize lock: real pointer events are usually integral, and
+        // integral screen coordinates are a measurably different
+        // population (at zoom 0.1, 1/3 and 1.0 they are exact under the
+        // old spelling where continuous ones are not). Rounding shaves
+        // at most 1 px off the drag, and drag_min is 3, so the commit
+        // guard still holds.
+        if st.u() < n("quantize_p") {
+            press_x = press_x.round();
+            press_y = press_y.round();
+            release_x = release_x.round();
+            release_y = release_y.round();
+        }
+
+        ShiftDraw { zoom, offset_x, offset_y, press_x, press_y, release_x, release_y }
+    }
+
+    /// The seed for this run: `JAS_PROPERTY_SEED` if the environment
+    /// names one, otherwise the nanosecond clock. FRESH EVERY RUN is
+    /// the point — the lane exists to see vectors nobody chose.
+    /// Mirrors Swift `propertySeed`.
+    #[cfg(feature = "web")]
+    fn property_seed() -> u64 {
+        if let Ok(s) = std::env::var("JAS_PROPERTY_SEED") {
+            return s
+                .trim()
+                .parse::<u64>()
+                .unwrap_or_else(|e| panic!("JAS_PROPERTY_SEED={s:?} is not a u64: {e}"));
+        }
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x5EED_1234_ABCD_0001)
+    }
+
+    /// LANE 3 — THE GENERATIVE LANE. The same checker, on vectors nobody
+    /// chose, from a fresh seed every run.
+    ///
+    /// Three things are asserted, and the second and third are what keep
+    /// the lane from rotting into a no-op:
+    ///
+    ///   * every generated vector satisfies the circle invariant;
+    ///   * every generated vector actually COMMITTED an element (the
+    ///     count is checked against `cases`), so the guard can never
+    ///     quietly swallow the population;
+    ///   * at least `min_discriminating` of them are vectors the
+    ///     pre-DYADICSIDE spelling would get WRONG, measured live by the
+    ///     mutant — the lane's teeth, checked rather than assumed.
+    ///
+    /// A failure prints the seed. `JAS_PROPERTY_SEED=<that seed>`
+    /// replays the run exactly, here or in Swift.
+    #[cfg(feature = "web")]
+    #[test]
+    fn shift_constrain_generative() {
+        let fx = shift_constrain_fixture();
+        let (setup, path, viewport) = shift_constrain_env(&fx);
+        let tools = shift_constrain_tools(&fx);
+        let cfg = &fx["generative"];
+        let cases = cfg["cases"].as_u64().expect("generative.cases") as usize;
+        let min_discriminating =
+            cfg["min_discriminating"].as_u64().expect("generative.min_discriminating") as usize;
+
+        // The cross-language pin: both ports must draw the SAME vectors
+        // from the same seed, or a seed reported by one is meaningless
+        // in the other.
+        assert_stream_pin(&fx);
+
+        let seed = property_seed();
+        eprintln!(
+            "shift_constrain_generative: seed {seed} ({cases} cases x {} tools) — \
+             replay with JAS_PROPERTY_SEED={seed}",
+            tools.len()
+        );
+
+        let mut st = PropertyStream::new(seed);
+        let mut discriminating = 0usize;
+        let mut committed = 0usize;
+        let mut failures: Vec<String> = Vec::new();
+
+        for i in 0..cases {
+            let draw = shift_draw_sample(&mut st, cfg);
+            if mutant_is_discriminating(&draw) {
+                discriminating += 1;
+            }
+            for (tool, (fa, fb)) in &tools {
+                match check_shift_constrain(&draw, tool, (fa, fb), &setup, &path, viewport) {
+                    None => committed += 1,
+                    Some(why) => {
+                        // Cap the report: the first handful shows the
+                        // shape, and the seed reproduces the rest.
+                        if failures.len() < 8 {
+                            failures.push(format!("case {i}: {why}"));
+                        }
+                    }
+                }
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "seed {seed}: the circle invariant failed on generated vectors \
+             (showing up to 8):\n  {}\nReplay with JAS_PROPERTY_SEED={seed}",
+            failures.join("\n  ")
+        );
+        // Reached only when nothing failed, so every check committed.
+        assert_eq!(
+            committed,
+            cases * tools.len(),
+            "seed {seed}: only {committed} of {} generated draws committed an \
+             element — the generator has drifted below the 1-pixel commit guard \
+             and is asserting nothing",
+            cases * tools.len()
+        );
+        assert!(
+            discriminating >= min_discriminating,
+            "seed {seed}: only {discriminating} of {cases} generated vectors would \
+             catch the pre-DYADICSIDE spelling (floor {min_discriminating}). The \
+             generator has been narrowed or broken; a lane that cannot fail the bug \
+             it was written for is worth zero."
+        );
+        // Report the teeth on the SUCCESS path too. A floor that is only
+        // read when it trips hides a slow slide toward it; this number
+        // is the one to watch if the generator is ever retuned.
+        eprintln!(
+            "shift_constrain_generative: {discriminating}/{cases} generated vectors \
+             discriminate the pre-DYADICSIDE spelling (floor {min_discriminating})"
+        );
+    }
+
+    /// One pinned double, read as an IEEE-754 bit pattern in hex.
+    ///
+    /// NOT `as_f64()` on a decimal literal, and the reason is measured:
+    /// serde_json 1.0.149 with default features (what this crate builds
+    /// today) mis-parses 21397 of 199903 SHORTEST-ROUND-TRIP f64
+    /// literals by exactly 1 ulp — 10.7%. Rust's own `str::parse`,
+    /// Swift's `Double(String)` and Swift's JSONSerialization all read
+    /// the same literals correctly, so the error is one-sided and
+    /// invisible from the Swift arm. A decimal pin here would therefore
+    /// not be a shared value at all, and a bit-exactness gate built on
+    /// one would report phantom reds and phantom greens with equal
+    /// confidence. See the fixture's `_stream_pin_doc`.
+    #[cfg(feature = "web")]
+    fn pinned_f64(v: &serde_json::Value) -> f64 {
+        let s = v
+            .as_str()
+            .unwrap_or_else(|| panic!("stream_pin values are hex bit-pattern strings, got {v}"));
+        let hex = s.strip_prefix("0x").unwrap_or(s);
+        f64::from_bits(
+            u64::from_str_radix(hex, 16)
+                .unwrap_or_else(|e| panic!("stream_pin value {s:?} is not hex: {e}")),
+        )
+    }
+
+    /// Both ports draw the same vectors from the same seed. Compares the
+    /// first few cases of a FIXED seed against bit-pattern pins,
+    /// `==` on doubles. Mirrors Swift `assertStreamPin`.
+    #[cfg(feature = "web")]
+    fn assert_stream_pin(fx: &serde_json::Value) {
+        let pin = &fx["stream_pin"];
+        let seed = pin["seed"].as_u64().expect("stream_pin.seed");
+        let cfg = &fx["generative"];
+        let mut st = PropertyStream::new(seed);
+        for (i, want) in pin["cases"].as_array().unwrap().iter().enumerate() {
+            let got = shift_draw_sample(&mut st, cfg);
+            let press = want["press"].as_array().unwrap();
+            let release = want["release"].as_array().unwrap();
+            let expect: [(&str, f64, f64); 7] = [
+                ("zoom", got.zoom, pinned_f64(&want["zoom"])),
+                ("view_offset_x", got.offset_x, pinned_f64(&want["view_offset_x"])),
+                ("view_offset_y", got.offset_y, pinned_f64(&want["view_offset_y"])),
+                ("press_x", got.press_x, pinned_f64(&press[0])),
+                ("press_y", got.press_y, pinned_f64(&press[1])),
+                ("release_x", got.release_x, pinned_f64(&release[0])),
+                ("release_y", got.release_y, pinned_f64(&release[1])),
+            ];
+            for (field, g, w) in expect {
+                assert!(
+                    g == w,
+                    "stream_pin seed {seed} case {i}: {field} is {g:?} (bits {:#018x}), \
+                     expected EXACTLY {w:?} (bits {:#018x}). The two ports are no longer \
+                     fuzzing the same space, so every seed exchanged between them is \
+                     meaningless.",
+                    g.to_bits(),
+                    w.to_bits()
+                );
             }
         }
     }
@@ -6507,32 +7154,48 @@ mod tests {
             out
         }
 
-        // KNOWN DISAGREEMENTS, untriaged. Landing these as a pinned list
-        // rather than as a lowered floor is deliberate: the valuable direction
-        // is that a NEW disagreement reds, and that works from the first run.
-        // Each row is a QUESTION, not an accepted answer, and saying so is the
-        // point -- declaring them "artifacts" on reasoning alone would be the
-        // confident-and-wrong row this project keeps catching itself writing.
+        // KNOWN DISAGREEMENTS. Landing these as a pinned list rather than as a
+        // lowered floor is deliberate: the valuable direction is that a NEW
+        // disagreement reds, and that works from the first run. Each row was
+        // filed as a QUESTION, not an accepted answer -- declaring them
+        // "artifacts" on reasoning alone would be the confident-and-wrong row
+        // this project keeps catching itself writing.
+        //
+        // TRIAGED 2026-07-30 (Flask, seat `TRIAGE-container-seeded-seven.md`),
+        // by reproducing each one and READING THE BYTES rather than arguing.
+        // The theory that all seven were artifacts DID NOT SURVIVE: three are,
+        // four were a real defect and are now fixed.
         //
         //   menu_lock / menu_hide: the flag lands on the WRAPPER and this
-        //   comparison strips it. Lock and visibility CASCADE
-        //   (`effective_locked` / `effective_visibility`), so the artist-visible
-        //   result is probably identical and only the stored JSON differs --
-        //   SUSPECTED artifact of the relation, NOT VERIFIED.
+        //   comparison strips it -- measured, `"locked":true` vs `false` and
+        //   `"invisible"` vs `"preview"`. Both CASCADE (`effective_locked` /
+        //   `effective_visibility`), so the artist-visible result is identical.
+        //   CONFIRMED artifact.
         //
-        //   the five boolean ops: a boolean CONSUMES its selection to build a
-        //   compound shape. Whether operating on a group should consume the
-        //   group or its contents is a real semantic question that
-        //   transcripts/BOOLEAN.md may already answer; nobody has looked.
+        //   make_compound_shape: the group version carries one extra nesting
+        //   level, because the wrapper survived as a compound-shape OPERAND --
+        //   which BOOLEAN.md §operands explicitly permits -- and `unwrap_seeds`
+        //   does not recurse into a LiveElement's operands. The relation is
+        //   comparing two structures that are correctly different. CONFIRMED
+        //   artifact.
         //
-        // Triage is queued. Removing a row here requires either a fix or a
-        // recorded ruling.
+        //   THE FOUR BOOLEAN ROWS ARE GONE, and their absence is the gate:
+        //   union / subtract_front / intersection / exclude on a container
+        //   produced UNPAINTED, UNSTROKED artwork wearing the container's name
+        //   (`"fill":null, "name":"__seed_wrapper__"`). Not a semantic question
+        //   -- BOOLEAN.md settles both halves, §operands making a group a
+        //   legitimate operand and §paint taking "the frontmost operand's fill,
+        //   stroke, opacity and blend mode" -- but an implementation that could
+        //   not apply the settled rule to a container, because `fill()` and
+        //   `stroke()` both end `_ => None`. Fixed at every one of the six
+        //   container-reading paint sites plus the `common` reads beside them;
+        //   see `operand_leaves` / `source_common` /
+        //   `geometry::element::resolved_fill` and the unit twins in
+        //   controller.rs (`a_boolean_over_a_grouped_operand_paints_like_the_bare_leaf`).
+        //
+        // Removing a row here still requires either a fix or a recorded ruling.
         const KNOWN: &[&str] = &[
             "make_compound_shape.json::make_compound_shape_two_rects",
-            "boolean.json::boolean_union_overlapping_rects",
-            "boolean.json::boolean_subtract_front_overlapping_rects",
-            "boolean.json::boolean_intersection_overlapping_rects",
-            "boolean.json::boolean_exclude_overlapping_rects",
             "menu_object_ops.json::menu_lock_two_rects",
             "menu_object_ops.json::menu_hide_two_rects",
         ];
@@ -6675,15 +7338,27 @@ mod tests {
     }
 
     /// `<circle>` SURVIVES A ROUND TRIP even though the model no longer has a
-    /// circle kind: the writer re-derives the tag from `rx == ry`.
+    /// circle kind: the writer re-derives the tag from the radii AS THEY WILL
+    /// BE PRINTED.
     ///
     /// The mirror is pinned too, and it is a REWRITE we accept rather than a
     /// property we achieved: an `<ellipse rx=20 ry=20>` comes back out as
     /// `<circle>`. Someone who authored that ellipse deliberately will see it
     /// change. That is the price of one kind, recorded here so it is a decision
     /// and not a surprise.
+    ///
+    /// THE SECOND HALF, added after the render-path audit, is the SUB-PRECISION
+    /// case: the tag used to be decided by an exact `rx == ry` while the
+    /// coordinates were printed at four decimals, so radii differing below the
+    /// printed precision were written as `<ellipse rx="20" ry="20">` -- a file
+    /// that reopens EXACTLY round. The tag flipped to `<circle>` on the very
+    /// next save and the derived type token flipped with it. The twin is
+    /// `roundEllipsesSerializeAsCircleAndSquashedOnesDoNot` in
+    /// JasSwift/Tests/CrossLanguageTests.swift, over the same two fixtures.
     #[test]
     fn round_ellipses_serialize_as_circle_and_squashed_ones_do_not() {
+        use crate::algorithms::layers_filter::type_value;
+
         let doc = svg_to_document(&read_fixture("svg/circle_ellipse_mix.svg"));
         let out = document_to_svg(&doc);
         assert_eq!(out.matches("<circle").count(), 2,
@@ -6693,6 +7368,44 @@ mod tests {
         // And the re-read is stable -- a second trip must not oscillate.
         assert_eq!(document_to_svg(&svg_to_document(&out)), out,
                    "svg -> doc -> svg is not idempotent");
+
+        // THE TAG DESCRIBES WHAT WAS PRINTED. Hand-derived expectations for
+        // `svg/ellipse_radii_below_print_precision.svg` (pt = px * 0.75, and
+        // the writer prints px at four decimals):
+        //   [0, 0] rx=20.00001px ry=20.00002px. The radii differ, but both
+        //          print "20.0000" -> "20". Written as an <ellipse> the file
+        //          would say rx == ry and reopen round, so the tag must be
+        //          <circle> from the start.
+        //   [0, 1] rx=20px ry=20.0002px. That difference IS printed, so this
+        //          one stays an <ellipse> on every trip -- the guard against
+        //          a fix that rounds harder than the writer does.
+        let sub = svg_to_document(
+            &read_fixture("svg/ellipse_radii_below_print_precision.svg"));
+        let out1 = document_to_svg(&sub);
+        assert_eq!(out1.matches("<circle").count(), 1,
+                   "radii differing below the printed precision must be \
+                    written as <circle>; got:\n{out1}");
+        assert_eq!(out1.matches("<ellipse").count(), 1,
+                   "radii differing above the printed precision must stay \
+                    <ellipse>; got:\n{out1}");
+
+        // svg -> doc -> svg -> doc: what was written reads back as what was
+        // written, and the type token agrees with the tag.
+        let sub1 = svg_to_document(&out1);
+        assert_eq!(type_value(sub1.get_element(&vec![0, 0]).unwrap()), "circle",
+                   "the <circle> we wrote must read back as a round ellipse");
+        assert_eq!(type_value(sub1.get_element(&vec![0, 1]).unwrap()), "ellipse",
+                   "the <ellipse> we wrote must read back squashed");
+
+        // ... and the next save does not move, in tag or in token.
+        let out2 = document_to_svg(&sub1);
+        assert_eq!(out2, out1,
+                   "the tag is not stable across save-and-reopen:\n{out1}\n{out2}");
+        let sub2 = svg_to_document(&out2);
+        assert_eq!(type_value(sub2.get_element(&vec![0, 0]).unwrap()), "circle",
+                   "type token flipped on the second trip");
+        assert_eq!(type_value(sub2.get_element(&vec![0, 1]).unwrap()), "ellipse",
+                   "type token flipped on the second trip");
     }
 
     /// THE LAYERS TYPE FILTER, driven from the shared corpus.
@@ -6786,5 +7499,169 @@ mod tests {
             got_anc.sort();
             assert_eq!(got_anc, want_anc, "vector `{name}`: ancestor-only set");
         }
+    }
+
+    /// THE FILTER MENU — which declared item becomes which KIND of row, and what
+    /// each kind does when clicked.
+    ///
+    /// Driven from the `menu` block of
+    /// `test_fixtures/view_state/layers_type_filter.json`; the twin reader is
+    /// `layersFilterMenuMatchesTheSharedCorpus` in
+    /// JasSwift/Tests/CrossLanguageTests.swift.
+    ///
+    /// THE DEFECT IT CLOSES (shipped 2026-07-30, this port only).
+    /// `render_layers_filter_dropdown` collected every item carrying a `label`
+    /// and a `value` and never read its declared `type`, so the `All` row — an
+    /// ACTION — rendered as a thirteenth checkbox. Clicking it checked the token
+    /// `__all__`, which no element answers, so under CHECKED semantics the
+    /// hidden set became the whole vocabulary and the tree went blank. JasSwift
+    /// dispatched on the declared type from the day both were written, so the
+    /// pair written together disagreed within hours: precisely what a shared
+    /// vector is for.
+    #[test]
+    fn layers_filter_menu_matches_the_shared_corpus() {
+        use crate::algorithms::layers_filter::{
+            checked_after_action, hidden_from_checked, menu_rows, type_filter_keep,
+            MenuRowKind,
+        };
+        use std::collections::HashSet;
+
+        let raw = read_fixture("view_state/layers_type_filter.json");
+        let doc: serde_json::Value = serde_json::from_str(&raw)
+            .expect("layers_type_filter.json is not valid JSON");
+        let menu = &doc["menu"];
+
+        let items = menu["items"].as_array().expect("no `menu.items`");
+        // Anti-vacuity declared BY THE DATA, exact rather than slack.
+        assert_eq!(
+            items.len(),
+            menu["min_items"].as_u64().expect("no `min_items`") as usize,
+            "walked {} menu item(s) against the declared floor",
+            items.len()
+        );
+
+        let rows = menu_rows(items);
+
+        // (1) THE PARTITION. An action-typed item is NOT a type toggle, and an
+        //     item that declares no type it recognises is neither.
+        let got_toggles: Vec<&str> = rows.iter()
+            .filter(|r| r.kind == MenuRowKind::Toggle)
+            .map(|r| r.value.as_str())
+            .collect();
+        let want_toggles: Vec<&str> = menu["expected_toggle_values"].as_array()
+            .expect("no `expected_toggle_values`")
+            .iter().map(|v| v.as_str().expect("toggle value not a string"))
+            .collect();
+        assert_eq!(got_toggles, want_toggles,
+                   "the toggle rows are not the declared toggle rows -- an \
+                    action row rendered as a checkbox is the 2026-07-30 defect");
+
+        let got_actions: Vec<(&str, &str, &str)> = rows.iter()
+            .filter_map(|r| match &r.kind {
+                MenuRowKind::Action(a) => Some((r.label.as_str(), r.value.as_str(), a.as_str())),
+                MenuRowKind::Toggle => None,
+            })
+            .collect();
+        let want_actions: Vec<(&str, &str, &str)> = menu["expected_action_rows"].as_array()
+            .expect("no `expected_action_rows`")
+            .iter()
+            .map(|v| (
+                v["label"].as_str().expect("action row has no `label`"),
+                v["value"].as_str().expect("action row has no `value`"),
+                v["action"].as_str().expect("action row has no `action`"),
+            ))
+            .collect();
+        assert_eq!(got_actions, want_actions,
+                   "the action rows are not the declared action rows");
+
+        let tree: Vec<(Vec<usize>, String)> = menu["tree"].as_array()
+            .expect("no `menu.tree`")
+            .iter()
+            .map(|r| (
+                r["path"].as_array().expect("tree row has no `path`").iter()
+                    .map(|n| n.as_u64().expect("path entry not a number") as usize)
+                    .collect(),
+                r["type"].as_str().expect("tree row has no `type`").to_string(),
+            ))
+            .collect();
+        let keep_of = |hidden: &HashSet<String>| {
+            let mut got: Vec<Vec<usize>> = type_filter_keep(
+                tree.iter().map(|(p, t)| (p.as_slice(), t.as_str())),
+                hidden,
+            ).into_iter().collect();
+            got.sort();
+            got
+        };
+        let paths_of = |key: &str, v: &serde_json::Value| -> Vec<Vec<usize>> {
+            let mut out: Vec<Vec<usize>> = v[key].as_array()
+                .unwrap_or_else(|| panic!("no `{key}`"))
+                .iter()
+                .map(|p| p.as_array().expect("path not an array").iter()
+                    .map(|n| n.as_u64().expect("path entry not a number") as usize)
+                    .collect())
+                .collect();
+            out.sort();
+            out
+        };
+
+        // (2) INVOKING THE ACTION yields the everything-visible state.
+        let vectors = menu["action_vectors"].as_array().expect("no `action_vectors`");
+        assert_eq!(
+            vectors.len(),
+            menu["min_action_vectors"].as_u64().expect("no `min_action_vectors`") as usize,
+            "walked {} action vector(s) against the declared floor",
+            vectors.len()
+        );
+        for v in vectors {
+            let name = v["name"].as_str().unwrap_or("<unnamed>");
+            let action = v["action"].as_str().expect("vector has no `action`");
+            let before: HashSet<String> = v["checked_before"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `checked_before`"))
+                .iter().map(|t| t.as_str().expect("not a string").to_string())
+                .collect();
+
+            let got = checked_after_action(action, &before);
+            let effective = if v["expected_checked_after"].is_null() {
+                assert!(got.is_none(),
+                        "vector `{name}`: an action this port does not know must \
+                         be REFUSED, not answered with a guess -- got {got:?}");
+                before.clone()
+            } else {
+                let want: HashSet<String> = v["expected_checked_after"].as_array()
+                    .expect("`expected_checked_after` is neither null nor an array")
+                    .iter().map(|t| t.as_str().expect("not a string").to_string())
+                    .collect();
+                assert_eq!(got.as_ref(), Some(&want), "vector `{name}`: checked set after");
+                want
+            };
+
+            let hidden = hidden_from_checked(&effective);
+            let mut got_hidden: Vec<String> = hidden.iter().cloned().collect();
+            got_hidden.sort();
+            let mut want_hidden: Vec<String> = v["expected_hidden_after"].as_array()
+                .unwrap_or_else(|| panic!("{name}: no `expected_hidden_after`"))
+                .iter().map(|t| t.as_str().expect("not a string").to_string())
+                .collect();
+            want_hidden.sort();
+            assert_eq!(got_hidden, want_hidden, "vector `{name}`: hidden set after");
+
+            assert_eq!(keep_of(&hidden), paths_of("expected_keep_after", v),
+                       "vector `{name}`: the tree after the click");
+        }
+
+        // (3) THE REGRESSION ITSELF, as the blank tree it produced.
+        let d = &menu["defect_if_the_action_row_were_a_toggle"];
+        let checked: HashSet<String> = d["checked"].as_array()
+            .expect("no `defect...checked`")
+            .iter().map(|t| t.as_str().expect("not a string").to_string())
+            .collect();
+        let hidden = hidden_from_checked(&checked);
+        assert_eq!(
+            hidden.len(),
+            d["expected_hidden_count"].as_u64().expect("no `expected_hidden_count`") as usize,
+            "checking a token no element answers must hide the WHOLE vocabulary"
+        );
+        assert_eq!(keep_of(&hidden), paths_of("expected_keep", d),
+                   "the defect's blank tree is not what the fixture records");
     }
 }

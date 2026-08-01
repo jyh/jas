@@ -610,3 +610,119 @@ private func assertClose(_ a: Double, _ b: Double, _ tol: Double, _ name: String
         Issue.record("expected recognition result")
     }
 }
+
+// MARK: - Candidate precedence (JYH ruling, 2026-07-31)
+
+/// The ruled tie-break order, transcribed from the ruling:
+///
+///     line, scribble, circle/ellipse, rectangle, roundRect,
+///     triangle, lemniscate, arrow
+///
+/// Circle and ellipse share one slot (one ellipse fit, snapped either way),
+/// as do rectangle and square.
+private func ruledPrecedenceRank(_ kind: ShapeKind) -> Int {
+    switch kind {
+    case .line: return 0
+    case .scribble: return 1
+    case .circle, .ellipse: return 2
+    case .rectangle, .square: return 3
+    case .roundRect: return 4
+    case .triangle: return 5
+    case .lemniscate: return 6
+    case .arrow: return 7
+    }
+}
+
+/// The four points where an axis-aligned ellipse touches its own bounding
+/// box: each lies EXACTLY on the box perimeter and EXACTLY on the ellipse.
+/// Half-extents 30 and 40 make every side exactly 50 long, so arc-length
+/// resampling to 5 points returns these four verbatim (no interpolation, no
+/// rounding) and both fits see a perfect shape.
+private func ellipseBboxTouchPoints() -> [Pt] {
+    [(30, 0), (0, 40), (-30, 0), (0, -40), (30, 0)]
+}
+
+/// Config that hands the recogniser exactly the five points above.
+private func touchPointCfg() -> RecognizeConfig {
+    RecognizeConfig(resampleN: 5)
+}
+
+@Test func ellipseAndRectangleResidualsTieExactly() {
+    // Instrumentation, kept as a test in its own right: without a genuine
+    // tie the precedence test below would be pinning a comparison that
+    // never happens.
+    let cands = recognizeCandidates(ellipseBboxTouchPoints(), touchPointCfg())
+    #expect(cands.count == 2,
+            "expected exactly the ellipse and rectangle fits, got \(cands.map { ($1.kind, $0) })")
+    guard cands.count == 2 else { return }
+    // Equal as Double — not "within epsilon". Both fits are perfect.
+    #expect(cands[0].0 == cands[1].0)
+    #expect(cands[0].0 == 0.0)
+}
+
+@Test func tiedEllipseAndRectangleResolveToEllipse() {
+    // The ruling: circle/ellipse outranks rectangle, so when the two fit
+    // equally well the stroke commits as an ellipse. Swap the two appends
+    // in `recognizeCandidates` and this stroke silently becomes a 60x80
+    // rectangle instead.
+    let pts = ellipseBboxTouchPoints()
+    let cfg = touchPointCfg()
+    let kinds = recognizeCandidates(pts, cfg).map { $1.kind }
+    #expect(kinds == [.ellipse, .rectangle])
+
+    if case .ellipse(let cx, let cy, let rx, let ry) = recognize(pts, cfg) {
+        #expect(cx == 0 && cy == 0 && rx == 30 && ry == 40)
+    } else {
+        Issue.record("tie must resolve to the ellipse, got \(String(describing: recognize(pts, cfg)))")
+    }
+}
+
+@Test func candidateOrderFollowsTheRuledPrecedence() {
+    // Inputs chosen because each produces MORE THAN ONE candidate — an
+    // ordering claim over single-candidate lists proves nothing.
+    let cfg = RecognizeConfig()
+    let cases: [(String, [Pt])] = [
+        // line + scribble: shallow enough that the straight fit also lands
+        // inside tolerance.
+        ("shallow zigzag", sampleZigzag(0, 0, 25, 15, 8, 10)),
+        // ellipse + rectangle + roundRect
+        ("round rect", sampleRoundRect(0, 0, 120, 80, 15, 256)),
+        // circle + square
+        ("circle", sampleCircle(50, 50, 30, 64)),
+        // ellipse + rectangle
+        ("ellipse", sampleEllipse(50, 50, 60, 30, 64)),
+        // line + ellipse + rectangle + triangle + arrow
+        ("long thin arrow", sampleArrowOutline((0, 50), (200, 50), 20, 15, 4)),
+        ("noisy rect", jitter(sampleRect(0, 0, 100, 60, 16), 2, 3.5)),
+        ("nearly closed rect", openGap(sampleRect(0, 0, 100, 60, 16), 0.05)),
+    ]
+
+    var multiCandidateCases = 0
+    var ranksSeen: Set<Int> = []
+    for (name, pts) in cases {
+        let kinds = recognizeCandidates(pts, cfg).map { $1.kind }
+        let ranks = kinds.map(ruledPrecedenceRank)
+        let ascending = zip(ranks, ranks.dropFirst()).allSatisfy { $0 < $1 }
+        #expect(ascending, """
+            \(name): candidates \(kinds) (ranks \(ranks)) are not in the ruled \
+            precedence order line, scribble, circle/ellipse, rectangle, roundRect, \
+            triangle, lemniscate, arrow
+            """)
+        if kinds.count > 1 {
+            multiCandidateCases += 1
+            ranksSeen.formUnion(ranks)
+        }
+    }
+
+    // Vacuity guards. If a future change stops these inputs from producing
+    // overlapping fits, the ordering above becomes unwatched and the test
+    // must say so rather than keep passing.
+    #expect(multiCandidateCases >= 5,
+            "only \(multiCandidateCases) inputs produced competing candidates")
+    // Every slot but the lemniscate is observed in a contested list. Nothing
+    // can contest a lemniscate: its own aspect gate (cross extent within 20%
+    // of a*sqrt(2)/2) puts every rival fit further from the points than the
+    // tolerance allows.
+    #expect(ranksSeen == [0, 1, 2, 3, 4, 5, 7],
+            "precedence slots exercised by this corpus changed: \(ranksSeen.sorted())")
+}

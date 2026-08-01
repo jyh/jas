@@ -156,15 +156,48 @@ const MIN_CLOSED_BBOX_ASPECT: f64 = 0.10;
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Recognize from a raw polyline.
+/// Recognize from a raw polyline. Returns the best-fitting candidate:
+/// lowest residual wins, and an exact TIE is broken by the ruled
+/// precedence — see [`recognize_candidates`].
 pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape> {
+    // Lowest residual wins; EQUAL residuals are broken by the candidate's
+    // position in the list, which is the ruled precedence order. Spelled
+    // out rather than leaning on `sort_by`'s stability, because here a tie
+    // does not merely reorder a list — it decides WHICH SHAPE the artist's
+    // stroke becomes. Mirrors the selection in ShapeRecognize.swift.
+    recognize_candidates(points, cfg)
+        .into_iter()
+        .enumerate()
+        .min_by(|(i, a), (j, b)| {
+            a.0.partial_cmp(&b.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(i.cmp(j))
+        })
+        .map(|(_, (_, shape))| shape)
+}
+
+/// Every fit that lands within tolerance, paired with its residual, IN THE
+/// RULED PRECEDENCE ORDER (JYH, 2026-07-31):
+///
+/// ```text
+///     line, scribble, circle/ellipse, rectangle, roundRect,
+///     triangle, lemniscate, arrow
+/// ```
+///
+/// That order is not decoration. [`recognize`] takes the lowest residual
+/// and breaks an exact tie by position in this list, so reordering the
+/// pushes below silently changes what a freehand stroke commits as. The
+/// order is pinned by `candidate_order_follows_the_ruled_precedence` and
+/// by `tied_ellipse_and_rectangle_resolve_to_ellipse`; the Swift port
+/// pushes in the same order and is pinned by the same two tests.
+pub fn recognize_candidates(points: &[Pt], cfg: &RecognizeConfig) -> Vec<(f64, RecognizedShape)> {
     if points.len() < 3 {
-        return None;
+        return Vec::new();
     }
     let pts = resample(points, cfg.resample_n);
     let diag = bbox_diag_of(&pts);
     if diag < 1e-9 {
-        return None;
+        return Vec::new();
     }
     let closed = is_closed(&pts, cfg.close_gap_frac);
     let tol_abs = cfg.tolerance * diag;
@@ -270,8 +303,7 @@ pub fn recognize(points: &[Pt], cfg: &RecognizeConfig) -> Option<RecognizedShape
             }
     }
 
-    candidates.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
-    candidates.into_iter().next().map(|(_, s)| s)
+    candidates
 }
 
 /// Recognize from a path that may contain Beziers — flattens via
@@ -2090,6 +2122,140 @@ mod tests {
             }
             other => panic!("expected (Circle, Circle), got {other:?}"),
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Candidate precedence (JYH ruling, 2026-07-31)
+    // -----------------------------------------------------------------------
+
+    /// The ruled tie-break order, transcribed from the ruling:
+    ///
+    ///     line, scribble, circle/ellipse, rectangle, roundRect,
+    ///     triangle, lemniscate, arrow
+    ///
+    /// Circle and ellipse share one slot (one ellipse fit, snapped either
+    /// way), as do rectangle and square.
+    fn ruled_precedence_rank(kind: ShapeKind) -> usize {
+        match kind {
+            ShapeKind::Line => 0,
+            ShapeKind::Scribble => 1,
+            ShapeKind::Circle | ShapeKind::Ellipse => 2,
+            ShapeKind::Rectangle | ShapeKind::Square => 3,
+            ShapeKind::RoundRect => 4,
+            ShapeKind::Triangle => 5,
+            ShapeKind::Lemniscate => 6,
+            ShapeKind::Arrow => 7,
+        }
+    }
+
+    /// The four points where an axis-aligned ellipse touches its own
+    /// bounding box: each lies EXACTLY on the box perimeter and EXACTLY on
+    /// the ellipse. Half-extents 30 and 40 make every side exactly 50 long,
+    /// so arc-length resampling to 5 points returns these four verbatim
+    /// (no interpolation, no rounding) and both fits see a perfect shape.
+    fn ellipse_bbox_touch_points() -> Vec<Pt> {
+        vec![(30.0, 0.0), (0.0, 40.0), (-30.0, 0.0), (0.0, -40.0), (30.0, 0.0)]
+    }
+
+    /// Config that hands the recogniser exactly the five points above.
+    fn touch_point_cfg() -> RecognizeConfig {
+        RecognizeConfig { resample_n: 5, ..RecognizeConfig::default() }
+    }
+
+    #[test]
+    fn ellipse_and_rectangle_residuals_tie_exactly() {
+        // Instrumentation, kept as a test in its own right: without a
+        // genuine tie the precedence test below would be pinning a
+        // comparison that never happens.
+        let pts = ellipse_bbox_touch_points();
+        let cands = recognize_candidates(&pts, &touch_point_cfg());
+        assert_eq!(
+            cands.len(),
+            2,
+            "expected exactly the ellipse and rectangle fits, got {:?}",
+            cands.iter().map(|(r, s)| (s.kind(), *r)).collect::<Vec<_>>()
+        );
+        // Equal as f64 — not "within epsilon". Both fits are perfect.
+        assert_eq!(cands[0].0, cands[1].0, "residuals must be exactly equal");
+        assert_eq!(cands[0].0, 0.0, "both fits are exact on these points");
+    }
+
+    #[test]
+    fn tied_ellipse_and_rectangle_resolve_to_ellipse() {
+        // The ruling: circle/ellipse outranks rectangle, so when the two
+        // fit equally well the stroke commits as an ellipse. Swap the two
+        // pushes in `recognize_candidates` and this stroke silently becomes
+        // a 60x80 rectangle instead.
+        let pts = ellipse_bbox_touch_points();
+        let cfg = touch_point_cfg();
+        let kinds: Vec<ShapeKind> = recognize_candidates(&pts, &cfg)
+            .iter()
+            .map(|(_, s)| s.kind())
+            .collect();
+        assert_eq!(kinds, vec![ShapeKind::Ellipse, ShapeKind::Rectangle]);
+
+        match recognize(&pts, &cfg) {
+            Some(RecognizedShape::Ellipse { cx, cy, rx, ry }) => {
+                assert_eq!((cx, cy, rx, ry), (0.0, 0.0, 30.0, 40.0));
+            }
+            other => panic!("tie must resolve to the ellipse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn candidate_order_follows_the_ruled_precedence() {
+        // Inputs chosen because each produces MORE THAN ONE candidate —
+        // an ordering claim over single-candidate lists proves nothing.
+        let cfg = RecognizeConfig::default();
+        let cases: Vec<(&str, Vec<Pt>)> = vec![
+            // line + scribble: shallow enough that the straight fit also
+            // lands inside tolerance.
+            ("shallow zigzag", sample_zigzag(0.0, 0.0, 25.0, 15.0, 8, 10)),
+            // ellipse + rectangle + roundRect
+            ("round rect", sample_round_rect(0.0, 0.0, 120.0, 80.0, 15.0, 256)),
+            // circle + square
+            ("circle", sample_circle(50.0, 50.0, 30.0, 64)),
+            // ellipse + rectangle
+            ("ellipse", sample_ellipse(50.0, 50.0, 60.0, 30.0, 64)),
+            // line + ellipse + rectangle + triangle + arrow
+            ("long thin arrow", sample_arrow_outline((0.0, 50.0), (200.0, 50.0), 20.0, 15.0, 4.0)),
+            ("noisy rect", jitter(&sample_rect(0.0, 0.0, 100.0, 60.0, 16), 2, 3.5)),
+            ("nearly closed rect", open_gap(&sample_rect(0.0, 0.0, 100.0, 60.0, 16), 0.05)),
+        ];
+
+        let mut multi_candidate_cases = 0;
+        let mut ranks_seen: std::collections::BTreeSet<usize> = Default::default();
+        for (name, pts) in &cases {
+            let kinds: Vec<ShapeKind> = recognize_candidates(pts, &cfg)
+                .iter()
+                .map(|(_, s)| s.kind())
+                .collect();
+            let ranks: Vec<usize> = kinds.iter().map(|&k| ruled_precedence_rank(k)).collect();
+            assert!(
+                ranks.windows(2).all(|w| w[0] < w[1]),
+                "{name}: candidates {kinds:?} (ranks {ranks:?}) are not in the ruled \
+                 precedence order line, scribble, circle/ellipse, rectangle, roundRect, \
+                 triangle, lemniscate, arrow"
+            );
+            if kinds.len() > 1 {
+                multi_candidate_cases += 1;
+                ranks_seen.extend(ranks);
+            }
+        }
+
+        // Vacuity guards. If a future change stops these inputs from
+        // producing overlapping fits, the ordering above becomes unwatched
+        // and the test must say so rather than keep passing.
+        assert!(
+            multi_candidate_cases >= 5,
+            "only {multi_candidate_cases} inputs produced competing candidates"
+        );
+        // Every slot but the lemniscate is observed in a contested list.
+        // Nothing can contest a lemniscate: its own aspect gate (cross
+        // extent within 20% of a*sqrt(2)/2) puts every rival fit further
+        // from the points than the tolerance allows.
+        let expected: std::collections::BTreeSet<usize> = [0, 1, 2, 3, 4, 5, 7].into_iter().collect();
+        assert_eq!(ranks_seen, expected, "precedence slots exercised by this corpus changed");
     }
 
     #[test]

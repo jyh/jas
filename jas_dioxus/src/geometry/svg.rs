@@ -28,6 +28,106 @@ fn fmt(v: f64) -> String {
     s.to_string()
 }
 
+/// THE MATRIX-ENTRY SPELLING RULE (JYH, R2, 2026-07-31). Print `v` so that
+/// reading it back yields the SAME f64, bit for bit:
+///
+///   1. NO EXPONENT NOTATION, ever — positional digits at any magnitude.
+///   2. EXACTLY ONE decimal point, always present.
+///   3. Shortest digit string that round-trips, with trailing fraction
+///      zeros stripped down to — but not past — ONE digit (`1` → `1.0`).
+///   4. `-0.0` keeps its sign, as [`fmt`] already does: `-0.0`.
+///
+/// SPELLED IDENTICALLY IN JasSwift — `fmtMatrixEntry` in
+/// `JasSwift/Sources/Geometry/Svg.swift`. The two comments cross-reference
+/// each other; neither may move without the other. The literal bytes are
+/// pinned by `matrix_entry_spelling_matches_the_shared_vector_table`, whose
+/// comment also names the ONE BAND where the two ports are not yet known to
+/// agree: JasSwift reaches rule 3 by searching for the fewest DECIMAL
+/// PLACES that round-trip, which is the same function as fewest
+/// SIGNIFICANT DIGITS only below |v| ≈ 1e11 — far above any real multiplier,
+/// but not proven, and so not claimed.
+///
+/// # Why matrix entries and not positions
+///
+/// `a`/`b`/`c`/`d` are MULTIPLIERS. 1e-4 of a multiplier is not 1e-4 of
+/// anything — it is 1e-4 × whatever it multiplies, so 0.15pt on a 5000pt
+/// element. Rotate 30°: `a = cos30 = 0.8660254037844387` printed at 4dp is
+/// `0.866`, and the reopened matrix has `a² + b² = 0.999956` — NO LONGER
+/// ORTHONORMAL, a 2.2e-5 shrink with a shear baked in. It COMPOUNDS,
+/// because every later transform composes onto the drifted one
+/// (`op_apply.rs`, `matrix.multiply(&current)`): rotate a logo, save,
+/// reopen, rotate back, and it does not land on its guides.
+///
+/// A POSITION at 4dp is 0.0001pt, far below what any artist or renderer
+/// resolves. Same quantizer, two entirely different meanings — which is
+/// why `x`, `y`, `cx`, `rx`, path coordinates and the matrix's OWN
+/// TRANSLATION `e`/`f` all still go through [`fmt`]. `e`/`f` are positions
+/// that happen to live in a matrix; they are also the only two entries that
+/// cross the pt↔px conversion, which is not exactly invertible (`fl(4/3)`
+/// then ×0.75 loses an ulp for ~18% of values), so full precision would buy
+/// them long noisy digit strings and still not bit-exact reloading. At 4dp
+/// they SETTLE on the first save and never move again —
+/// `a_reopened_matrix_is_bit_identical_on_every_later_save_and_reopen`.
+///
+/// # Why this exact spelling, and not something simpler
+///
+/// Three cheaper spellings were measured and rejected:
+///
+/// * A LONG FIXED PRECISION (`{:.17}`) breaks BOTH ports' readers —
+///   serde_json and JSONSerialization each mis-round 19-significant-digit
+///   literals by one ulp. Precision is not the same thing as fidelity.
+/// * A BARE `format!("{}")` diverges from Swift in BYTES while agreeing in
+///   VALUE, which is the worst of both: "shortest round-trip" is spelled
+///   three ways. Rust's `Display` never uses exponent notation and never
+///   appends `.0`; Swift's `.description` and Python's `repr` do both,
+///   outside roughly [1e-4, 1e16). `1e-5` is `0.00001` in Rust and `1e-05`
+///   in Swift. Rules 1 and 2 exist to pin the intersection: rule 1 is what
+///   Rust already does and Swift must be told to do, rule 2 is what Swift
+///   already does and Rust must be told to do.
+/// * A NAIVE `{}` also regresses `-0.0` to `-0`; rule 2 restores the sign
+///   AND the point in one move.
+///
+/// THE SURFACE IS DELIBERATELY NARROW — matrix multipliers only, the two
+/// `matrix(...)` writers below and nothing else. That narrowness is the
+/// whole reason this is safe. Applying it corpus-wide would make
+/// byte-level float formatting a cross-language contract in the very layer
+/// that exists to detect contract breaks. DO NOT WIDEN IT.
+///
+/// Non-finite entries are excluded and keep their pre-existing behaviour
+/// ([`fmt`], which yields `NaN`/`inf`): SVG's number grammar cannot express
+/// them at any precision, so `parse_transform` drops such a matrix on
+/// reload either way, and inventing a shared spelling for them would add a
+/// cross-port contract without adding a representable value. A subnormal
+/// entry expands to ~330 positional characters; that is a bounded cost on a
+/// matrix already too singular to invert.
+fn fmt_matrix_entry(v: f64) -> String {
+    if !v.is_finite() {
+        return fmt(v);
+    }
+    // Rust's `Display` for f64 is already rules 1 and 3: positional at
+    // every magnitude, and the shortest digit string that round-trips
+    // (so never a trailing fraction zero). Rule 2 is the one addition.
+    let mut s = format!("{}", v);
+    if !s.contains('.') {
+        s.push_str(".0");
+    }
+    s
+}
+
+/// The `matrix(a,b,c,d,e,f)` value shared by the two writers that emit one —
+/// the standard `transform` attribute and the Symbols P4 private
+/// `data-jas-instance-transform`. ONE function, so the multipliers cannot
+/// gain precision at one site and silently keep 4dp at the other; see
+/// [`fmt_matrix_entry`] for why the six entries split two ways.
+fn matrix_value(t: &Transform) -> String {
+    format!(
+        "matrix({},{},{},{},{},{})",
+        fmt_matrix_entry(t.a), fmt_matrix_entry(t.b),
+        fmt_matrix_entry(t.c), fmt_matrix_entry(t.d),
+        fmt(px(t.e)), fmt(px(t.f))
+    )
+}
+
 fn color_str(c: &Color) -> String {
     let (rv, gv, bv, a) = c.to_rgba();
     let r = (rv * 255.0).round() as u8;
@@ -122,10 +222,7 @@ fn stroke_attrs(stroke: &Option<Stroke>) -> String {
 fn transform_attr(t: &Option<Transform>) -> String {
     match t {
         None => String::new(),
-        Some(t) => format!(
-            " transform=\"matrix({},{},{},{},{},{})\"",
-            fmt(t.a), fmt(t.b), fmt(t.c), fmt(t.d), fmt(px(t.e)), fmt(px(t.f))
-        ),
+        Some(t) => format!(" transform=\"{}\"", matrix_value(t)),
     }
 }
 
@@ -371,6 +468,20 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             // so a file's `<circle>` elements survive a round trip even though
             // the model no longer has a circle kind.
             //
+            // THE TAG IS DECIDED FROM THE VALUES AS THEY WILL BE PRINTED, so
+            // the export is SELF-CONSISTENT: what we write is what we would
+            // read back. `fmt` prints four decimals, and an exact `rx == ry`
+            // test asked a question the file cannot answer -- radii differing
+            // below that precision (rx=5.00001, ry=5.00002) both print "5", so
+            // the element went out as `<ellipse rx="5" ry="5">`, a file that
+            // reopens EXACTLY round. The tag flipped to `<circle>` on the very
+            // next save, and the derived type token
+            // (`algorithms::layers_filter::type_value`) and the auto-generated
+            // label flipped with it. Comparing the PRINTED strings settles both
+            // directions at once: the `<circle>` we write re-reads round, and
+            // an `<ellipse>` we write re-reads squashed. JasSwift's
+            // `Sources/Geometry/Svg.swift` spells this the same way.
+            //
             // THE MIRROR IS A REWRITE WE ACCEPT: an author's deliberate
             // `<ellipse rx="5" ry="5">` comes back out as `<circle>`. That is
             // the price of one kind, and it is pinned by
@@ -387,16 +498,20 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
             );
-            if e.rx == e.ry {
+            // The very strings the attributes will carry, so the tag cannot
+            // disagree with the numbers beside it.
+            let rx_txt = fmt(px(e.rx));
+            let ry_txt = fmt(px(e.ry));
+            if rx_txt == ry_txt {
                 format!(
                     "{}<circle cx=\"{}\" cy=\"{}\" r=\"{}\"{}/>\n",
-                    indent, fmt(px(e.cx)), fmt(px(e.cy)), fmt(px(e.rx)), common_attrs,
+                    indent, fmt(px(e.cx)), fmt(px(e.cy)), rx_txt, common_attrs,
                 )
             } else {
                 format!(
                     "{}<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\"{}/>\n",
                     indent, fmt(px(e.cx)), fmt(px(e.cy)),
-                    fmt(px(e.rx)), fmt(px(e.ry)), common_attrs,
+                    rx_txt, ry_txt, common_attrs,
                 )
             }
         }
@@ -667,8 +782,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 let inst_xform = match &r.transform {
                     None => String::new(),
                     Some(t) => format!(
-                        " data-jas-instance-transform=\"matrix({},{},{},{},{},{})\"",
-                        fmt(t.a), fmt(t.b), fmt(t.c), fmt(t.d), fmt(px(t.e)), fmt(px(t.f))
+                        " data-jas-instance-transform=\"{}\"", matrix_value(t)
                     ),
                 };
                 format!(
@@ -4318,5 +4432,352 @@ mod tests {
         let parsed = svg_to_document(&svg);
         assert_eq!(parsed.artboards.len(), 1);
         assert_eq!(parsed.document_setup, doc.document_setup);
+    }
+
+    // -------------------------------------------------------------------
+    // MATRIX ENTRY PRECISION (R2, ruled 2026-07-31)
+    //
+    // These tests measure the PROPERTY — that a matrix which leaves the
+    // writer and comes back is still the SAME LINEAR MAP — not the
+    // spelling that achieves it. The spelling is pinned separately, and
+    // only because it is a cross-port contract; if a future edit finds a
+    // better spelling, only those tests should have to move.
+    // -------------------------------------------------------------------
+
+    /// One save-and-reopen for an element-level transform: doc → svg → doc.
+    /// Returns the matrix as the reopened document sees it.
+    fn reopen(t: Transform) -> Transform {
+        let doc = make_doc(vec![Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 100.0, height: 50.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))),
+            stroke: None,
+            common: CommonProps { transform: Some(t), ..Default::default() },
+            fill_gradient: None,
+            stroke_gradient: None,
+        })]);
+        let reopened = svg_to_document(&document_to_svg(&doc));
+        let children = reopened.layers[0].children().unwrap();
+        children[0]
+            .common()
+            .transform
+            .expect("the SVG round trip dropped the transform entirely")
+    }
+
+    /// A rotation matrix is ORTHONORMAL: `a² + b² == 1`, to within the
+    /// ulp or two that `cos`/`sin` themselves cost. Quantising the
+    /// multipliers destroys that — at 4dp cos30 lands on `0.866`, the
+    /// reopened map shrinks by 2.2e-5 and carries a shear it never had.
+    ///
+    /// Fuzzed over the whole circle rather than pinned at 30°: a rule
+    /// about a MULTIPLIER has no lucky angles the way `DYADICSIDE`'s
+    /// round trip had lucky zooms, but a single vector would still leave
+    /// a future edit free to be right in one place and wrong everywhere.
+    #[test]
+    fn rotation_stays_orthonormal_across_a_save_and_reopen() {
+        const TOL: f64 = 4.0 * f64::EPSILON;
+        let mut worst_deg = 0.0f64;
+        let mut worst_err = 0.0f64;
+        for deg in 0..360 {
+            let angle = deg as f64;
+            let m = reopen(Transform::rotate(angle));
+            let err = (m.a * m.a + m.b * m.b - 1.0).abs();
+            if err > worst_err {
+                worst_err = err;
+                worst_deg = angle;
+            }
+        }
+        assert!(
+            worst_err <= TOL,
+            "a reopened rotation is no longer orthonormal: worst |a²+b²-1| = {:e} \
+             at {}°, tolerance {:e}",
+            worst_err, worst_deg, TOL
+        );
+    }
+
+    /// The four MULTIPLIERS survive a save-and-reopen BIT-EXACTLY.
+    ///
+    /// They can, and so they must: `a`/`b`/`c`/`d` are unitless, so unlike
+    /// `e`/`f` they never pass through the pt↔px conversion, and nothing
+    /// but the writer's own precision stands between the value that was
+    /// saved and the value that comes back.
+    #[test]
+    fn matrix_multipliers_survive_a_save_and_reopen_bit_exactly() {
+        for deg in 0..360 {
+            let t = Transform::rotate(deg as f64);
+            let m = reopen(t);
+            for (name, got, want) in [
+                ("a", m.a, t.a), ("b", m.b, t.b),
+                ("c", m.c, t.c), ("d", m.d, t.d),
+            ] {
+                assert_eq!(
+                    got.to_bits(), want.to_bits(),
+                    "rotate({deg}°) came back with {name} = {got}, saved {want}"
+                );
+            }
+        }
+    }
+
+    /// Once reopened, a matrix is a FIXPOINT: saving and reopening it
+    /// again changes not one bit of any of the SIX entries.
+    ///
+    /// This is the property that keeps drift from COMPOUNDING across
+    /// sessions, and it is stated over all six deliberately. `e`/`f` are
+    /// positions and stay at 4dp, so they are NOT expected to survive the
+    /// first save unchanged — they are expected to SETTLE on it, and then
+    /// never move again however many times the file is opened.
+    #[test]
+    fn a_reopened_matrix_is_bit_identical_on_every_later_save_and_reopen() {
+        for deg in 0..360 {
+            for (tx, ty) in [(0.0, 0.0), (12.3456789, -98.7654321), (0.00001, 5000.25)] {
+                let t = Transform { e: tx, f: ty, ..Transform::rotate(deg as f64) };
+                let m1 = reopen(t);
+                let m2 = reopen(m1);
+                for (name, got, want) in [
+                    ("a", m2.a, m1.a), ("b", m2.b, m1.b),
+                    ("c", m2.c, m1.c), ("d", m2.d, m1.d),
+                    ("e", m2.e, m1.e), ("f", m2.f, m1.f),
+                ] {
+                    assert_eq!(
+                        got.to_bits(), want.to_bits(),
+                        "rotate({deg}°)+translate({tx},{ty}) is not a fixpoint: \
+                         {name} moved from {want} to {got} on the second reopen"
+                    );
+                }
+            }
+        }
+    }
+
+    /// THE ARTIST SYMPTOM: rotate a logo, save, reopen, rotate BACK.
+    /// It must land on its guides — the composition must be the identity,
+    /// not a 0.99998 scale with a shear in it.
+    #[test]
+    fn rotating_back_after_a_save_and_reopen_lands_on_the_identity() {
+        const TOL: f64 = 4.0 * f64::EPSILON;
+        for deg in 0..720 {
+            let angle = deg as f64 * 0.5;
+            let there = reopen(Transform::rotate(angle));
+            let back = Transform::rotate(-angle).multiply(&there);
+            for (name, got, want) in [
+                ("a", back.a, 1.0), ("b", back.b, 0.0),
+                ("c", back.c, 0.0), ("d", back.d, 1.0),
+            ] {
+                assert!(
+                    (got - want).abs() <= TOL,
+                    "rotate({angle}°), save, reopen, rotate(-{angle}°) did not \
+                     return to the identity: {name} = {got}, expected {want}"
+                );
+            }
+        }
+    }
+
+    /// And the error does not merely persist, it COMPOUNDS. Each new
+    /// transform composes onto the reloaded one (`op_apply.rs`,
+    /// `matrix.multiply(&current)`), so a per-save error in the
+    /// multipliers is re-multiplied on every subsequent edit.
+    ///
+    /// SEVERAL ANGLES, AND ORTHONORMALITY CHECKED AT EVERY CYCLE, because
+    /// a single angle can be lucky in a way that hides the whole defect:
+    /// 15° at 4dp is a PERIODIC orbit — `(0.9659, 0.2588)` and its
+    /// rotations are each other's quantised images, so after 24 cycles it
+    /// lands back on an exact `(1, 0)` and the accumulated drift cancels
+    /// to nothing. Written that way first, this test passed against the
+    /// unfixed writer.
+    #[test]
+    fn repeated_save_and_reopen_cycles_do_not_accumulate_scale_drift() {
+        // 64 ulp: 24 chained `multiply` calls cost ~12 ulp of their own
+        // even with a perfect writer (measured), and the defect this
+        // guards against is 3e-5 to 6e-4 — nine orders of magnitude away.
+        const TOL: f64 = 64.0 * f64::EPSILON;
+        for step_deg in [7.0, 15.0, 30.0, 41.3, 0.5, 123.456] {
+            let mut m = Transform::IDENTITY;
+            for cycle in 1..=24 {
+                m = reopen(Transform::rotate(step_deg).multiply(&m));
+                let err = (m.a * m.a + m.b * m.b - 1.0).abs();
+                assert!(
+                    err <= TOL,
+                    "after {cycle} rotate({step_deg}°)/save/reopen cycles the \
+                     element is scaled by {}: |a²+b²-1| = {err:e}, tolerance {TOL:e}",
+                    (m.a * m.a + m.b * m.b).sqrt()
+                );
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // THE SPELLING RULE ITSELF. Pinned separately from the properties
+    // above, and pinned at all only because it is a CROSS-PORT CONTRACT:
+    // JasSwift must emit the same bytes for the same f64. Each of the four
+    // clauses of the rule in `fmt_matrix_entry`'s doc comment gets a test.
+    // -------------------------------------------------------------------
+
+    /// Clause 1: no exponent notation, at any magnitude. A bare Swift
+    /// `.description` would spell `1e-5` as `1e-05`, agreeing on the value
+    /// and disagreeing on the bytes.
+    #[test]
+    fn matrix_entry_spelling_never_uses_exponent_notation() {
+        for v in [
+            1e-5, 1.5e-7, -3e-9, 1e20, 2.5e18, 1e16, -1e17,
+            f64::MIN_POSITIVE, f64::MAX, 5e-324,
+        ] {
+            let s = fmt_matrix_entry(v);
+            assert!(
+                !s.contains('e') && !s.contains('E'),
+                "{v:?} was spelled {s}, which is exponent notation"
+            );
+        }
+    }
+
+    /// Clauses 2 and 3: exactly one decimal point, always present, with a
+    /// fraction that is never empty and never has a strippable trailing
+    /// zero. A bare Rust `Display` would spell `1.0` as `1`.
+    #[test]
+    fn matrix_entry_spelling_always_has_exactly_one_point_and_no_padding() {
+        for v in [
+            0.0, -0.0, 1.0, -2.0, 0.5, 100.0, 1e20, 1e-5,
+            0.8660254037844387, 0.25881904510252074, -0.5,
+        ] {
+            let s = fmt_matrix_entry(v);
+            assert_eq!(s.matches('.').count(), 1, "{v:?} was spelled {s}");
+            let frac = s.split('.').nth(1).unwrap();
+            assert!(!frac.is_empty(), "{v:?} was spelled {s} with an empty fraction");
+            assert!(
+                frac == "0" || !frac.ends_with('0'),
+                "{v:?} was spelled {s} with an unstripped trailing zero"
+            );
+        }
+    }
+
+    /// Clause 4: negative zero keeps its sign — a naive `{}` gives `-0`,
+    /// and 4dp `fmt` gives `-0`; the rule gives `-0.0`, and both spellings
+    /// must still READ BACK as negative zero.
+    #[test]
+    fn matrix_entry_spelling_preserves_negative_zero() {
+        assert_eq!(fmt_matrix_entry(0.0), "0.0");
+        assert_eq!(fmt_matrix_entry(-0.0), "-0.0");
+        assert!(
+            fmt_matrix_entry(-0.0).parse::<f64>().unwrap().is_sign_negative(),
+            "a reopened -0.0 lost its sign"
+        );
+        assert!(fmt_matrix_entry(0.0).parse::<f64>().unwrap().is_sign_positive());
+    }
+
+    /// The reason the whole rule exists: what is printed reads back as the
+    /// same f64, BIT FOR BIT. Fuzzed over raw bit patterns rather than a
+    /// pretty range, because the hard cases are the ones nobody would
+    /// think to type — subnormals, values near a binade edge, 17-digit
+    /// mantissas. A fixed `{:.17}` fails this, mis-rounding by one ulp.
+    #[test]
+    fn matrix_entry_spelling_round_trips_bit_exactly() {
+        // xorshift64, seeded from the digits of pi — deterministic, so a
+        // failure is reproducible rather than a once-a-month mystery.
+        let mut state: u64 = 0x243F_6A88_85A3_08D3;
+        let mut checked = 0u32;
+        let fixed = [
+            0.0f64, -0.0, 1.0, -1.0, 0.8660254037844387, 0.5,
+            1.0 / 3.0, f64::MIN_POSITIVE, 5e-324, f64::MAX, -f64::MAX,
+        ];
+        for i in 0..200_000u32 {
+            let v = if (i as usize) < fixed.len() {
+                fixed[i as usize]
+            } else {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                f64::from_bits(state)
+            };
+            if !v.is_finite() {
+                continue;
+            }
+            let s = fmt_matrix_entry(v);
+            let back: f64 = s.parse().unwrap_or_else(|e| {
+                panic!("{v:?} was spelled {s}, which does not parse as f64: {e}")
+            });
+            assert_eq!(
+                back.to_bits(), v.to_bits(),
+                "{v:?} was spelled {s}, which reads back as {back:?}"
+            );
+            checked += 1;
+        }
+        assert!(checked > 100_000, "the fuzz only reached {checked} finite samples");
+    }
+
+    /// THE SHARED VECTOR TABLE — the literal bytes, so the two ports can be
+    /// DIFFED and not merely both described as "shortest round-trip". Mirror
+    /// this table verbatim in JasSwift's `SvgTests`.
+    ///
+    /// Every entry is in the range a real matrix multiplier occupies. That
+    /// is on purpose: a rotation, scale or shear entry lives within a few
+    /// orders of 1, and "shortest round-trip" is only unambiguous there.
+    /// FOR ABSURD MAGNITUDES THE TWO PORTS' SPELLINGS ARE NOT KNOWN TO
+    /// AGREE — measured, over 400k random bit patterns, against a
+    /// simulation of JasSwift's shortest-`%.Nf` search: zero disagreements
+    /// below |v| = 1e9, the first at |v| ≈ 7.2e11 (`-722043421803.1563`
+    /// here, `-722043421803.1562` there — both reparse to the same f64),
+    /// and pervasive above 1e18, where "fewest DECIMAL PLACES that
+    /// round-trips" and "fewest SIGNIFICANT DIGITS that round-trips" stop
+    /// being the same function. A multiplier that large is a degenerate
+    /// matrix, so this table does not pretend to settle it; the band is
+    /// named here so that whoever needs it settled can find it.
+    #[test]
+    fn matrix_entry_spelling_matches_the_shared_vector_table() {
+        for (v, want) in [
+            (0.0f64, "0.0"),
+            (-0.0, "-0.0"),
+            (1.0, "1.0"),
+            (-1.0, "-1.0"),
+            (2.0, "2.0"),
+            (0.5, "0.5"),
+            (-0.5, "-0.5"),
+            (0.7071, "0.7071"),
+            // cos/sin of 30°, 15° and 45° — the multipliers this rule exists for.
+            (0.8660254037844387, "0.8660254037844387"),
+            (0.49999999999999994, "0.49999999999999994"),
+            (0.9659258262890683, "0.9659258262890683"),
+            (0.25881904510252074, "0.25881904510252074"),
+            (0.7071067811865476, "0.7071067811865476"),
+            (-0.7071067811865475, "-0.7071067811865475"),
+            (1.0 / 3.0, "0.3333333333333333"),
+            // Below Swift's exponent-notation floor of 1e-4, where a bare
+            // `.description` would say `1e-05`.
+            (0.00001, "0.00001"),
+            (0.000015, "0.000015"),
+            (-0.0000001, "-0.0000001"),
+            // At and above Swift's exponent-notation ceiling of 1e16.
+            (10000000000000000.0, "10000000000000000.0"),
+            (100000000000000000000.0, "100000000000000000000.0"),
+        ] {
+            assert_eq!(
+                fmt_matrix_entry(v), want,
+                "shared vector table: {v:?} must be spelled {want}"
+            );
+        }
+    }
+
+    /// The rule reaches the SYMBOLS instance matrix too, not just the
+    /// standard `transform` attribute — one `matrix_value` writer, so the
+    /// two cannot drift apart.
+    #[test]
+    fn both_matrix_writers_use_the_full_precision_spelling() {
+        let t = Transform::rotate(30.0);
+        assert!(
+            transform_attr(&Some(t)).contains("0.8660254037844387"),
+            "transform attr: {}", transform_attr(&Some(t))
+        );
+        let doc = make_doc(vec![Element::Live(
+            crate::geometry::live::LiveVariant::Reference(
+                crate::geometry::live::ReferenceElem {
+                    transform: Some(t),
+                    ..crate::geometry::live::ReferenceElem::new(
+                        crate::geometry::live::ElementRef("r1".to_string()),
+                        CommonProps::default(),
+                    )
+                },
+            ),
+        )]);
+        let svg = document_to_svg(&doc);
+        assert!(
+            svg.contains("data-jas-instance-transform=\"matrix(0.8660254037844387,"),
+            "instance transform kept 4dp:\n{svg}"
+        );
     }
 }

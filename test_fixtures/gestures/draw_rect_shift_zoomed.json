@@ -1,0 +1,63 @@
+[
+  {
+    "_doc": [
+      "SHIFTZOOM: the Shift-constrained Rect drag run OFF the identity view —",
+      "the square twin of draw_ellipse_shift_zoomed.json, same view and same",
+      "drag, so the two vectors differ only in the tool.",
+      "",
+      "draw_rect_shift.json runs at zoom 1.0, where the screen->document",
+      "conversion (`doc = (screen - view_offset) / zoom`) hands the tool exact",
+      "integers, so every doc-space anchor is dyadic and the arithmetic below is",
+      "exact by luck. That is why the original SHIFTCONSTRAIN smoke test — run",
+      "by hand at 100% zoom — saw a true square.",
+      "",
+      "At zoom 1.5 the anchor is NOT dyadic. Geometry, by hand, from",
+      "`doc = screen / 1.5` (offset 0):",
+      "",
+      "  press   screen ( 30,  50) -> doc ( 20, 100/3)",
+      "  release screen (120,  95) -> doc ( 80, 190/3)",
+      "",
+      "  ddx = 80 - 20       = 60     (the furthest reach)",
+      "  ddy = 190/3 - 100/3 = 30",
+      "  side = max(|ddx|, |ddy|) = 60     -> width = height = 60",
+      "",
+      "The drag is down-and-right, so the square grows into that quadrant from",
+      "the press point and the top-left corner stays the anchor: x = 20,",
+      "y = 100/3 = 33.3333 (4 dp, the canonical rounding).",
+      "",
+      "WHY THIS VECTOR NEEDS `expected_exact`. The canonical document JSON",
+      "rounds every float to 4 decimal places, so it CANNOT see the defect this",
+      "case exists for: before the fix the commit recovered the side as",
+      "`abs(doc_end_y - doc_start_y)`, re-subtracting the anchor that had just",
+      "been added to it, and 100/3 + 60 - 100/3 comes back one ulp heavy (the",
+      "sum crosses the 64 binade). width was 60.0 and height 60.00000000000001 —",
+      "not a square — and the 4-dp golden below reads 60.0 either way. The",
+      "`expected_exact` block is the real gate: it compares the committed",
+      "doubles at FULL precision, exactly as `expected_view` does for the view",
+      "triple.",
+      "",
+      "`rx`/`ry` in the golden are the rect's CORNER radii (both 0), not the",
+      "size — the size fields to pin here are width and height."
+    ],
+    "name": "draw_rect_shift_zoomed_is_a_square_at_non_dyadic_zoom",
+    "setup_svg": "circle_basic.svg",
+    "tool": "rect",
+    "view": {
+      "zoom_level": 1.5,
+      "view_offset_x": 0.0,
+      "view_offset_y": 0.0,
+      "viewport_w": 800.0,
+      "viewport_h": 600.0
+    },
+    "events": [
+      { "kind": "press", "x": 30, "y": 50 },
+      { "kind": "move", "x": 120, "y": 95, "dragging": true, "shift": true },
+      { "kind": "release", "x": 120, "y": 95, "shift": true }
+    ],
+    "expected_json": "draw_rect_shift_zoomed_expected.json",
+    "expected_exact": {
+      "path": [0, 1],
+      "fields": { "width": 60.0, "height": 60.0 }
+    }
+  }
+]

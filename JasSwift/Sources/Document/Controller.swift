@@ -33,10 +33,23 @@ struct BooleanCommon {
     /// The 1→1 survivor arms (SUBTRACT_FRONT / SUBTRACT_BACK / CROP / TRIM, and
     /// DIVIDE's designated operand): full Theseus preservation, §3.1. Rust's
     /// twin is `survivor.common().clone()`.
-    init(preserving e: Element) {
+    ///
+    /// TWO ELEMENTS, because a container operand is two things at once: [e] is
+    /// what the operand SPEAKS WITH (`booleanPaintSource` — its first paintable
+    /// leaf, or itself when it is one) and [operand] is the SELECTED element
+    /// this edit destroys. They are the same element for a leaf operand.
+    /// `opacity` is the one field that reads [operand] rather than [e], because
+    /// it is the one field a container really carries — see
+    /// `booleanComposedOpacity`.
+    ///
+    /// [operand] has NO DEFAULT deliberately. Swift rebuilds field by field, so
+    /// a defaulted parameter would have let every existing call site keep the
+    /// old, uncomposed answer in silence — the copy-site omission class this
+    /// port keeps paying for. Required, and the compiler enumerates the sites.
+    init(preserving e: Element, operand: Element) {
         name = e.name
         id = e.id
-        opacity = e.opacity
+        opacity = booleanComposedOpacity(operand)
         transform = e.transform
         locked = e.isLocked
         visibility = e.visibility
@@ -53,6 +66,116 @@ struct BooleanCommon {
 private func booleanToolOrigin(_ e: Element) -> String? {
     if case .path(let v) = e { return v.toolOrigin }
     return nil
+}
+
+/// THE ELEMENT AN OPERAND SPEAKS WITH, wherever a boolean result inherits from
+/// it. Twin: Rust's `boolean_paint_source`.
+///
+/// Both halves of the rule were already settled and the implementation applied
+/// only one of them. BOOLEAN.md §Operand rules: *"operands can be paths,
+/// GROUPS, text, or nested LiveElements"* — a container is a legitimate
+/// operand, and `elementToPolygonSet` has always flattened one correctly.
+/// BOOLEAN.md §Operand and paint rules: the result is *"painted with the
+/// frontmost operand's fill, stroke, opacity, and blend mode"*. But
+/// `Element.fill` and `Element.stroke` answer `nil` for `.group`/`.layer` —
+/// right for the data model, a group holds no paint of its own — so read RAW at
+/// this seam, a boolean over a group produced UNPAINTED, UNSTROKED artwork
+/// wearing the CONTAINER'S OWN NAME. Artist-visible in one click: select a
+/// group and a shape, press Union, and the result vanishes.
+///
+/// The resolution is the container ruling of 2026-07-29 (JYH at council: *"yes,
+/// recurse into members"*) — a container SPEAKS FOR ITS MEMBERS, at any depth —
+/// spent here exactly as `selectionStrokeForPanel` spends it for the Stroke
+/// panel's Weight field: the FIRST PAINTABLE LEAF, reached through
+/// `forEachPaintable`. So a group and its sole member answer alike, which is
+/// precisely the relation `anOperationOnAGroupEqualsTheSameOperationOnItsMember`
+/// measures across the whole action corpus.
+///
+/// NOT A WIDENING of `fill`/`stroke` themselves. Those are read at render,
+/// hit-test and panel seams; giving a container a paint of its own there would
+/// change three semantics at once. The expansion belongs at the point of USE,
+/// which is the same reason `mapPaintable`/`forEachPaintable` exist rather than
+/// a recursive `withFill`.
+///
+/// An empty container reaches no leaf and answers with ITSELF — i.e. no paint,
+/// the same `nil` the raw read gave. Nothing to inherit is the honest answer,
+/// not a defect to paper over.
+///
+/// KNOWN OPEN, deliberately not settled here: on the 1→1 survivor arms
+/// (subtract_front / subtract_back / crop / trim, and divide's designated
+/// operand) a MULTI-leaf container now hands its FIRST leaf's `name` and `id`
+/// to the product, which is election by position — the rule JYH rejected in
+/// both directions. The honest reading is that an N-leaf container collapsing
+/// to one polygon is §3.3's N→1 (unanimity plus a fresh mint), the same
+/// both-ports-at-once repair the DIVIDE and MERGE rows in
+/// `applyDestructiveBoolean` already wait on. Before this fix EVERY container
+/// operand answered `nil` at every one of those sites, so this narrows the open
+/// class rather than widening it.
+func booleanPaintSource(_ e: Element) -> Element {
+    var first: Element?
+    e.forEachPaintable { leaf in if first == nil { first = leaf } }
+    return first ?? e
+}
+
+/// THE OPACITY A BOOLEAN PRODUCT WEARS for one operand: the product of every
+/// opacity between the operand and the leaf it SPEAKS WITH, inclusive.
+/// RULED 2026-07-31 (`RULING-boolean-container-paint-2026-07-31.md`).
+/// Twin: Rust's `resolved_opacity`, and BOOLEAN.md §Container operands.
+///
+/// `booleanPaintSource` above settled `fill` and `stroke`, and it had no choice
+/// to make: a container has NO paint of its own (`fill()` ends `_ => nil`), so
+/// resolving to the member was the only available answer. **`opacity` is a
+/// different question.** A container carries a REAL opacity, so two true values
+/// exist — the container's and its leaf's — and the shipped fix picked one
+/// silently and inconsistently: this port read the resolved leaf's, Rust read
+/// the container's own. A second divergence, hiding under the first.
+///
+/// THE PRINCIPLE THAT DECIDES IT: for a DESTRUCTIVE operation, the result
+/// should LOOK LIKE WHAT IT CONSUMED. A group drawn at `0.5 × 0.8 = 0.4` came
+/// back at 0.8 here and 0.5 in Rust — either way the artwork visibly changes
+/// density at the instant of clicking, which no reading of BOOLEAN.md §paint
+/// justifies. The two true values are therefore COMBINED, not elected between,
+/// and the walk runs the WHOLE chain: nesting multiplies at every level.
+///
+/// THE HONEST LIMIT — write it down, do not let a later reader rediscover it as
+/// a bug. Where a group holds SEVERAL members at DIFFERENT opacities, **no rule
+/// preserves appearance**: flattening N differently-transparent shapes into one
+/// path is lossy by nature. Composition is EXACT for the single-visible-member
+/// case and an APPROXIMATION otherwise. The ruling is not "correct vs
+/// incorrect"; it is which approximation is least surprising, chosen to be
+/// exact precisely where an artist will notice.
+///
+/// BLEND MODE IS **OPEN** and is deliberately NOT composed here. Same shape but
+/// worse: opacities multiply, blend modes do not compose at all, so there is no
+/// combining operation to reach for. Unruled as of 2026-07-31 — the current
+/// behaviour stands until it is ruled, in both ports, and the two ports' current
+/// behaviours are NOT THE SAME: for a container operand this port answers with
+/// the resolved LEAF's mode and Rust answers with the CONTAINER'S OWN. That is a
+/// real divergence, reported rather than silently repaired — picking one here
+/// would be ruling the open question by whichever port got edited. See
+/// `booleanMergedCommon`.
+///
+/// The descent must reach the SAME leaf `booleanPaintSource` does, or the
+/// product would wear one operand's paint scaled by another's opacity. Both
+/// walk children in order and take the first subtree that reaches a paintable
+/// leaf; `anEmptyContainerComposesWithNothing` pins that they agree on the
+/// degenerate case, where no leaf is reached and the container's own opacity is
+/// the whole answer.
+func booleanComposedOpacity(_ e: Element) -> Double {
+    let kids: [Element]
+    switch e {
+    case .group(let g): kids = g.children
+    case .layer(let l): kids = l.children
+    // A leaf composes with nothing: the identity, so no non-container
+    // behaviour anywhere in `applyDestructiveBoolean` moves.
+    default: return e.opacity
+    }
+    for kid in kids {
+        var reachesALeaf = false
+        kid.forEachPaintable { _ in reachesALeaf = true }
+        if reachesALeaf { return e.opacity * booleanComposedOpacity(kid) }
+    }
+    return e.opacity
 }
 
 /// The `BooleanCommon` an N→1 merge product wears, minus its id (the caller
@@ -77,14 +200,30 @@ private func booleanToolOrigin(_ e: Element) -> String? {
 /// (`elementToPolygonSet`) contains ZERO transform references, so the result
 /// rings are RAW: a unanimous transform is the only one under which they are
 /// meaningful. What changes is that no operand is elected to donate one.
-func booleanMergedCommon(_ sources: [Element], front: Element) -> BooleanCommon {
+///
+/// `frontOperand` is the frontmost SELECTED element, of which `front` is the
+/// leaf it speaks with — the same pair `BooleanCommon(preserving:operand:)`
+/// takes, and for the same one field. See `booleanComposedOpacity`.
+func booleanMergedCommon(_ sources: [Element], front: Element,
+                         frontOperand: Element) -> BooleanCommon {
     func unanimous<T: Equatable>(_ get: (Element) -> T) -> T? {
         guard let first = sources.first.map(get) else { return nil }
         return sources.allSatisfy { get($0) == first } ? first : nil
     }
     var c = BooleanCommon()
     // Paint, per the ratified four-property rule.
-    c.opacity = front.opacity
+    //
+    // `opacity` is COMPOSED down the frontmost operand's container chain
+    // (RULED 2026-07-31); it is the one of the four that a container really
+    // carries, so it is the one that reads the OPERAND and not what the
+    // operand speaks with.
+    c.opacity = booleanComposedOpacity(frontOperand)
+    // `blendMode` is **OPEN**. Modes do not compose — there is no
+    // multiplication to reach for — so the ruling of 2026-07-31 deliberately
+    // left this alone and it keeps reading the resolved LEAF's, which is this
+    // port's pre-existing answer and NOT Rust's (it reads the container's own).
+    // Do not "finish the job" here without a ruling; see
+    // `booleanComposedOpacity`.
     c.blendMode = front.blendMode
     if let v = unanimous({ $0.transform }) { c.transform = v }
     if let v = unanimous({ $0.isLocked }) { c.locked = v }
@@ -1365,6 +1504,12 @@ public class Controller {
         guard paths.allSatisfy({ Array($0.dropLast()) == parent }) else { return }
         let elements = paths.map { doc.getElement($0) }
         let frontmost = elements.last!
+        // The frontmost operand may itself be a CONTAINER, which carries no
+        // paint of its own — read raw, an Alt-click Shape Mode over a group
+        // built an INVISIBLE compound. `booleanPaintSource` resolves it to the
+        // leaf that speaks for it; for a leaf operand it is the identity, so
+        // nothing else moves.
+        let paintSrc = booleanPaintSource(frontmost)
         let cs = CompoundShape(
             operation: operation,
             operands: elements,
@@ -1373,9 +1518,16 @@ public class Controller {
             // frontmost operand's PAINT is inherited, which is exactly what
             // Rust's `make_compound_shape_with_op` copies. So: unnamed.
             name: nil,
-            fill: frontmost.fill,
-            stroke: frontmost.stroke,
-            opacity: 1.0,
+            fill: paintSrc.fill,
+            stroke: paintSrc.stroke,
+            // COMPOSED down the frontmost operand's container chain (RULED
+            // 2026-07-31). This slot was a literal `1.0`, which was wrong twice
+            // over: Rust already copied `frontmost.common().opacity`, so ANY
+            // half-transparent operand — container or plain leaf — came out
+            // opaque here and translucent there. `booleanComposedOpacity` is
+            // the identity on a leaf, so it closes that divergence in the same
+            // stroke as it answers the container case.
+            opacity: booleanComposedOpacity(frontmost),
             transform: frontmost.transform,
             locked: false,
             visibility: frontmost.visibility
@@ -1547,6 +1699,13 @@ public class Controller {
         let parent = Array(paths[0].dropLast())
         guard paths.allSatisfy({ Array($0.dropLast()) == parent }) else { return }
         let elements = paths.map { doc.getElement($0) }
+        // WHAT EACH OPERAND SPEAKS WITH, one per operand and in operand order.
+        // GEOMETRY still reads `elements` — `elementToPolygonSet` flattens a
+        // container's whole subtree and always did — while everything the
+        // RESULT INHERITS reads `paintSources`, because a container carries no
+        // paint and no claim of its own (see `booleanPaintSource`). For a leaf
+        // operand the two arrays are identical, so no existing behaviour moves.
+        let paintSources = elements.map(booleanPaintSource)
         let precision = options.precision
 
         // outputs: one (polygonSet, fill, stroke, common) tuple per fragment —
@@ -1557,7 +1716,7 @@ public class Controller {
             let sets = elements.map { elementToPolygonSet($0, precision: precision) }
             let op: CompoundOperation = opName == "union" ? .union
                 : opName == "intersection" ? .intersection : .exclude
-            let front = elements.last!
+            let front = paintSources.last!
             // N → 1. THE REJECTED RULE IN DISGUISE lived on the other side of
             // this line in Rust (`front.common().clone()` — "the frontmost
             // source keeps the id", elected by z-order) and as a total DROP
@@ -1567,12 +1726,24 @@ public class Controller {
             // one-to-one (the cardinality law), so the product wears a MINTED
             // id, its paint from the frontmost, and everything else by
             // unanimity (EDIT_SEMANTICS_FREEZE.md §3.3, §3.6).
-            var common = booleanMergedCommon(elements, front: front)
+            // Unanimity ranges over what SPOKE, not over the wrappers around
+            // it: the container ruling makes a selected group shorthand for its
+            // members, so a group's own `name` is not a voter — it is not an
+            // operand, its members are. Reading `elements` here is what put the
+            // CONTAINER'S NAME on the product of a union.
+            var common = booleanMergedCommon(paintSources, front: front,
+                                             frontOperand: elements.last!)
             // Identity is minted only when an identity is actually AT STAKE —
             // i.e. when some operand carried one. Identity in this app is LAZY
             // (VISION.md §6.2), so a merge of id-less operands kills nothing and
             // the product takes the fresh element's documented default, `nil`.
             // Rust's arm is guarded identically.
+            //
+            // This guard reads `elements`, NOT `paintSources`, and the split is
+            // deliberate: "at stake" asks what this edit DESTROYS, and a
+            // container operand is destroyed along with its members, so its own
+            // id counts. What the product INHERITS is a different question —
+            // that is the line above, and only what spoke may answer it.
             if elements.contains(where: { $0.id != nil }) {
                 var existing = doc.elementIds
                 guard let minted = mintUniqueIds(1, existing: &existing,
@@ -1588,22 +1759,27 @@ public class Controller {
                             common))
         case "subtract_front", "crop":
             let cutter = elementToPolygonSet(elements.last!, precision: precision)
-            for survivor in elements.dropLast() {
+            for (i, survivor) in elements.dropLast().enumerated() {
                 let sSet = elementToPolygonSet(survivor, precision: precision)
                 let res = opName == "crop"
                     ? booleanIntersect(sSet, cutter)
                     : booleanSubtract(sSet, cutter)
                 // 1 → 1: the survivor's identity LIVES (§3.6's survivor row).
-                outputs.append((res, survivor.fill, survivor.stroke,
-                                BooleanCommon(preserving: survivor)))
+                // The survivor is cut as a WHOLE (its subtree, via the set
+                // above) but speaks with its leaf — a grouped survivor kept its
+                // geometry and lost its paint before this.
+                let src = paintSources[i]
+                outputs.append((res, src.fill, src.stroke,
+                                BooleanCommon(preserving: src, operand: survivor)))
             }
         case "subtract_back":
             let cutter = elementToPolygonSet(elements.first!, precision: precision)
-            for survivor in elements.dropFirst() {
+            for (i, survivor) in elements.enumerated().dropFirst() {
                 let sSet = elementToPolygonSet(survivor, precision: precision)
+                let src = paintSources[i]
                 outputs.append((booleanSubtract(sSet, cutter),
-                                survivor.fill, survivor.stroke,
-                                BooleanCommon(preserving: survivor)))
+                                src.fill, src.stroke,
+                                BooleanCommon(preserving: src, operand: survivor)))
             }
         case "divide":
             // Walk operands back-to-front, maintaining a partition
@@ -1636,9 +1812,10 @@ public class Controller {
                 // rather than fixed one-sidedly — the repair must land in both
                 // ports in one commit, exactly as the transform-blind class is
                 // scheduled to.
-                let src = elements[paintIdx]
+                let src = paintSources[paintIdx]
                 outputs.append((region, src.fill, src.stroke,
-                                BooleanCommon(preserving: src)))
+                                BooleanCommon(preserving: src,
+                                              operand: elements[paintIdx])))
             }
         case "trim", "merge":
             let operandSets = elements.map { elementToPolygonSet($0, precision: precision) }
@@ -1649,9 +1826,14 @@ public class Controller {
                     region = booleanSubtract(region, later)
                 }
                 if !region.isEmpty {
-                    // TRIM is 1 → 1 per operand: full preservation.
-                    trimmed.append((region, elements[i].fill, elements[i].stroke,
-                                    BooleanCommon(preserving: elements[i])))
+                    // TRIM is 1 → 1 per operand: full preservation. Of what the
+                    // operand SPEAKS WITH — MERGE below then compares those
+                    // fills for equality, and two grouped operands both reading
+                    // `nil` would have looked identical for the wrong reason.
+                    let src = paintSources[i]
+                    trimmed.append((region, src.fill, src.stroke,
+                                    BooleanCommon(preserving: src,
+                                                  operand: elements[i])))
                 }
             }
             if opName == "trim" {

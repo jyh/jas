@@ -195,8 +195,10 @@ import Testing
                       transform: Transform(e: 36, f: 18)))
     ])])
     let svg = documentToSvg(doc)
-    // translate(36pt, 18pt) -> e=48px, f=24px
-    #expect(svg.contains("transform=\"matrix(1,0,0,1,48,24)\""))
+    // translate(36pt, 18pt) -> e=48px, f=24px. The four MULTIPLIERS ride the
+    // matrix-entry spelling rule (R2) and so always carry a decimal point;
+    // e/f are POSITIONS and stay on the 4dp `fmt`. See `fmtMatrixEntry`.
+    #expect(svg.contains("transform=\"matrix(1.0,0.0,0.0,1.0,48,24)\""))
 }
 
 @Test func svgStrokeLinecapLinejoin() {
@@ -1380,4 +1382,314 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     #expect(s.startArrowScale == 100)
     #expect(s.endArrowScale == 100)
     #expect(s.arrowAlign == .tipAtEnd)
+}
+
+// MARK: - Matrix entry precision (R2, ruled 2026-07-31)
+//
+// These tests measure the PROPERTY -- that a matrix which leaves the writer
+// and comes back is still the SAME LINEAR MAP -- not the spelling that
+// achieves it. The spelling is pinned separately, and only because it is a
+// cross-port contract; if a future edit finds a better spelling, only those
+// tests should have to move. Mirrors the `MATRIX ENTRY PRECISION` block in
+// jas_dioxus/src/geometry/svg.rs.
+
+/// One save-and-reopen for an element-level transform: doc -> svg -> doc.
+/// Returns the matrix as the reopened document sees it. Mirrors Rust's
+/// `reopen`.
+private func reopenTransform(_ t: Transform) -> Transform {
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 100, height: 50,
+                   fill: Fill(color: Color(r: 1, g: 0, b: 0)),
+                   transform: t))
+    ])])
+    let reopened = svgToDocument(documentToSvg(doc))
+    guard let m = reopened.layers[0].children[0].transform else {
+        Issue.record("the SVG round trip dropped the transform entirely")
+        return Transform.identity
+    }
+    return m
+}
+
+/// A rotation matrix is ORTHONORMAL: `a² + b² == 1`, to within the ulp or two
+/// that `cos`/`sin` themselves cost. Quantising the multipliers destroys that
+/// -- at 4dp cos30 lands on `0.866`, the reopened map shrinks by 2.2e-5 and
+/// carries a shear it never had.
+///
+/// Fuzzed over the whole circle rather than pinned at 30°: a rule about a
+/// MULTIPLIER has no lucky angles the way DYADICSIDE's round trip had lucky
+/// zooms, but a single vector would still leave a future edit free to be
+/// right in one place and wrong everywhere.
+@Test func rotationStaysOrthonormalAcrossASaveAndReopen() {
+    let tol = 4.0 * Double.ulpOfOne
+    var worstDeg = 0.0
+    var worstErr = 0.0
+    for deg in 0..<360 {
+        let angle = Double(deg)
+        let m = reopenTransform(Transform.rotate(angle))
+        let err = abs(m.a * m.a + m.b * m.b - 1.0)
+        if err > worstErr { worstErr = err; worstDeg = angle }
+    }
+    #expect(worstErr <= tol,
+            "a reopened rotation is no longer orthonormal: worst |a²+b²-1| = \(worstErr) at \(worstDeg)°, tolerance \(tol)")
+}
+
+/// The four MULTIPLIERS survive a save-and-reopen BIT-EXACTLY.
+///
+/// They can, and so they must: `a`/`b`/`c`/`d` are unitless, so unlike `e`/`f`
+/// they never pass through the pt<->px conversion, and nothing but the
+/// writer's own precision stands between the value that was saved and the
+/// value that comes back.
+@Test func matrixMultipliersSurviveASaveAndReopenBitExactly() {
+    for deg in 0..<360 {
+        let t = Transform.rotate(Double(deg))
+        let m = reopenTransform(t)
+        for (name, got, want) in [("a", m.a, t.a), ("b", m.b, t.b),
+                                  ("c", m.c, t.c), ("d", m.d, t.d)] {
+            #expect(got.bitPattern == want.bitPattern,
+                    "rotate(\(deg)°) came back with \(name) = \(got), saved \(want)")
+        }
+    }
+}
+
+/// Once reopened, a matrix is a FIXPOINT: saving and reopening it again
+/// changes not one bit of any of the SIX entries.
+///
+/// This is the property that keeps drift from COMPOUNDING across sessions,
+/// and it is stated over all six deliberately. `e`/`f` are POSITIONS and stay
+/// at 4dp, so they are NOT expected to survive the first save unchanged --
+/// they are expected to SETTLE on it, and then never move again however many
+/// times the file is opened.
+@Test func aReopenedMatrixIsBitIdenticalOnEveryLaterSaveAndReopen() {
+    for deg in 0..<360 {
+        for (tx, ty) in [(0.0, 0.0), (12.3456789, -98.7654321), (0.00001, 5000.25)] {
+            let r = Transform.rotate(Double(deg))
+            let t = Transform(a: r.a, b: r.b, c: r.c, d: r.d, e: tx, f: ty)
+            let m1 = reopenTransform(t)
+            let m2 = reopenTransform(m1)
+            for (name, got, want) in [("a", m2.a, m1.a), ("b", m2.b, m1.b),
+                                      ("c", m2.c, m1.c), ("d", m2.d, m1.d),
+                                      ("e", m2.e, m1.e), ("f", m2.f, m1.f)] {
+                #expect(got.bitPattern == want.bitPattern,
+                        "rotate(\(deg)°)+translate(\(tx),\(ty)) is not a fixpoint: \(name) moved from \(want) to \(got) on the second reopen")
+            }
+        }
+    }
+}
+
+/// THE ARTIST SYMPTOM, in one test: rotate a logo, save, reopen, rotate back
+/// -- and land on the guides you started from.
+@Test func rotateSaveReopenRotateBackReturnsToTheIdentity() {
+    let tol = 4.0 * Double.ulpOfOne
+    for step in 0..<720 {
+        let angle = Double(step) * 0.5
+        let there = reopenTransform(Transform.rotate(angle))
+        let back = Transform.rotate(-angle).multiply(there)
+        for (name, got, want) in [("a", back.a, 1.0), ("b", back.b, 0.0),
+                                  ("c", back.c, 0.0), ("d", back.d, 1.0)] {
+            #expect(abs(got - want) <= tol,
+                    "rotate(\(angle)°), save, reopen, rotate(-\(angle)°) did not return to the identity: \(name) = \(got), expected \(want)")
+        }
+    }
+}
+
+/// And the error does not merely persist, it COMPOUNDS. Each new transform
+/// composes onto the reloaded one (the Rust twin's `op_apply.rs`
+/// `matrix.multiply(&current)`), so a per-save error in the multipliers is
+/// re-multiplied on every subsequent edit.
+///
+/// SEVERAL ANGLES, AND ORTHONORMALITY CHECKED AT EVERY CYCLE, because a
+/// single angle can be lucky in a way that hides the whole defect: 15° at 4dp
+/// is a PERIODIC orbit -- `(0.9659, 0.2588)` and its rotations are each
+/// other's quantised images, so after 24 cycles it lands back on an exact
+/// `(1, 0)` and the accumulated drift cancels to nothing.
+@Test func repeatedSaveAndReopenCyclesDoNotAccumulateScaleDrift() {
+    // 64 ulp: 24 chained `multiply` calls cost ~12 ulp of their own even with
+    // a perfect writer, and the defect this guards against is 3e-5 to 6e-4 --
+    // nine orders of magnitude away.
+    let tol = 64.0 * Double.ulpOfOne
+    for stepDeg in [7.0, 15.0, 30.0, 41.3, 0.5, 123.456] {
+        var m = Transform.identity
+        for cycle in 1...24 {
+            m = reopenTransform(Transform.rotate(stepDeg).multiply(m))
+            let err = abs(m.a * m.a + m.b * m.b - 1.0)
+            #expect(err <= tol,
+                    "after \(cycle) rotate(\(stepDeg)°)/save/reopen cycles the element is scaled by \((m.a * m.a + m.b * m.b).squareRoot()): |a²+b²-1| = \(err), tolerance \(tol)")
+        }
+    }
+}
+
+// MARK: - The matrix-entry SPELLING rule (the cross-port contract)
+
+/// The `matrix(...)` argument list of the first `transform=` attribute in the
+/// document, as emitted.
+private func emittedMatrixArgs(_ t: Transform) -> String {
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 100, height: 50, transform: t))
+    ])])
+    let svg = documentToSvg(doc)
+    guard let open = svg.range(of: " transform=\"matrix("),
+          let close = svg.range(of: ")\"", range: open.upperBound..<svg.endIndex) else {
+        Issue.record("no transform=\"matrix(...)\" in:\n\(svg)")
+        return ""
+    }
+    return String(svg[open.upperBound..<close.lowerBound])
+}
+
+/// The spelling of one multiplier, as the writer emits it.
+private func spelledMultiplier(_ v: Double) -> String {
+    let args = emittedMatrixArgs(Transform(a: v))
+    return args.split(separator: ",", omittingEmptySubsequences: false)
+        .first.map(String.init) ?? ""
+}
+
+/// The multiplier spelling, pinned value by value.
+///
+/// This is a BYTE-LEVEL CROSS-PORT CONTRACT and the only place in the SVG
+/// writer that is one: jas_dioxus and JasSwift must spell a matrix multiplier
+/// the same way or the same artwork saved by the two ports differs on disk.
+/// The three languages in this project spell a float three different ways by
+/// default (Rust's `Display` never uses exponent notation and never appends
+/// `.0`; Swift's `.description` and Python's `repr` do both, outside
+/// [1e-4, 1e16)), so neither port may use its default -- the rule is written
+/// out explicitly in both. Mirrors the Rust twin's spelling tests.
+@Test func matrixMultiplierSpelling() {
+    // (value, expected spelling) -- fed through the `a` slot.
+    let cases: [(Double, String)] = [
+        (1.0, "1.0"),                                   // integral: one kept digit
+        (0.0, "0.0"),
+        (-0.0, "-0.0"),                                 // the sign survives
+        (2.0, "2.0"),
+        (-1.0, "-1.0"),
+        (0.5, "0.5"),
+        (-2.5, "-2.5"),
+        (0.1, "0.1"),                                   // shortest, not 0.1000000000000000055
+        (0.7071, "0.7071"),                             // a 4dp value is untouched
+        (1.0 / 3.0, "0.3333333333333333"),
+        (0.8660254037844387, "0.8660254037844387"),     // cos 30°
+        (0.49999999999999994, "0.49999999999999994"),   // sin 30°
+        (0.7071067811865476, "0.7071067811865476"),     // cos 45°
+        (1e-5, "0.00001"),                              // NOT 1e-05
+        (1e-7, "0.0000001"),
+        (1e16, "10000000000000000.0"),                  // NOT 1e+16
+        // SHORTEST, not EXACT. Above 2^53 the two part company: the double
+        // nearest 1e23 has the exact value 99999999999999991611392, and
+        // printing THAT would round-trip perfectly while disagreeing with
+        // the Rust twin byte for byte. Rule 3 says shortest.
+        (1e23, "100000000000000000000000.0"),
+        (2.5e18, "2500000000000000000.0"),
+        (-1e17, "-100000000000000000.0"),
+    ]
+    for (v, want) in cases {
+        let got = spelledMultiplier(v)
+        #expect(got == want, "matrix multiplier \(v) spelled '\(got)', expected '\(want)'")
+    }
+}
+
+/// Clause 1: no exponent notation, at any magnitude. A bare Swift
+/// `.description` would spell `1e-5` as `1e-05`, agreeing on the value and
+/// disagreeing on the bytes.
+@Test func matrixEntrySpellingNeverUsesExponentNotation() {
+    for v in [1e-5, 1.5e-7, -3e-9, 1e20, 2.5e18, 1e16, -1e17,
+              Double.leastNormalMagnitude, Double.greatestFiniteMagnitude, 5e-324] {
+        let s = spelledMultiplier(v)
+        #expect(!s.contains("e") && !s.contains("E"),
+                "\(v) was spelled \(s), which is exponent notation")
+    }
+}
+
+/// Clauses 2 and 3: exactly one decimal point, always present, with a
+/// fraction that is never empty and never has a strippable trailing zero.
+/// A bare Rust `Display` would spell `1.0` as `1`.
+@Test func matrixEntrySpellingAlwaysHasExactlyOnePointAndNoPadding() {
+    for v in [0.0, -0.0, 1.0, -2.0, 0.5, 100.0, 1e20, 1e-5,
+              0.8660254037844387, 0.25881904510252074, -0.5] {
+        let s = spelledMultiplier(v)
+        #expect(s.filter { $0 == "." }.count == 1, "\(v) was spelled \(s)")
+        let frac = s.split(separator: ".").count > 1
+            ? String(s.split(separator: ".")[1]) : ""
+        #expect(!frac.isEmpty, "\(v) was spelled \(s) with an empty fraction")
+        #expect(frac == "0" || !frac.hasSuffix("0"),
+                "\(v) was spelled \(s) with an unstripped trailing zero")
+    }
+}
+
+/// Clause 4: negative zero keeps its sign -- a naive spelling gives `-0`, and
+/// the 4dp `fmt` gives `-0`; the rule gives `-0.0`, and it must still READ
+/// BACK as negative zero.
+@Test func matrixEntrySpellingPreservesNegativeZero() {
+    #expect(spelledMultiplier(0.0) == "0.0")
+    #expect(spelledMultiplier(-0.0) == "-0.0")
+    #expect(Double(spelledMultiplier(-0.0))!.sign == .minus, "a reopened -0.0 lost its sign")
+    #expect(Double(spelledMultiplier(0.0))!.sign == .plus)
+}
+
+/// The reason the whole rule exists: what is printed reads back as the same
+/// Double, BIT FOR BIT. Fuzzed over raw bit patterns rather than a pretty
+/// range, because the hard cases are the ones nobody would think to type --
+/// subnormals, values near a binade edge, 17-digit mantissas. A fixed
+/// `%.17f` fails this, mis-rounding by one ulp.
+///
+/// Same xorshift64 and same pi seed as the Rust twin, so the two ports walk
+/// the SAME 200k values: a spelling that diverges between the ports on some
+/// exotic bit pattern is then a difference the two suites can be diffed on,
+/// not one that waits for an artist to find it.
+@Test func matrixEntrySpellingRoundTripsBitExactly() {
+    var state: UInt64 = 0x243F_6A88_85A3_08D3
+    let fixed: [Double] = [
+        0.0, -0.0, 1.0, -1.0, 0.8660254037844387, 0.5,
+        1.0 / 3.0, Double.leastNormalMagnitude, 5e-324,
+        Double.greatestFiniteMagnitude, -Double.greatestFiniteMagnitude,
+    ]
+    var checked = 0
+    for i in 0..<200_000 {
+        var v: Double
+        if i < fixed.count {
+            v = fixed[i]
+        } else {
+            state ^= state << 13
+            state ^= state >> 7
+            state ^= state << 17
+            v = Double(bitPattern: state)
+        }
+        guard v.isFinite else { continue }
+        let s = fmtMatrixEntry(v)
+        guard let back = Double(s) else {
+            Issue.record("\(v) was spelled \(s), which does not parse as a Double")
+            continue
+        }
+        if back.bitPattern != v.bitPattern {
+            Issue.record("\(v) was spelled \(s), which reads back as \(back)")
+            break
+        }
+        checked += 1
+    }
+    #expect(checked > 190_000, "the fuzz checked only \(checked) finite values")
+}
+
+/// Positions do NOT ride the rule: `e`/`f` are translations in px and keep
+/// the writer's 4dp `fmt`, exactly as `x`, `y`, `rx` and the path data do.
+/// The surface of the spelling rule is deliberately narrow -- making
+/// byte-level float formatting a cross-language contract corpus-wide would
+/// put it in the layer that exists to DETECT contract breaks.
+@Test func matrixTranslationKeepsTheFourDecimalSpelling() {
+    // 36pt -> 48px, 18pt -> 24px: integral, and written without a `.0`.
+    #expect(emittedMatrixArgs(Transform(e: 36, f: 18)) == "1.0,0.0,0.0,1.0,48,24")
+    // A non-representable translation is still rounded to 4dp, not spelled
+    // out: (1/3)pt -> 0.4444444444444444px -> "0.4444".
+    let args = emittedMatrixArgs(Transform(e: 1.0 / 3.0, f: 0))
+    #expect(args == "1.0,0.0,0.0,1.0,0.4444,0", "got '\(args)'")
+}
+
+/// The instance transform (SYMBOLS.md §4 / Fork F2) rides the same rule --
+/// it is the same matrix format written by a second function, and a rule
+/// applied to only one of the two writers is a divergence waiting to happen.
+@Test func instanceTransformRidesTheMatrixSpellingRule() {
+    let doc = Document(layers: [Layer(children: [
+        .rect(Rect(x: 0, y: 0, width: 36, height: 36, id: "r1")),
+        .live(.reference(ReferenceElem(target: ElementRef("r1"), name: nil, id: "i1",
+                                       instanceTransform: Transform.rotate(30)))),
+    ])])
+    let svg = documentToSvg(doc)
+    #expect(svg.contains("data-jas-instance-transform=\"matrix(0.8660254037844387,0.49999999999999994,-0.49999999999999994,0.8660254037844387,0,0)\""),
+            "instance transform not spelled at full multiplier precision:\n\(svg)")
 }

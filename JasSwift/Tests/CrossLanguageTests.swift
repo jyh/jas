@@ -3192,6 +3192,15 @@ private let gestureFixtures = [
     "draw_ellipse.json",
     "draw_ellipse_shift.json",
     "draw_rect_shift.json",
+    // SHIFTZOOM: the same two Shift drags at zoom 1.5, where the doc-space
+    // anchor is NOT dyadic. The pair above runs at zoom 1, where every anchor
+    // is an exact integer and a commit that RECOVERS the constrained side by
+    // re-subtracting the anchor happens to be exact — which is why
+    // SHIFTCONSTRAIN shipped a Shift that only drew a true circle/square at
+    // 100% zoom. Both cases carry `expected_exact`, since the 4-dp canonical
+    // golden cannot see the one-ulp gap between rx and ry.
+    "draw_ellipse_shift_zoomed.json",
+    "draw_rect_shift_zoomed.json",
     "draw_rounded_rect.json",
     "draw_polygon.json",
     "draw_star.json",
@@ -3392,15 +3401,75 @@ private func runGestureModel(_ tc: [String: Any]) -> Model {
     return model
 }
 
+/// Full-precision value of one named geometry field, for the `expected_exact`
+/// assertion below. Deliberately a short, explicit table rather than a
+/// reflective lookup: a fixture naming a field this list does not carry is a
+/// fixture bug, and saying so loudly beats silently asserting nothing. Mirrors
+/// Rust `gesture_exact_field`.
+private func gestureExactField(_ el: Element, _ field: String) -> Double? {
+    switch (el, field) {
+    case (.ellipse(let e), "cx"): return e.cx
+    case (.ellipse(let e), "cy"): return e.cy
+    case (.ellipse(let e), "rx"): return e.rx
+    case (.ellipse(let e), "ry"): return e.ry
+    case (.rect(let r), "x"): return r.x
+    case (.rect(let r), "y"): return r.y
+    case (.rect(let r), "width"): return r.width
+    case (.rect(let r), "height"): return r.height
+    default: return nil
+    }
+}
+
+/// OPTIONAL second assertion: `expected_exact`.
+///
+/// The canonical document JSON rounds every float to 4 decimal places, which is
+/// right for a cross-language golden but blind to a one-ulp defect.
+/// Shift-constrained drawing is exactly that kind of contract — a circle is a
+/// circle only if rx and ry are the SAME double, and at a non-dyadic zoom a
+/// commit that re-derives the radius from a coordinate misses by ~1e-14, which
+/// the golden cannot show. This block names an element by path and pins chosen
+/// fields at FULL precision.
+///
+/// The comparison is EXACT (`==` on Double), on the same reasoning as
+/// `assertActionView`: both ports run the same IEEE-754 double operations on the
+/// same inputs and the fixture literals are shortest-round-trip forms, so any
+/// difference is a real divergence, not a formatting artifact. Cases without the
+/// block are unaffected. Mirrors Rust `assert_gesture_exact`.
+private func assertGestureExact(_ tc: [String: Any], _ doc: Document) {
+    guard let exact = tc["expected_exact"] as? [String: Any] else { return }
+    let name = tc["name"] as! String
+    let path = (exact["path"] as! [NSNumber]).map { $0.intValue }
+    guard let el = doc.tryGetElement(path) else {
+        Issue.record("expected_exact: '\(name)' has no element at path \(path)")
+        return
+    }
+    let fields = exact["fields"] as! [String: NSNumber]
+    for (field, wantNum) in fields {
+        let want = wantNum.doubleValue
+        guard let got = gestureExactField(el, field) else {
+            Issue.record("expected_exact: field \(field) is not readable on this element kind")
+            continue
+        }
+        #expect(
+            got == want,
+            """
+            Gesture test '\(name)': element \(path) field \(field) is \(got), \
+            expected EXACTLY \(want) (delta \(got - want))
+            """)
+    }
+}
+
 /// Mirror of `assertOperationTest`: replay the gesture and compare the canonical
 /// document JSON against the pinned golden, dumping EXPECTED/ACTUAL on mismatch.
+/// Then apply the case's optional full-precision `expected_exact` pins.
 /// Mirrors Rust `assert_gesture_test`.
 private func assertGestureTest(_ tc: [String: Any]) {
     let name = tc["name"] as! String
     let expectedFile = tc["expected_json"] as! String
     let expected = readFixture("gestures/\(expectedFile)")
         .trimmingCharacters(in: .whitespacesAndNewlines)
-    let actual = documentToTestJson(runGestureModel(tc).document)
+    let document = runGestureModel(tc).document
+    let actual = documentToTestJson(document)
 
     if actual != expected {
         print("=== EXPECTED (\(name)) ===")
@@ -3409,6 +3478,8 @@ private func assertGestureTest(_ tc: [String: Any]) {
         print(actual)
     }
     #expect(actual == expected, "Gesture test '\(name)' failed: canonical JSON mismatch")
+
+    assertGestureExact(tc, document)
 }
 
 /// Inc-1 of the shared gesture-fixture corpus: replay each fixture's pointer
@@ -3423,6 +3494,508 @@ private func assertGestureTest(_ tc: [String: Any]) {
             assertGestureTest(tc)
         }
     }
+}
+
+// ===============================================================
+// THE CIRCLE INVARIANT — a Shift-constrained draw is SQUARE
+// BIT-EXACTLY, at any zoom and any pan.
+//
+//     ellipse.rx == ellipse.ry        rect.width == rect.height
+//
+// Built as a CHECKER with a GENERATIVE lane rather than as more gesture
+// vectors, because vectors are the wrong instrument here. DYADICSIDE
+// fixed the cause (the constrained side is CARRIED in `doc_w`/`doc_h`,
+// never RECOVERED by re-subtracting the anchor) but pinned it with two
+// hand-picked drags, and the round trip `(anchor + side) - anchor` only
+// loses an ulp when the sum crosses a binade — so most candidate vectors
+// are exact BY LUCK and the original defect needed a SEARCHED-FOR vector
+// to show itself.
+//
+// Three lanes, in the ruled order — the checker is the law, the corpus
+// is its witnesses, the generative lane is its growing confidence:
+//
+//   `checkShiftConstrain`        the predicate (the law)
+//   `shiftConstrainWitnesses`    the named corpus, deterministic
+//   `shiftConstrainGenerative`   fresh vectors, fresh seed each run
+//
+// All three read test_fixtures/properties/shift_constrain_square.json,
+// whose `_doc` carries the full rationale. Mirrors Rust
+// `check_shift_constrain` / `shift_constrain_witnesses` /
+// `shift_constrain_generative` (jas_dioxus/src/cross_language_test.rs).
+// ---------------------------------------------------------------
+
+/// One Shift-constrained draw, in the terms the checker takes: the view it
+/// happens on and the two viewport points that bracket it. Mirrors Rust
+/// `ShiftDraw`.
+private struct ShiftDraw {
+    var zoom: Double
+    var offsetX: Double
+    var offsetY: Double
+    var pressX: Double
+    var pressY: Double
+    var releaseX: Double
+    var releaseY: Double
+
+    /// The gesture case this draw denotes: press, one dragging move with Shift
+    /// held, release at the same point with Shift held. Shaped for
+    /// `runGestureModel`, so the checker drives the PRODUCTION CanvasTool seam
+    /// through the same replay path the gesture corpus uses — not a private
+    /// re-derivation of what the tool would have done.
+    func gestureCase(tool: String, setupSvg: String, viewport: (Double, Double)) -> [String: Any] {
+        [
+            "name": "shift_constrain/\(tool)",
+            "setup_svg": setupSvg,
+            "tool": tool,
+            "view": [
+                "zoom_level": zoom,
+                "view_offset_x": offsetX,
+                "view_offset_y": offsetY,
+                "viewport_w": viewport.0,
+                "viewport_h": viewport.1,
+            ] as [String: Any],
+            "events": [
+                ["kind": "press", "x": pressX, "y": pressY] as [String: Any],
+                ["kind": "move", "x": releaseX, "y": releaseY,
+                 "dragging": true, "shift": true] as [String: Any],
+                ["kind": "release", "x": releaseX, "y": releaseY,
+                 "shift": true] as [String: Any],
+            ],
+        ]
+    }
+}
+
+/// THE CHECKER. Replay `draw` with `tool` and rule the committed element
+/// legal: it must EXIST at `path`, and its two named fields must be the SAME
+/// Double.
+///
+/// Returns `nil` when legal, a complaint when not — a predicate rather than an
+/// assertion, so the generative lane can collect several failures and report
+/// the shape of them instead of aborting on the first.
+///
+/// The equality is `==`, with no tolerance band, deliberately. A circle is a
+/// circle only if the radii are the same Double: the model types the shape by
+/// comparing them and the 4-decimal-place canonical golden cannot see a 1e-14
+/// gap, so an "almost equal" pair is exactly the defect this exists to catch.
+///
+/// Mirrors Rust `check_shift_constrain`.
+private func checkShiftConstrain(
+    _ draw: ShiftDraw,
+    tool: String,
+    fields: (String, String),
+    setupSvg: String,
+    path: [Int],
+    viewport: (Double, Double)
+) -> String? {
+    let tc = draw.gestureCase(tool: tool, setupSvg: setupSvg, viewport: viewport)
+    let doc = runGestureModel(tc).document
+    guard let el = doc.tryGetElement(path) else {
+        return """
+            \(tool): nothing was committed at path \(path) — the 1-pixel commit \
+            guard suppressed the draw, so this case asserts nothing
+            """
+    }
+    // `gestureExactField` returns nil for a field it does not carry — the same
+    // explicit table the `expected_exact` channel reads, so a fixture naming an
+    // unreadable field fails loudly instead of asserting nothing.
+    guard let a = gestureExactField(el, fields.0), let b = gestureExactField(el, fields.1) else {
+        return "\(tool): fields \(fields.0)/\(fields.1) are not readable on this element kind"
+    }
+    if a == b { return nil }
+    return """
+        \(tool): \(fields.0) = \(a) but \(fields.1) = \(b) (delta \(b - a)) — a \
+        Shift-constrained draw must be square BIT-EXACTLY; view zoom=\(draw.zoom) \
+        offset=(\(draw.offsetX), \(draw.offsetY)), press=(\(draw.pressX), \(draw.pressY)), \
+        release=(\(draw.releaseX), \(draw.releaseY))
+        """
+}
+
+/// THE MUTANT — the PRE-DYADICSIDE spelling, kept so the checker's teeth can be
+/// measured rather than assumed.
+///
+/// This is NOT a second copy of the implementation; it is the BUG, written
+/// down. Before DYADICSIDE the commit recovered the half-side as
+/// `abs(doc_end - doc_start) / 2`, re-subtracting the anchor that had just been
+/// added to it, and that round trip is not exact away from a dyadic zoom.
+/// Returns the pair (x half-side, y half-side) the old spelling would have
+/// committed; they differ exactly on the vectors that spelling gets wrong.
+///
+/// Used two ways: every witness asserts that the mutant's verdict matches its
+/// recorded `discriminating` flag, and the generative lane refuses a run in
+/// which too few of its fresh vectors could have caught the bug. A checker that
+/// cannot fail the bug it was written for is worth zero, so that is measured
+/// continuously.
+///
+/// IF THE TOOLS' CONSTRAINT ARITHMETIC EVER CHANGES SHAPE, this must be
+/// re-derived or deleted outright — a stale mutant measures nothing while
+/// looking like it measures something. Spelled to match the YAML step for step,
+/// including `0.0 - side` for the negative branch (the expression language's
+/// `0 - max(...)`). Mirrors Rust `dyadicside_mutant`.
+private func dyadicsideMutant(_ draw: ShiftDraw) -> (Double, Double) {
+    // doc = (screen - view_offset) / zoom — YamlTool's pointerEventPayload.
+    let docStartX = (draw.pressX - draw.offsetX) / draw.zoom
+    let docStartY = (draw.pressY - draw.offsetY) / draw.zoom
+    let docX = (draw.releaseX - draw.offsetX) / draw.zoom
+    let docY = (draw.releaseY - draw.offsetY) / draw.zoom
+    let side = max(abs(docX - docStartX), abs(docY - docStartY))
+    let docEndX = docStartX + (docX >= docStartX ? side : 0.0 - side)
+    let docEndY = docStartY + (docY >= docStartY ? side : 0.0 - side)
+    return (abs(docEndX - docStartX) / 2.0, abs(docEndY - docStartY) / 2.0)
+}
+
+/// Would the pre-DYADICSIDE spelling get this vector WRONG?
+private func mutantIsDiscriminating(_ draw: ShiftDraw) -> Bool {
+    let (a, b) = dyadicsideMutant(draw)
+    return a != b
+}
+
+/// The shared property fixture, parsed once per test.
+private func shiftConstrainFixture() -> [String: Any] {
+    let data = readFixture("properties/shift_constrain_square.json").data(using: .utf8)!
+    guard let fx = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        fatalError("properties/shift_constrain_square.json is not valid JSON")
+    }
+    return fx
+}
+
+/// `(tool id, (field a, field b))` pairs the fixture declares.
+private func shiftConstrainTools(_ fx: [String: Any]) -> [(String, (String, String))] {
+    (fx["tools"] as! [[String: Any]]).map { t in
+        let fields = t["fields"] as! [String]
+        precondition(fields.count == 2, "a tool's `fields` names exactly the pair that must be equal")
+        return (t["tool"] as! String, (fields[0], fields[1]))
+    }
+}
+
+/// The fixture's setup / path / viewport, shared by both lanes.
+private func shiftConstrainEnv(_ fx: [String: Any]) -> (String, [Int], (Double, Double)) {
+    let setup = fx["setup_svg"] as! String
+    let path = (fx["element_path"] as! [NSNumber]).map { $0.intValue }
+    let viewport = (
+        (fx["viewport_w"] as! NSNumber).doubleValue,
+        (fx["viewport_h"] as! NSNumber).doubleValue
+    )
+    return (setup, path, viewport)
+}
+
+/// LANE 2 — THE WITNESSES. Every named vector, against every tool,
+/// deterministically, every run.
+///
+/// Also asserts each witness's recorded `discriminating` flag against the
+/// mutant, so the corpus proves its own teeth: nine of the eleven vectors here
+/// would have caught the DYADICSIDE bug, and this test says so out loud every
+/// run rather than trusting a comment written the day they were searched for.
+@Test func shiftConstrainWitnesses() {
+    let fx = shiftConstrainFixture()
+    let (setup, path, viewport) = shiftConstrainEnv(fx)
+    let tools = shiftConstrainTools(fx)
+    let witnesses = fx["witnesses"] as! [[String: Any]]
+    #expect(!witnesses.isEmpty, "the witness corpus must not be empty")
+
+    var discriminating = 0
+    var failures: [String] = []
+
+    for w in witnesses {
+        let name = w["name"] as! String
+        let press = (w["press"] as! [NSNumber]).map { $0.doubleValue }
+        let release = (w["release"] as! [NSNumber]).map { $0.doubleValue }
+        let draw = ShiftDraw(
+            zoom: (w["zoom"] as! NSNumber).doubleValue,
+            offsetX: (w["view_offset_x"] as! NSNumber).doubleValue,
+            offsetY: (w["view_offset_y"] as! NSNumber).doubleValue,
+            pressX: press[0], pressY: press[1],
+            releaseX: release[0], releaseY: release[1])
+
+        // The witness's claim about its own power, checked.
+        guard let claimed = w["discriminating"] as? Bool else {
+            Issue.record("witness '\(name)' must record `discriminating`")
+            continue
+        }
+        let actual = mutantIsDiscriminating(draw)
+        #expect(
+            actual == claimed,
+            """
+            witness '\(name)' records discriminating=\(claimed), but the \
+            pre-DYADICSIDE mutant says \(actual) (mutant halves \(dyadicsideMutant(draw))). \
+            Either the flag is stale or the mutant no longer models the old spelling.
+            """)
+        if actual { discriminating += 1 }
+
+        for (tool, fields) in tools {
+            if let why = checkShiftConstrain(
+                draw, tool: tool, fields: fields, setupSvg: setup, path: path, viewport: viewport)
+            {
+                failures.append("witness '\(name)': \(why)")
+            }
+        }
+    }
+
+    #expect(
+        discriminating >= 2,
+        """
+        the witness corpus has lost its teeth: only \(discriminating) of \
+        \(witnesses.count) vectors would catch the pre-DYADICSIDE spelling
+        """)
+    #expect(
+        failures.isEmpty,
+        """
+        the circle invariant failed on \(failures.count) witness/tool pair(s):
+          \(failures.joined(separator: "\n  "))
+        """)
+}
+
+// ---------------------------------------------------------------
+// The seeded input stream. Spelled identically in Rust
+// (`PropertyStream` / `property_seed` / `shift_draw_sample`) so a seed
+// that goes red in one port replays vector-for-vector in the other —
+// pinned by `stream_pin` in the fixture.
+// ---------------------------------------------------------------
+
+/// The house LCG (Numerical Recipes constants, as in `ShapeRecognizeTests` and
+/// `FirstRepeatedVertexTests`), on a SplitMix64-finalized seed.
+///
+/// The finalizer matters: raw LCG states for adjacent seeds differ by only the
+/// multiplier, so `JAS_PROPERTY_SEED=1` and `=2` would otherwise produce
+/// near-identical first draws — a trap for anyone replaying by hand.
+private struct PropertyStream {
+    private var state: UInt64
+
+    init(seed: UInt64) {
+        var z = seed
+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+        state = z ^ (z >> 31)
+    }
+
+    /// Next draw, uniform in [0, 1).
+    mutating func u() -> Double {
+        state = state &* 1664525 &+ 1013904223
+        return Double(state >> 11) / Double(UInt64(1) << 53)
+    }
+}
+
+private func lerp(_ lo: Double, _ hi: Double, _ u: Double) -> Double {
+    lo + (hi - lo) * u
+}
+
+/// A signed magnitude in [lo, hi] from ONE draw: the low half of the unit
+/// interval is the negative branch, the high half the positive one, each
+/// rescaled back to [0, 1). Both rescalings are exact in binary (Sterbenz on
+/// `u - 0.5`, and a multiply by 2), so the two ports cannot disagree about them.
+private func signedMagnitude(_ u: Double, _ lo: Double, _ hi: Double) -> Double {
+    if u < 0.5 {
+        return -(lo + (hi - lo) * (u * 2.0))
+    }
+    return lo + (hi - lo) * ((u - 0.5) * 2.0)
+}
+
+/// Draw ONE Shift-constrained draw from the stream. Nine values, in the order
+/// the fixture's `_generative_doc` records; both ports must consume them in that
+/// order or the streams diverge.
+///
+/// The drag is an OFFSET from the press, not an independent second point, so
+/// `drag_min` guarantees the 1-pixel commit guard is cleared and no rejection
+/// sampling is needed — every draw is a real case. Mirrors Rust
+/// `shift_draw_sample`.
+private func shiftDrawSample(_ st: inout PropertyStream, _ cfg: [String: Any]) -> ShiftDraw {
+    func n(_ k: String) -> Double {
+        guard let v = cfg[k] as? NSNumber else { fatalError("generative.\(k) must be a number") }
+        return v.doubleValue
+    }
+    let zoom = lerp(n("zoom_min"), n("zoom_max"), st.u())
+    let offsetX = lerp(n("offset_min"), n("offset_max"), st.u())
+    let offsetY = lerp(n("offset_min"), n("offset_max"), st.u())
+    var pressX = lerp(n("press_min"), n("press_max"), st.u())
+    var pressY = lerp(n("press_min"), n("press_max"), st.u())
+    var dx = signedMagnitude(st.u(), n("drag_min"), n("drag_max"))
+    var dy = signedMagnitude(st.u(), n("drag_min"), n("drag_max"))
+
+    // Axis lock: a pure horizontal or vertical Shift drag takes the other branch
+    // (the zero axis has no sign to follow, so it takes the positive one). A
+    // continuous generator produces an exact zero with probability zero, so it
+    // has to be asked for. At most one axis is zeroed — both would fail the
+    // commit guard.
+    let axis = st.u()
+    let p = n("axis_zero_p")
+    if axis < p {
+        dy = 0.0
+    } else if axis < 2.0 * p {
+        dx = 0.0
+    }
+
+    var releaseX = pressX + dx
+    var releaseY = pressY + dy
+
+    // Quantize lock: real pointer events are usually integral, and integral
+    // screen coordinates are a measurably different population (at zoom 0.1, 1/3
+    // and 1.0 they are exact under the old spelling where continuous ones are
+    // not). Rounding shaves at most 1 px off the drag, and drag_min is 3, so the
+    // commit guard still holds.
+    if st.u() < n("quantize_p") {
+        pressX = pressX.rounded()
+        pressY = pressY.rounded()
+        releaseX = releaseX.rounded()
+        releaseY = releaseY.rounded()
+    }
+
+    return ShiftDraw(
+        zoom: zoom, offsetX: offsetX, offsetY: offsetY,
+        pressX: pressX, pressY: pressY, releaseX: releaseX, releaseY: releaseY)
+}
+
+/// The seed for this run: `JAS_PROPERTY_SEED` if the environment names one,
+/// otherwise the nanosecond clock. FRESH EVERY RUN is the point — the lane
+/// exists to see vectors nobody chose. Mirrors Rust `property_seed`.
+private func propertySeed() -> UInt64 {
+    if let s = ProcessInfo.processInfo.environment["JAS_PROPERTY_SEED"] {
+        guard let v = UInt64(s.trimmingCharacters(in: .whitespaces)) else {
+            fatalError("JAS_PROPERTY_SEED=\(s) is not a UInt64")
+        }
+        return v
+    }
+    return DispatchTime.now().uptimeNanoseconds
+        &+ UInt64(Date().timeIntervalSince1970 * 1_000_000_000) % 1_000_000_007
+}
+
+/// One pinned double, read as an IEEE-754 bit pattern in hex.
+///
+/// NOT a decimal literal, and the reason is measured: serde_json 1.0.149 with
+/// default features (what jas_dioxus builds today) mis-parses 21397 of 199903
+/// SHORTEST-ROUND-TRIP f64 literals by exactly 1 ulp — 10.7%. Swift's
+/// JSONSerialization reads the same literals correctly, so the error is
+/// one-sided and INVISIBLE FROM THIS ARM: a decimal pin would look perfect here
+/// while the Rust arm silently fuzzed a different space. See the fixture's
+/// `_stream_pin_doc`. Mirrors Rust `pinned_f64`.
+private func pinnedF64(_ v: Any?) -> Double {
+    guard let s = v as? String else {
+        fatalError("stream_pin values are hex bit-pattern strings, got \(String(describing: v))")
+    }
+    let hex = s.hasPrefix("0x") ? String(s.dropFirst(2)) : s
+    guard let bits = UInt64(hex, radix: 16) else {
+        fatalError("stream_pin value \(s) is not hex")
+    }
+    return Double(bitPattern: bits)
+}
+
+/// Both ports draw the same vectors from the same seed. Compares the first few
+/// cases of a FIXED seed against bit-pattern pins, `==` on doubles. Mirrors Rust
+/// `assert_stream_pin`.
+private func assertStreamPin(_ fx: [String: Any]) {
+    let pin = fx["stream_pin"] as! [String: Any]
+    let seed = (pin["seed"] as! NSNumber).uint64Value
+    let cfg = fx["generative"] as! [String: Any]
+    var st = PropertyStream(seed: seed)
+    for (i, want) in (pin["cases"] as! [[String: Any]]).enumerated() {
+        let got = shiftDrawSample(&st, cfg)
+        let press = want["press"] as! [Any]
+        let release = want["release"] as! [Any]
+        let expect: [(String, Double, Double)] = [
+            ("zoom", got.zoom, pinnedF64(want["zoom"])),
+            ("view_offset_x", got.offsetX, pinnedF64(want["view_offset_x"])),
+            ("view_offset_y", got.offsetY, pinnedF64(want["view_offset_y"])),
+            ("press_x", got.pressX, pinnedF64(press[0])),
+            ("press_y", got.pressY, pinnedF64(press[1])),
+            ("release_x", got.releaseX, pinnedF64(release[0])),
+            ("release_y", got.releaseY, pinnedF64(release[1])),
+        ]
+        for (field, g, w) in expect {
+            #expect(
+                g == w,
+                """
+                stream_pin seed \(seed) case \(i): \(field) is \(g) \
+                (bits \(String(g.bitPattern, radix: 16))), expected EXACTLY \(w) \
+                (bits \(String(w.bitPattern, radix: 16))). The two ports are no longer \
+                fuzzing the same space, so every seed exchanged between them is meaningless.
+                """)
+        }
+    }
+}
+
+/// LANE 3 — THE GENERATIVE LANE. The same checker, on vectors nobody chose,
+/// from a fresh seed every run.
+///
+/// Three things are asserted, and the second and third are what keep the lane
+/// from rotting into a no-op:
+///
+///   * every generated vector satisfies the circle invariant;
+///   * every generated vector actually COMMITTED an element (the count is
+///     checked against `cases`), so the guard can never quietly swallow the
+///     population;
+///   * at least `min_discriminating` of them are vectors the pre-DYADICSIDE
+///     spelling would get WRONG, measured live by the mutant — the lane's teeth,
+///     checked rather than assumed.
+///
+/// A failure prints the seed. `JAS_PROPERTY_SEED=<that seed>` replays the run
+/// exactly, here or in Rust.
+@Test func shiftConstrainGenerative() {
+    let fx = shiftConstrainFixture()
+    let (setup, path, viewport) = shiftConstrainEnv(fx)
+    let tools = shiftConstrainTools(fx)
+    let cfg = fx["generative"] as! [String: Any]
+    let cases = (cfg["cases"] as! NSNumber).intValue
+    let minDiscriminating = (cfg["min_discriminating"] as! NSNumber).intValue
+
+    // The cross-language pin: both ports must draw the SAME vectors from the
+    // same seed, or a seed reported by one is meaningless in the other.
+    assertStreamPin(fx)
+
+    let seed = propertySeed()
+    print("""
+        shiftConstrainGenerative: seed \(seed) (\(cases) cases x \(tools.count) tools) — \
+        replay with JAS_PROPERTY_SEED=\(seed)
+        """)
+
+    var st = PropertyStream(seed: seed)
+    var discriminating = 0
+    var committed = 0
+    var failures: [String] = []
+
+    for i in 0..<cases {
+        let draw = shiftDrawSample(&st, cfg)
+        if mutantIsDiscriminating(draw) { discriminating += 1 }
+        for (tool, fields) in tools {
+            if let why = checkShiftConstrain(
+                draw, tool: tool, fields: fields, setupSvg: setup, path: path, viewport: viewport)
+            {
+                // Cap the report: the first handful shows the shape, and the
+                // seed reproduces the rest.
+                if failures.count < 8 { failures.append("case \(i): \(why)") }
+            } else {
+                committed += 1
+            }
+        }
+    }
+
+    #expect(
+        failures.isEmpty,
+        """
+        seed \(seed): the circle invariant failed on generated vectors (showing up to 8):
+          \(failures.joined(separator: "\n  "))
+        Replay with JAS_PROPERTY_SEED=\(seed)
+        """)
+    if failures.isEmpty {
+        // Meaningful only when nothing failed, so every check committed.
+        #expect(
+            committed == cases * tools.count,
+            """
+            seed \(seed): only \(committed) of \(cases * tools.count) generated draws \
+            committed an element — the generator has drifted below the 1-pixel commit \
+            guard and is asserting nothing
+            """)
+    }
+    #expect(
+        discriminating >= minDiscriminating,
+        """
+        seed \(seed): only \(discriminating) of \(cases) generated vectors would catch the \
+        pre-DYADICSIDE spelling (floor \(minDiscriminating)). The generator has been \
+        narrowed or broken; a lane that cannot fail the bug it was written for is worth zero.
+        """)
+    // Report the teeth on the SUCCESS path too. A floor that is only read when
+    // it trips hides a slow slide toward it; this number is the one to watch if
+    // the generator is ever retuned.
+    print("""
+        shiftConstrainGenerative: \(discriminating)/\(cases) generated vectors discriminate \
+        the pre-DYADICSIDE spelling (floor \(minDiscriminating))
+        """)
 }
 
 // ===============================================================
@@ -4015,14 +4588,26 @@ private let seedExempt: [String: String] = [
 /// reasoned-out "probably an artifact", which is the confident-and-wrong shape
 /// this codebase keeps catching itself writing.
 ///
-/// Triage is owned by the jas/windows seat (letter 14 §5), which will read
+/// Triage is owned by the jas/windows seat (letter 14 §5), which reads
 /// transcripts/BOOLEAN.md before forming a view.
+///
+/// THE FOUR `boolean.json` ROWS ARE GONE, and they went the way this comment
+/// demands: a FIX, not a reasoned-out artifact. Triage (jas/windows seat,
+/// 2026-07-30) read BOOLEAN.md and found both halves settled — §Operand rules
+/// admits a GROUP as an operand, §Operand and paint rules gives the result the
+/// frontmost operand's paint — so the implementation was applying a settled
+/// rule to leaves only. The measured diff was exactly two fields, `fill` and
+/// `name`: the boolean seam read `Element.fill`/`Element.stroke` raw (`nil` for
+/// a container) and ran its unanimity over the WRAPPERS rather than over what
+/// spoke. See `booleanPaintSource` in Document/Controller.swift.
+///
+/// THE THREE THAT STAY are artifacts of the seeding relation itself, verified
+/// rather than assumed: `make_compound_shape` RETAINS its operands, so the
+/// wrapper group is still present in the result by construction, and
+/// `menu_lock` / `menu_hide` write the flag onto the element the path names —
+/// the wrapper — which is a different element from the leaf underneath it.
 private let seedKnown: Set<String> = [
     "make_compound_shape.json::make_compound_shape_two_rects",
-    "boolean.json::boolean_union_overlapping_rects",
-    "boolean.json::boolean_subtract_front_overlapping_rects",
-    "boolean.json::boolean_intersection_overlapping_rects",
-    "boolean.json::boolean_exclude_overlapping_rects",
     "menu_object_ops.json::menu_lock_two_rects",
     "menu_object_ops.json::menu_hide_two_rects",
 ]
@@ -4688,13 +5273,23 @@ private func wireUnhex(_ s: String) -> Data {
 }
 
 /// `<circle>` SURVIVES A ROUND TRIP even though the model no longer has a
-/// circle kind: the writer re-derives the tag from `rx == ry`.
+/// circle kind: the writer re-derives the tag from the radii AS THEY WILL BE
+/// PRINTED.
 ///
 /// The mirror is pinned too, and it is a REWRITE we accept rather than a
 /// property we achieved: an `<ellipse rx=20 ry=20>` comes back out as
 /// `<circle>`. Someone who authored that ellipse deliberately will see it
 /// change. That is the price of one kind, recorded so it is a decision and not
 /// a surprise.
+///
+/// THE SECOND HALF, added after the render-path audit, is the SUB-PRECISION
+/// case: the tag used to be decided by an exact `rx == ry` while the
+/// coordinates were printed at four decimals, so radii differing below the
+/// printed precision were written as `<ellipse rx="20" ry="20">` -- a file that
+/// reopens EXACTLY round. The tag flipped to `<circle>` on the very next save
+/// and the derived type token flipped with it. The twin is
+/// `round_ellipses_serialize_as_circle_and_squashed_ones_do_not` in
+/// jas_dioxus/src/cross_language_test.rs, over the same two fixtures.
 @Test func roundEllipsesSerializeAsCircleAndSquashedOnesDoNot() throws {
     let doc = svgToDocument(readFixture("svg/circle_ellipse_mix.svg"))
     let out = documentToSvg(doc)
@@ -4704,6 +5299,42 @@ private func wireUnhex(_ s: String) -> Data {
             "only the rx != ry shape should emit <ellipse>; got:\n\(out)")
     #expect(documentToSvg(svgToDocument(out)) == out,
             "svg -> doc -> svg is not idempotent")
+
+    // THE TAG DESCRIBES WHAT WAS PRINTED. Hand-derived expectations for
+    // `svg/ellipse_radii_below_print_precision.svg` (pt = px * 0.75, and the
+    // writer prints px at four decimals):
+    //   [0, 0] rx=20.00001px ry=20.00002px. The radii differ, but both print
+    //          "20.0000" -> "20". Written as an <ellipse> the file would say
+    //          rx == ry and reopen round, so the tag must be <circle> from the
+    //          start.
+    //   [0, 1] rx=20px ry=20.0002px. That difference IS printed, so this one
+    //          stays an <ellipse> on every trip -- the guard against a fix that
+    //          rounds harder than the writer does.
+    let sub = svgToDocument(
+        readFixture("svg/ellipse_radii_below_print_precision.svg"))
+    let out1 = documentToSvg(sub)
+    #expect(out1.components(separatedBy: "<circle").count - 1 == 1,
+            "radii differing below the printed precision must be written as <circle>; got:\n\(out1)")
+    #expect(out1.components(separatedBy: "<ellipse").count - 1 == 1,
+            "radii differing above the printed precision must stay <ellipse>; got:\n\(out1)")
+
+    // svg -> doc -> svg -> doc: what was written reads back as what was
+    // written, and the type token agrees with the tag.
+    let sub1 = svgToDocument(out1)
+    #expect(layersTypeValue(sub1.getElement([0, 0])) == "circle",
+            "the <circle> we wrote must read back as a round ellipse")
+    #expect(layersTypeValue(sub1.getElement([0, 1])) == "ellipse",
+            "the <ellipse> we wrote must read back squashed")
+
+    // ... and the next save does not move, in tag or in token.
+    let out2 = documentToSvg(sub1)
+    #expect(out2 == out1,
+            "the tag is not stable across save-and-reopen:\n\(out1)\n\(out2)")
+    let sub2 = svgToDocument(out2)
+    #expect(layersTypeValue(sub2.getElement([0, 0])) == "circle",
+            "type token flipped on the second trip")
+    #expect(layersTypeValue(sub2.getElement([0, 1])) == "ellipse",
+            "type token flipped on the second trip")
 }
 
 /// answer to ONE source.
@@ -4750,4 +5381,97 @@ private func wireUnhex(_ s: String) -> Data {
         #expect(got == want,
                 "vector `\(name)`: kept \(got.sorted { $0.lexicographicallyPrecedes($1) }), expected \(want.sorted { $0.lexicographicallyPrecedes($1) })")
     }
+}
+
+/// THE FILTER MENU — which declared item becomes which KIND of row, and what
+/// each kind does when clicked.
+///
+/// Driven from the `menu` block of
+/// `test_fixtures/view_state/layers_type_filter.json`; the twin reader is
+/// `layers_filter_menu_matches_the_shared_corpus` in
+/// jas_dioxus/src/cross_language_test.rs.
+///
+/// THE DEFECT IT CLOSES was jas_dioxus's alone (shipped 2026-07-30):
+/// `render_layers_filter_dropdown` collected every item carrying a `label` and a
+/// `value` and never read its declared `type`, so the `All` row — an ACTION —
+/// rendered as a thirteenth checkbox and clicking it checked the token
+/// `__all__`, which no element answers, blanking the tree. `renderDropdown` here
+/// dispatched on the declared type from the day both were written.
+///
+/// THAT IS EXACTLY WHY THIS VECTOR IS SHARED RATHER THAN A RUST-SIDE FIX. The
+/// two ports were written the same day, one from the other, and disagreed within
+/// hours in a way neither port's own suite could see — the menu was private
+/// render code on both sides. Pinning the correct port costs one reader and buys
+/// the guarantee that this port cannot drift INTO the defect later.
+@Test func layersFilterMenuMatchesTheSharedCorpus() throws {
+    let raw = readFixture("view_state/layers_type_filter.json")
+    let root = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as! [String: Any]
+    let menu = root["menu"] as! [String: Any]
+
+    let items = menu["items"] as! [[String: Any]]
+    // Anti-vacuity declared BY THE DATA, exact rather than slack.
+    #expect(items.count == menu["min_items"] as! Int,
+            "walked \(items.count) menu item(s) against the declared floor")
+
+    let rows = layersFilterMenuRows(items)
+
+    // (1) THE PARTITION. An action-typed item is NOT a type toggle, and an item
+    //     that declares no type it recognises is neither.
+    let gotToggles = rows.filter { $0.kind == .toggle }.map { $0.value }
+    let wantToggles = menu["expected_toggle_values"] as! [String]
+    #expect(gotToggles == wantToggles,
+            "the toggle rows are not the declared toggle rows — an action row rendered as a checkbox is the 2026-07-30 defect")
+
+    let gotActions: [[String]] = rows.compactMap { r in
+        if case .action(let a) = r.kind { return [r.label, r.value, a] }
+        return nil
+    }
+    let wantActions: [[String]] = (menu["expected_action_rows"] as! [[String: Any]]).map {
+        [$0["label"] as! String, $0["value"] as! String, $0["action"] as! String]
+    }
+    #expect(gotActions == wantActions, "the action rows are not the declared action rows")
+
+    let tree: [(path: ElementPath, typeValue: String)] =
+        (menu["tree"] as! [[String: Any]]).map {
+            (path: $0["path"] as! [Int], typeValue: $0["type"] as! String)
+        }
+    func keepOf(_ hidden: Set<String>) -> Set<ElementPath> {
+        layersTypeFilterKeep(tree, hidden: hidden)
+    }
+
+    // (2) INVOKING THE ACTION yields the everything-visible state.
+    let vectors = menu["action_vectors"] as! [[String: Any]]
+    #expect(vectors.count == menu["min_action_vectors"] as! Int,
+            "walked \(vectors.count) action vector(s) against the declared floor")
+    for v in vectors {
+        let name = v["name"] as? String ?? "<unnamed>"
+        let action = v["action"] as! String
+        let before = Set(v["checked_before"] as! [String])
+
+        let got = layersCheckedAfterAction(action, before)
+        var effective: Set<String>
+        if v["expected_checked_after"] is NSNull {
+            #expect(got == nil,
+                    "vector `\(name)`: an action this port does not know must be REFUSED, not answered with a guess — got \(String(describing: got))")
+            effective = before
+        } else {
+            let want = Set(v["expected_checked_after"] as! [String])
+            #expect(got == want, "vector `\(name)`: checked set after")
+            effective = want
+        }
+
+        let hidden = layersHiddenFromChecked(effective)
+        #expect(hidden == Set(v["expected_hidden_after"] as! [String]),
+                "vector `\(name)`: hidden set after")
+        #expect(keepOf(hidden) == Set(v["expected_keep_after"] as! [[Int]]),
+                "vector `\(name)`: the tree after the click")
+    }
+
+    // (3) THE REGRESSION ITSELF, as the blank tree it produced in the other port.
+    let d = menu["defect_if_the_action_row_were_a_toggle"] as! [String: Any]
+    let hidden = layersHiddenFromChecked(Set(d["checked"] as! [String]))
+    #expect(hidden.count == d["expected_hidden_count"] as! Int,
+            "checking a token no element answers must hide the WHOLE vocabulary")
+    #expect(keepOf(hidden) == Set(d["expected_keep"] as! [[Int]]),
+            "the defect's blank tree is not what the fixture records")
 }

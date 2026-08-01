@@ -472,8 +472,9 @@ that one field, then apply.
 - [ ] **EYE-111** [wired] **P2.** Source has no stroke (`None`),
       master on → target's stroke becomes None.
       Do: Source rect has `stroke = none`. Target has black
-      stroke. Stroke master on. Apply.
-      Expect: Target stroke = none.
+      stroke. Stroke master on, `stroke_color` on. Apply.
+      Expect: Target stroke = none. ("No stroke" is a value of the
+      `stroke_color` attribute, so it rides that sub-toggle.)
       — last: —
 
 - [ ] **EYE-112** [wired] **P2.** Source has no stroke, master
@@ -482,6 +483,29 @@ that one field, then apply.
       every stroke sub-toggle off. Apply.
       Expect: Target stroke unchanged. (No-op short-circuit when
       sub-toggles are all off.)
+      — last: —
+
+- [ ] **EYE-113** [wired] **P1.** Source has no stroke, master on,
+      `stroke_color` OFF → target's stroke unchanged even though the
+      other sub-toggles are on.
+      Do: Source = no stroke. Target = blue 4pt round-cap stroke.
+      Master on; turn `stroke_color` off and leave every other
+      stroke sub-toggle on. Apply.
+      Expect: Target stroke still blue 4pt round-cap. (The
+      stroke-less branch honours the sub-toggles exactly as the
+      has-a-stroke branch does; it used to clear the target
+      outright and ignore all eight.)
+      — last: —
+
+- [ ] **EYE-114** [wired] **P1.** Fabricating a stroke seeds from
+      the APP default, never from the source.
+      Do: Source = dashed magenta 9pt stroke. Target = a rect with
+      NO stroke. Master on; `stroke_dash` on, `stroke_color` and
+      `stroke_weight` OFF (and the rest off). Apply.
+      Expect: Target gains a dashed stroke whose dash matches the
+      source, and whose colour is BLACK and width 1pt — the app
+      default (`state.stroke_color` / `state.stroke_width`) — not
+      the source's magenta 9pt. RULED JYH 2026-07-31.
       — last: —
 
 ---

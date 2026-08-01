@@ -1370,7 +1370,14 @@ private func unpackElement(_ v: MsgValue) throws -> Element {
     // migration (2026-07-30), but this is a PERSISTED USER FORMAT and a file
     // saved before that day must still open. Read as equal radii, which is
     // what it always meant. The canonical TEST json is deliberately NOT
-    // tolerant this way -- there a stray "circle" must fail loudly.
+    // tolerant this way -- there a stray "circle" must fail loudly, so that a
+    // STALE FIXTURE INPUT is REFUSED rather than silently reinterpreted as a
+    // round ellipse by a test that then PASSES while testing something other
+    // than what the fixture says. (Not, as this used to claim, to stop a port
+    // WRITING the old kind: the corpus runners compare the canonical JSON as a
+    // STRING against a pinned golden. Refuted by measurement, not by reading;
+    // correction from Flask, the Windows seat, adopted 2026-07-30.) See
+    // `parseElementBase` in Geometry/TestJson.swift.
     case tagCircle:
         let legacyR = try asF64(at(arr, 9))
         return .ellipse(Ellipse(cx: try asF64(at(arr, 7)), cy: try asF64(at(arr, 8)),
