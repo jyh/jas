@@ -88,6 +88,15 @@ fn main() {
         "fit_curve" => run_fit_curve(&vectors),
         "shape_recognize" => run_shape_recognize(&vectors),
         "planar" => run_planar(&vectors),
+        "arrangement" => run_arrangement(&vectors),
+        "transform_apply" => run_transform_apply(&vectors),
+        "paragraph_markers" => run_paragraph_markers(&vectors),
+        "hyphenator" => run_hyphenator(&vectors),
+        "simplify" => run_simplify(&vectors),
+        "dash_renderer" => run_dash_renderer(&vectors),
+        "art_along_path" => run_art_along_path(&vectors),
+        "pattern_along_path" => run_pattern_along_path(&vectors),
+        "bristle_stroke" => run_bristle_stroke(&vectors),
         "text_layout" => run_text_layout(&vectors),
         "text_layout_paragraph" => run_text_layout_paragraph(&vectors),
         "path_text_layout" => run_path_text_layout(&vectors),
@@ -1333,4 +1342,451 @@ fn run_align(vectors: &[Value]) -> Vec<Value> {
             .collect();
         json!({ "translations": translations })
     }).collect()
+}
+
+// ---------------------------------------------------------------
+// arrangement (the shared segment-splitting primitive)
+// ---------------------------------------------------------------
+//
+// `split_points` and `add_or_find_vertex` are the first stage of BOTH the
+// planar-graph extractor and the boolean ring normalizer, and until this
+// verb existed neither had any cross-language witness: their whole
+// assurance was 11 Rust tests and 11 Swift tests mirrored by hand.
+//
+// The `endpoint` field is load-bearing and is NOT a tolerance quantity.
+// The module contracts that a returned point is TAKEN FROM an existing
+// endpoint whenever a parameter sits at one, bit-exactly, because that is
+// what lets the caller's dedup fuse a T-junction into a single vertex. A
+// tolerance comparison cannot tell (5.0, 0.0) from (4.999999999999999,
+// 0.0), so each point reports which input endpoint it is BIT-IDENTICAL to
+// — first match in the order a1, a2, b1, b2 — and that string is compared
+// exactly.
+
+fn arrangement_endpoint_name(
+    p: (f64, f64),
+    a1: (f64, f64),
+    a2: (f64, f64),
+    b1: (f64, f64),
+    b2: (f64, f64),
+) -> Value {
+    for (name, q) in [("a1", a1), ("a2", a2), ("b1", b1), ("b2", b2)] {
+        if p.0 == q.0 && p.1 == q.1 {
+            return Value::String(name.to_string());
+        }
+    }
+    Value::Null
+}
+
+fn arrangement_point(v: &Value) -> (f64, f64) {
+    let a = v.as_array().expect("arrangement: point must be [x, y]");
+    (
+        a[0].as_f64().expect("arrangement: x must be a number"),
+        a[1].as_f64().expect("arrangement: y must be a number"),
+    )
+}
+
+fn run_arrangement(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::arrangement::{add_or_find_vertex, split_points};
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let func = tc["function"].as_str().unwrap_or("");
+            let result = match func {
+                "split_points" => {
+                    let a = tc["a"].as_array().expect("arrangement: `a` missing");
+                    let b = tc["b"].as_array().expect("arrangement: `b` missing");
+                    let (a1, a2) = (arrangement_point(&a[0]), arrangement_point(&a[1]));
+                    let (b1, b2) = (arrangement_point(&b[0]), arrangement_point(&b[1]));
+                    let pts: Vec<Value> = split_points(a1, a2, b1, b2)
+                        .into_iter()
+                        .map(|(p, s, t)| {
+                            json!({
+                                "p": [p.0, p.1],
+                                "s": s,
+                                "t": t,
+                                "endpoint": arrangement_endpoint_name(p, a1, a2, b1, b2),
+                            })
+                        })
+                        .collect();
+                    json!({ "points": pts })
+                }
+                "add_or_find_vertex" => {
+                    let mut verts: Vec<(f64, f64)> = tc["vertices"]
+                        .as_array()
+                        .expect("arrangement: `vertices` missing")
+                        .iter()
+                        .map(arrangement_point)
+                        .collect();
+                    let indices: Vec<Value> = tc["points"]
+                        .as_array()
+                        .expect("arrangement: `points` missing")
+                        .iter()
+                        .map(|p| json!(add_or_find_vertex(&mut verts, arrangement_point(p))))
+                        .collect();
+                    let out: Vec<Value> = verts.iter().map(|v| json!([v.0, v.1])).collect();
+                    json!({ "indices": indices, "vertices": out })
+                }
+                _ => {
+                    eprintln!("Unknown arrangement function: {}", func);
+                    std::process::exit(1);
+                }
+            };
+            json!({ "name": name, "result": result })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// transform_apply (the Scale / Rotate / Shear matrix builders)
+// ---------------------------------------------------------------
+//
+// Every transform dialog and every transform tool routes through these
+// four functions, and none of them had a cross-language witness. The
+// matrix is reported as its six components in FULL precision — the
+// MATRIXPRECISION ruling is that multipliers keep full precision and only
+// positions round to four — plus the transformed image of two probe
+// points, so a matrix that is right in its components and wrong in its
+// pivot cannot pass.
+
+fn transform_json(t: &jas_dioxus::geometry::element::Transform) -> Value {
+    // Two probe points, applied through the matrix: the pivot arithmetic
+    // (translate(-r) * base * translate(r)) lives entirely in `e` and `f`,
+    // and a reader comparing only a..d would not see it move.
+    let apply = |x: f64, y: f64| (t.a * x + t.c * y + t.e, t.b * x + t.d * y + t.f);
+    let p1 = apply(0.0, 0.0);
+    let p2 = apply(100.0, 40.0);
+    json!({
+        "m": [t.a, t.b, t.c, t.d, t.e, t.f],
+        "origin_image": [p1.0, p1.1],
+        "probe_image": [p2.0, p2.1],
+    })
+}
+
+fn run_transform_apply(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::transform_apply as ta;
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let func = tc["function"].as_str().unwrap_or("");
+            let n = |k: &str, d: f64| tc.get(k).and_then(|v| v.as_f64()).unwrap_or(d);
+            let result = match func {
+                "scale_matrix" => transform_json(&ta::scale_matrix(
+                    n("sx", 1.0), n("sy", 1.0), n("rx", 0.0), n("ry", 0.0),
+                )),
+                "rotate_matrix" => transform_json(&ta::rotate_matrix(
+                    n("theta_deg", 0.0), n("rx", 0.0), n("ry", 0.0),
+                )),
+                "shear_matrix" => transform_json(&ta::shear_matrix(
+                    n("angle_deg", 0.0),
+                    tc.get("axis").and_then(|v| v.as_str()).unwrap_or("horizontal"),
+                    n("axis_angle_deg", 0.0),
+                    n("rx", 0.0),
+                    n("ry", 0.0),
+                )),
+                "stroke_width_factor" => {
+                    json!({ "factor": ta::stroke_width_factor(n("sx", 1.0), n("sy", 1.0)) })
+                }
+                _ => {
+                    eprintln!("Unknown transform_apply function: {}", func);
+                    std::process::exit(1);
+                }
+            };
+            json!({ "name": name, "result": result })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// paragraph_markers (the list-marker half of text_layout_paragraph)
+// ---------------------------------------------------------------
+//
+// The `text_layout_paragraph` verb drives `text_layout::layout_with_
+// paragraphs`; it does NOT reach the module of the same name. Those five
+// functions are called only from the RENDERER (canvas/render.rs,
+// CanvasSubwindow.swift) and from app_state, so every ordered list an
+// artist draws goes through arithmetic no corpus family watched.
+
+fn run_paragraph_markers(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::text_layout::ParagraphSegment;
+    use jas_dioxus::algorithms::text_layout_paragraph as tlp;
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let func = tc["function"].as_str().unwrap_or("");
+            let result = match func {
+                "marker_text" => json!({ "text": tlp::marker_text(
+                    tc["list_style"].as_str().unwrap_or(""),
+                    tc["counter"].as_u64().unwrap_or(0) as usize) }),
+                "to_alpha" => json!({ "text": tlp::to_alpha(
+                    tc["n"].as_u64().unwrap_or(0) as usize,
+                    tc["upper"].as_bool().unwrap_or(false)) }),
+                "to_roman" => json!({ "text": tlp::to_roman(
+                    tc["n"].as_u64().unwrap_or(0) as usize,
+                    tc["upper"].as_bool().unwrap_or(false)) }),
+                "compute_counters" => {
+                    // Only `list_style` is consulted, so the fixture carries
+                    // a bare style list rather than whole segments.
+                    let segs: Vec<ParagraphSegment> = tc["styles"]
+                        .as_array()
+                        .expect("paragraph_markers: `styles` missing")
+                        .iter()
+                        .map(|v| ParagraphSegment {
+                            list_style: v.as_str().map(String::from),
+                            ..ParagraphSegment::default()
+                        })
+                        .collect();
+                    json!({ "counters": tlp::compute_counters(&segs) })
+                }
+                _ => {
+                    eprintln!("Unknown paragraph_markers function: {}", func);
+                    std::process::exit(1);
+                }
+            };
+            json!({ "name": name, "result": result })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// hyphenator (Liang-style pattern hyphenation)
+// ---------------------------------------------------------------
+//
+// Both public functions. `split_pattern` is the parser the whole table
+// is read through, so a divergence there mis-hyphenates every word
+// silently rather than loudly.
+
+fn run_hyphenator(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::hyphenator::{hyphenate, split_pattern};
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let func = tc["function"].as_str().unwrap_or("");
+            let result = match func {
+                "split_pattern" => {
+                    let (letters, digits) = split_pattern(tc["pattern"].as_str().unwrap_or(""));
+                    json!({ "letters": letters, "digits": digits })
+                }
+                "hyphenate" => {
+                    let pats: Vec<String> = tc["patterns"]
+                        .as_array()
+                        .expect("hyphenator: `patterns` missing")
+                        .iter()
+                        .map(|v| v.as_str().unwrap_or("").to_string())
+                        .collect();
+                    let refs: Vec<&str> = pats.iter().map(|s| s.as_str()).collect();
+                    let breaks = hyphenate(
+                        tc["word"].as_str().unwrap_or(""),
+                        &refs,
+                        tc["min_before"].as_u64().unwrap_or(0) as usize,
+                        tc["min_after"].as_u64().unwrap_or(0) as usize,
+                    );
+                    // The break MASK is the primitive answer; the hyphenated
+                    // spelling is the same answer a human can read, and a
+                    // reader who can only check one should check that one.
+                    let word: Vec<char> = tc["word"].as_str().unwrap_or("").chars().collect();
+                    let mut spelled = String::new();
+                    for (i, c) in word.iter().enumerate() {
+                        if i > 0 && *breaks.get(i).unwrap_or(&false) {
+                            spelled.push('-');
+                        }
+                        spelled.push(*c);
+                    }
+                    json!({ "breaks": breaks, "spelled": spelled })
+                }
+                _ => {
+                    eprintln!("Unknown hyphenator function: {}", func);
+                    std::process::exit(1);
+                }
+            };
+            json!({ "name": name, "result": result })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// simplify (polyline -> Bezier, the Object > Simplify command and the
+// tail of every boolean result)
+// ---------------------------------------------------------------
+
+fn run_simplify(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::simplify::{simplify_polyline, simplify_polyline_with_angle};
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let pts: Vec<(f64, f64)> = tc["points"]
+                .as_array()
+                .expect("simplify: `points` missing")
+                .iter()
+                .map(arrangement_point)
+                .collect();
+            let precision = tc["precision"].as_f64().unwrap_or(1.0);
+            let closed = tc["closed"].as_bool().unwrap_or(false);
+            let out = match tc.get("corner_angle").and_then(|v| v.as_f64()) {
+                Some(a) => simplify_polyline_with_angle(&pts, precision, closed, a),
+                None => simplify_polyline(&pts, precision, closed),
+            };
+            let cmds: Vec<Value> = out.iter().map(cmd_to_json).collect();
+            json!({ "name": name, "result": cmds })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// dash_renderer (every dashed stroke the app draws)
+// ---------------------------------------------------------------
+//
+// The output is a LIST OF SUB-PATHS, one per dash, in arc-length order,
+// so the family pins the dash BOUNDARIES and not merely the total ink.
+
+fn run_dash_renderer(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::dash_renderer::expand_dashed_stroke;
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let elem = parse_element(&tc["element"]);
+            let d = match &elem {
+                Element::Path(e) => e.d.clone(),
+                _ => Vec::new(),
+            };
+            let dash: Vec<f64> = tc["dash_array"]
+                .as_array()
+                .expect("dash_renderer: `dash_array` missing")
+                .iter()
+                .map(|v| v.as_f64().unwrap_or(0.0))
+                .collect();
+            let align = tc["align_anchors"].as_bool().unwrap_or(false);
+            let subpaths: Vec<Value> = expand_dashed_stroke(&d, &dash, align)
+                .iter()
+                .map(|sp| Value::Array(sp.iter().map(cmd_to_json).collect()))
+                .collect();
+            json!({ "name": name, "result": { "subpaths": subpaths } })
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// The three PATH BRUSHES: art warp, pattern tiling, bristles
+// ---------------------------------------------------------------
+//
+// One shape, three families. Each takes a stroke path plus a brush and
+// returns a list of polygons (or, for the bristle brush, polylines) in
+// document coordinates. `art_flatten` already gates the FIRST-SUBPATH
+// WALKER all three sit on; nothing gated the warp, the tiling or the
+// bristle spread above it, so an S-4 fix at the walker could be undone
+// by a divergence one level up and no family would say so.
+
+fn polys_json(polys: &[Vec<(f64, f64)>]) -> Value {
+    Value::Array(
+        polys
+            .iter()
+            .map(|p| Value::Array(p.iter().map(|q| json!([q.0, q.1])).collect()))
+            .collect(),
+    )
+}
+
+fn brush_polys(v: Option<&Value>) -> Vec<Vec<(f64, f64)>> {
+    v.and_then(|x| x.as_array())
+        .map(|a| {
+            a.iter()
+                .map(|p| {
+                    p.as_array()
+                        .expect("brush polygon must be a point list")
+                        .iter()
+                        .map(arrangement_point)
+                        .collect()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn brush_path(tc: &Value) -> Vec<PathCommand> {
+    match parse_element(&tc["element"]) {
+        Element::Path(e) => e.d,
+        _ => Vec::new(),
+    }
+}
+
+fn run_art_along_path(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::art_along_path::{art_along_path, ArtBrush};
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let b = &tc["brush"];
+            let n = |k: &str, d: f64| b.get(k).and_then(|v| v.as_f64()).unwrap_or(d);
+            let f = |k: &str| b.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            let brush = ArtBrush {
+                artwork_width: n("artwork_width", 0.0),
+                artwork_height: n("artwork_height", 0.0),
+                artwork: brush_polys(b.get("artwork")),
+                scale: n("scale", 100.0),
+                flip_across: f("flip_across"),
+                flip_along: f("flip_along"),
+                stroke_weight: n("stroke_weight", 1.0),
+            };
+            json!({"name": name,
+                   "result": polys_json(&art_along_path(&brush_path(tc), &brush))})
+        })
+        .collect()
+}
+
+fn run_pattern_along_path(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::pattern_along_path::{pattern_along_path, PatternBrush};
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let b = &tc["brush"];
+            let n = |k: &str, d: f64| b.get(k).and_then(|v| v.as_f64()).unwrap_or(d);
+            let f = |k: &str| b.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            let brush = PatternBrush {
+                tile_width: n("tile_width", 0.0),
+                tile_height: n("tile_height", 0.0),
+                side: brush_polys(b.get("side")),
+                scale: n("scale", 100.0),
+                spacing: n("spacing", 0.0),
+                flip_across: f("flip_across"),
+                flip_along: f("flip_along"),
+                stroke_weight: n("stroke_weight", 1.0),
+            };
+            json!({"name": name,
+                   "result": polys_json(&pattern_along_path(&brush_path(tc), &brush))})
+        })
+        .collect()
+}
+
+fn run_bristle_stroke(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::bristle_stroke::{bristle_stroke, BristleBrush};
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let b = &tc["brush"];
+            let n = |k: &str, d: f64| b.get(k).and_then(|v| v.as_f64()).unwrap_or(d);
+            let brush = BristleBrush {
+                size: n("size", 1.0),
+                density: n("density", 50.0),
+                thickness: n("thickness", 50.0),
+                opacity: n("opacity", 100.0),
+                stroke_weight: n("stroke_weight", 1.0),
+            };
+            // The three DERIVED scalars are reported alongside the polylines
+            // because the caller strokes with them: a port that agreed on
+            // every bristle centreline and disagreed on the alpha would
+            // paint a visibly different stroke and compare green.
+            json!({"name": name, "result": {
+                "count": brush.count(),
+                "line_width": brush.line_width(),
+                "alpha": brush.alpha(),
+                "bristles": polys_json(&bristle_stroke(&brush_path(tc), &brush)),
+            }})
+        })
+        .collect()
 }

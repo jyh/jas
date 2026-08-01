@@ -1,0 +1,100 @@
+{
+  "_doc": "POLYLINE-TO-BEZIER SIMPLIFICATION (jas_dioxus/src/algorithms/simplify.rs, JasSwift/Sources/Algorithms/Simplify.swift) -- the Object > Simplify command and the tail of every boolean result, and until this family it had no cross-language witness of any kind.\n\nTWO CLASSES OF VECTOR, AND THE DIFFERENCE IS DECLARED RATHER THAN HIDDEN.\n\n  (a) Vectors that carry `expected`. Every run in these is TWO POINTS long, which the wrapper emits as a plain LineTo without calling the curve fitter at all, so the whole answer -- corner detection, run splitting, seam handling, the ClosePath -- is derivable on paper and is derived in each `derivation` field.\n\n  (b) Vectors that carry `_no_golden_why` instead. These reach `fit_curve` (Schneider 1990), whose control points come out of a least-squares solve with Newton-Raphson reparameterisation. A hand-derived expectation for that is not a derivation, it is a transcription of the implementation, and docs/CHECKERS.md section 0 scores a transcription zero. So these vectors are CROSS-PORT COMPARISON ONLY: they gate that Rust and Swift agree, which is this phase's job, and they gate NOTHING about correctness. The correctness half belongs to the `fit_curve` family, which has its own hand-derived corpus, and to the max-deviation law named in that family's checker-gap row.\n\nThe split is stated here so that a later reader counting goldens does not mistake (b) for an oversight, and so that adding a golden to a (b) vector by pasting a port's output is recognisable as the wrong move.\n\nTolerance 1e-9: the (a) answers are exact small integers, and the (b) answers come out of the same solve in both ports.",
+  "algorithm": "simplify",
+  "comparison": "tolerance",
+  "tolerance": 1e-9,
+  "vectors": [
+    {
+      "name": "empty_input_is_empty",
+      "derivation": "DEGENERATE: fewer than 2 points returns no commands at all -- not a bare MoveTo.",
+      "points": [], "precision": 1.0, "closed": false,
+      "expected": []
+    },
+    {
+      "name": "one_point_is_empty",
+      "derivation": "DEGENERATE, and the other side of the same guard: a single point is still fewer than 2, so there is nothing to simplify and nothing is emitted. A port that emitted a lone MoveTo would put an invisible zero-length path into the document.",
+      "points": [[5.0, 5.0]], "precision": 1.0, "closed": false,
+      "expected": []
+    },
+    {
+      "name": "two_points_open_is_one_line",
+      "derivation": "The documented two-point short-circuit: no corner detection, no fitting, just MoveTo then LineTo.",
+      "points": [[0.0, 0.0], [10.0, 0.0]], "precision": 1.0, "closed": false,
+      "expected": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "L", "x": 10.0, "y": 0.0}
+      ]
+    },
+    {
+      "name": "two_points_closed_adds_the_close",
+      "derivation": "The same short-circuit with `closed` set appends ClosePath -- and appends ONLY that: it does not add a LineTo back to the start, because the two-point branch is taken before any run splitting.",
+      "points": [[0.0, 0.0], [10.0, 0.0]], "precision": 1.0, "closed": true,
+      "expected": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "L", "x": 10.0, "y": 0.0},
+        {"cmd": "Z"}
+      ]
+    },
+    {
+      "name": "square_ring_every_vertex_is_a_corner",
+      "derivation": "THE SEAM VECTOR. A closed unit square: at every vertex the incoming and outgoing unit edges are perpendicular, so the dot product is 0, which is below cos(30 degrees) = 0.866, so all four vertices are corners. Closed run splitting walks corner k to corner k+1 around the ring, so the LAST run is [p3, p0] -- it wraps the seam. Every run is two points long, so each emits a LineTo, and the output therefore ends with an EXPLICIT LineTo back to the start BEFORE the ClosePath. That explicit closing line is the seam behaviour the corpus is here to pin: a port that stopped at p3 and relied on Z to close would draw the same picture and disagree on the command list.",
+      "points": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]],
+      "precision": 1.0, "closed": true,
+      "expected": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "L", "x": 10.0, "y": 0.0},
+        {"cmd": "L", "x": 10.0, "y": 10.0},
+        {"cmd": "L", "x": 0.0, "y": 10.0},
+        {"cmd": "L", "x": 0.0, "y": 0.0},
+        {"cmd": "Z"}
+      ]
+    },
+    {
+      "name": "open_polyline_endpoints_are_never_corners",
+      "derivation": "An L with a right angle at the middle vertex. For an OPEN polyline the corner scan runs over interior indices only, so index 0 and index 2 cannot be corners no matter what; index 1 turns 90 degrees and is one. Runs are [p0,p1] and [p1,p2], both two points, so both emit LineTo and there is no ClosePath.",
+      "points": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+      "precision": 1.0, "closed": false,
+      "expected": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "L", "x": 10.0, "y": 0.0},
+        {"cmd": "L", "x": 10.0, "y": 10.0}
+      ]
+    },
+    {
+      "name": "corner_angle_override_promotes_a_shallow_turn",
+      "derivation": "THE THRESHOLD, pinned where it BITES. The turn at (10,0) is shallow: the outgoing unit edge is (10,1)/sqrt(101) = (0.995037, 0.099504), so the dot with (1,0) is 0.9950372, which is a turn of 0.0996687 radians -- about 5.71 degrees, far under the 30-degree default. With the threshold lowered to 0.05 radians, cos(0.05) = 0.9987503 and 0.9950372 < 0.9987503, so the vertex IS a corner and both runs are two points long, giving two LineTos and no fitting.",
+      "points": [[0.0, 0.0], [10.0, 0.0], [20.0, 1.0]],
+      "precision": 1.0, "closed": false, "corner_angle": 0.05,
+      "expected": [
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "L", "x": 10.0, "y": 0.0},
+        {"cmd": "L", "x": 20.0, "y": 1.0}
+      ]
+    },
+    {
+      "name": "shallow_turn_under_the_default_threshold_is_fitted",
+      "_no_golden_why": "THE OTHER SIDE of the threshold, and the pair is the point: identical geometry, default 30-degree threshold, so the 5.71-degree turn is NOT a corner, the whole polyline is one three-point run, and the answer comes from fit_curve's least-squares solve. Class (b) -- comparison only, no golden, by the rule in this file's _doc.",
+      "points": [[0.0, 0.0], [10.0, 0.0], [20.0, 1.0]],
+      "precision": 1.0, "closed": false
+    },
+    {
+      "name": "collinear_run_is_fitted_not_short_circuited",
+      "_no_golden_why": "Three exactly collinear points have a dot product of 1 at the interior vertex, so there is no corner, so the run is three points and goes to the FITTER even though a LineTo would express it exactly. That is a real and slightly surprising property of the wrapper, and it is worth a cross-port vector; the resulting control points are class (b).",
+      "points": [[0.0, 0.0], [5.0, 0.0], [10.0, 0.0]],
+      "precision": 1.0, "closed": false
+    },
+    {
+      "name": "duplicate_vertex_suppresses_corner_detection_at_both_neighbours",
+      "_no_golden_why": "DEGENERATE, and the behaviour is not obvious: a repeated vertex makes one incident edge zero-length, and the corner test SKIPS any vertex with a degenerate edge. Because the duplicate sits between them, BOTH index 1 and index 2 are skipped -- so a genuine right angle at (10,0) is never detected and the whole four-point polyline becomes a single fitted run. Class (b): the corner list is derivable on paper and is stated here, but the fitted output is not.",
+      "points": [[0.0, 0.0], [10.0, 0.0], [10.0, 0.0], [10.0, 10.0]],
+      "precision": 1.0, "closed": false
+    },
+    {
+      "name": "closed_ring_with_no_corner_repeats_the_seam_vertex",
+      "_no_golden_why": "A closed ring whose vertices all turn gently (a regular octagon turns 45 degrees per vertex, so with the threshold raised to 1.0 radians = 57.3 degrees none of them is a corner) takes the no-corner branch, which emits ONE run with the seam vertex appended a second time so the fitter can close the loop. Class (b) for the control points; what the vector gates cross-port is that both ports take that branch and append that duplicate.",
+      "points": [[10.0, 0.0], [7.0, 7.0], [0.0, 10.0], [-7.0, 7.0],
+                 [-10.0, 0.0], [-7.0, -7.0], [0.0, -10.0], [7.0, -7.0]],
+      "precision": 0.5, "closed": true, "corner_angle": 1.0
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "_doc": "THE ART BRUSH'S WARP (jas_dioxus/src/algorithms/art_along_path.rs, JasSwift/Sources/Algorithms/ArtAlongPath.swift). The `art_flatten` family already gates the FIRST-SUBPATH WALKER this sits on -- that is the family whose absence let a leading-ClosePath bail-out ship in both ports at once (S-4) -- but nothing gated the WARP above it. So the repair at the walker could be undone one level up and no corpus family would say so.\n\nEXPECTATIONS ARE HAND-DERIVED from the documented warp: a point (ax, ay) of the artwork maps to arc-length t = clamp(ax / artwork_width, 0, 1) along the path (mirrored when flip_along), displaced along the path's LEFT normal by (ay - artwork_height/2) / artwork_height * h_out, where h_out = (scale/100) * stroke_weight (negated when flip_across). On a straight horizontal path the tangent is 0 everywhere, so the left normal is (0, 1) and the warp collapses to a scale-and-translate that can be written down exactly. Every vector here uses that path for exactly that reason.\n\nTolerance 1e-9: the answers are exact on this geometry.",
+  "algorithm": "art_along_path",
+  "comparison": "tolerance",
+  "tolerance": 1e-9,
+  "vectors": [
+    {
+      "name": "straight_path_scales_the_artwork_to_the_ribbon",
+      "derivation": "Path (0,0)-(100,0), length 100, tangent 0, left normal (0,1). Artwork is the 10x4 rectangle [(0,0),(10,0),(10,4),(0,4)] with scale 100 and stroke_weight 20, so h_out = 20. ax=0 maps to arc 0 and ax=10 to arc 100; ay=0 gives offset (0-2)/4*20 = -10 and ay=4 gives +10. The rectangle therefore becomes [(0,-10),(100,-10),(100,10),(0,10)]: stretched to the path's full length and to the ribbon's full height.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"artwork_width": 10.0, "artwork_height": 4.0, "scale": 100.0, "stroke_weight": 20.0, "flip_across": false, "flip_along": false,
+                "artwork": [[[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [0.0, 4.0]]]},
+      "expected": [[[0.0, -10.0], [100.0, -10.0], [100.0, 10.0], [0.0, 10.0]]]
+    },
+    {
+      "name": "scale_halves_the_ribbon_but_not_the_length",
+      "derivation": "SEPARATES THE TWO AXES. Same input with scale 50: h_out = 0.5 * 20 = 10, so the offsets halve to -5 and +5, while the ALONG-path extent is unchanged -- the artwork always spans the whole path, whatever the scale. A port that applied `scale` to both axes would fail here and pass the row above.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"artwork_width": 10.0, "artwork_height": 4.0, "scale": 50.0, "stroke_weight": 20.0, "flip_across": false, "flip_along": false,
+                "artwork": [[[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [0.0, 4.0]]]},
+      "expected": [[[0.0, -5.0], [100.0, -5.0], [100.0, 5.0], [0.0, 5.0]]]
+    },
+    {
+      "name": "flip_across_negates_the_normal_offset_only",
+      "derivation": "flip_across negates the offset and leaves t alone, so the same rectangle comes back with its y values swapped and its x values in place: [(0,10),(100,10),(100,-10),(0,-10)].",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"artwork_width": 10.0, "artwork_height": 4.0, "scale": 100.0, "stroke_weight": 20.0, "flip_across": true, "flip_along": false,
+                "artwork": [[[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [0.0, 4.0]]]},
+      "expected": [[[0.0, 10.0], [100.0, 10.0], [100.0, -10.0], [0.0, -10.0]]]
+    },
+    {
+      "name": "flip_along_mirrors_t_and_leaves_the_offset",
+      "derivation": "THE OTHER FLIP, and the pair separates them. flip_along replaces t with 1 - t and does not touch the offset, so the x values mirror and the y values stay: [(100,-10),(0,-10),(0,10),(100,10)]. A port that had wired the two flags to the same axis would fail exactly one of this row and the row above.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"artwork_width": 10.0, "artwork_height": 4.0, "scale": 100.0, "stroke_weight": 20.0, "flip_across": false, "flip_along": true,
+                "artwork": [[[0.0, 0.0], [10.0, 0.0], [10.0, 4.0], [0.0, 4.0]]]},
+      "expected": [[[100.0, -10.0], [0.0, -10.0], [0.0, 10.0], [100.0, 10.0]]]
+    },
+    {
+      "name": "an_out_of_range_artwork_x_is_clamped_not_wrapped",
+      "derivation": "DEGENERATE INPUT: an artwork point beyond artwork_width has t = clamp(ax/w, 0, 1), so ax = 25 on a width of 10 lands at t = 1, the END of the path, and ax = -5 lands at t = 0. Clamped, never wrapped and never extrapolated past the path's ends. Pinned because wrapping would put ink somewhere the artist never drew.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"artwork_width": 10.0, "artwork_height": 4.0, "scale": 100.0, "stroke_weight": 20.0, "flip_across": false, "flip_along": false,
+                "artwork": [[[-5.0, 2.0], [25.0, 2.0]]]},
+      "expected": [[[0.0, 0.0], [100.0, 0.0]]]
+    },
+    {
+      "name": "two_artwork_polygons_come_back_as_two",
+      "derivation": "The output is ONE warped polygon PER artwork polygon, in order -- not a flattened point list and not a merged ring. Two degenerate two-point polygons at ay = 0 and ay = 4 give offsets -10 and +10.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"artwork_width": 10.0, "artwork_height": 4.0, "scale": 100.0, "stroke_weight": 20.0, "flip_across": false, "flip_along": false,
+                "artwork": [[[0.0, 0.0], [10.0, 0.0]], [[0.0, 4.0], [10.0, 4.0]]]},
+      "expected": [[[0.0, -10.0], [100.0, -10.0]], [[0.0, 10.0], [100.0, 10.0]]]
+    },
+    {
+      "name": "zero_artwork_width_yields_nothing",
+      "derivation": "DEGENERATE: a zero (or negative) artwork dimension is rejected before the path is even flattened, because t would divide by it. No polygons.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"artwork_width": 0.0, "artwork_height": 4.0, "scale": 100.0, "stroke_weight": 20.0, "flip_across": false, "flip_along": false,
+                "artwork": [[[0.0, 0.0], [10.0, 0.0]]]},
+      "expected": []
+    },
+    {
+      "name": "empty_artwork_yields_nothing",
+      "derivation": "DEGENERATE, and by a DIFFERENT road than the row above: the dimensions are valid and the path is flattened, but there is no polygon to warp, so the loop produces nothing.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"artwork_width": 10.0, "artwork_height": 4.0, "scale": 100.0, "stroke_weight": 20.0, "flip_across": false, "flip_along": false,
+                "artwork": []},
+      "expected": []
+    },
+    {
+      "name": "a_zero_length_path_yields_nothing",
+      "derivation": "DEGENERATE: the path flattens to two coincident points, so the total arc length is 0 and there is no direction to warp along. Rejected rather than divided by.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 5, "y": 5}, {"cmd": "L", "x": 5, "y": 5}]},
+      "brush": {"artwork_width": 10.0, "artwork_height": 4.0, "scale": 100.0, "stroke_weight": 20.0, "flip_across": false, "flip_along": false,
+                "artwork": [[[0.0, 0.0], [10.0, 0.0]]]},
+      "expected": []
+    }
+  ]
+}

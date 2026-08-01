@@ -43,7 +43,13 @@ public enum TransformApply {
     public static func shearMatrix(angleDeg: Double, axis: String,
                                    axisAngleDeg: Double,
                                    rx: Double, ry: Double) -> Transform {
-        let k = tan(angleDeg * .pi / 180)
+        // `angleDeg * (pi/180)`, matching Rust's `f64::to_radians()`, which
+        // is `self * (PI / 180.0)`. Writing it as `angleDeg * .pi / 180`
+        // groups the other way and disagrees by an ulp on a quarter of all
+        // integer degrees; through `tan` near the dialog's +/-89.9 clamp
+        // that ulp reaches 4.7e-10 of shear factor -- MEASURED through the
+        // transform_apply corpus family.
+        let k = tan(angleDeg * (Double.pi / 180))
         let base: Transform
         switch axis {
         case "horizontal":

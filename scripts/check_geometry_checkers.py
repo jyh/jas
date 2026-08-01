@@ -197,6 +197,7 @@ Usage:
 """
 
 import ast
+import copy
 import json
 import os
 import pathlib
@@ -1328,6 +1329,22 @@ def reconcile(report):
         sample_floor = acct.get("min_checks_per_lane")
         vector_floor = acct.get("min_rulable_vectors")
         rulable = acct.get("rulable_vectors")
+        # A sampled law's per-probe-lane floors. `null` means the law does not
+        # sample in lanes (gradient_remap); a MALFORMED value is refused
+        # rather than skipped, because "unreadable" and "no floors" would
+        # otherwise be the same thing to every rule below.
+        probe_floors = acct.get("min_checks_per_probe_lane")
+        if probe_floors is not None and not (
+                isinstance(probe_floors, dict) and probe_floors
+                and all(isinstance(v, int) and v >= 1
+                        for v in probe_floors.values())):
+            errors.append(
+                f"reconcile: {algo} carries "
+                f"min_checks_per_probe_lane={probe_floors!r}; it must be "
+                f"absent/null (a law that does not sample in lanes) or a map "
+                f"of lane to a floor >= 1. An unreadable floor block and no "
+                f"floor block must not mean the same thing")
+            probe_floors = None
         if not isinstance(sample_floor, int) or sample_floor < 1:
             errors.append(
                 f"reconcile: {algo} carries no `min_checks_per_lane` "
@@ -1358,6 +1375,31 @@ def reconcile(report):
                     f"sample check(s), floor {sample_floor}: the lane did not "
                     f"go empty, it went THIN -- which a non-zero test cannot "
                     f"see")
+            # THE PROBE LANES INSIDE THAT TOTAL. `samples` is the SUM over a
+            # sampled law's probe lanes, and a sum is paid by whichever half
+            # has it: an anchor lane that halved reconciles green behind a
+            # generative lane that did not. The sum above cannot see it, so
+            # the split is carried in the account and asserted here, iterated
+            # over the DECLARED lanes -- a probe lane that contributed nothing
+            # is missing from the breakdown, not present with a zero.
+            for pl in sorted(probe_floors or {}):
+                by_pl = lanes[lane].get("samples_by_probe_lane")
+                if not isinstance(by_pl, dict):
+                    errors.append(
+                        f"reconcile: {algo} lane `{lane}` declares "
+                        f"`min_checks_per_probe_lane` but carries no "
+                        f"`samples_by_probe_lane` breakdown, so the floor is "
+                        f"asserted against nothing and only the sum -- the "
+                        f"quantity one lane can pay for the other -- survives")
+                    break
+                got = by_pl.get(pl, 0)
+                if got < probe_floors[pl]:
+                    errors.append(
+                        f"reconcile: {algo} lane `{lane}` performed {got} "
+                        f"sample check(s) in the `{pl}` probe lane, floor "
+                        f"{probe_floors[pl]}: one probe lane went THIN while "
+                        f"the total stayed healthy, which is exactly what a "
+                        f"union floor cannot see")
         if len(counts) > 1:
             errors.append(
                 f"reconcile: {algo}'s lanes disagree about how much was "
@@ -1611,6 +1653,99 @@ def self_test():
                               "min_discriminating": 7}}})),
           "(e4) an account with no witness-shape block must be refused: "
           "without it nothing here can tell span from population")
+
+    # (e5) THE PROBE LANES INSIDE A SAMPLED LAW'S TOTAL. `samples` is the SUM
+    # over `anchor` + `generative`, so an anchor lane that halved reconciles
+    # green behind a generative lane that did not -- which is the same defect
+    # as (e3), one axis down, and invisible to every rule phrased over the
+    # sum. Both directions: the split must be ASSERTED when floors are
+    # declared, and a floor block the reader cannot parse must be refused
+    # rather than skipped.
+    def sampled(anchor, generative, floors=None, breakdown=True):
+        lane = {"ruled": 19, "samples": anchor + generative}
+        if breakdown:
+            lane["samples_by_probe_lane"] = {"anchor": anchor,
+                                             "generative": generative}
+        return rpt({"a": {"lanes": {"rust": dict(lane), "swift": dict(lane)},
+                          "seam": 1, "discriminating": 8,
+                          "min_discriminating": 8,
+                          "min_checks_per_lane": 1558,
+                          "min_checks_per_probe_lane":
+                              {"anchor": 1216, "generative": 342}
+                              if floors is None else floors,
+                          "min_rulable_vectors": 19, "rulable_vectors": 19}})
+    check(reconcile(sampled(1216, 456)) == [],
+          "(e5) a run whose probe lanes each meet their floor must reconcile "
+          "clean")
+    check(any("`anchor` probe lane" in e for e in
+              reconcile(sampled(600, 1072))),
+          "(e5) an ANCHOR lane at half strength must be refused even though "
+          "the SUM (1672) clears min_checks_per_lane: a union total is paid "
+          "by whichever lane has it, and the anchor lane is the reproducible "
+          "one")
+    check(any("`generative` probe lane" in e for e in
+              reconcile(sampled(1558, 0))),
+          "(e5) a generative lane that drew NOTHING must be refused: the sum "
+          "is met entirely by the deterministic lane, so the run grew no "
+          "confidence at all and nothing said so")
+    check(any("no `samples_by_probe_lane`" in e for e in
+              reconcile(sampled(1216, 456, breakdown=False))),
+          "(e5) declaring per-probe-lane floors and reporting no breakdown "
+          "must be refused -- otherwise the floors are asserted against "
+          "nothing and only the payable sum survives")
+    check(any("min_checks_per_probe_lane" in e for e in
+              reconcile(sampled(1216, 456, floors={"anchor": 0}))),
+          "(e5) a malformed probe-lane floor block must be refused, not "
+          "skipped: `unreadable` and `no floors` must not mean the same thing")
+
+    # (e6) THE FIXTURE SIDE OF THE SAME RULE, over `cla._checker_config`, and
+    # it is proven by MUTATING THE LIVE FIXTURE'S OWN checker block rather
+    # than a synthetic one -- a synthetic block drifts away from the shape
+    # the tree actually declares, and then the self-test grades a fixture
+    # nobody ships.
+    with open(REPO / "test_fixtures" / "algorithms" / "boolean.json",
+              encoding="utf-8") as fh:
+        live_boolean = json.load(fh)
+
+    def cfg_refuses(mutate, fragment, why):
+        doc = copy.deepcopy(live_boolean)
+        mutate(doc["checker"])
+        got, msg = cla._checker_config("boolean", doc)
+        check(got is None and fragment in (msg or ""),
+              f"(e6) {why} -- got {msg!r}")
+
+    check(cla._checker_config("boolean", copy.deepcopy(live_boolean))[0]
+          is not None,
+          "(e6) the live boolean.json checker block must be accepted")
+    cfg_refuses(lambda c: c.update(min_accepted_per_vector=64),
+                "PER PROBE LANE",
+                "the OLD scalar floor -- one number over the union of two "
+                "lanes -- must be refused now that the lanes are separate")
+    cfg_refuses(lambda c: c["min_accepted_per_vector"].pop("generative"),
+                "declares no `min_accepted_per_vector` for probe lane "
+                "'generative'",
+                "a lane with no floor and no excuse must be refused: silence "
+                "is how a lane goes unfloored")
+    cfg_refuses(lambda c: c["no_information_floor"].update(anchor="tidier"),
+                "both floors probe lane 'anchor'",
+                "a lane cannot be floored and excused at once")
+    cfg_refuses(lambda c: c["no_information_floor"].update(generative="  "),
+                "with no reason",
+                "an excuse nobody had to justify is how a floor is emptied "
+                "one lane at a time")
+    cfg_refuses(lambda c: c["min_inside_probes_per_vector"].update(prng=3),
+                "does not draw",
+                "a floor for a lane no generator produces is a number that "
+                "reads as a guarantee and evaluates to nothing")
+    cfg_refuses(lambda c: c["min_checks_per_probe_lane"].update(anchor=900),
+                "the only derivable value",
+                "a per-probe-lane total that is not `per-vector floor x "
+                "vectors` must be refused: an observed total goes flaky with "
+                "the seed and a hand-typed one drifts")
+    cfg_refuses(lambda c: c.update(min_checks_per_lane=1216),
+                "per-probe-lane floors sum to",
+                "the scalar total and the probe-lane split must agree, or one "
+                "of the two numbers is not being read")
 
     # (f) CI WIRING, asserted over EXECUTED STEPS. The three cases below are
     # the defect and its two disguises; the last is the one that shipped.
@@ -2179,7 +2314,14 @@ def self_test():
           "at seam 1, CI wiring over EXECUTED steps only (YAML comment, shell "
           "comment, unpaired job, mismatched path), report freshness (run id, "
           "fixture and spec digests, tracked file), THIN and COLLINEAR "
-          "corpora, LANE ADJUDICATION over the DECLARED lanes (empty registry, "
+          "corpora, THE PROBE LANES INSIDE A SAMPLED TOTAL (a halved anchor "
+          "lane and a silent generative lane, each behind a healthy sum; a "
+          "missing breakdown; a malformed floor block; and, over the LIVE "
+          "fixture's own checker block, the old scalar floor, an unfloored "
+          "lane, a lane both floored and excused, a reasonless excuse, a "
+          "floor for a lane nothing draws, an underived total and a total "
+          "that disagrees with its parts), LANE ADJUDICATION over the "
+          "DECLARED lanes (empty registry, "
           "floor, missing reason, unknown platform and language, undeclared "
           "condition; a job carrying NEITHER flag, job- and step-level `if:` "
           "and its declared-and-stale exception, job- and step-level "

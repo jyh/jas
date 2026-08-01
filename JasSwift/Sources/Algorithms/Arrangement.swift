@@ -61,7 +61,10 @@ func arrangementDist(_ a: (Double, Double), _ b: (Double, Double)) -> Double {
 
 /// Linear-search vertex dedup: return the index of an existing vertex
 /// within `ARR_VERT_EPS` of `pt`, or append `pt` and return its index.
-func arrangementAddOrFindVertex(
+/// Public so the AlgorithmRoundtrip corpus tool can gate it directly:
+/// it is the other half of the arrangement primitive, and its
+/// first-match-wins order dependence is invisible through its callers.
+public func arrangementAddOrFindVertex(
     _ verts: inout [(Double, Double)], _ pt: (Double, Double)
 ) -> Int {
     for (i, v) in verts.enumerated() {

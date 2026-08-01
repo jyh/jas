@@ -63,6 +63,15 @@ case "polygon_metrics":   results = runPolygonMetrics(activeVectors)
 case "fit_curve":         results = runFitCurve(activeVectors)
 case "shape_recognize":   results = runShapeRecognize(activeVectors)
 case "planar":            results = runPlanar(activeVectors)
+case "arrangement":       results = runArrangement(activeVectors)
+case "transform_apply":   results = runTransformApply(activeVectors)
+case "paragraph_markers": results = runParagraphMarkers(activeVectors)
+case "hyphenator":        results = runHyphenator(activeVectors)
+case "simplify":          results = runSimplify(activeVectors)
+case "dash_renderer":     results = runDashRenderer(activeVectors)
+case "art_along_path":    results = runArtAlongPath(activeVectors)
+case "pattern_along_path": results = runPatternAlongPath(activeVectors)
+case "bristle_stroke":    results = runBristleStroke(activeVectors)
 case "text_layout":       results = runTextLayout(activeVectors)
 case "text_layout_paragraph": results = runTextLayoutParagraph(activeVectors)
 case "path_text_layout":  results = runPathTextLayout(activeVectors)
@@ -887,4 +896,328 @@ func runAlign(_ vectors: [[String: Any]]) -> [[String: Any]] {
         out.append(["translations": ts])
     }
     return out
+}
+
+// MARK: - Arrangement (the shared segment-splitting primitive)
+//
+// `arrangementSplitPoints` and `arrangementAddOrFindVertex` are the first
+// stage of BOTH the planar-graph extractor and the boolean ring normalizer,
+// and until this verb existed neither had any cross-language witness: their
+// whole assurance was 11 Rust tests and 11 Swift tests mirrored by hand.
+//
+// The `endpoint` field is load-bearing and is NOT a tolerance quantity. The
+// module contracts that a returned point is TAKEN FROM an existing endpoint
+// whenever a parameter sits at one, bit-exactly, because that is what lets
+// the caller's dedup fuse a T-junction into a single vertex. A tolerance
+// comparison cannot tell (5.0, 0.0) from (4.999999999999999, 0.0), so each
+// point reports which input endpoint it is BIT-IDENTICAL to -- first match
+// in the order a1, a2, b1, b2 -- and that string is compared exactly.
+
+private func arrangementEndpointName(
+    _ p: (Double, Double),
+    _ a1: (Double, Double), _ a2: (Double, Double),
+    _ b1: (Double, Double), _ b2: (Double, Double)
+) -> Any {
+    for (name, q) in [("a1", a1), ("a2", a2), ("b1", b1), ("b2", b2)] {
+        if p.0 == q.0 && p.1 == q.1 { return name }
+    }
+    return NSNull()
+}
+
+private func arrangementPoint(_ v: Any?) -> (Double, Double) {
+    guard let a = v as? [Any], a.count >= 2,
+          let x = (a[0] as? NSNumber)?.doubleValue,
+          let y = (a[1] as? NSNumber)?.doubleValue else {
+        fputs("arrangement: point must be [x, y]\n", stderr)
+        exit(1)
+    }
+    return (x, y)
+}
+
+func runArrangement(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let function = tc["function"] as? String ?? ""
+        var result: [String: Any]
+        switch function {
+        case "split_points":
+            guard let a = tc["a"] as? [Any], let b = tc["b"] as? [Any] else {
+                fputs("arrangement: `a` / `b` missing\n", stderr)
+                exit(1)
+            }
+            let a1 = arrangementPoint(a[0]), a2 = arrangementPoint(a[1])
+            let b1 = arrangementPoint(b[0]), b2 = arrangementPoint(b[1])
+            let pts: [[String: Any]] = arrangementSplitPoints(a1, a2, b1, b2).map {
+                (p, s, t) in
+                ["p": [p.0, p.1], "s": s, "t": t,
+                 "endpoint": arrangementEndpointName(p, a1, a2, b1, b2)]
+            }
+            result = ["points": pts]
+        case "add_or_find_vertex":
+            guard let seed = tc["vertices"] as? [Any],
+                  let queries = tc["points"] as? [Any] else {
+                fputs("arrangement: `vertices` / `points` missing\n", stderr)
+                exit(1)
+            }
+            var verts: [(Double, Double)] = seed.map { arrangementPoint($0) }
+            let indices: [Int] = queries.map {
+                arrangementAddOrFindVertex(&verts, arrangementPoint($0))
+            }
+            result = ["indices": indices, "vertices": verts.map { [$0.0, $0.1] }]
+        default:
+            fputs("Unknown arrangement function: \(function)\n", stderr)
+            exit(1)
+        }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Transform Apply (the Scale / Rotate / Shear matrix builders)
+//
+// Every transform dialog and every transform tool routes through these four
+// functions, and none of them had a cross-language witness. The matrix is
+// reported as its six components in FULL precision -- the MATRIXPRECISION
+// ruling is that multipliers keep full precision and only positions round to
+// four -- plus the transformed image of two probe points, so a matrix that is
+// right in its components and wrong in its pivot cannot pass.
+
+private func transformJSON(_ t: Transform) -> [String: Any] {
+    // Two probe points, applied through the matrix: the pivot arithmetic
+    // (translate(-r) * base * translate(r)) lives entirely in `e` and `f`,
+    // and a reader comparing only a...d would not see it move.
+    func apply(_ x: Double, _ y: Double) -> [Double] {
+        [t.a * x + t.c * y + t.e, t.b * x + t.d * y + t.f]
+    }
+    return ["m": [t.a, t.b, t.c, t.d, t.e, t.f],
+            "origin_image": apply(0, 0),
+            "probe_image": apply(100, 40)]
+}
+
+func runTransformApply(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let function = tc["function"] as? String ?? ""
+        func n(_ k: String, _ d: Double) -> Double {
+            (tc[k] as? NSNumber)?.doubleValue ?? d
+        }
+        var result: [String: Any]
+        switch function {
+        case "scale_matrix":
+            result = transformJSON(TransformApply.scaleMatrix(
+                sx: n("sx", 1), sy: n("sy", 1), rx: n("rx", 0), ry: n("ry", 0)))
+        case "rotate_matrix":
+            result = transformJSON(TransformApply.rotateMatrix(
+                thetaDeg: n("theta_deg", 0), rx: n("rx", 0), ry: n("ry", 0)))
+        case "shear_matrix":
+            result = transformJSON(TransformApply.shearMatrix(
+                angleDeg: n("angle_deg", 0),
+                axis: tc["axis"] as? String ?? "horizontal",
+                axisAngleDeg: n("axis_angle_deg", 0),
+                rx: n("rx", 0), ry: n("ry", 0)))
+        case "stroke_width_factor":
+            result = ["factor": TransformApply.strokeWidthFactor(
+                sx: n("sx", 1), sy: n("sy", 1))]
+        default:
+            fputs("Unknown transform_apply function: \(function)\n", stderr)
+            exit(1)
+        }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Paragraph Markers (the list-marker half of TextLayoutParagraph)
+//
+// The `text_layout_paragraph` verb drives `layoutWithParagraphs`; it does NOT
+// reach the file of the same name. Those five functions are called only from
+// the RENDERER (CanvasSubwindow.swift, canvas/render.rs), so every ordered
+// list an artist draws goes through arithmetic no corpus family watched.
+
+func runParagraphMarkers(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let function = tc["function"] as? String ?? ""
+        var result: [String: Any]
+        switch function {
+        case "marker_text":
+            result = ["text": markerText(tc["list_style"] as? String ?? "",
+                                         counter: (tc["counter"] as? NSNumber)?.intValue ?? 0)]
+        case "to_alpha":
+            result = ["text": toAlpha((tc["n"] as? NSNumber)?.intValue ?? 0,
+                                      upper: (tc["upper"] as? NSNumber)?.boolValue ?? false)]
+        case "to_roman":
+            result = ["text": toRoman((tc["n"] as? NSNumber)?.intValue ?? 0,
+                                      upper: (tc["upper"] as? NSNumber)?.boolValue ?? false)]
+        case "compute_counters":
+            // Only `listStyle` is consulted, so the fixture carries a bare
+            // style list rather than whole segments.
+            let styles = (tc["styles"] as? [Any]) ?? []
+            let segs: [ParagraphSegment] = styles.map { s in
+                var seg = ParagraphSegment(charStart: 0, charEnd: 0)
+                seg.listStyle = s as? String
+                return seg
+            }
+            result = ["counters": computeCounters(segs)]
+        default:
+            fputs("Unknown paragraph_markers function: \(function)\n", stderr)
+            exit(1)
+        }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Hyphenator (Liang-style pattern hyphenation)
+//
+// Both public functions. `splitPattern` is the parser the whole table is read
+// through, so a divergence there mis-hyphenates every word silently rather
+// than loudly.
+
+func runHyphenator(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let function = tc["function"] as? String ?? ""
+        var result: [String: Any]
+        switch function {
+        case "split_pattern":
+            let (letters, digits) = splitPattern(tc["pattern"] as? String ?? "")
+            result = ["letters": letters, "digits": digits.map { Int($0) }]
+        case "hyphenate":
+            let word = tc["word"] as? String ?? ""
+            let pats = (tc["patterns"] as? [String]) ?? []
+            let breaks = hyphenate(word, patterns: pats,
+                                   minBefore: (tc["min_before"] as? NSNumber)?.intValue ?? 0,
+                                   minAfter: (tc["min_after"] as? NSNumber)?.intValue ?? 0)
+            // The break MASK is the primitive answer; the hyphenated spelling
+            // is the same answer a human can read, and a reader who can only
+            // check one should check that one.
+            var spelled = ""
+            for (i, c) in Array(word).enumerated() {
+                if i > 0 && i < breaks.count && breaks[i] { spelled.append("-") }
+                spelled.append(c)
+            }
+            result = ["breaks": breaks, "spelled": spelled]
+        default:
+            fputs("Unknown hyphenator function: \(function)\n", stderr)
+            exit(1)
+        }
+        return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Simplify (polyline -> Bezier: the Object > Simplify command and the
+//         tail of every boolean result)
+
+func runSimplify(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let pts = ((tc["points"] as? [Any]) ?? []).map { arrangementPoint($0) }
+        let precision = (tc["precision"] as? NSNumber)?.doubleValue ?? 1.0
+        let closed = (tc["closed"] as? NSNumber)?.boolValue ?? false
+        let out: [PathCommand]
+        if let angle = (tc["corner_angle"] as? NSNumber)?.doubleValue {
+            out = simplifyPolyline(pts, precision: precision, closed: closed,
+                                   cornerAngleThreshold: angle)
+        } else {
+            out = simplifyPolyline(pts, precision: precision, closed: closed)
+        }
+        return ["name": name, "result": out.map { cmdToJSON($0) }]
+    }
+}
+
+// MARK: - Dash Renderer (every dashed stroke the app draws)
+//
+// The output is a LIST OF SUB-PATHS, one per dash, in arc-length order, so the
+// family pins the dash BOUNDARIES and not merely the total ink.
+
+func runDashRenderer(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let elem = parseElement(tc["element"]!)
+        var d: [PathCommand] = []
+        if case .path(let p) = elem { d = p.d }
+        let dash = ((tc["dash_array"] as? [Any]) ?? []).map {
+            ($0 as? NSNumber)?.doubleValue ?? 0
+        }
+        let align = (tc["align_anchors"] as? NSNumber)?.boolValue ?? false
+        let subpaths = DashRenderer.expandDashedStroke(
+            path: d, dashArray: dash, alignAnchors: align)
+        return ["name": name,
+                "result": ["subpaths": subpaths.map { $0.map { cmdToJSON($0) } }]]
+    }
+}
+
+// MARK: - The three PATH BRUSHES: art warp, pattern tiling, bristles
+//
+// One shape, three families. Each takes a stroke path plus a brush and
+// returns a list of polygons (or, for the bristle brush, polylines) in
+// document coordinates. `art_flatten` already gates the FIRST-SUBPATH WALKER
+// all three sit on; nothing gated the warp, the tiling or the bristle spread
+// above it, so an S-4 fix at the walker could be undone by a divergence one
+// level up and no family would say so.
+
+private func brushPolys(_ v: Any?) -> [[[Double]]] {
+    ((v as? [Any]) ?? []).map { poly in
+        ((poly as? [Any]) ?? []).map { pt in
+            let p = arrangementPoint(pt)
+            return [p.0, p.1]
+        }
+    }
+}
+
+private func brushPath(_ tc: [String: Any]) -> [PathCommand] {
+    let elem = parseElement(tc["element"]!)
+    if case .path(let p) = elem { return p.d }
+    return []
+}
+
+func runArtAlongPath(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let b = (tc["brush"] as? [String: Any]) ?? [:]
+        func n(_ k: String, _ d: Double) -> Double { (b[k] as? NSNumber)?.doubleValue ?? d }
+        func f(_ k: String) -> Bool { (b[k] as? NSNumber)?.boolValue ?? false }
+        let brush = ArtBrush(artworkWidth: n("artwork_width", 0),
+                             artworkHeight: n("artwork_height", 0),
+                             artwork: brushPolys(b["artwork"]),
+                             scale: n("scale", 100),
+                             flipAcross: f("flip_across"), flipAlong: f("flip_along"),
+                             strokeWeight: n("stroke_weight", 1))
+        return ["name": name, "result": artAlongPath(brushPath(tc), brush)]
+    }
+}
+
+func runPatternAlongPath(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let b = (tc["brush"] as? [String: Any]) ?? [:]
+        func n(_ k: String, _ d: Double) -> Double { (b[k] as? NSNumber)?.doubleValue ?? d }
+        func f(_ k: String) -> Bool { (b[k] as? NSNumber)?.boolValue ?? false }
+        let brush = PatternBrush(tileWidth: n("tile_width", 0),
+                                 tileHeight: n("tile_height", 0),
+                                 side: brushPolys(b["side"]),
+                                 scale: n("scale", 100), spacing: n("spacing", 0),
+                                 flipAcross: f("flip_across"), flipAlong: f("flip_along"),
+                                 strokeWeight: n("stroke_weight", 1))
+        return ["name": name, "result": patternAlongPath(brushPath(tc), brush)]
+    }
+}
+
+func runBristleStroke(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let b = (tc["brush"] as? [String: Any]) ?? [:]
+        func n(_ k: String, _ d: Double) -> Double { (b[k] as? NSNumber)?.doubleValue ?? d }
+        let brush = BristleBrush(size: n("size", 1), density: n("density", 50),
+                                 thickness: n("thickness", 50), opacity: n("opacity", 100),
+                                 strokeWeight: n("stroke_weight", 1))
+        // The three DERIVED scalars are reported alongside the polylines
+        // because the caller strokes with them: a port that agreed on every
+        // bristle centreline and disagreed on the alpha would paint a visibly
+        // different stroke and compare green.
+        return ["name": name, "result": [
+            "count": brush.count(),
+            "line_width": brush.lineWidth(),
+            "alpha": brush.alpha(),
+            "bristles": bristleStroke(brushPath(tc), brush),
+        ]]
+    }
 }

@@ -1,0 +1,230 @@
+{
+  "_doc": "THE SCALE / ROTATE / SHEAR MATRIX BUILDERS (jas_dioxus/src/algorithms/transform_apply.rs, JasSwift/Sources/Algorithms/TransformApply.swift). Every transform dialog and every transform tool routes through these four functions, and until this family none of them had a cross-language witness.\n\nEach vector reports the six matrix components AND the images of two probe points, (0,0) and (100,40). Both halves are needed: the pivot arithmetic (T(r) * base * T(-r)) lives entirely in `e` and `f`, so a reader comparing only a..d would not see the reference point move; and the components catch a matrix that happens to agree on two points.\n\nEXPECTATIONS ARE HAND-DERIVED from the documented composition (around_point returns T(rx,ry) * base * T(-rx,-ry), so applying it to p gives base(p - r) + r) and from the mathematics of the base matrices, using a pocket calculator's cos/sin/tan -- never by running either port. The `derivation` field on each vector carries the arithmetic.\n\nTHE TOLERANCE IS 1e-12 AND IT IS DELIBERATELY NOT TIGHTER. cos(90 degrees) is 6.1e-17 rather than 0 in every IEEE dialect, sin(180 degrees) is 1.2e-16, and tan(45 degrees) is 0.9999999999999999, so the mathematically exact expectations above can only be pinned against a band. 1e-12 admits those and is still ~10^4 times narrower than any behavioural difference between two of these matrices.\n\nWHAT THIS TOLERANCE DOES NOT GATE, STATED RATHER THAN LEFT TO BE DISCOVERED: the two ports spell degree-to-radian conversion differently -- Rust's f64::to_radians() is `deg * (PI/180)` and Swift writes `deg * .pi / 180`, which is `(deg * PI) / 180` -- and those disagree by one ulp on 186 of the 721 integer degree values in [-360, 360]. That is a real port-wide divergence, measured, and it is recorded as a named coverage gap rather than hidden by this band. It is BELOW this tolerance by four orders of magnitude, so this family passes with it present; what would see it is a bit-pattern comparison, which is a different instrument.",
+  "algorithm": "transform_apply",
+  "comparison": "tolerance",
+  "tolerance": 1e-12,
+  "vectors": [
+    {
+      "name": "scale_uniform_about_the_origin",
+      "function": "scale_matrix",
+      "derivation": "base = scale(2,3) = [2,0,0,3,0,0]; the reference point is the origin so the conjugation is the identity. (0,0) is fixed; (100,40) maps to (200,120).",
+      "sx": 2.0, "sy": 3.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [2.0, 0.0, 0.0, 3.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [200.0, 120.0]
+      }
+    },
+    {
+      "name": "scale_about_a_reference_point",
+      "function": "scale_matrix",
+      "derivation": "THE PIVOT VECTOR: a..d are identical to the row above, so only e and f and the probe images can tell the two apart. e = rx - a*rx - c*ry = 10 - 2*10 - 0 = -10; f = ry - b*rx - d*ry = 20 - 0 - 3*20 = -40. (0,0) maps to (e,f) = (-10,-40); (100,40) maps to (2*100 - 10, 3*40 - 40) = (190, 80). The reference point itself is fixed: 2*10 - 10 = 10, 3*20 - 40 = 20.",
+      "sx": 2.0, "sy": 3.0, "rx": 10.0, "ry": 20.0,
+      "expected": {
+        "m": [2.0, 0.0, 0.0, 3.0, -10.0, -40.0],
+        "origin_image": [-10.0, -40.0],
+        "probe_image": [190.0, 80.0]
+      }
+    },
+    {
+      "name": "scale_negative_x_is_a_mirror_about_the_reference_line",
+      "function": "scale_matrix",
+      "derivation": "sx = -1 with rx = 50 is a reflection in the vertical line x = 50. a = -1, d = 1. e = 50 - (-1)*50 - 0 = 100; f = 0 - 0 - 1*0 = 0. (0,0) maps to (100,0) -- its mirror image -- and (100,40) maps to (0,40).",
+      "sx": -1.0, "sy": 1.0, "rx": 50.0, "ry": 0.0,
+      "expected": {
+        "m": [-1.0, 0.0, 0.0, 1.0, 100.0, 0.0],
+        "origin_image": [100.0, 0.0],
+        "probe_image": [0.0, 40.0]
+      }
+    },
+    {
+      "name": "scale_by_one_is_the_identity_even_off_origin",
+      "function": "scale_matrix",
+      "derivation": "The documented identity case, and it must stay the identity for ANY reference point: e = 7 - 1*7 - 0 = 0 and f = 9 - 0 - 1*9 = 0, so the pivot cancels exactly.",
+      "sx": 1.0, "sy": 1.0, "rx": 7.0, "ry": 9.0,
+      "expected": {
+        "m": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [100.0, 40.0]
+      }
+    },
+    {
+      "name": "rotate_zero_is_the_identity",
+      "function": "rotate_matrix",
+      "derivation": "cos 0 = 1, sin 0 = 0, so the matrix is [1,0,0,1,0,0] and every point is fixed.",
+      "theta_deg": 0.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [100.0, 40.0]
+      }
+    },
+    {
+      "name": "rotate_ninety_about_the_origin",
+      "function": "rotate_matrix",
+      "derivation": "cos 90 = 0, sin 90 = 1, so m = [0,1,-1,0,0,0]. The application rule is (a*x + c*y + e, b*x + d*y + f), so (100,40) maps to (0*100 - 1*40, 1*100 + 0*40) = (-40, 100) -- the quarter turn the SIGN of `c` decides, which is the half of the convention a symmetric angle could not pin.",
+      "theta_deg": 90.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [0.0, 1.0, -1.0, 0.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [-40.0, 100.0]
+      }
+    },
+    {
+      "name": "rotate_ninety_about_a_reference_point",
+      "function": "rotate_matrix",
+      "derivation": "Same a..d as above. e = 50 - 0*50 - (-1)*50 = 100; f = 50 - 1*50 - 0*50 = 0. (0,0) maps to (100,0); (100,40) maps to (-40 + 100, 100 + 0) = (60,100). The reference point is fixed: -50 + 100 = 50, 50 + 0 = 50.",
+      "theta_deg": 90.0, "rx": 50.0, "ry": 50.0,
+      "expected": {
+        "m": [0.0, 1.0, -1.0, 0.0, 100.0, 0.0],
+        "origin_image": [100.0, 0.0],
+        "probe_image": [60.0, 100.0]
+      }
+    },
+    {
+      "name": "rotate_one_eighty_negates_both_axes",
+      "function": "rotate_matrix",
+      "derivation": "cos 180 = -1, sin 180 = 0, so m = [-1,0,0,-1,0,0] and (100,40) maps to (-100,-40). Both transcendentals land on the tolerance band rather than on the exact value here: no IEEE dialect returns 0 for sin(pi).",
+      "theta_deg": 180.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [-1.0, 0.0, 0.0, -1.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [-100.0, -40.0]
+      }
+    },
+    {
+      "name": "rotate_forty_five_about_the_origin",
+      "function": "rotate_matrix",
+      "derivation": "cos 45 = sin 45 = sqrt(2)/2 = 0.7071067811865476. (100,40) maps to (100c - 40s, 100s + 40c) = (60c, 140c) = (42.42640687119285, 98.99494936611666).",
+      "theta_deg": 45.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [0.7071067811865476, 0.7071067811865476, -0.7071067811865476, 0.7071067811865476, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [42.42640687119285, 98.99494936611666]
+      }
+    },
+    {
+      "name": "rotate_negative_thirty_about_the_origin",
+      "function": "rotate_matrix",
+      "derivation": "A NEGATIVE angle, which no other vector here carries and which the sign of `b` decides. cos(-30) = sqrt(3)/2 = 0.8660254037844386, sin(-30) = -1/2 exactly. m = [sqrt(3)/2, -0.5, 0.5, sqrt(3)/2, 0, 0]. (100,40) maps to (100*sqrt(3)/2 + 40*0.5, -100*0.5 + 40*sqrt(3)/2) = (106.60254037844386, -15.358983848622458).",
+      "theta_deg": -30.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [0.8660254037844386, -0.5, 0.5, 0.8660254037844386, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [106.60254037844386, -15.358983848622458]
+      }
+    },
+    {
+      "name": "rotate_three_sixty_returns_to_the_identity",
+      "function": "rotate_matrix",
+      "derivation": "A FULL TURN: cos 360 = 1, sin 360 = 0, and the point must come back to itself. This is the vector where the degree-to-radian conversion is worked hardest -- 360 * (PI/180) against (360 * PI) / 180 -- and it is one of the 186 integer degrees on which the two spellings differ by an ulp. The resulting matrix difference is ~1e-16, four orders below this family's band.",
+      "theta_deg": 360.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [100.0, 40.0]
+      }
+    },
+    {
+      "name": "shear_zero_is_the_identity",
+      "function": "shear_matrix",
+      "derivation": "tan 0 = 0, so shear(0,0) is the identity and the reference point is irrelevant.",
+      "angle_deg": 0.0, "axis": "horizontal", "axis_angle_deg": 0.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [100.0, 40.0]
+      }
+    },
+    {
+      "name": "shear_horizontal_forty_five",
+      "function": "shear_matrix",
+      "derivation": "k = tan 45 = 1. shear(kx=1, ky=0) puts the factor in `c`: m = [1, 0, 1, 1, 0, 0]. (100,40) slides horizontally by 1*40 to (140, 40); the y coordinate does not move, which is what `horizontal` means.",
+      "angle_deg": 45.0, "axis": "horizontal", "axis_angle_deg": 0.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [1.0, 0.0, 1.0, 1.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [140.0, 40.0]
+      }
+    },
+    {
+      "name": "shear_vertical_forty_five",
+      "function": "shear_matrix",
+      "derivation": "THE AXIS SWAP, which the horizontal row cannot see: shear(kx=0, ky=1) puts the factor in `b` instead. m = [1, 1, 0, 1, 0, 0], and (100,40) slides vertically by 1*100 to (100, 140).",
+      "angle_deg": 45.0, "axis": "vertical", "axis_angle_deg": 0.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [100.0, 140.0]
+      }
+    },
+    {
+      "name": "shear_horizontal_thirty_about_a_reference_point",
+      "function": "shear_matrix",
+      "derivation": "k = tan 30 = 1/sqrt(3) = 0.5773502691896258. a=1, b=0, c=k, d=1. e = rx - a*rx - c*ry = 20 - 20 - 10k = -10k = -5.773502691896258; f = ry - b*rx - d*ry = 10 - 0 - 10 = 0. (0,0) maps to (-10k, 0). (100,40) maps to (100 + 40k - 10k, 40) = (100 + 30k, 40) = (117.32050807568878, 40).",
+      "angle_deg": 30.0, "axis": "horizontal", "axis_angle_deg": 0.0, "rx": 20.0, "ry": 10.0,
+      "expected": {
+        "m": [1.0, 0.0, 0.5773502691896258, 1.0, -5.773502691896258, 0.0],
+        "origin_image": [-5.773502691896258, 0.0],
+        "probe_image": [117.32050807568878, 40.0]
+      }
+    },
+    {
+      "name": "shear_custom_axis_at_ninety_is_a_negated_vertical_shear",
+      "function": "shear_matrix",
+      "derivation": "THE CUSTOM-AXIS BRANCH, which neither port's tests reach and whose answer is not obvious. base = R(90) * shear(k,0) * R(-90). Writing each as [[a,c],[b,d]]: R(90) = [[0,-1],[1,0]], shear(k,0) = [[1,k],[0,1]], R(-90) = [[0,1],[-1,0]]. R(90)*shear = [[0,-1],[1,k]]; times R(-90) = [[1,0],[-k,1]]. So the custom axis at 90 degrees is shear(0, -k) -- a VERTICAL shear with the factor NEGATED, not shear(0, +k). With k = tan 30 = 0.5773502691896258, (100,40) maps to (100, 40 - 100k) = (100, -17.735026918962582).",
+      "angle_deg": 30.0, "axis": "custom", "axis_angle_deg": 90.0, "rx": 0.0, "ry": 0.0,
+      "expected": {
+        "m": [1.0, -0.5773502691896258, 0.0, 1.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [100.0, -17.735026918962582]
+      }
+    },
+    {
+      "name": "shear_unknown_axis_falls_back_to_the_identity",
+      "function": "shear_matrix",
+      "derivation": "DEGENERATE INPUT, and the fallback is behaviour neither port writes down: an axis string that is none of horizontal/vertical/custom yields the IDENTITY base, so the whole matrix is the identity regardless of the angle and of the reference point (7 - 7 = 0, 9 - 9 = 0). Pinned so that a port that fell back to `horizontal` instead -- an easy and silent difference -- is caught.",
+      "angle_deg": 30.0, "axis": "diagonal", "axis_angle_deg": 0.0, "rx": 7.0, "ry": 9.0,
+      "expected": {
+        "m": [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+        "origin_image": [0.0, 0.0],
+        "probe_image": [100.0, 40.0]
+      }
+    },
+    {
+      "name": "stroke_width_factor_is_the_geometric_mean",
+      "function": "stroke_width_factor",
+      "derivation": "SCALE_TOOL.md: multiply by the unsigned geometric mean sqrt(|sx * sy|). sqrt(4*9) = 6.",
+      "sx": 4.0, "sy": 9.0,
+      "expected": {"factor": 6.0}
+    },
+    {
+      "name": "stroke_width_factor_ignores_one_negative_factor",
+      "function": "stroke_width_factor",
+      "derivation": "UNSIGNED: sqrt(|-4| * |9|) = 6. A port that computed sqrt(sx*sy) would get NaN here, which is the whole reason the spec says unsigned -- strokes do not flip.",
+      "sx": -4.0, "sy": 9.0,
+      "expected": {"factor": 6.0}
+    },
+    {
+      "name": "stroke_width_factor_ignores_two_negative_factors",
+      "function": "stroke_width_factor",
+      "derivation": "sqrt(|-4| * |-9|) = 6. The row above and this one separate |sx|*|sy| from |sx*sy|: they agree here, but a port that took the absolute value only once would fail the row above and pass this one.",
+      "sx": -4.0, "sy": -9.0,
+      "expected": {"factor": 6.0}
+    },
+    {
+      "name": "stroke_width_factor_collapses_to_zero_on_a_flat_axis",
+      "function": "stroke_width_factor",
+      "derivation": "DEGENERATE: a zero factor on either axis makes the geometric mean 0, so a stroke scaled flat has no width. sqrt(0*5) = 0.",
+      "sx": 0.0, "sy": 5.0,
+      "expected": {"factor": 0.0}
+    },
+    {
+      "name": "stroke_width_factor_is_the_factor_itself_when_uniform",
+      "function": "stroke_width_factor",
+      "derivation": "The identity the spec's wording implies: under UNIFORM scaling the geometric mean must be the factor, sqrt(2*2) = 2, or a uniformly scaled stroke would not track its shape.",
+      "sx": 2.0, "sy": 2.0,
+      "expected": {"factor": 2.0}
+    }
+  ]
+}

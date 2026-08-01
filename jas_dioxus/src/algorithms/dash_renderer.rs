@@ -36,6 +36,25 @@ pub fn expand_dashed_stroke(
     if path.is_empty() {
         return Vec::new();
     }
+    // S-4: a LEADING ClosePath establishes no anchor and draws nothing, so
+    // it must not reach either branch below. The dashed branch already
+    // ignores it — `split_at_moveto` gives it its own subpath and
+    // `build_segments` finds no segment there — but the undashed fast path
+    // did not, and the two branches have to answer alike. Measured, in BOTH
+    // ports identically (so no port-vs-port comparison could see it): a bare
+    // `Z M 5 5` came back as ONE sub-path where `M 5 5` came back as none,
+    // because the drawability test asked only "is some command not a
+    // MoveTo" and a ClosePath is not a MoveTo. Same shape as the
+    // leading-close bail-outs already repaired in `art_flatten` and
+    // `calligraphic_outline`.
+    let lead = path
+        .iter()
+        .take_while(|c| matches!(c, PathCommand::ClosePath))
+        .count();
+    let path = &path[lead..];
+    if path.is_empty() {
+        return Vec::new();
+    }
     // No dashing → single solid sub-path equal to the original path.
     if dash_array.is_empty() || dash_array.iter().all(|&v| v == 0.0) {
         if path.iter().any(|c| !matches!(c, PathCommand::MoveTo { .. })) {

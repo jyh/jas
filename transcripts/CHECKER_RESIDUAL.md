@@ -1,4 +1,17 @@
-# CHECKER_RESIDUAL — the geometry-checker bus models CI, and a model has a floor
+# CHECKER_RESIDUAL — a guard that models its subject inherits the model's floor
+
+> **THE STOPPING RULE, RATIFIED BY JYH AT COUNCIL, 2026-08-01.**
+>
+> **Fix an instance when it is cheap and concrete. Declare the CLASS once. Do
+> not hold a working instrument for the next member of a series that has no
+> last element.**
+>
+> It was written against **seven** arrivals of one shape across Phases 1 and 2,
+> and the eighth arrived during the sitting that wrote it down. The rule is not
+> "stop looking". It is: **when you find the next one, fix it if it is cheap,
+> declare it if it is not, and land the phase either way.** The class below is
+> the standing declaration, so the next author inherits *the decision* rather
+> than *the fatigue*.
 
 This document exists because the same defect shape arrived **four times in one
 phase**, each fix correct and each one abstraction short of the last:
@@ -115,3 +128,94 @@ gap somebody rediscovers as a defect.
 per line, and a line can change the shell's mode for every line after it. Recorded to make
 the pattern's persistence visible, not to justify a sixth iteration: closing this properly
 means EXECUTING the workflow, which is a different instrument.
+
+---
+
+# THE CLASS — instances 6, 7 and 8, which are 1–5 with "CI" replaced by "THE SAMPLE"
+
+Phase 2 built a **sampled** instrument (`spec/geometry/region.py` +
+`spec/geometry/probes.py`), and the shape arrived three more times in it. Read the
+sentence at the top of this file with one word swapped and every row below is
+already covered:
+
+> **A guard that MODELS its subject inherits every assumption the model makes,
+> and those assumptions are invisible precisely because they are the model's
+> floor.**
+
+For instances 1–5 the modelled subject was **CI**. For 6–8 it is **the sample**. It
+is one class, and it does not need a second name.
+
+| # | the guard | what it MODELLED | the assumption that was the floor | found |
+|---|---|---|---|---|
+| **6** | `min_accepted_per_vector`, F1 | the sample's *adequacy*, via a box built from the geometry under test | that a sampling box drawn around the output **contains** the output's defects — when the box is a FUNCTION of the output, so a runaway coordinate MOVES the box | a 1pt ring 100pt away left `accepted` at 88 of 88 against a floor of 64 while probes inside the region fell 31 → **0**; 0 of 17 vectors noticed, 10 seeds, three distances |
+| **7** | `min_inside_probes_per_vector`, `min_accepted_per_vector`, `min_checks_per_lane` | the sample as **one pool** | that two lanes drawn for opposite reasons — one seedless and reproducible, one fresh every run — are **interchangeable**, so a floor DERIVED from the anchor lane may be PAID by the generative one | blind the lattice (all 64 probes still accepted, none informative) and the union floors still pass **11–15 of `boolean`'s 17** non-empty vectors, median 13, over 40 seeds — and 0–4 of `boolean_normalize`'s 16. **The reverse is worse: `prng_probes: 0`, the discovery lane deleted outright, was 19 of 19 GREEN in BOTH families** |
+| **8** | the failure message's lane label, and then the per-lane accumulators | the probe list's **layout** — `"lattice" if idx < lattice_side ** 2 else "prng"` | that the anchor lane is first, emits exactly `side*side` points, and has nothing inserted between it and the generative lane | found while fixing 7. Harmless in a MESSAGE, load-bearing the instant a FLOOR turns on it: a mis-labelled probe charges one lane's shortfall to the other, which is instance 7 rebuilt inside its own repair |
+
+**6, 7 and 8 are all FIXED, and none of them was held for the next one.**
+
+- **6** — two remedies of different kinds, per `docs/CHECKERS.md` §4b lesson 4: an
+  EXACT clause (`region.containment_defect`, no probe, no seed, no box) and an
+  INFORMATION floor (`min_inside_probes_per_vector`, counting probes the law
+  answered *inside the subject* rather than probes it merely accepted).
+- **7** — every sampled floor is now keyed by probe lane; each lane meets its own
+  floor or the vector reds, and the red names the lane. The generative lane's
+  exemption from the information floor is **declared, with the measurement**
+  (`checker.no_information_floor`), not omitted.
+- **8** — the lane travels **with the probe**, from the generator that drew it
+  (`pr.lattice` / `pr.scatter` yield `(lane, point)`), so the attribution is READ
+  and never inferred from an index.
+
+## What is NOT claimed, and this is the declaration
+
+**The instrument is still a model of its subject, and there will be a ninth.** Two
+of the model's own floors, stated so the next author does not rediscover them as
+defects:
+
+1. **The refusal test reads the OUTPUT's edges.** A probe is refused when it comes
+   within `tolerance_points` of any edge of A, of B, *or of the result* — so a
+   wrong result can, in principle, refuse the probes that would have caught it.
+   The per-lane repair narrows this a long way (the anchor floor is now 64 of 64,
+   so **any** output-induced refusal on the deterministic lane reds) and does not
+   close it: the generative lane's floor has slack by construction, because a
+   seeded floor without slack is flaky.
+2. **The floors are derived from THIS corpus.** `min_inside_probes_per_vector` is
+   the corpus minimum over the anchor lane; edit a vector's geometry and the
+   number is stale. It fails in the safe direction — a smaller region reds — and
+   the correct response is to RE-DERIVE it, never to lower it.
+
+Closing either properly means a different instrument (exhaustive or symbolic
+membership, not sampling), exactly as closing instances 1–5 means *executing* the
+workflow. **Per the stopping rule, that is not this phase's job and it is not the
+next rule of this kind.**
+
+## The machine-checked half — the sampled instrument's rows
+
+Each row states a premise about text in this repository, so
+`scripts/check_deferral_expiry.py` reds when the mechanism is deleted. As with the
+CI rows above, these exist so that **removing the mechanism is a red** — they do
+not replace the mechanism.
+
+- The probe's lane travels WITH the probe rather than being recovered from its
+  index (instance 8):
+  <!-- expires-when: {"port": "spec", "file": "spec/geometry/probes.py", "contains": "PROBE_LANES"} -->
+- The modelled attribution has not come back into the checker:
+  <!-- expires-when: {"port": "gate", "file": "scripts/cross_language_algorithms.py", "lacks": "if idx < cfg"} -->
+- The sampled floors are still keyed BY LANE, and still total over the lanes in
+  both directions (instance 7):
+  <!-- expires-when: {"port": "gate", "file": "scripts/cross_language_algorithms.py", "contains": "PER_PROBE_LANE_FLOORS"} -->
+- The INFORMATION floor still exists as a distinct thing from the population
+  floor (instance 6's second remedy):
+  <!-- expires-when: {"port": "gate", "file": "scripts/cross_language_algorithms.py", "contains": "min_inside_probes_per_vector"} -->
+- The EXACT clause that catches a leak without a probe still exists (instance 6's
+  first remedy, and the one a widened sample can never replace):
+  <!-- expires-when: {"port": "spec", "file": "spec/geometry/region.py", "contains": "def containment_defect"} -->
+- A lane excused from the information floor is excused BY NAME, WITH A REASON, in
+  the fixture — never by an omitted key:
+  <!-- expires-when: {"port": "corpus", "file": "test_fixtures/algorithms/boolean.json", "contains": "no_information_floor"} -->
+
+**The limit of these rows, stated:** a substring claim over one file is weaker than
+the property it stands for, exactly as it is for the CI rows. `contains:
+"PER_PROBE_LANE_FLOORS"` would still hold if the block were emptied to `{}`; what
+actually adjudicates that is `_per_lane_floor_errors`, which is total over
+`pr.PROBE_LANES` in both directions and is proven red in
+`check_geometry_checkers.py --self-test` case (e6).

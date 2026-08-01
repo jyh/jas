@@ -71,6 +71,19 @@ golden with extra steps.
 spec/geometry/            the analytic TCB: what a thing MEANS, as importable
                           Python. Standard library ONLY — enforced, not
                           conventional (check_geometry_checkers.py scans it).
+                            linear_gradient.py — what a gradient PAINTS here
+                            region.py          — what a REGION IS (membership
+                                                 under either fill rule; ring
+                                                 simplicity; laminarity; and
+                                                 containment, the one clause
+                                                 here that is EXACT and needs
+                                                 no probe at all)
+                            probes.py          — WHERE TO ASK (the anchor
+                                                 lattice and the seeded stream;
+                                                 every probe carries the LANE
+                                                 that drew it, because a
+                                                 per-lane floor cannot be
+                                                 charged from an index — §4c)
 scripts/cross_language_algorithms.py
                           the Seam-1 checkers themselves, beside the registry.
                           Already wired on BOTH platform families
@@ -142,7 +155,297 @@ integers: a negative double's bit pattern exceeds 2^63.)
 
 ---
 
-## 5. The generative lane (not yet built for Seam 1 — read before you build it)
+## 4b. THE REGION TIER (Phase 2) — and the four things it measured
+
+`spec/geometry/region.py` answers one question — **is this point in the region
+these rings denote under this fill rule** — and two families rule with it:
+`boolean` (`boolean_result_is_the_sampled_combination`) and `boolean_normalize`
+(`normalize_preserves_the_declared_region`). Both are Seam 1, so the Windows
+seat adjudicates them in full.
+
+**What it buys.** `compare_exact_boolean` demands ELEMENTWISE RING EQUALITY at
+4dp. The region is unique; **the encoding is not** — ring order, start vertex,
+winding, one-ring-versus-two at a pinch and retained collinear vertices are all
+free. `boolean.json`'s `intersect_edge_shared_ring_pair_evenodd` is the worked
+example: both ports emit the single rectangle `[8,12]x[2,8]` as **two** abutting
+rings. A region law is blind to that and refuses a wrong region instead.
+
+**Four measurements, all reproducible, none assumed:**
+
+| mutant | region law | ring equality | pinned-golden oracle |
+|---|---|---|---|
+| clean tree | green | green | green |
+| Swift tie-break **inverted** | **RED** (1) | RED (1) | green |
+| **BOTH ports** inverted (a shared bug) | **RED (2, one per lane)** | **GREEN** | RED (1, on `area`) |
+| Swift **pre-STABLETIE spelling** | green | green | green |
+
+Read the third row: a bug present in both ports leaves the port-vs-port
+comparison **completely green**, and the region law reds in both lanes. Read the
+fourth: the literal census-row-35 code is **invisible to every instrument**,
+because it is not observable at HEAD — Swift's shipping sort happens to be
+stable, exactly as STABLETIE measured. A checker cannot catch a defect that
+produces no wrong answer; what it catches is the wrong answer that defect is one
+stdlib release away from producing.
+
+### 4b.1 THE COMPLEMENTARITY MEASUREMENT — measured BOTH ways, and the ruling
+
+**`compare_exact_boolean` KEEPS ITS GATE STATUS (RULED, R-A, 2026-08-01).** The
+question the ruling settled was whether the region law makes the older,
+encoding-exact comparison redundant. It does not, and the answer is a
+measurement rather than an opinion: **each instrument is blind to defects the
+other refuses, so neither subsumes the other.**
+
+The table above measures one direction. This is the other, over `boolean`'s 19
+rulable vectors, each mutant applied to the **Rust** output and then (a) compared
+against the untouched **Swift** output by ring equality and (b) ruled by the
+region law on its own:
+
+| mutant | ring equality | region law |
+|---|---|---|
+| clean tree | green | green |
+| a defect BOTH ports share (tie-break inverted in each) | **GREEN — blind** | **RED**, once per lane |
+| one result vertex nudged **0.01pt** (100× the wire's 4dp step) | **RED, 17/19** | **green, 0/19 — blind** |
+| a **0.2pt** square hole added to the result | **RED, 17/19** | green on 16/19 |
+| **400 hairline rings** (0.0002pt squares) appended | **RED, 17/19** | green on 16/19 |
+
+*(17 and not 19 because two vectors' correct results are empty, so there is no
+ring to corrupt. The 0.2pt hole and the 400 hairlines each red **3** vectors, and
+not one of the three reds is “there is a hole” or “there are hairlines”: two are
+`containment_defect` firing because the injected geometry happened to land
+outside an operand box on a disjoint union, and one is a probe that landed inside
+the hole by luck. The region law is not detecting these defects; it is
+occasionally tripping over them.)*
+
+One measurement worth keeping separately, because it is a consequence of the
+per-lane repair in §4c and not of the region law as designed: **400 hairline
+*slivers* spanning the sampling box** — 800 extra edges through the probe field
+— red **12 of 19**, almost all through `min_accepted_per_vector.anchor`. That is
+the law refusing to answer rather than the law seeing a wrong region, and it is
+the correct posture, but it should not be read as region coverage.
+
+**So: ring equality is an ADMISSION BARRIER and an ENCODING gate; the region law
+is a MEANING gate.** Ring equality would red a third port, a Skia/Vello rewrite,
+or a `snap_grid` change that moved a coordinate by an ulp — and it catches, at
+4dp, every re-encoding above that leaves the region intact. The region law is
+blind to all of those by construction, and is the only instrument that reds on a
+bug both ports share.
+
+**THE RULING, and it is a scope call that belongs to JYH and not to a checker
+author: revisit the gate status of `compare_exact_boolean` only when a THIRD PORT
+ACTUALLY APPLIES FOR ADMISSION.** Not when one is discussed, and not because the
+barrier is inconvenient. Until then both instruments run and neither is demoted.
+
+**Four things the phase learned that cost real time, written down so the next
+author does not re-buy them:**
+
+1. **The obvious tie geometry does not reach the tie.** Two rings of one operand
+   sharing a FULL edge, or meeting at a single vertex, are fused or separated by
+   CANONICALISATION before the sweep runs; inverting the tie-break changed *not
+   one byte* on five such vectors. What reaches it is a **PARTIAL edge share
+   ending at a shared vertex** (`subtract_across_a_partial_edge_share_tie`).
+   STABLETIE's own test said so in one line and it was read too late.
+2. **"Non-zero membership equals even-odd membership" is FALSE of correct
+   output**, so do not write that property. Both ports emit
+   `subtract_inner_creates_hole` with its hole wound the SAME way as its outer
+   ring — winding 2 inside the hole — and `BOOLEAN.md` clause 4 declares results
+   even-odd *precisely so the sweep's winding need not be consistent*. The
+   property that says what was meant, and is winding-blind, is **laminarity**:
+   over the probe set, no two result rings may be partially overlapping.
+3. **Derive `min_checks_per_lane`, never observe it.** With a generative lane the
+   accepted-probe count moves run to run. The floor is
+   `min_accepted_per_vector x min_rulable_vectors`, which is a true lower bound
+   and cannot go flaky.
+4. **THE SUBJECT OF MEASUREMENT SETS THE MEASUREMENT'S RESOLUTION** — the
+   finding that held this phase back a day, and the one most likely to recur in
+   the next sampled law. **A sampling box built from the geometry under test is
+   a function of the OUTPUT, so an output that runs away carries the instrument
+   with it.** Append a 1pt spurious ring 100pt from `union_overlapping_squares`
+   — a far coordinate from a near-parallel intersection is a *named* failure
+   mode of sweep-line booleans — and `accepted` stays **88 of 88 against a floor
+   of 64**, a perfect sample by every count the fixture declared, while the
+   probes landing **inside the region under test fall from 31 to ZERO**. Green,
+   fully sampled, nothing asked. **0 of 17 vectors caught it, across 10 seeds,
+   for specks of 0.1pt and 1.0pt at 100pt, 1000pt and 10000pt.**
+
+   It also falsified a sentence written in three places — `boolean.json`'s
+   `_lanes_why`, `_region_probe_points`'s docstring, and `probes.py`'s
+   `sampling_box` — in the form *"the box spans A, B and the result, so a
+   result that leaks outside the operand hull is probed where it leaked."*
+   **It does not, and all three now say so, in place, next to the claim they
+   replaced.** A design claim that is false in the file is worse than no claim:
+   the next author reads it as a guarantee and stops looking. Widening a sample
+   never catches a subject that moves the sample.
+
+   Two remedies, and note that they are **different in kind**:
+
+   - **Prefer an EXACT clause whenever the property admits one.**
+     `bbox(result) ⊆ bbox(A) ∪ bbox(B)` holds for all four boolean operations
+     because each returns a subset of `A ∪ B`; it is O(vertices), needs no
+     probe, no seed and no box, and its only tolerance is the serialisation
+     epsilon already derived. It reds all 19 vectors at every speck size and
+     distance measured. An exact clause cannot be blinded by its subject
+     **because it is not measured at places the subject chose.**
+   - **A sampled clause must floor INFORMATION, not REFUSALS.**
+     `min_accepted_per_vector` counts probes the law was *willing to answer*;
+     `min_inside_probes_per_vector` counts probes that landed in the region
+     being adjudicated, read from the spec side. A fully blind lane reports
+     `88 of 88` for the first and `0` for the second. With the exact clause
+     bypassed, the same speck run passes the old floor (1672 samples against
+     1216) and reds **17 of 19 vectors** on the new one.
+
+   And its exemption is **declared, never silent**: some regions are empty by
+   construction (an intersection of disjoint operands, a canonicalisation of a
+   zero-area input), so those vectors are named in `checker.empty_regions` with
+   a reason. Policed three ways — a declaration the sample contradicts is
+   refused, an undeclared vector that went quiet is refused, and a name the law
+   never reaches is refused. **Sampling witnesses a region's presence exactly
+   and can never prove its absence**, which is why emptiness is a sentence a
+   human wrote and the machine's whole job is to refuse a false one.
+
+## 4c. A FLOOR BELONGS TO ONE LANE — and the lane travels with the probe
+
+> **IF A LAW SAMPLES IN MORE THAN ONE LANE, EVERY FLOOR IT DECLARES IS KEYED BY
+> LANE, AND EACH LANE MEETS ITS OWN. A number compared against the union of two
+> lanes is paid by whichever lane happens to have it.**
+
+This is a rule, not advice, and it is here because Phase 2 shipped the opposite
+by accident. `_rule_region` accumulated `accepted` and `inside` over
+`lattice(64) + scatter(24)` **concatenated**, so both per-vector floors — and
+`min_checks_per_lane` downstream — were compared against the union total. The
+fixture's own justification for `min_inside_probes_per_vector` read *"DERIVED
+FROM THE ANCHOR LANE, so the generative lane's 24 draws can only add to it and
+the floor cannot go flaky"*, which is a true sentence about the floor's
+**stability** and a false one about what the floor then **measured**: draws that
+can only add can also be **the only thing there**.
+
+**Measured, 40 seeds.** Displace every anchor probe 10000pt — all 64 are still
+*accepted* (they stand clear of every edge by miles) and *none* is informative —
+and the union floors still pass **11 to 15 of `boolean`'s 17 non-empty vectors,
+median 13**, and 0 to 4 of `boolean_normalize`'s 16. Thirteen vectors reporting a
+healthy sample while the seedless lane a bisect depends on asked nothing at all.
+Under per-lane floors it is **zero, in both families, at every seed measured.**
+
+**And the other direction, which is worse.** Set `prng_probes: 0` — delete the
+discovery lane outright — and the old checker was **19 of 19 GREEN in both
+families**: the anchor lane's 64 probes met a floor of 64 and its inside count met
+a floor derived from itself, so nothing anywhere noticed that the generative lane
+had stopped existing. Under per-lane floors it reds **all 19, in both**, naming
+the lane: *the 'generative' probe lane produced NO PROBE AT ALL for this vector,
+so every floor charged to it is met by an accumulator that was never touched.*
+Note the shape of that assertion — it checks that each declared lane **was seen**,
+not that its counter is non-zero, because a lane that drew nothing and a lane that
+drew and was refused report the same number. Same sentence as R5's, one instrument
+down.
+
+Three consequences, and the second is the one that costs thought:
+
+1. **THE LANE COMES FROM THE PRODUCER.** `pr.lattice` and `pr.scatter` yield
+   `(lane, point)`. Recovering it downstream as `"lattice" if idx < side**2 else
+   "prng"` is not reading the lane, it is modelling the concatenation's layout —
+   tolerable in a failure *message*, and load-bearing the instant a *floor* turns
+   on it, because a mis-labelled probe charges one lane's shortfall to the other.
+   That is the defect above, rebuilt inside its own repair.
+2. **THE TWO LANES CANNOT CARRY THE SAME KIND OF FLOOR, AND SAYING SO IS THE
+   POINT.** The anchor lane is seedless, so it carries per-vector floors on both
+   quantities at their exact corpus minima (`accepted` = 64, the lattice's full
+   width; `inside` = 3 for `boolean`, 13 for `boolean_normalize`). The generative
+   lane **cannot carry a per-vector information floor at all**: 24 uniform draws
+   over a box a region fills 3/64 of put **zero** probes inside in about a third
+   of runs, and six of `boolean`'s vectors reach 0 at least once over 300 seeds.
+   Any floor of 1 there would be flaky, **and a flaky floor gets lowered until it
+   is vacuous.** So that lane carries a POPULATION floor only — and the
+   exemption is **declared by name with the measurement**, in
+   `checker.no_information_floor`, policed both ways, never an omitted key.
+3. **A SEEDED LANE'S FLOOR IS DERIVED WITH A TAIL BOUND, NOT OBSERVED.** The
+   generative population floor is 18 of 24, and the arithmetic is in the fixture:
+   the refusal band is `2 x tolerance_points` = 0.002pt around every edge, so the
+   per-probe refusal probability is bounded by
+   `(total edge length x 0.002) / (sampling-box area)` — worst vector 0.001867 —
+   giving `P(7+ refusals in 24 draws) <= 2.7e-14` per vector and `5.0e-13` across
+   a run. Measured worst over 300 seeds: **one** refusal. The house rule *“declare
+   the floor equal to the authored count”* is right for a deterministic
+   population and wrong for a seeded one; a seeded floor is set where its tail is
+   unarguable, and it says so.
+
+The fixture-wide half is the same rule one level up: `min_checks_per_probe_lane`
+is asserted per lane by the runner **and** by `--reconcile` (the report carries
+`samples_by_probe_lane`), because `min_checks_per_lane` is their SUM and a sum is
+paid by whichever half has it. Both numbers are derived — `per-vector floor x
+min_rulable_vectors`, and the scalar is their total — and `_checker_config`
+refuses a file where they disagree.
+
+**This is instance 7 and instance 8 of the shape declared in
+`transcripts/CHECKER_RESIDUAL.md`** (instances 1–5 were the CI-wiring gate; 6 was
+F1 above). Same sentence with *CI* replaced by *the sample*: **a guard that
+models its subject inherits every assumption the model makes.** The stopping rule
+ratified with it — *fix an instance when it is cheap, declare the CLASS once, do
+not hold a working instrument for the next member of a series with no last
+element* — is why this section ends here rather than in a ninth rule.
+
+## 4d. PHASE 3, THE PLUMBING PASS — what a family costs when nobody is arguing
+
+Phase 3 added no checker. It added **WIRE**: nine algorithm families that had
+no verb, no fixture and no manifest row, taking `ALGORITHMS` from **24 to 33**.
+Every one is registered with a `checker_gap` that names **the law that is
+available and unwritten**, never "no law exists" — which is the honest state
+and the one §6.4 asks for.
+
+**The estimate was 5.1 days and it was too high, for a reason worth keeping.**
+Once the first verb existed the shape repeated: parse a fixture record, call
+one public function, emit JSON. Seven of the nine were **near-identical** —
+`transform_apply`, `paragraph_markers`, `hyphenator`, `simplify`,
+`art_along_path`, `pattern_along_path`, `bristle_stroke` — and three of those
+shared one helper apiece. Two were **bespoke**: `arrangement`, because the
+returned point's **bit-exact identity** with an input endpoint is a contract a
+tolerance cannot see and had to be reported as its own field; and
+`dash_renderer`, because the answer is a list of sub-paths and the interesting
+vectors are the ones where a dash straddles an anchor. **The cost is not in the
+verb. It is in the hand-derived expectations** — and it is paid per *clause of
+the spec*, not per family.
+
+**Three things the pass measured that are worth more than the plumbing:**
+
+1. **A hand-mirrored primitive can be right.** `arrangement` — the shared
+   segment splitter under boolean, planar and normalize, whose whole assurance
+   was 11 Rust tests and 11 Swift tests transcribed by hand — agreed on **24
+   hand-derived vectors and 6000 fuzz pairs, exactly, including three branches
+   no test in either port reached.** A negative result, and it is the one this
+   phase most needed, because "never compared" was the reason to look.
+2. **The divergence was in the arithmetic nobody thought of as an algorithm.**
+   Rust's `f64::to_radians()` is `deg * (PI/180)`; Swift wrote
+   `deg * .pi / 180`, which groups the other way. They differ by an ulp on
+   **184 of 721 integer degrees**, and since MATRIXPRECISION writes `a/b/c/d`
+   at full precision that reaches **the saved SVG bytes**. Two sites fixed
+   (354 bit-mismatches → 0, 2957 Swift tests still green); the other 17 Swift
+   sites are a declared gap. **No existing family could have seen it: every
+   tolerance in the registry is 1e-4 or wider and the difference is 1e-16.**
+3. **The S-4 class arrived a third time, and only the relational pass could
+   see it.** Registering `dash_renderer` immediately reddened three vectors:
+   its undashed fast path counted a leading `ClosePath` as drawable, so
+   `Z M 5 5` returned one sub-path where `M 5 5` returned none — **in both
+   ports identically**, exactly as `art_flatten` and `calligraphic_outline`
+   had before it. Fixed in both. The lesson is not the bug, it is that
+   **registering a family is what runs the relational passes over it**; an
+   unregistered family is invisible to every instrument in this document, not
+   merely to its own.
+
+## 5. The generative lane (Seam 1 arm built in Phase 2 — read before extending it)
+
+**What Phase 2 built, and what it deliberately did not.** The region families
+sample from TWO lanes: an **anchor** lane (an 8x8 jittered lattice whose jitter
+is a hash of the family and vector name and *nothing else* — seedless, so a red
+is the same red on every machine and in every run, which is what a bisect
+needs), and a **generative** lane (24 SplitMix64 draws per vector, freshly
+seeded from `time.time_ns()`, the seed printed at the head of the checker pass
+and carried in the checker report as `generative_seed`, replayable with
+`JAS_PROPERTY_SEED=0x...`). Per-vector streams are derived
+`splitmix64(run_seed XOR fnv1a("law|vector"))`, so replaying one family cannot
+perturb another's draws — item 1 below, done. There is **no `JAS_..._CASES`
+knob**: the counts live in the fixture and nothing can shrink them from an
+environment variable, which is strictly safer than item 4 below and is why item
+4 is still open for the Seam-2 lane only. There is **no stream pin**, and there
+does not need to be one at Seam 1: the stream has ONE implementation, so there
+is no second copy for it to drift from.
 
 Four things the existing `shift_constrain` lane gets right and any new lane must
 keep: a **fresh nanosecond seed** every run; the seed **printed at the head and
@@ -248,6 +551,38 @@ ways.
 }
 ```
 
+**If your law SAMPLES, it declares more, and none of them is optional.**
+
+```jsonc
+"min_accepted_per_vector":     { "anchor": 64, "generative": 18 },
+"min_inside_probes_per_vector": { "anchor": 3 },
+"no_information_floor": {
+  "generative": "<the MEASUREMENT that makes a floor here flaky, by name>"
+},
+"min_checks_per_probe_lane":   { "anchor": 1216, "generative": 342 },
+"empty_regions":  { "<vector>": "<why this region is empty BY CONSTRUCTION>" }
+```
+
+- `min_inside_probes_per_vector` — how many probes must land in the region being
+  adjudicated. A floor on *accepted* probes counts the instrument's caution and
+  reads `88 of 88` on a lane that asked nothing; see §4b lesson 4.
+- **Every one of these is KEYED BY PROBE LANE and total over
+  `pr.PROBE_LANES` in both directions** — see §4c. A lane with no floor is
+  refused; a floor for a lane nothing draws is refused; a lane both floored and
+  excused is refused; an excuse with no reason is refused.
+- `min_checks_per_probe_lane` is **derived** (`per-vector floor x
+  min_rulable_vectors`) and `min_checks_per_lane` must equal its sum. The file is
+  refused if the two disagree.
+- `empty_regions` is the by-name declaration for subjects that are empty by
+  construction.
+
+Keys a particular law needs beyond the generic block are declared in
+`CHECKER_LAW_REQUIRED_KEYS`, so a fixture that omits one gets a **sentence
+naming the missing floor** rather than a `KeyError` from the runner. A
+**map-valued** `min_*` key whose name no rule reads is refused outright: the
+scalar check skips dicts, so an unrecognised map is asserted by nothing while
+reading as a floor.
+
 ### 6.4 Register the family in `scripts/corpus_manifest.json`
 
 `"checker": "<name or a pointer to the per-algorithm registry>"`, or
@@ -327,6 +662,18 @@ instead: synthetic cases (a)–(d) that must go red, plus case **(e), the live
 tree must be clean** — the house style across 23 `scripts/` gates. `R3` refuses
 to register a family with neither.
 
+**A mutant may be derived from the OUTPUT, not only from the input.** The
+signature is `mutate(vec, out)` and the teeth are measured **inside the lane
+loop, per lane**, against that lane's real output; `discriminating` in the
+report is the WEAKEST lane's count, so one toothless lane cannot hide behind the
+other's teeth. The reason is not convenience: `gradient_remap`'s bug is a bug of
+ARITHMETIC and has an expression in the input alone, but `boolean`'s registered
+bug — the pinch regression, *a multi-ring region emitted as one self-touching
+ring* — is a bug of **ENCODING**, and an encoding bug has no expression that
+does not mention the encoding it corrupts. It is also the mutant that proves why
+a region law needs a STRUCTURAL half: on several vectors the concatenated ring
+**samples correctly**, and only `every result ring is simple` refuses it.
+
 **Mutants rot silently.** A stale mutant keeps a floor green forever while
 measuring arithmetic nobody ships. There is no freshness gate today; it is
 needed **before the second mutant, not before the first**. The cheaper fix, when
@@ -400,6 +747,19 @@ rather than hand-transcribing it.
   MACHINE-CHECKED assumption:** `transcripts/CHECKER_RESIDUAL.md` names the
   premise, states what would falsify it, and carries `expires-when` markers
   that `scripts/check_deferral_expiry.py` reds on when the premise moves.
+- **THE SAME SHAPE ARRIVED THREE MORE TIMES INSIDE THE SAMPLED INSTRUMENT, and
+  they are instances 6, 7 and 8 of ONE class, not three findings.** The
+  modelled subject is *the sample* rather than *CI*, and the sentence is
+  unchanged: a sampling box built from the output moves with the output (F1,
+  §4b lesson 4); floors pooled over two lanes are paid by whichever lane has
+  them (§4c); a lane recovered from a probe's index models the list's layout
+  (§4c). **All three are fixed**, and the class — with what is still
+  unclosed, what would falsify it, and the ratified STOPPING RULE that says to
+  declare it once rather than write a ninth rule — is in
+  `transcripts/CHECKER_RESIDUAL.md`. Two of the sampled instrument's own floors
+  remain declared rather than closed, and are named there: the refusal test
+  reads the OUTPUT's edges, and the information floors are derived from THIS
+  corpus.
 - **R8 cannot stop someone who means it.** Deleting a lane row and lowering
   `MIN_DECLARED_LANES` in one commit is a legal edit — by design, because
   dropping a lane has to be *possible*. What the registry buys is that the edit
@@ -429,6 +789,50 @@ rather than hand-transcribing it.
   mutant for is still unwatched.** Making *that* total is a coverage question
   about `spec/` (every branch and every constant named by some mutant), and it
   is not answered here.
+- **THE TWO F1 REMEDIES HAVE BOUNDARIES, AND THEY ARE DIFFERENT BOUNDARIES.**
+  The **containment clause is exact but not general**: it is sound for these
+  two shapes — a boolean of two operands, a canonicalisation of one — because
+  each returns a subset of its inputs' union. A future family gets no free
+  ride from it; it gets the *question* ("does this law's property admit an
+  exact clause?"), which is the transferable part. The **information floor is
+  general but blunt**: one scalar per fixture is bounded by the weakest
+  vector, so `boolean`'s floor is **3**, set by
+  `intersect_edge_shared_ring_pair_evenodd`, while the median vector carries
+  17 and the strongest 27. It reds on a *collapse* and would not red on a
+  vector quietly halving. A per-vector floor map would be tight and would also
+  be a maintenance wall; if one is ever wanted, the number to key it on is the
+  ANCHOR lane's count, which is the only seed-independent one.
+- **THE REGION LAW IS GREEN ON THE CORPUS AND RED ON RANDOM INPUT, AND THAT GAP
+  IS NOT YET ADJUDICATED.** A one-off fuzz (not wired to CI; 900 operand pairs
+  built only from axis-aligned rectangles, right triangles and corner-cut
+  pentagons on a 6x6 integer grid) had the law reject **153** of them on the
+  clean tree — 46 by the membership clause, 92 by ring simplicity, 23 by
+  laminarity. Two of those were minimised by hand into confirmed shared wrong
+  answers (see the findings in the Phase-2 report; both ports agree, both are
+  wrong, and independent Monte-Carlo integration over `spec/geometry/region.py`
+  adjudicates them). The rest are **unclassified**: some are certainly the same
+  class, and some may be the law over-claiming that a boolean RESULT'S rings are
+  always simple, which `BOOLEAN.md` states of `canonicalize`'s output but nowhere
+  states of the sweep's. **Do not widen the corpus with fuzz output until that is
+  ruled**, and do not read the 153 as 153 defects.
+- **`polygon_metrics` is now the SECOND membership sampler, not the only one.**
+  `spec/geometry/region.py` answers the same question harness-side, importing
+  nothing. It could replace both production copies
+  (`jas_dioxus/src/algorithms/polygon_metrics.rs`,
+  `JasSwift/Sources/Algorithms/PolygonMetrics.swift`) as the *harness's* oracle
+  tomorrow — the migration is Phase 3, split out deliberately. What blocks it is
+  not the instrument: (a) the ports' copies are called from inside
+  `algorithm_roundtrip` to compute the `sample_points` and `area` that the
+  goldens are expressed in, so retiring them means moving that computation
+  harness-side and re-deriving every `area` golden through the new arithmetic;
+  (b) `point_in_ring` is used by `hit_test`'s production path, not only by the
+  harness, so one of the two copies is shipping code and cannot be deleted at
+  all — only stopped from being the thing that grades itself; and (c) the
+  `polygon_metrics` family's whole present value is that it pins the two
+  hand-mirrored copies against each other, and nothing yet pins either against
+  `spec/`. The cheap first step is a law on `polygon_metrics` itself
+  (`spec/geometry/region.py` reproduces each pinned answer), which needs no port
+  edit and closes (c).
 - **The manifest is a wall.** It already prints 35 coverage gaps every run;
   `checker_gap` adds a second dimension. The bidirectional staleness check is
   the only thing keeping it honest. That is a maintenance cost, and it is stated

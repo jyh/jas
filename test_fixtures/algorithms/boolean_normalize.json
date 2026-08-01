@@ -2,6 +2,78 @@
   "algorithm": "boolean_normalize",
   "comparison": "exact",
   "tolerance": 0.01,
+  "_checker_doc": [
+    "THE LAW HERE IS ONE SENTENCE OF transcripts/BOOLEAN.md, CLAUSE 3:",
+    "'Canonicalization SPENDS the rule -- canonicalize returns simple rings",
+    "denoting THE SAME REGION read under even-odd, whatever rule came in.",
+    "This is the single place a declared rule is interpreted.'",
+    "",
+    "Everything this family does is therefore checkable without opening",
+    "boolean_normalize.rs: the output, read even-odd, must cover exactly the",
+    "points the input covered when read under the rule the input DECLARED, and",
+    "the output's rings must be simple and non-overlapping (that is what",
+    "`canonical` MEANS, and `all_rings_simple` in each `expected` block below",
+    "is the ports' own claim to it -- the checker recomputes it in the analytic",
+    "tier instead of believing it).",
+    "",
+    "The vectors' own _derivation paragraphs are the spec text this was written",
+    "from; each states its region and its arithmetic in prose, and every one of",
+    "them was derivable before any implementation existed."
+  ],
+  "checker": {
+    "name": "normalize_preserves_the_declared_region",
+    "seam": 1,
+    "law": "the output read EVEN-ODD covers exactly the points the input covered read under the rule the input DECLARED; every output ring is simple and the rings are pairwise non-overlapping; and every output VERTEX lies inside bbox(input), because canonicalisation changes the encoding and never the region",
+    "samples_per_vector": 88,
+    "lattice_side": 8,
+    "prng_probes": 24,
+    "_lanes_why": "The same two lanes as boolean.json, deliberately: an 8x8 seedless jittered lattice (the ANCHOR lane, identical on every machine and every run) plus 24 draws from this run's SplitMix64 stream (the GENERATIVE lane, seeded from the clock, printed and replayable through JAS_PROPERTY_SEED). 8x8 is the resolution the 2x2 spliced loop of retrograde_counter_wound_loop needs -- a coarser lattice can step straight over the feature that vector exists for. And the same correction as boolean.json, 2026-08-01: the box spans the OUTPUT as well as the input, and that does NOT make a runaway output visible to the sample. It makes the sample follow the runaway. See boolean.json's _lanes_why for the measurement; the two remedies are the containment clause of the law above (exact, no probe) and min_inside_probes_per_vector below.",
+    "tolerance_points": 0.001,
+    "_tolerance_points_why": "As boolean.json, and for the same reason: DERIVED from the wire's 4-decimal coordinate quantisation, ten steps of it, in document points. A probe within 1e-3pt of any edge of the input or of the output is REFUSED, because a point on a boundary has no defined answer and answering one would make this law flaky rather than strict. This family needs the refusal more than boolean does -- half its inputs are slits, retraces and doubly-traced squares, all of which put edges on top of each other.",
+    "_floors_are_per_probe_lane_why": "AS boolean.json, AND FOR THE SAME MEASURED REASON. Every sampled floor here is keyed by PROBE LANE because the checker used to pool `lattice(64) + scatter(24)` into one accumulator and compare both floors against the union, which let a floor DERIVED FROM THE ANCHOR LANE be PAID BY THE GENERATIVE LANE. Blind the lattice on this family -- every anchor probe displaced 10000pt, all 64 still ACCEPTED, none informative -- and over 40 seeds the old union floor of 13 was still met by the generative draws alone on 0 to 4 of the 16 non-empty vectors, median 1. THAT IS A SMALLER HOLE THAN boolean's (11 to 15 of 17) AND IT IS THE SAME HOLE: this family's floor is 13 rather than 3, so 24 draws pay it less often, and `less often` is not a property anyone should be relying on. Under the per-lane floors it is zero at every seed measured. AND THE OTHER DIRECTION, WHICH THIS FAMILY SHOWS AS BADLY AS boolean DOES: set prng_probes to 0 and the old checker was 19 of 19 GREEN here too -- the discovery lane deleted, and no floor anywhere able to say so, because the anchor lane paid every one of them by itself. It now reds all 19. Each lane meets its own floor or the vector reds.",
+    "min_accepted_per_vector": {
+      "anchor": 64,
+      "generative": 18
+    },
+    "_min_accepted_per_vector_why": "TOTALITY FROM THE FIRST RUN: a lane that sampled nothing is an ERROR. It counts REFUSALS, not INFORMATION, and a full accept is what a fully blind lane reports -- which is why the information floor below exists. ANCHOR = 64, the lattice's FULL WIDTH; the lane is seedless and measured over this corpus it accepts all 64 on every vector, including the shared span of rings_sharing_a_collinear_edge_evenodd (whose refusals fall in the generative draws, not on the fixed lattice points). Exact, no headroom, and it cannot drift with the seed. GENERATIVE = 18, DERIVED exactly as in boolean.json: the refusal band is 2 x tolerance_points = 0.002pt around every edge of the input and of the output, so the per-probe refusal probability is bounded by (total edge length x 0.002) / (sampling-box area), worst case here doubly_wound_square_nonzero_fills at 120pt of edge in a 225pt-square box, p <= 0.001067. P(7 or more refusals in 24 draws) <= 5.4e-16 per vector, <= 1.1e-14 across the fixture in one run. Measured over 300 seeds the worst any vector saw was TWO refusals (22 of 24, co_rotating_spliced_loop_nonzero). A seeded lane's floor must be loose or it goes flaky, and a flaky floor gets lowered until it is vacuous; this is a POPULATION floor whose job is to red on a lane that stopped drawing.",
+    "min_inside_probes_per_vector": {
+      "anchor": 13
+    },
+    "_min_inside_probes_per_vector_why": "THE INFORMATION FLOOR; see boolean.json's entry for the failure it exists to catch. It counts the accepted probes landing INSIDE the region under test, read from the INPUT under its declared rule and never from the output, so a wrong or runaway output cannot talk its way past it. CHARGED TO THE ANCHOR LANE, WHICH IS THE LANE IT WAS DERIVED FROM: 13 is the CORPUS MINIMUM over the seedless lattice, set by pinch_at_revisited_vertex, whose two 4x4 lobes sit in a 14x14 sampling box; the next are simple_triangle_passthrough at 14 and t_junction_self_touch_bowtie at 16, and the maximum is 30. It is higher than boolean's 3 because every vector here is a canonicalisation of ONE input, so the region always fills a decent share of its own bounding box, where boolean's intersections can be a sliver of the operand hull. The old justification -- `derived from the anchor lane, so the 24 generative draws can only add and the seed cannot make it flaky` -- was a true statement about the floor's STABILITY and a false one about what it measured, because the comparison was against the union and draws that can only add can also be the only thing there.",
+    "no_information_floor": {
+      "generative": "AS boolean.json, and measured on this corpus too: 24 uniform draws cannot carry a per-vector information floor. Over 300 seeds simple_triangle_passthrough and t_junction_self_touch_bowtie each reached ZERO probes inside at least once, so any floor of 1 or more here would be flaky, and a flaky floor is lowered until it is vacuous. This family's regions fill more of their boxes than boolean's, so it is closer to affordable than boolean's is -- and that is exactly why it is declared rather than quietly set to a number that works most of the time. The information guarantee is the ANCHOR lane's (64 of the 88 probes, seedless, floored at 13 above); this lane is held to a POPULATION floor (18 per vector) and to a fixture-wide total (342), so a generative lane that stopped running still reds."
+    },
+    "min_rulable_vectors": 19,
+    "min_checks_per_probe_lane": {
+      "anchor": 1216,
+      "generative": 342
+    },
+    "_min_checks_per_probe_lane_why": "THE FIXTURE-WIDE HALF OF THE SAME REPAIR: min_checks_per_lane below is the SUM, and a sum is paid by whichever half has it. DERIVED, and the derivation is machine-checked so the numbers cannot drift apart in this file: min_accepted_per_vector[lane] x min_rulable_vectors, so 64 x 19 = 1216 and 18 x 19 = 342. For scale, the measured anchor total is exactly 1216 and the generative total ranges 454 to 456 across 300 seeds.",
+    "min_checks_per_lane": 1558,
+    "_min_checks_per_lane_why": "DERIVED: the sum of min_checks_per_probe_lane, 1216 + 342. Derived rather than pinned at the measured total (about 1670) so the generative lane's variation cannot make the floor flaky. It is the LANGUAGE lane's total (rust, swift), which is the axis --reconcile iterates; the probe-lane split above is the axis a union total cannot see.",
+    "min_witnesses": {
+      "declares_nonzero": 5,
+      "declares_evenodd_explicitly": 4,
+      "input_ring_is_not_simple": 11,
+      "input_has_multiple_rings": 5
+    },
+    "_min_witnesses_why": "The rule is the only thing this function SPENDS, so a corpus with no non-zero vector -- or none that declares even-odd explicitly, which is the other half of every pinned PAIR here -- watches the rule-reading half of the law with nothing, however many vectors it holds. `input_ring_is_not_simple` is the witness that canonicalisation is being asked to do something: a corpus of already-canonical inputs cannot tell this function from the identity, and eleven of these inputs are figure-eights, bowties, pinches, slits, retrograde loops or doubly-traced squares. `input_has_multiple_rings` witnesses `the rule reads the whole set at once`. Each floor equals the authored count.",
+    "unrulable": {
+      "empty_input_yields_empty": "an input with no vertex denotes the empty region and offers no place to put a probe, so there is no membership question to ask. The vector still earns its keep through the `expected` golden (0 rings, 0 area); it is the LAW that cannot rule it, not the corpus that cannot use it."
+    },
+    "empty_regions": {
+      "degenerate_two_vertices_dropped": "A TWO-VERTEX INPUT ENCLOSES NO AREA. The input is the single ring [(0,0),(10,0)], whose closed form retraces one segment; it bounds nothing under either fill rule, so the region is empty by construction and no probe can be inside it. Unlike empty_input_yields_empty above this vector IS rulable -- there are vertices, so there is a sampling box -- and its ruling is the strong claim that every one of its 88 probes is found OUTSIDE the output, which is what `the degenerate ring was dropped` MEANS. Declared rather than exempted: emptiness is not measurable by sampling, so it is stated, and the law refuses the statement the moment a probe lands inside.",
+      "zero_area_collinear_ring_dropped": "THREE COLLINEAR VERTICES ENCLOSE NO AREA. Shoelace zero, so the ring bounds nothing under either rule and the region is empty by construction. Ruled exactly as above: all 88 probes must be OUTSIDE the output.",
+      "doubly_wound_square_evenodd_empties": "AN EVEN-ODD READING OF A DOUBLY-TRACED SQUARE. The input traces the same square twice, so every interior point has crossing count 2 -- even -- and under the rule this vector DECLARES the region is empty. This is the vector's whole purpose, and it is the sharpest declaration in this block: its pair doubly_wound_square_nonzero_fills declares nonzero over the same geometry and is FULL (42 probes inside). A checker that silently exempted an empty region would exempt exactly the vector that proves the rule is being spent."
+    },
+    "mutant": {
+      "name": "normalisation_that_does_not_spend_the_rule",
+      "provenance": "THE PRE-2026-07-26 STATE, recorded in transcripts/BOOLEAN.md's 'Superseded reading, for the record': 'the tree contradicted itself: algorithms/boolean declared even-odd with orientation outside the contract, while algorithms/boolean_normalize documented its input as non-zero winding', which clause 3 closed with 'canonicalization SPENDS the rule ... this is the single place a declared rule is interpreted'. Its artist-visible symptom is stated one section up in the same document: 'a document declaring fill-rule=nonzero would be silently reinterpreted by a boolean operation, and the artist would get a hole they never drew.' The mutant hands the input's rings straight back, to be read even-odd downstream -- a rule unspent.",
+      "_why_this_one": "It attacks BOTH halves of the law, and the two sets of vectors it reaches barely overlap. On a non-zero vector it is a WRONG REGION and the membership clause refuses it; on a self-crossing, pinched, retraced or doubly-traced input it is a NON-SIMPLE RING and the structural clause refuses it. boolean.json's mutant is the mirror image -- structural teeth almost everywhere and membership teeth nowhere -- so between them the two families keep both clauses measured. PER-CLAUSE TEETH, RE-MEASURED 2026-08-01 AFTER F1: rejected 11 times by `every output ring is simple`, once by membership (a non-zero vector whose region changes), once by laminarity (overlapping_rings_nonzero_union, whose two input rings partially overlap) and ZERO times by containment -- which is expected and not a gap in this mutant, because handing the input's own rings back cannot put a vertex outside the input's box. It reaches three of the law's four clauses, more than any other registered mutant in the tree, which is why the ordering inside the law puts the STRUCTURAL verdict before the membership one -- returning at the first wrong point would leave laminarity unreachable on any output that is both misshapen and mis-membered.",
+      "min_discriminating": 13,
+      "_min_discriminating_why": "MEASURED on this corpus, 2026-08-01: 13 of 19 rulable vectors. Toothless, honestly, on the six whose input is already canonical under the rule it declares (simple_square_passthrough, simple_triangle_passthrough, consecutive_duplicates_deduped, nested_co_oriented_rings_evenodd_hole, rings_sharing_a_collinear_edge_evenodd, rings_sharing_a_collinear_edge_nonzero_fuse -- the last because a shared collinear edge fuses into the same REGION either way, which is exactly what that pair was authored to show)."
+    }
+  },
   "vectors": [
     {
       "name": "simple_square_passthrough",
@@ -149,7 +221,7 @@
     {
       "name": "nested_co_oriented_rings_nonzero_solid",
       "fill_rule": "nonzero",
-      "_derivation": "INTER-RING WINDING CANCELLATION, the nesting case. The SAME two CCW nested rings as nested_co_oriented_rings_evenodd_hole, declared nonzero instead. Inside the inner ring the winding is +1 (outer) +1 (inner) = 2, non-zero, so that region IS filled; between the rings it is +1, also filled. Filled-ness is therefore identical on both sides of the inner ring, so the inner ring bounds nothing and every one of its spans is dropped. One CCW ring survives: the outer square, area 400. Under the pre-ruling fixed even-odd reading this input was unrepresentable — a nonzero document was silently turned into a donut.",
+      "_derivation": "INTER-RING WINDING CANCELLATION, the nesting case. The SAME two CCW nested rings as nested_co_oriented_rings_evenodd_hole, declared nonzero instead. Inside the inner ring the winding is +1 (outer) +1 (inner) = 2, non-zero, so that region IS filled; between the rings it is +1, also filled. Filled-ness is therefore identical on both sides of the inner ring, so the inner ring bounds nothing and every one of its spans is dropped. One CCW ring survives: the outer square, area 400. Under the pre-ruling fixed even-odd reading this input was unrepresentable \u2014 a nonzero document was silently turned into a donut.",
       "input": [
         [[0,0],[20,0],[20,20],[0,20]],
         [[5,5],[15,5],[15,15],[5,15]]
@@ -163,7 +235,7 @@
     {
       "name": "overlapping_rings_nonzero_union",
       "fill_rule": "nonzero",
-      "_derivation": "INTER-RING WINDING CANCELLATION, the overlap case. Two CCW squares [0,10]^2 and [5,15]^2 whose boundaries cross at (10,5) and (5,10), declared nonzero. Inside the overlap the winding is 1+1 = 2, so the overlap is filled and the set means the UNION: the arcs running through the other square have winding 2 on one side and 1 on the other — filled both ways — and drop out. Survivors chain CCW as (0,0) (10,0) (10,5) (15,5) (15,15) (5,15) (5,10) (0,10); shoelace 0+50-25+150+150-25+50+0 = 350, area 175 = 100 + 100 - 25.",
+      "_derivation": "INTER-RING WINDING CANCELLATION, the overlap case. Two CCW squares [0,10]^2 and [5,15]^2 whose boundaries cross at (10,5) and (5,10), declared nonzero. Inside the overlap the winding is 1+1 = 2, so the overlap is filled and the set means the UNION: the arcs running through the other square have winding 2 on one side and 1 on the other \u2014 filled both ways \u2014 and drop out. Survivors chain CCW as (0,0) (10,0) (10,5) (15,5) (15,15) (5,15) (5,10) (0,10); shoelace 0+50-25+150+150-25+50+0 = 350, area 175 = 100 + 100 - 25.",
       "input": [
         [[0,0],[10,0],[10,10],[0,10]],
         [[5,5],[15,5],[15,15],[5,15]]
@@ -177,7 +249,7 @@
     {
       "name": "rings_sharing_a_collinear_edge_nonzero_fuse",
       "fill_rule": "nonzero",
-      "_derivation": "INTER-RING WINDING CANCELLATION, the shared-edge case. The same two CCW squares as rings_sharing_a_collinear_edge_evenodd, declared nonzero. To the left of the shared span x=10 the winding is +1 (first square alone); to its right it is +1 (second square alone). Filled on both sides, so the span is interior and drops out, and the squares fuse into the rectangle [0,20]x[0,10]. Collinear vertices are RETAINED (collapsing them is the Boolean panel's separate opt-in), so the ring is (0,0) (10,0) (20,0) (20,10) (10,10) (0,10) — six vertices, area 200 = 100 + 100, region-preserving.",
+      "_derivation": "INTER-RING WINDING CANCELLATION, the shared-edge case. The same two CCW squares as rings_sharing_a_collinear_edge_evenodd, declared nonzero. To the left of the shared span x=10 the winding is +1 (first square alone); to its right it is +1 (second square alone). Filled on both sides, so the span is interior and drops out, and the squares fuse into the rectangle [0,20]x[0,10]. Collinear vertices are RETAINED (collapsing them is the Boolean panel's separate opt-in), so the ring is (0,0) (10,0) (20,0) (20,10) (10,10) (0,10) \u2014 six vertices, area 200 = 100 + 100, region-preserving.",
       "input": [
         [[0,0],[10,0],[10,10],[0,10]],
         [[10,0],[20,0],[20,10],[10,10]]
@@ -191,7 +263,7 @@
     {
       "name": "co_rotating_spliced_loop_evenodd",
       "fill_rule": "evenodd",
-      "_derivation": "The carried rule bites WITHIN one ring too, not only between rings. Same input as co_rotating_spliced_loop_nonzero, declared even-odd. Inside the co-wound loop the winding is 2 — EVEN, so under even-odd that region is NOT filled and the loop survives as a hole of signed area -4, where under nonzero it fused away. The slit still has the same filled-ness on both sides and still drops out. Two rings, net even-odd area 100 - 4 = 96.",
+      "_derivation": "The carried rule bites WITHIN one ring too, not only between rings. Same input as co_rotating_spliced_loop_nonzero, declared even-odd. Inside the co-wound loop the winding is 2 \u2014 EVEN, so under even-odd that region is NOT filled and the loop survives as a hole of signed area -4, where under nonzero it fused away. The slit still has the same filled-ness on both sides and still drops out. Two rings, net even-odd area 100 - 4 = 96.",
       "input": [[[0,0],[5,2],[7,2],[7,4],[5,4],[5,2],[0,0],[10,0],[10,10],[0,10]]],
       "expected": {
         "area": 96.0,
@@ -202,7 +274,7 @@
     {
       "name": "doubly_wound_square_nonzero_fills",
       "fill_rule": "nonzero",
-      "_derivation": "One ring that traces the same 10x10 square twice, so the winding is 2 everywhere inside it. Non-zero: 2 != 0, filled — one ring of area 100. Paired with doubly_wound_square_evenodd_empties on identical vertices, which is the cleanest possible demonstration that rings alone do not determine a region.",
+      "_derivation": "One ring that traces the same 10x10 square twice, so the winding is 2 everywhere inside it. Non-zero: 2 != 0, filled \u2014 one ring of area 100. Paired with doubly_wound_square_evenodd_empties on identical vertices, which is the cleanest possible demonstration that rings alone do not determine a region.",
       "input": [[[0,0],[10,0],[10,10],[0,10],[0,0],[10,0],[10,10],[0,10]]],
       "expected": {
         "area": 100.0,

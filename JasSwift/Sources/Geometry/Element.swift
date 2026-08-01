@@ -614,7 +614,15 @@ public struct Transform: Equatable, Hashable {
     }
 
     public static func rotate(_ angleDeg: Double) -> Transform {
-        let rad = angleDeg * .pi / 180
+        // `angleDeg * (pi/180)`, NOT `angleDeg * pi / 180`. The two group
+        // differently and disagree by an ulp on 184 of the 721 integer
+        // degrees in [-360, 360] -- MEASURED through the transform_apply
+        // corpus family, not argued. Rust spells this `f64::to_radians()`,
+        // which is `self * (PI / 180.0)`, and since MATRIXPRECISION writes
+        // a/b/c/d at full shortest-round-trip precision the difference is
+        // no longer invisible: it reaches the `matrix(...)` bytes in the
+        // saved SVG. Keep the parenthesis.
+        let rad = angleDeg * (Double.pi / 180)
         return Transform(a: cos(rad), b: sin(rad), c: -sin(rad), d: cos(rad))
     }
 
