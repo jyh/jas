@@ -1,5 +1,5 @@
 {
-  "_doc": "LINEAR gradient stop remap for split fragments (S-2, ruled 2026-07-26). A gradient carries NO position: a linear gradient is an angle plus stops, and the painter resolves it against the element's OWN bbox -- the ramp runs from centre - half_diag*u to centre + half_diag*u, u = (cos t, -sin t), half_diag = half the bbox diagonal (painter::element_render::resolve_gradient / the Swift twin). So a fragment that inherits its parent's gradient verbatim RE-FITS the whole ramp to its own smaller box: three fragments of a red-to-blue hull each run the full red-to-blue instead of each showing its slice. Parent and fragment share the angle, so both project onto the SAME direction and every parent stop has a well-defined absolute position along it; re-expressing that position as a fraction of the fragment's span is a plain affine map of `location`. Stops outside [0,100] are then CLIPPED, with interpolated colours inserted at the endpoints so the visible ramp is exact. Every `expected` below is hand-derived from that arithmetic, NOT captured from an implementation: each vector's _comment carries the derivation. Boxes are given zero height (or zero width) where possible so half_diag is exactly half the extent and every number stays checkable by eye. COLOURS ARE 8-BIT HEX on both sides, because that is what a stop can hold: JasSwift's GradientStop.color is a hex String while jas_dioxus's is a Color with f64 channels, so hex is the widest value the two models actually share and the comparison is EXACT rather than toleranced. The quantisation is stated per vector where a blend lands off a byte boundary. RADIAL is deliberately absent: its centre is forced to the fragment's bbox centre and the model has nowhere to record an anchor, so the recentre stands (JYH accepted it; `gradient anchor` is a separate stone). FREEFORM is absent because resolve_gradient returns None for it -- nothing is painted, so there is nothing to preserve. `midpoint` is carried through unchanged and pinned so a future change to that decision is visible; the painter does not read it today.",
+  "_doc": "LINEAR gradient stop remap for split fragments (S-2, ruled 2026-07-26). A gradient carries NO position: a linear gradient is an angle plus stops, and the painter resolves it against the element's OWN bbox -- the ramp runs from centre - half_diag*u to centre + half_diag*u, u = (cos t, -sin t), half_diag = half the bbox diagonal (painter::element_render::resolve_gradient / the Swift twin). So a fragment that inherits its parent's gradient verbatim RE-FITS the whole ramp to its own smaller box: three fragments of a red-to-blue hull each run the full red-to-blue instead of each showing its slice. Parent and fragment share the angle, so both project onto the SAME direction and every parent stop has a well-defined absolute position along it; re-expressing that position as a fraction of the fragment's span is a plain affine map of `location`. Stops outside [0,100] are then CLIPPED, with interpolated colours inserted at the endpoints so the visible ramp is exact. Every `expected` below is hand-derived from that arithmetic, NOT captured from an implementation: each vector's _comment carries the derivation. The first nine vectors give every box zero height (or zero width) so half_diag is exactly half the extent and every number stays checkable by eye -- WHICH LEFT THE DIAGONAL UNTESTED, because hypot(w,h) equals max(w,h) on every degenerate box. That was measured on 2026-07-31: replacing half the diagonal with half the longer side left the oracle, the checker and the whole board green. The four `two_dimensional_*` and `concentric_*` vectors close it, with Pythagorean boxes chosen so the arithmetic stays exact and hand-checkable anyway; each reds that substitution by 8.5 to 13 byte units. A one-dimensional witness set is a special case wearing the clothes of a general one. COLOURS ARE 8-BIT HEX on both sides, because that is what a stop can hold: JasSwift's GradientStop.color is a hex String while jas_dioxus's is a Color with f64 channels, so hex is the widest value the two models actually share and the comparison is EXACT rather than toleranced. The quantisation is stated per vector where a blend lands off a byte boundary. RADIAL is deliberately absent: its centre is forced to the fragment's bbox centre and the model has nowhere to record an anchor, so the recentre stands (JYH accepted it; `gradient anchor` is a separate stone). FREEFORM is absent because resolve_gradient returns None for it -- nothing is painted, so there is nothing to preserve. `midpoint` is carried through unchanged and pinned so a future change to that decision is visible; the painter does not read it today.",
   "vectors": [
     {
       "name": "left_half_of_a_two_stop_ramp",
@@ -111,6 +111,72 @@
       ]
     },
     {
+      "name": "two_dimensional_boxes_clip_both_ends",
+      "_why": "THE FIRST VECTOR IN THIS FAMILY WITH A TWO-DIMENSIONAL BOX. Every box in the nine vectors above has one side exactly zero, so hypot(w,h) equals max(w,h) on all eighteen of them and `half the DIAGONAL` -- the distinctive clause of the denotation, the one spec/geometry/linear_gradient.py's own docstring calls out as `not half the width` -- was exercised by NOTHING. Mutating it to max(w,h)/2 left the oracle, the checker and the whole board green. On this vector the law reds by 13.00 byte units, 26x the 0.500001 tolerance.",
+      "_comment": "angle 0 => u = (1,0). Parent (0,0,120,90): centre (60,45), centre.u = 60, diag = hypot(120,90) = 150 so half = 75 -- NOT 60, which is what half the width would give. Ramp runs -15..135. Fragment (0,0,60,45): centre.u = 30, diag = hypot(60,45) = 75 so half = 37.5. Stop L=0 sits at 60 + (-1)(75) = -15 -> L' = 50*((-15-30)/37.5 + 1) = 50*(-0.2) = -10. Stop L=100 sits at 135 -> L' = 50*((135-30)/37.5 + 1) = 50*3.8 = 190. BOTH ends clip. Sample at 0: t = 10/200 = 0.05 -> (0.95, 0, 0.05) -> 242.25 rounds to 242 = 0xf2 and 12.75 rounds to 13 = 0x0d -> f2000d. Sample at 100: t = 110/200 = 0.55 -> 114.75 rounds to 115 = 0x73 and 140.25 rounds to 140 = 0x8c -> 73008c. Max residual against the parent's exact colours is 0.25, the endpoint quantisation and nothing else.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 120.0, 90.0],
+      "fragment": [0.0, 0.0, 60.0, 45.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "f2000d", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "73008c", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "two_dimensional_interior_stop_survives",
+      "_why": "Two-dimensional AND exercising the pass-through arm: a stop that lands strictly inside (0,100) survives with its own midpoint, which only `fragment_larger_than_parent_keeps_interior_stops` did before, and that vector is one-dimensional. Its midpoint is 30, not the default 50, so a remap that rebuilt interior stops instead of carrying them would be visible. Reds the max(w,h)/2 mutant by 12.75 byte units.",
+      "_comment": "angle 0 => u = (1,0). Parent (0,0,120,90): centre.u = 60, diag 150, half 75, ramp -15..135, with red@0, green@50, blue@100 sitting at -15, 60 and 135. Fragment (30,25,30,40): centre (45,45), centre.u = 45, diag = hypot(30,40) = 50 so half = 25 (max(w,h)/2 would say 20). Ramp 20..70. L=0 -> abs -15 -> L' = 50*((-15-45)/25 + 1) = 50*(-1.4) = -70. L=50 -> abs 60 -> L' = 50*((60-45)/25 + 1) = 50*1.6 = 80, STRICTLY INSIDE, so green passes through unchanged at 80 carrying midpoint 30. L=100 -> abs 135 -> L' = 50*((135-45)/25 + 1) = 50*4.6 = 230. Sample at 0 lies between red(-70) and green(80): t = 70/150 = 7/15, and 255*8/15 = 136 = 0x88, 255*7/15 = 119 = 0x77 exactly -> 887700. Sample at 100 lies between green(80) and blue(230): t = 20/150 = 2/15, and 255*13/15 = 221 = 0xdd, 255*2/15 = 34 = 0x22 exactly -> 00dd22. Every value is exact on a byte boundary, so the residual is 0.000 -- this vector needs no tolerance at all.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 120.0, 90.0],
+      "fragment": [30.0, 25.0, 30.0, 40.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "00ff00", "opacity": 100.0, "location": 50.0, "midpoint": 30.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "887700", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "00ff00", "opacity": 100.0, "location": 80.0, "midpoint": 30.0 },
+        { "hex": "00dd22", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "two_dimensional_at_angle_90_uses_the_diagonal",
+      "_why": "The y-down sign and the diagonal at once. `angle_90_pins_the_y_down_sign` above pins the minus on sin, but on boxes of zero WIDTH, where the diagonal degenerates to the height and the projection axis is the only extent there is. Here both extents are non-zero and the fragment sits off the y axis, so the vector holds the sign AND the diagonal simultaneously. Reds the max(w,h)/2 mutant by 8.50 byte units.",
+      "_comment": "u = (cos 90, -sin 90) = (0,-1), so projections are NEGATED y. Parent (0,0,120,90): centre (60,45), centre.u = -45, diag = 150, half = 75. Ramp -120..30, with red@0 at -120 and blue@100 at 30. Fragment (40,45,30,40): centre (55,65), centre.u = -65, diag = hypot(30,40) = 50, half = 25 (max(w,h)/2 would say 20). Ramp -90..-40. L=0 -> abs -120 -> L' = 50*((-120+65)/25 + 1) = 50*(-1.2) = -60. L=100 -> abs 30 -> L' = 50*((30+65)/25 + 1) = 50*4.8 = 240. Sample at 0: t = 60/300 = 0.2 -> 255*0.8 = 204 = 0xcc and 255*0.2 = 51 = 0x33 -> cc0033. Sample at 100: t = 160/300 = 8/15 -> 255*7/15 = 119 = 0x77 and 255*8/15 = 136 = 0x88 -> 770088. Exact on byte boundaries; residual 0.000. Drop the minus on sin and this vector inverts, exactly as its one-dimensional sibling does.",
+      "angle": 90.0,
+      "parent": [0.0, 0.0, 120.0, 90.0],
+      "fragment": [40.0, 45.0, 30.0, 40.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "cc0033", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "770088", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
+      "name": "concentric_fragment_of_a_different_aspect_needs_the_diagonal",
+      "_why": "THE PURE STATEMENT OF THE CLAUSE, and the reason the other three are not enough on their own. The fragment is CONCENTRIC with the parent on the ramp axis, so the remap depends on nothing but the RATIO of the two halves. Scale a box uniformly and that ratio is the same whether you take the diagonal or the longer side -- which is why a two-dimensional vector whose boxes are similar and concentric would still be blind to the mutation. Here the aspects differ (4:3 against 7:24), so the ratio is 1/2 under the diagonal and 3/5 under max(w,h), and NOTHING BUT the diagonal makes the arithmetic come out. Reds the mutant by 13.00 byte units. It also refuses the other plausible wrong formula, the box's PROJECTED extent onto u, which here would be 40 and 7.",
+      "_comment": "angle 0 => u = (1,0). Parent (0,0,80,60): centre (40,30), centre.u = 40, diag = hypot(80,60) = 100 so half = 50; max(w,h)/2 would say 40 and the projected extent would say 40. Ramp -10..90. Fragment (33,6,14,48): centre (40,30) -- the same point -- so centre.u = 40 also; diag = hypot(14,48) = 50 (2x the 7-24-25 triple) so half = 25, where max(w,h)/2 would say 24 and the projected extent 7. Ramp 15..65. L=0 -> abs -10 -> L' = 50*((-10-40)/25 + 1) = 50*(-1) = -50. L=100 -> abs 90 -> L' = 50*((90-40)/25 + 1) = 50*3 = 150. Sample at 0: t = 50/200 = 0.25 -> 191.25 rounds to 191 = 0xbf and 63.75 rounds to 64 = 0x40 -> bf0040. Sample at 100: t = 150/200 = 0.75 -> the mirror, 4000bf. Residual 0.25, quantisation only. The hexes match middle_half_clips_both_ends because the FRACTIONS match; the geometry that produces them does not.",
+      "angle": 0.0,
+      "parent": [0.0, 0.0, 80.0, 60.0],
+      "fragment": [33.0, 6.0, 14.0, 48.0],
+      "stops": [
+        { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "0000ff", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ],
+      "expected": [
+        { "hex": "bf0040", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 },
+        { "hex": "4000bf", "opacity": 100.0, "location": 100.0, "midpoint": 50.0 }
+      ]
+    },
+    {
       "name": "degenerate_fragment_is_returned_unchanged",
       "_comment": "A fragment bbox with zero width AND zero height has half_diag 0: there is no span to map onto, and the division would produce infinities. The stops come back exactly as given. Reachable: a severing erase can leave a fragment that is a single point.",
       "angle": 0.0,
@@ -138,5 +204,35 @@
         { "hex": "ff0000", "opacity": 100.0, "location": 0.0, "midpoint": 50.0 }
       ]
     }
-  ]
+  ],
+  "checker": {
+    "_doc": "THE LAW over this family, and every floor it is held to. See docs/CHECKERS.md. The `expected` blocks above are WITNESSES -- hand-derived anchors carrying the arithmetic in each _comment. This block is the CHECKER: a predicate that rules ANY output legal or not, including outputs no witness pins, so a novel dispute the corpus is silent on still gets adjudicated. It was written from the denotation stated in this file's own _doc and in PATH_ERASER_TOOL.md -- what a linear gradient MEANS -- and reconciled against all nine hand-derived expectations BEFORE any implementation was run. gradient_remap.rs was not opened while it was written: a formula transcribed out of the file under test cannot fail the bug it was copied from. Every number below is declared HERE and nowhere else -- a floor mirrored into a runner drifts.",
+    "name": "gradient_remap_repaints_the_fragment",
+    "seam": 1,
+    "_seam_why": "Seam 1 = the out-of-process algorithm_roundtrip wire, so ONE Python predicate adjudicates BOTH active ports with zero port edits, and the Windows lane -- which has no Swift toolchain -- sees all of it. A Seam-2 checker at a tool or gesture seam costs roughly 6.7x this, must be hand-mirrored per port, and would show the Windows seat the Rust arm alone.",
+    "law": "the remapped gradient paints the fragment the colours the parent painted over that same region",
+    "samples_per_vector": 65,
+    "_samples_why": "A uniform sweep of the fragment's own ramp at 65 places -- so 0, 25, 50, 75 and 100 land exactly on the grid, which is where hand-derived stops sit -- plus every knot of the output ramp, because a piecewise-linear ramp can only bend at a stop and a grid that misses the stops can miss the bend.",
+    "tolerance_bytes": 0.500001,
+    "_tolerance_why": "DERIVED, not chosen. Clipping inserts an interpolated colour at each endpoint and a stop can only hold a BYTE, so an inserted endpoint is off the exact value by at most half a byte; every interior sample is a convex combination of two endpoint errors, so the bound is 0.5 byte units everywhere. It is TIGHT, not slack: the measured max residual over the thirteen hand-derived expectations is exactly 0.500 on three of them, and the four two-dimensional vectors sit at 0.250, 0.000, 0.000 and 0.250. The 1e-6 is f64 slop between three floating-point dialects and nothing more. For scale, the mutant below is rejected by 63.75 to 255 byte units, so the tolerance sits two to three orders of magnitude below anything real. THE ULP RULE: this law is robust to ulp-scale disagreement, which is what licenses it to live harness-side at all; a bit-exact law may not.",
+    "min_rulable_vectors": 12,
+    "min_checks_per_lane": 750,
+    "min_witnesses": {
+      "two_dimensional_boxes": 4,
+      "diagonal_differs_from_longer_side": 4,
+      "aspect_ratio_differs_between_parent_and_fragment": 3
+    },
+    "_min_witnesses_why": "THE SHAPE OF THE WITNESS SET, WHICH ITS SIZE CANNOT SPEAK TO. min_rulable_vectors and min_checks_per_lane both count; the defect they could not see was COLLINEARITY. Every box in the first nine vectors has one side exactly zero, so hypot(w,h) = max(w,h) on all eighteen, and nine vectors at 65 samples each -- 585 green comparisons -- exercised the diagonal clause exactly zero times. Adding a tenth degenerate vector would have raised both counts and changed nothing. These floors count vectors satisfying a named SEPARATION instead. `two_dimensional_boxes`: both extents non-zero on parent and fragment. `diagonal_differs_from_longer_side`: the two candidate formulas actually disagree on this vector, which is the property being bought and is stated directly rather than inferred from two-dimensionality. `aspect_ratio_differs_between_parent_and_fragment`: floor 3, the authored count, because similar CONCENTRIC boxes give the same answer under both formulas however two-dimensional they are -- a corpus of scaled copies is blind, and concentric_fragment_of_a_different_aspect_needs_the_diagonal is the one vector that closes it. Total in both directions against CHECKER_WITNESS_PROBES: a floor with no probe and a probe with no floor are both refused. This is a REGRESSION floor and not a discovery instrument -- it keeps a noticed clause exercised, and cannot say which clause to notice next. See docs/CHECKERS.md.",
+    "_floors_why": "12 of the 13 vectors are rulable (see `unrulable`) and each contributes at least 65 sample comparisons -- 781 measured, because the ramp knots of two_dimensional_interior_stop_survives fall off the 65-point grid and are added to it. The floors are equal to the authored counts rather than to 1: a floor of zero is not a floor, and a floor of one is barely one. Adding vectors raises the real count and leaves these green; DELETING vectors reds, which is the emptying-by-rewriting this file must not survive. RAISED 2026-07-31 from 8/500, when the four two-dimensional vectors were added: a floor left at the old count would have let the new witnesses be deleted again silently, which is the same defect as never having added them.",
+    "unrulable": {
+      "degenerate_fragment_is_returned_unchanged": "the fragment's ramp has zero length, so every location collapses onto one point and `what colour is here` has no answer. Declared rather than silently skipped: the checker asserts this set BOTH ways, so a vector that quietly stopped being ruled fails, and a vector that becomes rulable fails as a stale holdout."
+    },
+    "mutant": {
+      "name": "identity_remap",
+      "_doc": "THE BUG, WRITTEN DOWN -- not a second copy of the implementation. It is fed to the same predicate on every run and the predicate must REJECT it; that is how the lane measures its own TEETH rather than only its population.",
+      "provenance": "The PRE-S-2 SHIPPING BEHAVIOUR, historical and not invented: a fragment inherited its parent's stop list verbatim and re-fitted the whole ramp to its own smaller box. Stated in this file's own _doc (`three fragments of a red-to-blue hull each run the full red-to-blue instead of each showing its slice`) and in transcripts/BOOLEAN.md's statement of the phase-2 debt the 2026-07-27 stone paid. A mutant with no named prior bug is a self-graded exam -- the author invents one the checker already catches -- and the registry refuses to register one.",
+      "min_discriminating": 11,
+      "_min_discriminating_why": "MEASURED, not guessed: 11 of the 12 rulable vectors reject the identity, by margins of 63.75 to 255 byte units. The twelfth, single_stop_is_returned_unchanged, paints one flat colour, so the identity IS the right answer there and no law could separate them -- a property of the vector, not a weakness of the law. Raised from 7 with the four two-dimensional vectors."
+    }
+  }
 }

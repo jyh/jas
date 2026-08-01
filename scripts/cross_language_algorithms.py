@@ -14,18 +14,28 @@ Usage:
 
 import argparse
 import copy
+import datetime
+import hashlib
 import json
 import math
 import os
 import subprocess
 import sys
 import tempfile
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lane_report  # noqa: E402  (sibling module in scripts/)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FIXTURES_DIR = os.path.join(REPO_ROOT, "test_fixtures", "algorithms")
+
+sys.path.insert(0, REPO_ROOT)
+# The analytic TCB the geometry checkers rule with. It imports nothing from
+# this repository -- that property is what makes it an independent instrument
+# rather than a fourth implementation, and scripts/check_geometry_checkers.py
+# enforces it. See docs/CHECKERS.md.
+from spec.geometry import linear_gradient as lg  # noqa: E402
 
 # Algorithm → (comparison strategy, tolerance)
 ALGORITHMS = {
@@ -710,6 +720,615 @@ def check_leading_close_invariance(langs, algos, verbose=False):
 
 
 # ---------------------------------------------------------------
+# GEOMETRY CHECKERS -- the law tier. See docs/CHECKERS.md.
+# ---------------------------------------------------------------
+#
+# A CHECKER is a small executable predicate that takes ANY input/output pair
+# and rules it legal or not, written from the SPEC and never from the
+# implementation. It is not a golden: it has no pinned answer, so it can rule
+# a case nobody wrote down, and a shared bug in both ports does not make it
+# green. It rides SEAM 1 -- the out-of-process `algorithm_roundtrip` wire --
+# so ONE Python predicate adjudicates BOTH active ports and the Windows lane
+# sees all of it (`swift test` is macOS-only; a Seam-2 checker would give the
+# Windows seat the Rust arm alone, half-watched by construction).
+#
+# The verdicts are counted in lane_report's RELATIONAL bucket: a checker
+# compares no two implementations and reproduces no golden, so folding it into
+# either of the other two would overstate the run. RELATIONAL is non-zero and
+# BLOCKING under `--lang rust` with no `--require-comparisons`, which is
+# exactly the shape of the Windows lane.
+
+# algorithm -> the law's name. Total over ALGORITHMS: an algorithm that is not
+# here must be in GEOMETRY_CHECKER_GAPS with a written reason, and one that is
+# in BOTH, or in NEITHER, is a failure. Policed in reverse too -- see
+# CHECKER_PROBES.
+GEOMETRY_CHECKERS = {
+    "gradient_remap": "gradient_remap_repaints_the_fragment",
+}
+
+# Registered algorithms with NO checker, and why. A row here is a claim that
+# nobody has to re-derive; a row that stops being true is caught by the probe
+# sweep below, which is the direction `swift:dropdown` went stale in for
+# months (the defect behind check_gate_consistency.py).
+#
+# "PHASE 2" means: a law IS available at this seam and is not written yet --
+# the honest state, distinct from "no law exists". A reason that merely
+# restates the implementation is not a reason.
+GEOMETRY_CHECKER_GAPS = {
+    "measure": "unit conversion of a scalar; any law would restate the "
+               "conversion table, which is a golden with extra steps",
+    "length": "as `measure`: a unit-aware string parse/format, no geometry",
+    "color_convert": "PHASE 2 -- the round-trip law (rgb->hsb->rgb within one "
+                     "panel unit) is a real law at this seam, unwritten",
+    "number_commit": "a widget's commit rule over strings; the law IS the rule "
+                     "table, so it belongs to the declarative tier, not here",
+    "element_bounds": "PHASE 2 -- the containment law (every flattened point "
+                      "inside the box, and the box touched on all four sides) "
+                      "is available here, unwritten",
+    "element_evaluated_bounds": "PHASE 2 -- as `element_bounds`, through the "
+                                "element's own matrix and its ancestors'",
+    "flatten": "PHASE 2 -- the deviation law (every sample within eps of the "
+               "analytic curve, and the endpoints exact) is available here",
+    "art_flatten": "PHASE 2 -- as `flatten`, on the first-subpath walker",
+    "calligraphic_outline": "PHASE 2 -- the ribbon law (both rails everywhere "
+                            "half the declared width from the spine) is "
+                            "available here, unwritten",
+    "paste_translate": "PHASE 2 -- the Preservation Law is checkable (every "
+                       "coordinate moved by exactly the offset, every other "
+                       "field byte-identical); it needs a document differ",
+    "arrow_trim": "PHASE 2 -- the arc-length law (the trimmed end sits exactly "
+                  "the setback along the original path) is available here",
+    "path_project": "PHASE 2 -- the nearest-point law (no sample on the "
+                    "segment is closer than the returned one) is available "
+                    "here and needs no new instrument",
+    "align": "PHASE 2 -- the coincidence law (each element's declared edge "
+             "lands on the target edge, and the perpendicular axis does not "
+             "move) is available here",
+    "fit_curve": "PHASE 2 -- the max-deviation law over the input points",
+    "shape_recognize": "PHASE 2 -- as `fit_curve`, plus a residual bound",
+    "hit_test": "BLOCKED on the polygon membership tier: the law is the "
+                "sampled winding rule, whose instrument is the "
+                "polygon_metrics migration into spec/geometry (Phase 3)",
+    "boolean": "BLOCKED on the same tier -- the law is `a point is in A u B "
+               "iff it is in A or in B`, sampled; standing it up before the "
+               "instrument moves would build a third sampler",
+    "boolean_normalize": "BLOCKED, as `boolean`",
+    "planar": "BLOCKED, as `boolean`: face areas ruled against a sampled "
+              "membership oracle (it carries a property STRATEGY today, which "
+              "is a comparison rule, not a law)",
+    "polygon_metrics": "IT IS THE INSTRUMENT. Its checker is the spec/geometry "
+                       "migration itself (Phase 3), which ends with one "
+                       "sampler instead of the two production copies this "
+                       "family currently pins against each other",
+    "text_layout": "no geometry law without a font oracle: advance widths come "
+                   "from the platform, so any predicate would be a golden",
+    "text_layout_paragraph": "as `text_layout`",
+    "path_text_layout": "as `text_layout`; the arc-length half is checkable "
+                        "and is PHASE 2, the glyph half is not",
+}
+
+# The REVERSE direction, mechanised. Each registered checker names the shape it
+# consumes; if a GAP algorithm's fixture starts carrying that shape, the gap
+# row is stale and must be deleted rather than left asserting a hole that has
+# closed. One direction of policing is how a stale exemption survives.
+CHECKER_PROBES = {
+    "gradient_remap_repaints_the_fragment":
+        lambda v: all(k in v for k in ("angle", "parent", "fragment", "stops")),
+}
+
+# THE WITNESS SET'S SHAPE, WHICH ITS SIZE CANNOT SPEAK TO.
+#
+# Nine vectors and 585 sample comparisons, all green, all blind: every bbox in
+# this family had one side exactly zero, so hypot(w,h) equalled max(w,h) on all
+# eighteen of them and `half the DIAGONAL` -- the distinctive clause of the
+# denotation -- was exercised by nothing. Counting vectors cannot see that.
+# Counting samples cannot see that. Both measure POPULATION; the defect is
+# COLLINEARITY, a property of the span.
+#
+# So a law may also declare what its witnesses must SEPARATE. Each probe below
+# is a named property of a single vector; the fixture declares how many
+# vectors must satisfy it, and the runner counts. The floors are total in both
+# directions (see `_checker_config`): a declared floor with no probe is a
+# number nothing measures, and a probe with no declared floor is a measurement
+# nothing asserts.
+#
+# WHAT THIS IS NOT: it is a REGRESSION floor, not a discovery instrument. It
+# keeps a clause that has been noticed from going unexercised again; it cannot
+# tell anyone which clause to notice next. See docs/CHECKERS.md for the
+# general answer (a mutant per clause of the analytic tier), of which this is
+# the hand-rolled special case for the one clause that was caught.
+CHECKER_WITNESS_PROBES = {
+    "gradient_remap_repaints_the_fragment": {
+        "two_dimensional_boxes":
+            lambda v: all(b[2] > 0 and b[3] > 0
+                          for b in (v["parent"], v["fragment"])),
+        # The separation that matters, stated directly rather than inferred
+        # from two-dimensionality: a corpus could be two-dimensional and still
+        # not distinguish the diagonal from the longer side.
+        "diagonal_differs_from_longer_side":
+            lambda v: any(abs(math.hypot(b[2], b[3]) - max(b[2], b[3])) > 1e-9
+                          for b in (v["parent"], v["fragment"])),
+        # ... and the ratio test: similar, concentric boxes agree on the
+        # remap under BOTH formulas, so a corpus of scaled copies is blind
+        # however two-dimensional it is. This is the property the
+        # `concentric_*` vector was authored to hold.
+        "aspect_ratio_differs_between_parent_and_fragment":
+            lambda v: abs(_aspect(v["parent"]) - _aspect(v["fragment"])) > 1e-9,
+    },
+}
+
+
+def _aspect(bbox):
+    """w/h for a bbox, with the degenerate cases mapped to distinct sentinels
+    so a zero-height box never compares equal to a zero-width one."""
+    w, h = bbox[2], bbox[3]
+    if h == 0:
+        return math.inf if w != 0 else -1.0
+    return w / h
+
+
+# Keys a checker may NEVER see. Mechanical, not intended: `expected` is the
+# port's own pinned answer, and a predicate that reads it is differential
+# testing wearing a hat.
+CHECKER_FORBIDDEN_INPUT_KEYS = ("expected", "translations")
+
+
+def checker_input(vec):
+    """The vector as the law is allowed to see it: input only."""
+    return {k: v for k, v in vec.items()
+            if k not in CHECKER_FORBIDDEN_INPUT_KEYS}
+
+
+def _fmt_colour(c):
+    return "rgb({:.1f},{:.1f},{:.1f})@{:.1f}%".format(*c)
+
+
+def gradient_remap_repaints_the_fragment(vec, out_stops, cfg):
+    """THE LAW. A remapped gradient must paint the fragment the colours the
+    parent painted over that same region.
+
+    Written from `PATH_ERASER_TOOL.md` and the fixture's `_doc`, both of which
+    state what a linear gradient MEANS; `gradient_remap.rs` was not opened.
+    Returns None when the output is legal, else why it is not.
+    """
+    u = lg.axis_unit(vec["angle"])
+    parent_centre, parent_half = lg.ramp(vec["parent"], u)
+    frag_centre, frag_half = lg.ramp(vec["fragment"], u)
+    n, tol = cfg["samples_per_vector"], cfg["tolerance_bytes"]
+    # A uniform sweep of the fragment's own ramp, plus its knots: a piecewise
+    # linear ramp can only bend at a stop, so a grid that misses the stops can
+    # miss the bend.
+    places = sorted({100.0 * k / (n - 1) for k in range(n)}
+                    | {s["location"] for s in out_stops
+                       if 0.0 <= s["location"] <= 100.0})
+    for loc in places:
+        here = lg.location_to_axial(loc, frag_centre, frag_half)
+        want = lg.colour_at_axial(vec["stops"], parent_centre, parent_half, here)
+        got = lg.colour_at_location(out_stops, loc)
+        off = max(abs(a - b) for a, b in zip(want, got))
+        if off > tol:
+            return (f"{loc:g}% along the fragment: the parent painted "
+                    f"{_fmt_colour(want)} there, the remap paints "
+                    f"{_fmt_colour(got)} (off by {off:.3f} > {tol:g})")
+    return len(places)
+
+
+def gradient_remap_is_rulable(vec):
+    """Why this vector cannot be ruled, or None if it can.
+
+    A zero-length ramp collapses every location onto one point, so "what
+    colour is here" has no answer. Declared rather than silently skipped: the
+    fixture must name every unrulable vector, and a vector that becomes
+    rulable makes the declaration stale.
+    """
+    u = lg.axis_unit(vec["angle"])
+    if lg.ramp(vec["parent"], u)[1] == 0.0:
+        return "the parent's ramp has zero length"
+    if lg.ramp(vec["fragment"], u)[1] == 0.0:
+        return "the fragment's ramp has zero length"
+    return None
+
+
+def gradient_remap_mutant(vec):
+    """THE BUG, WRITTEN DOWN -- not a second copy of the implementation.
+
+    PROVENANCE: this is the PRE-S-2 SHIPPING BEHAVIOUR, named in the fixture's
+    own `_doc` ("a fragment that inherits its parent's gradient verbatim
+    RE-FITS the whole ramp to its own smaller box: three fragments of a
+    red-to-blue hull each run the full red-to-blue instead of each showing its
+    slice") and in transcripts/BOOLEAN.md's statement of the phase-2 debt. It
+    is a historical wrong answer, not an invented one -- a mutant an author
+    invents is a self-graded exam, and its discriminating count reads healthy
+    forever.
+    """
+    return copy.deepcopy(vec["stops"])
+
+
+CHECKER_FUNCS = {
+    "gradient_remap_repaints_the_fragment": (
+        gradient_remap_repaints_the_fragment,
+        gradient_remap_is_rulable,
+        gradient_remap_mutant,
+    ),
+}
+
+
+def _checker_config(algo, fixture_doc):
+    """The fixture's own declared floors and knobs, validated.
+
+    Every number lives in ONE place -- the fixture -- and every reader takes
+    it from there. A floor hardcoded in a runner is itself a defect: a
+    mirrored number drifts, and a floor of zero is not a floor.
+    """
+    cfg = fixture_doc.get("checker")
+    if not isinstance(cfg, dict):
+        return None, (f"{algo}.json declares no `checker` block, so the lane "
+                      f"has no floor to meet and cannot go non-vacuous "
+                      f"visibly")
+    required = ("name", "seam", "law", "samples_per_vector", "tolerance_bytes",
+                "min_rulable_vectors", "min_checks_per_lane", "unrulable",
+                "mutant")
+    missing = [k for k in required if k not in cfg]
+    if missing:
+        return None, (f"{algo}.json `checker` block is missing "
+                      f"{', '.join(missing)}")
+    for key in ("min_rulable_vectors", "min_checks_per_lane"):
+        if not isinstance(cfg[key], int) or cfg[key] < 1:
+            return None, (f"{algo}.json declares {key}={cfg[key]!r}; it must "
+                          f"be an integer >= 1 (a floor of zero is not a "
+                          f"floor)")
+    mut = cfg["mutant"]
+    if not isinstance(mut, dict) or not mut.get("provenance"):
+        return None, (f"{algo}.json's mutant carries no `provenance`: a mutant "
+                      f"must name the wrong answer it transcribes, or the "
+                      f"family takes the red-self-test rung instead")
+    if not isinstance(mut.get("min_discriminating"), int) \
+            or mut["min_discriminating"] < 1:
+        return None, (f"{algo}.json declares min_discriminating="
+                      f"{mut.get('min_discriminating')!r}; a mutant nothing "
+                      f"rejects measures nothing")
+
+    # The witness-SHAPE floors, total in both directions against the probes
+    # this law publishes. One direction only is how a stale exemption lives.
+    probes = CHECKER_WITNESS_PROBES.get(cfg["name"], {})
+    declared = cfg.get("min_witnesses")
+    if not isinstance(declared, dict):
+        return None, (f"{algo}.json declares no `min_witnesses` block. Its "
+                      f"law publishes {len(probes)} witness-shape probe(s), "
+                      f"and a corpus can satisfy every COUNT while being "
+                      f"collinear -- which is how all 18 of this family's "
+                      f"boxes were degenerate for its whole life")
+    for name in sorted(set(declared) - set(probes)):
+        return None, (f"{algo}.json declares min_witnesses['{name}'], which "
+                      f"no probe of `{cfg['name']}` measures: a floor nothing "
+                      f"evaluates is a number that reads as a guarantee")
+    for name in sorted(set(probes) - set(declared)):
+        return None, (f"{algo}.json declares no floor for the witness probe "
+                      f"'{name}': a probe nothing asserts on is a measurement "
+                      f"taken and discarded")
+    for name, floor in sorted(declared.items()):
+        if not isinstance(floor, int) or floor < 1:
+            return None, (f"{algo}.json declares min_witnesses['{name}']="
+                          f"{floor!r}; a floor of zero is not a floor")
+    return cfg, None
+
+
+# ---------------------------------------------------------------
+# The checker report's FRESHNESS evidence
+# ---------------------------------------------------------------
+#
+# `--reconcile` reads a file. A file is not a run: a stale copy left on disk
+# (or, worse, COMMITTED) reconciles exactly as cleanly as a fresh one, and the
+# gate would then be asserting last week's counts about today's tree. So the
+# report carries evidence of what it was produced FROM, and the reader
+# recomputes it. Two things are digested:
+#
+#   fixtures -- the vectors the counts were performed over. Add, edit or delete
+#               a vector and the counts in a stale report are about a corpus
+#               that no longer exists.
+#   spec     -- the analytic tier the law is COMPUTED with. This is the
+#               interlock the `half_diag` audit asked for: change the
+#               denotation and a report produced under the old one stops being
+#               evidence, rather than silently vouching for the new one.
+#
+# Both are computed HERE, by the writer, and called from
+# check_geometry_checkers.py by the reader, so the two sides cannot drift into
+# digesting different things -- which is the whole failure mode of a
+# hand-mirrored number.
+
+
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def fixture_digest(algos):
+    """sha256 of each named algorithm fixture, as it is on disk right now."""
+    out = {}
+    for algo in sorted(set(algos)):
+        path = os.path.join(FIXTURES_DIR, f"{algo}.json")
+        if os.path.exists(path):
+            out[algo] = _sha256_file(path)
+    return out
+
+
+def spec_digest():
+    """sha256 of every analytic-tier module, keyed on a POSIX relative path.
+
+    POSIX keys, not `str(Path)`: a digest map keyed on the platform separator
+    compares unequal between a Windows writer and a POSIX reader for reasons
+    that have nothing to do with content. That is check_swift_copy_sites.py's
+    2026-07-28 defect wearing a different hat.
+    """
+    root = os.path.join(REPO_ROOT, "spec")
+    out = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for fname in filenames:
+            if not fname.endswith(".py"):
+                continue
+            full = os.path.join(dirpath, fname)
+            rel = os.path.relpath(full, REPO_ROOT).replace(os.sep, "/")
+            out[rel] = _sha256_file(full)
+    return out
+
+
+def checker_report(langs, executed):
+    """The executed-count account, plus the evidence that it is THIS run's."""
+    return {
+        "run_id": uuid.uuid4().hex,
+        "generated_at": datetime.datetime.now(
+            datetime.timezone.utc).isoformat(timespec="seconds"),
+        "lanes_requested": list(langs),
+        "inputs_digest": {
+            "fixtures": fixture_digest(executed.keys()),
+            "spec": spec_digest(),
+        },
+        "algorithms": executed,
+    }
+
+
+def check_geometry_laws(langs, algos, verbose=False):
+    """Rule every registered family's OUTPUT against its law, in every lane.
+
+    Returns (passed, failed, errors, executed) where `executed` is the
+    machine-readable account of what ACTUALLY RAN -- the number the runner
+    computed, not the number the fixture asked for. R1/R2/R5 of the totality
+    rules; see docs/CHECKERS.md.
+    """
+    passed = failed = errors = 0
+    executed = {}
+
+    # R1, forward: the classification must be TOTAL over ALGORITHMS.
+    for algo in algos:
+        named = algo in GEOMETRY_CHECKERS
+        excused = algo in GEOMETRY_CHECKER_GAPS
+        if named and excused:
+            print(f"  FAIL: checker/{algo} [registered AND excused: decide "
+                  f"which, a family cannot be both]")
+            failed += 1
+        elif not named and not excused:
+            print(f"  FAIL: checker/{algo} [unclassified: register a checker "
+                  f"in GEOMETRY_CHECKERS, or say in GEOMETRY_CHECKER_GAPS why "
+                  f"there is no law for it. Silence is how a family goes "
+                  f"unwatched]")
+            failed += 1
+
+    for name in GEOMETRY_CHECKERS.values():
+        if name not in CHECKER_FUNCS:
+            print(f"  FAIL: checker/{name} [named in GEOMETRY_CHECKERS but "
+                  f"no such predicate exists]")
+            failed += 1
+
+    for algo in algos:
+        fixture_path = os.path.join(FIXTURES_DIR, f"{algo}.json")
+        if not os.path.exists(fixture_path):
+            continue  # the main loop already reports a missing fixture
+        with open(fixture_path, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        vectors = [v for v in (doc if isinstance(doc, list)
+                               else doc.get("vectors", []))
+                   if isinstance(v, dict) and not v.get("_skip")]
+
+        # R1, reverse: a gap row whose fixture now carries a registered law's
+        # shape is STALE and must be deleted, not left asserting a closed hole.
+        if algo in GEOMETRY_CHECKER_GAPS:
+            for law, probe in CHECKER_PROBES.items():
+                hits = [v.get("name", "?") for v in vectors if probe(v)]
+                if hits:
+                    print(f"  FAIL: checker/{algo} [excused as having no law, "
+                          f"but {len(hits)} of its vectors now carry the shape "
+                          f"`{law}` rules (e.g. {hits[0]}): delete the stale "
+                          f"GEOMETRY_CHECKER_GAPS entry and register it]")
+                    failed += 1
+            continue
+        if algo not in GEOMETRY_CHECKERS:
+            continue
+
+        law_name = GEOMETRY_CHECKERS[algo]
+        if law_name not in CHECKER_FUNCS:
+            continue  # already reported
+        rule, rulable, mutate = CHECKER_FUNCS[law_name]
+        cfg, why = _checker_config(algo, doc if isinstance(doc, dict) else {})
+        if cfg is None:
+            print(f"  FAIL: checker/{algo} [{why}]")
+            failed += 1
+            continue
+        if cfg["name"] != law_name:
+            print(f"  FAIL: checker/{algo} [fixture names checker "
+                  f"'{cfg['name']}', the registry names '{law_name}']")
+            failed += 1
+            continue
+
+        # R2, part one: the UNRULABLE set is declared, and policed both ways.
+        declared = dict(cfg["unrulable"])
+        rulable_vecs = []
+        for v in vectors:
+            vname = v.get("name", "?")
+            why_not = rulable(checker_input(v))
+            if why_not and vname not in declared:
+                print(f"  FAIL: checker/{algo}/{vname} [cannot be ruled "
+                      f"({why_not}) and is not declared in the fixture's "
+                      f"`checker.unrulable`: a vector the law silently skips "
+                      f"is a vector nothing watches]")
+                failed += 1
+            elif why_not:
+                declared.pop(vname)
+            elif vname in declared:
+                print(f"  FAIL: checker/{algo}/{vname} [declared unrulable, "
+                      f"but the law CAN rule it now: delete the stale "
+                      f"`checker.unrulable` entry]")
+                failed += 1
+                declared.pop(vname)
+                rulable_vecs.append(v)
+            else:
+                rulable_vecs.append(v)
+        for stale in sorted(declared):
+            print(f"  FAIL: checker/{algo} [`checker.unrulable` names "
+                  f"'{stale}', which is not a vector in this fixture: a stale "
+                  f"holdout]")
+            failed += 1
+
+        if len(rulable_vecs) < cfg["min_rulable_vectors"]:
+            print(f"  FAIL: checker/{algo} [{len(rulable_vecs)} rulable "
+                  f"vector(s), floor is {cfg['min_rulable_vectors']}: vectors "
+                  f"were removed without lowering the floor the fixture "
+                  f"states about itself]")
+            failed += 1
+
+        # R3: TEETH, measured on every run. The mutant is fed to the same
+        # predicate and MUST be rejected -- a law that cannot fail a known
+        # wrong answer is a golden with extra steps.
+        discriminating = 0
+        for v in rulable_vecs:
+            verdict = rule(checker_input(v), mutate(v), cfg)
+            if isinstance(verdict, str):
+                discriminating += 1
+        floor = cfg["mutant"]["min_discriminating"]
+        if discriminating < floor:
+            print(f"  FAIL: checker/{algo} [the mutant "
+                  f"'{cfg['mutant'].get('name')}' is rejected on only "
+                  f"{discriminating} vector(s), floor {floor}. Either the law "
+                  f"lost its teeth or the mutant went stale -- a stale mutant "
+                  f"measures nothing while looking like it measures "
+                  f"something]")
+            failed += 1
+
+        # THE WITNESS SET'S SHAPE. Measured over the rulable vectors, because
+        # a vector the law cannot rule contributes no evidence about any
+        # clause. Counting vectors and samples cannot see collinearity: this
+        # is the assertion that can.
+        witnesses = {}
+        for wname, probe in sorted(
+                CHECKER_WITNESS_PROBES.get(law_name, {}).items()):
+            hits = [v.get("name", "?") for v in rulable_vecs
+                    if probe(checker_input(v))]
+            witnesses[wname] = len(hits)
+            wfloor = cfg["min_witnesses"][wname]
+            if len(hits) < wfloor:
+                print(f"  FAIL: checker/{algo} [{len(hits)} witness(es) "
+                      f"satisfy '{wname}', floor {wfloor}. The corpus has "
+                      f"gone COLLINEAR: it can be any size and still leave "
+                      f"this clause of the denotation exercised by nothing, "
+                      f"which is the state all 18 of this family's bounding "
+                      f"boxes were in until 2026-07-31]")
+                failed += 1
+
+        # The rulings themselves, once per lane. ONE predicate, BOTH ports.
+        per_lane = {}
+        for lang in langs:
+            if (lang, algo) in SKIP_LANG_ALGO:
+                continue
+            try:
+                out = json.loads(LANGUAGES[lang](algo, fixture_path))
+            except Exception as e:
+                print(f"  ERROR: checker/{algo} {lang}: {e}")
+                errors += 1
+                continue
+            by_name = {r.get("name"): r.get("result") for r in out
+                       if isinstance(r, dict)}
+            ruled = samples = 0
+            for v in rulable_vecs:
+                vname = v.get("name", "?")
+                if vname not in by_name:
+                    print(f"  FAIL: checker/{algo}/{vname} [{lang} emitted no "
+                          f"result for this vector]")
+                    failed += 1
+                    continue
+                verdict = rule(checker_input(v), by_name[vname], cfg)
+                ruled += 1
+                if isinstance(verdict, str):
+                    print(f"  FAIL: checker/{algo}/{vname} [{lang}: "
+                          f"{cfg['law']} — {verdict}]")
+                    if verbose:
+                        print(f"    output: "
+                              f"{json.dumps(by_name[vname], sort_keys=True)[:200]}")
+                    failed += 1
+                else:
+                    samples += verdict
+                    passed += 1
+            per_lane[lang] = {"ruled": ruled, "samples": samples}
+
+            # R2, part two: the runner asserts the count it ACTUALLY RAN, not
+            # the count the fixture declared. This is the assertion that
+            # catches a seeding pass that seeded zero.
+            if ruled != len(rulable_vecs):
+                print(f"  FAIL: checker/{algo} [{lang} ruled {ruled} of "
+                      f"{len(rulable_vecs)} rulable vectors]")
+                failed += 1
+            if samples < cfg["min_checks_per_lane"]:
+                print(f"  FAIL: checker/{algo} [{lang} performed {samples} "
+                      f"sample check(s), floor {cfg['min_checks_per_lane']}: "
+                      f"the lane has gone vacuous, which is the one failure "
+                      f"mode that looks like success]")
+                failed += 1
+
+        # R5: the lanes must AGREE about how much was checked. A lane that
+        # quietly stopped being adjudicated is invisible in a total.
+        counts = {l: d["ruled"] for l, d in per_lane.items()}
+        if len(set(counts.values())) > 1:
+            print(f"  FAIL: checker/{algo} [lanes disagree about how many "
+                  f"vectors were ruled: {counts}]")
+            failed += 1
+        # The floors travel WITH the counts. R5 claims the reconciler asserts
+        # "each meets the declared floor", and that was true of
+        # min_discriminating only: min_checks_per_lane and
+        # min_rulable_vectors were checked here and nowhere else, so a
+        # reconcile run could not tell a full lane from a two-thirds-empty
+        # one. Copied from the fixture at the moment of use, never
+        # hand-mirrored -- the fixture stays the single place each number is
+        # DECLARED.
+        executed[algo] = {
+            "law": law_name, "seam": cfg["seam"],
+            "rulable_vectors": len(rulable_vecs),
+            "min_rulable_vectors": cfg["min_rulable_vectors"],
+            "min_checks_per_lane": cfg["min_checks_per_lane"],
+            "witnesses": witnesses,
+            "min_witnesses": dict(cfg["min_witnesses"]),
+            "discriminating": discriminating,
+            "min_discriminating": floor,
+            "lanes": per_lane,
+        }
+
+    # R4: per-FAMILY vacuity, below lane_report's run-level resolution. A
+    # registered family that ruled nothing is a FAILURE, not a silent
+    # contributor of zero to a healthy-looking total.
+    for algo in algos:
+        if algo not in GEOMETRY_CHECKERS:
+            continue
+        acct = executed.get(algo)
+        if not acct or not acct["lanes"] or not any(
+                d["ruled"] for d in acct["lanes"].values()):
+            print(f"  FAIL: checker/{algo} [registered, but this run ruled "
+                  f"NOTHING for it]")
+            failed += 1
+    return (passed, failed, errors, executed)
+
+
+# ---------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------
 
@@ -739,6 +1358,12 @@ def main():
     parser.add_argument("--self-test", action="store_true",
                         help="Check the summary's own reporting rules "
                              "(scripts/lane_report.py) and exit")
+    parser.add_argument("--checker-report", metavar="PATH",
+                        help="Write the geometry checkers' EXECUTED-COUNT "
+                             "account to PATH, for "
+                             "scripts/check_geometry_checkers.py --reconcile. "
+                             "The counts are what the runner actually ran, "
+                             "not what the fixtures asked for.")
     args = parser.parse_args()
 
     langs = [l.strip() for l in args.lang.split(",")]
@@ -791,6 +1416,22 @@ def main():
     s4_passed, s4_failed, s4_errors = check_leading_close_invariance(
         langs, algos, args.verbose)
     errors += s4_errors
+
+    # The CHECKER pass (see check_geometry_laws): rules each port's output
+    # against a law written from the spec, in every lane, with the law's own
+    # teeth re-measured against a historical wrong answer on every run. Also
+    # relational -- it reproduces no golden and compares no two lanes.
+    chk_passed, chk_failed, chk_errors, chk_executed = check_geometry_laws(
+        langs, algos, args.verbose)
+    errors += chk_errors
+    s4_passed += chk_passed
+    s4_failed += chk_failed
+    if args.checker_report:
+        with open(args.checker_report, "w", encoding="utf-8",
+                  newline="") as fh:
+            json.dump(checker_report(langs, chk_executed),
+                      fh, indent=2, sort_keys=True)
+            fh.write("\n")
 
     for algo in algos:
         strategy, tol = ALGORITHMS[algo]
@@ -993,7 +1634,8 @@ def main():
         relational_passed=s4_passed, relational_failed=s4_failed,
         oracle_what="vs the pinned goldens",
         comparison_what="lane-vs-lane agreement",
-        relational_what="S-4 leading-ClosePath invariance, same lane",
+        relational_what="S-4 leading-ClosePath invariance + geometry "
+                        "checkers, same lane",
         per_lane_comparisons=per_lane,
         require_comparisons=args.require_comparisons,
         unexercised=lane_report.unexercised_active_ports(lanes),

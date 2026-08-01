@@ -28,6 +28,8 @@
         "swift"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "action dispatch produces a whole document; the law available here is the Preservation Law, which needs a document differ (PHASE 2)",
       "claim_style": {
         "rust": "name-list (ACTION_FIXTURES in src/cross_language_test.rs) + data references",
         "swift": "name-list (actionFixtures in CrossLanguageTests.swift) + data references"
@@ -42,6 +44,7 @@
         "scripts"
       ],
       "port_symmetry": false,
+      "checker": "per-algorithm; see GEOMETRY_CHECKERS in scripts/cross_language_algorithms.py, which is itself total over ALGORITHMS and policed in both directions. gradient_remap carries the first law (Seam 1).",
       "claim_style": {
         "rust": "path literals (cross_language_test.rs + module-scattered tests, e.g. geometry/tspan.rs)",
         "swift": "path literals (AlignFixtureTests full paths; TspanPrimitivesTests loadFixture)",
@@ -56,6 +59,8 @@
         "reference"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "artboard fit/zoom is geometry and IS checkable (the fitted view contains the artboard and touches on one axis) -- PHASE 2, unwritten",
       "claim_style": {
         "reference": "os.path.join segments (test_artboards_effects.py)"
       },
@@ -69,6 +74,8 @@
         "reference"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "character attributes are a field-assignment table; the law would restate it",
       "claim_style": {
         "rust": "path literal (read_fixture in src/cross_language_test.rs character_apply_panel_edit_corpus)",
         "swift": "path literal (Tests/Panels/CharacterApplyCorpusTests.swift characterApplyCorpus)",
@@ -85,6 +92,8 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "constraint satisfaction IS checkable (the fitted concept satisfies every declared constraint) -- PHASE 2, and the strongest unclaimed law in the manifest",
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
         "swift": "path literal (CrossLanguageTests.swift)",
@@ -102,6 +111,8 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "as concept_constraints: the fitter's output should satisfy the fitter's own declared predicate -- PHASE 2",
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
         "swift": "path literal (CrossLanguageTests.swift)",
@@ -119,6 +130,8 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "as concept_constraints -- PHASE 2",
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
         "swift": "path literal (CrossLanguageTests.swift)",
@@ -136,6 +149,8 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "concept DECLARATIONS, not results: there is no output to rule",
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
         "swift": "path literal (CrossLanguageTests.swift)",
@@ -152,6 +167,8 @@
         "scripts"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "whole-document goldens for the workspace runner; the law is the Preservation Law again (PHASE 2, needs the differ)",
       "claim_style": {
         "rust": "name-lists (json/binary/svg round-trip arrays) + assert_svg_parse helper calls + path literals",
         "swift": "name-lists (jsonRoundtripAllExpected / binaryRoundtripAllExpected / binaryReadPythonFixtures) + assertSvgParse/assertWorkspaceFixture helper calls + path literals",
@@ -167,6 +184,8 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "the expression corpus is the declarative tier's own gate; a law over it would be a second evaluator",
       "claim_style": {
         "rust": "path literal (tests/cross_language_test.rs)",
         "swift": "path literal (CrossLanguageTests.swift)",
@@ -181,6 +200,8 @@
         "swift"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "SEAM 2 -- gesture replay is in-process in both ports, so a law here must be hand-mirrored per port and the Windows lane would see the Rust arm only. Deliberately not Phase 1: at most ONE Seam-2 checker, and shift_constrain already holds that slot",
       "claim_style": {
         "rust": "name-list (GESTURE_FIXTURES) + data references",
         "swift": "name-list (gestureFixtures) + data references"
@@ -194,6 +215,8 @@
         "swift"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "key-to-action routing is a lookup table; the law would restate it",
       "claim_style": {
         "rust": "name-list (KEY_FIXTURES) + data references",
         "swift": "name-list (keyFixtures) + data references"
@@ -207,6 +230,8 @@
         "swift"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "op_apply is the journal spine; the law is round-trip (apply then undo restores the document byte-for-byte) -- PHASE 2, a genuine law and not a restatement",
       "claim_style": {
         "rust": "path literals (run_operation_fixture calls + txn/drag_coalesce/recorded literals) + data references",
         "swift": "runOperationFixture helper calls + path literals + data references"
@@ -221,6 +246,8 @@
         "scripts"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "IT IS ALREADY A LAW FAMILY, and predates this tier: it asserts six invariants rather than pinning a golden. Registering it here would double-gate it; the honest note is that the checker tier generalises what this family did first",
       "claim_style": {
         "rust": "path literal (read_fixture in src/cross_language_test.rs preservation_invariants) + data references",
         "swift": "path literal (readFixture in CrossLanguageTests.swift preservationInvariants) + data references",
@@ -235,6 +262,8 @@
         "swift"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "captured production documents used as INPUT; they pin no output to rule",
       "claim_style": {
         "rust": "path literals (production_capture/eye_demo*.json) + data references",
         "swift": "path literals + data references"
@@ -249,6 +278,8 @@
         "reference"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "stroke attributes are a field-assignment table, as character_apply",
       "claim_style": {
         "rust": "path literal (read_fixture in src/cross_language_test.rs stroke_apply_panel_edit_corpus)",
         "swift": "path literal (Tests/Panels/StrokeApplyCorpusTests.swift strokeApplyCorpus)",
@@ -264,6 +295,8 @@
         "scripts"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "SVG round-trip is checkable (read then write is idempotent) -- PHASE 2; the commutativity runner already asserts a weaker relative of it",
       "claim_style": {
         "rust": "DIRECTORY GLOB (tests/cross_language_test.rs json_roundtrip_all_fixtures reads every svg/*.svg) + name-lists + data references",
         "swift": "name-lists (svgRoundtripAllFixtures) + assertSvgParse calls + data references",
@@ -278,6 +311,8 @@
         "swift"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "zoom/pan state is a scalar bookkeeping table; the geometry law that matters (a point under the cursor stays under the cursor across a zoom) belongs to the tool seam, SEAM 2",
       "claim_style": {
         "rust": "path literal (read_fixture in src/cross_language_test.rs layers_type_filter_matches_the_shared_corpus)",
         "swift": "path literal (readFixture in CrossLanguageTests.swift layersTypeFilterMatchesTheSharedCorpus)"
@@ -291,6 +326,8 @@
         "swift"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "as test_fixtures/operations -- PHASE 2, the same round-trip law",
       "claim_style": {
         "rust": "path literals (run_workspace_operation_fixture calls) + data references",
         "swift": "runWorkspaceOperationFixture helper calls + data references"
@@ -303,6 +340,8 @@
         "scripts"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "the SOURCE the compiled concept_constraints corpus is generated from; the law belongs on the compiled family, not on its source",
       "claim_style": {
         "scripts": "compile source (compile_concept_constraints_corpus.py + check_concept_constraints_corpus.sh)"
       },
@@ -314,6 +353,8 @@
         "scripts"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "source, as above",
       "claim_style": {
         "scripts": "compile source (compile_concept_fitters_corpus.py + check_concept_fitters_corpus.sh)"
       },
@@ -325,6 +366,8 @@
         "scripts"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "source, as above",
       "claim_style": {
         "scripts": "compile source (compile_concept_operations_corpus.py + check_concept_operations_corpus.sh)"
       },
@@ -336,6 +379,8 @@
         "scripts"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "source, as above",
       "claim_style": {
         "scripts": "compile source (compile_concept_corpus.py + check_concept_corpus.sh)"
       },
@@ -348,6 +393,8 @@
         "scripts"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "source, as above",
       "claim_style": {
         "reference": "os.path.join segments (test_expr.py runs the yaml directly)",
         "scripts": "compile source (compile_expr_corpus.py + check_expr_corpus.sh)"
@@ -360,6 +407,8 @@
         "reference"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "widget-primitive exercise data with no blocking renderer to rule; the gradient LAW lives on test_fixtures/algorithms/gradient_remap.json, where there is an output",
       "claim_style": {
         "reference": "os.path.join segments (test_gradient_primitives.py)"
       },
@@ -371,6 +420,8 @@
         "reference"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "reference-only layer-action scenarios; a directory-level claim with no per-case output the harness can rule",
       "claim_style": {
         "reference": "DIRECTORY GLOB (test_phase3_fixtures.py globs *.yaml)"
       },
@@ -382,6 +433,8 @@
         "reference"
       ],
       "port_symmetry": false,
+      "checker": null,
+      "checker_gap": "as phase3 -- reference-only, directory-level",
       "claim_style": {
         "reference": "DIRECTORY GLOB (test_set_effect.py globs *.yaml)"
       },
@@ -394,6 +447,8 @@
         "swift"
       ],
       "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "IT IS THE SEAM-2 PROPERTY FAMILY (shift_constrain): law, witnesses, mutant and a generative lane, in-process and mirrored per port. It is the other half of this tier, not a gap -- but its floors are hardcoded in the two runners rather than declared in the fixture, so it is not yet readable by this registry. Named as the first migration when the property corpus moves to declared floors",
       "claim_style": {
         "rust": "path literal in src/cross_language_test.rs (check_shift_constrain)",
         "swift": "path literal in Tests/CrossLanguageTests.swift (checkShiftConstrain)"
@@ -694,5 +749,24 @@
       "blocks": "The two per-port tests are a parity CLAIM asserted twice, not one predicate both ports can fail identically (EDIT_SEMANTICS_FREEZE.md 4.2). Nothing document-level watches a character write: not id_uniqueness, not bystanders_unchanged, not subject_fields_only. A future divergence in WHICH element the write lands on, or in what it does to a bystander, is invisible to the shared corpus. This is a specific instance of the declared preservation-op-vocabulary-only gap.",
       "unblock": "Register one verb, `set_selection_character_attrs`, carrying a resolved attribute map, in both dispatchers. Swift is additive and reaches production directly (JasSwift/Sources/Document/OpApply.swift -> controller.setSelectionTextAttributes(attrs)). Rust needs the write lowered a layer first, or the verb would be a SECOND implementation that can drift from the one production uses: move CharacterAttrs (a plain 16-field struct, 15 references across exactly 2 files) and the clone-then-mutate write loop from workspace/app_state.rs into document/controller.rs, leave character_with_group and the panel-state derivation where they are, and have app_state call down. Then add a preservation vector over a setup_test_json carrying a named, identified, masked, blend-moded Text (SVG cannot express mask or blendMode) and raise min_vectors. Deliberately NOT done in the 2026-07-28 CHARIDENT lane: a cross-layer type move in Rust, with no failing test to justify it because Rust already conforms, was judged the wrong risk to take beside a concurrent lane."
     }
+  ],
+  "_checker_doc": [
+    "THE CHECKER REGISTRY (docs/CHECKERS.md). Every family either NAMES a",
+    "checker or carries \"checker\": null WITH a \"checker_gap\" reason. A family",
+    "in neither state FAILS -- that is R1, and it is what stops a family from",
+    "going unwatched by being forgotten rather than by being excused.",
+    "The registry is policed in BOTH directions: scripts/check_geometry_checkers.py",
+    "reds on a gap row whose family now names a checker (a stale row), and the",
+    "algorithm-level registry inside scripts/cross_language_algorithms.py reds on",
+    "a gap row whose fixture now carries the shape a registered law consumes.",
+    "One direction of policing is how `swift:dropdown` asserted a missing feature",
+    "for months after it shipped.",
+    "MAINTENANCE COST, STATED RATHER THAN HIDDEN: this adds a second dimension to",
+    "a document that already prints 35 coverage gaps on every run. If checker_gap",
+    "rows accumulate the way coverage_gaps have, the bidirectional staleness check",
+    "is the only thing keeping the wall honest. A reason that merely restates the",
+    "implementation is not a reason; \"PHASE 2\" means a law IS available at that",
+    "seam and is unwritten, which is a different and more honest claim than",
+    "\"no law exists\"."
   ]
 }
