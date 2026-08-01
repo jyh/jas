@@ -35,11 +35,33 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKSPACE_JSON = REPO_ROOT / "workspace" / "workspace.json"
 
-# A deliberate tripwire: it fires whenever the bundle's action count moves, so
-# a new action cannot be added without someone looking at its intent class.
-# 236 -> 237 on 2026-07-28: `paste_preserving_layers`, ruling R3 of
-# transcripts/LAYER_STRUCTURE.md.
-EXPECTED_TOTAL_ACTIONS = 237
+# RETIRED 2026-08-01: `EXPECTED_TOTAL_ACTIONS`, an exact pin on the bundle's
+# action count, described as "a deliberate tripwire ... so a new action cannot
+# be added without someone looking at its intent class."
+#
+# It was right that the tripwire is needed and wrong that a count is the
+# instrument, on three counts measured the day it was removed:
+#
+#   1. IT WENT STALE AND STAYED STALE. `FILTERSPEC` (67e22601, 2026-07-30) took
+#      the bundle 237 -> 239 without raising it. Every one of the 23 commits
+#      that followed on `main` was RED on this gate, including DERIVEDFLOOR
+#      ("a count nobody restates is a count...") and FAILCLOSED. A gate in CI's
+#      blocking set stayed red for two days and nobody read it.
+#   2. THE ARTIFACT DIFF ALREADY DOES THE JOB, BY NAME. check_intent_map.sh
+#      regenerates intent_map.json / INTENT_MAP.md and diffs them against the
+#      committed copies, so a new action reds the gate showing the action AND
+#      the class it landed in. The most a count can say is "two more than
+#      yesterday" -- the same argument DERIVEDGATING used to retire `FLOOR`.
+#   3. THE COUNT IS BLIND TO RECLASSIFICATION AND TO DROPPED ENTRIES.
+#      `total_actions` is literally `len(actions)`, so an action silently
+#      moving from `journaling` to `never`, or `build_map` failing to emit an
+#      entry at all, leaves it reading exactly 239. Mutation-proven: deleting
+#      an action from the map does not move the count and DOES red the
+#      coverage relation below, by name.
+#
+# The tripwire now lives in two places that cannot go stale: the artifact diff
+# (which names what changed) and `assert_map_covers_bundle` (which has no
+# number in it).
 
 # ---------------------------------------------------------------------------
 # The AUTHORED verb -> journaling table.
@@ -634,12 +656,40 @@ def render_md(entries, summary):
     return "\n".join(lines)
 
 
+def assert_map_covers_bundle(ws, entries):
+    """The derived replacement for the retired action-count pin.
+
+    A RELATION between two independently-derived sets, with no number in it:
+    every action the bundle declares must carry a map entry, and every map
+    entry must be an action the bundle declares or a declared native
+    intercept. It cannot go stale, and unlike a count it NAMES what it finds.
+    """
+    bundle = set(ws["actions"])
+    intercepts = set(ws.get("native_intercepts", []))
+    mapped = set(entries)
+
+    assert bundle, (
+        "the bundle declares no actions at all -- the generator read an empty "
+        "or wrong `actions` map, and every downstream assertion here would "
+        "pass vacuously")
+
+    missing = sorted(bundle - mapped)
+    assert not missing, (
+        f"{len(missing)} action(s) in the bundle have NO intent-map entry, so "
+        f"the map is narrower than the thing it claims to enumerate: "
+        f"{missing}")
+
+    extra = sorted(mapped - (bundle | intercepts))
+    assert not extra, (
+        f"{len(extra)} intent-map entr(ies) name nothing in the bundle's "
+        f"`actions` map or its `native_intercepts` list -- a stale entry "
+        f"outliving what it described: {extra}")
+
+
 def self_test(ws):
     entries, summary = build_map(ws)
 
-    assert summary["total_actions"] == EXPECTED_TOTAL_ACTIONS, (
-        f"expected {EXPECTED_TOTAL_ACTIONS} actions in the bundle, found "
-        f"{summary['total_actions']}")
+    assert_map_covers_bundle(ws, entries)
     assert entries["export_to_pdf"]["class"] == "native-intercept", (
         "export_to_pdf must classify native-intercept")
     assert entries["select_tool"]["class"] == "tool-lifecycle", (

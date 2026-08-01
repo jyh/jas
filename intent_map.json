@@ -138,6 +138,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "clear_layers_type_filter": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "close_panel": {
       "class": "ui-state",
       "doc_verbs": []
@@ -944,6 +948,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "solo_layers_type_filter": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "sort_brushes_by_name": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1145,7 +1153,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 200,
+      "ui-state": 202,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1199,7 +1207,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 237,
+    "total_actions": 239,
     "verb_table": {
       "always": [
         "doc.copy_selection",
