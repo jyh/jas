@@ -1,0 +1,895 @@
+{
+  "_doc": "THE VARIABLE-WIDTH STROKE OUTLINE -- the Width Tool's geometry (jas_dioxus/src/algorithms/offset_path.rs, JasSwift/Sources/Canvas/OffsetPath.swift).\n\nWHY THIS FAMILY DID NOT EXIST UNTIL 2026-08-01, which is the whole point of it. The module had no return values. It was a sequence of drawing calls -- `web_sys::CanvasRenderingContext2d` in Rust, CGContext here -- so the rails and the caps were side effects on a raster surface and never numbers. Rust's copy was additionally gated behind the `web` feature for that one import, so on a native build it did not compile at all. There was nothing for a roundtrip verb to serialise, therefore no cross-port comparison, therefore the two ports' agreement about a variable-width stroke rested on the two files having been typed to look alike. Splitting the GEOMETRY from the RASTERISATION is what made this fixture possible.\n\nWHAT THE VECTORS PIN. `polygon` is the closed outline the renderer fills, with cap arcs flattened at the vector's own `arc_steps` (4, to stay readable; the production constant travels separately as `default_arc_steps` so it cannot drift between the ports). The polygon is FAITHFUL rather than tidy: it carries the duplicate vertex a `move_to` leaves behind, and it would carry a chord between a rail and a cap arc that did not start on it, because both are real edges of the filled shape. `start_cap` and `end_cap` report the caps PARAMETRICALLY, so a cap defect is legible as an angle and so the sweep DIRECTION is a compared value rather than a platform flag -- see `decreasing`, which is arithmetic here and was `arc_with_anticlockwise(.., true)` against `addArc(.., clockwise: true)` before the split.\n\nEXPECTATIONS ARE HAND-DERIVED, and from two sentences that are not the implementation's: the rails are p +/- n*w, and SVG 1.1 section 11.4 says a `round` cap is a SEMICIRCLE of radius half the stroke width centred on the endpoint. That second sentence has a consequence the arithmetic must honour -- the semicircle's two ends ARE the two rail points -- and it is what `round_uniform_pointing_east` and `round_uniform_pointing_south` assert. Every coordinate below is an integer, a half-integer or a multiple of 5/sqrt(2); the derivation is written out per vector.\n\nSCOPE, STATED WHERE IT REPORTS. This family gates the OUTLINE. It does not gate the fill (colour, alpha, winding rule), it does not gate the platform call that consumes the polygon, and it does not gate the path flattener underneath it (`flatten` does that) -- every vector here is straight-line geometry so that the rails can be written down by hand. Asymmetric half-widths appear only under a butt cap: SVG defines `round` for a stroke with ONE width, and what a semicircle should mean when the two rails sit at different distances is an open question, not something to pin by transcribing whichever mean the code happens to take.",
+  "algorithm": "offset_path",
+  "comparison": "tolerance",
+  "tolerance": 1e-09,
+  "vectors": [
+    {
+      "name": "butt_uniform_on_a_two_point_path",
+      "derivation": "A horizontal 10pt path, uniform half-widths 5 and 5, butt cap. The normal is (0,1) at both samples, so the left rail is y=+5 and the right rail y=-5. Butt adds nothing, so the outline is left rail forward then right rail back. The FIRST point appears twice because the renderer moves to left[0] and then draws a line to it: that duplicate is in the filled path and this family reports what the renderer emits, not a tidied version of it.",
+      "element": {
+        "type": "path",
+        "d": [
+          {
+            "cmd": "M",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cmd": "L",
+            "x": 10,
+            "y": 0
+          }
+        ]
+      },
+      "width_points": [
+        {
+          "t": 0.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        },
+        {
+          "t": 1.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        }
+      ],
+      "linecap": "butt",
+      "arc_steps": 4,
+      "expected": {
+        "polygon": [
+          [
+            0,
+            5
+          ],
+          [
+            0,
+            5
+          ],
+          [
+            10,
+            5
+          ],
+          [
+            10,
+            -5
+          ],
+          [
+            0,
+            -5
+          ]
+        ],
+        "start_cap": {
+          "kind": "butt"
+        },
+        "end_cap": {
+          "kind": "butt"
+        },
+        "default_arc_steps": 32
+      }
+    },
+    {
+      "name": "square_uniform_on_a_two_point_path",
+      "derivation": "The same path and profile with a square cap. SVG extends the stroke half its width -- here 5pt -- beyond each endpoint along the path direction: backwards to x=-5 at the start, forwards to x=15 at the end. Both rails move together, so the outline gains one corner pair at each end and the cap is a 10x5 rectangle.",
+      "element": {
+        "type": "path",
+        "d": [
+          {
+            "cmd": "M",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cmd": "L",
+            "x": 10,
+            "y": 0
+          }
+        ]
+      },
+      "width_points": [
+        {
+          "t": 0.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        },
+        {
+          "t": 1.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        }
+      ],
+      "linecap": "square",
+      "arc_steps": 4,
+      "expected": {
+        "polygon": [
+          [
+            -5,
+            -5
+          ],
+          [
+            -5,
+            5
+          ],
+          [
+            0,
+            5
+          ],
+          [
+            10,
+            5
+          ],
+          [
+            15,
+            5
+          ],
+          [
+            15,
+            -5
+          ],
+          [
+            10,
+            -5
+          ],
+          [
+            0,
+            -5
+          ]
+        ],
+        "start_cap": {
+          "kind": "square",
+          "ext": 5.0,
+          "ux": -1.0,
+          "uy": 0.0
+        },
+        "end_cap": {
+          "kind": "square",
+          "ext": 5.0,
+          "ux": 1.0,
+          "uy": 0.0
+        },
+        "default_arc_steps": 32
+      }
+    },
+    {
+      "name": "round_uniform_pointing_east",
+      "derivation": "THE DISCRIMINATING VECTOR, half of a pair that differ only in DIRECTION. Same path and profile, round cap, four segments per semicircle. SVG's round cap is the semicircle of radius 5 centred on the endpoint, so at the start it runs from the right rail (0,-5), which is at angle -90 degrees, around the far side (angle 180) to the left rail (0,5) at +90 degrees -- a sweep of 180 degrees toward DECREASING angle. Its four interior samples are therefore at -135, -180 and -225 degrees, i.e. (-5/sqrt2, -5/sqrt2), (-5, 0) and (-5/sqrt2, 5/sqrt2). The end cap is the mirror image about x=10, sweeping from +90 through 0 to -90 so that it bulges to x=15. NOTE WHAT IS NOT HERE: no chord. The arc BEGINS on the rail it is joined to, which is the whole content of `the cap is a semicircle centred on the endpoint`.",
+      "element": {
+        "type": "path",
+        "d": [
+          {
+            "cmd": "M",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cmd": "L",
+            "x": 10,
+            "y": 0
+          }
+        ]
+      },
+      "width_points": [
+        {
+          "t": 0.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        },
+        {
+          "t": 1.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        }
+      ],
+      "linecap": "round",
+      "arc_steps": 4,
+      "expected": {
+        "polygon": [
+          [
+            0,
+            -5
+          ],
+          [
+            3.061616997868383e-16,
+            -5.0
+          ],
+          [
+            -3.5355339059327373,
+            -3.5355339059327378
+          ],
+          [
+            -5.0,
+            -6.123233995736766e-16
+          ],
+          [
+            -3.5355339059327386,
+            3.5355339059327373
+          ],
+          [
+            -9.184850993605148e-16,
+            5.0
+          ],
+          [
+            0,
+            5
+          ],
+          [
+            10,
+            5
+          ],
+          [
+            10.0,
+            5.0
+          ],
+          [
+            13.535533905932738,
+            3.5355339059327373
+          ],
+          [
+            15.0,
+            0.0
+          ],
+          [
+            13.535533905932738,
+            -3.5355339059327373
+          ],
+          [
+            10.0,
+            -5.0
+          ],
+          [
+            10,
+            -5
+          ],
+          [
+            0,
+            -5
+          ]
+        ],
+        "start_cap": {
+          "kind": "round",
+          "cx": 0.0,
+          "cy": 0.0,
+          "r": 5.0,
+          "a0": -1.5707963267948966,
+          "a1": 1.5707963267948966,
+          "decreasing": true
+        },
+        "end_cap": {
+          "kind": "round",
+          "cx": 10.0,
+          "cy": 0.0,
+          "r": 5.0,
+          "a0": 1.5707963267948966,
+          "a1": -1.5707963267948966,
+          "decreasing": true
+        },
+        "default_arc_steps": 32
+      }
+    },
+    {
+      "name": "round_uniform_pointing_south",
+      "derivation": "The other half of the pair: the SAME stroke rotated a quarter turn, running from (0,0) to (0,10). The normal is (-1,0), so the left rail is x=-5 and the right rail x=+5. By the same law the start cap runs from the right rail (5,0) at angle 0, around the far side (angle -90, i.e. the point (0,-5) BEYOND the start) to the left rail (-5,0) at 180 degrees. A cap built from a REFLECTED angle instead of a rotated one agrees with a correct cap on one direction and disagrees on every other, which is why this family pins two directions and not one.",
+      "element": {
+        "type": "path",
+        "d": [
+          {
+            "cmd": "M",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cmd": "L",
+            "x": 0,
+            "y": 10
+          }
+        ]
+      },
+      "width_points": [
+        {
+          "t": 0.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        },
+        {
+          "t": 1.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        }
+      ],
+      "linecap": "round",
+      "arc_steps": 4,
+      "expected": {
+        "polygon": [
+          [
+            5,
+            0
+          ],
+          [
+            5.0,
+            0.0
+          ],
+          [
+            3.5355339059327378,
+            -3.5355339059327373
+          ],
+          [
+            3.061616997868383e-16,
+            -5.0
+          ],
+          [
+            -3.5355339059327373,
+            -3.5355339059327378
+          ],
+          [
+            -5.0,
+            -6.123233995736766e-16
+          ],
+          [
+            -5,
+            0
+          ],
+          [
+            -5,
+            10
+          ],
+          [
+            -5.0,
+            10.0
+          ],
+          [
+            -3.5355339059327373,
+            13.535533905932738
+          ],
+          [
+            3.061616997868383e-16,
+            15.0
+          ],
+          [
+            3.5355339059327378,
+            13.535533905932738
+          ],
+          [
+            5.0,
+            10.0
+          ],
+          [
+            5,
+            10
+          ],
+          [
+            5,
+            0
+          ]
+        ],
+        "start_cap": {
+          "kind": "round",
+          "cx": 0.0,
+          "cy": 0.0,
+          "r": 5.0,
+          "a0": 0.0,
+          "a1": 3.141592653589793,
+          "decreasing": true
+        },
+        "end_cap": {
+          "kind": "round",
+          "cx": 0.0,
+          "cy": 10.0,
+          "r": 5.0,
+          "a0": 3.141592653589793,
+          "a1": 0.0,
+          "decreasing": true
+        },
+        "default_arc_steps": 32
+      }
+    },
+    {
+      "name": "butt_asymmetric_taper_over_a_corner",
+      "derivation": "The profile and the normals, with the caps kept out of it. An L-shaped path M(0,0) L(10,0) L(10,10): the two legs are 10 long, so the samples sit at t = 0, 0.5 and 1. The profile tapers (4,2) to (0,0) and the interpolation is a smoothstep, whose value at the midpoint is exactly 1/2, so the middle half-widths are 2 and 1. The middle sample's tangent is the CHORD across the corner, (10,10), so its normal is (-1,1)/sqrt2 and the rails there are (10,0) -/+ 2*(-1,1)/sqrt2 and (10,0) + 1*(1,-1)/sqrt2. At t=1 both half-widths are zero, so both rails meet the path at (10,10).",
+      "element": {
+        "type": "path",
+        "d": [
+          {
+            "cmd": "M",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cmd": "L",
+            "x": 10,
+            "y": 0
+          },
+          {
+            "cmd": "L",
+            "x": 10,
+            "y": 10
+          }
+        ]
+      },
+      "width_points": [
+        {
+          "t": 0.0,
+          "width_left": 4.0,
+          "width_right": 2.0
+        },
+        {
+          "t": 1.0,
+          "width_left": 0.0,
+          "width_right": 0.0
+        }
+      ],
+      "linecap": "butt",
+      "arc_steps": 4,
+      "expected": {
+        "polygon": [
+          [
+            0,
+            4
+          ],
+          [
+            0,
+            4
+          ],
+          [
+            8.585786437626904,
+            1.4142135623730951
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            10.707106781186548,
+            -0.7071067811865476
+          ],
+          [
+            0,
+            -2
+          ]
+        ],
+        "start_cap": {
+          "kind": "butt"
+        },
+        "end_cap": {
+          "kind": "butt"
+        },
+        "default_arc_steps": 32
+      }
+    },
+    {
+      "name": "round_taper_to_zero_suppresses_the_end_cap",
+      "derivation": "The threshold, pinned. A cap is drawn only when the stroke is wider than 0.1pt across there; a profile that tapers to zero has no width at its far end and therefore no cap, however the artist set the cap style. Here the profile runs (5,5) to (0,0) over a horizontal 10pt path: the start keeps its round cap of radius 5 and the end is butt, with both rails collapsed onto the path at (10,0).",
+      "element": {
+        "type": "path",
+        "d": [
+          {
+            "cmd": "M",
+            "x": 0,
+            "y": 0
+          },
+          {
+            "cmd": "L",
+            "x": 10,
+            "y": 0
+          }
+        ]
+      },
+      "width_points": [
+        {
+          "t": 0.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        },
+        {
+          "t": 1.0,
+          "width_left": 0.0,
+          "width_right": 0.0
+        }
+      ],
+      "linecap": "round",
+      "arc_steps": 4,
+      "expected": {
+        "polygon": [
+          [
+            0,
+            -5
+          ],
+          [
+            3.061616997868383e-16,
+            -5.0
+          ],
+          [
+            -3.5355339059327373,
+            -3.5355339059327378
+          ],
+          [
+            -5.0,
+            -6.123233995736766e-16
+          ],
+          [
+            -3.5355339059327386,
+            3.5355339059327373
+          ],
+          [
+            -9.184850993605148e-16,
+            5.0
+          ],
+          [
+            0,
+            5
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            10,
+            0
+          ],
+          [
+            0,
+            -5
+          ]
+        ],
+        "start_cap": {
+          "kind": "round",
+          "cx": 0.0,
+          "cy": 0.0,
+          "r": 5.0,
+          "a0": -1.5707963267948966,
+          "a1": 1.5707963267948966,
+          "decreasing": true
+        },
+        "end_cap": {
+          "kind": "butt"
+        },
+        "default_arc_steps": 32
+      }
+    },
+    {
+      "name": "butt_uniform_on_a_line_element",
+      "derivation": "THE OTHER ENTRY POINT. A line element does not go through the path flattener; it is subdivided into a fixed 32 equal steps so a width profile has somewhere to vary. That count is a magic number in both ports and this is the only vector that pins it: the line runs (0,0) to (32,0), so the 33 samples land on the integers and the rails are exactly (i, 5) and (i, -5) for i = 0..32. A port that subdivided into 16 or 64 would emit a different number of points here and nothing else in the corpus would notice.",
+      "element": {
+        "type": "line",
+        "x1": 0,
+        "y1": 0,
+        "x2": 32,
+        "y2": 0
+      },
+      "width_points": [
+        {
+          "t": 0.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        },
+        {
+          "t": 1.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        }
+      ],
+      "linecap": "butt",
+      "arc_steps": 4,
+      "expected": {
+        "polygon": [
+          [
+            0,
+            5
+          ],
+          [
+            0,
+            5
+          ],
+          [
+            1,
+            5
+          ],
+          [
+            2,
+            5
+          ],
+          [
+            3,
+            5
+          ],
+          [
+            4,
+            5
+          ],
+          [
+            5,
+            5
+          ],
+          [
+            6,
+            5
+          ],
+          [
+            7,
+            5
+          ],
+          [
+            8,
+            5
+          ],
+          [
+            9,
+            5
+          ],
+          [
+            10,
+            5
+          ],
+          [
+            11,
+            5
+          ],
+          [
+            12,
+            5
+          ],
+          [
+            13,
+            5
+          ],
+          [
+            14,
+            5
+          ],
+          [
+            15,
+            5
+          ],
+          [
+            16,
+            5
+          ],
+          [
+            17,
+            5
+          ],
+          [
+            18,
+            5
+          ],
+          [
+            19,
+            5
+          ],
+          [
+            20,
+            5
+          ],
+          [
+            21,
+            5
+          ],
+          [
+            22,
+            5
+          ],
+          [
+            23,
+            5
+          ],
+          [
+            24,
+            5
+          ],
+          [
+            25,
+            5
+          ],
+          [
+            26,
+            5
+          ],
+          [
+            27,
+            5
+          ],
+          [
+            28,
+            5
+          ],
+          [
+            29,
+            5
+          ],
+          [
+            30,
+            5
+          ],
+          [
+            31,
+            5
+          ],
+          [
+            32,
+            5
+          ],
+          [
+            32,
+            -5
+          ],
+          [
+            31,
+            -5
+          ],
+          [
+            30,
+            -5
+          ],
+          [
+            29,
+            -5
+          ],
+          [
+            28,
+            -5
+          ],
+          [
+            27,
+            -5
+          ],
+          [
+            26,
+            -5
+          ],
+          [
+            25,
+            -5
+          ],
+          [
+            24,
+            -5
+          ],
+          [
+            23,
+            -5
+          ],
+          [
+            22,
+            -5
+          ],
+          [
+            21,
+            -5
+          ],
+          [
+            20,
+            -5
+          ],
+          [
+            19,
+            -5
+          ],
+          [
+            18,
+            -5
+          ],
+          [
+            17,
+            -5
+          ],
+          [
+            16,
+            -5
+          ],
+          [
+            15,
+            -5
+          ],
+          [
+            14,
+            -5
+          ],
+          [
+            13,
+            -5
+          ],
+          [
+            12,
+            -5
+          ],
+          [
+            11,
+            -5
+          ],
+          [
+            10,
+            -5
+          ],
+          [
+            9,
+            -5
+          ],
+          [
+            8,
+            -5
+          ],
+          [
+            7,
+            -5
+          ],
+          [
+            6,
+            -5
+          ],
+          [
+            5,
+            -5
+          ],
+          [
+            4,
+            -5
+          ],
+          [
+            3,
+            -5
+          ],
+          [
+            2,
+            -5
+          ],
+          [
+            1,
+            -5
+          ],
+          [
+            0,
+            -5
+          ]
+        ],
+        "start_cap": {
+          "kind": "butt"
+        },
+        "end_cap": {
+          "kind": "butt"
+        },
+        "default_arc_steps": 32
+      }
+    },
+    {
+      "name": "single_point_path_has_no_outline",
+      "derivation": "A path with one point has no direction, so there is no normal, no rail and nothing to cap. The answer is the empty polygon and two butt caps -- stated as a vector rather than left to chance, because `what does this do with nothing` is the question a renderer answers by crashing.",
+      "element": {
+        "type": "path",
+        "d": [
+          {
+            "cmd": "M",
+            "x": 3,
+            "y": 4
+          }
+        ]
+      },
+      "width_points": [
+        {
+          "t": 0.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        },
+        {
+          "t": 1.0,
+          "width_left": 5.0,
+          "width_right": 5.0
+        }
+      ],
+      "linecap": "round",
+      "arc_steps": 4,
+      "expected": {
+        "polygon": [],
+        "start_cap": {
+          "kind": "butt"
+        },
+        "end_cap": {
+          "kind": "butt"
+        },
+        "default_arc_steps": 32
+      }
+    }
+  ]
+}

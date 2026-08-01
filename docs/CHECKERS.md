@@ -429,6 +429,63 @@ the spec*, not per family.
    unregistered family is invisible to every instrument in this document, not
    merely to its own.
 
+### 4d.1 THE TENTH FAMILY — `offset_path`, and what "unplumbable" was hiding
+
+Phase 3 left **one** family declared rather than done: `offset_path`, the
+Width Tool's variable-width stroke. Its reason was different in kind from the
+other eight and worth stating, because it is the reason this programme exists.
+It was not missing a fixture. **It had no values at all** — 299 lines of
+`web_sys::CanvasRenderingContext2d` calls in Rust (gated behind `web` for that
+one import, so a native build could not link it) and CGContext calls in Swift.
+The rails and the caps were side effects on a raster surface. There was
+nothing for a verb to serialise, therefore no comparison, therefore the two
+ports' agreement about every tapered stroke the app draws rested on the two
+files having been **typed to look alike**.
+
+Splitting the GEOMETRY from the RASTERISATION is the whole fix, and it took
+one sitting: `variable_width_outline_*` returns two rails and two caps as
+numbers, `flatten_outline` turns that into the polygon the renderer fills, and
+the three drawing functions keep the feature gate while the module loses it.
+`ALGORITHMS` is 33 → **34**.
+
+**Three things it measured, and the second is the one to carry forward:**
+
+1. **A flagged divergence was ABSENT, and the flag was the wrong worry.** The
+   ports handed the same numbers to `arc_with_anticlockwise(.., true)` and
+   `addArc(.., clockwise: true)` across a CGContext y-flip. Measured — a real
+   `CGMutablePath`, points read back with `applyWithBlock` — `clockwise: true`
+   IS the decreasing-angle sweep, the same one WHATWG gives canvas for those
+   arguments. (The canvas half stays a **spec reading**: there is no browser
+   in `swift test`, and the file says so where it reports.)
+2. **The defect was one level below the flag, in both ports identically.** The
+   cap's base angle was `atan2(n_y, -n_x)` — the two arguments of the tangent
+   the wrong way round, which is `pi/2 - theta`: the direction **REFLECTED**,
+   not the direction. A reflection agrees on one axis and diverges by
+   `2*theta` everywhere else, so every round cap was welded on at the wrong
+   angle except at 135 and 315 degrees, where the two errors cancel. On a 10pt
+   eastward stroke the arc began **7.07pt from the rail it was joined to** and
+   the renderer bridged it with a chord. The square cap was always right,
+   which is how a fumble looks next to a misunderstanding. **The proof is the
+   shape of the failure, not the failure:** the three round-cap vectors were
+   RED against hand-derived SVG geometry while **all eight port-vs-port
+   comparisons were GREEN** — §4b's third row, live, in a family whose first
+   day this was.
+3. **The safest answer to "do these two platform flags agree" is to stop
+   asking.** Both ports now flatten the cap through the same arithmetic
+   (`CAP_ARC_STEPS`, carried on the wire as `default_arc_steps` so it cannot
+   drift) and neither hands a sweep flag to a rasteriser. The measurement in
+   (1) is knowledge worth keeping; the product no longer depends on it. Note
+   what that cost, stated rather than buried: a cap is a 32-segment polyline
+   now, not a platform arc, and the chord error is `r*(1-cos(pi/64))`.
+
+**And what the family deliberately does NOT pin, because a golden that guesses
+is worse than a gap.** SVG 11.4 defines `round` for a stroke with ONE width;
+when the two rails sit at different distances from the spine, no semicircle
+joins both, and the code takes the mean so the arc touches neither. Every
+asymmetric-width vector here therefore carries a butt cap, and the question is
+banked for JYH rather than answered by transcribing whichever mean the code
+happens to take.
+
 ## 5. The generative lane (Seam 1 arm built in Phase 2 — read before extending it)
 
 **What Phase 2 built, and what it deliberately did not.** The region families

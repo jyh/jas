@@ -1256,7 +1256,7 @@ fn draw_oval_cursor_overlay(
 
     let rx = size * 0.5 * z;
     let ry = size * (roundness / 100.0) * 0.5 * z;
-    let rad = angle_deg * std::f64::consts::PI / 180.0;
+    let rad = angle_deg.to_radians();
 
     // Drag preview: if a buffer is named and mode != idle, draw
     // each buffered point as an oval. Painting = semi-transparent

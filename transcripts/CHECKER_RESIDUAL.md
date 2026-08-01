@@ -150,8 +150,18 @@ is one class, and it does not need a second name.
 | **6** | `min_accepted_per_vector`, F1 | the sample's *adequacy*, via a box built from the geometry under test | that a sampling box drawn around the output **contains** the output's defects — when the box is a FUNCTION of the output, so a runaway coordinate MOVES the box | a 1pt ring 100pt away left `accepted` at 88 of 88 against a floor of 64 while probes inside the region fell 31 → **0**; 0 of 17 vectors noticed, 10 seeds, three distances |
 | **7** | `min_inside_probes_per_vector`, `min_accepted_per_vector`, `min_checks_per_lane` | the sample as **one pool** | that two lanes drawn for opposite reasons — one seedless and reproducible, one fresh every run — are **interchangeable**, so a floor DERIVED from the anchor lane may be PAID by the generative one | blind the lattice (all 64 probes still accepted, none informative) and the union floors still pass **11–15 of `boolean`'s 17** non-empty vectors, median 13, over 40 seeds — and 0–4 of `boolean_normalize`'s 16. **The reverse is worse: `prng_probes: 0`, the discovery lane deleted outright, was 19 of 19 GREEN in BOTH families** |
 | **8** | the failure message's lane label, and then the per-lane accumulators | the probe list's **layout** — `"lattice" if idx < lattice_side ** 2 else "prng"` | that the anchor lane is first, emits exactly `side*side` points, and has nothing inserted between it and the generative lane | found while fixing 7. Harmless in a MESSAGE, load-bearing the instant a FLOOR turns on it: a mis-labelled probe charges one lane's shortfall to the other, which is instance 7 rebuilt inside its own repair |
+| **9** | `scripts/check_degree_radian_grouping.py` — the source gate that pins the degree/radian grouping in both active ports | **the source TEXT**, one line at a time, as a stand-in for *the arithmetic the program performs* | that a conversion is spelled where it happens: that `pi` and `180` meet on one line. They need not. `let k = Double.pi; ... deg * k / 180` is the defect in two statements; `x * 0.017453292519943295` is the ratio inlined; `Angle(degrees:)` is the conversion inside a library the gate never reads | **predicted, not found** — declared at the gate's birth rather than after it let one through, because the class was already written down here. Measured today: 0 sites of any of the three forms in scope, which means the gate would not notice the first one |
 
-**6, 7 and 8 are all FIXED, and none of them was held for the next one.**
+**6, 7, 8 and 9 are the same sentence with a different subject.** 6–8 are FIXED;
+**9 is DECLARED and cannot be fixed by a tenth rule of this kind** — closing it
+means reading the arithmetic rather than the text (a type-checked AST pass per
+port, or a runtime comparison), which is a different instrument. What it gets
+instead is the countermeasure this file exists to argue for: **the gate states its
+scope where it reports.** Every run, on both the green and the red path, prints
+the five things it cannot see. An instrument that says what it does not cover
+cannot be read as answering the wider question.
+
+**None of 6, 7 and 8 was held for the next one.**
 
 - **6** — two remedies of different kinds, per `docs/CHECKERS.md` §4b lesson 4: an
   EXACT clause (`region.containment_defect`, no probe, no seed, no box) and an
@@ -212,6 +222,13 @@ not replace the mechanism.
 - A lane excused from the information floor is excused BY NAME, WITH A REASON, in
   the fixture — never by an omitted key:
   <!-- expires-when: {"port": "corpus", "file": "test_fixtures/algorithms/boolean.json", "contains": "no_information_floor"} -->
+- Instance 9's countermeasure is that the gate SAYS what it cannot see, on every
+  run and on both the green and the red path. Delete the scope report and the
+  gate starts reading as an answer to the wider question:
+  <!-- expires-when: {"port": "gate", "file": "scripts/check_degree_radian_grouping.py", "contains": "def report_scope"} -->
+- And its exemption ledger is policed in BOTH directions, so a row whose site has
+  gone stops being an inherited excuse:
+  <!-- expires-when: {"port": "gate", "file": "scripts/check_degree_radian_grouping.py", "contains": "def adjudicate"} -->
 
 **The limit of these rows, stated:** a substring claim over one file is weaker than
 the property it stands for, exactly as it is for the CI rows. `contains:

@@ -48,7 +48,8 @@ public enum TransformApply {
         // groups the other way and disagrees by an ulp on a quarter of all
         // integer degrees; through `tan` near the dialog's +/-89.9 clamp
         // that ulp reaches 4.7e-10 of shear factor -- MEASURED through the
-        // transform_apply corpus family.
+        // transform_apply corpus family. Enforced tree-wide by
+        // scripts/check_degree_radian_grouping.py.
         let k = tan(angleDeg * (Double.pi / 180))
         let base: Transform
         switch axis {

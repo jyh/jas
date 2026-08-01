@@ -88,6 +88,14 @@ jobs:
       # premise checked by a single grep answers for the wrong port.
       - run: python scripts/check_deferral_expiry.py --self-test && python scripts/check_deferral_expiry.py
       - run: python scripts/check_gate_consistency.py --self-test && python scripts/check_gate_consistency.py
+      # One sanctioned grouping for every degree/radian conversion, in both
+      # active ports. `(deg * PI) / 180` and `deg * (PI / 180)` are different
+      # doubles -- they disagree in BITS on 384 of 1441 integer degrees -- and
+      # since MATRIXPRECISION the saved SVG carries a/b/c/d at full precision,
+      # so the divergence reaches the file. No corpus tolerance can see it: the
+      # tightest in the registry is 1e-12 and the difference is 1e-16. Swept 42
+      # sites on 2026-08-01; this is what stops the 43rd.
+      - run: python scripts/check_degree_radian_grouping.py --self-test && python scripts/check_degree_radian_grouping.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -283,6 +291,12 @@ jobs:
           python scripts/check_deferral_expiry.py
           python scripts/check_gate_consistency.py --self-test
           python scripts/check_gate_consistency.py
+          # Enumerates its subjects with `git ls-files` and compares path
+          # PREFIXES ("JasSwift/", "jas_dioxus/") against git's POSIX output --
+          # no str(Path) anywhere -- so it should be separator-clean here.
+          # Windows CI is what proves that, not this comment.
+          python scripts/check_degree_radian_grouping.py --self-test
+          python scripts/check_degree_radian_grouping.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves

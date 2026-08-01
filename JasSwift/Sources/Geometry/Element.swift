@@ -621,7 +621,9 @@ public struct Transform: Equatable, Hashable {
         // which is `self * (PI / 180.0)`, and since MATRIXPRECISION writes
         // a/b/c/d at full shortest-round-trip precision the difference is
         // no longer invisible: it reaches the `matrix(...)` bytes in the
-        // saved SVG. Keep the parenthesis.
+        // saved SVG. Keep the parenthesis -- and it is no longer this site's
+        // job to remember why: scripts/check_degree_radian_grouping.py refuses
+        // the other spelling everywhere in both active ports.
         let rad = angleDeg * (Double.pi / 180)
         return Transform(a: cos(rad), b: sin(rad), c: -sin(rad), d: cos(rad))
     }
@@ -2637,7 +2639,7 @@ private func arcExtremaPoints(
         return [(x0, y0), (x, y)]
     }
     let twoPi = 2.0 * Double.pi
-    let phi = xRotationDeg * Double.pi / 180.0
+    let phi = xRotationDeg * (Double.pi / 180)
     let cosPhi = cos(phi), sinPhi = sin(phi)
 
     let dx = (x0 - x) / 2.0, dy = (y0 - y) / 2.0

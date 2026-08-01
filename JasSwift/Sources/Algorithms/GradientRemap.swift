@@ -44,7 +44,7 @@ public typealias GradientBBox = (Double, Double, Double, Double)
 private func gradientAxisFrame(_ bbox: GradientBBox,
                                _ angleDeg: Double) -> (Double, Double) {
     let (bx, by, bw, bh) = bbox
-    let rad = angleDeg * Double.pi / 180.0
+    let rad = angleDeg * (Double.pi / 180)
     let ux = cos(rad)
     let uy = -sin(rad)
     let cx = bx + bw / 2.0

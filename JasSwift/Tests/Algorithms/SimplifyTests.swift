@@ -40,7 +40,7 @@ private func isClosePath(_ c: PathCommand) -> Bool { if case .closePath = c { re
 
 @Test func detectCornersBelowThresholdIsSmooth() {
     // 25-degree turn — below the 30-degree threshold, no corner.
-    let angle = 25.0 * Double.pi / 180.0
+    let angle = 25.0 * (Double.pi / 180)
     let pts: [(Double, Double)] = [
         (0.0, 0.0),
         (10.0, 0.0),
@@ -52,7 +52,7 @@ private func isClosePath(_ c: PathCommand) -> Bool { if case .closePath = c { re
 
 @Test func detectCornersAboveThresholdIsCorner() {
     // 45-degree turn — above the 30-degree threshold, marked.
-    let angle = 45.0 * Double.pi / 180.0
+    let angle = 45.0 * (Double.pi / 180)
     let pts: [(Double, Double)] = [
         (0.0, 0.0),
         (10.0, 0.0),

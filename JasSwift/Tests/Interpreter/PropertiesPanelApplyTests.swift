@@ -85,7 +85,7 @@ private func rectE(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> Elemen
 /// atan((a*c + b*d) / (a*d - b*c)).
 private func decomposedShearDeg(_ t: Transform) -> Double {
     let det = t.a * t.d - t.b * t.c
-    return atan((t.a * t.c + t.b * t.d) / det) * 180 / .pi
+    return atan((t.a * t.c + t.b * t.d) / det) * (180 / Double.pi)
 }
 
 @Test func applyShearSetsAngle() {
@@ -107,7 +107,7 @@ private func decomposedShearDeg(_ t: Transform) -> Double {
     applyPropertiesField(controller: c, field: "rotation", value: 45.0)
     let t = m.document.getElement([0, 0]).transform ?? .identity
     #expect(abs(decomposedShearDeg(t) - 30) < 1e-4)
-    #expect(abs(atan2(t.b, t.a) * 180 / .pi - 45) < 1e-4)
+    #expect(abs(atan2(t.b, t.a) * (180 / Double.pi) - 45) < 1e-4)
 }
 
 @Test func applyShearMultiSelectionShearsGroup() {

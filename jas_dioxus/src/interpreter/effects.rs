@@ -4953,7 +4953,7 @@ fn blob_brush_oval_ring(
     const SEGMENTS: usize = 16;
     let rx = size * 0.5;
     let ry = size * (roundness_pct / 100.0) * 0.5;
-    let rad = angle_deg * std::f64::consts::PI / 180.0;
+    let rad = angle_deg.to_radians();
     let (cs, sn) = (rad.cos(), rad.sin());
     let mut out = Vec::with_capacity(SEGMENTS);
     for i in 0..SEGMENTS {

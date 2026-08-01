@@ -460,7 +460,7 @@ fn make_canvas_gradient(
             // Endpoints lie on the bbox boundary aligned with the angle.
             let cx = bx + bw / 2.0;
             let cy = by + bh / 2.0;
-            let rad = g.angle * std::f64::consts::PI / 180.0;
+            let rad = g.angle.to_radians();
             let half_diag = (bw * bw + bh * bh).sqrt() / 2.0;
             let dx = rad.cos() * half_diag;
             let dy = -rad.sin() * half_diag; // canvas y is down

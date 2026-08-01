@@ -93,7 +93,7 @@ public func propertiesPanelLiveOverrides(model: Model) -> [String: Any] {
     if let first = doc.selection.first,
        let elem = doc.tryGetElement(first.path) {
         if let t = elem.transform {
-            rotation = atan2(t.b, t.a) * 180.0 / .pi
+            rotation = atan2(t.b, t.a) * (180 / Double.pi)
             shear = propShearAngle(t)
         }
         opacity = elem.opacity * 100.0
@@ -141,7 +141,7 @@ private func propShearAngle(_ mat: Transform) -> Double {
     let det = mat.a * mat.d - mat.b * mat.c
     if sx == 0 || det == 0 { return 0 }
     let k = (mat.a * mat.c + mat.b * mat.d) / det
-    return atan(k) * 180.0 / .pi
+    return atan(k) * (180 / Double.pi)
 }
 
 /// Set rotation to `deg` (keeping decomposed scale AND shear) about the
@@ -155,7 +155,7 @@ private func propRotatedTransform(_ mat: Transform, _ local: BBox,
     let det = mat.a * mat.d - mat.b * mat.c
     let sy = sx != 0 ? det / sx : 0
     let k = det != 0 ? (mat.a * mat.c + mat.b * mat.d) / det : 0
-    let rad = deg * .pi / 180.0
+    let rad = deg * (Double.pi / 180)
     let ca = cos(rad), sa = sin(rad)
     let rotated = Transform(a: sx * ca, b: sx * sa,
                             c: sy * (k * ca - sa), d: sy * (k * sa + ca),
@@ -178,7 +178,7 @@ private func propShearedTransform(_ mat: Transform, _ local: BBox,
     let theta = atan2(mat.b, mat.a)
     let det = mat.a * mat.d - mat.b * mat.c
     let sy = det / sx
-    let k = tan(deg * .pi / 180.0)
+    let k = tan(deg * (Double.pi / 180))
     let ct = cos(theta), st = sin(theta)
     let sheared = Transform(a: sx * ct, b: sx * st,
                             c: sy * (k * ct - st), d: sy * (k * st + ct),
@@ -282,14 +282,14 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
             let cy = bbox.y + bbox.height / 2
             // shear_about_pivot(value - cur, ., cy): a doc-space horizontal
             // shear about the bbox center y — (x,y) -> (x + k*(y - cy), y).
-            let k = tan((v - cur) * .pi / 180.0)
+            let k = tan((v - cur) * (Double.pi / 180))
             group = Transform(a: 1, b: 0, c: k, d: 1, e: -k * cy, f: 0)
         default:
             guard let v = num() else { return }
             var cur = 0.0
             if let f = doc.selection.first,
                let ft = doc.tryGetElement(f.path)?.transform {
-                cur = atan2(ft.b, ft.a) * 180 / .pi
+                cur = atan2(ft.b, ft.a) * (180 / Double.pi)
             }
             let cx = bbox.x + bbox.width / 2, cy = bbox.y + bbox.height / 2
             group = Transform.rotate(v - cur).aroundPoint(cx, cy)

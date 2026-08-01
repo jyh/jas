@@ -68,6 +68,16 @@ ALGORITHMS = {
     # Gated at the public function so the family asserts the ribbon the artist
     # sees rather than an internal.
     "calligraphic_outline": ("tolerance", 1e-9),
+    # The WIDTH TOOL's variable-width stroke outline, and the last family of
+    # the Phase-3 plumbing pass to become reachable at all. It was
+    # unreachable because the module RETURNED NOTHING: rails and caps existed
+    # only as `web_sys` / CGContext drawing calls, and Rust's copy was gated
+    # behind `web` for that one import, so on a native build it did not even
+    # compile. Splitting the geometry from the rasterisation is what put the
+    # caps on a wire. 1e-9 because the vectors are integer geometry and
+    # multiples of 5/sqrt(2), and the cap defect this family was written
+    # against moves a point by up to a full stroke DIAMETER.
+    "offset_path":       ("tolerance", 1e-9),
     # The offset a PASTE applies to each pasted element (workspace/actions.yaml
     # §paste: "offset 24 points down and to the right", against
     # paste_in_place's explicit "no offset"). EXACT, and the result is the whole
@@ -833,6 +843,24 @@ GEOMETRY_CHECKER_GAPS = {
     "calligraphic_outline": "PHASE 2 -- the ribbon law (both rails everywhere "
                             "half the declared width from the spine) is "
                             "available here, unwritten",
+    "offset_path": "PHASE 4 -- two laws are available at this seam and both "
+                   "are unwritten. (1) THE RAIL LAW: every rail point sits "
+                   "exactly wl (or wr) from the spine along the spine's own "
+                   "normal, which is `calligraphic_outline`'s ribbon law with "
+                   "a profile instead of a constant, so one predicate should "
+                   "serve both. (2) THE CAP LAW, which is the sharper one and "
+                   "is why this row says PHASE 4 rather than PHASE 2: SVG "
+                   "11.4 defines a round cap as a SEMICIRCLE OF RADIUS HALF "
+                   "THE STROKE WIDTH CENTRED ON THE ENDPOINT, and that is a "
+                   "closed-form statement about the emitted polygon -- every "
+                   "cap vertex is exactly r from the endpoint, the two ends "
+                   "of the sweep ARE the two rail points, and the sweep lies "
+                   "on the far side of the endpoint from the spine. It needs "
+                   "no probe, no seed and no sampling box; it is exact, which "
+                   "is the posture docs/CHECKERS.md section 4b asks for "
+                   "first. It is unwritten because this pass was the "
+                   "PLUMBING: the family had no verb, no fixture and no wire "
+                   "at all until 2026-08-01",
     "paste_translate": "PHASE 2 -- the Preservation Law is checkable (every "
                        "coordinate moved by exactly the offset, every other "
                        "field byte-identical); it needs a document differ",

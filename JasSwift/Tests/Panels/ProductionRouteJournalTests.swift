@@ -869,7 +869,7 @@ private func makeModelWithTwoArtboards() -> Model {
 /// radius:50}` generates — already selected.
 private func makeModelWithSelectedHexagon() -> Model {
     let pts: [(Double, Double)] = (0..<6).map { i in
-        let a = Double(i) * 60.0 * .pi / 180.0
+        let a = Double(i) * 60.0 * (Double.pi / 180)
         return (50.0 * cos(a), 50.0 * sin(a))
     }
     let hex = Element.polygon(Polygon(points: pts))

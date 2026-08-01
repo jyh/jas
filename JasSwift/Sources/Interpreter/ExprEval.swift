@@ -1389,7 +1389,7 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         guard args.count == 1 else { return .null }
         let a = evalNode(args[0], ctx)
         guard case .number(let n) = a else { return .null }
-        let rad = n * Double.pi / 180.0
+        let rad = n * (Double.pi / 180)
         switch name {
         case "sin": return .number(sin(rad))
         case "cos": return .number(cos(rad))
@@ -1405,7 +1405,7 @@ private func evalFunc(_ name: String, _ args: [Expr], _ ctx: [String: Any]) -> V
         guard case .number(let y) = vy, case .number(let x) = vx else {
             return .null
         }
-        return .number(atan2(y, x) * 180.0 / Double.pi)
+        return .number(atan2(y, x) * (180 / Double.pi))
 
     // pow(base, exp) -> Number | Null (Null on a non-finite result).
     case "pow":

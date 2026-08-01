@@ -49,6 +49,7 @@ case "element_evaluated_bounds": results = runElementEvaluatedBounds(activeVecto
 case "flatten":           results = runFlatten(activeVectors)
 case "art_flatten":       results = runArtFlatten(activeVectors)
 case "calligraphic_outline": results = runCalligraphicOutline(activeVectors)
+case "offset_path":       results = runOffsetPath(activeVectors)
 case "paste_translate":   results = runPasteTranslate(activeVectors)
 case "arrow_trim":        results = runArrowTrim(activeVectors)
 case "gradient_remap":    results = runGradientRemap(activeVectors)
@@ -174,6 +175,87 @@ func runCalligraphicOutline(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let pts = calligraphicOutline(d, brush)
         let result = pts.map { [$0.0, $0.1] }
         return ["name": name, "result": result]
+    }
+}
+
+// MARK: - Offset Path (the WIDTH TOOL's variable-width stroke outline)
+//
+// The last unreachable family of the Phase-3 plumbing pass, and it was
+// unreachable for a reason worth naming: `offset_path` produced no values at
+// all. In Rust it was 299 lines of `web_sys::CanvasRenderingContext2d` calls
+// gated behind `web`; here it was CGContext calls. Either way the rails and
+// the caps existed only as side effects on a raster surface, so nothing could
+// serialise them, nothing could compare them, and the two ports' agreement
+// about a variable-width stroke rested on the two files having been typed to
+// look alike.
+//
+// The verb reports THREE things:
+//   * `polygon` -- the closed outline the renderer fills, flattened at the
+//     vector's own `arc_steps`. Faithful: it carries the duplicate vertex a
+//     `move` leaves behind and any chord between a rail and the point a cap
+//     arc actually begins at, because both are edges of the filled shape.
+//   * `start_cap` / `end_cap` -- the caps PARAMETRICALLY, so a cap defect is
+//     legible as an angle rather than only as a moved point, and so the sweep
+//     direction is a compared VALUE instead of a platform flag nobody outside
+//     the drawing code ever saw.
+//   * `default_arc_steps` -- the production constant, which is not otherwise
+//     on the wire.
+//
+// SCOPE, stated where it reports: this gates the OUTLINE. It does not gate
+// the fill (colour, alpha, winding rule) and it does not gate the platform
+// call that consumes the polygon.
+
+func runOffsetPath(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    func capJson(_ c: StrokeCap) -> [String: Any] {
+        switch c {
+        case .butt:
+            return ["kind": "butt"]
+        case .round(let cx, let cy, let r, let a0, let a1, let decreasing):
+            return ["kind": "round", "cx": cx, "cy": cy, "r": r,
+                    "a0": a0, "a1": a1, "decreasing": decreasing]
+        case .square(let ext, let ux, let uy):
+            return ["kind": "square", "ext": ext, "ux": ux, "uy": uy]
+        }
+    }
+
+    return vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let widthPoints: [StrokeWidthPoint] =
+            (tc["width_points"] as? [[String: Any]] ?? []).map { p in
+                StrokeWidthPoint(
+                    t: (p["t"] as? NSNumber)?.doubleValue ?? 0,
+                    widthLeft: (p["width_left"] as? NSNumber)?.doubleValue ?? 0,
+                    widthRight: (p["width_right"] as? NSNumber)?.doubleValue ?? 0)
+            }
+        let linecap: LineCap
+        switch tc["linecap"] as? String ?? "butt" {
+        case "round":  linecap = .round
+        case "square": linecap = .square
+        default:       linecap = .butt
+        }
+        let arcSteps = (tc["arc_steps"] as? NSNumber)?.intValue ?? capArcSteps
+
+        let elem = parseElement(tc["element"]!)
+        let outline: StrokeOutline
+        switch elem {
+        case .line(let l):
+            outline = variableWidthOutlineLine(x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2,
+                                               widthPoints: widthPoints,
+                                               linecap: linecap)
+        case .path(let p):
+            outline = variableWidthOutlinePath(p.d, widthPoints: widthPoints,
+                                               linecap: linecap)
+        default:
+            outline = variableWidthOutlinePath([], widthPoints: widthPoints,
+                                               linecap: linecap)
+        }
+        let poly = flattenOutline(outline, arcSteps: arcSteps).map { [$0.x, $0.y] }
+        return ["name": name, "result": [
+            "polygon": poly,
+            "start_cap": capJson(outline.startCap),
+            "end_cap": capJson(outline.endCap),
+            "default_arc_steps": capArcSteps,
+        ] as [String: Any]]
     }
 }
 

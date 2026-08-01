@@ -493,13 +493,13 @@ private enum SvgPrimitiveBuilder {
             case "rotate":
                 if args.count >= 3 {
                     // rotate(a, cx, cy) = T(cx,cy) . R(a) . T(-cx,-cy)
-                    let a = args[0] * .pi / 180.0
+                    let a = args[0] * (Double.pi / 180)
                     let cx = args[1], cy = args[2]
                     step = CGAffineTransform(translationX: cx, y: cy)
                         .rotated(by: a)
                         .translatedBy(x: -cx, y: -cy)
                 } else if args.count >= 1 {
-                    step = CGAffineTransform(rotationAngle: args[0] * .pi / 180.0)
+                    step = CGAffineTransform(rotationAngle: args[0] * (Double.pi / 180))
                 } else {
                     return nil
                 }
@@ -755,7 +755,7 @@ private enum SvgDParser {
             return
         }
 
-        let phi = phiDeg * Double.pi / 180.0
+        let phi = phiDeg * (Double.pi / 180)
         let cosPhi = cos(phi)
         let sinPhi = sin(phi)
 

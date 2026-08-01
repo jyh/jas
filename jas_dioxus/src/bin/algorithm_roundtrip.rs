@@ -74,6 +74,7 @@ fn main() {
         "flatten" => run_flatten(&vectors),
         "art_flatten" => run_art_flatten(&vectors),
         "calligraphic_outline" => run_calligraphic_outline(&vectors),
+        "offset_path" => run_offset_path(&vectors),
         "paste_translate" => run_paste_translate(&vectors),
         "arrow_trim" => run_arrow_trim(&vectors),
         "gradient_remap" => run_gradient_remap(&vectors),
@@ -328,6 +329,104 @@ fn run_calligraphic_outline(vectors: &[Value]) -> Vec<Value> {
             let pts = calligraphic_outline(&d, &brush);
             let result: Vec<Value> = pts.iter().map(|(x, y)| json!([x, y])).collect();
             json!({"name": name, "result": result})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// offset_path (the WIDTH TOOL's variable-width stroke outline)
+// ---------------------------------------------------------------
+//
+// The last unreachable family of the Phase-3 plumbing pass, and it was
+// unreachable for a reason worth naming: `algorithms/offset_path` produced no
+// values at all. It was 299 lines of `web_sys::CanvasRenderingContext2d`
+// calls, gated behind `web` for that one import, so the rails and the caps
+// existed only as side effects on a canvas. Nothing could serialise them,
+// nothing could compare them, and the two ports' agreement about a variable-
+// width stroke rested on the two files having been typed to look alike.
+//
+// The verb reports THREE things:
+//   * `polygon` -- the closed outline the renderer fills, flattened at the
+//     vector's own `arc_steps`. Faithful: it carries the duplicate vertex a
+//     `move_to` leaves behind and any chord between a rail and the point a
+//     cap arc actually begins at, because both are edges of the filled shape.
+//   * `start_cap` / `end_cap` -- the caps PARAMETRICALLY, so a cap defect is
+//     legible as an angle rather than only as a moved point, and so the sweep
+//     direction is a compared VALUE instead of a platform flag nobody outside
+//     the drawing code ever saw.
+//   * `default_arc_steps` -- the production constant. It is not otherwise on
+//     the wire (the vectors choose small step counts to stay hand-readable),
+//     and a constant the two ports could set differently is exactly the kind
+//     of agreement that should not rest on a comment.
+//
+// SCOPE, stated where it reports: this gates the OUTLINE. It does not gate
+// the fill (colour, alpha, winding rule) and it does not gate the platform
+// call that consumes the polygon.
+
+fn run_offset_path(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::algorithms::offset_path::{
+        flatten_outline, variable_width_outline_line,
+        variable_width_outline_path, StrokeCap, CAP_ARC_STEPS,
+    };
+    use jas_dioxus::geometry::element::{LineCap, StrokeWidthPoint};
+
+    fn cap_json(c: &StrokeCap) -> Value {
+        match *c {
+            StrokeCap::Butt => json!({"kind": "butt"}),
+            StrokeCap::Round { cx, cy, r, a0, a1, decreasing } => json!({
+                "kind": "round", "cx": cx, "cy": cy, "r": r,
+                "a0": a0, "a1": a1, "decreasing": decreasing,
+            }),
+            StrokeCap::Square { ext, ux, uy } => json!({
+                "kind": "square", "ext": ext, "ux": ux, "uy": uy,
+            }),
+        }
+    }
+
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let width_points: Vec<StrokeWidthPoint> = tc["width_points"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|p| StrokeWidthPoint {
+                            t: p["t"].as_f64().unwrap_or(0.0),
+                            width_left: p["width_left"].as_f64().unwrap_or(0.0),
+                            width_right: p["width_right"].as_f64().unwrap_or(0.0),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            let linecap = match tc["linecap"].as_str().unwrap_or("butt") {
+                "round" => LineCap::Round,
+                "square" => LineCap::Square,
+                _ => LineCap::Butt,
+            };
+            let arc_steps = tc["arc_steps"].as_u64().unwrap_or(CAP_ARC_STEPS as u64)
+                as usize;
+
+            let elem = parse_element(&tc["element"]);
+            let outline = match &elem {
+                Element::Line(e) => variable_width_outline_line(
+                    e.x1, e.y1, e.x2, e.y2, &width_points, linecap,
+                ),
+                Element::Path(e) => {
+                    variable_width_outline_path(&e.d, &width_points, linecap)
+                }
+                _ => variable_width_outline_path(&[], &width_points, linecap),
+            };
+            let poly: Vec<Value> = flatten_outline(&outline, arc_steps)
+                .iter()
+                .map(|(x, y)| json!([x, y]))
+                .collect();
+            json!({"name": name, "result": {
+                "polygon": poly,
+                "start_cap": cap_json(&outline.start_cap),
+                "end_cap": cap_json(&outline.end_cap),
+                "default_arc_steps": CAP_ARC_STEPS,
+            }})
         })
         .collect()
 }
