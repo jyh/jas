@@ -51,6 +51,55 @@ pub struct ConceptDef {
     pub closed: bool,
 }
 
+/// The evaluated rings of a live kind whose geometry lives behind a resolver
+/// (`Reference` / `Recorded` / `Generated`), or `None` for every other element
+/// — including `CompoundShape`, which owns its operands and needs no resolver.
+///
+/// `Some(empty)` and `None` mean DIFFERENT things and callers must not conflate
+/// them: `None` is "this kind carries its own coordinates, ask it"; `Some([])`
+/// is "this kind's geometry is resolved, and it resolved to nothing" — a
+/// dangling target, an unknown concept, or a cycle, each of which evaluates to
+/// empty rather than trapping (REFERENCE_GRAPH.md §3).
+///
+/// THE ONE definition, shared by hit-testing and bounds. Both need the same
+/// answer to "where is this instance", and a second copy is how they would come
+/// to disagree.
+pub fn resolved_rings(
+    elem: &Element,
+    resolver: &dyn ElementResolver,
+) -> Option<crate::algorithms::boolean::PolygonSet> {
+    let Element::Live(v) = elem else { return None };
+    let mut visiting = VisitSet::new();
+    match v {
+        LiveVariant::Reference(r) => {
+            Some(r.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
+        }
+        LiveVariant::Recorded(rec) => {
+            Some(rec.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
+        }
+        LiveVariant::Generated(g) => {
+            Some(g.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
+        }
+        LiveVariant::CompoundShape(_) => None,
+    }
+}
+
+/// Axis-aligned bounding box of a ring set, or `None` when it holds no points.
+pub fn rings_bbox(
+    rings: &crate::algorithms::boolean::PolygonSet,
+) -> Option<(f64, f64, f64, f64)> {
+    let mut pts = rings.iter().flatten();
+    let &(x0, y0) = pts.next()?;
+    let (mut minx, mut miny, mut maxx, mut maxy) = (x0, y0, x0, y0);
+    for &(x, y) in pts {
+        minx = minx.min(x);
+        miny = miny.min(y);
+        maxx = maxx.max(x);
+        maxy = maxy.max(y);
+    }
+    Some((minx, miny, maxx - minx, maxy - miny))
+}
+
 /// Look up a concept pack in the bundled workspace registry (CONCEPTS.md 3b).
 ///
 /// THE SINGLE definition shared by every resolver that answers

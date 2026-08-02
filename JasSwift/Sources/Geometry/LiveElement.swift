@@ -68,6 +68,46 @@ public struct NullResolver: ElementResolver {
     public func resolve(_ id: ElementRef) -> Element? { nil }
 }
 
+/// The evaluated rings of a live kind whose geometry lives behind a resolver
+/// (`reference` / `recorded` / `generated`), or `nil` for every other element —
+/// including `compoundShape`, which owns its operands and needs no resolver.
+///
+/// `[]` and `nil` mean DIFFERENT things and callers must not conflate them:
+/// `nil` is "this kind carries its own coordinates, ask it"; `[]` is "this
+/// kind's geometry is resolved, and it resolved to nothing" — a dangling
+/// target, an unknown concept, or a cycle, each of which evaluates to empty
+/// rather than trapping (REFERENCE_GRAPH.md §3).
+///
+/// THE ONE definition, shared by hit-testing and bounds. Both need the same
+/// answer to "where is this instance", and a second copy is how they would come
+/// to disagree. Mirrors Rust `resolved_rings` (geometry/live.rs).
+public func resolvedRings(_ elem: Element, _ resolver: ElementResolver) -> BoolPolygonSet? {
+    guard case .live(let v) = elem else { return nil }
+    var visiting = VisitSet()
+    switch v {
+    case .reference(let r):
+        return r.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    case .recorded(let rec):
+        return rec.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    case .generated(let g):
+        return g.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    case .compoundShape:
+        return nil
+    }
+}
+
+/// Axis-aligned bounding box of a ring set, or `nil` when it holds no points.
+public func ringsBBox(_ rings: BoolPolygonSet) -> BBox? {
+    let pts = rings.flatMap { $0 }
+    guard let first = pts.first else { return nil }
+    var minX = first.0, minY = first.1, maxX = first.0, maxY = first.1
+    for p in pts.dropFirst() {
+        minX = min(minX, p.0); minY = min(minY, p.1)
+        maxX = max(maxX, p.0); maxY = max(maxY, p.1)
+    }
+    return (x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+}
+
 /// The cycle-guard set threaded through evaluation. Carried as an explicit
 /// parameter (never instance state) so all five apps break reference cycles
 /// identically (REFERENCE_GRAPH.md §3). Mirrors Rust `VisitSet`.

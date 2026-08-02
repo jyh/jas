@@ -28,7 +28,7 @@
 
 use crate::geometry::element::{flatten_path_commands, Element};
 use crate::geometry::live::{
-    ElementResolver, LiveVariant, NullResolver, VisitSet, DEFAULT_PRECISION,
+    resolved_rings, rings_bbox, ElementResolver, LiveVariant, NullResolver, DEFAULT_PRECISION,
 };
 
 // ---------------------------------------------------------------------------
@@ -408,32 +408,6 @@ fn push_ring_segments(ring: &[(f64, f64)], segs: &mut Vec<(f64, f64, f64, f64)>)
     segs.push((last.0, last.1, first.0, first.1));
 }
 
-/// The evaluated rings of a live kind whose geometry lives behind a resolver
-/// (`Reference` / `Recorded` / `Generated`), or `None` for anything else.
-/// A dangling target, an unknown concept, or a cycle yields `Some(empty)` —
-/// never a panic (REFERENCE_GRAPH.md §3).
-fn resolved_rings(
-    elem: &Element,
-    resolver: &dyn ElementResolver,
-) -> Option<crate::algorithms::boolean::PolygonSet> {
-    let Element::Live(v) = elem else { return None };
-    let mut visiting = VisitSet::new();
-    match v {
-        LiveVariant::Reference(r) => {
-            Some(r.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
-        }
-        LiveVariant::Recorded(rec) => {
-            Some(rec.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
-        }
-        LiveVariant::Generated(g) => {
-            Some(g.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
-        }
-        // CompoundShape owns its operands, so it needs no resolver and is
-        // already answered exactly by `segments_of_element`.
-        LiveVariant::CompoundShape(_) => None,
-    }
-}
-
 /// `elem.bounds()`, except for the resolver-needing live kinds, whose own
 /// `bounds()` is a hard-coded `(0,0,0,0)` — for those, the bounding box of the
 /// RESOLVED rings. Used by the filled arms, which compare against a bounding
@@ -443,25 +417,18 @@ fn resolved_bounds(
     elem: &Element,
     resolver: &dyn ElementResolver,
 ) -> (f64, f64, f64, f64) {
-    let Some(rings) = resolved_rings(elem, resolver) else {
-        return elem.bounds();
-    };
-    let mut pts = rings.iter().flatten();
-    let Some(&(x0, y0)) = pts.next() else {
-        // Dangling / cyclic / unknown: no geometry, and a zero box at the
-        // origin would be a false claim about where it is. Report the same
-        // degenerate box `bounds()` does, so nothing downstream changes for
-        // the case that genuinely has nothing to show.
-        return elem.bounds();
-    };
-    let (mut minx, mut miny, mut maxx, mut maxy) = (x0, y0, x0, y0);
-    for &(x, y) in pts {
-        minx = minx.min(x);
-        miny = miny.min(y);
-        maxx = maxx.max(x);
-        maxy = maxy.max(y);
+    match resolved_rings(elem, resolver) {
+        // Not a resolver-backed kind: it carries its own coordinates. NOTE this
+        // is the STROKE-INFLATED box, which is what every filled arm here
+        // compares against; the geometric twin lives in `element.rs` and must
+        // stay separate (swapping one for the other would silently change
+        // hit-testing for every stroked shape).
+        None => elem.bounds(),
+        // Resolved, but to nothing (dangling / cyclic / unknown). A zero box at
+        // the ORIGIN would be a false claim about where it is; report what
+        // `bounds()` reports, so the genuinely-empty case is unchanged.
+        Some(rings) => rings_bbox(&rings).unwrap_or_else(|| elem.bounds()),
     }
-    (minx, miny, maxx - minx, maxy - miny)
 }
 
 /// [`segments_of_element`], resolving live kinds through `resolver`.

@@ -48,7 +48,18 @@ public func elementEvaluatedBBox(_ doc: Document, _ path: ElementPath) -> BBox? 
         guard let last = path.last, last < kids.count else { return nil }
         node = kids[last]
     }
-    let b = node.geometricBounds
+    // RESOLVEDBOUNDS: resolve the kinds whose geometry lives behind an id, so a
+    // placed symbol instance reports the box it OCCUPIES rather than the zero
+    // box its own struct carries. `doc` is the whole document, so the resolver
+    // is built here rather than threaded in; this is the Properties-panel path,
+    // not a per-frame one. Mirrors Rust `element_evaluated_bbox`.
+    //
+    // `nil` means it occupies nothing (a dangling instance, or a group of
+    // them). There is no honest box, and the zero box is what this function has
+    // always returned for "nothing to show" — kept, so only the resolvable case
+    // changes.
+    let b = resolvedGeometricBounds(node, RebuildResolver(document: doc))
+        ?? (x: 0, y: 0, width: 0, height: 0)
     // Apply innermost-first: the element's own transform, then each ancestor
     // outward (layer last) — matching the rendered combined CTM.
     let chain: [Transform?] = [node.transform] + ancestors.reversed()

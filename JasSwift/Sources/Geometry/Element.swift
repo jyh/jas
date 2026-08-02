@@ -766,6 +766,54 @@ private func pointsBounds(_ points: [(Double, Double)]) -> BBox {
 /// Union the geometric bounds of a children list. Returns
 /// `(0, 0, 0, 0)` for empty groups. Used by the recursive
 /// `Element.geometricBounds` implementation.
+/// Geometric bounds that RESOLVE the three live kinds whose geometry lives
+/// behind an id (`reference` / `recorded` / `generated`), returning `nil` for an
+/// element that occupies no canvas at all.
+///
+/// `Element.geometricBounds` and `Element.bounds` are deliberately left
+/// resolver-less and both keep answering the zero box for those kinds — the same
+/// two-form split as `HitTest`'s plain and `...With` verbs, for the same reason:
+/// with no document behind it, there is no fact about where a target id is.
+///
+/// ## Why `nil`, and why it is the whole point
+///
+/// A dangling instance draws nothing, so it must contribute NOTHING to a union
+/// — not a zero-sized box at the origin. `childrenGeometricBounds` unions its
+/// children unconditionally, so a group holding one instance reported a box
+/// STRETCHED BACK TO (0,0): measured (0,0,110,110) for a group whose true extent
+/// was (5,7,105,103). The empty box was not merely absent; it was a phantom
+/// point at the origin that the union swallowed.
+///
+/// Degenerate boxes from every OTHER kind still contribute exactly as before.
+/// Mirrors Rust `resolved_geometric_bounds` (geometry/element.rs).
+public func resolvedGeometricBounds(_ elem: Element, _ resolver: ElementResolver) -> BBox? {
+    if let rings = resolvedRings(elem, resolver) {
+        return ringsBBox(rings)
+    }
+    switch elem {
+    case .group(let g): return resolvedChildrenBounds(g.children, resolver)
+    case .layer(let l): return resolvedChildrenBounds(l.children, resolver)
+    default: return elem.geometricBounds
+    }
+}
+
+/// Union of the children's resolved geometric bounds, skipping the ones that
+/// occupy nothing. `nil` when no child occupies anything.
+private func resolvedChildrenBounds(_ children: [Element], _ resolver: ElementResolver) -> BBox? {
+    var acc: (Double, Double, Double, Double)? = nil
+    for c in children {
+        guard let b = resolvedGeometricBounds(c, resolver) else { continue }
+        if let (ax, ay, bx, by) = acc {
+            acc = (min(ax, b.x), min(ay, b.y),
+                   max(bx, b.x + b.width), max(by, b.y + b.height))
+        } else {
+            acc = (b.x, b.y, b.x + b.width, b.y + b.height)
+        }
+    }
+    guard let (ax, ay, bx, by) = acc else { return nil }
+    return (x: ax, y: ay, width: bx - ax, height: by - ay)
+}
+
 private func childrenGeometricBounds(_ children: [Element]) -> BBox {
     guard !children.isEmpty else { return (0, 0, 0, 0) }
     let all = children.map(\.geometricBounds)

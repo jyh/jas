@@ -180,46 +180,22 @@ private func pushRingSegments(_ ring: [(Double, Double)],
     segs.append((last.0, last.1, first.0, first.1))
 }
 
-/// The evaluated rings of a kind whose geometry lives behind `resolver`, or nil
-/// for anything else. A dangling target, an unknown concept, or a cycle yields
-/// an empty set — never a trap (REFERENCE_GRAPH.md §3).
-private func resolvedRings(_ elem: Element, _ resolver: ElementResolver) -> BoolPolygonSet? {
-    guard case .live(let v) = elem else { return nil }
-    var visiting = VisitSet()
-    switch v {
-    case .reference(let r):
-        return r.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
-    case .recorded(let rec):
-        return rec.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
-    case .generated(let g):
-        return g.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
-    // A compound shape owns its operands, so it needs no resolver and is
-    // already answered exactly by `segmentsOfElement`.
-    case .compoundShape:
-        return nil
-    }
-}
-
 /// `elem.bounds`, except for the resolver-needing kinds, whose own `bounds` is
 /// a hard-coded zero box — for those, the bounding box of the RESOLVED rings.
 /// Used by the filled arms, which compare against a bounding box: an instance
 /// carrying a paint override took those arms and compared against a degenerate
 /// box at the origin.
 private func resolvedBounds(_ elem: Element, _ resolver: ElementResolver) -> BBox {
+    // Not a resolver-backed kind: it carries its own coordinates. NOTE this is
+    // the STROKE-INFLATED box, which is what every filled arm here compares
+    // against; the geometric twin lives in `Element.swift` and must stay
+    // separate (swapping one for the other would silently change hit-testing
+    // for every stroked shape).
     guard let rings = resolvedRings(elem, resolver) else { return elem.bounds }
-    let pts = rings.flatMap { $0 }
-    guard let first = pts.first else {
-        // Dangling / cyclic / unknown: nothing to show, and a zero box at the
-        // origin would be a false claim about where it is. Report what
-        // `bounds` reports, so that case is unchanged.
-        return elem.bounds
-    }
-    var minX = first.0, minY = first.1, maxX = first.0, maxY = first.1
-    for p in pts.dropFirst() {
-        minX = min(minX, p.0); minY = min(minY, p.1)
-        maxX = max(maxX, p.0); maxY = max(maxY, p.1)
-    }
-    return (x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    // Resolved, but to nothing (dangling / cyclic / unknown). A zero box at the
+    // ORIGIN would be a false claim about where it is; report what `bounds`
+    // reports, so the genuinely-empty case is unchanged.
+    return ringsBBox(rings) ?? elem.bounds
 }
 
 public func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Double)] {

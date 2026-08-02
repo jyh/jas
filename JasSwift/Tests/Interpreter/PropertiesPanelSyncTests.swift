@@ -109,3 +109,85 @@ private func rectT(_ x: Double, _ y: Double, _ w: Double, _ h: Double,
                                                           selected: [[0, 0]]))
     #expect((o["prop_shear"] as? Double) == 0)
 }
+
+// MARK: - RESOLVEDBOUNDS: an instance reports the box it OCCUPIES
+//
+// A symbol instance carries no coordinates of its own — its geometry is its
+// master's, reached by id. `Element.geometricBounds` has no resolver, so it
+// answered the zero box, and the Properties panel showed X/Y/W/H all zero for a
+// shape plainly sitting elsewhere on the canvas.
+//
+// Worse in a group: the zero box is not absent, it is a phantom point AT THE
+// ORIGIN that the children-union swallows, so a group holding one instance got
+// a selection box reaching back to (0,0) across empty canvas.
+//
+// Twins of Rust's tests in document/evaluated_bounds.rs.
+
+/// A master rect at (5,7,10,20) in `symbols`, one instance of it at [0,0].
+private func docWithInstance() -> Document {
+    let master = Element.rect(Rect(x: 5, y: 7, width: 10, height: 20, id: "m1"))
+    let instance = Element.live(.reference(ReferenceElem(
+        target: ElementRef("m1"), name: nil, id: "i1")))
+    return Document(layers: [Layer(children: [instance])], symbols: [master])
+}
+
+/// A group holding that same instance plus a rect at (100,100,10,10).
+private func docWithGroupHoldingInstance() -> Document {
+    let master = Element.rect(Rect(x: 5, y: 7, width: 10, height: 20, id: "m1"))
+    let instance = Element.live(.reference(ReferenceElem(
+        target: ElementRef("m1"), name: nil, id: "i1")))
+    let sibling = Element.rect(Rect(x: 100, y: 100, width: 10, height: 10))
+    let group = Element.group(Group(children: [instance, sibling]))
+    return Document(layers: [Layer(children: [group])], symbols: [master])
+}
+
+private func expectBBox(_ got: BBox?, _ want: (Double, Double, Double, Double),
+                        _ what: String, sourceLocation: SourceLocation = #_sourceLocation) {
+    guard let g = got else {
+        Issue.record("\(what): expected a box, got nil", sourceLocation: sourceLocation)
+        return
+    }
+    #expect(abs(g.x - want.0) < 1e-9 && abs(g.y - want.1) < 1e-9
+            && abs(g.width - want.2) < 1e-9 && abs(g.height - want.3) < 1e-9,
+            "\(what): expected \(want), got \(g)", sourceLocation: sourceLocation)
+}
+
+@Test func aPlacedSymbolInstanceReportsTheBoxItOccupies() {
+    // Measured before the repair: (0,0,0,0).
+    expectBBox(elementEvaluatedBBox(docWithInstance(), [0, 0]),
+               (5, 7, 10, 20), "instance")
+}
+
+@Test func aGroupHoldingAnInstanceIsNotStretchedBackToTheOrigin() {
+    // Measured before the repair: (0,0,110,110).
+    expectBBox(elementEvaluatedBBox(docWithGroupHoldingInstance(), [0, 0]),
+               (5, 7, 105, 103), "group with instance")
+}
+
+@Test func aDanglingInstanceStillReportsNothing() {
+    // REFERENCE_GRAPH.md §3: unresolvable evaluates to empty. It draws nothing,
+    // so there is no honest box — and the zero box is what this function has
+    // always returned for "nothing to show". Unchanged.
+    var doc = docWithInstance()
+    doc = Document(layers: doc.layers, symbols: [])
+    expectBBox(elementEvaluatedBBox(doc, [0, 0]), (0, 0, 0, 0), "dangling instance")
+}
+
+@Test func aGroupOfOnlyDanglingInstancesDoesNotClaimTheOrigin() {
+    // The union must SKIP what occupies nothing rather than fold in a point at
+    // (0,0) — otherwise the group claims a corner nothing is drawn in.
+    var doc = docWithGroupHoldingInstance()
+    doc = Document(layers: doc.layers, symbols: [])
+    expectBBox(elementEvaluatedBBox(doc, [0, 0]),
+               (100, 100, 10, 10), "group whose instance is dangling")
+}
+
+@Test func theResolverlessMethodsKeepAnsweringZeroForAnInstance() {
+    // The forbidden fix, pinned (same guard as CONTAINERPAINT and RESOLVEDHIT):
+    // widening `bounds` / `geometricBounds` would make them answer a question
+    // they cannot see. They stay resolver-less and stay AGREEING WITH EACH OTHER.
+    let instance = Element.live(.reference(ReferenceElem(
+        target: ElementRef("m1"), name: nil, id: "i1")))
+    #expect(instance.bounds == (x: 0, y: 0, width: 0, height: 0))
+    #expect(instance.geometricBounds == (x: 0, y: 0, width: 0, height: 0))
+}
