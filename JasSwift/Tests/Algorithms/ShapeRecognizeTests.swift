@@ -455,7 +455,7 @@ private func assertClose(_ a: Double, _ b: Double, _ tol: Double, _ name: String
 
 @Test func tiltedSquareReturnsNone() {
     let clean = sampleRect(-50, -50, 100, 100, 16)
-    let pts = rotatePts(clean, 0, 0, 30.0 * .pi / 180)
+    let pts = rotatePts(clean, 0, 0, 30.0 * (Double.pi / 180))
     let result = recognize(pts, RecognizeConfig())
     if case .rectangle = result {
         Issue.record("tilted square should NOT classify as Rectangle")

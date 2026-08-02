@@ -1869,6 +1869,92 @@ fn children_bounds(children: &[Rc<Element>]) -> Bounds {
     (min_x, min_y, max_x - min_x, max_y - min_y)
 }
 
+/// Geometric bounds that RESOLVE the three live kinds whose geometry lives
+/// behind an id (`Reference` / `Recorded` / `Generated`), returning `None` for
+/// an element that occupies no canvas at all.
+///
+/// `Element::geometric_bounds` and `Element::bounds` are deliberately left
+/// resolver-less and both keep answering `(0,0,0,0)` for those kinds — the same
+/// two-form split as `hit_test`'s plain and `_with` verbs, for the same reason:
+/// with no document behind it, there is no fact about where a target id is.
+/// Readers that HAVE a resolver use this; readers that do not keep the answer
+/// they had.
+///
+/// ## Why `Option`, and why it is the whole point
+///
+/// A dangling instance draws nothing, so it must contribute NOTHING to a
+/// union — not a zero-sized box at the origin. `geometric_children_bounds`
+/// unions its children unconditionally, so a group holding one instance
+/// reported a box STRETCHED BACK TO (0,0): measured `(0,0,110,110)` for a group
+/// whose true extent was `(5,7,105,103)`. The empty box was not merely absent,
+/// it was a phantom point at the origin that the union swallowed.
+///
+/// Degenerate boxes from every OTHER kind still contribute exactly as before
+/// (a zero-width rect is a real point on the canvas, and this is not the place
+/// to relitigate that).
+pub fn resolved_geometric_bounds(
+    elem: &Element,
+    resolver: &dyn super::live::ElementResolver,
+) -> Option<Bounds> {
+    resolved_bounds_with(elem, resolver, Element::geometric_bounds)
+}
+
+/// [`resolved_geometric_bounds`] with the leaf measurement chosen by the
+/// caller: pass [`Element::geometric_bounds`] for the stroke-exclusive box or
+/// [`Element::bounds`] for the stroke-inflated (preview) one.
+///
+/// The parameter exists because Align reads both, under its Use Preview Bounds
+/// flag. Hard-coding the geometric leaf here would have silently dropped stroke
+/// inflation from every leaf inside a GROUP the moment align started resolving
+/// — fixing an instance's box by breaking every stroked sibling's.
+///
+/// **A resolver-backed kind answers with its resolved rings under EITHER leaf
+/// choice**, because evaluated rings carry no stroke. So an instance's own
+/// stroke inflation is still missing in preview mode; it would need the
+/// resolved TARGET's stroke, which is a different piece of work. That is a
+/// bounded, stated shortfall — and strictly better than the zero box it
+/// replaces, which was wrong in both modes.
+pub fn resolved_bounds_with(
+    elem: &Element,
+    resolver: &dyn super::live::ElementResolver,
+    leaf: fn(&Element) -> Bounds,
+) -> Option<Bounds> {
+    if let Some(rings) = super::live::resolved_rings(elem, resolver) {
+        // A resolver-backed kind: its box is its resolved rings', and nothing
+        // at all when those rings are empty.
+        return super::live::rings_bbox(&rings);
+    }
+    match elem {
+        Element::Group(g) => resolved_children_bounds(&g.children, resolver, leaf),
+        Element::Layer(l) => resolved_children_bounds(&l.children, resolver, leaf),
+        _ => Some(leaf(elem)),
+    }
+}
+
+/// Union of the children's resolved bounds, skipping the ones that occupy
+/// nothing. `None` when no child occupies anything (including the
+/// empty-children case, which `geometric_children_bounds` reports as the
+/// degenerate box at the origin).
+fn resolved_children_bounds(
+    children: &[Rc<Element>],
+    resolver: &dyn super::live::ElementResolver,
+    leaf: fn(&Element) -> Bounds,
+) -> Option<Bounds> {
+    let mut acc: Option<(f64, f64, f64, f64)> = None;
+    for c in children {
+        let Some((x, y, w, h)) = resolved_bounds_with(c, resolver, leaf) else {
+            continue;
+        };
+        acc = Some(match acc {
+            None => (x, y, x + w, y + h),
+            Some((ax, ay, bx, by)) => {
+                (ax.min(x), ay.min(y), bx.max(x + w), by.max(y + h))
+            }
+        });
+    }
+    acc.map(|(ax, ay, bx, by)| (ax, ay, bx - ax, by - ay))
+}
+
 fn geometric_children_bounds(children: &[Rc<Element>]) -> Bounds {
     if children.is_empty() {
         return (0.0, 0.0, 0.0, 0.0);

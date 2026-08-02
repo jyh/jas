@@ -30,6 +30,20 @@ public enum DashRenderer {
         alignAnchors: Bool
     ) -> [[PathCommand]] {
         guard !path.isEmpty else { return [] }
+        // S-4: a LEADING closePath establishes no anchor and draws nothing,
+        // so it must not reach either branch below. The dashed branch
+        // already ignores it — `splitAtMoveTo` gives it its own subpath and
+        // `buildSegments` finds no segment there — but the undashed fast
+        // path did not, and the two branches have to answer alike. Measured,
+        // in BOTH ports identically (so no port-vs-port comparison could see
+        // it): a bare `Z M 5 5` came back as ONE sub-path where `M 5 5` came
+        // back as none, because the drawability test asked only "is some
+        // command not a moveTo" and a closePath is not a moveTo. Same shape
+        // as the leading-close bail-outs already repaired in `artFlatten`
+        // and `calligraphicOutline`.
+        let lead = path.prefix { if case .closePath = $0 { return true }; return false }.count
+        let path = Array(path.dropFirst(lead))
+        guard !path.isEmpty else { return [] }
         // No dashing → single solid sub-path equal to the original.
         if dashArray.isEmpty || dashArray.allSatisfy({ $0 == 0.0 }) {
             // Skip MoveTo-only paths.

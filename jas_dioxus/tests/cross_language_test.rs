@@ -152,10 +152,12 @@ fn align_fixture_matches_expected() {
         let pairs: Vec<(Vec<usize>, &Element)> = rects.iter().enumerate()
             .map(|(i, e)| (vec![i], e)).collect();
 
+        // No document behind these vectors -- the runner materialises plain
+        // rects -- so the resolver-less measurements are exactly right here.
         let bounds_fn: aa::BoundsFn = if v["use_preview_bounds"].as_bool().unwrap_or(false) {
-            aa::preview_bounds
+            &aa::preview_bounds
         } else {
-            aa::geometric_bounds
+            &aa::geometric_bounds
         };
         let reference = {
             let r = &v["reference"];

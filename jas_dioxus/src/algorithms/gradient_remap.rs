@@ -55,7 +55,7 @@ pub type BBox = (f64, f64, f64, f64);
 /// between the two ramp centres along the ramp.
 fn axis_frame(bbox: BBox, angle_deg: f64) -> (f64, f64) {
     let (bx, by, bw, bh) = bbox;
-    let rad = angle_deg * std::f64::consts::PI / 180.0;
+    let rad = angle_deg.to_radians();
     let ux = rad.cos();
     let uy = -rad.sin();
     let cx = bx + bw / 2.0;

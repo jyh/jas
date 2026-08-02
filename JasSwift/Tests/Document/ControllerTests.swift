@@ -993,6 +993,70 @@ private func makeLockedLayerCtrl(lockFirst: Bool) -> Controller {
     }
 }
 
+// MARK: - RESOLVEDHIT: selection must see what the canvas draws
+//
+// A symbol instance is a ReferenceElem holding no geometry of its own
+// (SYMBOLS.md §1): it re-resolves its master every paint. Paint had a
+// resolver; hit-testing did not, so segmentsOfElement returned [] and bounds
+// returned a zero box for every instance on the canvas. The artist sees the
+// shape and cannot rubber-band it.
+//
+// DOCUMENT-CONTEXT by necessity: the shared algorithm corpus feeds
+// elementIntersectsRect one standalone element with no document behind it, so
+// it cannot express "an instance whose master is elsewhere in the document" at
+// all — which is why the corpus never asked and all three ports agreed.
+//
+// Twins of Rust's marquee_selects_a_placed_symbol_instance and friends
+// (document/controller.rs).
+
+/// A master rect at (0,0,10,10) in `symbols`, one instance of it in the layer
+/// tree, and nothing selected. The instance's own geometry is empty;
+/// everything it occupies on canvas comes from resolving "m1".
+private func symbolInstanceCtrl() -> Controller {
+    let master = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10, id: "m1"))
+    let doc = Document(layers: [Layer(name: "Layer", children: [])], symbols: [master])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.placeInstance(masterId: "m1", refId: "i1")
+    // placeInstance auto-selects; clear it so the marquee is the only thing
+    // that can put the instance in the selection.
+    ctrl.model.setDocumentForTest(ctrl.document.replacing(selection: []))
+    return ctrl
+}
+
+@Test func marqueeSelectsAPlacedSymbolInstance() {
+    let ctrl = symbolInstanceCtrl()
+    ctrl.selectRect(x: -1, y: -1, width: 12, height: 12)
+    #expect(selPaths(ctrl.document.selection) == [[0, 0]],
+            "a marquee enclosing the resolved master must select the instance")
+}
+
+@Test func lassoSelectsAPlacedSymbolInstance() {
+    let ctrl = symbolInstanceCtrl()
+    ctrl.selectPolygon(polygon: [(-1, -1), (12, -1), (12, 12), (-1, 12)])
+    #expect(selPaths(ctrl.document.selection) == [[0, 0]],
+            "a lasso enclosing the resolved master must select the instance")
+}
+
+@Test func marqueeMissesASymbolInstanceItDoesNotCover() {
+    // The repair must not degrade into "a reference is always hit".
+    let ctrl = symbolInstanceCtrl()
+    ctrl.selectRect(x: 100, y: 100, width: 10, height: 10)
+    #expect(ctrl.document.selection.isEmpty,
+            "a marquee far from the resolved geometry must not select it")
+}
+
+@Test func marqueeSkipsADanglingSymbolInstance() {
+    // REFERENCE_GRAPH.md §3: an unresolvable target evaluates to empty. An
+    // instance of a master that is not there occupies no canvas, so there is
+    // nothing for a marquee to catch.
+    let ctrl = Controller(model: Model(document: Document(layers: [Layer(name: "Layer", children: [])])))
+    ctrl.placeInstance(masterId: "ghost", refId: "i1")
+    ctrl.model.setDocumentForTest(ctrl.document.replacing(selection: []))
+    ctrl.selectRect(x: -1000, y: -1000, width: 2000, height: 2000)
+    #expect(ctrl.document.selection.isEmpty,
+            "a dangling instance draws nothing and so catches nothing")
+}
+
 @Test func placeInstanceAppendsAndSelects() {
     // placeInstance appends a reference to the active layer and selects it.
     // Mirrors Rust place_instance_appends_and_selects.

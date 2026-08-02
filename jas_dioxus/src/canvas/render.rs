@@ -129,18 +129,13 @@ impl crate::geometry::live::ElementResolver for RenderResolver {
 
     /// Resolve a concept pack from the bundled workspace registry so a
     /// `Generated` instance renders its concept's geometry on canvas
-    /// (CONCEPTS.md 3b). Concepts are static workspace data and `Workspace::load`
-    /// is cached, so this is cheap.
+    /// (CONCEPTS.md 3b). Shared with the hit-test resolver so paint and
+    /// selection cannot disagree about a concept's geometry.
     fn resolve_concept(
         &self,
         concept_id: &str,
     ) -> Option<crate::geometry::live::ConceptDef> {
-        let ws = crate::interpreter::workspace::Workspace::load()?;
-        let c = ws.concept(concept_id)?;
-        Some(crate::geometry::live::ConceptDef {
-            generator: c.get("generator")?.as_str()?.to_string(),
-            closed: c.get("closed").and_then(|v| v.as_bool()).unwrap_or(true),
-        })
+        crate::geometry::live::workspace_concept(concept_id)
     }
 }
 
@@ -460,7 +455,7 @@ fn make_canvas_gradient(
             // Endpoints lie on the bbox boundary aligned with the angle.
             let cx = bx + bw / 2.0;
             let cy = by + bh / 2.0;
-            let rad = g.angle * std::f64::consts::PI / 180.0;
+            let rad = g.angle.to_radians();
             let half_diag = (bw * bw + bh * bh).sqrt() / 2.0;
             let dx = rad.cos() * half_diag;
             let dy = -rad.sin() * half_diag; // canvas y is down

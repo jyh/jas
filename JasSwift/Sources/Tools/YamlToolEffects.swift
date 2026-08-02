@@ -2569,7 +2569,7 @@ private func blobBrushOvalRing(
     let segments = 16
     let rx = size * 0.5
     let ry = size * (roundnessPct / 100.0) * 0.5
-    let rad = angleDeg * .pi / 180.0
+    let rad = angleDeg * (Double.pi / 180)
     let cs = cos(rad), sn = sin(rad)
     var out: BoolRing = []
     out.reserveCapacity(segments)
@@ -3090,7 +3090,12 @@ private func resolveReferencePoint(
         isValidPath(doc, es.path) ? doc.getElement(es.path) : nil
     }
     if elements.isEmpty { return (0, 0) }
-    let bb = alignUnionBounds(elements, alignGeometricBounds)
+    // RESOLVEDALIGN: resolve behind-an-id geometry so a selection holding a
+    // symbol instance gets a pivot at the middle of what is DRAWN.
+    let pivotResolver = IdIndexResolver(index: model.idIndex)
+    let bb = alignUnionBounds(elements) {
+        alignResolvedBounds($0, pivotResolver, alignGeometricBounds)
+    }
     return (bb.x + bb.width / 2, bb.y + bb.height / 2)
 }
 
@@ -3122,7 +3127,7 @@ private func dragToRotateAngle(
 ) -> Double {
     let thetaPress  = atan2(py - ry, px - rx)
     let thetaCursor = atan2(cy - ry, cx - rx)
-    var thetaDeg = (thetaCursor - thetaPress) * 180.0 / .pi
+    var thetaDeg = (thetaCursor - thetaPress) * (180 / Double.pi)
     if shift { thetaDeg = (thetaDeg / 45.0).rounded() * 45.0 }
     return thetaDeg
 }
@@ -3139,11 +3144,11 @@ private func dragToShearParams(
         if abs(dx) >= abs(dy) {
             let denom = max(abs(py - ry), 1e-9)
             let k = dx / denom
-            return (atan(k) * 180.0 / .pi, "horizontal", 0)
+            return (atan(k) * (180 / Double.pi), "horizontal", 0)
         } else {
             let denom = max(abs(px - rx), 1e-9)
             let k = dy / denom
-            return (atan(k) * 180.0 / .pi, "vertical", 0)
+            return (atan(k) * (180 / Double.pi), "vertical", 0)
         }
     }
     let ax = px - rx
@@ -3153,8 +3158,8 @@ private func dragToShearParams(
     let perpY = ax / axisLen
     let perpDist = (cx - px) * perpX + (cy - py) * perpY
     let k = perpDist / axisLen
-    let axisAngleDeg = atan2(ay, ax) * 180.0 / .pi
-    return (atan(k) * 180.0 / .pi, "custom", axisAngleDeg)
+    let axisAngleDeg = atan2(ay, ax) * (180 / Double.pi)
+    return (atan(k) * (180 / Double.pi), "custom", axisAngleDeg)
 }
 
 /// Resolve state.scale_strokes (default true) and state.scale_corners

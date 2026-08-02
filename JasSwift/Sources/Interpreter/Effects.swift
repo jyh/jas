@@ -2469,7 +2469,12 @@ public func applyAlignOperation(model: Model, store: StateStore, op: String) {
 
     // Read align panel state.
     let usePreview = (store.get("align_use_preview_bounds") as? Bool) ?? false
-    let boundsFn: AlignBoundsFn = usePreview ? alignPreviewBounds : alignGeometricBounds
+    // RESOLVEDALIGN: pick the LEAF measurement per Use Preview Bounds, then wrap
+    // it so the kinds whose geometry lives behind an id resolve. Both modes were
+    // affected — each plain function is resolver-less.
+    let leaf: (Element) -> BBox = usePreview ? alignPreviewBounds : alignGeometricBounds
+    let resolver = IdIndexResolver(index: model.idIndex)
+    let boundsFn: AlignBoundsFn = { alignResolvedBounds($0, resolver, leaf) }
     let alignTo = (store.get("align_to") as? String) ?? "selection"
     let keyPathRaw = store.get("align_key_object_path")
 

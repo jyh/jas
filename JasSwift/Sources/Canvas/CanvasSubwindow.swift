@@ -413,7 +413,7 @@ private func fillCurrentPathWithGradient(_ ctx: CGContext, _ g: Gradient, _ bbox
     ctx.clip(using: cgFillRule(fillRule))
     switch g.type {
     case .linear:
-        let rad = g.angle * .pi / 180
+        let rad = g.angle * (Double.pi / 180)
         let halfDiag = sqrt(bbox.width * bbox.width + bbox.height * bbox.height) / 2
         let cx = bbox.midX, cy = bbox.midY
         let dx = cos(rad) * halfDiag
@@ -503,7 +503,7 @@ func arcToBeziers(
 
     var rx = abs(rxIn)
     var ry = abs(ryIn)
-    let phi = xRotation * .pi / 180.0
+    let phi = xRotation * (Double.pi / 180)
     let cosPhi = cos(phi), sinPhi = sin(phi)
 
     let dx2 = (cx0 - x) / 2.0, dy2 = (cy0 - y) / 2.0
@@ -997,7 +997,7 @@ private func drawSegmentedText(_ ctx: CGContext, _ v: Text) {
         cx += dxPx
         let bShift = t.baselineShift ?? 0.0
         let rotDeg = t.rotate ?? 0.0
-        let rotRad = rotDeg * .pi / 180.0
+        let rotRad = rotDeg * (Double.pi / 180)
         let hasRotate = rotRad != 0.0
         let hasTransform = t.transform != nil
 
@@ -1509,7 +1509,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         let hScale = parseScalePercent(v.horizontalScale)
         let vScale = parseScalePercent(v.verticalScale)
         let rotDeg = parseRotateDeg(v.rotate)
-        let rotRad = rotDeg * .pi / 180.0
+        let rotRad = rotDeg * (Double.pi / 180)
         let needsScale = (hScale != 1.0 || vScale != 1.0)
         if needsScale {
             ctx.translateBy(x: v.x, y: v.y)
@@ -3119,7 +3119,7 @@ class CanvasNSView: NSView {
             // no-edit repaints reuse the cached target geometry. Per-app perf
             // cache; no behavior change (gated by a per-hit assert that
             // cached == fresh in LiveElement.swift).
-            setRecomputeCacheGeneration(model.generation)
+            setRecomputeCacheEpoch(owner: ObjectIdentifier(model), generation: model.generation)
         } else {
             setCanvasRefResolver(RebuildResolver(document: document))
         }

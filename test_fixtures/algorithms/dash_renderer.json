@@ -1,0 +1,149 @@
+{
+  "_doc": "THE DASH RENDERER (jas_dioxus/src/algorithms/dash_renderer.rs, JasSwift/Sources/Algorithms/DashRenderer.swift, against workspace_interpreter/dash_renderer.py). Every dashed stroke the app draws goes through it -- both ports expand the dashes themselves rather than handing a dash array to the platform -- and until this family nothing compared the two.\n\nThe result is a LIST OF SUB-PATHS, one per dash, in arc-length order, so the family pins where each dash STARTS AND STOPS and not merely how much ink there is. A comparison on total length would pass a port whose phase was half a period out.\n\nEXPECTATIONS ARE HAND-DERIVED from DASH_ALIGN.md's rule, with the arithmetic in each `derivation`. In PRESERVE mode the pattern is laid down from arc-length 0 at its literal lengths, so the dash boundaries are multiples of the period and can be written down directly. In ALIGN mode the per-segment scale is `L / (m * P + d0)` with `m = round((L - d0) / P)` for a lone open segment -- round HALF AWAY FROM ZERO, which is what both `f64::round` and `Double.rounded()` do and what Python's built-in `round` does NOT, a trap worth naming since it is how a hand derivation goes wrong here.\n\nTolerance 1e-9. Preserve-mode answers are exact integers; the align-mode answers are an accumulating sum of a scaled dash length, so they carry a few ulps of drift by the last dash and cannot be pinned bit-exactly.",
+  "algorithm": "dash_renderer",
+  "comparison": "tolerance",
+  "tolerance": 1e-9,
+  "vectors": [
+    {
+      "name": "preserve_even_pattern_on_a_straight_line",
+      "derivation": "A horizontal line of length 100 with pattern [10,10] (period 20), preserve mode. The pattern starts at arc-length 0 with a dash, so the ink runs 0-10, 20-30, 40-50, 60-70, 80-90, and the final 90-100 is a gap: FIVE dashes, and the line ends WITHOUT ink. That trailing gap is the whole difference between preserve and align, and the align row below uses the same line.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "dash_array": [10.0, 10.0], "align_anchors": false,
+      "expected": {"subpaths": [
+        [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 10.0, "y": 0.0}],
+        [{"cmd": "M", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 30.0, "y": 0.0}],
+        [{"cmd": "M", "x": 40.0, "y": 0.0}, {"cmd": "L", "x": 50.0, "y": 0.0}],
+        [{"cmd": "M", "x": 60.0, "y": 0.0}, {"cmd": "L", "x": 70.0, "y": 0.0}],
+        [{"cmd": "M", "x": 80.0, "y": 0.0}, {"cmd": "L", "x": 90.0, "y": 0.0}]
+      ]}
+    },
+    {
+      "name": "preserve_odd_pattern_is_padded_by_repetition",
+      "derivation": "SVG semantics: an odd-length dash array is repeated to make it even, so [10] becomes [10,10] and the answer must be IDENTICAL to the row above. A port that padded with a zero, or with the array's first element only, would differ immediately.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "dash_array": [10.0], "align_anchors": false,
+      "expected": {"subpaths": [
+        [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 10.0, "y": 0.0}],
+        [{"cmd": "M", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 30.0, "y": 0.0}],
+        [{"cmd": "M", "x": 40.0, "y": 0.0}, {"cmd": "L", "x": 50.0, "y": 0.0}],
+        [{"cmd": "M", "x": 60.0, "y": 0.0}, {"cmd": "L", "x": 70.0, "y": 0.0}],
+        [{"cmd": "M", "x": 80.0, "y": 0.0}, {"cmd": "L", "x": 90.0, "y": 0.0}]
+      ]}
+    },
+    {
+      "name": "preserve_uneven_pattern_pins_the_gap_length",
+      "derivation": "SEPARATES THE ON LENGTH FROM THE OFF LENGTH, which [10,10] cannot: pattern [12,8] on the same 100-length line has period 20 but 12 units of ink. Dashes run 0-12, 20-32, 40-52, 60-72, 80-92, and the tail 92-100 is a gap. A port that swapped the two entries would produce 0-8, 20-28, ... and pass every symmetric vector.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "dash_array": [12.0, 8.0], "align_anchors": false,
+      "expected": {"subpaths": [
+        [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 12.0, "y": 0.0}],
+        [{"cmd": "M", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 32.0, "y": 0.0}],
+        [{"cmd": "M", "x": 40.0, "y": 0.0}, {"cmd": "L", "x": 52.0, "y": 0.0}],
+        [{"cmd": "M", "x": 60.0, "y": 0.0}, {"cmd": "L", "x": 72.0, "y": 0.0}],
+        [{"cmd": "M", "x": 80.0, "y": 0.0}, {"cmd": "L", "x": 92.0, "y": 0.0}]
+      ]}
+    },
+    {
+      "name": "preserve_a_dash_that_straddles_an_anchor_keeps_the_corner",
+      "derivation": "THE VECTOR THIS FAMILY EXISTS FOR. An L-shaped path: (0,0) to (45,0) to (45,95), total arc length 140, pattern [12,8]. Dash boundaries are unchanged by the corner, so the ink runs 0-12, 20-32, 40-52, 60-72, 80-92, 100-112, 120-132. The THIRD dash spans arc-length 40 to 52 and the corner sits at 45, so it must be emitted as THREE commands -- M(40,0), L(45,0), L(45,7) -- and not as a straight chord from (40,0) to (45,7). Every later dash lives on the vertical leg at offset arc - 45. The last dash, 120-132, ends at y = 132 - 45 = 87, eight units short of the far end.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 45, "y": 0}, {"cmd": "L", "x": 45, "y": 95}]},
+      "dash_array": [12.0, 8.0], "align_anchors": false,
+      "expected": {"subpaths": [
+        [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 12.0, "y": 0.0}],
+        [{"cmd": "M", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 32.0, "y": 0.0}],
+        [{"cmd": "M", "x": 40.0, "y": 0.0}, {"cmd": "L", "x": 45.0, "y": 0.0}, {"cmd": "L", "x": 45.0, "y": 7.0}],
+        [{"cmd": "M", "x": 45.0, "y": 15.0}, {"cmd": "L", "x": 45.0, "y": 27.0}],
+        [{"cmd": "M", "x": 45.0, "y": 35.0}, {"cmd": "L", "x": 45.0, "y": 47.0}],
+        [{"cmd": "M", "x": 45.0, "y": 55.0}, {"cmd": "L", "x": 45.0, "y": 67.0}],
+        [{"cmd": "M", "x": 45.0, "y": 75.0}, {"cmd": "L", "x": 45.0, "y": 87.0}]
+      ]}
+    },
+    {
+      "name": "align_a_lone_open_segment_puts_ink_on_both_ends",
+      "derivation": "ALIGN MODE, and the contrast with the first row is the point. A lone open segment is the EE boundary case -- a dash at BOTH ends -- so the solver picks the whole number of periods m = round((L - d0) / P) = round((100 - 10) / 20) = round(4.5) = 5, HALF AWAY FROM ZERO, and scales the pattern by L / (m*P + d0) = 100/110 = 0.9090909090909091. The scaled dash and gap are each 100/11 = 9.09090909090909. Ink therefore runs from k * 200/11 for 100/11 units, k = 0..5: SIX dashes, and the last one ends exactly at 100, so the line ends WITH ink where the preserve row ended with a gap. The listed values follow the accumulating walk (t += scaled length), so the later boundaries carry a few ulps of drift from the closed form -- inside the 1e-9 band by five orders of magnitude.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "dash_array": [10.0, 10.0], "align_anchors": true,
+      "expected": {"subpaths": [
+        [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 9.09090909090909, "y": 0.0}],
+        [{"cmd": "M", "x": 18.18181818181818, "y": 0.0}, {"cmd": "L", "x": 27.27272727272727, "y": 0.0}],
+        [{"cmd": "M", "x": 36.36363636363636, "y": 0.0}, {"cmd": "L", "x": 45.45454545454545, "y": 0.0}],
+        [{"cmd": "M", "x": 54.54545454545455, "y": 0.0}, {"cmd": "L", "x": 63.63636363636364, "y": 0.0}],
+        [{"cmd": "M", "x": 72.72727272727273, "y": 0.0}, {"cmd": "L", "x": 81.81818181818183, "y": 0.0}],
+        [{"cmd": "M", "x": 90.90909090909092, "y": 0.0}, {"cmd": "L", "x": 100.0, "y": 0.0}]
+      ]}
+    },
+    {
+      "name": "align_with_an_exact_fit_leaves_the_pattern_alone",
+      "derivation": "THE FIXED POINT of the solver, and the cheapest check that the scale is a scale and not a constant. A 110-length segment with pattern [10,10]: m = round((110-10)/20) = 5 and m*P + d0 = 110 exactly, so the scale is 1 and align mode must reproduce the LITERAL pattern -- six dashes at 0-10, 20-30, 40-50, 60-70, 80-90, 100-110. A port whose solver was off by one period would stretch or squeeze visibly here.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 110, "y": 0}]},
+      "dash_array": [10.0, 10.0], "align_anchors": true,
+      "expected": {"subpaths": [
+        [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 10.0, "y": 0.0}],
+        [{"cmd": "M", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 30.0, "y": 0.0}],
+        [{"cmd": "M", "x": 40.0, "y": 0.0}, {"cmd": "L", "x": 50.0, "y": 0.0}],
+        [{"cmd": "M", "x": 60.0, "y": 0.0}, {"cmd": "L", "x": 70.0, "y": 0.0}],
+        [{"cmd": "M", "x": 80.0, "y": 0.0}, {"cmd": "L", "x": 90.0, "y": 0.0}],
+        [{"cmd": "M", "x": 100.0, "y": 0.0}, {"cmd": "L", "x": 110.0, "y": 0.0}]
+      ]}
+    },
+    {
+      "name": "empty_dash_array_is_one_solid_subpath",
+      "derivation": "No dashing at all: the whole path comes back as a SINGLE sub-path equal to the input, command for command. Pinned because 'no dashes' and 'no ink' are opposite answers and a guard that returned the empty list would silently erase every undashed stroke.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 30, "y": 0}, {"cmd": "L", "x": 30, "y": 40}]},
+      "dash_array": [], "align_anchors": false,
+      "expected": {"subpaths": [[
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "L", "x": 30.0, "y": 0.0},
+        {"cmd": "L", "x": 30.0, "y": 40.0}
+      ]]}
+    },
+    {
+      "name": "an_all_zero_dash_array_is_also_solid",
+      "derivation": "DEGENERATE, and it takes the same branch for a different reason: a pattern of all zeros has no period to lay down, so it means 'not dashed' rather than 'infinitely many zero-length dashes'. Same single solid sub-path.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 30, "y": 0}]},
+      "dash_array": [0.0, 0.0], "align_anchors": false,
+      "expected": {"subpaths": [[
+        {"cmd": "M", "x": 0.0, "y": 0.0},
+        {"cmd": "L", "x": 30.0, "y": 0.0}
+      ]]}
+    },
+    {
+      "name": "a_moveto_only_path_draws_nothing",
+      "derivation": "DEGENERATE: a path with no drawable segment has no arc length, so it yields NO sub-path -- not one empty sub-path. The undashed branch checks for a non-MoveTo command precisely so this case does not slip through as 'solid'.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 5, "y": 5}]},
+      "dash_array": [], "align_anchors": false,
+      "expected": {"subpaths": []}
+    },
+    {
+      "name": "a_dashed_moveto_only_path_also_draws_nothing",
+      "derivation": "The same degenerate input down the DASHED branch, which reaches it by a different guard (the segment list comes back empty). Both roads must arrive at no sub-paths.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 5, "y": 5}]},
+      "dash_array": [10.0, 10.0], "align_anchors": false,
+      "expected": {"subpaths": []}
+    },
+    {
+      "name": "each_subpath_is_dashed_from_its_own_origin",
+      "derivation": "TWO SUBPATHS IN ONE PATH. The pattern restarts at arc-length 0 of EACH subpath rather than running continuously across the MoveTo, so the second leg -- a 30-long horizontal line starting at (0,50) -- gets the same 0-10 / 20-30 layout as the first, in its own coordinates. A port that accumulated arc length across the MoveTo would put the second leg out of phase.",
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 30, "y": 0},
+        {"cmd": "M", "x": 0, "y": 50}, {"cmd": "L", "x": 30, "y": 50}
+      ]},
+      "dash_array": [10.0, 10.0], "align_anchors": false,
+      "expected": {"subpaths": [
+        [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 10.0, "y": 0.0}],
+        [{"cmd": "M", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 30.0, "y": 0.0}],
+        [{"cmd": "M", "x": 0.0, "y": 50.0}, {"cmd": "L", "x": 10.0, "y": 50.0}],
+        [{"cmd": "M", "x": 20.0, "y": 50.0}, {"cmd": "L", "x": 30.0, "y": 50.0}]
+      ]}
+    },
+    {
+      "name": "a_cubic_dash_is_emitted_as_a_cubic",
+      "_no_golden_why": "DASH_ALIGN.md section subpath_between: a dash that lands inside a curve must be emitted as a CURVE (a de Casteljau split of the original), never as a chord and never as a polyline. That contract is checkable on paper -- the command must be a C -- but the split control points come out of the shared arc-length parameterisation in `arrow_trim`, and writing them down here would transcribe that kernel rather than derive it. Comparison-only, and what it gates is that both ports split the same cubic at the same parameter.",
+      "element": {"type": "path", "d": [
+        {"cmd": "M", "x": 0, "y": 0},
+        {"cmd": "C", "x1": 0, "y1": 60, "x2": 90, "y2": 60, "x": 90, "y": 0}
+      ]},
+      "dash_array": [12.0, 8.0], "align_anchors": false
+    }
+  ]
+}

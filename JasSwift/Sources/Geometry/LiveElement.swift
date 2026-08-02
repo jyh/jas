@@ -68,6 +68,46 @@ public struct NullResolver: ElementResolver {
     public func resolve(_ id: ElementRef) -> Element? { nil }
 }
 
+/// The evaluated rings of a live kind whose geometry lives behind a resolver
+/// (`reference` / `recorded` / `generated`), or `nil` for every other element —
+/// including `compoundShape`, which owns its operands and needs no resolver.
+///
+/// `[]` and `nil` mean DIFFERENT things and callers must not conflate them:
+/// `nil` is "this kind carries its own coordinates, ask it"; `[]` is "this
+/// kind's geometry is resolved, and it resolved to nothing" — a dangling
+/// target, an unknown concept, or a cycle, each of which evaluates to empty
+/// rather than trapping (REFERENCE_GRAPH.md §3).
+///
+/// THE ONE definition, shared by hit-testing and bounds. Both need the same
+/// answer to "where is this instance", and a second copy is how they would come
+/// to disagree. Mirrors Rust `resolved_rings` (geometry/live.rs).
+public func resolvedRings(_ elem: Element, _ resolver: ElementResolver) -> BoolPolygonSet? {
+    guard case .live(let v) = elem else { return nil }
+    var visiting = VisitSet()
+    switch v {
+    case .reference(let r):
+        return r.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    case .recorded(let rec):
+        return rec.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    case .generated(let g):
+        return g.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    case .compoundShape:
+        return nil
+    }
+}
+
+/// Axis-aligned bounding box of a ring set, or `nil` when it holds no points.
+public func ringsBBox(_ rings: BoolPolygonSet) -> BBox? {
+    let pts = rings.flatMap { $0 }
+    guard let first = pts.first else { return nil }
+    var minX = first.0, minY = first.1, maxX = first.0, maxY = first.1
+    for p in pts.dropFirst() {
+        minX = min(minX, p.0); minY = min(minY, p.1)
+        maxX = max(maxX, p.0); maxY = max(maxY, p.1)
+    }
+    return (x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+}
+
 /// The cycle-guard set threaded through evaluation. Carried as an explicit
 /// parameter (never instance state) so all five apps break reference cycles
 /// identically (REFERENCE_GRAPH.md §3). Mirrors Rust `VisitSet`.
@@ -842,6 +882,10 @@ private struct RecomputeKey: Hashable {
 // test runner so concurrent tests neither data-race the dictionary nor share
 // cache entries. The box is created lazily per thread and reused thereafter.
 private final class RecomputeCacheBox {
+    /// Identity of the Model the cached entries were computed from. See
+    /// ``setRecomputeCacheEpoch(owner:generation:)`` — a generation alone does
+    /// not identify a document state, only a document state WITHIN one model.
+    var owner: ObjectIdentifier? = nil
     var generation: UInt64 = 0
     var entries: [RecomputeKey: RecomputeCacheEntry] = [:]
 }
@@ -856,15 +900,30 @@ private func recomputeCacheBox() -> RecomputeCacheBox {
     return box
 }
 
-/// Generation-epoch the recompute cache: if `generation` differs from the
-/// current epoch, clear every entry and adopt the new epoch. Called at the
-/// paint entry with `Model.generation` (bumped on every mutation / undo /
-/// redo), so this drops the cache on any edit while preserving it across
-/// no-edit repaints.
-func setRecomputeCacheGeneration(_ generation: UInt64) {
+/// Epoch the recompute cache: if the `(owner, generation)` pair differs from
+/// the current epoch, clear every entry and adopt the new one. Called at each
+/// entry point that reads the cache — the paint entry and the selection entry —
+/// with `Model.generation` (bumped on every mutation / undo / redo), so this
+/// drops the cache on any edit while preserving it across no-edit repaints.
+///
+/// `owner` IS LOAD-BEARING, and the reason is written down two files away.
+/// ``CanvasRenderSignature`` carries a `modelId` because it must distinguish
+/// "two tabs whose independent generation counters could otherwise collide at
+/// the same value" — the repaint signature had that guard and this cache did
+/// not, though it needs exactly the same one. Two documents open at the same
+/// generation, each with a symbol master sharing an id (ids are per-document,
+/// so "m1" in both is ordinary), would otherwise serve each other's geometry:
+/// the instance in one tab paints the master from the other.
+///
+/// Rust guards the same hazard one layer down, per cache entry, by comparing
+/// the target's `Rc::as_ptr`. `Element` is a value type here with no pointer to
+/// compare, which is why this port carries the distinction in the epoch
+/// instead. Same hazard, same coverage, two dialects.
+func setRecomputeCacheEpoch(owner: ObjectIdentifier, generation: UInt64) {
     let box = recomputeCacheBox()
-    if box.generation != generation {
+    if box.owner != owner || box.generation != generation {
         box.entries.removeAll(keepingCapacity: true)
+        box.owner = owner
         box.generation = generation
     }
 }
@@ -957,6 +1016,7 @@ func recomputeCacheStateForTest(_ targetId: String, _ precision: Double) -> Reco
 func clearRecomputeCacheForTest() {
     let box = recomputeCacheBox()
     box.entries.removeAll()
+    box.owner = nil
     box.generation = 0
 }
 

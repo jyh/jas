@@ -1,0 +1,67 @@
+{
+  "_doc": "THE PATTERN BRUSH'S TILING (jas_dioxus/src/algorithms/pattern_along_path.rs, JasSwift/Sources/Algorithms/PatternAlongPath.swift). Same standing as `art_along_path`: the shared first-subpath walker beneath it is gated by `art_flatten`, and the tiling above it was gated by nothing.\n\nEXPECTATIONS ARE HAND-DERIVED from the documented tiling: ribbon = (scale/100) * stroke_weight; the tile's ON-PATH length is tile_w = ribbon * (tile_width / tile_height), which is the tile's own aspect ratio carried onto the ribbon's height; the advance is step = tile_w * (1 + spacing/100); and the number of whole tiles is max(floor(total / step), 1) -- AT LEAST ONE, so a path shorter than a tile still gets a clamped tile rather than nothing. Within a tile, a point (ax, ay) sits at arc-length start + clamp(ax/tile_width, 0, 1) * tile_w, offset along the left normal by (ay - tile_height/2) / tile_height * ribbon.\n\nA straight horizontal path is used throughout so the tangent is 0, the left normal is (0,1), and every answer is exact.",
+  "algorithm": "pattern_along_path",
+  "comparison": "tolerance",
+  "tolerance": 1e-9,
+  "vectors": [
+    {
+      "name": "straight_path_tiles_twice",
+      "derivation": "ribbon = 1.0 * 10 = 10; tile_w = 10 * (100/20) = 50; spacing 0 so step = 50; total 100 gives floor(100/50) = 2 tiles. The side polygon [(0,10),(50,0),(100,10),(50,20)] is a diamond: ax/100 gives u = 0, 0.5, 1, 0.5 and ay gives offsets (10-10)/20*10 = 0, (0-10)/20*10 = -5, 0, +5. Tile 0 therefore lands on [(0,0),(25,-5),(50,0),(25,5)] and tile 1 on the same shape advanced by 50.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"tile_width": 100.0, "tile_height": 20.0, "scale": 100.0, "spacing": 0.0, "stroke_weight": 10.0, "flip_across": false, "flip_along": false,
+                "side": [[[0.0, 10.0], [50.0, 0.0], [100.0, 10.0], [50.0, 20.0]]]},
+      "expected": [
+        [[0.0, 0.0], [25.0, -5.0], [50.0, 0.0], [25.0, 5.0]],
+        [[50.0, 0.0], [75.0, -5.0], [100.0, 0.0], [75.0, 5.0]]
+      ]
+    },
+    {
+      "name": "spacing_reduces_the_tile_count_and_leaves_the_tile_alone",
+      "derivation": "THE DISTINCTION SPACING IS FOR, and it is easy to get backwards. spacing 50 makes step = 50 * 1.5 = 75, so floor(100/75) = 1 tile -- but the TILE ITSELF is unchanged and still spans arc 0..50, because spacing is a gap between tiles and not a scale on them. A port that folded the gap into tile_w would return one tile spanning 0..75.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"tile_width": 100.0, "tile_height": 20.0, "scale": 100.0, "spacing": 50.0, "stroke_weight": 10.0, "flip_across": false, "flip_along": false,
+                "side": [[[0.0, 10.0], [50.0, 0.0], [100.0, 10.0], [50.0, 20.0]]]},
+      "expected": [[[0.0, 0.0], [25.0, -5.0], [50.0, 0.0], [25.0, 5.0]]]
+    },
+    {
+      "name": "a_path_shorter_than_one_tile_still_gets_one_tile",
+      "derivation": "DEGENERATE, and it is a deliberate clamp rather than a rounding accident: total 30 against step 50 gives floor(0.6) = 0, which is raised to 1. The single tile is NOT squeezed to fit -- it still spans arc 0..50 in tile coordinates, and `point_at_arclength` clamps everything past the path's end onto the end point, so u = 0.5 and u = 1 both land at x = 30. The tile therefore collapses at its far end, which is the documented behaviour and not a defect.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 30, "y": 0}]},
+      "brush": {"tile_width": 100.0, "tile_height": 20.0, "scale": 100.0, "spacing": 0.0, "stroke_weight": 10.0, "flip_across": false, "flip_along": false,
+                "side": [[[0.0, 10.0], [50.0, 0.0], [100.0, 10.0], [50.0, 20.0]]]},
+      "expected": [[[0.0, 0.0], [25.0, -5.0], [30.0, 0.0], [25.0, 5.0]]]
+    },
+    {
+      "name": "flip_across_negates_the_offset",
+      "derivation": "The diamond's near and far points swap: -5 becomes +5 and back. The ON-PATH positions do not move.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 50, "y": 0}]},
+      "brush": {"tile_width": 100.0, "tile_height": 20.0, "scale": 100.0, "spacing": 0.0, "stroke_weight": 10.0, "flip_across": true, "flip_along": false,
+                "side": [[[0.0, 10.0], [50.0, 0.0], [100.0, 10.0], [50.0, 20.0]]]},
+      "expected": [[[0.0, 0.0], [25.0, 5.0], [50.0, 0.0], [25.0, -5.0]]]
+    },
+    {
+      "name": "zero_tile_height_yields_nothing",
+      "derivation": "DEGENERATE: tile_height is a divisor twice over (in the aspect ratio and in the offset), so a zero is rejected before anything is computed.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"tile_width": 100.0, "tile_height": 0.0, "scale": 100.0, "spacing": 0.0, "stroke_weight": 10.0, "flip_across": false, "flip_along": false,
+                "side": [[[0.0, 10.0], [100.0, 10.0]]]},
+      "expected": []
+    },
+    {
+      "name": "zero_scale_collapses_the_ribbon_and_yields_nothing",
+      "derivation": "DEGENERATE, by a different road: the dimensions are fine, but scale 0 makes ribbon 0, so tile_w is 0 and there is no advance to tile by. Rejected rather than looped over forever -- which is what a port that only guarded the dimensions would do.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 0, "y": 0}, {"cmd": "L", "x": 100, "y": 0}]},
+      "brush": {"tile_width": 100.0, "tile_height": 20.0, "scale": 0.0, "spacing": 0.0, "stroke_weight": 10.0, "flip_across": false, "flip_along": false,
+                "side": [[[0.0, 10.0], [100.0, 10.0]]]},
+      "expected": []
+    },
+    {
+      "name": "a_zero_length_path_yields_nothing",
+      "derivation": "DEGENERATE: two coincident points give total arc length 0, so there is nothing to tile along.",
+      "element": {"type": "path", "d": [{"cmd": "M", "x": 5, "y": 5}, {"cmd": "L", "x": 5, "y": 5}]},
+      "brush": {"tile_width": 100.0, "tile_height": 20.0, "scale": 100.0, "spacing": 0.0, "stroke_weight": 10.0, "flip_across": false, "flip_along": false,
+                "side": [[[0.0, 10.0], [100.0, 10.0]]]},
+      "expected": []
+    }
+  ]
+}

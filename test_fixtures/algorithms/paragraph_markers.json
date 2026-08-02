@@ -1,0 +1,161 @@
+{
+  "_doc": "THE LIST-MARKER HALF OF `text_layout_paragraph` -- and the reason it is a SEPARATE family from the verb of that name. The `text_layout_paragraph` verb drives `text_layout::layout_with_paragraphs`; it never reaches the module called text_layout_paragraph. Those functions (`marker_text`, `to_alpha`, `to_roman`, `compute_counters`) are called only from the RENDERER -- jas_dioxus/src/canvas/render.rs and JasSwift/Sources/Canvas/CanvasSubwindow.swift -- so every bulleted and numbered list an artist draws went through arithmetic that no corpus family watched.\n\nThe fifth function, `build_segments_from_text` / `buildParagraphSegments`, is NOT here: it consumes a tspan list and a content string, which is the text corpus's shape rather than this one's, and giving it a home is a separate vector set. That is a declared omission, not an oversight.\n\nEXPECTATIONS ARE HAND-DERIVED from PARAGRAPH.md's enumeration and from the definitions of spreadsheet base-26 and Roman numerals. Comparison is EXACT: every answer is a string or an integer, and a tolerance would mean nothing.",
+  "algorithm": "paragraph_markers",
+  "comparison": "exact",
+  "vectors": [
+    {
+      "name": "marker_bullet_disc",
+      "function": "marker_text",
+      "derivation": "PARAGRAPH.md maps bullet-disc to U+2022 BULLET, and the counter is ignored for every bullet-* style -- passing 7 must change nothing.",
+      "list_style": "bullet-disc", "counter": 7,
+      "expected": {"text": "•"}
+    },
+    {
+      "name": "marker_bullet_open_square",
+      "function": "marker_text",
+      "derivation": "bullet-open-square is U+25A1 WHITE SQUARE, not U+25A0 BLACK SQUARE. The pair separates the two square styles, which are one codepoint apart and easy to transpose.",
+      "list_style": "bullet-open-square", "counter": 1,
+      "expected": {"text": "□"}
+    },
+    {
+      "name": "marker_bullet_square",
+      "function": "marker_text",
+      "derivation": "The other half of that pair: bullet-square is U+25A0 BLACK SQUARE.",
+      "list_style": "bullet-square", "counter": 1,
+      "expected": {"text": "■"}
+    },
+    {
+      "name": "marker_num_decimal",
+      "function": "marker_text",
+      "derivation": "num-decimal renders the counter followed by a period. The trailing '.' is part of the marker, not something the renderer adds.",
+      "list_style": "num-decimal", "counter": 7,
+      "expected": {"text": "7."}
+    },
+    {
+      "name": "marker_num_lower_alpha_past_z",
+      "function": "marker_text",
+      "derivation": "Counter 27 is the first two-letter marker: base-26 with no zero digit gives 'aa', so the marker is 'aa.'. This is the one value that separates spreadsheet base-26 from ordinary base-26, in which 27 would be 'ba'.",
+      "list_style": "num-lower-alpha", "counter": 27,
+      "expected": {"text": "aa."}
+    },
+    {
+      "name": "marker_num_upper_roman",
+      "function": "marker_text",
+      "derivation": "1990 = M + CM + XC, so the upper-roman marker is 'MCMXC.'. It exercises both subtractive pairs.",
+      "list_style": "num-upper-roman", "counter": 1990,
+      "expected": {"text": "MCMXC."}
+    },
+    {
+      "name": "marker_unknown_style_is_empty",
+      "function": "marker_text",
+      "derivation": "DEGENERATE, and it is a contract rather than an accident: an unrecognised style returns the EMPTY string so the renderer skips drawing a marker. A port that returned the style name, or the bare counter, would draw garbage into the artboard.",
+      "list_style": "bullet-triangle", "counter": 3,
+      "expected": {"text": ""}
+    },
+    {
+      "name": "alpha_one_is_a",
+      "function": "to_alpha",
+      "derivation": "The counter is 1-BASED: 1 maps to 'a', not to 'b' and not to the empty string.",
+      "n": 1, "upper": false,
+      "expected": {"text": "a"}
+    },
+    {
+      "name": "alpha_twenty_six_is_z",
+      "function": "to_alpha",
+      "derivation": "26 is the last single letter. n -= 1 gives 25, 25 % 26 = 25 -> 'z', and 25 / 26 = 0 terminates.",
+      "n": 26, "upper": false,
+      "expected": {"text": "z"}
+    },
+    {
+      "name": "alpha_twenty_seven_rolls_over_to_aa",
+      "function": "to_alpha",
+      "derivation": "THE ROLLOVER. n=27: 26 % 26 = 0 -> 'a', 26 / 26 = 1; then 0 % 26 = 0 -> 'a', 0/26 = 0. Reversed: 'aa'.",
+      "n": 27, "upper": false,
+      "expected": {"text": "aa"}
+    },
+    {
+      "name": "alpha_fifty_two_is_az",
+      "function": "to_alpha",
+      "derivation": "SEPARATES THE TWO DIGITS, which 'aa' cannot. n=52: 51 % 26 = 25 -> 'z', 51/26 = 1; then 0 -> 'a'. Reversed: 'az'. Uppercase gives 'AZ'.",
+      "n": 52, "upper": true,
+      "expected": {"text": "AZ"}
+    },
+    {
+      "name": "alpha_fifty_three_carries_to_ba",
+      "function": "to_alpha",
+      "derivation": "The step after 'AZ' must be 'BA', not 'AA' and not 'BZ'. n=53: 52 % 26 = 0 -> 'a', 52/26 = 2; then 1 % 26 = 1 -> 'b'. Reversed: 'ba' -> 'BA'.",
+      "n": 53, "upper": true,
+      "expected": {"text": "BA"}
+    },
+    {
+      "name": "alpha_zero_is_empty",
+      "function": "to_alpha",
+      "derivation": "DEGENERATE: there is no zeroth letter in a system with no zero digit, so 0 returns the empty string rather than looping or underflowing.",
+      "n": 0, "upper": false,
+      "expected": {"text": ""}
+    },
+    {
+      "name": "roman_one",
+      "function": "to_roman",
+      "derivation": "1 = I, lowercased to 'i'.",
+      "n": 1, "upper": false,
+      "expected": {"text": "i"}
+    },
+    {
+      "name": "roman_four_is_subtractive",
+      "function": "to_roman",
+      "derivation": "4 must be 'iv', not 'iiii'. This is the smallest subtractive pair.",
+      "n": 4, "upper": false,
+      "expected": {"text": "iv"}
+    },
+    {
+      "name": "roman_nine_is_subtractive",
+      "function": "to_roman",
+      "derivation": "9 must be 'ix', not 'viiii'. Paired with 4 above, the two pin both of the units-place subtractive forms.",
+      "n": 9, "upper": false,
+      "expected": {"text": "ix"}
+    },
+    {
+      "name": "roman_thirty_nine_ninety_nine_is_the_ceiling",
+      "function": "to_roman",
+      "derivation": "3999 is the largest standard Roman numeral: MMM + CM + XC + IX = MMMCMXCIX. It exercises every subtractive pair in one value.",
+      "n": 3999, "upper": true,
+      "expected": {"text": "MMMCMXCIX"}
+    },
+    {
+      "name": "roman_above_the_ceiling_falls_back_to_parentheses",
+      "function": "to_roman",
+      "derivation": "DEGENERATE, and it is a documented contract: standard Roman tops out at MMMCMXCIX, so 4000 collapses to the parenthesised decimal '(4000)' -- in BOTH cases, upper and lower, since there is nothing to case. A port that emitted 'MMMM' would disagree here and nowhere else.",
+      "n": 4000, "upper": false,
+      "expected": {"text": "(4000)"}
+    },
+    {
+      "name": "roman_zero_is_empty",
+      "function": "to_roman",
+      "derivation": "DEGENERATE: Roman numerals have no zero, so 0 returns the empty string.",
+      "n": 0, "upper": true,
+      "expected": {"text": ""}
+    },
+    {
+      "name": "counters_run_breaks_on_a_bullet_and_restarts",
+      "function": "compute_counters",
+      "derivation": "PARAGRAPH.md counter-run rule. Two num-decimal paragraphs count 1, 2. A bullet paragraph is not a numbered list, so it takes 0 AND BREAKS THE RUN. The next num-decimal therefore restarts at 1 rather than continuing at 3 -- that restart is the whole content of the rule. The two num-lower-roman paragraphs then start their own run at 1 and 2, because a DIFFERENT num- style also breaks the run.",
+      "styles": ["num-decimal", "num-decimal", "bullet-disc", "num-decimal", "num-lower-roman", "num-lower-roman"],
+      "expected": {"counters": [1, 2, 0, 1, 1, 2]}
+    },
+    {
+      "name": "counters_a_styleless_paragraph_breaks_the_run",
+      "function": "compute_counters",
+      "derivation": "A paragraph with NO list style at all (null, not a bullet) breaks the run exactly as a bullet does, so the interleaving gives [0,1,0,1] and never [0,1,0,2].",
+      "styles": [null, "num-decimal", null, "num-decimal"],
+      "expected": {"counters": [0, 1, 0, 1]}
+    },
+    {
+      "name": "counters_empty_input_is_empty",
+      "function": "compute_counters",
+      "derivation": "DEGENERATE: no paragraphs, no counters. Pinned so that a port returning [0] for the empty case is caught.",
+      "styles": [],
+      "expected": {"counters": []}
+    }
+  ]
+}

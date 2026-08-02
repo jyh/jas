@@ -2398,7 +2398,7 @@ struct YamlElementView: View {
                 .border(SwiftUI.Color.gray, width: 1)
             } else {
                 // Angle convention: 0° = left-to-right; positive rotates CCW.
-                let rad = angle * .pi / 180.0
+                let rad = angle * (Double.pi / 180)
                 let start = UnitPoint(x: 0.5 - 0.5 * cos(rad), y: 0.5 + 0.5 * sin(rad))
                 let end = UnitPoint(x: 0.5 + 0.5 * cos(rad), y: 0.5 - 0.5 * sin(rad))
                 Rectangle().fill(

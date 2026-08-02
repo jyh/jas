@@ -614,7 +614,17 @@ public struct Transform: Equatable, Hashable {
     }
 
     public static func rotate(_ angleDeg: Double) -> Transform {
-        let rad = angleDeg * .pi / 180
+        // `angleDeg * (pi/180)`, NOT `angleDeg * pi / 180`. The two group
+        // differently and disagree by an ulp on 184 of the 721 integer
+        // degrees in [-360, 360] -- MEASURED through the transform_apply
+        // corpus family, not argued. Rust spells this `f64::to_radians()`,
+        // which is `self * (PI / 180.0)`, and since MATRIXPRECISION writes
+        // a/b/c/d at full shortest-round-trip precision the difference is
+        // no longer invisible: it reaches the `matrix(...)` bytes in the
+        // saved SVG. Keep the parenthesis -- and it is no longer this site's
+        // job to remember why: scripts/check_degree_radian_grouping.py refuses
+        // the other spelling everywhere in both active ports.
+        let rad = angleDeg * (Double.pi / 180)
         return Transform(a: cos(rad), b: sin(rad), c: -sin(rad), d: cos(rad))
     }
 
@@ -756,6 +766,77 @@ private func pointsBounds(_ points: [(Double, Double)]) -> BBox {
 /// Union the geometric bounds of a children list. Returns
 /// `(0, 0, 0, 0)` for empty groups. Used by the recursive
 /// `Element.geometricBounds` implementation.
+/// Geometric bounds that RESOLVE the three live kinds whose geometry lives
+/// behind an id (`reference` / `recorded` / `generated`), returning `nil` for an
+/// element that occupies no canvas at all.
+///
+/// `Element.geometricBounds` and `Element.bounds` are deliberately left
+/// resolver-less and both keep answering the zero box for those kinds — the same
+/// two-form split as `HitTest`'s plain and `...With` verbs, for the same reason:
+/// with no document behind it, there is no fact about where a target id is.
+///
+/// ## Why `nil`, and why it is the whole point
+///
+/// A dangling instance draws nothing, so it must contribute NOTHING to a union
+/// — not a zero-sized box at the origin. `childrenGeometricBounds` unions its
+/// children unconditionally, so a group holding one instance reported a box
+/// STRETCHED BACK TO (0,0): measured (0,0,110,110) for a group whose true extent
+/// was (5,7,105,103). The empty box was not merely absent; it was a phantom
+/// point at the origin that the union swallowed.
+///
+/// Degenerate boxes from every OTHER kind still contribute exactly as before.
+/// Mirrors Rust `resolved_geometric_bounds` (geometry/element.rs).
+public func resolvedGeometricBounds(_ elem: Element, _ resolver: ElementResolver) -> BBox? {
+    resolvedBoundsWith(elem, resolver) { $0.geometricBounds }
+}
+
+/// ``resolvedGeometricBounds(_:_:)`` with the leaf measurement chosen by the
+/// caller: `\.geometricBounds` for the stroke-exclusive box, `\.bounds` for the
+/// stroke-inflated (preview) one.
+///
+/// The parameter exists because Align reads both, under its Use Preview Bounds
+/// flag. Hard-coding the geometric leaf would have silently dropped stroke
+/// inflation from every leaf inside a GROUP the moment align started resolving
+/// — fixing an instance's box by breaking every stroked sibling's.
+///
+/// **A resolver-backed kind answers with its resolved rings under EITHER leaf
+/// choice**, because evaluated rings carry no stroke. So an instance's own
+/// stroke inflation is still missing in preview mode; it would need the
+/// resolved TARGET's stroke, which is different work. A bounded, stated
+/// shortfall, and strictly better than the zero box it replaces — which was
+/// wrong in both modes.
+public func resolvedBoundsWith(_ elem: Element,
+                               _ resolver: ElementResolver,
+                               _ leaf: (Element) -> BBox) -> BBox? {
+    if let rings = resolvedRings(elem, resolver) {
+        return ringsBBox(rings)
+    }
+    switch elem {
+    case .group(let g): return resolvedChildrenBounds(g.children, resolver, leaf)
+    case .layer(let l): return resolvedChildrenBounds(l.children, resolver, leaf)
+    default: return leaf(elem)
+    }
+}
+
+/// Union of the children's resolved geometric bounds, skipping the ones that
+/// occupy nothing. `nil` when no child occupies anything.
+private func resolvedChildrenBounds(_ children: [Element],
+                                    _ resolver: ElementResolver,
+                                    _ leaf: (Element) -> BBox) -> BBox? {
+    var acc: (Double, Double, Double, Double)? = nil
+    for c in children {
+        guard let b = resolvedBoundsWith(c, resolver, leaf) else { continue }
+        if let (ax, ay, bx, by) = acc {
+            acc = (min(ax, b.x), min(ay, b.y),
+                   max(bx, b.x + b.width), max(by, b.y + b.height))
+        } else {
+            acc = (b.x, b.y, b.x + b.width, b.y + b.height)
+        }
+    }
+    guard let (ax, ay, bx, by) = acc else { return nil }
+    return (x: ax, y: ay, width: bx - ax, height: by - ay)
+}
+
 private func childrenGeometricBounds(_ children: [Element]) -> BBox {
     guard !children.isEmpty else { return (0, 0, 0, 0) }
     let all = children.map(\.geometricBounds)
@@ -2629,7 +2710,7 @@ private func arcExtremaPoints(
         return [(x0, y0), (x, y)]
     }
     let twoPi = 2.0 * Double.pi
-    let phi = xRotationDeg * Double.pi / 180.0
+    let phi = xRotationDeg * (Double.pi / 180)
     let cosPhi = cos(phi), sinPhi = sin(phi)
 
     let dx = (x0 - x) / 2.0, dy = (y0 - y) / 2.0

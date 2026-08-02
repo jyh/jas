@@ -1,0 +1,173 @@
+{
+  "_doc": "LIANG-STYLE PATTERN HYPHENATION (jas_dioxus/src/algorithms/hyphenator.rs, JasSwift/Sources/Algorithms/Hyphenator.swift). Both public functions are gated. `split_pattern` is the parser through which the WHOLE pattern table is read, so a divergence there mis-hyphenates every word in the document quietly rather than loudly, and it is the cheaper of the two to get subtly wrong.\n\nThe patterns are supplied BY THE VECTOR, never taken from the ports' built-in EN_US_PATTERNS_SAMPLE. A fixture that leaned on the built-in table would be pinning two copies of a constant against each other and would go stale the moment either port loaded the full ~4500-pattern dictionary the module says is coming.\n\n`hyphenate` reports two things: the raw break MASK, which is the primitive's actual answer, and the same answer SPELLED with hyphens, which is the form a human reviewing this file can check against the derivation without counting array indices. The mask is what a port must match; the spelling is what makes a failure readable.\n\nEXPECTATIONS ARE HAND-DERIVED by running Liang's rule on paper: pad the lowercased word with '.' at both ends, match each pattern as a substring, take the MAXIMUM digit at each inter-character position, permit a break where that maximum is ODD, then suppress breaks inside the first `min_before` and last `min_after` characters, and force positions 0 and n to false.\n\nComparison is EXACT: booleans and strings, where a tolerance would mean nothing.",
+  "algorithm": "hyphenator",
+  "comparison": "exact",
+  "vectors": [
+    {
+      "name": "split_pattern_leading_digit",
+      "function": "split_pattern",
+      "derivation": "'1ti' -> the digit 1 is pending when 't' arrives, so it lands at position 0 (before 't'); 'i' takes 0; and the trailing push adds 0 after 'i'. letters = 'ti', digits = [1,0,0], length 3 = letters + 1.",
+      "pattern": "1ti",
+      "expected": {"letters": "ti", "digits": [1, 0, 0]}
+    },
+    {
+      "name": "split_pattern_interior_digit",
+      "function": "split_pattern",
+      "derivation": "'2tion': 2 is pending for 't' -> position 0; the remaining letters take 0; the trailing push adds 0. letters = 'tion', digits = [2,0,0,0,0].",
+      "pattern": "2tion",
+      "expected": {"letters": "tion", "digits": [2, 0, 0, 0, 0]}
+    },
+    {
+      "name": "split_pattern_trailing_digit",
+      "function": "split_pattern",
+      "derivation": "THE POSITION NO OTHER ROW REACHES: a digit at the very END of the pattern is never consumed by a letter, so it is delivered by the final push. 'ab3' -> letters = 'ab', digits = [0,0,3].",
+      "pattern": "ab3",
+      "expected": {"letters": "ab", "digits": [0, 0, 3]}
+    },
+    {
+      "name": "split_pattern_digits_on_both_sides_of_one_letter",
+      "function": "split_pattern",
+      "derivation": "The module's own worked example: \"2'2 -> letters=\\\"'\\\", digits=[2,2]\" -- one letter, so the digit array has length 2, the leading 2 before the apostrophe and the trailing 2 after it. (The doc comment writes three entries; two is what the length rule `letters + 1` gives, and the length rule is the one this file pins.)",
+      "pattern": "2'2",
+      "expected": {"letters": "'", "digits": [2, 2]}
+    },
+    {
+      "name": "split_pattern_word_boundary_dot_is_a_letter",
+      "function": "split_pattern",
+      "derivation": "'.' is NOT a digit, so it goes through the letter branch and becomes part of the letter string -- which is exactly what makes '.un1' anchor at a word start. letters = '.un', digits = [0,0,0,1].",
+      "pattern": ".un1",
+      "expected": {"letters": ".un", "digits": [0, 0, 0, 1]}
+    },
+    {
+      "name": "split_pattern_only_a_digit",
+      "function": "split_pattern",
+      "derivation": "DEGENERATE: a pattern with no letters at all. The loop never runs the letter branch, so letters is empty and the final push delivers the digit: digits = [5], length 1 = 0 + 1.",
+      "pattern": "5",
+      "expected": {"letters": "", "digits": [5]}
+    },
+    {
+      "name": "split_pattern_empty",
+      "function": "split_pattern",
+      "derivation": "DEGENERATE: the empty pattern still obeys the length rule -- letters '' and digits [0], because the final push always fires.",
+      "pattern": "",
+      "expected": {"letters": "", "digits": [0]}
+    },
+    {
+      "name": "hyphenate_single_odd_pattern",
+      "function": "hyphenate",
+      "derivation": "word 'hyphenate' (9 chars), one pattern 'he1n'. Padded: '.hyphenate.'. 'hen' does not occur; 'he' occurs at index 4 of the padded string (chars .hyphenate. = . h y p h e n a t e .), so 'hen' matches at padded index 4 ('h','e','n' at 4,5,6). The pattern's digits are [0,0,0,1] over letters 'hen', so the 1 lands AFTER 'n' -- between word chars 6 ('n') and 7 ('a'), i.e. position 6. Odd, so a break is permitted there. min_before = min_after = 0 imposes nothing. Result: breaks[6] alone is true, spelled 'hyphen-ate'.",
+      "word": "hyphenate", "patterns": ["hen1"], "min_before": 0, "min_after": 0,
+      "expected": {
+        "breaks": [false, false, false, false, false, false, true, false, false, false],
+        "spelled": "hyphen-ate"
+      }
+    },
+    {
+      "name": "hyphenate_even_priority_forbids_the_break",
+      "function": "hyphenate",
+      "derivation": "THE PARITY RULE, and it is the whole of Liang's method: the same word and the same position, but the pattern's digit is 2 instead of 1. An EVEN maximum FORBIDS a break, so the mask is all false and the word is spelled unchanged. A port that tested `level > 0` instead of `level % 2 == 1` passes the row above and fails this one.",
+      "word": "hyphenate", "patterns": ["hen2"], "min_before": 0, "min_after": 0,
+      "expected": {
+        "breaks": [false, false, false, false, false, false, false, false, false, false],
+        "spelled": "hyphenate"
+      }
+    },
+    {
+      "name": "hyphenate_higher_priority_overrides_a_lower_one",
+      "function": "hyphenate",
+      "derivation": "TWO PATTERNS COMPETING FOR ONE POSITION. 'hen1' would permit a break after 'n' (position 6); 'en2a' matches 'ena' at padded indices 5,6,7 with digits [0,0,2,0], putting a 2 at the position between 'n' and 'a' -- the same position 6. The maximum wins, and 2 is even, so the break is FORBIDDEN. The pattern ORDER must not matter, which is what makes this a max and not a last-writer-wins.",
+      "word": "hyphenate", "patterns": ["hen1", "en2a"], "min_before": 0, "min_after": 0,
+      "expected": {
+        "breaks": [false, false, false, false, false, false, false, false, false, false],
+        "spelled": "hyphenate"
+      }
+    },
+    {
+      "name": "hyphenate_min_before_suppresses_an_early_break",
+      "function": "hyphenate",
+      "derivation": "THE DIALOG'S 'After First N letters' CONSTRAINT. word 'baker', pattern 'ba1k' puts a 1 between 'a' and 'k', i.e. position 2. With min_before = 0 that break stands; with min_before = 3 a break at position 2 falls inside the first three letters and is suppressed, leaving the mask empty.",
+      "word": "baker", "patterns": ["ba1k"], "min_before": 3, "min_after": 0,
+      "expected": {
+        "breaks": [false, false, false, false, false, false],
+        "spelled": "baker"
+      }
+    },
+    {
+      "name": "hyphenate_the_same_break_survives_a_smaller_min_before",
+      "function": "hyphenate",
+      "derivation": "THE OTHER SIDE OF THE SAME CONSTRAINT, so the pair pins where the threshold BITES rather than merely that it exists. Same word and pattern with min_before = 2: position 2 is no longer inside the first two letters, so the break stands and the word spells 'ba-ker'.",
+      "word": "baker", "patterns": ["ba1k"], "min_before": 2, "min_after": 0,
+      "expected": {
+        "breaks": [false, false, true, false, false, false],
+        "spelled": "ba-ker"
+      }
+    },
+    {
+      "name": "hyphenate_min_after_suppresses_a_late_break",
+      "function": "hyphenate",
+      "derivation": "The 'Before Last N letters' half. word 'baker' (5 chars), pattern 'ke1r' puts a 1 between 'e' and 'r', position 4. min_after = 2 suppresses any break within the last two characters -- positions 4 and 5 -- so the mask is empty.",
+      "word": "baker", "patterns": ["ke1r"], "min_before": 0, "min_after": 2,
+      "expected": {
+        "breaks": [false, false, false, false, false, false],
+        "spelled": "baker"
+      }
+    },
+    {
+      "name": "hyphenate_word_boundary_anchor_only_matches_at_the_start",
+      "function": "hyphenate",
+      "derivation": "'.re1' is anchored: the leading '.' matches only the padding, so it fires on 'redo' (padded '.redo.') and puts a 1 after 're', position 2. It must NOT fire on the 're' inside 'bore' -- that is the next row.",
+      "word": "redo", "patterns": [".re1"], "min_before": 0, "min_after": 0,
+      "expected": {
+        "breaks": [false, false, true, false, false],
+        "spelled": "re-do"
+      }
+    },
+    {
+      "name": "hyphenate_word_boundary_anchor_does_not_match_mid_word",
+      "function": "hyphenate",
+      "derivation": "THE OTHER HALF OF THE ANCHOR, without which the row above proves nothing: 'bore' padded is '.bore.', and '.re' does not occur in it because the 're' at the end is preceded by 'o'. The mask is empty. A port that stripped the padding, or matched the '.' against any position, would fire here.",
+      "word": "bore", "patterns": [".re1"], "min_before": 0, "min_after": 0,
+      "expected": {
+        "breaks": [false, false, false, false, false],
+        "spelled": "bore"
+      }
+    },
+    {
+      "name": "hyphenate_is_case_folded",
+      "function": "hyphenate",
+      "derivation": "The word is lowercased before matching, so a capitalised word hyphenates identically -- 'Redo' takes the same break at position 2 as 'redo'. The SPELLING keeps the original case, because the mask indexes the original characters.",
+      "word": "Redo", "patterns": [".re1"], "min_before": 0, "min_after": 0,
+      "expected": {
+        "breaks": [false, false, true, false, false],
+        "spelled": "Re-do"
+      }
+    },
+    {
+      "name": "hyphenate_no_pattern_matches",
+      "function": "hyphenate",
+      "derivation": "A pattern set that matches nothing leaves every level at 0, so no break is permitted and the mask has length 5 = 4 + 1. Pinned because 'no breaks' and 'no answer' are different, and a port returning an empty array would be caught by the length.",
+      "word": "abcd", "patterns": ["1zz"], "min_before": 0, "min_after": 0,
+      "expected": {
+        "breaks": [false, false, false, false, false],
+        "spelled": "abcd"
+      }
+    },
+    {
+      "name": "hyphenate_empty_word_is_empty",
+      "function": "hyphenate",
+      "derivation": "DEGENERATE: the empty word returns the EMPTY mask, not [false]. That is the one place the length rule `n + 1` does not hold, and it is an explicit early return in both ports.",
+      "word": "", "patterns": ["1a"], "min_before": 0, "min_after": 0,
+      "expected": {"breaks": [], "spelled": ""}
+    },
+    {
+      "name": "hyphenate_empty_pattern_set",
+      "function": "hyphenate",
+      "derivation": "DEGENERATE: no patterns at all still yields a full-length all-false mask for a non-empty word.",
+      "word": "abc", "patterns": [], "min_before": 0, "min_after": 0,
+      "expected": {
+        "breaks": [false, false, false, false],
+        "spelled": "abc"
+      }
+    }
+  ]
+}

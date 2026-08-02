@@ -21,6 +21,36 @@ use crate::geometry::element::*;
 /// compare a maintained index against a from-scratch rebuild by value.
 pub type IdIndex = rpds::RedBlackTreeMap<String, std::rc::Rc<Element>>;
 
+/// An [`ElementResolver`](crate::geometry::live::ElementResolver) over a
+/// borrowed [`IdIndex`] — the CORE counterpart of `canvas::render`'s
+/// `RenderResolver`, which reads the same index through a render-scoped
+/// thread-local.
+///
+/// It exists because paint is not the only reader that has to resolve. Marquee
+/// and lasso selection must resolve the same ids paint does, or the artist gets
+/// a shape that is drawn and cannot be caught (RESOLVEDHIT). Selection lives in
+/// the controller, which holds the `Model` and therefore the index directly, so
+/// it borrows rather than reaching for the paint thread-local — no global state
+/// and no dependency on the web-gated `canvas` module, which this file is
+/// forbidden (see the module header).
+pub struct IndexResolver<'a>(pub &'a IdIndex);
+
+impl crate::geometry::live::ElementResolver for IndexResolver<'_> {
+    fn resolve(
+        &self,
+        id: &crate::geometry::live::ElementRef,
+    ) -> Option<std::rc::Rc<Element>> {
+        self.0.get(&id.0).cloned()
+    }
+
+    fn resolve_concept(
+        &self,
+        concept_id: &str,
+    ) -> Option<crate::geometry::live::ConceptDef> {
+        crate::geometry::live::workspace_concept(concept_id)
+    }
+}
+
 fn collect_ref_ids(elem: &std::rc::Rc<Element>, out: &mut IdIndex) {
     if let Some(id) = &elem.common().id {
         // first-occurrence wins (the unique-id invariant means there are no

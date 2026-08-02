@@ -76,6 +76,32 @@ public typealias AlignBoundsFn = (Element) -> BBox
 public func alignPreviewBounds(_ e: Element) -> BBox { e.bounds }
 public func alignGeometricBounds(_ e: Element) -> BBox { e.geometricBounds }
 
+/// Resolver-aware [`AlignBoundsFn`] body (RESOLVEDALIGN): the resolved box for
+/// the three kinds whose geometry lives behind an id — a symbol instance, a
+/// recorded and a generated element — `leaf` for everything else, and for a
+/// container the union over members under the same rule.
+///
+/// BOTH modes needed it: `alignPreviewBounds` and `alignGeometricBounds` are
+/// each resolver-less, so an instance measured as a zero box at the origin
+/// whichever way Use Preview Bounds was set. Measured in the Rust twin: an
+/// instance whose true right edge was 15 aligned as though it were 0, so Align
+/// Right moved it 110 instead of 95.
+///
+/// `leaf` is a PARAMETER rather than hard-coded to the geometric box, because
+/// hard-coding it would fix the instance and silently drop stroke inflation
+/// from every stroked element inside a group.
+///
+/// An element that occupies nothing (a dangling instance) yields the degenerate
+/// box at the origin — exactly what it yielded before. That case is
+/// deliberately unchanged; only the RESOLVABLE case moves.
+///
+/// Mirrors Rust `align::resolved_bounds` (algorithms/align.rs).
+public func alignResolvedBounds(_ e: Element,
+                                _ resolver: ElementResolver,
+                                _ leaf: (Element) -> BBox) -> BBox {
+    resolvedBoundsWith(e, resolver, leaf) ?? (x: 0, y: 0, width: 0, height: 0)
+}
+
 /// Union the bounding boxes of an element list using the given
 /// bounds function. Returns `(0, 0, 0, 0)` when the list is empty.
 public func alignUnionBounds(_ elements: [Element], _ boundsFn: AlignBoundsFn) -> BBox {

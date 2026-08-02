@@ -1211,7 +1211,7 @@ private func drawOvalCursorOverlay(
 
     let rx = size * 0.5 * z
     let ry = size * (roundness / 100.0) * 0.5 * z
-    let rad = angleDeg * .pi / 180.0
+    let rad = angleDeg * (Double.pi / 180)
 
     // Drag preview: if a buffer is named and mode != idle, draw each
     // buffered point as an oval. Painting = semi-transparent fill;
@@ -1413,7 +1413,12 @@ private func resolveOverlayRefPoint(
         isValidPath(doc, es.path) ? doc.getElement(es.path) : nil
     }
     if elements.isEmpty { return nil }
-    let bb = alignUnionBounds(elements, alignGeometricBounds)
+    // RESOLVEDALIGN: resolve behind-an-id geometry so a selection holding a
+    // symbol instance gets a pivot at the middle of what is DRAWN.
+    let pivotResolver = IdIndexResolver(index: model.idIndex)
+    let bb = alignUnionBounds(elements) {
+        alignResolvedBounds($0, pivotResolver, alignGeometricBounds)
+    }
     return (bb.x + bb.width / 2, bb.y + bb.height / 2)
 }
 
@@ -1495,7 +1500,7 @@ private func drawBBoxGhost(
         case "rotate":
             let tp = atan2(py - ry, px - rx)
             let tc = atan2(cy - ry, cx - rx)
-            var theta = (tc - tp) * 180.0 / .pi
+            var theta = (tc - tp) * (180 / Double.pi)
             if shift { theta = (theta / 45.0).rounded() * 45.0 }
             return TransformApply.rotateMatrix(thetaDeg: theta, rx: rx, ry: ry)
         case "shear":
@@ -1506,13 +1511,13 @@ private func drawBBoxGhost(
                     let denom = max(abs(py - ry), 1e-9)
                     let k = dx / denom
                     return TransformApply.shearMatrix(
-                        angleDeg: atan(k) * 180.0 / .pi,
+                        angleDeg: atan(k) * (180 / Double.pi),
                         axis: "horizontal", axisAngleDeg: 0, rx: rx, ry: ry)
                 } else {
                     let denom = max(abs(px - rx), 1e-9)
                     let k = dy / denom
                     return TransformApply.shearMatrix(
-                        angleDeg: atan(k) * 180.0 / .pi,
+                        angleDeg: atan(k) * (180 / Double.pi),
                         axis: "vertical", axisAngleDeg: 0, rx: rx, ry: ry)
                 }
             }
@@ -1523,9 +1528,9 @@ private func drawBBoxGhost(
             let perpY = ax / axisLen
             let perpDist = (cx - px) * perpX + (cy - py) * perpY
             let k = perpDist / axisLen
-            let axisAngleDeg = atan2(ay, ax) * 180.0 / .pi
+            let axisAngleDeg = atan2(ay, ax) * (180 / Double.pi)
             return TransformApply.shearMatrix(
-                angleDeg: atan(k) * 180.0 / .pi,
+                angleDeg: atan(k) * (180 / Double.pi),
                 axis: "custom", axisAngleDeg: axisAngleDeg,
                 rx: rx, ry: ry)
         default:
@@ -1538,7 +1543,12 @@ private func drawBBoxGhost(
         isValidPath(doc, es.path) ? doc.getElement(es.path) : nil
     }
     if elements.isEmpty { return }
-    let bb = alignUnionBounds(elements, alignGeometricBounds)
+    // RESOLVEDALIGN: resolve behind-an-id geometry so a selection holding a
+    // symbol instance gets a pivot at the middle of what is DRAWN.
+    let pivotResolver = IdIndexResolver(index: model.idIndex)
+    let bb = alignUnionBounds(elements) {
+        alignResolvedBounds($0, pivotResolver, alignGeometricBounds)
+    }
     // Transform the four corners in DOCUMENT space — the matrix, its pivot
     // (rx, ry), and the bbox are all doc-space — then map each corner to
     // screen for drawing. The dashed stroke pattern stays in screen pixels

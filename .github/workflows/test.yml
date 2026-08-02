@@ -37,6 +37,11 @@ jobs:
       # written is watched on one platform and unwatched on the other, silently.
       # That is how the line above was wrong on Windows for its whole life.
       - run: python scripts/check_lane_coverage.py --self-test && python scripts/check_lane_coverage.py
+      # TOTALITY over the checker tier: every family classified, every floor
+      # declared in its fixture, every mutant carrying a named prior bug, and
+      # spec/ importing nothing from this repository. A checker lane that
+      # silently inspects nothing is indistinguishable from a clean tree.
+      - run: python scripts/check_geometry_checkers.py --self-test && python scripts/check_geometry_checkers.py
       # Every function that dispatches on Element kind must account for
       # containers, or carry a ledger row saying why not. Five defects wore
       # that shape in one week, all invisible in Rust and live in JasSwift.
@@ -83,6 +88,21 @@ jobs:
       # premise checked by a single grep answers for the wrong port.
       - run: python scripts/check_deferral_expiry.py --self-test && python scripts/check_deferral_expiry.py
       - run: python scripts/check_gate_consistency.py --self-test && python scripts/check_gate_consistency.py
+      # One sanctioned grouping for every degree/radian conversion, in both
+      # active ports. `(deg * PI) / 180` and `deg * (PI / 180)` are different
+      # doubles -- they disagree in BITS on 384 of 1441 integer degrees -- and
+      # since MATRIXPRECISION the saved SVG carries a/b/c/d at full precision,
+      # so the divergence reaches the file. No corpus tolerance can see it: the
+      # tightest in the registry is 1e-12 and the difference is 1e-16. Swept 42
+      # sites on 2026-08-01; this is what stops the 43rd.
+      - run: python scripts/check_degree_radian_grouping.py --self-test && python scripts/check_degree_radian_grouping.py
+      # Per-family non-default variance. A census on 2026-08-02 found seven
+      # corpus-wide frozen dimensions whose constants are EXACTLY the struct
+      # defaults -- a corpus of defaults cannot tell a dropped field from a
+      # preserved one, which is check_swift_copy_sites.py's class from the other
+      # end. Per-family on purpose: pooled counting is what hides it (opacity
+      # takes 9 distinct values corpus-wide while actions/ sits at 334 of 334).
+      - run: python scripts/check_default_variance.py --self-test && python scripts/check_default_variance.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -258,6 +278,8 @@ jobs:
           # absence, so it must appear in both lanes or it fails immediately.
           python scripts/check_lane_coverage.py --self-test
           python scripts/check_lane_coverage.py
+          python scripts/check_geometry_checkers.py --self-test
+          python scripts/check_geometry_checkers.py
           python scripts/check_element_dispatch.py --self-test
           python scripts/check_element_dispatch.py
           python scripts/check_selection_invariant.py --self-test
@@ -276,6 +298,18 @@ jobs:
           python scripts/check_deferral_expiry.py
           python scripts/check_gate_consistency.py --self-test
           python scripts/check_gate_consistency.py
+          # Reads Rust source and fixture JSON with explicit encoding, and keys
+          # its families on os.path.relpath output normalised to '/', so it
+          # should be separator- and codepage-clean here. Windows CI is what
+          # proves that, not this comment.
+          python scripts/check_default_variance.py --self-test
+          python scripts/check_default_variance.py
+          # Enumerates its subjects with `git ls-files` and compares path
+          # PREFIXES ("JasSwift/", "jas_dioxus/") against git's POSIX output --
+          # no str(Path) anywhere -- so it should be separator-clean here.
+          # Windows CI is what proves that, not this comment.
+          python scripts/check_degree_radian_grouping.py --self-test
+          python scripts/check_degree_radian_grouping.py
           # Scans git-tracked text via `git ls-files`, which emits POSIX paths on
           # every platform, and compares with PurePosixPath — no str(Path) in the
           # path, so it should be separator-clean here. Windows CI is what proves
@@ -337,7 +371,13 @@ jobs:
       - name: Cross-language — rust oracle against the pinned goldens
         run: |
           python scripts/lane_report.py --self-test
-          python scripts/cross_language_algorithms.py --lang rust
+          python scripts/cross_language_algorithms.py --lang rust --checker-report checker-report.json
+          # The geometry checkers ride SEAM 1 — the out-of-process roundtrip
+          # wire — so ONE Python predicate adjudicates them and this box can
+          # referee them in full, with no Swift toolchain. That is the whole
+          # argument for Seam 1: a Seam-2 checker would show Windows the Rust
+          # arm alone, half-watched by construction.
+          python scripts/check_geometry_checkers.py --reconcile checker-report.json
           python scripts/cross_language_commutativity.py --lang rust
           python scripts/cross_language_workspace.py --lang rust
 
@@ -497,8 +537,15 @@ jobs:
       # --lang edited down to one) must exit non-zero here rather than pass as
       # an oracle run. Single-lane oracle runs stay legitimate WITHOUT the flag
       # — that is how a Linux box with no Swift checks the pinned goldens.
+      # --checker-report / --reconcile: the geometry checkers write down the
+      # number of rulings they ACTUALLY performed, per lane, and the gate reads
+      # it back (R5). Without the second step the count is printed to a log
+      # where nothing asserts on it — which is how a checker lane goes vacuous
+      # while every other gate stays green.
       - name: Algorithm equivalence
-        run: python scripts/cross_language_algorithms.py --lang rust,swift --require-comparisons
+        run: python scripts/cross_language_algorithms.py --lang rust,swift --require-comparisons --checker-report checker-report.json
+      - name: Geometry checkers — reconcile the executed counts
+        run: python scripts/check_geometry_checkers.py --reconcile checker-report.json
       - name: SVG commutativity
         run: python scripts/cross_language_commutativity.py --lang rust,swift --require-comparisons
       - name: Workspace equivalence

@@ -41,3 +41,12 @@ screenshot.png
 # NOTE: workspace/workspace.json is COMMITTED. Regenerate with:
 #   python -m workspace_interpreter.compile workspace/ workspace/workspace.json
 # CI enforces freshness; see scripts/check_workspace_json.sh.
+
+# The geometry checkers' EXECUTED-COUNT account, written by
+# `cross_language_algorithms.py --checker-report` and read back by
+# `check_geometry_checkers.py --reconcile`. A PER-RUN artefact, never a fact
+# about the tree: committed, it would sit in every checkout and let the
+# reconcile step pass on a run where the step that WRITES it had been deleted.
+# check_geometry_checkers.py asserts both halves -- that this entry exists,
+# and that the file it reads is untracked.
+checker-report.json

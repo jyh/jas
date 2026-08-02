@@ -1,0 +1,224 @@
+{
+  "_doc": [
+    "THE (FAMILY, FIELD) PAIRS THAT MUST CARRY NON-DEFAULT VECTORS.",
+    "Read by scripts/check_default_variance.py. Nothing else consumes it.",
+    "",
+    "WHY THIS FILE EXISTS. A read-only census of 446 fixture files / 1,751",
+    "vectors on 2026-08-02 found seven dimensions frozen corpus-wide, and every",
+    "frozen constant equals EXACTLY the struct default -- verified field by",
+    "field against CommonProps::default(). Fixtures are authored by",
+    "CONSTRUCTING a document, so they inherit the constructor. A corpus whose",
+    "every value IS the default cannot distinguish a dropped field from a",
+    "preserved one, which is the banked Swift copy-site omission class seen",
+    "from the other end: one writes the default in, the other cannot tell that",
+    "it was written in.",
+    "",
+    "AND THE VARIANCE THAT EXISTS IS CAMPAIGN RESIDUE. The cross-tab is",
+    "near-diagonal -- `transform` varies only under transform_*, `locked` only",
+    "under lock_*, `stroke` only under set_* -- and the two fields varied",
+    "everywhere, `name` and `fill`, are precisely the two that had dedicated",
+    "campaigns. The corpus varies where we once looked. That predicts the next",
+    "blind spot exactly: any field that never had a campaign.",
+    "",
+    "SO THE GATE ITERATES THIS FILE, NOT THE CORPUS. Walking the fields you",
+    "happen to find would miss the field nobody varied, which is the entire",
+    "defect. Same inversion as checker_lane_registry.json, same reason.",
+    "",
+    "TO ADD AN OBLIGATION: one row, a `min`, and a `reason` naming what it buys",
+    "that no other row does. Adding is deliberately CHEAP -- `min` is a floor,",
+    "not an exact count, because every extra carrier is progress and should",
+    "never red an unrelated change.",
+    "",
+    "TO DROP ONE: delete the row and lower `min_obligations` in the same",
+    "commit, in a message saying which pair stops being able to tell a dropped",
+    "field from a preserved one, and why that is acceptable. That sentence is",
+    "the whole mechanism; nothing here can stop someone who means it.",
+    "",
+    "KEYS ARE 'family|field'. A family is <fixture-subdirectory>/<leading token",
+    "of the file name>, with a trailing _expected stripped -- the same grouping",
+    "the census's own sentences use."
+  ],
+
+  "min_obligations": 11,
+
+  "obligations": {
+    "operations/transform|transform": {
+      "min": 8,
+      "reason": "THE ONLY PLACE IN THE CORPUS WHERE A TRANSFORM IS NON-DEFAULT. 90.6% of elements carry none, and outside transform_* the figure is 100%: 11 of these documents against 0 of the other 172 measured. If this family goes flat, `transform: null` becomes universal and no fixture anywhere can separate a port that preserves the transform from a port that drops it on a copy -- which is exactly what a field-by-field rebuild at a Swift copy site does."
+    },
+    "operations/transform|id": {
+      "min": 8,
+      "reason": "Element identity UNDER AN EDIT THAT REWRITES GEOMETRY. The preservation law says an edit changes what it speaks to and preserves the rest; a transform speaks to geometry, so the id is the thing it must not touch. This is the largest id-bearing family and the only one where identity has to survive a coordinate rewrite rather than a structural move."
+    },
+    "operations/bystander|id": {
+      "min": 3,
+      "reason": "The bystander clause's own family: ids that must survive an edit aimed at somebody else. Small (3 documents, 12 id-bearing slots) and therefore the first to be lost to a fixture cleanup, and it is the only family whose entire point is that the id of an UNTOUCHED element is checked."
+    },
+    "operations/lock|locked": {
+      "min": 6,
+      "reason": "The lock-inheritance ruling (LAYER_STRUCTURE.md 13). This family could not exist before LOCKSVG taught the SVG codec to round-trip common.locked -- until then no shared fixture could START from a locked document, which is exactly why the corpus stayed green over an enforcement gap that wide. Losing these carriers restores that hole."
+    },
+    "operations/paste|locked": {
+      "min": 5,
+      "reason": "A SECOND VERB. operations/lock alone would make `locked` a one-campaign field, and the census's whole point is that the corpus varies only where a campaign once looked. Paste/duplicate rewrites elements wholesale rather than flipping a flag, so it is the family that can see a copy site rebuilding an element and forgetting the flag -- a different failure from the one lock_* watches."
+    },
+    "operations/set|stroke": {
+      "min": 5,
+      "reason": "Stroke is null in 753 of 758 slots corpus-wide. set_* is the family that actually paints one, and with 7 carriers over 8 slots it is the densest stroke evidence in the tree. If it collapses, `stroke: null` is universal and a dropped stroke is indistinguishable from an unstroked element."
+    },
+    "gestures/draw|stroke": {
+      "min": 9,
+      "reason": "The same field through the OTHER DRIVER. An op-only corpus is structurally blind to what a tool commits -- the argument the preservation corpus already accepted when it grew a gesture arm. These documents are produced by replaying pointer input through the real tool, so they can see a stroke that the op vocabulary writes and the tool path does not."
+    },
+    "actions/fill|stroke": {
+      "min": 3,
+      "reason": "A third stroke family, and the only one reached through the ACTION layer rather than through ops or gestures. Three doors, three chances to notice; two of them are the ones the equivalence directive says to pin."
+    },
+    "gestures/blob|tool_origin": {
+      "min": 3,
+      "reason": "tool_origin is non-default in 10 slots in the entire corpus and is set by exactly one tool. It is also a CommonProps field ADDED AFTER most copy sites were written, which is the precise shape check_swift_copy_sites.py exists for: the compiler cannot enumerate the sites, so only a fixture that carries a non-default value can. Losing this family retires the only evidence that blob-brush provenance survives anything."
+    },
+    "gestures/recorded|tool_origin": {
+      "min": 3,
+      "reason": "The second and last tool_origin family. Two families is the difference between 'this field is exercised' and 'one fixture happens to set it'; with only 10 non-default slots corpus-wide there is no third to fall back on."
+    },
+    "operations/paste|visibility": {
+      "min": 3,
+      "reason": "THE ONLY CELL IN THE CORPUS WITH THREE VISIBILITY CARRIERS -- 10 non-default slots exist in total, across 1043. Visibility is the eye-button cycle's field and carries a banked 2-2 cross-port divergence (deselect-on-invisible), so a corpus that cannot see it written cannot referee that divergence at all. Zero headroom by construction: this row is the whole population."
+    }
+  },
+
+  "declared_debt": {
+    "_doc": [
+      "WHAT IS NOT PAYABLE TODAY, WITH ITS MEASUREMENT, so the number is visible",
+      "rather than forgotten. 310 of 382 populated (family x field) cells hold",
+      "fewer than three non-default carriers. Reding all of them would mean",
+      "authoring hundreds of fixtures, and the tree is held for a regeneration",
+      "of ~103 goldens besides.",
+      "",
+      "EVERY ROW HERE IS EXACT, IN BOTH DIRECTIONS. An obligation is a floor",
+      "because adding a carrier must stay cheap; debt is the opposite -- its job",
+      "is to keep an unpaid number honest. If a measurement moves toward health",
+      "someone paid part of the debt without noticing and the row must be",
+      "promoted to an obligation or restated; if it moves away, the corpus",
+      "thinned where it was already thin. Either way the gate says so instead of",
+      "the number rotting.",
+      "",
+      "`improves` SAYS WHICH WAY HEALTH LIES, and it is required. The first cut",
+      "of the gate assumed 'up is better', which is right for families_varying:*",
+      "and exactly backwards for thin_cells (a count of BLIND cells): it",
+      "reported a corpus that had just lost a lock family as PAID DOWN. A red",
+      "pointing the wrong way is worse than no red, because someone acts on it."
+    ],
+
+    "measured": {
+      "thin_cells": {
+        "value": 310,
+        "improves": "down",
+        "why_not_closed": "The headline. 310 of 382 populated cells hold fewer than 3 non-default carriers, over the 27 families with at least 3 documents. Closing a cell means authoring fixtures, not editing a gate, and the census's own advice is not to try: seed the pairs whose consequence is real and leave the rest measured. READ THIS ROW ONLY WITH populated_cells: it is a numerator over a population that moves, so deleting evidence LOWERS it."
+      },
+      "populated_cells": {
+        "value": 382,
+        "improves": "up",
+        "why_not_closed": "THE DENOMINATOR, declared because thin_cells alone points the wrong way when the corpus shrinks. Measured 2026-08-02: deleting one fixture from the three-document gestures/select family drops it below the three-document threshold, takes all of its cells out of the count, and moves thin_cells 310 -> 298 -- so the gate's ONLY red read 'PAID DOWN -- promote it to an obligation' for a change that destroyed evidence. `improves` fixes the polarity of the comparison; it cannot fix a quantity whose population moves underneath it. With both declared the shape is legible: both up = the corpus grew, both down = it SHRANK, thin down and this steady = somebody actually paid. Left as debt rather than an obligation because it is a measurement of the corpus's size, not a floor anybody should be held to."
+      },
+      "families_varying:selected_layer": {
+        "value": 0,
+        "improves": "up",
+        "why_not_closed": "ZERO. selected_layer is 0 in all 268 documents -- the only field in the vocabulary varied by no family at all. It is also the field document_equivalent() deliberately pins as one that must NOT differ, so a fixture varying it has to be authored against a considered story about what the active-layer cursor means after an edit. That story does not exist yet; inventing one to fill a cell would be worse than the gap."
+      },
+      "families_varying:opacity": {
+        "value": 3,
+        "improves": "up",
+        "why_not_closed": "Opacity is 1.0 in 2016 of 2113 observations and in 334 of 334 under actions/. Three families vary it and NONE of them has three documents, so no cell can carry an obligation today. This is also the field that proves aggregation useless: opacity takes NINE distinct values corpus-wide and clears any pooled distinct-value floor while whole directories sit at the default."
+      },
+      "families_varying:transform": {
+        "value": 5,
+        "improves": "up",
+        "why_not_closed": "Five families, and only operations/transform is dense enough to obligate. The deeper gap this number cannot express: NO transform anywhere in the corpus has a negative determinant, so there is no mirror and no flip in the entire tree. That is a claim about the VALUES of a non-default field, which this gate's primitive cannot see at all -- see out_of_reach."
+      },
+      "families_varying:visibility": {
+        "value": 4,
+        "improves": "up",
+        "why_not_closed": "10 non-default slots in 1043. One cell reaches three carriers and it is already an obligation; the other three families carry one or two. Visibility has three states and the corpus exercises the transitions, not the storage, so growth here waits on the layers-panel eye-cycle work."
+      },
+      "families_varying:locked": {
+        "value": 8,
+        "improves": "up",
+        "why_not_closed": "The healthiest of the frozen dimensions, and only because LOCKSVG unblocked it in July. Eight families, two of them dense enough to obligate. Left as debt so the number is watched: a codec regression that stops round-tripping common.locked would drain this back toward zero and the obligations alone would only catch the last two families to go."
+      },
+      "families_varying:tool_origin": {
+        "value": 3,
+        "improves": "up",
+        "why_not_closed": "10 non-default slots corpus-wide, all of them on paths, from two tools. Both families are obligated; the third is a rounding artefact of a single fixture. There is no cheap way to grow this without shipping more tools that tag their output."
+      },
+      "families_varying:mask": {
+        "value": 1,
+        "improves": "up",
+        "why_not_closed": "ONE non-default slot in the entire corpus. Mask is storage-only until OPACITY.md Phase 3b wires the renderer, so the field exists, serializes, and is asserted by exactly one fixture. An obligation of three would be unpayable until the feature lands, and a floor of one asserts nothing this row does not already say."
+      },
+      "families_varying:mode": {
+        "value": 1,
+        "improves": "up",
+        "why_not_closed": "Two non-default slots, one family. BlendMode has sixteen variants and the corpus exercises one of them once. Same reason as mask: storage-only in Phase 2, renderer support deferred, so the fixtures that would carry it do not exist yet."
+      },
+      "families_varying:fill_gradient": {
+        "value": 1,
+        "improves": "up",
+        "why_not_closed": "One slot. Gradient paint lives on the gradient-panel branch and its corpus has not merged; until it does, the shared tree carries a single witness that the field survives serialization at all."
+      },
+      "families_varying:stroke_gradient": {
+        "value": 1,
+        "improves": "up",
+        "why_not_closed": "One slot, same branch, same reason as fill_gradient. Recorded separately because the two are independent Option fields and a copy site can drop either alone."
+      },
+      "families_varying:stroke_brush": {
+        "value": 2,
+        "improves": "up",
+        "why_not_closed": "Brush click-to-apply has never worked -- the Rust port writes a literal template string as the brush id and the reference interpreter lacks the effect entirely (BRUSHAPPLY, queue slot 4). Growing this cell before the feature works would pin the bug."
+      },
+      "families_varying:stroke_brush_overrides": {
+        "value": 2,
+        "improves": "up",
+        "why_not_closed": "Rides on stroke_brush and is blocked behind the same BRUSHAPPLY stone."
+      },
+      "families_varying:stroke": {
+        "value": 14,
+        "improves": "up",
+        "why_not_closed": "14 families, three obligated. Still debt because the corpus's strokes are nearly all the same stroke: width, cap, join, alignment, miter limit and dash pattern are effectively constant inside the non-null slots. This gate counts the SLOT as non-default and cannot see that its interior is frozen -- a Stroke is one field to P1 and eight fields to a copy site."
+      },
+      "families_varying:fill": {
+        "value": 64,
+        "improves": "up",
+        "why_not_closed": "One of the two fields varied everywhere, and it is here as the control rather than as a gap: fill had a dedicated campaign, which is exactly why it looks healthy. Recorded so that if it ever DROPS the gate says so, and as the standing reminder of what the diagonal means."
+      },
+      "families_varying:name": {
+        "value": 67,
+        "improves": "up",
+        "why_not_closed": "The other campaign field (name-any-element), varied in 67 of 69 families -- mostly because every document has a Layer and every Layer is named. Kept exact for the same reason as fill: it is the shape of a field that WAS looked at, and the contrast is the finding."
+      },
+      "families_varying:id": {
+        "value": 34,
+        "improves": "up",
+        "why_not_closed": "34 families, and the healthiest of the newer fields because the element-identity campaign is recent. Two cells are obligated. Left as debt because id is emitted ONLY when set, so a port that stopped writing ids would lose the key rather than change its value -- and key-absence reads as the default here, by design and by the writer's convention."
+      }
+    },
+
+    "out_of_reach": {
+      "_doc": [
+        "CENSUS FINDINGS THIS GATE'S PRIMITIVE CANNOT EXPRESS, listed so the",
+        "omission is visible rather than implied by silence. Each would need a",
+        "different instrument, not another row above."
+      ],
+      "no_negative_determinant": "No transform anywhere in the corpus has a negative determinant -- there is no mirror and no flip in the entire tree. P1 counts whether a field is non-default, never what the value MEANS, so a corpus of 500 translate-only transforms scores identically to one that mirrors. Needs a value-predicate instrument.",
+      "square_boxes": "646 of 771 boxes are square. Squareness is a RELATION between width and height, not a field, so it has no struct default to differ from.",
+      "equal_radii": "638 of 686 rx/ry pairs are equal. Same shape as square_boxes, and additionally rx/ry have no derivable default at all: RectElem has no Default impl, so there is no source to read one from.",
+      "colour_space": "rgb 707 to cmyk 1. Colour lives inside Fill/Stroke, so P1 sees one non-default `fill` slot and nothing about the space, the channel values or the alpha. Stroke has the same interior problem, recorded on its debt row.",
+      "semantically_inert_values": "A transform of scale(1,1) is non-default and means nothing. This gate would score it as a carrier and an obligation could be satisfied by eleven of them.",
+      "per_port_defaults": "Defaults are read from the Rust source only. A Swift or Python default that differs would make this gate classify the corpus against the wrong baseline, silently and in agreement with itself.",
+      "collinearity": "A family whose documents all descend from one setup SVG can satisfy a floor with N copies of one situation. This is a population count, exactly like min_rulable_vectors, and it was min_witnesses' failure too: it went GREEN on twelve identical copies of one gradient_remap vector. CONFIRMED AGAINST THIS GATE, not inherited: on 2026-08-02 operations/transform was rewritten as seventeen byte-identical copies of transform_rotate_ref_center_expected.json plus one other document -- one distinct content hash across seventeen of eighteen files -- and the whole board stayed GREEN, both obligations satisfied and the debt unmoved. P1 counts CARRIERS, and a replica is a carrier. Anyone reading a satisfied floor here should read it as 'N documents carry a non-default value', never as 'N situations were tried'.",
+      "unwatched_element_fields": "73 of the 80 fields on the 14 structs an Element can BE are outside the vocabulary: a field enters only via CommonProps or by being Option-typed, and everything else -- PathElem::fill_rule, GroupElem/LayerElem::isolated_blending and ::knockout_group, width_points, the 21-field TextElem typography block -- is plain-typed on a struct with no Default impl, so there is no default to differ from. This is the gate's own thesis pointed at the gate: those are precisely the never-had-a-campaign fields. Only the COUNT is fixed (UNWATCHED_ELEMENT_FIELDS, pinned exact in the self-test), because MIN_DERIVED_DEFAULTS only notices the vocabulary shrinking and a plain-typed addition moves neither number -- two of the three ways to add a field force a ruling and the third used to arrive in silence. Measuring them needs Default impls on the Elem structs, which is a Rust change, not a gate change.",
+      "depth_within_a_document": "A document counts as a carrier when ANY applicable element in it holds a non-default value. A family of eight documents each with 300 elements, one of which carries a transform, scores eight -- the same as eight documents that are non-default throughout. The primitive sees a family's breadth and never its density."
+    }
+  }
+}

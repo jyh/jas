@@ -1,5 +1,17 @@
 import Testing
+import Foundation
 @testable import JasLib
+
+/// A stable stand-in for "the one model these tests are talking about", so the
+/// generation-epoch tests below exercise the GENERATION half of the epoch with
+/// the owner held fixed. The owner half has its own test
+/// (`twoOwnersAtTheSameGenerationDoNotShareCacheEntries`).
+private final class TestCacheOwner {}
+private let testCacheOwner = TestCacheOwner()
+
+private func setTestRecomputeEpoch(_ generation: UInt64) {
+    setRecomputeCacheEpoch(owner: ObjectIdentifier(testCacheOwner), generation: generation)
+}
 
 /// Tests for the LiveElement framework — mirror jas_dioxus live.rs
 /// tests.
@@ -449,7 +461,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     // .pure entry; a second eval at the same generation reuses it (the gate
     // confirms cached == fresh) and the RESULT equals a fresh eval.
     clearRecomputeCacheForTest()
-    setRecomputeCacheGeneration(7)
+    setTestRecomputeEpoch(7)
     let resolver = CellResolver()
     resolver.set("p4c_r1", rectAt(0, 0))
     let reference = ReferenceElem(target: ElementRef("p4c_r1"), name: nil)
@@ -477,7 +489,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     // Editing the target bumps the generation; the epoch clears the cache so
     // the next eval recomputes against the NEW target. No stale geometry.
     clearRecomputeCacheForTest()
-    setRecomputeCacheGeneration(1)
+    setTestRecomputeEpoch(1)
     let resolver = CellResolver()
     resolver.set("p4c_r1", rectAt(0, 0))           // 10x10
     let reference = ReferenceElem(target: ElementRef("p4c_r1"), name: nil)
@@ -491,7 +503,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
 
     // Edit: a larger rect, AND advance the generation, as a real edit would.
     resolver.set("p4c_r1", bigRect(40, 40))
-    setRecomputeCacheGeneration(2)
+    setTestRecomputeEpoch(2)
     #expect(recomputeCacheStateForTest("p4c_r1", DEFAULT_PRECISION) == nil)
 
     var v2 = VisitSet()
@@ -522,7 +534,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     // target is .hasRefs (so it re-resolves), and a nested edit, which bumps
     // the generation, is reflected.
     clearRecomputeCacheForTest()
-    setRecomputeCacheGeneration(5)
+    setTestRecomputeEpoch(5)
     let resolver = CellResolver()
     resolver.set("p4c_x", rectAt(0, 0))            // nested leaf, 10x10
     let g = Element.group(Group(children: [
@@ -548,7 +560,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     // Edit the NESTED target — a real edit, which bumps the generation. The
     // epoch clears the cache; the next eval reflects the new nested geometry.
     resolver.set("p4c_x", bigRect(30, 30))
-    setRecomputeCacheGeneration(6)
+    setTestRecomputeEpoch(6)
     var v2 = VisitSet()
     let second = outer.evaluateWith(
         precision: DEFAULT_PRECISION, resolver: resolver, visiting: &v2)
@@ -563,7 +575,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     // target; a scaled instance of the SAME target reuses that cache and
     // applies its own transform on top.
     clearRecomputeCacheForTest()
-    setRecomputeCacheGeneration(9)
+    setTestRecomputeEpoch(9)
     let resolver = CellResolver()
     resolver.set("p4c_r1", rectAt(0, 0))
 
@@ -592,7 +604,7 @@ private func bigRect(_ w: Double, _ h: Double) -> Element {
     // precision, so a circle tessellated at one precision never serves a
     // request at another (which would be a wrong-detail result).
     clearRecomputeCacheForTest()
-    setRecomputeCacheGeneration(3)
+    setTestRecomputeEpoch(3)
     let resolver = CellResolver()
     resolver.set("p4c_c1", .ellipse(Ellipse(cx: 0, cy: 0, rx: 100, ry: 100)))
     let reference = ReferenceElem(target: ElementRef("p4c_c1"), name: nil)
@@ -903,4 +915,41 @@ private func ringAreaAbs(_ ring: BoolRing) -> Double {
     #expect(BoolFillRule(FillRule.evenodd) == .evenodd)
     #expect(FillRule(BoolFillRule.nonzero) == .nonzero)
     #expect(FillRule(BoolFillRule.evenodd) == .evenodd)
+}
+
+/// RESOLVEDHIT flank: the epoch's OWNER half.
+///
+/// Two documents open at the same generation, each holding a symbol master
+/// under the same id — ordinary, because ids are per-document — must not serve
+/// each other's geometry. Before the owner was part of the epoch, the second
+/// reader got the first's rings and the per-hit `cached == fresh` assert fired.
+/// `CanvasRenderSignature` already carried this exact distinction for repaint
+/// ("two tabs whose independent generation counters could otherwise collide at
+/// the same value"); the recompute cache did not.
+@Test func twoOwnersAtTheSameGenerationDoNotShareCacheEntries() {
+    final class Owner {}
+    let tabA = Owner(), tabB = Owner()
+    clearRecomputeCacheForTest()
+
+    // Tab A: "shared-id" is a 10x10 at the origin. Populate the cache.
+    setRecomputeCacheEpoch(owner: ObjectIdentifier(tabA), generation: 4)
+    let resolverA = CellResolver()
+    resolverA.set("shared-id", rectAt(0, 0))
+    var vA = VisitSet()
+    let a = ReferenceElem(target: ElementRef("shared-id"), name: nil)
+        .evaluateWith(precision: DEFAULT_PRECISION, resolver: resolverA, visiting: &vA)
+    #expect(recomputeCacheStateForTest("shared-id", DEFAULT_PRECISION) == .pure)
+
+    // Tab B: SAME id, SAME generation, DIFFERENT geometry.
+    setRecomputeCacheEpoch(owner: ObjectIdentifier(tabB), generation: 4)
+    #expect(recomputeCacheStateForTest("shared-id", DEFAULT_PRECISION) == nil,
+            "a different owner at the same generation must not inherit the entry")
+    let resolverB = CellResolver()
+    resolverB.set("shared-id", rectAt(500, 500))
+    var vB = VisitSet()
+    let b = ReferenceElem(target: ElementRef("shared-id"), name: nil)
+        .evaluateWith(precision: DEFAULT_PRECISION, resolver: resolverB, visiting: &vB)
+
+    #expect(!boolPolygonSetsEqual(a, b),
+            "tab B must get its own master's geometry, not tab A's")
 }

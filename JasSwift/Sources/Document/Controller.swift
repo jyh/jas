@@ -808,22 +808,46 @@ public class Controller {
 
     // MARK: - Public selection methods
 
+    // RESOLVEDHIT: every selection path resolves through the Model's id index,
+    // so an element whose geometry lives behind a stable id (a symbol
+    // instance, a recorded or generated element) is caught where it is DRAWN.
+    // The canvas has always resolved these; selection had not, so an instance
+    // was visible and uncatchable. Mirrors Rust's `IndexResolver` at the
+    // matching call sites in `document/controller.rs`.
+    ///
+    /// Epoching the recompute cache here is not optional bookkeeping: this is a
+    /// SECOND READER of a cache whose only other reader (paint) owned the
+    /// epoch. A reader that consumes a cache without stating which document
+    /// state it wants is asking to be served someone else's answer.
+    private var hitResolver: ElementResolver {
+        setRecomputeCacheEpoch(owner: ObjectIdentifier(model), generation: model.generation)
+        return IdIndexResolver(index: model.idIndex)
+    }
+
     public func selectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
-        selectFlat(model, predicate: { elementIntersectsRect($0, x, y, width, height) }, extend: extend)
+        let resolver = hitResolver
+        selectFlat(model,
+                   predicate: { elementIntersectsRectWith($0, x, y, width, height, resolver) },
+                   extend: extend)
     }
 
     public func selectPolygon(polygon: [(Double, Double)], extend: Bool = false) {
-        selectFlat(model, predicate: { elementIntersectsPolygon($0, polygon) }, extend: extend)
+        let resolver = hitResolver
+        selectFlat(model,
+                   predicate: { elementIntersectsPolygonWith($0, polygon, resolver) },
+                   extend: extend)
     }
 
     public func groupSelectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
+        let resolver = hitResolver
         selectRecursive(model, leafHandler: { path, elem in
-            elementIntersectsRect(elem, x, y, width, height)
+            elementIntersectsRectWith(elem, x, y, width, height, resolver)
                 ? ElementSelection.all(path) : nil
         }, extend: extend)
     }
 
     public func directSelectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
+        let resolver = hitResolver
         selectRecursive(model, leafHandler: { path, elem in
             let cps = elem.controlPointPositions
             let hitCPs: [Int] = cps.enumerated().compactMap { (i, pt) in
@@ -831,7 +855,7 @@ public class Controller {
             }
             if !hitCPs.isEmpty {
                 return ElementSelection.partial(path, hitCPs)
-            } else if elementIntersectsRect(elem, x, y, width, height) {
+            } else if elementIntersectsRectWith(elem, x, y, width, height, resolver) {
                 // Marquee covers the body but no CPs. Select the
                 // element with an empty CP set — the Direct
                 // Selection tool must not promote "body

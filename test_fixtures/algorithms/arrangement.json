@@ -1,0 +1,280 @@
+{
+  "_doc": "THE SHARED SEGMENT-SPLITTING PRIMITIVE (jas_dioxus/src/algorithms/arrangement.rs, JasSwift/Sources/Algorithms/Arrangement.swift). It is the first stage of BOTH the planar-graph extractor and the boolean ring normalizer, so it is the most production-reachable geometry in the tree -- and until this family it had NO cross-language corpus at all: its entire assurance was 11 Rust tests and 11 Swift tests MIRRORED BY HAND, which is agreement-by-transcription, not equivalence.\n\nTwo entry points are gated, because both are public and both are called by both consumers:\n\n  split_points(a1,a2,b1,b2) -> [(p, s, t)]  -- every arrangement-relevant meeting of the two segments: proper crossings, T-junctions, endpoint coincidences, and the two ends of a collinear overlap. `s` is p's parameter on a, `t` its parameter on b.\n\n  add_or_find_vertex(verts, pt) -> index    -- the linear-search vertex dedup that fuses split points into shared vertices.\n\nEXPECTATIONS ARE HAND-DERIVED from the documented predicate and epsilon policy (VERT_EPS 1e-9 absolute; PARAM_EPS 1e-9 on the normalized parameter; DENOM_EPS 1e-12 on the raw 2x2 determinant; COLLINEAR_EPS 1e-9 perpendicular distance). Every `derivation` field carries the arithmetic. No expectation was produced by running either port.\n\nTHE `endpoint` FIELD IS NOT DECORATION. The module's contract says a returned point is TAKEN FROM an existing endpoint whenever one of the parameters sits at an endpoint, `exactly`, rather than re-derived by a1 + s*(a2-a1) -- and that exactness is what lets the caller's dedup fuse a T-junction into one vertex instead of two. A tolerance comparison is blind to the difference between (5.0, 0.0) and (4.999999999999999, 0.0), so each result reports WHICH of the four input endpoints its point is BIT-IDENTICAL to (first match in the order a1, a2, b1, b2), or null. That field is compared as a string and admits no tolerance.\n\nCOORDINATES ARE SMALL AND MOSTLY INTEGRAL on purpose (docs/CHECKERS.md section 4, the hex-bit-pattern rule): serde_json mis-parses about one shortest-round-trip f64 literal in ten by an ulp, so a fixture full of random doubles would put the two ports on different inputs. Where a vector needs a value inside an epsilon band, it is chosen so that the OUTPUT is insensitive to a one-ulp parse difference -- either the value is snapped away entirely, or it is echoed and compared under the 1e-12 tolerance, which is ~10^13 ulps wide at these magnitudes.",
+  "algorithm": "arrangement",
+  "comparison": "tolerance",
+  "tolerance": 1e-12,
+  "_tolerance_why": "Both ports run the same divisions on the same small-integer inputs, so agreement should be bit-exact; 1e-12 is set well above one ulp at these magnitudes (~1e-16) and well below every discriminating difference the vectors encode, the narrowest of which is the 1e-9 PARAM_EPS band itself.",
+  "vectors": [
+    {
+      "name": "proper_crossing_at_the_centre",
+      "function": "split_points",
+      "derivation": "a=(0,0)-(10,10), b=(10,0)-(0,10). dxa=10 dya=10 dxb=-10 dyb=10, denom = 10*10 - 10*(-10) = 200. dxab = 0-10 = -10, dyab = 0. s = (-10*0 - 10*(-10))/200 = 100/200 = 0.5. t = (10*0 - 10*(-10))/200 = 0.5. Neither parameter is at an endpoint, so p is re-derived: (0 + 0.5*10, 0 + 0.5*10) = (5,5), which is NOT any input endpoint.",
+      "a": [[0.0, 0.0], [10.0, 10.0]],
+      "b": [[10.0, 0.0], [0.0, 10.0]],
+      "expected": {
+        "points": [
+          {"p": [5.0, 5.0], "s": 0.5, "t": 0.5, "endpoint": null}
+        ]
+      }
+    },
+    {
+      "name": "proper_crossing_with_unequal_parameters",
+      "function": "split_points",
+      "derivation": "SEPARATES s FROM t, which the equal-parameter crossing above cannot: a port that swapped the two would compare green on every 0.5/0.5 vector. a=(0,0)-(4,0), b=(1,-3)-(1,1). denom = 4*4 - 0*0 = 16. dxab = 0-1 = -1, dyab = 0-(-3) = 3. s = (0*3 - 4*(-1))/16 = 4/16 = 0.25. t = (4*3 - 0*(-1))/16 = 12/16 = 0.75. p = (0 + 0.25*4, 0) = (1,0), re-derived.",
+      "a": [[0.0, 0.0], [4.0, 0.0]],
+      "b": [[1.0, -3.0], [1.0, 1.0]],
+      "expected": {
+        "points": [
+          {"p": [1.0, 0.0], "s": 0.25, "t": 0.75, "endpoint": null}
+        ]
+      }
+    },
+    {
+      "name": "t_junction_takes_b_start_exactly",
+      "function": "split_points",
+      "derivation": "b's START lands in a's interior. a=(0,0)-(10,0), b=(5,0)-(5,5). denom = 10*5 - 0*0 = 50. dxab = -5, dyab = 0. s = (0*0 - 5*(-5))/50 = 0.5. t = (10*0 - 0*(-5))/50 = 0. t is AT an endpoint, s is not, so the point must be b1 itself and bit-identically so -- not 5.0000000001.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[5.0, 0.0], [5.0, 5.0]],
+      "expected": {
+        "points": [
+          {"p": [5.0, 0.0], "s": 0.5, "t": 0.0, "endpoint": "b1"}
+        ]
+      }
+    },
+    {
+      "name": "t_junction_takes_b_end_exactly",
+      "function": "split_points",
+      "derivation": "THE MIRROR OF THE ROW ABOVE, and NO test in either port's hand-mirrored set reaches it: the `t == 1 -> p = b2` branch of the crossing case. b's END lands in a's interior. a=(0,0)-(10,0), b=(5,5)-(5,0). denom = 10*(-5) - 0*0 = -50. dxab = 0-5 = -5, dyab = 0-5 = -5. s = (0*(-5) - (-5)*(-5))/(-50) = (-25)/(-50) = 0.5. t = (10*(-5) - 0*(-5))/(-50) = 1.0. So p = b2 = (5,0), bit-exact.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[5.0, 5.0], [5.0, 0.0]],
+      "expected": {
+        "points": [
+          {"p": [5.0, 0.0], "s": 0.5, "t": 1.0, "endpoint": "b2"}
+        ]
+      }
+    },
+    {
+      "name": "t_junction_takes_a_end_exactly",
+      "function": "split_points",
+      "derivation": "The `s == 1 -> p = a2` branch of the CROSSING case, also unreached by the hand-mirrored tests (they reach it only through the collinear branch). a=(0,0)-(10,0), b=(10,-5)-(10,5). denom = 10*10 - 0*0 = 100. dxab = 0-10 = -10, dyab = 0-(-5) = 5. s = (0*5 - 10*(-10))/100 = 1.0. t = (10*5 - 0*(-10))/100 = 0.5. p = a2 = (10,0).",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[10.0, -5.0], [10.0, 5.0]],
+      "expected": {
+        "points": [
+          {"p": [10.0, 0.0], "s": 1.0, "t": 0.5, "endpoint": "a2"}
+        ]
+      }
+    },
+    {
+      "name": "endpoint_coincidence_at_the_shared_vertex",
+      "function": "split_points",
+      "derivation": "a=(0,0)-(10,0), b=(0,0)-(0,10). denom = 100, dxab = dyab = 0, so s = t = 0. Both parameters are at an endpoint; the point is a1 (which is also b1 -- the reported endpoint name is the FIRST match in the order a1,a2,b1,b2).",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[0.0, 0.0], [0.0, 10.0]],
+      "expected": {
+        "points": [
+          {"p": [0.0, 0.0], "s": 0.0, "t": 0.0, "endpoint": "a1"}
+        ]
+      }
+    },
+    {
+      "name": "parameter_just_inside_the_snap_band_snaps_to_the_endpoint",
+      "function": "split_points",
+      "derivation": "PARAM_EPS = 1e-9. a=(0,0)-(1,0), b=(5e-10,-1)-(5e-10,1). denom = 1*2 - 0*0 = 2. dxab = 0 - 5e-10, dyab = 0-(-1) = 1. s = (0*1 - 2*(-5e-10))/2 = 5e-10, which is <= PARAM_EPS, so s snaps to EXACTLY 0 and the point becomes a1 = (0,0) -- NOT (5e-10, 0). t = (1*1 - 0)/2 = 0.5. The output carries no trace of the 5e-10 input, so this vector is immune to a one-ulp parse difference.",
+      "a": [[0.0, 0.0], [1.0, 0.0]],
+      "b": [[5e-10, -1.0], [5e-10, 1.0]],
+      "expected": {
+        "points": [
+          {"p": [0.0, 0.0], "s": 0.0, "t": 0.5, "endpoint": "a1"}
+        ]
+      }
+    },
+    {
+      "name": "parameter_just_outside_the_snap_band_stays_interior",
+      "function": "split_points",
+      "derivation": "THE OTHER SIDE OF THE SAME BAND, so the pair pins where the band ENDS rather than merely that one exists. Same construction with 2e-9 > PARAM_EPS: s = 2e-9 does not snap, so the point is re-derived as (0 + 2e-9*1, 0) and matches no input endpoint. t = 0.5.",
+      "a": [[0.0, 0.0], [1.0, 0.0]],
+      "b": [[2e-9, -1.0], [2e-9, 1.0]],
+      "expected": {
+        "points": [
+          {"p": [2e-9, 0.0], "s": 2e-9, "t": 0.5, "endpoint": null}
+        ]
+      }
+    },
+    {
+      "name": "parallel_but_not_collinear_has_no_meeting",
+      "function": "split_points",
+      "derivation": "a=(0,0)-(10,0), b=(0,1)-(10,1). denom = 10*0 - 0*10 = 0, so the parallel branch runs. Perpendicular distance from b1 to a's line is 1, far above COLLINEAR_EPS, so the pair is rejected.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[0.0, 1.0], [10.0, 1.0]],
+      "expected": {"points": []}
+    },
+    {
+      "name": "crossing_outside_both_segments_has_no_meeting",
+      "function": "split_points",
+      "derivation": "The infinite lines meet at (20,0), beyond both spans. a=(0,0)-(10,0), b=(30,10)-(25,5). denom = 10*(-5) - 0*(-5) = -50. dxab = -30, dyab = -10. s = ((-5)*(-10) - (-5)*(-30))/(-50) = (50-150)/(-50) = 2.0 > 1 + PARAM_EPS, rejected.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[30.0, 10.0], [25.0, 5.0]],
+      "expected": {"points": []}
+    },
+    {
+      "name": "collinear_partial_overlap_reports_both_overlap_ends",
+      "function": "split_points",
+      "derivation": "a covers x in [0,10]; b covers [4,20]; the overlap is [4,10]. len2a = 100. tb1 = 4*10/100 = 0.4, tb2 = 20*10/100 = 2.0. start = max(0.4, 0) = 0.4, end = min(2.0, 1) = 1.0. u=0.4 equals tb1, so the point is b1 = (4,0) exactly, and t = project(b1..b2, (4,0)) = 0. u=1.0 snaps to s=1, so the point is a2 = (10,0), and t = ((10-4)*16)/256 = 0.375.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[4.0, 0.0], [20.0, 0.0]],
+      "expected": {
+        "points": [
+          {"p": [4.0, 0.0], "s": 0.4, "t": 0.0, "endpoint": "b1"},
+          {"p": [10.0, 0.0], "s": 1.0, "t": 0.375, "endpoint": "a2"}
+        ]
+      }
+    },
+    {
+      "name": "collinear_overlap_is_independent_of_b_direction",
+      "function": "split_points",
+      "derivation": "THE SAME SPANS AS THE ROW ABOVE with b reversed, and it pins t as well as p -- the hand-mirrored test for this case asserts only the two points, so a port whose t was measured from the wrong end of b would pass it. b=(20,0)-(4,0): tb1 = 2.0, tb2 = 0.4, lo=0.4, hi=2.0, so start=0.4 end=1.0 as before. u=0.4 matches tb2 now, so the point is b2 = (4,0) and t = project((20,0)..(4,0), (4,0)) = ((4-20)*(-16))/256 = 1.0. u=1.0 gives a2 = (10,0) with t = ((10-20)*(-16))/256 = 0.625.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[20.0, 0.0], [4.0, 0.0]],
+      "expected": {
+        "points": [
+          {"p": [4.0, 0.0], "s": 0.4, "t": 1.0, "endpoint": "b2"},
+          {"p": [10.0, 0.0], "s": 1.0, "t": 0.625, "endpoint": "a2"}
+        ]
+      }
+    },
+    {
+      "name": "collinear_contained_span_reports_the_inner_ends",
+      "function": "split_points",
+      "derivation": "b sits strictly inside a, so BOTH of b's endpoints split a and neither overlap end is clamped. tb1 = 0.3, tb2 = 0.7; both are interior, so s is 0.3 and 0.7 and the points are b1 and b2 with t = 0 and 1.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[3.0, 0.0], [7.0, 0.0]],
+      "expected": {
+        "points": [
+          {"p": [3.0, 0.0], "s": 0.3, "t": 0.0, "endpoint": "b1"},
+          {"p": [7.0, 0.0], "s": 0.7, "t": 1.0, "endpoint": "b2"}
+        ]
+      }
+    },
+    {
+      "name": "collinear_touching_at_one_point_reports_one_point",
+      "function": "split_points",
+      "derivation": "a covers [0,10], b covers [10,20]: the spans meet only at x=10. tb1 = 1.0, tb2 = 2.0, start = 1.0, end = min(2.0,1) = 1.0, and |end-start| <= PARAM_EPS collapses the two overlap ends to one. s snaps to 1, so the point is a2 = (10,0); t = project((10,0)..(20,0), (10,0)) = 0.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[10.0, 0.0], [20.0, 0.0]],
+      "expected": {
+        "points": [
+          {"p": [10.0, 0.0], "s": 1.0, "t": 0.0, "endpoint": "a2"}
+        ]
+      }
+    },
+    {
+      "name": "collinear_disjoint_spans_have_no_meeting",
+      "function": "split_points",
+      "derivation": "a covers [0,10], b covers [20,30]. tb1 = 2.0, tb2 = 3.0, start = 2.0, end = min(3.0, 1) = 1.0, and end < start - PARAM_EPS, so nothing is reported.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[20.0, 0.0], [30.0, 0.0]],
+      "expected": {"points": []}
+    },
+    {
+      "name": "collinear_span_entirely_before_a_has_no_meeting",
+      "function": "split_points",
+      "derivation": "THE OTHER SIDE of the disjointness test, which the hand-mirrored set does not carry: b lies BEFORE a rather than after it, so the clamp runs the other way. tb1 = -3.0, tb2 = -2.0; start = max(-3,0) = 0.0, end = min(-2,1) = -2.0, and end < start - PARAM_EPS rejects.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[-30.0, 0.0], [-20.0, 0.0]],
+      "expected": {"points": []}
+    },
+    {
+      "name": "collinear_full_retrace_reports_both_endpoints",
+      "function": "split_points",
+      "derivation": "A segment and its exact reverse -- the self-overlap a retraced spike produces. a=(5,10)-(5,5), b=(5,5)-(5,10). len2a = 25. tb1 = ((5-5)*0 + (5-10)*(-5))/25 = 1.0, tb2 = 0.0. lo=0, hi=1, so start=0 and end=1: s=0 gives a1=(5,10) with t = project((5,5)..(5,10),(5,10)) = 1, and s=1 gives a2=(5,5) with t=0.",
+      "a": [[5.0, 10.0], [5.0, 5.0]],
+      "b": [[5.0, 5.0], [5.0, 10.0]],
+      "expected": {
+        "points": [
+          {"p": [5.0, 10.0], "s": 0.0, "t": 1.0, "endpoint": "a1"},
+          {"p": [5.0, 5.0], "s": 1.0, "t": 0.0, "endpoint": "a2"}
+        ]
+      }
+    },
+    {
+      "name": "collinear_overlap_off_the_axes",
+      "function": "split_points",
+      "derivation": "EVERY OTHER COLLINEAR VECTOR IN THIS FILE AND IN BOTH PORTS' TEST SETS IS AXIS-ALIGNED, so the projection arithmetic is exercised with one of dx,dy always zero. a=(0,0)-(8,6) (length 10), b=(4,3)-(12,9). denom = 8*6 - 6*8 = 0; both of b's endpoints are exactly on a's line. len2a = 100. tb1 = (4*8 + 3*6)/100 = 0.5, tb2 = (12*8 + 9*6)/100 = 1.5. start = 0.5, end = 1.0. u=0.5 matches tb1 so the point is b1 = (4,3) with t = 0; u=1.0 snaps to s=1 so the point is a2 = (8,6) with t = ((8-4)*8 + (6-3)*6)/100 = 0.5.",
+      "a": [[0.0, 0.0], [8.0, 6.0]],
+      "b": [[4.0, 3.0], [12.0, 9.0]],
+      "expected": {
+        "points": [
+          {"p": [4.0, 3.0], "s": 0.5, "t": 0.0, "endpoint": "b1"},
+          {"p": [8.0, 6.0], "s": 1.0, "t": 0.5, "endpoint": "a2"}
+        ]
+      }
+    },
+    {
+      "name": "zero_length_a_splits_nothing",
+      "function": "split_points",
+      "derivation": "DEGENERATE, and it pairs with the next row to pin an ASYMMETRY that neither port's tests state. a is a point sitting on b's interior. denom = 0, so the parallel branch runs, and len2a = 0 rejects immediately -- a degenerate `a` never reports a meeting, even one that is geometrically there.",
+      "a": [[3.0, 3.0], [3.0, 3.0]],
+      "b": [[0.0, 3.0], [6.0, 3.0]],
+      "expected": {"points": []}
+    },
+    {
+      "name": "zero_length_b_on_a_interior_does_split",
+      "function": "split_points",
+      "derivation": "THE ASYMMETRY: the same degenerate configuration with the roles swapped DOES report. b is the point (5,0) on a's interior. denom = 0, len2a = 100 > 0, both distances are 0 so the pair is collinear, and tb1 = tb2 = 0.5 collapses to one overlap end. s = 0.5, the point is b1 = (5,0), and t = 0 because project_param returns 0 for a degenerate segment.",
+      "a": [[0.0, 0.0], [10.0, 0.0]],
+      "b": [[5.0, 0.0], [5.0, 0.0]],
+      "expected": {
+        "points": [
+          {"p": [5.0, 0.0], "s": 0.5, "t": 0.0, "endpoint": "b1"}
+        ]
+      }
+    },
+    {
+      "name": "sub_denom_eps_pair_is_treated_as_collinear",
+      "function": "split_points",
+      "derivation": "DENOM_EPS = 1e-12 on the RAW determinant, so the branch it guards is reachable only at small scale. a=(0,0)-(1e-6,0); b=(2.5e-7,0)-(7.5e-7,1e-13). denom = 1e-6*1e-13 - 0 = 1e-19, below DENOM_EPS, so the PARALLEL branch runs; both perpendicular distances (0 and 1e-13) are under COLLINEAR_EPS, so the pair is collinear with tb1 = 0.25 and tb2 = 0.75 and TWO overlap ends are reported. This is discriminating: a port that took the crossing branch instead would compute s=0.25, t=0 and report ONE point.",
+      "a": [[0.0, 0.0], [1e-6, 0.0]],
+      "b": [[2.5e-7, 0.0], [7.5e-7, 1e-13]],
+      "expected": {
+        "points": [
+          {"p": [2.5e-7, 0.0], "s": 0.25, "t": 0.0, "endpoint": "b1"},
+          {"p": [7.5e-7, 1e-13], "s": 0.75, "t": 1.0, "endpoint": "b2"}
+        ]
+      }
+    },
+    {
+      "name": "add_or_find_dedups_within_vert_eps",
+      "function": "add_or_find_vertex",
+      "derivation": "VERT_EPS = 1e-9, STRICTLY less than. Starting from an empty list: (0,0) is pushed at 0; (10,0) is 10 away so it is pushed at 1; (0,0) again matches index 0; (10,5e-10) is 5e-10 from index 1, inside the band, so it returns 1 WITHOUT being stored; (10,2e-9) is outside the band so it is pushed at 2. The final list is what the caller's topology is built on, so it is reported alongside the indices.",
+      "vertices": [],
+      "points": [[0.0, 0.0], [10.0, 0.0], [0.0, 0.0], [10.0, 5e-10], [10.0, 2e-9]],
+      "expected": {
+        "indices": [0, 1, 0, 1, 2],
+        "vertices": [[0.0, 0.0], [10.0, 0.0], [10.0, 2e-9]]
+      }
+    },
+    {
+      "name": "add_or_find_first_match_wins_over_a_nearer_one",
+      "function": "add_or_find_vertex",
+      "derivation": "THE ORDER-DEPENDENCE WITNESS. Two stored vertices are both inside the band around the query, and the FIRST one is FARTHER. The contract is a linear search that returns the first match, so the answer is 0; a port that returned the NEAREST match would answer 1 and every other vector in this family would still be green. Nothing is appended, so the stored list comes back unchanged.",
+      "vertices": [[0.0, 8e-10], [0.0, 1e-10]],
+      "points": [[0.0, 0.0]],
+      "expected": {
+        "indices": [0],
+        "vertices": [[0.0, 8e-10], [0.0, 1e-10]]
+      }
+    },
+    {
+      "name": "add_or_find_measures_against_the_stored_representative",
+      "function": "add_or_find_vertex",
+      "derivation": "Dedup is measured against what is STORED, not against the last point seen, so tolerance does not chain. (0,0) is pushed at 0. (0,6e-10) is inside the band around index 0, so it returns 0 and is NOT stored. (0,1.2e-9) is 1.2e-9 from the stored (0,0) -- outside the band -- so it is pushed at 1, even though it is only 6e-10 from the point that preceded it. A port that had stored the second point, or that compared against the previous input, would answer [0,0,0] and hold two vertices instead of three positions.",
+      "vertices": [],
+      "points": [[0.0, 0.0], [0.0, 6e-10], [0.0, 1.2e-9]],
+      "expected": {
+        "indices": [0, 0, 1],
+        "vertices": [[0.0, 0.0], [0.0, 1.2e-9]]
+      }
+    }
+  ]
+}

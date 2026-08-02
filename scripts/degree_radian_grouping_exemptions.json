@@ -1,0 +1,7 @@
+{
+  "_doc": "Sites permitted to spell a degree/radian conversion with a grouping other than the sanctioned one (Swift `x * (Double.pi / 180)` / `x * (180 / Double.pi)`; Rust `x.to_radians()` / `x.to_degrees()`). Read by scripts/check_degree_radian_grouping.py.",
+  "_why_empty": "EMPTY, and that is the finding rather than an oversight. The sweep of 2026-08-01 moved all 39 JasSwift sites and all 5 stray jas_dioxus sites onto the sanctioned grouping and NOT ONE of them needed the other one -- there is no site in either active port whose meaning depends on multiplying before dividing. An exemption here would have to argue that a particular call wants a DIFFERENT DOUBLE from the one the live Python reference computes, which is a claim about a bug, not about a requirement.",
+  "_key_format": "\"<repo-relative path>:<line number>\": \"<why this site needs the other grouping>\". The anchor is a line number, so a row survives only until the file moves under it -- which is deliberate: a rotted anchor reds as STALE and gets re-argued rather than inherited.",
+  "_policed_both_ways": "check_degree_radian_grouping.py walks this ledger after scanning and reds on any row whose site has vanished or now spells the conversion correctly. check_gate_consistency.py enforces that that second loop exists.",
+  "sites": {}
+}

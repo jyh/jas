@@ -4953,7 +4953,7 @@ fn blob_brush_oval_ring(
     const SEGMENTS: usize = 16;
     let rx = size * 0.5;
     let ry = size * (roundness_pct / 100.0) * 0.5;
-    let rad = angle_deg * std::f64::consts::PI / 180.0;
+    let rad = angle_deg.to_radians();
     let (cs, sn) = (rad.cos(), rad.sin());
     let mut out = Vec::with_capacity(SEGMENTS);
     for i in 0..SEGMENTS {
@@ -6100,7 +6100,14 @@ fn resolve_reference_point(
     if elements.is_empty() {
         return (0.0, 0.0);
     }
-    let (x, y, w, h) = align::union_bounds(&elements, align::geometric_bounds);
+    // RESOLVEDALIGN: resolve the kinds whose geometry lives behind an id, so a
+    // selection containing a symbol instance gets a pivot at the middle of what
+    // is DRAWN rather than one dragged toward the origin.
+    let resolver = crate::document::id_index::IndexResolver(model.id_index());
+    let bounds_fn = |e: &crate::geometry::element::Element| {
+        align::resolved_bounds(e, &resolver, crate::geometry::element::Element::geometric_bounds)
+    };
+    let (x, y, w, h) = align::union_bounds(&elements, &bounds_fn);
     (x + w / 2.0, y + h / 2.0)
 }
 

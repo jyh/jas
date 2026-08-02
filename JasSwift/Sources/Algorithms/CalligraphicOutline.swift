@@ -45,7 +45,7 @@ public func calligraphicOutline(_ commands: [PathCommand],
 
     let a = brush.size / 2.0
     let b = (brush.size * (brush.roundness / 100.0)) / 2.0
-    let thetaBrush = brush.angle * .pi / 180.0
+    let thetaBrush = brush.angle * (Double.pi / 180)
 
     var left: [(Double, Double)] = []
     var right: [(Double, Double)] = []

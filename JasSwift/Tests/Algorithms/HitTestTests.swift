@@ -200,3 +200,52 @@ private func redFilledPolyline(_ pts: [(Double, Double)]) -> Element {
     let sq2 = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
     #expect(!elementIntersectsPolygon(line, sq2))
 }
+
+// MARK: - RESOLVEDHIT: the resolver-less verb's contract, pinned
+//
+// The tempting "fix" for an unhittable symbol instance is to give the
+// resolver-less path something to chew on — flatten the instance, cache
+// geometry on it, widen the default case. Each would make the SHARED verb
+// answer a question it cannot actually see: with no document behind it, there
+// is no fact about where a target id is.
+//
+// These pin the boundary, so the shortcut cannot land later and look green.
+// Twins of Rust's `the_resolverless_verb_keeps_answering_false_for_a_reference`
+// and friends in algorithms/hit_test.rs.
+
+private func bareReference() -> Element {
+    Element.live(.reference(ReferenceElem(target: ElementRef("m1"), name: nil, id: nil)))
+}
+
+@Test func theResolverlessVerbKeepsAnsweringFalseForAReference() {
+    let r = bareReference()
+    #expect(!elementIntersectsRect(r, -1000, -1000, 2000, 2000))
+    let big = [(-1000.0, -1000.0), (1000.0, -1000.0), (1000.0, 1000.0), (-1000.0, 1000.0)]
+    #expect(!elementIntersectsPolygon(r, big))
+    #expect(segmentsOfElement(r).isEmpty)
+}
+
+@Test func aResolverThatResolvesNothingAgreesWithTheResolverlessVerb() {
+    // NullResolver is not a special case in the `...With` path — it is the
+    // ordinary dangling answer. If these two ever disagree, the resolving form
+    // has grown geometry out of nothing.
+    let r = bareReference()
+    #expect(elementIntersectsRectWith(r, -1000, -1000, 2000, 2000, NullResolver())
+            == elementIntersectsRect(r, -1000, -1000, 2000, 2000))
+}
+
+@Test func aResolverThatResolvesTheTargetSeesTheMastersGeometry() {
+    // The algorithm-level half of the controller tests: same element, two
+    // resolvers, opposite answers — so the repair demonstrably turns on
+    // resolution and not on anything else about the element.
+    struct One: ElementResolver {
+        let master: Element
+        func resolve(_ id: ElementRef) -> Element? { id.id == "m1" ? master : nil }
+    }
+    let master = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                   fill: Fill(color: Color(r: 1, g: 0, b: 0, a: 1)),
+                                   id: "m1"))
+    let r = bareReference()
+    #expect(elementIntersectsRectWith(r, -1, -1, 12, 12, One(master: master)))
+    #expect(!elementIntersectsRect(r, -1, -1, 12, 12))
+}

@@ -2,6 +2,116 @@
   "algorithm": "boolean",
   "comparison": "exact",
   "tolerance": 0.01,
+  "_checker_doc": [
+    "TWO INSTRUMENTS RULE THIS FAMILY, AND THEY MEASURE DIFFERENT THINGS.",
+    "",
+    "`compare_exact_boolean` (the `exact_boolean` strategy) demands ELEMENTWISE",
+    "RING EQUALITY at 4dp: same ring order, same starting vertex, same",
+    "direction, same vertex list. That is strictly stronger than the region",
+    "being right and strictly weaker at seeing whether it IS right. The REGION",
+    "is unique; the RING ENCODING IS NOT. Ring order, starting vertex, winding",
+    "direction, one-ring-versus-two at a pinch and retained collinear vertices",
+    "are all free, and this very fixture now contains a worked example:",
+    "`intersect_edge_shared_ring_pair_evenodd` denotes the single rectangle",
+    "[8,12]x[2,8] and both ports encode it as TWO abutting rings split at",
+    "x=10. Nothing is wrong. A comparison that pins that encoding is an",
+    "ADMISSION BARRIER -- it would red a third port, a Skia or Vello rewrite,",
+    "or any snap_grid change that moved a coordinate by an ulp -- while still",
+    "only seeing a wrong region DIFFERENTIALLY, which is to say only when the",
+    "two ports are wrong in different ways.",
+    "",
+    "`boolean_result_is_the_sampled_combination` (the `checker` block below)",
+    "is the other instrument. It rules the REGION by the sampled winding rule",
+    "and is blind to the encoding; it needs only ONE lane, so the Windows seat",
+    "adjudicates it in full without a Swift toolchain; and a bug SHARED by",
+    "both ports does not make it green.",
+    "",
+    "BOTH RUN. Demoting the exact comparison to advisory changes what this",
+    "gate PROMISES and is a scope call for JYH, not for a checker author; see",
+    "the plan's section 'A SCOPE CALL THAT IS JYH'S'. Nothing here does it.",
+    "",
+    "CENSUS ROW 35, AND A CORRECTION WORTH READING BEFORE ADDING A VECTOR.",
+    "STABLETIE (d901ce2f) found Swift's `Array.sort` used where Rust uses a",
+    "stable `sort_by`, and recorded that the sweep queue's comparator ties",
+    "exactly when two events share a point, a direction, a collinear opposite",
+    "endpoint AND A POLYGON ID -- which is what TWO RINGS OF THE SAME OPERAND",
+    "touching produce. No vector in this fixture produced that shape.",
+    "",
+    "THE OBVIOUS FIX DOES NOT WORK, AND IT WAS MEASURED, NOT ASSUMED. Two",
+    "rings of one operand sharing a FULL edge, or meeting at a single vertex,",
+    "do NOT reach the tie: CANONICALISATION RUNS FIRST and fuses or separates",
+    "them before the sweep sees anything, taking the tie with it. STABLETIE's",
+    "own test says so in one line -- 'runBooleanSweep, not booleanSubtract:",
+    "the normalizer would fuse the two touching subject rings into one L",
+    "before the sweep ever sees them, and the tie with it' -- and it was",
+    "re-measured here: inverting the tie-break in Boolean.swift changed NOT",
+    "ONE BYTE of the output on five such vectors.",
+    "",
+    "WHAT DOES REACH IT is a PARTIAL edge share that ends at a shared vertex:",
+    "`subtract_across_a_partial_edge_share_tie`, the last vector below, whose",
+    "operands are STABLETIE's own. Inverting the tie-break turns its answer",
+    "from two unit squares (area 2) into a square and a TRIANGLE (area 1.5) --",
+    "the exact symptom that commit names -- and the region law refuses it.",
+    "",
+    "The five vectors before it stay, for a different reason than the one they",
+    "were added for: each puts two rings of ONE operand in contact under a",
+    "different function, and `intersect_edge_shared_ring_pair_evenodd` is the",
+    "worked demonstration that ring_count is an encoding and not a region."
+  ],
+  "checker": {
+    "name": "boolean_result_is_the_sampled_combination",
+    "seam": 1,
+    "law": "a point is in A u B iff it is in A or in B; in A n B iff in both; in A - B iff in A and not B; in A xor B iff in exactly one -- membership read by ray cast over the ORIGINAL OPERAND rings under each operand's DECLARED fill rule, never over the sweep's output; every result ring is simple and the rings are pairwise non-overlapping; and every result VERTEX lies inside bbox(A) or bbox(B), because all four operations return a subset of A u B",
+    "samples_per_vector": 88,
+    "lattice_side": 8,
+    "prng_probes": 24,
+    "_lanes_why": "TWO sampling lanes, as the doctrine requires. The ANCHOR lane is an 8x8 jittered lattice over the operand-and-result bounding box, jittered by a hash of the family and vector name and NOTHING ELSE -- no seed, so a red is the same red on every machine and every run, which is what a bisect needs. The GENERATIVE lane is 24 draws from a SplitMix64 stream freshly seeded from the clock each run, printed at the head of the run and carried in the checker report so a red survives the CI log expiring. 8x8 is not arbitrary: the smallest feature any vector here carries is the 2x2 loop of the normalize family and the 3pt strip of subtract_from_evenodd_declared_donut, both of which a lattice this fine cannot step over. A CORRECTION, 2026-08-01, because this field used to claim the opposite and the claim was FALSE: the box spanning the RESULT as well as the operands does NOT mean `a result that leaks outside the operand hull is probed where it leaked`. THE SAMPLING BOX IS A FUNCTION OF THE OUTPUT, so a leak MOVES the box instead of being caught by it -- append a 1pt spurious ring 100pt from union_overlapping_squares and all 88 probes are still accepted against what was then a floor of 64 over their UNION (the floors are per lane now -- see _floors_are_per_probe_lane_why -- which does not change this measurement, because the anchor lane accepts all 64 of its probes in the speck case too: a leak blinds the sample without refusing any of it), all 88 correctly agree that empty plane is empty, and the probes landing inside the region under test fall from 31 to ZERO. Nothing was asked and the lane was green; 0 of 17 vectors noticed, across 10 seeds, at 100pt, 1000pt and 10000pt. The result is in the box for one reason only, and it is a good one: so that the NEGATIVE half of the membership question is asked where the result actually claims area. A LEAK is refused exactly and without any probe by the containment clause of the law above, and the BLINDNESS is refused by min_inside_probes_per_vector below.",
+    "tolerance_points": 0.001,
+    "_tolerance_points_why": "DERIVED, in document points. A probe closer than this to ANY edge of A, of B, or of the result is REFUSED rather than answered: a point on a boundary has no defined answer, and refusing it is what makes this law strict instead of flaky. The floor under the number is the wire's own quantisation -- every port serialises document coordinates through a shared 4-decimal formatter, so 1e-4 pt is the finest distinction that survives, and a probe must stand off by more than one such step for three float dialects (Rust, Swift, Python) to agree which side of an edge it is on. Ten steps is the margin taken. In document points it is a thousandth of a point.",
+    "_floors_are_per_probe_lane_why": "EVERY SAMPLED FLOOR BELOW IS KEYED BY PROBE LANE, and that is a repair, not decoration. Until 2026-08-01 the checker accumulated `accepted` and `inside` over `lattice(64) + scatter(24)` CONCATENATED and compared both against the UNION total, so a floor DERIVED FROM THE ANCHOR LANE could be PAID BY THE GENERATIVE LANE. The two lanes are not interchangeable -- one is seedless and identical on every machine, the other is a fresh draw whose count moves run to run -- so pooling them let the lane that varies discharge the obligation of the lane a bisect depends on. MEASURED over 40 seeds: blind the lattice entirely (every anchor probe displaced 10000pt, so all 64 are still ACCEPTED and none is informative) and the old union floor of 3 was still met, by the 24 generative draws alone, on 11 to 15 of this family's 17 non-empty vectors -- a median of THIRTEEN vectors reporting a healthy sample while the reproducible half of the instrument asked nothing. Under the per-lane floors it is ZERO at every one of those seeds. AND THE OTHER DIRECTION IS WORSE: set prng_probes to 0 -- delete the discovery lane outright -- and the old checker was 19 of 19 GREEN, because the anchor lane's 64 probes met a floor of 64 and its inside count met a floor derived from itself; nothing anywhere noticed that the generative lane had stopped existing. It now reds all 19, by asserting that each declared lane WAS SEEN rather than that its counter is non-zero (a lane that drew nothing and a lane that drew and was refused report the same number). Each lane now meets its own floor or the vector reds, and the red names the lane.",
+    "min_accepted_per_vector": {
+      "anchor": 64,
+      "generative": 18
+    },
+    "_min_accepted_per_vector_why": "TOTALITY FROM THE FIRST RUN: a lane that sampled nothing must be an ERROR, not a silent zero. It counts REFUSALS, not INFORMATION -- 88 of 88 accepted is the number a fully blind lane reports -- which is why min_inside_probes_per_vector exists below. ANCHOR = 64, the lattice's FULL WIDTH: the lane is seedless, and measured over this corpus every one of its 64 probes stands clear of every edge on every vector, so the floor is exact with no headroom and cannot drift with the seed. It is deliberately tight: a legal re-encoding of a result that puts an edge within 1e-3pt of one of the 64 fixed lattice points would red, and the answer to that red is to RE-DERIVE the number against the new geometry, never to lower it. Tightening it here also closes something the union floor could not: the refusal test reads the OUTPUT's edges too, so a wrong result that threads an edge through the region could previously refuse up to 24 probes and still clear 64 of 88. GENERATIVE = 18, which is 24 draws minus 6, and it is DERIVED rather than observed. The refusal band is 2 x tolerance_points = 0.002pt wide around every edge of A, of B and of the result, so the per-probe refusal probability is bounded by (total edge length x 0.002) / (sampling-box area); the worst vector in this corpus is subtract_across_a_partial_edge_share_tie at 28pt of edge in a 30pt-square box, giving p <= 0.001867. P(7 or more refusals in one vector's 24 draws) <= 2.7e-14, and <= 5.0e-13 across all 19 vectors in a run. Measured over 300 seeds the worst any vector saw was ONE refusal (23 of 24). A seeded lane's floor must be loose or it becomes flaky, and a flaky floor gets lowered until it is vacuous; this one is a POPULATION floor whose job is to red on a lane that stopped drawing -- which reports zero, not seventeen.",
+    "min_inside_probes_per_vector": {
+      "anchor": 3
+    },
+    "_min_inside_probes_per_vector_why": "THE INFORMATION FLOOR, and it exists because min_accepted_per_vector cannot tell a lane that sampled its subject from one that sampled empty plane -- both report a full accept. This one counts the accepted probes that land INSIDE the region being adjudicated, by the SPEC's reading of the operands and not the result's, which is the quantity that actually collapses when the instrument goes blind: 31 to ZERO on union_overlapping_squares with a 1pt spurious ring 100pt away, and 0 of 19 vectors keeping 3 at 10000pt. IT IS CHARGED TO THE ANCHOR LANE, WHICH IS THE LANE IT WAS DERIVED FROM. 3 is the CORPUS MINIMUM over the seedless lattice, set by intersect_edge_shared_ring_pair_evenodd, whose result is the small rectangle [8,12]x[2,8] inside a 20x14 sampling box and which additionally refuses the probes near the internal x=10 edge of its two-ring encoding; the next three are intersect_inner_is_inner and intersect_overlapping_squares at 4 and subtract_across_a_partial_edge_share_tie at 5, the median over the 17 non-empty vectors is 17 and the maximum is 27. The old justification -- `derived from the anchor lane, so the generative lane's 24 draws can only add to it and the floor cannot go flaky` -- was true about the floor's STABILITY and false about what the floor then measured: draws that can only add can also be the only thing there, and the union comparison let them be. A legal re-encoding moves this number UPWARD, not down: fusing those two abutting rings into one deletes the internal edge and returns the probes it was refusing. Note what the floor is NOT: it is not the leak detector. A leak is caught exactly by the containment clause, which needs no probe at all; this floor catches the SECOND thing a leak does, and catches it for any other cause of blindness too.",
+    "no_information_floor": {
+      "generative": "THE GENERATIVE LANE CARRIES NO PER-VECTOR INFORMATION FLOOR, AND THE REASON IS MEASURED, NOT CONVENIENT. 24 uniform draws over a box the region fills 3/64 of put ZERO probes inside about a third of the time; over 300 seeds, SIX of this family's non-empty vectors each reached 0 at least once -- intersect_overlapping_squares, intersect_inner_is_inner, intersect_edge_shared_ring_pair_evenodd, subtract_overlapping_squares, subtract_from_nonzero_edge_shared_ring_pair and subtract_across_a_partial_edge_share_tie. Any floor of 1 or more on this lane would therefore be FLAKY, and a flaky floor gets lowered until it is vacuous -- the failure this whole block exists to prevent. The information guarantee is the ANCHOR lane's job precisely because that lane is deterministic: it is 64 of the 88 probes and it is floored at 3 above. This lane's job is DISCOVERY, and it is still held to a POPULATION floor (min_accepted_per_vector.generative = 18) and to a fixture-wide total (min_checks_per_probe_lane.generative = 342), so a generative lane that stopped running reds. What is NOT claimed: that this lane could not go blind while the anchor lane stays informative. The two draw from the SAME box, so a blindness that reaches one reaches the other; a defect that hits the stream alone shows up as a population red, not an information red."
+    },
+    "min_rulable_vectors": 19,
+    "min_checks_per_probe_lane": {
+      "anchor": 1216,
+      "generative": 342
+    },
+    "_min_checks_per_probe_lane_why": "THE FIXTURE-WIDE HALF OF THE SAME REPAIR, and it is not redundant with min_checks_per_lane below: that one is the SUM, and a sum is paid by whichever half has it -- an anchor lane that halved reconciles green behind a generative lane that did not. DERIVED, and the derivation is machine-checked in _checker_config so the two numbers cannot drift apart in this file: min_accepted_per_vector[lane] x min_rulable_vectors, so 64 x 19 = 1216 and 18 x 19 = 342. Measured totals for scale: the anchor lane performs exactly 1216 (it is deterministic and accepts everything), the generative lane 453 to 456 across 300 seeds.",
+    "min_checks_per_lane": 1558,
+    "_min_checks_per_lane_why": "DERIVED, not observed: the sum of min_checks_per_probe_lane, 1216 + 342. Deriving it rather than pinning the measured total (about 1670) is what keeps the generative lane's run-to-run variation from making the floor flaky, while still redding on a vector that went quiet. Kept alongside the per-probe-lane block because the LANGUAGE lane (rust, swift) is the thing --reconcile iterates, and because R5's `every declared floor` reads it; the two are asserted together and a disagreement between them is refused.",
+    "min_witnesses": {
+      "union_vectors": 5,
+      "intersect_vectors": 4,
+      "subtract_vectors": 7,
+      "exclude_vectors": 3,
+      "operand_declares_nonzero": 3,
+      "operand_with_multiple_rings": 8,
+      "operands_overlap_in_area": 16
+    },
+    "_min_witnesses_why": "COUNTING CANNOT SEE COLLINEARITY. This law's denotation has two independent axes -- the four combination clauses, and the fill rule each operand is read under -- and a corpus of any size can exercise one value of each and stay green. The four function floors keep all four clauses run. `operand_declares_nonzero` keeps the non-zero half of `contains` alive: without it the pre-ruling defect (a declared rule silently discarded, so the artist gets a hole they never drew) would be reintroducible with every count healthy. `operand_with_multiple_rings` is the witness for `the rule reads the WHOLE SET at once, not ring by ring`, which is only a claim about sets with more than one ring. `operands_overlap_in_area` keeps disjoint operands from being the whole corpus, which would make intersect and subtract trivially empty and union a concatenation. Each floor equals the authored count, so adding a vector stays green and deleting one reds.",
+    "unrulable": {},
+    "empty_regions": {
+      "intersect_disjoint_squares_empty": "AN INTERSECTION OF DISJOINT OPERANDS. A is [0,10]x[0,10] and B is [20,30]x[20,30]; they share no point, so A n B is the empty region and no probe can land inside it. This is a DECLARATION, not an exemption from adjudication: the vector is still ruled, and its ruling is the strong one -- all 88 of its probes must be found OUTSIDE the result, which is exactly the claim that an intersection of disjoint squares emits nothing. Stated by name because a run cannot measure emptiness: a sample witnesses a region's PRESENCE (one probe inside proves it) and never its absence, so the emptiness claim has to be a sentence a human wrote and the machine's job is to refuse a false one -- which it does, on the first probe that lands inside.",
+      "subtract_identical_squares_empty": "A DIFFERENCE OF EQUAL OPERANDS. A and B are the same square [0,10]x[0,10], so A - B removes every point of A and the region is empty by construction. Ruled exactly as above: every accepted probe must be OUTSIDE the result, and a single one found inside refuses this declaration rather than being excused by it."
+    },
+    "mutant": {
+      "name": "the_pinch_regression",
+      "provenance": "THE PRE-2026-07-26 SHIPPING BEHAVIOUR, named in this fixture's own _derivation for exclude_overlapping_squares: 'both ports emitting ONE self-touching twelve-vertex ring, because connect_edges cannot tell which of two regions touching at a pinch vertex it is on'. Repaired by the split-at-repeated-vertex post-pass (boolean.rs split_pinched_rings / Boolean.swift splitPinchedRings) and recorded in transcripts/BOOLEAN.md as 'Multi-ring results: FIXED 2026-07-26'. The mutant concatenates every result ring into one, which is that emission. It is a historical wrong answer, not an invented one.",
+      "_why_this_one": "It is a bug of ENCODING, and it is the reason the law has a STRUCTURAL half at all: on several of these vectors the concatenated ring SAMPLES CORRECTLY -- even-odd membership over it agrees with the region everywhere -- so the membership clause alone would swallow it. Only `every result ring is simple` refuses it. It is also why the mutant is derived from the OUTPUT: an encoding bug has no expression that does not mention the encoding it corrupts. PER-CLAUSE TEETH, RE-MEASURED 2026-08-01 AFTER F1 (the law has FOUR clauses now and a single count cannot say which are watched): this mutant is rejected 8 times by `every result ring is simple` and ZERO times by membership, by laminarity or by containment. That is honest and it is the point of pairing it with boolean_normalize's, which is rejected 11 / 1 / 1 / 0 across the same four. The membership clause's real teeth in this family are the PORT mutation recorded in subtract_across_a_partial_edge_share_tie's _derivation, and the CONTAINMENT clause's are the F1 speck -- a spurious ring appended to the Rust port's output, which reds all 19 vectors at 0.1pt and 1.0pt, at 100pt, 1000pt and 10000pt. Neither is re-run on every CI pass; extending the registered mutant set to one per clause is docs/CHECKERS.md section 8's open item, and containment is now the clearest candidate because its mutant is two lines and needs no encoding knowledge at all.",
+      "min_discriminating": 8,
+      "_min_discriminating_why": "MEASURED on this corpus, 2026-08-01: 8 of 19 rulable vectors. Exactly the vectors whose correct result carries more than one ring -- union_disjoint_squares, exclude_overlapping_squares, subtract_inner_creates_hole, subtract_from_evenodd_declared_donut, intersect_edge_shared_ring_pair_evenodd, exclude_edge_shared_ring_pair_against_inner_square, exclude_from_nonzero_declared_solid_bar and subtract_across_a_partial_edge_share_tie. On the other 11 the concatenation is the identity, and the mutant is honestly toothless there rather than pretended otherwise."
+    }
+  },
   "vectors": [
     {
       "name": "union_disjoint_squares",
@@ -12,9 +122,9 @@
         "area": 200.0,
         "ring_count": 2,
         "sample_points": [
-          {"point": [5.0, 5.0], "inside": true},
-          {"point": [20.0, 5.0], "inside": true},
-          {"point": [12.0, 5.0], "inside": false}
+          {"point": [5.0,5.0], "inside": true},
+          {"point": [20.0,5.0], "inside": true},
+          {"point": [12.0,5.0], "inside": false}
         ]
       }
     },
@@ -38,10 +148,10 @@
         "area": 175.0,
         "ring_count": 1,
         "sample_points": [
-          {"point": [2.0, 2.0], "inside": true},
-          {"point": [12.0, 12.0], "inside": true},
-          {"point": [7.0, 7.0], "inside": true},
-          {"point": [12.0, 2.0], "inside": false}
+          {"point": [2.0,2.0], "inside": true},
+          {"point": [12.0,12.0], "inside": true},
+          {"point": [7.0,7.0], "inside": true},
+          {"point": [12.0,2.0], "inside": false}
         ]
       }
     },
@@ -54,9 +164,9 @@
         "area": 25.0,
         "ring_count": 1,
         "sample_points": [
-          {"point": [7.0, 7.0], "inside": true},
-          {"point": [2.0, 2.0], "inside": false},
-          {"point": [12.0, 12.0], "inside": false}
+          {"point": [7.0,7.0], "inside": true},
+          {"point": [2.0,2.0], "inside": false},
+          {"point": [12.0,12.0], "inside": false}
         ]
       }
     },
@@ -69,9 +179,9 @@
         "area": 75.0,
         "ring_count": 1,
         "sample_points": [
-          {"point": [2.0, 2.0], "inside": true},
-          {"point": [7.0, 7.0], "inside": false},
-          {"point": [12.0, 12.0], "inside": false}
+          {"point": [2.0,2.0], "inside": true},
+          {"point": [7.0,7.0], "inside": false},
+          {"point": [12.0,12.0], "inside": false}
         ]
       }
     },
@@ -85,9 +195,9 @@
         "area": 150.0,
         "ring_count": 2,
         "sample_points": [
-          {"point": [2.0, 2.0], "inside": true},
-          {"point": [12.0, 12.0], "inside": true},
-          {"point": [7.0, 7.0], "inside": false}
+          {"point": [2.0,2.0], "inside": true},
+          {"point": [12.0,12.0], "inside": true},
+          {"point": [7.0,7.0], "inside": false}
         ]
       }
     },
@@ -100,8 +210,8 @@
         "area": 100.0,
         "ring_count": 1,
         "sample_points": [
-          {"point": [5.0, 5.0], "inside": true},
-          {"point": [15.0, 5.0], "inside": false}
+          {"point": [5.0,5.0], "inside": true},
+          {"point": [15.0,5.0], "inside": false}
         ]
       }
     },
@@ -125,8 +235,8 @@
         "area": 84.0,
         "ring_count": 2,
         "sample_points": [
-          {"point": [1.0, 1.0], "inside": true},
-          {"point": [5.0, 5.0], "inside": false}
+          {"point": [1.0,1.0], "inside": true},
+          {"point": [5.0,5.0], "inside": false}
         ]
       }
     },
@@ -139,9 +249,9 @@
         "area": 200.0,
         "ring_count": 1,
         "sample_points": [
-          {"point": [5.0, 5.0], "inside": true},
-          {"point": [15.0, 5.0], "inside": true},
-          {"point": [25.0, 5.0], "inside": false}
+          {"point": [5.0,5.0], "inside": true},
+          {"point": [15.0,5.0], "inside": true},
+          {"point": [25.0,5.0], "inside": false}
         ]
       }
     },
@@ -154,8 +264,8 @@
         "area": 16.0,
         "ring_count": 1,
         "sample_points": [
-          {"point": [5.0, 5.0], "inside": true},
-          {"point": [1.0, 1.0], "inside": false}
+          {"point": [5.0,5.0], "inside": true},
+          {"point": [1.0,1.0], "inside": false}
         ]
       }
     },
@@ -173,9 +283,9 @@
         "area": 240.0,
         "ring_count": 2,
         "sample_points": [
-          {"point": [10.0, 10.0], "inside": false},
-          {"point": [2.0, 10.0], "inside": true},
-          {"point": [10.0, 1.0], "inside": false}
+          {"point": [10.0,10.0], "inside": false},
+          {"point": [2.0,10.0], "inside": true},
+          {"point": [10.0,1.0], "inside": false}
         ]
       }
     },
@@ -193,9 +303,131 @@
         "area": 340.0,
         "ring_count": 1,
         "sample_points": [
-          {"point": [10.0, 10.0], "inside": true},
-          {"point": [2.0, 10.0], "inside": true},
-          {"point": [10.0, 1.0], "inside": false}
+          {"point": [10.0,10.0], "inside": true},
+          {"point": [2.0,10.0], "inside": true},
+          {"point": [10.0,1.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "subtract_from_nonzero_edge_shared_ring_pair",
+      "a_fill_rule": "nonzero",
+      "_derivation": "TWO RINGS OF ONE OPERAND sharing the FULL edge x=10, traced upward by one and downward by the other, under SUBTRACT. MEASURED, and it is the correction the _checker_doc records: a FULL shared edge does NOT reach the sweep-queue tie of census row 35 -- canonicalisation fuses the pair first, and inverting Boolean.swift's tie-break changes not one byte of this answer. The vector earns its place anyway, as the subtract arm of the same-operand-contact class and as a carried-rule witness. Declared nonzero, the shared span is filled on both sides and the pair fuses: A is the rectangle [0,20]x[0,10], area 200. B is [5,25]x[5,15]; the part of it inside A is [5,20]x[5,10], area 15*5 = 75. A - B is therefore the L-shape of area 200 - 75 = 125, one ring. The sample at (15,7) is inside A and inside B and must be OUT.",
+      "function": "subtract",
+      "a": [
+        [[0,0],[10,0],[10,10],[0,10]],
+        [[10,0],[20,0],[20,10],[10,10]]
+      ],
+      "b": [[[5,5],[25,5],[25,15],[5,15]]],
+      "expected": {
+        "area": 125.0,
+        "ring_count": 1,
+        "sample_points": [
+          {"point": [2.0,2.0], "inside": true},
+          {"point": [15.0,2.0], "inside": true},
+          {"point": [15.0,7.0], "inside": false},
+          {"point": [12.0,12.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "intersect_edge_shared_ring_pair_evenodd",
+      "_derivation": "THE WORKED EXAMPLE of why the region and its encoding are different things, and the intersect arm of the same-operand-contact class. The same edge-sharing pair as the vector above, declared nothing and therefore read EVEN-ODD: a ray from (5,5) crosses x=10 twice and x=20 once, three crossings, odd, so the pair still denotes the union [0,20]x[0,10]. B is [8,12]x[2,8], wholly inside it, so A n B IS B: a single 4x6 rectangle of area 24. BOTH PORTS EMIT IT AS TWO RINGS, [8,10]x[2,8] and [10,12]x[2,8], split along the operands' shared edge. That is not a defect and this fixture does not ask them to stop: it is exactly the encoding freedom that makes elementwise ring equality an admission barrier, and the region checker is blind to it while `ring_count: 2` below pins it.",
+      "function": "intersect",
+      "a": [
+        [[0,0],[10,0],[10,10],[0,10]],
+        [[10,0],[20,0],[20,10],[10,10]]
+      ],
+      "b": [[[8,2],[12,2],[12,8],[8,8]]],
+      "expected": {
+        "area": 24.0,
+        "ring_count": 2,
+        "sample_points": [
+          {"point": [9.0,5.0], "inside": true},
+          {"point": [11.0,5.0], "inside": true},
+          {"point": [5.0,5.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "exclude_edge_shared_ring_pair_against_inner_square",
+      "_derivation": "The exclude arm of the same-operand-contact class. The same even-odd edge-sharing pair, region [0,20]x[0,10] of area 200, exclusive-or'd with B = [8,12]x[2,8] of area 24, which lies wholly inside it -- so the answer is A minus B, a rectangle with a rectangular hole: 200 - 24 = 176. The ports emit THREE rings: the outer boundary FUSED across the operands' shared edge, and the hole SPLIT along it into [8,10]x[2,8] and [10,12]x[2,8]. Two encoding choices in opposite directions in one answer, and the region is the same either way.",
+      "function": "exclude",
+      "a": [
+        [[0,0],[10,0],[10,10],[0,10]],
+        [[10,0],[20,0],[20,10],[10,10]]
+      ],
+      "b": [[[8,2],[12,2],[12,8],[8,8]]],
+      "expected": {
+        "area": 176.0,
+        "ring_count": 3,
+        "sample_points": [
+          {"point": [2.0,5.0], "inside": true},
+          {"point": [15.0,5.0], "inside": true},
+          {"point": [9.0,5.0], "inside": false},
+          {"point": [11.0,5.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "union_with_vertex_touching_ring_pair",
+      "_derivation": "The union arm of the same-operand-contact class: two rings of one operand touching at a SINGLE VERTEX rather than along an edge. Measured with the rest -- a single shared vertex does not reach the tie either. A is [0,10]^2 and [10,20]^2 meeting only at (10,10); B is [5,15]^2, which overlaps both and bridges them. Inclusion-exclusion on the union: 100 + 100 + 100, less the two overlaps [5,10]^2 and [10,15]^2 of 25 each, less the pairwise A1 n A2 which is the single point (10,10) and has area 0: 300 - 50 = 250. The blob is simply connected -- every hole candidate escapes to infinity -- so one ring.",
+      "function": "union",
+      "a": [
+        [[0,0],[10,0],[10,10],[0,10]],
+        [[10,10],[20,10],[20,20],[10,20]]
+      ],
+      "b": [[[5,5],[15,5],[15,15],[5,15]]],
+      "expected": {
+        "area": 250.0,
+        "ring_count": 1,
+        "sample_points": [
+          {"point": [2.0,2.0], "inside": true},
+          {"point": [18.0,18.0], "inside": true},
+          {"point": [12.0,7.0], "inside": true},
+          {"point": [3.0,13.0], "inside": false},
+          {"point": [17.0,3.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "exclude_from_nonzero_declared_solid_bar",
+      "_derivation": "The multi-ring operand under the CARRIED RULE rather than under a shared edge, so the non-zero half of the denotation has a witness at a second boolean function. A is the nested pair [0,20]^2 and [5,15]^2 DECLARED nonzero: inside the inner ring the winding is +1+1 = 2, so A is a SOLID 20x20 of area 400 with no hole (the same pair declared even-odd would be a donut of 300, which is the whole content of the carried-rule ruling). B is the horizontal bar [0,20]x[8,12], area 80, wholly inside A. B inside A means the exclusive-or is A minus B: 400 - 80 = 320, and removing a full-width bar cuts the square into TWO disjoint rectangles, [0,20]x[0,8] and [0,20]x[12,20], so two rings.",
+      "a_fill_rule": "nonzero",
+      "function": "exclude",
+      "a": [
+        [[0,0],[20,0],[20,20],[0,20]],
+        [[5,5],[15,5],[15,15],[5,15]]
+      ],
+      "b": [[[0,8],[20,8],[20,12],[0,12]]],
+      "expected": {
+        "area": 320.0,
+        "ring_count": 2,
+        "sample_points": [
+          {"point": [10.0,4.0], "inside": true},
+          {"point": [10.0,10.0], "inside": false},
+          {"point": [10.0,16.0], "inside": true},
+          {"point": [25.0,10.0], "inside": false}
+        ]
+      }
+    },
+    {
+      "name": "subtract_across_a_partial_edge_share_tie",
+      "_derivation": "CENSUS ROW 35, THE VECTOR THAT ACTUALLY REACHES IT, and it is the one shape five plausible guesses missed. The operands are STABLETIE's own (`tieSubject` / `tieClipping` in JasSwift/Tests/Algorithms/BooleanTests.swift). A is two rings of ONE operand whose boundaries share the span x=3, y in [2,3] and END AT A SHARED VERTEX (3,3) with collinear edges arriving at it from (3,1) and (3,2) -- a PARTIAL share, which canonicalisation leaves standing, where a FULL shared edge or a bare touching vertex is fused or separated away along with the tie. A is therefore [2,3]x[1,3] (area 2) plus [3,4]x[2,3] (area 1) = 3 under either rule. B is [1,3]x[2,5], area 6. A - B removes y >= 2 from the first ring, leaving [2,3]x[1,2]; the second ring is at x >= 3 and B stops at x = 3, so it survives whole. Two unit squares meeting at the single point (3,2): area 2, ring_count 2. THE MEASUREMENT, 2026-08-01: inverting the sweep queue's tie-break in Boolean.swift (`return a < b` -> `return a > b`, the mutation STABLETIE measured as producing 11,365 area-changing divergences) turns the second ring into the TRIANGLE (2,1) (3,1) (3,2) and the answer into area 1.5 -- 'a triangle where a square belongs', in that commit's words. The region law rejects it at the first probe. So does elementwise ring equality, WHEN AND ONLY WHEN exactly one port is mutated; mutate both and the ring comparison goes green while the region law still reds. See transcripts/CHECKER_RESIDUAL notes and docs/CHECKERS.md.",
+      "function": "subtract",
+      "a": [
+        [[2,1],[3,1],[3,3],[2,3]],
+        [[3,2],[4,2],[4,3],[3,3]]
+      ],
+      "b": [[[1,2],[3,2],[3,5],[1,5]]],
+      "expected": {
+        "area": 2.0,
+        "ring_count": 2,
+        "sample_points": [
+          {"point": [2.5,1.5], "inside": true},
+          {"point": [3.5,2.5], "inside": true},
+          {"point": [2.5,2.5], "inside": false},
+          {"point": [1.5,4.0], "inside": false}
         ]
       }
     }

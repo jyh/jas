@@ -26,9 +26,11 @@ pub mod corpus_text_measure;
 pub mod polygon_metrics;
 pub mod text_layout;
 pub mod text_layout_paragraph;
-// NOT gated: only three DRAWING functions inside need a canvas context, and
-// they carry the gate themselves. All six of its tests exercise the
-// width-profile arithmetic, which is a document law every port must agree on.
+// NOT gated: only the three DRAWING functions inside need a canvas context,
+// and they carry the gate themselves. The width profile, the offset rails and
+// the caps are arithmetic that both active ports must agree on -- the
+// `offset_path` algorithm family drives them, and all six of the module's own
+// tests exercise the same arithmetic without touching a canvas.
 pub mod offset_path;
 pub mod hyphenator;
 pub mod knuth_plass;
