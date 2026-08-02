@@ -203,6 +203,36 @@ KNOWN_GAP_KEYS_KEY = "_known_gap_keys"
 
 # ---------------------------------------------------------------
 # Language runners
+#
+# EVERY RUNNER BELOW PASSES `encoding="utf-8"` EXPLICITLY. Do not remove it,
+# and do not add a runner without it.
+#
+# `subprocess.run(..., text=True)` with no `encoding=` decodes using
+# `locale.getpreferredencoding(False)`. That is UTF-8 on macOS and Linux and
+# **cp1252 on Windows**, so a lane emitting a non-ASCII character produced
+# mojibake on exactly one platform and compared unequal against a golden that
+# was perfectly correct.
+#
+# Found 2026-08-02 on the Windows lane: `paragraph_markers` reds on
+# `marker_bullet_disc` / `_square` / `_open_square`. The Rust binary emitted
+# textbook UTF-8 -- `\xe2\x80\xa2` (U+2022 BULLET), `\xe2\x96\xa1` (U+25A1),
+# `\xe2\x96\xa0` (U+25A0) -- and the DRIVER mangled it on the way in. Green on
+# macOS throughout, which is why it survived the merge that introduced those
+# vectors.
+#
+# `check_encoding_hygiene.py` predicted this exactly, in its own
+# WHAT-THIS-CHECK-DELIBERATELY-CANNOT-SEE section: "SUBPROCESS TEXT PIPES --
+# 17 sites ... This is the largest thing the gate misses and it is a real
+# exposure, not a theoretical one ... Left for a follow-up rather than swept
+# blind." The follow-up never happened and the deferral was never registered
+# with `check_deferral_expiry.py`, so nothing chased it.
+#
+# The reason given for deferring -- "the fix is not uniform: some of those
+# pipes carry bytes that are genuinely not UTF-8" -- is true in general and
+# false HERE: every pipe in this file and its two sibling drivers carries the
+# JSON stdout of a `*_roundtrip` CLI, and JSON is UTF-8 by definition
+# (RFC 8259 s8.1). For these twelve sites the fix is uniform, so they are fixed
+# rather than deferred again.
 # ---------------------------------------------------------------
 
 def run_rust(algo, fixture_path):
@@ -210,7 +240,7 @@ def run_rust(algo, fixture_path):
         ["cargo", "run", "--bin", "algorithm_roundtrip",
          "--no-default-features", "--", algo, fixture_path],
         cwd=os.path.join(REPO_ROOT, "jas_dioxus"),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Rust failed: {result.stderr}")
@@ -221,7 +251,7 @@ def run_swift(algo, fixture_path):
     result = subprocess.run(
         ["swift", "run", "AlgorithmRoundtrip", algo, fixture_path],
         cwd=os.path.join(REPO_ROOT, "JasSwift"),
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Swift failed: {result.stderr}")
@@ -232,7 +262,7 @@ def run_ocaml(algo, fixture_path):
     result = subprocess.run(
         ["dune", "exec", "bin/algorithm_roundtrip.exe", "--", algo, fixture_path],
         cwd=os.path.join(REPO_ROOT, "jas_ocaml"),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"OCaml failed: {result.stderr}")
@@ -243,7 +273,7 @@ def run_python(algo, fixture_path):
     result = subprocess.run(
         [sys.executable, os.path.join(REPO_ROOT, "jas", "tools", "algorithm_roundtrip.py"),
          algo, fixture_path],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Python failed: {result.stderr}")
