@@ -338,6 +338,14 @@ jobs:
       - name: Reference interpreter conformance
         run: python -m pytest workspace_interpreter/tests -q
 
+      # SPECUNTESTED: the analytic tier is what the geometry checkers RULE BY,
+      # and until 2026-08-03 nothing tested it -- there was no test directory
+      # under spec/ and CI names its pytest paths explicitly, so a bare
+      # `pytest` never reached it either. Named separately from the reference
+      # interpreter because it is a different tier with a different job.
+      - name: Analytic tier (spec/geometry) conformance
+        run: python -m pytest spec/geometry/tests -q
+
       - name: Rust tests
         run: cd jas_dioxus && cargo test
 
@@ -404,6 +412,7 @@ jobs:
       # the code actually imports.
       - run: pip install -r requirements.txt
       - run: python -m pytest workspace_interpreter/tests
+      - run: python -m pytest spec/geometry/tests
 
   # The jas/ Qt app is FROZEN at the five-port-parity tag (POLICY.md): this
   # lane checks out the WHOLE repo at the tag — not just fixtures — because
