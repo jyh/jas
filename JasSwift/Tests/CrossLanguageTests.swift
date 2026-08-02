@@ -418,8 +418,75 @@ private func readFixtureData(_ path: String) -> Data {
         let doc = try! binaryToDocument(binData)
         let actual = documentToTestJson(doc)
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
-        #expect(actual == expected, "Python binary fixture '\(name)' did not produce expected JSON")
+        expectDocsEqualAtWriterResolution(actual, expected, name)
     }
+}
+
+/// The resolution of the SVG writer, in decimal places: `Svg.swift::fmt`
+/// quantizes lengths with `(v * 10000.0).rounded() / 10000.0`.
+private let svgWriterDP = 4
+
+/// Compare two canonical-JSON documents AT THE SVG WRITER'S RESOLUTION.
+///
+/// MIRRORS `cross_language_test.rs::assert_docs_equal_at_writer_resolution` —
+/// the full reasoning lives there. In short: this test asserts *decoding the
+/// Python-written binary yields the same document as parsing the source SVG*.
+/// Binary is lossless `Double`; SVG stores px at 4dp. A 1pt stroke goes out as
+/// `4/3 = 1.3333` and returns as `1.3333 × 0.75 = 0.999975` — the px grid, not a
+/// defect, and R2 ruled FOR 4dp on lengths precisely because they SETTLE there.
+///
+/// Until R3 the oracle also printed 4dp, so both sides rendered `1.0` and this
+/// held BY CONSTRUCTION, not by correctness. At 6dp it became false, and it
+/// should be: asserting agreement below 1e-4 across a boundary the ruling calls
+/// not exactly invertible asserts something already ruled untrue.
+///
+/// The allowance is deliberately narrow and is named here rather than left as a
+/// bare epsilon. Everything that is not a number is compared EXACTLY.
+private func expectDocsEqualAtWriterResolution(
+    _ actual: String, _ expected: String, _ name: String
+) {
+    // Identical bytes is the common case and needs no parsing.
+    if actual == expected { return }
+
+    func quantize(_ v: Any) -> Any {
+        if let n = v as? NSNumber {
+            // Bools bridge to NSNumber; they must not be treated as numeric.
+            if CFGetTypeID(n) == CFBooleanGetTypeID() { return v }
+            let s = pow(10.0, Double(svgWriterDP))
+            return NSNumber(value: (n.doubleValue * s).rounded() / s)
+        }
+        if let a = v as? [Any] { return a.map(quantize) }
+        if let o = v as? [String: Any] { return o.mapValues(quantize) }
+        return v
+    }
+
+    func canonical(_ s: String, _ side: String) -> String {
+        guard let data = s.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) else {
+            Issue.record("'\(name)': \(side) is not JSON")
+            return s
+        }
+        let q = quantize(parsed)
+        guard let out = try? JSONSerialization.data(
+            withJSONObject: q, options: [.sortedKeys]),
+              let text = String(data: out, encoding: .utf8) else {
+            Issue.record("'\(name)': \(side) could not be re-serialised")
+            return s
+        }
+        return text
+    }
+
+    #expect(
+        canonical(actual, "actual") == canonical(expected, "expected"),
+        """
+        Python binary fixture '\(name)' disagrees with the SVG-parsed golden AT \
+        THE SVG WRITER'S RESOLUTION (\(svgWriterDP) dp). A difference this large \
+        is a real divergence, not the pt<->px grid: the lossy-boundary allowance \
+        covers only differences below 1e-\(svgWriterDP).
+          binary-decoded: \(actual)
+          svg-parsed    : \(expected)
+        """
+    )
 }
 
 /// v1 used a different positional layout (no generic name/id slots), so a
