@@ -827,10 +827,21 @@ rather than hand-transcribing it.
   measure population, and `gradient_remap` was 9 vectors / 585 green
   comparisons in which every bounding box was degenerate. A tenth degenerate
   vector would have raised both numbers and exercised nothing new. R7's
-  `min_witnesses` **can** see it, but only for a clause someone has already
-  noticed: each probe is hand-written from a known separation, so R7 is a
-  **regression floor, not a discovery instrument** — it keeps a noticed clause
-  exercised and cannot say which clause to notice next.
+  `min_witnesses` **cannot see it either, except in the narrow case where its
+  hand-written probes happen to partition the corpus on the collinear clause.**
+  (This sentence read “`min_witnesses` **can** see it” until 2026-08-02. It
+  overstated the gate's reach, and a gate's own docs overstating its reach is an
+  instance of the very class this programme is about.) The mechanism of the
+  limit: `min_witnesses` counts vectors over a PREDICATE, so it sees the
+  **absence** of a separation and never its **concentration**. Proven by
+  mutation — twelve identical copies of one `gradient_remap` vector left the
+  board **GREEN**, with `min_discriminating` *rising* to 12 against a floor of
+  11. And even in the narrow case it is limited the way it always was: each
+  probe is hand-written from a known separation, so R7 is a **regression floor,
+  not a discovery instrument** — it keeps a noticed clause exercised and cannot
+  say which clause to notice next. The concentration half of that gap is now
+  measured directly, per family, by `scripts/check_default_variance.py` — see
+  the **DEFAULT VARIANCE** bullet in §8.
   **The total instrument is mutation, and the machinery already exists.**
   “This corpus exercises this clause” is exactly “some mutation of this clause
   is rejected by this corpus”, which is what R3's `mutant` /
@@ -894,3 +905,57 @@ rather than hand-transcribing it.
   `checker_gap` adds a second dimension. The bidirectional staleness check is
   the only thing keeping it honest. That is a maintenance cost, and it is stated
   here rather than discovered later.
+- **DEFAULT VARIANCE — the concentration half of the collinearity gap, now
+  measured.** A census of 446 fixture files / 1,751 vectors on 2026-08-02 found
+  **seven dimensions frozen corpus-wide, and every frozen constant equals
+  EXACTLY the struct default.** Fixtures are authored by *constructing* a
+  document, so they inherit the constructor — and **a corpus whose every value
+  IS the default cannot distinguish a dropped field from a preserved one.**
+  That is `check_swift_copy_sites.py`'s omission class seen from the other end;
+  the defect and the blindness share a cause. The variance that does exist is
+  **campaign residue**: the family × field cross-tab is near-diagonal
+  (`transform` only under `transform_*`, `locked` only under `lock_*`), and the
+  two fields varied everywhere — `name`, `fill` — are precisely the two that had
+  campaigns. So the corpus varies where we once looked, which predicts the next
+  blind spot: *any field that never had a campaign.*
+  `scripts/check_default_variance.py` counts, **per family**, the documents
+  carrying a non-default value of each field, against defaults **derived from
+  the Rust source** rather than typed into the gate. Aggregation was measured
+  and rejected first: `opacity` takes NINE distinct values corpus-wide and
+  clears any pooled floor while `actions/` sits at 334 of 334 default.
+  `scripts/default_variance_ledger.json` is the subject the gate iterates — 11
+  seeded obligations, each with its consequence written out, and the rest
+  recorded as **declared debt with its measurement** (310 of 382 populated cells
+  still below three carriers) so the number is visible rather than forgotten.
+  **What it still cannot see, on the green path as well as the red:** a field
+  the serializer omits; a default that differs per port (it reads Rust only); a
+  value that is non-default but semantically inert; and — the census finding it
+  cannot express at all — that **no transform anywhere has a negative
+  determinant**, because that is a claim about a non-default field's VALUES.
+  Those are listed in the ledger's `out_of_reach`.
+  **It does not close the collinearity half, and was proven not to.** The gate
+  was attacked on 2026-08-02 with the same mutation that had exposed
+  `min_witnesses`: `operations/transform` was rewritten as **seventeen
+  byte-identical copies** of one fixture plus one other document, and the board
+  stayed **GREEN** — both obligations satisfied, debt unmoved. P1 counts
+  *carriers*, and a replica is a carrier. A satisfied floor here reads “N
+  documents carry a non-default value”, never “N situations were tried”. That
+  is recorded in `out_of_reach.collinearity` with the reproduction.
+  Three further limits were found in the same attack and are declared rather
+  than papered: **73 of the 80 fields** on the structs an `Element` can be are
+  outside the vocabulary entirely (a field enters only via `CommonProps` or by
+  being `Option`-typed, and `PathElem::fill_rule`, `isolated_blending`,
+  `knockout_group` and the 21-field `TextElem` typography block are none of
+  those) — only the *count* is pinned, so a new one arrives with a ruling;
+  a document counts as a carrier when **any** element in it is non-default, so
+  the gate sees a family's breadth and never its depth; and `thin_cells` is a
+  numerator over a population that moves, so `populated_cells` is declared
+  beside it — without the pair, deleting a fixture reported “PAID DOWN”.
+  Two defects found by that attack were **fixed**, not declared:
+  `Element::Live(super::live::LiveVariant)` resolved to no struct, so 46 live
+  elements in 20 families contributed zero `fill`/`stroke` slots and the miss
+  surfaced as the confident wrong sentence *“`fill` is declared on a struct none
+  of this family's element types use”* — the payload resolver now reads
+  `live.rs` and **fails closed** on an unresolvable payload; and the
+  anti-vacuity floor summed three maps instead of taking their union, so an
+  element field sharing a `CommonProps` name drifted the floor upward.

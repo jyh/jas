@@ -96,6 +96,13 @@ jobs:
       # tightest in the registry is 1e-12 and the difference is 1e-16. Swept 42
       # sites on 2026-08-01; this is what stops the 43rd.
       - run: python scripts/check_degree_radian_grouping.py --self-test && python scripts/check_degree_radian_grouping.py
+      # Per-family non-default variance. A census on 2026-08-02 found seven
+      # corpus-wide frozen dimensions whose constants are EXACTLY the struct
+      # defaults -- a corpus of defaults cannot tell a dropped field from a
+      # preserved one, which is check_swift_copy_sites.py's class from the other
+      # end. Per-family on purpose: pooled counting is what hides it (opacity
+      # takes 9 distinct values corpus-wide while actions/ sits at 334 of 334).
+      - run: python scripts/check_default_variance.py --self-test && python scripts/check_default_variance.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -291,6 +298,12 @@ jobs:
           python scripts/check_deferral_expiry.py
           python scripts/check_gate_consistency.py --self-test
           python scripts/check_gate_consistency.py
+          # Reads Rust source and fixture JSON with explicit encoding, and keys
+          # its families on os.path.relpath output normalised to '/', so it
+          # should be separator- and codepage-clean here. Windows CI is what
+          # proves that, not this comment.
+          python scripts/check_default_variance.py --self-test
+          python scripts/check_default_variance.py
           # Enumerates its subjects with `git ls-files` and compares path
           # PREFIXES ("JasSwift/", "jas_dioxus/") against git's POSIX output --
           # no str(Path) anywhere -- so it should be separator-clean here.
