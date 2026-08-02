@@ -787,22 +787,45 @@ private func pointsBounds(_ points: [(Double, Double)]) -> BBox {
 /// Degenerate boxes from every OTHER kind still contribute exactly as before.
 /// Mirrors Rust `resolved_geometric_bounds` (geometry/element.rs).
 public func resolvedGeometricBounds(_ elem: Element, _ resolver: ElementResolver) -> BBox? {
+    resolvedBoundsWith(elem, resolver) { $0.geometricBounds }
+}
+
+/// ``resolvedGeometricBounds(_:_:)`` with the leaf measurement chosen by the
+/// caller: `\.geometricBounds` for the stroke-exclusive box, `\.bounds` for the
+/// stroke-inflated (preview) one.
+///
+/// The parameter exists because Align reads both, under its Use Preview Bounds
+/// flag. Hard-coding the geometric leaf would have silently dropped stroke
+/// inflation from every leaf inside a GROUP the moment align started resolving
+/// — fixing an instance's box by breaking every stroked sibling's.
+///
+/// **A resolver-backed kind answers with its resolved rings under EITHER leaf
+/// choice**, because evaluated rings carry no stroke. So an instance's own
+/// stroke inflation is still missing in preview mode; it would need the
+/// resolved TARGET's stroke, which is different work. A bounded, stated
+/// shortfall, and strictly better than the zero box it replaces — which was
+/// wrong in both modes.
+public func resolvedBoundsWith(_ elem: Element,
+                               _ resolver: ElementResolver,
+                               _ leaf: (Element) -> BBox) -> BBox? {
     if let rings = resolvedRings(elem, resolver) {
         return ringsBBox(rings)
     }
     switch elem {
-    case .group(let g): return resolvedChildrenBounds(g.children, resolver)
-    case .layer(let l): return resolvedChildrenBounds(l.children, resolver)
-    default: return elem.geometricBounds
+    case .group(let g): return resolvedChildrenBounds(g.children, resolver, leaf)
+    case .layer(let l): return resolvedChildrenBounds(l.children, resolver, leaf)
+    default: return leaf(elem)
     }
 }
 
 /// Union of the children's resolved geometric bounds, skipping the ones that
 /// occupy nothing. `nil` when no child occupies anything.
-private func resolvedChildrenBounds(_ children: [Element], _ resolver: ElementResolver) -> BBox? {
+private func resolvedChildrenBounds(_ children: [Element],
+                                    _ resolver: ElementResolver,
+                                    _ leaf: (Element) -> BBox) -> BBox? {
     var acc: (Double, Double, Double, Double)? = nil
     for c in children {
-        guard let b = resolvedGeometricBounds(c, resolver) else { continue }
+        guard let b = resolvedBoundsWith(c, resolver, leaf) else { continue }
         if let (ax, ay, bx, by) = acc {
             acc = (min(ax, b.x), min(ay, b.y),
                    max(bx, b.x + b.width), max(by, b.y + b.height))

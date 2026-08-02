@@ -1413,7 +1413,12 @@ private func resolveOverlayRefPoint(
         isValidPath(doc, es.path) ? doc.getElement(es.path) : nil
     }
     if elements.isEmpty { return nil }
-    let bb = alignUnionBounds(elements, alignGeometricBounds)
+    // RESOLVEDALIGN: resolve behind-an-id geometry so a selection holding a
+    // symbol instance gets a pivot at the middle of what is DRAWN.
+    let pivotResolver = IdIndexResolver(index: model.idIndex)
+    let bb = alignUnionBounds(elements) {
+        alignResolvedBounds($0, pivotResolver, alignGeometricBounds)
+    }
     return (bb.x + bb.width / 2, bb.y + bb.height / 2)
 }
 
@@ -1538,7 +1543,12 @@ private func drawBBoxGhost(
         isValidPath(doc, es.path) ? doc.getElement(es.path) : nil
     }
     if elements.isEmpty { return }
-    let bb = alignUnionBounds(elements, alignGeometricBounds)
+    // RESOLVEDALIGN: resolve behind-an-id geometry so a selection holding a
+    // symbol instance gets a pivot at the middle of what is DRAWN.
+    let pivotResolver = IdIndexResolver(index: model.idIndex)
+    let bb = alignUnionBounds(elements) {
+        alignResolvedBounds($0, pivotResolver, alignGeometricBounds)
+    }
     // Transform the four corners in DOCUMENT space — the matrix, its pivot
     // (rx, ry), and the bbox are all doc-space — then map each corner to
     // screen for drawing. The dashed stroke pattern stays in screen pixels

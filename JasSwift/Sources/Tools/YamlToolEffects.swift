@@ -3090,7 +3090,12 @@ private func resolveReferencePoint(
         isValidPath(doc, es.path) ? doc.getElement(es.path) : nil
     }
     if elements.isEmpty { return (0, 0) }
-    let bb = alignUnionBounds(elements, alignGeometricBounds)
+    // RESOLVEDALIGN: resolve behind-an-id geometry so a selection holding a
+    // symbol instance gets a pivot at the middle of what is DRAWN.
+    let pivotResolver = IdIndexResolver(index: model.idIndex)
+    let bb = alignUnionBounds(elements) {
+        alignResolvedBounds($0, pivotResolver, alignGeometricBounds)
+    }
     return (bb.x + bb.width / 2, bb.y + bb.height / 2)
 }
 

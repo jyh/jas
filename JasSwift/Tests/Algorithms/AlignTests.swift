@@ -304,3 +304,66 @@ private func refOf(_ rects: [Element]) -> AlignReference {
     #expect(out[1].dx == -90)
 }
 
+
+// MARK: - RESOLVEDALIGN: align must measure what is DRAWN
+//
+// `alignPreviewBounds` and `alignGeometricBounds` are both resolver-less, so a
+// symbol instance measured as a zero box at the origin whichever way Use
+// Preview Bounds was set. Measured in the Rust twin before the repair: union
+// (0,0,110,110) and Align Right moving the instance 110 when the only honest
+// answer was 95.
+//
+// Twins of Rust's tests in algorithms/align.rs.
+
+private func alignRect(_ x: Double, _ y: Double, _ w: Double, _ h: Double,
+                       id: String? = nil) -> Element {
+    .rect(Rect(x: x, y: y, width: w, height: h, id: id))
+}
+
+@Test func alignRightMovesASymbolInstanceByItsDrawnEdge() {
+    // Master at (5,7,10,20) → right edge 15; anchor at (100,100,10,10) → 110.
+    let instance = Element.live(.reference(ReferenceElem(
+        target: ElementRef("m1"), name: nil, id: "i1")))
+    let anchor = alignRect(100, 100, 10, 10)
+    let doc = Document(layers: [Layer(children: [instance, anchor])],
+                       symbols: [alignRect(5, 7, 10, 20, id: "m1")])
+    let resolver = RebuildResolver(document: doc)
+    let bf: AlignBoundsFn = { alignResolvedBounds($0, resolver, alignGeometricBounds) }
+
+    let u = alignUnionBounds([instance, anchor], bf)
+    #expect(abs(u.x - 5) < 1e-9 && abs(u.y - 7) < 1e-9
+            && abs(u.width - 105) < 1e-9 && abs(u.height - 103) < 1e-9,
+            "union: expected (5,7,105,103), got \(u)")
+
+    let out = alignRight([([0, 0], instance), ([0, 1], anchor)], .selection(u), bf)
+    #expect(out.count == 1, "only the instance moves: \(out)")
+    #expect(out.first?.path == [0, 0])
+    #expect(abs((out.first?.dx ?? 0) - 95) < 1e-9, "expected dx 95, got \(String(describing: out.first))")
+}
+
+@Test func previewModeStillInflatesAStrokedLeafInsideAGroup() {
+    // The trap this nearly walked into: wrapping the resolver around a
+    // HARD-CODED geometric leaf would fix the instance and silently drop stroke
+    // inflation from every stroked element inside a group. The leaf is a
+    // parameter for exactly this reason, so the two modes still differ.
+    let stroked = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 4)))
+    let group = Element.group(Group(children: [stroked]))
+    let resolver = RebuildResolver(document: Document(layers: []))
+
+    let geo = alignResolvedBounds(group, resolver, alignGeometricBounds)
+    let prev = alignResolvedBounds(group, resolver, alignPreviewBounds)
+    #expect(geo == (x: 0, y: 0, width: 10, height: 10))
+    #expect(prev == (x: -2, y: -2, width: 14, height: 14),
+            "preview must still inflate by half the 4pt stroke, got \(prev)")
+}
+
+@Test func theResolverlessAlignBoundsFnsAreUnchanged() {
+    // The conformance runner has no document and passes these directly; they
+    // must keep answering exactly what they always did.
+    let r = alignRect(1, 2, 3, 4)
+    #expect(alignPreviewBounds(r) == r.bounds)
+    #expect(alignGeometricBounds(r) == r.geometricBounds)
+    let inst = Element.live(.reference(ReferenceElem(target: ElementRef("m1"), name: nil)))
+    #expect(alignGeometricBounds(inst) == (x: 0, y: 0, width: 0, height: 0))
+}

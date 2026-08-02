@@ -1905,7 +1905,14 @@ fn resolve_overlay_reference_point(
     if elements.is_empty() {
         return None;
     }
-    let (x, y, w, h) = align::union_bounds(&elements, align::geometric_bounds);
+    // RESOLVEDALIGN: resolve the kinds whose geometry lives behind an id, so a
+    // selection containing a symbol instance gets a pivot at the middle of what
+    // is DRAWN rather than one dragged toward the origin.
+    let resolver = crate::document::id_index::IndexResolver(model.id_index());
+    let bounds_fn = |e: &crate::geometry::element::Element| {
+        align::resolved_bounds(e, &resolver, crate::geometry::element::Element::geometric_bounds)
+    };
+    let (x, y, w, h) = align::union_bounds(&elements, &bounds_fn);
     Some((x + w / 2.0, y + h / 2.0))
 }
 
@@ -2052,7 +2059,14 @@ fn draw_bbox_ghost(
     if elements.is_empty() {
         return;
     }
-    let (bx, by, bw, bh) = align::union_bounds(&elements, align::geometric_bounds);
+    // RESOLVEDALIGN: resolve the kinds whose geometry lives behind an id, so a
+    // selection containing a symbol instance gets a pivot at the middle of what
+    // is DRAWN rather than one dragged toward the origin.
+    let resolver = crate::document::id_index::IndexResolver(model.id_index());
+    let bounds_fn = |e: &crate::geometry::element::Element| {
+        align::resolved_bounds(e, &resolver, crate::geometry::element::Element::geometric_bounds)
+    };
+    let (bx, by, bw, bh) = align::union_bounds(&elements, &bounds_fn);
 
     // Transform the four corners in DOCUMENT space — the matrix, its pivot
     // (rx, ry), and the bbox are all doc-space — then map each corner to

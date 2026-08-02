@@ -2802,12 +2802,22 @@ impl AppState {
             return;
         }
 
-        // Pick bounds fn per Use Preview Bounds.
-        let bounds_fn: aa::BoundsFn = if self.align_panel.use_preview_bounds {
-            aa::preview_bounds
-        } else {
-            aa::geometric_bounds
+        // Pick the LEAF measurement per Use Preview Bounds, then wrap it so the
+        // three kinds whose geometry lives behind an id resolve (RESOLVEDALIGN).
+        // Both modes were affected: `preview_bounds` and `geometric_bounds` are
+        // each resolver-less, so an instance measured as a zero box at the
+        // origin whichever way the flag was set.
+        let leaf: fn(&crate::geometry::element::Element) -> crate::geometry::element::Bounds =
+            if self.align_panel.use_preview_bounds {
+                crate::geometry::element::Element::bounds
+            } else {
+                crate::geometry::element::Element::geometric_bounds
+            };
+        let resolver = crate::document::id_index::IndexResolver(tab.model.id_index());
+        let bounds_fn_body = |e: &crate::geometry::element::Element| {
+            aa::resolved_bounds(e, &resolver, leaf)
         };
+        let bounds_fn: aa::BoundsFn = &bounds_fn_body;
 
         // Build reference from panel state.
         let reference = match self.align_panel.align_to {
