@@ -129,18 +129,13 @@ impl crate::geometry::live::ElementResolver for RenderResolver {
 
     /// Resolve a concept pack from the bundled workspace registry so a
     /// `Generated` instance renders its concept's geometry on canvas
-    /// (CONCEPTS.md 3b). Concepts are static workspace data and `Workspace::load`
-    /// is cached, so this is cheap.
+    /// (CONCEPTS.md 3b). Shared with the hit-test resolver so paint and
+    /// selection cannot disagree about a concept's geometry.
     fn resolve_concept(
         &self,
         concept_id: &str,
     ) -> Option<crate::geometry::live::ConceptDef> {
-        let ws = crate::interpreter::workspace::Workspace::load()?;
-        let c = ws.concept(concept_id)?;
-        Some(crate::geometry::live::ConceptDef {
-            generator: c.get("generator")?.as_str()?.to_string(),
-            closed: c.get("closed").and_then(|v| v.as_bool()).unwrap_or(true),
-        })
+        crate::geometry::live::workspace_concept(concept_id)
     }
 }
 

@@ -145,7 +145,95 @@ public func ellipseIntersectsPolygon(_ cx: Double, _ cy: Double, _ erx: Double, 
 
 // MARK: - Element-level queries
 
+// MARK: - RESOLVEDHIT: the kinds whose geometry lives behind a resolver
+//
+// `reference` (a symbol instance), `recorded` and `generated` hold no
+// coordinates — only an id, a recipe, or a concept name. Their geometry exists
+// only once something resolves that, which is why `bounds` is a hard-coded
+// zero box for all three and `segmentsOfElement` returns [].
+//
+// The canvas resolves them, so an instance is DRAWN. Hit-testing did not, so an
+// instance was not SELECTABLE. Each entry point below therefore comes in two
+// forms, mirroring Rust's `algorithms/hit_test.rs` name for name:
+//
+//   * the plain form — the shared cross-language verb, resolver-less. It keeps
+//     answering false for these three kinds, and that is CORRECT for the
+//     question it is asked: with no document behind it a reference is
+//     dangling, and a dangling reference evaluates to empty
+//     (REFERENCE_GRAPH.md §3).
+//   * the `...With(resolver:)` form — what document-level callers use.
+//
+// Spelled as two NAMES rather than one defaulted parameter, in both ports, so
+// a caller that wants the resolving answer cannot get the narrow one by
+// omission.
+
+/// Append `ring`'s edges (closed) to `segs`. The shared tail of every arm that
+/// turns an evaluated ring set into hit-test segments, so the resolver-needing
+/// kinds and `compoundShape` cannot drift in how they close a ring.
+private func pushRingSegments(_ ring: [(Double, Double)],
+                              _ segs: inout [(Double, Double, Double, Double)]) {
+    guard ring.count >= 2 else { return }
+    for i in 0..<ring.count - 1 {
+        segs.append((ring[i].0, ring[i].1, ring[i+1].0, ring[i+1].1))
+    }
+    let last = ring.last!, first = ring.first!
+    segs.append((last.0, last.1, first.0, first.1))
+}
+
+/// The evaluated rings of a kind whose geometry lives behind `resolver`, or nil
+/// for anything else. A dangling target, an unknown concept, or a cycle yields
+/// an empty set — never a trap (REFERENCE_GRAPH.md §3).
+private func resolvedRings(_ elem: Element, _ resolver: ElementResolver) -> BoolPolygonSet? {
+    guard case .live(let v) = elem else { return nil }
+    var visiting = VisitSet()
+    switch v {
+    case .reference(let r):
+        return r.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    case .recorded(let rec):
+        return rec.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    case .generated(let g):
+        return g.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    // A compound shape owns its operands, so it needs no resolver and is
+    // already answered exactly by `segmentsOfElement`.
+    case .compoundShape:
+        return nil
+    }
+}
+
+/// `elem.bounds`, except for the resolver-needing kinds, whose own `bounds` is
+/// a hard-coded zero box — for those, the bounding box of the RESOLVED rings.
+/// Used by the filled arms, which compare against a bounding box: an instance
+/// carrying a paint override took those arms and compared against a degenerate
+/// box at the origin.
+private func resolvedBounds(_ elem: Element, _ resolver: ElementResolver) -> BBox {
+    guard let rings = resolvedRings(elem, resolver) else { return elem.bounds }
+    let pts = rings.flatMap { $0 }
+    guard let first = pts.first else {
+        // Dangling / cyclic / unknown: nothing to show, and a zero box at the
+        // origin would be a false claim about where it is. Report what
+        // `bounds` reports, so that case is unchanged.
+        return elem.bounds
+    }
+    var minX = first.0, minY = first.1, maxX = first.0, maxY = first.1
+    for p in pts.dropFirst() {
+        minX = min(minX, p.0); minY = min(minY, p.1)
+        maxX = max(maxX, p.0); maxY = max(maxY, p.1)
+    }
+    return (x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+}
+
 public func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Double)] {
+    segmentsOfElementWith(elem, NullResolver())
+}
+
+/// ``segmentsOfElement(_:)``, resolving live kinds through `resolver`.
+public func segmentsOfElementWith(_ elem: Element,
+                                  _ resolver: ElementResolver) -> [(Double, Double, Double, Double)] {
+    if let rings = resolvedRings(elem, resolver) {
+        var segs: [(Double, Double, Double, Double)] = []
+        for ring in rings { pushRingSegments(ring, &segs) }
+        return segs
+    }
     switch elem {
     case .line(let v):
         return [(v.x1, v.y1, v.x2, v.y2)]
@@ -182,14 +270,14 @@ public func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Doub
         case .compoundShape(let cs):
             var segs: [(Double, Double, Double, Double)] = []
             for ring in cs.evaluate(precision: DEFAULT_PRECISION) {
-                if ring.count < 2 { continue }
-                for i in 0..<ring.count-1 {
-                    segs.append((ring[i].0, ring[i].1, ring[i+1].0, ring[i+1].1))
-                }
-                let last = ring.last!, first = ring.first!
-                segs.append((last.0, last.1, first.0, first.1))
+                pushRingSegments(ring, &segs)
             }
             return segs
+        // Unreachable from `segmentsOfElementWith`: `resolvedRings` takes
+        // these three first, whatever the resolver. Reached only through the
+        // resolver-less verb, where empty is the right answer — and left as an
+        // explicit case rather than folded into `default` so a fifth live kind
+        // has to state which side of that line it falls on.
         case .reference, .recorded, .generated:
             return []
         }
@@ -239,6 +327,13 @@ public func segmentsOfElement(_ elem: Element) -> [(Double, Double, Double, Doub
 
 public func elementIntersectsRect(_ elem: Element,
                                   _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
+    elementIntersectsRectWith(elem, rx, ry, rw, rh, NullResolver())
+}
+
+/// ``elementIntersectsRect(_:_:_:_:_:)``, resolving live kinds through `resolver`.
+public func elementIntersectsRectWith(_ elem: Element,
+                                      _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double,
+                                      _ resolver: ElementResolver) -> Bool {
     if let t = elem.transform {
         guard let inv = t.inverse() else { return false }
         let corners = [
@@ -247,9 +342,9 @@ public func elementIntersectsRect(_ elem: Element,
             inv.applyPoint(rx + rw, ry + rh),
             inv.applyPoint(rx, ry + rh),
         ]
-        return elementIntersectsPolygonLocal(elem, corners)
+        return elementIntersectsPolygonLocal(elem, corners, resolver)
     }
-    return elementIntersectsRectLocal(elem, rx, ry, rw, rh)
+    return elementIntersectsRectLocal(elem, rx, ry, rw, rh, resolver)
 }
 
 /// "The selection region lies inside my paint", the clause a filled element
@@ -260,14 +355,16 @@ public func elementIntersectsRect(_ elem: Element,
 /// approximation of the fill, region corners instead of lasso vertices.  Keep
 /// the two spelled the same way; they are one clause with two callers.
 private func regionCornerInsideBounds(_ elem: Element,
-                                      _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
-    let b = elem.bounds
+                                      _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double,
+                                      _ resolver: ElementResolver) -> Bool {
+    let b = resolvedBounds(elem, resolver)
     let corners = [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)]
     return corners.contains { pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }
 }
 
 private func elementIntersectsRectLocal(_ elem: Element,
-                                        _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double) -> Bool {
+                                        _ rx: Double, _ ry: Double, _ rw: Double, _ rh: Double,
+                                        _ resolver: ElementResolver) -> Bool {
     switch elem {
     case .line(let v):
         return segmentIntersectsRect(v.x1, v.y1, v.x2, v.y2, rx, ry, rw, rh)
@@ -275,7 +372,7 @@ private func elementIntersectsRectLocal(_ elem: Element,
         if v.fill != nil {
             return rectsIntersect(v.x, v.y, v.width, v.height, rx, ry, rw, rh)
         }
-        return segmentsOfElement(elem).contains { s in
+        return segmentsOfElementWith(elem, resolver).contains { s in
             segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
         }
     case .ellipse(let v):
@@ -289,10 +386,10 @@ private func elementIntersectsRectLocal(_ elem: Element,
     // test — an open triangle's empty bbox corner answers true.
     case .polyline(let v):
         if v.fill != nil {
-            let b = elem.bounds
+            let b = resolvedBounds(elem, resolver)
             return rectsIntersect(b.x, b.y, b.width, b.height, rx, ry, rw, rh)
         }
-        return segmentsOfElement(elem).contains { s in
+        return segmentsOfElementWith(elem, resolver).contains { s in
             segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
         }
     case .polygon(let v):
@@ -300,22 +397,22 @@ private func elementIntersectsRectLocal(_ elem: Element,
             if v.points.contains(where: { pointInRect($0.0, $0.1, rx, ry, rw, rh) }) {
                 return true
             }
-            if regionCornerInsideBounds(elem, rx, ry, rw, rh) { return true }
-            return segmentsOfElement(elem).contains { s in
+            if regionCornerInsideBounds(elem, rx, ry, rw, rh, resolver) { return true }
+            return segmentsOfElementWith(elem, resolver).contains { s in
                 segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
             }
         }
-        return segmentsOfElement(elem).contains { s in
+        return segmentsOfElementWith(elem, resolver).contains { s in
             segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
         }
     case .path(let v):
-        let segs = segmentsOfElement(elem)
+        let segs = segmentsOfElementWith(elem, resolver)
         if v.fill != nil {
             let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
             if endpoints.contains(where: { pointInRect($0.s, $0.t, rx, ry, rw, rh) }) {
                 return true
             }
-            if regionCornerInsideBounds(elem, rx, ry, rw, rh) { return true }
+            if regionCornerInsideBounds(elem, rx, ry, rw, rh, resolver) { return true }
             return segs.contains { s in
                 segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
             }
@@ -324,26 +421,26 @@ private func elementIntersectsRectLocal(_ elem: Element,
             segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
         }
     case .text:
-        let b = elem.bounds
+        let b = resolvedBounds(elem, resolver)
         return rectsIntersect(b.x, b.y, b.width, b.height, rx, ry, rw, rh)
     // A live element hit-tests against its own segments, not its bounding
     // box — otherwise a marquee inside a compound shape's hole selects it.
     // Same body as the `.path` arm, reading the fill generically. Mirrors
     // Rust's catch-all arm, which Element::Live falls into.
     case .live:
-        let segs = segmentsOfElement(elem)
+        let segs = segmentsOfElementWith(elem, resolver)
         if elem.fill != nil {
             let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
             if endpoints.contains(where: { pointInRect($0.s, $0.t, rx, ry, rw, rh) }) {
                 return true
             }
-            if regionCornerInsideBounds(elem, rx, ry, rw, rh) { return true }
+            if regionCornerInsideBounds(elem, rx, ry, rw, rh, resolver) { return true }
         }
         return segs.contains { s in
             segmentIntersectsRect(s.0, s.1, s.2, s.3, rx, ry, rw, rh)
         }
     default:
-        let b = elem.bounds
+        let b = resolvedBounds(elem, resolver)
         return rectsIntersect(b.x, b.y, b.width, b.height, rx, ry, rw, rh)
     }
 }
@@ -380,15 +477,22 @@ public func segmentIntersectsPolygon(_ x1: Double, _ y1: Double, _ x2: Double, _
 }
 
 public func elementIntersectsPolygon(_ elem: Element, _ poly: [(Double, Double)]) -> Bool {
+    elementIntersectsPolygonWith(elem, poly, NullResolver())
+}
+
+/// ``elementIntersectsPolygon(_:_:)``, resolving live kinds through `resolver`.
+public func elementIntersectsPolygonWith(_ elem: Element, _ poly: [(Double, Double)],
+                                         _ resolver: ElementResolver) -> Bool {
     if let t = elem.transform {
         guard let inv = t.inverse() else { return false }
         let localPoly = poly.map { inv.applyPoint($0.0, $0.1) }
-        return elementIntersectsPolygonLocal(elem, localPoly)
+        return elementIntersectsPolygonLocal(elem, localPoly, resolver)
     }
-    return elementIntersectsPolygonLocal(elem, poly)
+    return elementIntersectsPolygonLocal(elem, poly, resolver)
 }
 
-private func elementIntersectsPolygonLocal(_ elem: Element, _ poly: [(Double, Double)]) -> Bool {
+private func elementIntersectsPolygonLocal(_ elem: Element, _ poly: [(Double, Double)],
+                                           _ resolver: ElementResolver) -> Bool {
     switch elem {
     case .line(let v):
         return segmentIntersectsPolygon(v.x1, v.y1, v.x2, v.y2, poly)
@@ -398,11 +502,11 @@ private func elementIntersectsPolygonLocal(_ elem: Element, _ poly: [(Double, Do
                            (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
             if corners.contains(where: { pointInPolygon($0.0, $0.1, poly) }) { return true }
             if poly.contains(where: { pointInRect($0.0, $0.1, v.x, v.y, v.width, v.height) }) { return true }
-            return segmentsOfElement(elem).contains { s in
+            return segmentsOfElementWith(elem, resolver).contains { s in
                 segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
             }
         }
-        return segmentsOfElement(elem).contains { s in
+        return segmentsOfElementWith(elem, resolver).contains { s in
             segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
         }
     // The ellipse is CURVED, so it has no segments and never had any: the
@@ -414,32 +518,32 @@ private func elementIntersectsPolygonLocal(_ elem: Element, _ poly: [(Double, Do
         return ellipseIntersectsPolygon(v.cx, v.cy, v.rx, v.ry, poly, filled: v.fill != nil)
     case .polyline(let v):
         if v.fill != nil {
-            let segs = segmentsOfElement(elem)
+            let segs = segmentsOfElementWith(elem, resolver)
             let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
             if endpoints.contains(where: { pointInPolygon($0.s, $0.t, poly) }) { return true }
-            if poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+            if poly.contains(where: { let b = resolvedBounds(elem, resolver); return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
             return segs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
         }
-        return segmentsOfElement(elem).contains { s in
+        return segmentsOfElementWith(elem, resolver).contains { s in
             segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
         }
     case .polygon(let v):
         if v.fill != nil {
             if v.points.contains(where: { pointInPolygon($0.0, $0.1, poly) }) { return true }
-            if poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
-            return segmentsOfElement(elem).contains { s in
+            if poly.contains(where: { let b = resolvedBounds(elem, resolver); return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+            return segmentsOfElementWith(elem, resolver).contains { s in
                 segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
             }
         }
-        return segmentsOfElement(elem).contains { s in
+        return segmentsOfElementWith(elem, resolver).contains { s in
             segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly)
         }
     case .path(let v):
-        let segs = segmentsOfElement(elem)
+        let segs = segmentsOfElementWith(elem, resolver)
         if v.fill != nil {
             let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
             if endpoints.contains(where: { pointInPolygon($0.s, $0.t, poly) }) { return true }
-            if poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+            if poly.contains(where: { let b = resolvedBounds(elem, resolver); return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
             return segs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
         }
         return segs.contains { s in
@@ -451,15 +555,15 @@ private func elementIntersectsPolygonLocal(_ elem: Element, _ poly: [(Double, Do
     // Rust's catch-all arm, which Element::Live falls into (its bbox arm
     // lists only Text | TextPath | Group | Layer).
     case .live:
-        let segs = segmentsOfElement(elem)
+        let segs = segmentsOfElementWith(elem, resolver)
         if elem.fill != nil {
             let endpoints = segs.flatMap { [(s: $0.0, t: $0.1), (s: $0.2, t: $0.3)] }
             if endpoints.contains(where: { pointInPolygon($0.s, $0.t, poly) }) { return true }
-            if poly.contains(where: { let b = elem.bounds; return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
+            if poly.contains(where: { let b = resolvedBounds(elem, resolver); return pointInRect($0.0, $0.1, b.x, b.y, b.width, b.height) }) { return true }
         }
         return segs.contains { s in segmentIntersectsPolygon(s.0, s.1, s.2, s.3, poly) }
     case .text, .textPath, .group, .layer:
-        let b = elem.bounds
+        let b = resolvedBounds(elem, resolver)
         let corners = [(b.x, b.y), (b.x + b.width, b.y),
                        (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
         if corners.contains(where: { pointInPolygon($0.0, $0.1, poly) }) { return true }

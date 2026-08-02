@@ -51,6 +51,23 @@ pub struct ConceptDef {
     pub closed: bool,
 }
 
+/// Look up a concept pack in the bundled workspace registry (CONCEPTS.md 3b).
+///
+/// THE SINGLE definition shared by every resolver that answers
+/// `resolve_concept` — the canvas's paint-time resolver and the document-level
+/// hit-test resolver. Written once on purpose: the two must agree about what a
+/// `Generated` element's geometry IS, and a second copy is exactly how a
+/// concept instance ends up drawn in one place and selected in another.
+/// `Workspace::load` is cached, so this is cheap.
+pub fn workspace_concept(concept_id: &str) -> Option<ConceptDef> {
+    let ws = crate::interpreter::workspace::Workspace::load()?;
+    let c = ws.concept(concept_id)?;
+    Some(ConceptDef {
+        generator: c.get("generator")?.as_str()?.to_string(),
+        closed: c.get("closed").and_then(|v| v.as_bool()).unwrap_or(true),
+    })
+}
+
 /// Resolves a stable element id to the element it currently names. Lets the
 /// geometry layer evaluate by-id references without depending on
 /// Model/Document. Phase 1 backs this with a rebuild-on-demand resolver; the

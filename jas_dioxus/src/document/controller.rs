@@ -15,7 +15,10 @@ use crate::geometry::element::{
     move_path_handle, with_fill, with_stroke, with_width_points,
     Element, Fill, GroupElem, Mask, Stroke, StrokeWidthPoint,
 };
-use crate::algorithms::hit_test::{element_intersects_polygon, element_intersects_rect, point_in_rect};
+use crate::algorithms::hit_test::{
+    element_intersects_polygon_with, element_intersects_rect_with, point_in_rect,
+};
+use crate::document::id_index::IndexResolver;
 
 // ---------------------------------------------------------------------------
 // Helpers — shared by the Controller's boolean ops
@@ -883,7 +886,18 @@ impl Controller {
         height: f64,
         extend: bool,
     ) {
-        select_flat(model, |elem| element_intersects_rect(elem, x, y, width, height), extend);
+        // RESOLVEDHIT: resolve through the Model's index, so an element whose
+        // geometry lives behind a stable id (a symbol instance, a recorded or
+        // generated element) is caught where it is DRAWN. The index is an rpds
+        // map: this clone is O(1) structure sharing, and it is what lets the
+        // resolver borrow while `select_flat` takes `&mut Model`.
+        let index = hit_index(model);
+        let resolver = IndexResolver(&index);
+        select_flat(
+            model,
+            |elem| element_intersects_rect_with(elem, x, y, width, height, &resolver),
+            extend,
+        );
     }
 
     /// Select all elements whose bounds intersect the given polygon.
@@ -892,7 +906,13 @@ impl Controller {
         polygon: &[(f64, f64)],
         extend: bool,
     ) {
-        select_flat(model, |elem| element_intersects_polygon(elem, polygon), extend);
+        let index = hit_index(model);
+        let resolver = IndexResolver(&index);
+        select_flat(
+            model,
+            |elem| element_intersects_polygon_with(elem, polygon, &resolver),
+            extend,
+        );
     }
 
     /// Direct selection marquee: select individual control points within the rect.
@@ -904,6 +924,8 @@ impl Controller {
         height: f64,
         extend: bool,
     ) {
+        let index = hit_index(model);
+        let resolver = IndexResolver(&index);
         select_recursive(model, |path, elem| {
             let cps = control_points(elem);
             let hit_cps: Vec<usize> = cps
@@ -917,7 +939,7 @@ impl Controller {
                     path: path.clone(),
                     kind: SelectionKind::Partial(SortedCps::from_iter(hit_cps)),
                 })
-            } else if element_intersects_rect(elem, x, y, width, height) {
+            } else if element_intersects_rect_with(elem, x, y, width, height, &resolver) {
                 Some(ElementSelection::partial(
                     path.clone(),
                     std::iter::empty::<usize>(),
@@ -3269,6 +3291,25 @@ fn select_flat(
     model.set_document_unbracketed(new_doc, NonUndoableIntent::Selection);
 }
 
+/// The id index a selection pass resolves through (RESOLVEDHIT), epoching the
+/// recompute cache on the way. `IdIndex` is an rpds map, so the clone is O(1)
+/// structure sharing; it exists so the resolver can borrow while `select_flat`
+/// takes `&mut Model`.
+///
+/// THE EPOCH CALL IS NOT BOOKKEEPING. Selection is a SECOND READER of a cache
+/// whose only other reader (paint) owned the epoch. This port is guarded one
+/// layer deeper than JasSwift — each entry records the target's `Rc::as_ptr`
+/// and is reused only on a pointer match — so cross-document confusion cannot
+/// happen here the way it can there. What the pointer CANNOT rule out is ABA:
+/// an edited-away target freed and a fresh one allocated at the same address
+/// would match a stale entry. The generation epoch is what closes that, and
+/// until now it was closed only by paint happening to run first. "Some other
+/// caller runs before me" is not an invariant; it is a habit.
+fn hit_index(model: &Model) -> crate::document::id_index::IdIndex {
+    crate::geometry::live::set_recompute_cache_generation(model.generation());
+    model.id_index().clone()
+}
+
 /// Recursive selection: traverse the full element tree, calling
 /// `leaf_handler` on each non-container element. Groups and layers
 /// are traversed (not expanded).
@@ -4158,6 +4199,95 @@ mod tests {
         let mut model = setup_model();
         Controller::select_rect(&mut model, 100.0, 100.0, 10.0, 10.0, false);
         assert!(model.document().selection.is_empty());
+    }
+
+    // ── RESOLVEDHIT: selection must see what the canvas draws ───────────────
+    //
+    // A symbol instance is a `ReferenceElem` holding no geometry of its own
+    // (SYMBOLS.md §1): it re-resolves its master every paint. Paint has a
+    // resolver (`canvas/render.rs`'s `RenderResolver` over the Model's id
+    // index); hit-testing did not, so `segments_of_element` answered `vec![]`
+    // and `bounds()` answered `(0,0,0,0)` for every instance on the canvas.
+    // The artist sees the shape and cannot rubber-band it.
+    //
+    // These are DOCUMENT-CONTEXT tests by necessity, not by preference. The
+    // shared algorithm corpus feeds `element_intersects_rect` one standalone
+    // element with no document behind it, so it cannot express "an instance
+    // whose master is elsewhere in the document" at all -- which is exactly
+    // why the corpus never asked and all three ports agreed.
+
+    /// A master rect at (0,0,10,10) in `doc.symbols`, one instance of it in
+    /// the layer tree, and nothing selected. The instance's own geometry is
+    /// empty; everything it occupies on canvas comes from resolving "m1".
+    fn symbol_instance_model() -> Model {
+        let mut model = Model::default();
+        let mut master = make_rect(0.0, 0.0, 10.0, 10.0);
+        master.common_mut().id = Some("m1".into());
+        let mut seed = model.document().clone();
+        seed.symbols.push(master);
+        model.set_document_for_test(seed);
+
+        Controller::place_instance(&mut model, "m1", "i1");
+        // place_instance auto-selects; clear it so the marquee is the only
+        // thing that can put the instance in the selection.
+        let mut doc = model.document().clone();
+        doc.selection.clear();
+        model.set_document_for_test(doc);
+        model
+    }
+
+    #[test]
+    fn marquee_selects_a_placed_symbol_instance() {
+        let mut model = symbol_instance_model();
+        Controller::select_rect(&mut model, -1.0, -1.0, 12.0, 12.0, false);
+        assert_eq!(
+            sel_paths(&model),
+            vec![vec![0, 0]],
+            "a marquee enclosing the resolved master must select the instance",
+        );
+    }
+
+    #[test]
+    fn lasso_selects_a_placed_symbol_instance() {
+        let mut model = symbol_instance_model();
+        let poly = vec![(-1.0, -1.0), (12.0, -1.0), (12.0, 12.0), (-1.0, 12.0)];
+        Controller::select_polygon(&mut model, &poly, false);
+        assert_eq!(
+            sel_paths(&model),
+            vec![vec![0, 0]],
+            "a lasso enclosing the resolved master must select the instance",
+        );
+    }
+
+    #[test]
+    fn marquee_misses_a_symbol_instance_it_does_not_cover() {
+        // The repair must not degrade into "a reference is always hit".
+        let mut model = symbol_instance_model();
+        Controller::select_rect(&mut model, 100.0, 100.0, 10.0, 10.0, false);
+        assert!(
+            model.document().selection.is_empty(),
+            "a marquee far from the resolved geometry must not select it",
+        );
+    }
+
+    #[test]
+    fn marquee_skips_a_dangling_symbol_instance() {
+        // REFERENCE_GRAPH.md §3: an unresolvable target evaluates to empty.
+        // An instance of a master that is not there occupies no canvas, so
+        // there is nothing for a marquee to catch. This is the answer the
+        // resolver-less corpus verb gives too, and it is right there for the
+        // same reason -- not a coincidence worth papering over.
+        let mut model = Model::default();
+        Controller::place_instance(&mut model, "ghost", "i1");
+        let mut doc = model.document().clone();
+        doc.selection.clear();
+        model.set_document_for_test(doc);
+
+        Controller::select_rect(&mut model, -1000.0, -1000.0, 2000.0, 2000.0, false);
+        assert!(
+            model.document().selection.is_empty(),
+            "a dangling instance draws nothing and so catches nothing",
+        );
     }
 
     #[test]

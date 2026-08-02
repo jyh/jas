@@ -3119,7 +3119,7 @@ class CanvasNSView: NSView {
             // no-edit repaints reuse the cached target geometry. Per-app perf
             // cache; no behavior change (gated by a per-hit assert that
             // cached == fresh in LiveElement.swift).
-            setRecomputeCacheGeneration(model.generation)
+            setRecomputeCacheEpoch(owner: ObjectIdentifier(model), generation: model.generation)
         } else {
             setCanvasRefResolver(RebuildResolver(document: document))
         }

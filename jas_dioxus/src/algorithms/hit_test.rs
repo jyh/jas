@@ -2,9 +2,34 @@
 //!
 //! Pure-geometry functions used by the controller for marquee selection,
 //! element intersection tests, and control-point queries.  These do not
-//! depend on the document model — only on element geometry.
+//! depend on the document model — only on element geometry, plus (for the
+//! `_with` entry points) an [`ElementResolver`] supplied by the caller.
+//!
+//! ## Why some kinds need a resolver (RESOLVEDHIT)
+//!
+//! Most elements carry their own coordinates. Three live kinds do not:
+//! `Reference` (a symbol instance) holds only a target id, `Recorded` holds a
+//! replayable recipe over other elements, and `Generated` holds a concept id
+//! plus params. Each one's geometry exists only once something resolves that
+//! id — which is why `LiveElement::bounds()` answers `(0,0,0,0)` for all three
+//! and `segments_of_element` answers `vec![]`.
+//!
+//! The canvas already resolves them (`canvas/render.rs`), so an instance is
+//! DRAWN. Hit-testing had no resolver, so an instance was not SELECTABLE. Each
+//! function below therefore comes in two forms:
+//!
+//! * the plain form — the shared cross-language verb, resolver-less. It keeps
+//!   answering `false` for these three kinds, and that is the CORRECT answer
+//!   for the question it is asked: with no document behind it, a reference is
+//!   dangling, and a dangling reference evaluates to empty
+//!   (REFERENCE_GRAPH.md §3).
+//! * the `_with` form — takes a resolver, and is what document-level callers
+//!   (marquee, lasso, direct-select marquee) use.
 
 use crate::geometry::element::{flatten_path_commands, Element};
+use crate::geometry::live::{
+    ElementResolver, LiveVariant, NullResolver, VisitSet, DEFAULT_PRECISION,
+};
 
 // ---------------------------------------------------------------------------
 // Primitive geometry
@@ -104,21 +129,37 @@ pub fn segment_intersects_polygon(
     false
 }
 
+// Called by the cross-language corpus runner and `bin/algorithm_roundtrip`,
+// neither of which the cdylib half of this crate's `crate-type` can see.
+#[allow(dead_code)]
 pub fn element_intersects_polygon(elem: &Element, poly: &[(f64, f64)]) -> bool {
+    element_intersects_polygon_with(elem, poly, &NullResolver)
+}
+
+/// [`element_intersects_polygon`], resolving live kinds through `resolver`.
+pub fn element_intersects_polygon_with(
+    elem: &Element,
+    poly: &[(f64, f64)],
+    resolver: &dyn ElementResolver,
+) -> bool {
     if let Some(t) = elem.transform() {
         if let Some(inv) = t.inverse() {
             let local_poly: Vec<(f64, f64)> = poly.iter()
                 .map(|&(x, y)| inv.apply_point(x, y))
                 .collect();
-            return element_intersects_polygon_local(elem, &local_poly);
+            return element_intersects_polygon_local(elem, &local_poly, resolver);
         }
         return false;
     }
-    element_intersects_polygon_local(elem, poly)
+    element_intersects_polygon_local(elem, poly, resolver)
 }
 
 /// Polygon hit-test against an element's raw (untransformed) coordinates.
-fn element_intersects_polygon_local(elem: &Element, poly: &[(f64, f64)]) -> bool {
+fn element_intersects_polygon_local(
+    elem: &Element,
+    poly: &[(f64, f64)],
+    resolver: &dyn ElementResolver,
+) -> bool {
     match elem {
         Element::Line(e) => {
             segment_intersects_polygon(e.x1, e.y1, e.x2, e.y2, poly)
@@ -139,10 +180,10 @@ fn element_intersects_polygon_local(elem: &Element, poly: &[(f64, f64)]) -> bool
                 if poly.iter().any(|&(px, py)| point_in_rect(px, py, e.x, e.y, e.width, e.height)) {
                     return true;
                 }
-                let segs = segments_of_element(elem);
+                let segs = segments_of_element_with(elem, resolver);
                 segs.iter().any(|&(x1, y1, x2, y2)| segment_intersects_polygon(x1, y1, x2, y2, poly))
             } else {
-                segments_of_element(elem)
+                segments_of_element_with(elem, resolver)
                     .iter()
                     .any(|&(x1, y1, x2, y2)| segment_intersects_polygon(x1, y1, x2, y2, poly))
             }
@@ -184,7 +225,7 @@ fn element_intersects_polygon_local(elem: &Element, poly: &[(f64, f64)]) -> bool
             ellipse_intersects_polygon(e.cx, e.cy, e.rx, e.ry, poly, e.fill.is_some())
         }
         Element::Text(_) | Element::TextPath(_) | Element::Group(_) | Element::Layer(_) => {
-            let (bx, by, bw, bh) = elem.bounds();
+            let (bx, by, bw, bh) = resolved_bounds(elem, resolver);
             let corners = [
                 (bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh),
             ];
@@ -204,7 +245,7 @@ fn element_intersects_polygon_local(elem: &Element, poly: &[(f64, f64)]) -> bool
         }
         _ => {
             if elem.fill().is_some() {
-                let segs = segments_of_element(elem);
+                let segs = segments_of_element_with(elem, resolver);
                 let endpoints: Vec<(f64, f64)> = segs
                     .iter()
                     .flat_map(|&(x1, y1, x2, y2)| vec![(x1, y1), (x2, y2)])
@@ -213,7 +254,7 @@ fn element_intersects_polygon_local(elem: &Element, poly: &[(f64, f64)]) -> bool
                     return true;
                 }
                 if poly.iter().any(|&(px, py)| {
-                    let b = elem.bounds();
+                    let b = resolved_bounds(elem, resolver);
                     point_in_rect(px, py, b.0, b.1, b.2, b.3)
                 }) {
                     return true;
@@ -221,7 +262,7 @@ fn element_intersects_polygon_local(elem: &Element, poly: &[(f64, f64)]) -> bool
                 segs.iter()
                     .any(|&(x1, y1, x2, y2)| segment_intersects_polygon(x1, y1, x2, y2, poly))
             } else {
-                segments_of_element(elem)
+                segments_of_element_with(elem, resolver)
                     .iter()
                     .any(|&(x1, y1, x2, y2)| segment_intersects_polygon(x1, y1, x2, y2, poly))
             }
@@ -345,7 +386,96 @@ pub fn ellipse_intersects_polygon(
 // Element-level queries
 // ---------------------------------------------------------------------------
 
+// Corpus verb; see `element_intersects_polygon`.
+#[allow(dead_code)]
 pub fn segments_of_element(elem: &Element) -> Vec<(f64, f64, f64, f64)> {
+    segments_of_element_with(elem, &NullResolver)
+}
+
+/// Append `ring`'s edges (closed) to `segs`. The shared tail of every arm that
+/// turns an evaluated [`PolygonSet`](crate::algorithms::boolean::PolygonSet)
+/// into hit-test segments, so the resolver-needing live kinds and
+/// `CompoundShape` cannot drift in how they close a ring.
+fn push_ring_segments(ring: &[(f64, f64)], segs: &mut Vec<(f64, f64, f64, f64)>) {
+    if ring.len() < 2 {
+        return;
+    }
+    for w in ring.windows(2) {
+        segs.push((w[0].0, w[0].1, w[1].0, w[1].1));
+    }
+    let last = *ring.last().unwrap();
+    let first = *ring.first().unwrap();
+    segs.push((last.0, last.1, first.0, first.1));
+}
+
+/// The evaluated rings of a live kind whose geometry lives behind a resolver
+/// (`Reference` / `Recorded` / `Generated`), or `None` for anything else.
+/// A dangling target, an unknown concept, or a cycle yields `Some(empty)` —
+/// never a panic (REFERENCE_GRAPH.md §3).
+fn resolved_rings(
+    elem: &Element,
+    resolver: &dyn ElementResolver,
+) -> Option<crate::algorithms::boolean::PolygonSet> {
+    let Element::Live(v) = elem else { return None };
+    let mut visiting = VisitSet::new();
+    match v {
+        LiveVariant::Reference(r) => {
+            Some(r.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
+        }
+        LiveVariant::Recorded(rec) => {
+            Some(rec.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
+        }
+        LiveVariant::Generated(g) => {
+            Some(g.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
+        }
+        // CompoundShape owns its operands, so it needs no resolver and is
+        // already answered exactly by `segments_of_element`.
+        LiveVariant::CompoundShape(_) => None,
+    }
+}
+
+/// `elem.bounds()`, except for the resolver-needing live kinds, whose own
+/// `bounds()` is a hard-coded `(0,0,0,0)` — for those, the bounding box of the
+/// RESOLVED rings. Used by the filled arms, which compare against a bounding
+/// box: an instance carrying a paint override took those arms and compared
+/// against a degenerate box at the origin.
+fn resolved_bounds(
+    elem: &Element,
+    resolver: &dyn ElementResolver,
+) -> (f64, f64, f64, f64) {
+    let Some(rings) = resolved_rings(elem, resolver) else {
+        return elem.bounds();
+    };
+    let mut pts = rings.iter().flatten();
+    let Some(&(x0, y0)) = pts.next() else {
+        // Dangling / cyclic / unknown: no geometry, and a zero box at the
+        // origin would be a false claim about where it is. Report the same
+        // degenerate box `bounds()` does, so nothing downstream changes for
+        // the case that genuinely has nothing to show.
+        return elem.bounds();
+    };
+    let (mut minx, mut miny, mut maxx, mut maxy) = (x0, y0, x0, y0);
+    for &(x, y) in pts {
+        minx = minx.min(x);
+        miny = miny.min(y);
+        maxx = maxx.max(x);
+        maxy = maxy.max(y);
+    }
+    (minx, miny, maxx - minx, maxy - miny)
+}
+
+/// [`segments_of_element`], resolving live kinds through `resolver`.
+pub fn segments_of_element_with(
+    elem: &Element,
+    resolver: &dyn ElementResolver,
+) -> Vec<(f64, f64, f64, f64)> {
+    if let Some(rings) = resolved_rings(elem, resolver) {
+        let mut segs = Vec::new();
+        for ring in &rings {
+            push_ring_segments(ring, &mut segs);
+        }
+        return segs;
+    }
     match elem {
         Element::Line(e) => vec![(e.x1, e.y1, e.x2, e.y2)],
         Element::Rect(e) => vec![
@@ -381,29 +511,43 @@ pub fn segments_of_element(elem: &Element) -> Vec<(f64, f64, f64, f64)> {
             }
         }
         Element::Live(v) => match v {
-            crate::geometry::live::LiveVariant::CompoundShape(cs) => {
-                let ps = cs.evaluate(crate::geometry::live::DEFAULT_PRECISION);
+            LiveVariant::CompoundShape(cs) => {
+                let ps = cs.evaluate(DEFAULT_PRECISION);
                 let mut segs = Vec::new();
                 for ring in &ps {
-                    if ring.len() < 2 { continue; }
-                    for w in ring.windows(2) {
-                        segs.push((w[0].0, w[0].1, w[1].0, w[1].1));
-                    }
-                    let last = *ring.last().unwrap();
-                    let first = *ring.first().unwrap();
-                    segs.push((last.0, last.1, first.0, first.1));
+                    push_ring_segments(ring, &mut segs);
                 }
                 segs
             }
-            crate::geometry::live::LiveVariant::Reference(_)
-            | crate::geometry::live::LiveVariant::Recorded(_)
-            | crate::geometry::live::LiveVariant::Generated(_) => vec![],
+            // Unreachable from `segments_of_element_with`: `resolved_rings`
+            // takes these three first, whatever the resolver. Reached only
+            // through the resolver-less verb, where empty is the right answer
+            // (see the module header) — and left as an explicit arm rather
+            // than folded into the catch-all so adding a fifth live kind has
+            // to state which side of that line it falls on.
+            LiveVariant::Reference(_)
+            | LiveVariant::Recorded(_)
+            | LiveVariant::Generated(_) => vec![],
         },
         _ => vec![],
     }
 }
 
+// Corpus verb; see `element_intersects_polygon`.
+#[allow(dead_code)]
 pub fn element_intersects_rect(elem: &Element, rx: f64, ry: f64, rw: f64, rh: f64) -> bool {
+    element_intersects_rect_with(elem, rx, ry, rw, rh, &NullResolver)
+}
+
+/// [`element_intersects_rect`], resolving live kinds through `resolver`.
+pub fn element_intersects_rect_with(
+    elem: &Element,
+    rx: f64,
+    ry: f64,
+    rw: f64,
+    rh: f64,
+    resolver: &dyn ElementResolver,
+) -> bool {
     if let Some(t) = elem.transform() {
         if let Some(inv) = t.inverse() {
             let corners = [
@@ -412,15 +556,22 @@ pub fn element_intersects_rect(elem: &Element, rx: f64, ry: f64, rw: f64, rh: f6
                 inv.apply_point(rx + rw, ry + rh),
                 inv.apply_point(rx, ry + rh),
             ];
-            return element_intersects_polygon_local(elem, &corners);
+            return element_intersects_polygon_local(elem, &corners, resolver);
         }
         return false; // singular transform — element is invisible
     }
-    element_intersects_rect_local(elem, rx, ry, rw, rh)
+    element_intersects_rect_local(elem, rx, ry, rw, rh, resolver)
 }
 
 /// Rect hit-test against an element's raw (untransformed) coordinates.
-fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: f64) -> bool {
+fn element_intersects_rect_local(
+    elem: &Element,
+    rx: f64,
+    ry: f64,
+    rw: f64,
+    rh: f64,
+    resolver: &dyn ElementResolver,
+) -> bool {
     match elem {
         Element::Line(e) => {
             segment_intersects_rect(e.x1, e.y1, e.x2, e.y2, rx, ry, rw, rh)
@@ -429,7 +580,7 @@ fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: 
             if e.fill.is_some() {
                 rects_intersect(e.x, e.y, e.width, e.height, rx, ry, rw, rh)
             } else {
-                segments_of_element(elem)
+                segments_of_element_with(elem, resolver)
                     .iter()
                     .any(|&(x1, y1, x2, y2)| segment_intersects_rect(x1, y1, x2, y2, rx, ry, rw, rh))
             }
@@ -447,25 +598,25 @@ fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: 
         // inside the fill. Unfilled polylines keep the segments test.
         Element::Polyline(e) => {
             if e.fill.is_some() {
-                let b = elem.bounds();
+                let b = resolved_bounds(elem, resolver);
                 rects_intersect(b.0, b.1, b.2, b.3, rx, ry, rw, rh)
             } else {
-                segments_of_element(elem)
+                segments_of_element_with(elem, resolver)
                     .iter()
                     .any(|&(x1, y1, x2, y2)| segment_intersects_rect(x1, y1, x2, y2, rx, ry, rw, rh))
             }
         }
         Element::Text(_) | Element::TextPath(_) => {
-            let b = elem.bounds();
+            let b = resolved_bounds(elem, resolver);
             rects_intersect(b.0, b.1, b.2, b.3, rx, ry, rw, rh)
         }
         Element::Group(_) | Element::Layer(_) => {
-            let b = elem.bounds();
+            let b = resolved_bounds(elem, resolver);
             rects_intersect(b.0, b.1, b.2, b.3, rx, ry, rw, rh)
         }
         _ => {
             if elem.fill().is_some() {
-                let segs = segments_of_element(elem);
+                let segs = segments_of_element_with(elem, resolver);
                 let endpoints: Vec<(f64, f64)> = segs
                     .iter()
                     .flat_map(|&(x1, y1, x2, y2)| vec![(x1, y1), (x2, y2)])
@@ -493,7 +644,7 @@ fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: 
                 // paths now agree by construction rather than by coincidence;
                 // a later move to a true point-in-fill test has to be made on
                 // both at once, deliberately.
-                let b = elem.bounds();
+                let b = resolved_bounds(elem, resolver);
                 let corners = [
                     (rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh),
                 ];
@@ -503,7 +654,7 @@ fn element_intersects_rect_local(elem: &Element, rx: f64, ry: f64, rw: f64, rh: 
                 segs.iter()
                     .any(|&(x1, y1, x2, y2)| segment_intersects_rect(x1, y1, x2, y2, rx, ry, rw, rh))
             } else {
-                segments_of_element(elem)
+                segments_of_element_with(elem, resolver)
                     .iter()
                     .any(|&(x1, y1, x2, y2)| segment_intersects_rect(x1, y1, x2, y2, rx, ry, rw, rh))
             }
@@ -1260,5 +1411,79 @@ mod tests {
         let mut hollow = filled_square(None);
         if let Element::Polygon(p) = &mut hollow { p.fill = None; }
         assert!(!element_intersects_rect(&hollow, 5.0, 5.0, 4.0, 4.0));
+    }
+
+    // ── RESOLVEDHIT: the resolver-less verb's contract, pinned ──────────────
+    //
+    // The tempting "fix" for an unhittable symbol instance is to give the
+    // resolver-less path something to chew on — flatten the instance, cache
+    // geometry on it, widen the catch-all. Each would make the SHARED verb
+    // answer a question it cannot actually see: with no document behind it,
+    // there is no fact about where a target id is.
+    //
+    // These pin the boundary, so the shortcut cannot land later and look green.
+    // Same shape as CONTAINERPAINT's guard on `Element::fill()`: the repair is
+    // replaceable, the guard against the wrong repair is not.
+
+    fn bare_reference() -> Element {
+        use crate::geometry::element::CommonProps;
+        use crate::geometry::live::{ElementRef, ReferenceElem};
+        Element::Live(LiveVariant::Reference(ReferenceElem::new(
+            ElementRef("m1".into()),
+            CommonProps::default(),
+        )))
+    }
+
+    #[test]
+    fn the_resolverless_verb_keeps_answering_false_for_a_reference() {
+        let r = bare_reference();
+        assert!(!element_intersects_rect(&r, -1000.0, -1000.0, 2000.0, 2000.0));
+        let big = [
+            (-1000.0, -1000.0), (1000.0, -1000.0), (1000.0, 1000.0), (-1000.0, 1000.0),
+        ];
+        assert!(!element_intersects_polygon(&r, &big));
+        assert!(segments_of_element(&r).is_empty());
+    }
+
+    #[test]
+    fn a_resolver_that_resolves_nothing_agrees_with_the_resolverless_verb() {
+        // NullResolver is not a special case in the `_with` path — it is the
+        // ordinary dangling answer. If these two ever disagree, the `_with`
+        // form has grown geometry out of nothing.
+        let r = bare_reference();
+        assert_eq!(
+            element_intersects_rect_with(&r, -1000.0, -1000.0, 2000.0, 2000.0, &NullResolver),
+            element_intersects_rect(&r, -1000.0, -1000.0, 2000.0, 2000.0),
+        );
+        assert_eq!(resolved_bounds(&r, &NullResolver), r.bounds());
+    }
+
+    #[test]
+    fn a_resolver_that_resolves_the_target_sees_the_masters_geometry() {
+        // The algorithm-level half of the controller tests: same element, two
+        // resolvers, opposite answers — so the repair demonstrably turns on
+        // resolution and not on anything else about the element.
+        use crate::geometry::element::{CommonProps, PolygonElem};
+        use crate::geometry::live::{ElementRef, ElementResolver};
+        use std::rc::Rc;
+
+        struct One(Rc<Element>);
+        impl ElementResolver for One {
+            fn resolve(&self, id: &ElementRef) -> Option<Rc<Element>> {
+                (id.0 == "m1").then(|| self.0.clone())
+            }
+        }
+        let master = Rc::new(Element::Polygon(PolygonElem {
+            common: CommonProps { id: Some("m1".into()), ..CommonProps::default() },
+            points: vec![(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)],
+            fill: red_fill(),
+            stroke: None,
+            fill_gradient: None,
+            stroke_gradient: None,
+        }));
+        let r = bare_reference();
+
+        assert!(element_intersects_rect_with(&r, -1.0, -1.0, 12.0, 12.0, &One(master)));
+        assert!(!element_intersects_rect(&r, -1.0, -1.0, 12.0, 12.0));
     }
 }

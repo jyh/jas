@@ -842,6 +842,10 @@ private struct RecomputeKey: Hashable {
 // test runner so concurrent tests neither data-race the dictionary nor share
 // cache entries. The box is created lazily per thread and reused thereafter.
 private final class RecomputeCacheBox {
+    /// Identity of the Model the cached entries were computed from. See
+    /// ``setRecomputeCacheEpoch(owner:generation:)`` — a generation alone does
+    /// not identify a document state, only a document state WITHIN one model.
+    var owner: ObjectIdentifier? = nil
     var generation: UInt64 = 0
     var entries: [RecomputeKey: RecomputeCacheEntry] = [:]
 }
@@ -856,15 +860,30 @@ private func recomputeCacheBox() -> RecomputeCacheBox {
     return box
 }
 
-/// Generation-epoch the recompute cache: if `generation` differs from the
-/// current epoch, clear every entry and adopt the new epoch. Called at the
-/// paint entry with `Model.generation` (bumped on every mutation / undo /
-/// redo), so this drops the cache on any edit while preserving it across
-/// no-edit repaints.
-func setRecomputeCacheGeneration(_ generation: UInt64) {
+/// Epoch the recompute cache: if the `(owner, generation)` pair differs from
+/// the current epoch, clear every entry and adopt the new one. Called at each
+/// entry point that reads the cache — the paint entry and the selection entry —
+/// with `Model.generation` (bumped on every mutation / undo / redo), so this
+/// drops the cache on any edit while preserving it across no-edit repaints.
+///
+/// `owner` IS LOAD-BEARING, and the reason is written down two files away.
+/// ``CanvasRenderSignature`` carries a `modelId` because it must distinguish
+/// "two tabs whose independent generation counters could otherwise collide at
+/// the same value" — the repaint signature had that guard and this cache did
+/// not, though it needs exactly the same one. Two documents open at the same
+/// generation, each with a symbol master sharing an id (ids are per-document,
+/// so "m1" in both is ordinary), would otherwise serve each other's geometry:
+/// the instance in one tab paints the master from the other.
+///
+/// Rust guards the same hazard one layer down, per cache entry, by comparing
+/// the target's `Rc::as_ptr`. `Element` is a value type here with no pointer to
+/// compare, which is why this port carries the distinction in the epoch
+/// instead. Same hazard, same coverage, two dialects.
+func setRecomputeCacheEpoch(owner: ObjectIdentifier, generation: UInt64) {
     let box = recomputeCacheBox()
-    if box.generation != generation {
+    if box.owner != owner || box.generation != generation {
         box.entries.removeAll(keepingCapacity: true)
+        box.owner = owner
         box.generation = generation
     }
 }
@@ -957,6 +976,7 @@ func recomputeCacheStateForTest(_ targetId: String, _ precision: Double) -> Reco
 func clearRecomputeCacheForTest() {
     let box = recomputeCacheBox()
     box.entries.removeAll()
+    box.owner = nil
     box.generation = 0
 }
 
