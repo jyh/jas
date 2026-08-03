@@ -111,6 +111,10 @@ jobs:
       # LOCAL sweep, which is where a red gate once shipped inside a commit
       # claiming every gate was green.
       - run: python scripts/check_index_blindspot.py --self-test && python scripts/check_index_blindspot.py
+      # SPECMUTANTS: which clauses of the analytic law the corpus actually
+      # exercises. docs/CHECKERS.md named this instrument and left its coverage
+      # question open; this answers it for the membership half and says so.
+      - run: python scripts/check_spec_mutation_coverage.py --self-test && python scripts/check_spec_mutation_coverage.py
       - run: python scripts/check_gate_consistency.py --self-test && python scripts/check_gate_consistency.py
       # One sanctioned grouping for every degree/radian conversion, in both
       # active ports. `(deg * PI) / 180` and `deg * (PI / 180)` are different
@@ -298,6 +302,11 @@ jobs:
         run: |
           python scripts/check_index_blindspot.py --self-test
           python scripts/check_index_blindspot.py
+
+      - name: Corpus coverage of the analytic law's clauses
+        run: |
+          python scripts/check_spec_mutation_coverage.py --self-test
+          python scripts/check_spec_mutation_coverage.py
 
       - name: Structural gates
         run: |
