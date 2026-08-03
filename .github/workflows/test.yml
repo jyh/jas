@@ -7,6 +7,24 @@ on:
     branches: [main]
 
 jobs:
+  # SCRUBGUARD: the 2026-07-22 history rewrite has no other guard. Its own job
+  # because it is the ONLY one needing full history -- `fetch-depth: 0` costs a
+  # slower checkout and buying it for every lane would be waste. A shallow
+  # checkout here would let the gate scan one commit and report success, so the
+  # gate refuses to run on one rather than trusting this file to stay right.
+  commit-trailers:
+    name: commit messages carry no session trailer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/check_commit_trailers.py --self-test
+      - run: python scripts/check_commit_trailers.py
+
   workspace-json-fresh:
     name: workspace.json up-to-date
     runs-on: ubuntu-latest
@@ -217,7 +235,13 @@ jobs:
       run:
         shell: bash
     steps:
+      # fetch-depth: 0 for check_commit_trailers.py below — it guards HISTORY,
+      # and on a depth-1 checkout it would scan one commit. It refuses to run
+      # shallow rather than trusting this line to stay here, so deleting this
+      # reds the lane instead of quietly hollowing the gate.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -254,6 +278,15 @@ jobs:
         run: |
           python scripts/check_encoding_hygiene.py --self-test
           python scripts/check_encoding_hygiene.py
+
+      # SCRUBGUARD on the lane that matters most: every commit that has ever
+      # carried the forbidden trailer was authored on this platform. A gate
+      # watching only ubuntu would have watched the one place the violation
+      # does not originate. Needs full history, and refuses to run without it.
+      - name: Commit messages carry no session trailer
+        run: |
+          python scripts/check_commit_trailers.py --self-test
+          python scripts/check_commit_trailers.py
 
       - name: Structural gates
         run: |
