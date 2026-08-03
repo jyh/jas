@@ -132,8 +132,12 @@ MUTANTS = [
     },
 ]
 
-MIN_MUTANTS = 4          # fail closed: a derivation that empties proves nothing
-MIN_VECTORS = 10         # ditto for the corpus side
+# ZERO SLACK (council O3.3). These were 4 and 10 against real populations of 5
+# and 17 -- floors that would not have noticed the mutant set losing a clause or
+# the corpus losing seven vectors. The floor is the population; growth is free,
+# shrinkage reds and must be answered here deliberately.
+MIN_MUTANTS = 5
+MIN_VECTORS = 17
 
 
 def load_region(source: str):

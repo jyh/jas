@@ -73,11 +73,18 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # by looking for the call, not by listing the gates.
 LS_FILES = re.compile(r"ls-files")
 
-# Below this, the scan has plainly failed rather than found a clean repository:
-# the population was 8 when this gate was written and does not shrink by
-# accident. Fail closed -- a derivation that silently empties reports no
-# findings, which is the vacuity this file exists to refuse.
-MIN_INDEX_GATES = 4
+# ZERO SLACK, per the council's O3.3 ruling: "derive the remaining hand-typed
+# floors ... so the slack-floor class is removed rather than policed."
+#
+# This was 4 against a real population of 8. A floor with slack does not fail
+# when the population HALVES -- four gates could stop reading the index and this
+# would still report a clean derivation, which is the precise weakness that let
+# `check_swift_copy_sites`' floor of 12 go stale through ONEROUNDKIND.
+#
+# So the floor IS the population. Growth is free (a new index-reading gate only
+# widens the blind spot this reports); any SHRINKAGE reds and must be answered
+# by lowering this line deliberately, in the commit that removes the gate.
+MIN_INDEX_GATES = 8
 
 
 def index_reading_gates() -> list[str]:
