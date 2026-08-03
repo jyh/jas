@@ -3112,6 +3112,30 @@ class CanvasNSView: NSView {
         // Restored after the selection overlays, which also evaluate live
         // geometry.
         let priorRefResolver = _currentRefResolver
+        // AMBIENT-CONTEXT AUDIT 2026-08-04 — restored by the CALLER below, not
+        // by scope, and left that way DELIBERATELY.
+        //
+        // Rust guards every ambient context with `Drop` (`DocGuard`,
+        // `RefIndexGuard`), and this port already carries the same shape for the
+        // document: `DocPrimitives.DocRegistration`, whose comment says it
+        // "Matches the DocGuard RAII pattern from the Rust port". This site is
+        // the one that does not, so the class that produced CACHEEPOCH — "some
+        // other caller runs before/after me" treated as an invariant when it is
+        // a habit — is structurally possible here and nowhere else in the port.
+        //
+        // MEASURED, not assumed: it does not bite today. The only `return`
+        // between here and the restore is inside a nested closure, so no path
+        // leaks a live resolver.
+        //
+        // NOT converted to `defer`, and the reason is the trap: `defer` fires at
+        // SCOPE END, which is after `ctx.restoreGState()` and the screen-space
+        // tool-overlay pass. The explicit call fires BEFORE them, deliberately —
+        // "now the live-evaluating passes are done". A bare `defer` silently
+        // hands those later passes the model's resolver instead of the prior
+        // one. Scoping it correctly means wrapping ~65 lines of paint code in a
+        // `do { }` and re-indenting them, and the visual result of this function
+        // has no test. A latent hazard is not worth a blind edit to untested
+        // paint code; it IS worth the next reader not having to re-derive this.
         if let model = controller?.model {
             setCanvasRefResolver(IdIndexResolver(index: model.idIndex))
             // Phase 4c: epoch the reference-geometry recompute cache off the
