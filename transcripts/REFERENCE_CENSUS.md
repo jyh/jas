@@ -65,7 +65,25 @@ Risk = (geometrically subtle enough that both ports can be identically wrong) ×
 
 **1. `knuth_plass`.** No reference, no fixture, no ALGORITHMS row, no roundtrip verb in either port. Rust's `compose` is a dynamic program over badness and demerits with penalty items and glue stretch; Swift's `KnuthPlass.swift` is a hand mirror. Nothing compares them, so the two ports are not even known to *agree*. A defect is visible only when it perturbs one of the 24 `text_layout_paragraph` vectors, all of which run on an injected fixed-width measurer. The blocker is encoding a tagged union on the wire; the manifest prices the unblock at ~30 lines per port (`corpus_manifest.json:779-781`). This is the only row in the census with zero instruments of any kind.
 
-**2. `eyedropper`.** No fixture, no runner, no checker. The five `test_fixtures` matches pin that the tool exists in the toolbar and has a shortcut; what `extract_appearance` and `apply_appearance` actually copy is pinned by nothing. `apply_appearance` rebuilds elements field by field — the documented habitat of the Swift copy-site omission class, where every newly added element field is silently dropped on the Swift side and no compiler complains. Rust's header asserts "Cross-language parity is mechanical" (`eyedropper.rs:16-17`); no gate tests that claim.
+**2. `eyedropper`.** No fixture, no runner, no checker. The five `test_fixtures` matches pin that the tool exists in the toolbar and has a shortcut; what `extract_appearance` and `apply_appearance` actually copy is pinned by nothing. Rust's header asserts "Cross-language parity is mechanical" (`eyedropper.rs:16-17`); no gate tests that claim.
+
+> **CORRECTION 2026-08-04 — this row's mechanism claim was FALSE and is struck.**
+> It read: *"`apply_appearance` rebuilds elements field by field — the documented
+> habitat of the Swift copy-site omission class, where every newly added element
+> field is silently dropped on the Swift side."* Checked at both levels and it is
+> not so. Rust `apply_appearance` opens `let mut result = target.clone()`
+> (`eyedropper.rs:233`); Swift `applyEyedropperAppearance` opens
+> `var result = target` (`Eyedropper.swift:187`), a value-type copy — the same
+> idiom. The `with*` helpers both delegate to are clone-then-mutate at every arm
+> (`Element.swift:1910-1928`), and `withStroke`'s own comment states the rule:
+> *"Clone-then-mutate at every arm (EDIT_SEMANTICS_FREEZE.md §3.1): this speaks
+> to `stroke` and nothing else, and the copy carries the rest."*
+>
+> **The absence of coverage stands; the named defect habitat does not.** The row
+> had inferred the class from the function's shape without reading the helpers,
+> and it is the most actionable-looking claim in the whole census — it names a
+> known, banked defect class and implies a live instance. See §"What was
+> adversarially checked, and what was not" below.
 
 **3. `magic_wand`.** No fixture, no runner, no reference. Five tolerance defaults (fill 32.0, stroke 32.0, weight 5.0, opacity 5.0, blend off — `magic_wand.rs:49-59`) are duplicated as literals in each port with nothing pinning them, so a one-character drift in any one silently changes which elements a click selects. Lower geometric subtlety than tier 2, but the coverage is nil and the surface is user-facing.
 
@@ -212,3 +230,38 @@ hardest thing to establish and the easiest to assert: the implementation may be
 under another name, inlined into a caller, expressed in the YAML layer, or — as
 here — in a different TIER entirely. No future census in this repository should
 report an absence that has not been attacked.
+
+
+---
+
+## WHAT WAS ADVERSARIALLY CHECKED, AND WHAT WAS NOT
+
+The refutation phase of this census attacked exactly one kind of claim: **that an
+algorithm has no live reference.** Every `frozen_only` / `absent` / `unknown` row
+went to a skeptic whose only instruction was to find the implementation the first
+pass had missed, and six of twenty-four were overturned.
+
+**The RISK RANKING was never attacked.** It was written by the synthesis agent
+from the rows' free-text notes, and nothing checked those notes against the code.
+That is the half most likely to be quoted and acted on — a risk claim tells
+someone what to go and fix — and it is the half with no adversary.
+
+Spot-checked on 2026-08-04, four rows, chosen for having claims a machine can
+settle:
+
+| row | claim | verdict |
+|---|---|---|
+| `knuth_plass` (T1 #1) | no fixture, no runner, no roundtrip verb | **accurate** — 0, 0, 0 |
+| `eyedropper` (T1 #2) | `apply_appearance` rebuilds field by field | **FALSE** — both ports clone-then-mutate |
+| `magic_wand` (T1 #3) | five defaults duplicated as literals, nothing pinning them | **accurate** — and it is FOUR copies, not two: Rust, Swift, `state.yaml`, and `actions.yaml`'s reset action. All four agree today. |
+| `hit_test` (T2 #5) | 123 of 157 vectors element-level (81 rect, 42 polygon) | **accurate to the digit** |
+
+**One of four carries a false mechanism claim.** That is not a reason to discard
+the census — three of four held, one exactly — but it is a reason to treat every
+unstruck risk sentence here as UNVERIFIED, and to check the code before acting on
+one. The absence counts have an adversary behind them. The risk prose does not.
+
+The transferable lesson is about the harness, not this document: **an adversarial
+pass is scoped to the claim you point it at.** Pointing it at "does an
+implementation exist" bought a measured quarter-overturn rate on absences and
+bought nothing at all for the sentences a reader is most likely to act on.

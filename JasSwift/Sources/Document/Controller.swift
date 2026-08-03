@@ -820,7 +820,7 @@ public class Controller {
     /// epoch. A reader that consumes a cache without stating which document
     /// state it wants is asking to be served someone else's answer.
     private var hitResolver: ElementResolver {
-        setRecomputeCacheEpoch(owner: ObjectIdentifier(model), generation: model.generation)
+        setRecomputeCacheEpoch(owner: model.recomputeIdentity, generation: model.generation)
         return IdIndexResolver(index: model.idIndex)
     }
 

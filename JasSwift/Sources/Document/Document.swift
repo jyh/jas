@@ -724,6 +724,12 @@ public struct RebuildResolver: ElementResolver {
     /// wrap it in an ``IdIndexResolver``.
     public init(document doc: Document) {
         self.inner = IdIndexResolver(index: rebuildIdIndex(doc))
+        // Building an index from a Document IS declaring a document context, so
+        // it declares an epoch too. Without this the resolver inherits whichever
+        // epoch was last live on this thread and reads that caller's cached
+        // geometry for any id they share — measured as an intermittent
+        // `cached == fresh` assert failure at roughly one run in ten.
+        setRecomputeCacheEpoch(owner: nextAdHocEpochOwner(), generation: 0)
     }
 
     public func resolve(_ id: ElementRef) -> Element? { inner.resolve(id) }

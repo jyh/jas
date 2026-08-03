@@ -885,7 +885,7 @@ private final class RecomputeCacheBox {
     /// Identity of the Model the cached entries were computed from. See
     /// ``setRecomputeCacheEpoch(owner:generation:)`` — a generation alone does
     /// not identify a document state, only a document state WITHIN one model.
-    var owner: ObjectIdentifier? = nil
+    var owner: UInt64? = nil
     var generation: UInt64 = 0
     var entries: [RecomputeKey: RecomputeCacheEntry] = [:]
 }
@@ -906,6 +906,13 @@ private func recomputeCacheBox() -> RecomputeCacheBox {
 /// with `Model.generation` (bumped on every mutation / undo / redo), so this
 /// drops the cache on any edit while preserving it across no-edit repaints.
 ///
+/// `owner` IS A NEVER-REUSED COUNTER, NOT AN ADDRESS. It was
+/// `ObjectIdentifier(model)` until 2026-08-04, and an address is recycled when
+/// its object deallocates: two Models that never coexist shared a token, two
+/// fresh ones shared a generation, and the epoch matched across them. The
+/// per-hit assert caught it on about one test run in four. See
+/// `Model.recomputeIdentity`.
+///
 /// `owner` IS LOAD-BEARING, and the reason is written down two files away.
 /// ``CanvasRenderSignature`` carries a `modelId` because it must distinguish
 /// "two tabs whose independent generation counters could otherwise collide at
@@ -919,7 +926,27 @@ private func recomputeCacheBox() -> RecomputeCacheBox {
 /// the target's `Rc::as_ptr`. `Element` is a value type here with no pointer to
 /// compare, which is why this port carries the distinction in the epoch
 /// instead. Same hazard, same coverage, two dialects.
-func setRecomputeCacheEpoch(owner: ObjectIdentifier, generation: UInt64) {
+/// Mint a never-reused epoch owner for an AD-HOC evaluation context — one that
+/// is not a `Model` but is still a distinct document state, such as a
+/// `RebuildResolver` built from a `Document`.
+///
+/// Why this exists: the guard "no declared epoch, no cache" is necessary and
+/// NOT sufficient. A caller that does not epoch inherits whatever epoch the
+/// last caller on this thread left live, so its lookups hit that caller's
+/// entries. Measured: after the guard landed, the remaining failures were
+/// `elementEvaluatedBBox` tests, which build a `RebuildResolver` and never
+/// epoch, colliding on the id "m1" with an earlier test's model. The fix is not
+/// to guess whether an epoch belongs to you — it is to DECLARE one.
+private let adHocLock = NSLock()
+private var adHocCounter: UInt64 = 1 << 40   // far from any Model identity
+func nextAdHocEpochOwner() -> UInt64 {
+    adHocLock.lock()
+    defer { adHocLock.unlock() }
+    adHocCounter &+= 1
+    return adHocCounter
+}
+
+func setRecomputeCacheEpoch(owner: UInt64, generation: UInt64) {
     let box = recomputeCacheBox()
     if box.owner != owner || box.generation != generation {
         box.entries.removeAll(keepingCapacity: true)
@@ -978,6 +1005,32 @@ func cachedTargetGeometry(
     resolver: ElementResolver, visiting: inout VisitSet
 ) -> BoolPolygonSet {
     let box = recomputeCacheBox()
+
+    // NO DECLARED EPOCH, NO CACHE. `owner == nil` means nobody has said WHICH
+    // document state this thread is evaluating, and an id alone does not
+    // identify geometry: two documents routinely hold different masters under
+    // the same id. Serving a cached ring set here means serving whatever the
+    // last caller on this thread happened to leave behind.
+    //
+    // This is not hypothetical and it is not a test artifact. It was measured
+    // on 2026-08-04: the suite failed the per-hit `cached == fresh` assert on
+    // ~5 runs in 20, and the tests in flight were exactly the ones that call
+    // `evaluateWith` DIRECTLY -- referenceEvaluatesToTargetGeometry,
+    // renderRefIndexResolvesReferenceToTarget,
+    // instanceResolvesToMasterGeometryFromSymbols -- several of which use the
+    // ids "r1"/"m1" for DIFFERENT geometry. None of them epochs, because
+    // epoching was only ever done by paint and (later) selection.
+    //
+    // The earlier repair added `owner` to the epoch and did not fix this,
+    // because it only helps callers that CALL it. The lesson is the one this
+    // file already learned once: "some other caller runs before me" is not an
+    // invariant, it is a habit. Caching is now OPT-IN -- a caller that wants it
+    // declares an epoch, and one that does not gets a correct fresh answer.
+    guard box.owner != nil else {
+        return elementToPolygonSetWith(
+            target, precision: precision, resolver: resolver, visiting: &visiting)
+    }
+
     let key = RecomputeKey(id: targetId, precisionBits: precision.bitPattern)
     switch box.entries[key] {
     case .pure(let geom):
