@@ -105,6 +105,12 @@ jobs:
       # was a premise and wrote it down. Per-port claims, because a cross-port
       # premise checked by a single grep answers for the wrong port.
       - run: python scripts/check_deferral_expiry.py --self-test && python scripts/check_deferral_expiry.py
+      # INDEXBLIND: reds while untracked files exist, because eight gates
+      # derive their subject list from `git ls-files` and cannot see one. Always
+      # green in CI (a checkout has no untracked files) -- its value is the
+      # LOCAL sweep, which is where a red gate once shipped inside a commit
+      # claiming every gate was green.
+      - run: python scripts/check_index_blindspot.py --self-test && python scripts/check_index_blindspot.py
       - run: python scripts/check_gate_consistency.py --self-test && python scripts/check_gate_consistency.py
       # One sanctioned grouping for every degree/radian conversion, in both
       # active ports. `(deg * PI) / 180` and `deg * (PI / 180)` are different
@@ -287,6 +293,11 @@ jobs:
         run: |
           python scripts/check_commit_trailers.py --self-test
           python scripts/check_commit_trailers.py
+
+      - name: Untracked files are invisible to index-reading gates
+        run: |
+          python scripts/check_index_blindspot.py --self-test
+          python scripts/check_index_blindspot.py
 
       - name: Structural gates
         run: |
