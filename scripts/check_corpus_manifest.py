@@ -1056,7 +1056,7 @@ def self_test() -> int:
         import subprocess
         proc = subprocess.run(
             [sys.executable, os.path.abspath(__file__)],
-            capture_output=True, text=True, cwd=REPO_ROOT)
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT)
         unsurfaced = [i for i in declared_ids if i not in proc.stdout]
         check(proc.returncode == 0 and declared_ids and not unsurfaced,
               f"the real gate SURFACES every declared coverage gap "

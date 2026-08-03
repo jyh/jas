@@ -81,7 +81,7 @@ def run_rust(mode: str, svg_path: str) -> str:
         ["cargo", "run", "--bin", "svg_roundtrip", "--no-default-features",
          "-q", "--", mode, svg_path],
         cwd=os.path.join(REPO_ROOT, "jas_dioxus"),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Rust {mode} failed: {result.stderr}")
@@ -92,7 +92,7 @@ def run_ocaml(mode: str, svg_path: str) -> str:
     result = subprocess.run(
         ["dune", "exec", "bin/svg_roundtrip.exe", "--", mode, svg_path],
         cwd=os.path.join(REPO_ROOT, "jas_ocaml"),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"OCaml {mode} failed: {result.stderr}")
@@ -103,7 +103,7 @@ def run_python(mode: str, svg_path: str) -> str:
     result = subprocess.run(
         [sys.executable, os.path.join(REPO_ROOT, "jas", "tools", "svg_roundtrip.py"),
          mode, svg_path],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Python {mode} failed: {result.stderr}")
@@ -114,7 +114,7 @@ def run_swift(mode: str, svg_path: str) -> str:
     result = subprocess.run(
         ["swift", "run", "SvgRoundtrip", mode, svg_path],
         cwd=os.path.join(REPO_ROOT, "JasSwift"),
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Swift {mode} failed: {result.stderr}")

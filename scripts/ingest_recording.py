@@ -179,7 +179,7 @@ def mint_goldens(seam: str, fixture_path: str) -> dict:
     and return {case_name: golden_string}."""
     res = subprocess.run(
         ["cargo", "run", "--quiet", "--bin", "corpus_replay", "--", seam, fixture_path],
-        cwd=RUST_CRATE, capture_output=True, text=True)
+        cwd=RUST_CRATE, capture_output=True, text=True, encoding="utf-8")
     if res.returncode != 0:
         fail(f"corpus_replay failed:\n{res.stderr}")
     try:
@@ -418,7 +418,7 @@ def self_test() -> None:
         res = subprocess.run(
             [sys.executable, os.path.abspath(__file__), bad_path,
              "--fixtures-root", root],
-            capture_output=True, text=True)
+            capture_output=True, text=True, encoding="utf-8")
         assert res.returncode == 1 and "fidelity" in res.stderr, (
             f"unfaithful recording was not refused: rc={res.returncode} {res.stderr}")
 

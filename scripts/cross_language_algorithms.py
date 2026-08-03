@@ -210,7 +210,7 @@ def run_rust(algo, fixture_path):
         ["cargo", "run", "--bin", "algorithm_roundtrip",
          "--no-default-features", "--", algo, fixture_path],
         cwd=os.path.join(REPO_ROOT, "jas_dioxus"),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Rust failed: {result.stderr}")
@@ -221,7 +221,7 @@ def run_swift(algo, fixture_path):
     result = subprocess.run(
         ["swift", "run", "AlgorithmRoundtrip", algo, fixture_path],
         cwd=os.path.join(REPO_ROOT, "JasSwift"),
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Swift failed: {result.stderr}")
@@ -232,7 +232,7 @@ def run_ocaml(algo, fixture_path):
     result = subprocess.run(
         ["dune", "exec", "bin/algorithm_roundtrip.exe", "--", algo, fixture_path],
         cwd=os.path.join(REPO_ROOT, "jas_ocaml"),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"OCaml failed: {result.stderr}")
@@ -243,7 +243,7 @@ def run_python(algo, fixture_path):
     result = subprocess.run(
         [sys.executable, os.path.join(REPO_ROOT, "jas", "tools", "algorithm_roundtrip.py"),
          algo, fixture_path],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Python failed: {result.stderr}")

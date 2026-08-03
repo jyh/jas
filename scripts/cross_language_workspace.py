@@ -50,7 +50,7 @@ def run_rust(args: list[str]) -> str:
         ["cargo", "run", "--bin", "workspace_roundtrip",
          "-q", "--"] + args,
         cwd=os.path.join(REPO_ROOT, "jas_dioxus"),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Rust failed: {result.stderr}")
@@ -65,7 +65,7 @@ def run_swift(args: list[str]) -> str:
         # on-demand inside the 60s timeout (finding #25).
         ["swift", "run", "WorkspaceRoundtrip"] + args,
         cwd=os.path.join(REPO_ROOT, "JasSwift"),
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, encoding="utf-8", timeout=60,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Swift failed: {result.stderr}")
@@ -76,7 +76,7 @@ def run_ocaml(args: list[str]) -> str:
     result = subprocess.run(
         ["dune", "exec", "bin/workspace_roundtrip.exe", "--"] + args,
         cwd=os.path.join(REPO_ROOT, "jas_ocaml"),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"OCaml failed: {result.stderr}")
@@ -87,7 +87,7 @@ def run_python(args: list[str]) -> str:
     result = subprocess.run(
         [sys.executable, "tools/workspace_roundtrip.py"] + args,
         cwd=os.path.join(REPO_ROOT, "jas"),
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=30,
     )
     if result.returncode != 0:
         raise RuntimeError(f"Python failed: {result.stderr}")

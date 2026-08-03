@@ -59,12 +59,22 @@ WHAT THIS CHECK DELIBERATELY CANNOT SEE -- stated because a gate whose blind
 spots are unknown is the defect it exists to prevent, one level up. Each was
 measured over the scope on 2026-07-28, not guessed:
 
-  * SUBPROCESS TEXT PIPES -- 17 sites. `subprocess.run(..., text=True)`,
-    `check_output(...)` and `.decode()` with no argument all use the locale
-    codec, exactly like a bare `open()`. This is the largest thing the gate
-    misses and it is a real exposure, not a theoretical one. It is out of scope
-    because the fix is not uniform: some of those pipes carry bytes that are
-    genuinely not UTF-8. Left for a follow-up rather than swept blind.
+  * SUBPROCESS TEXT PIPES -- NO LONGER A BLIND SPOT. This section used to say
+    "17 sites ... the largest thing the gate misses ... out of scope because
+    the fix is not uniform: some of those pipes carry bytes that are genuinely
+    not UTF-8." The prediction came true on 2026-08-02, on the Windows lane,
+    eleven days later. THE STATED REASON WAS ALSO FALSE: measured, every
+    exposed pipe in this tree carries either a roundtrip CLI's JSON (UTF-8 by
+    definition) or `git ls-files` paths (git quotes non-ASCII by default, and
+    this repository has ZERO non-ASCII tracked paths). Not one carried bytes
+    that are genuinely not UTF-8. The scan is now AST-based and covers them;
+    cases (j)-(m) below pin the four shapes.
+
+    The count was wrong too, and instructively: a line-oriented census of this
+    same class missed THREE sites that the AST walk finds, because the calls
+    span lines. Case (i) below had already written down why -- "precisely what
+    a line-oriented grep cannot see, and why this walks the AST" -- and the
+    census was run with a grep anyway.
   * ATTRIBUTE `.open()` CALLS. `os.open` (flags, no encoding), and
     `gzip`/`bz2`/`lzma`/`zipfile`/`tarfile`/`shelve`/`dbm`.open all take an
     `open` name with different semantics; flagging them would be an overcount.
@@ -143,6 +153,20 @@ NON_FILE_OPEN_OWNERS = {
     "shelve", "dbm", "sqlite3", "socket", "wave",
 }
 
+# The subprocess calls that can hand back `str`. A pipe decoded without a named
+# encoding uses `locale.getpreferredencoding(False)` -- UTF-8 here, cp1252 on
+# Windows -- so a lane emitting one non-ASCII byte mojibakes on exactly one
+# platform. This gate's own blind-spot section called that shot in advance and
+# the follow-up did not happen for eleven days; it happened on 2026-08-02 on the
+# Windows lane, to three `paragraph_markers` vectors.
+SUBPROCESS_TEXT_CALLS = {"run", "check_output", "Popen", "call", "check_call"}
+
+# `check_output` and friends return BYTES by default. Only an explicit
+# text/universal_newlines makes the pipe a decode, so those are the trigger --
+# flagging every subprocess call would overcount, which is the same arithmetic
+# error the binary-mode case (d) below already cost this gate once.
+SUBPROCESS_TEXT_KWS = ("text", "universal_newlines")
+
 MISSING_ENCODING = "missing encoding="
 MISSING_NEWLINE = "missing newline="
 
@@ -193,6 +217,8 @@ def _classify(call):
         owner = f.value.id if isinstance(f.value, ast.Name) else None
         if f.attr in ("read_text", "write_text"):
             return f.attr, owner
+        if owner == "subprocess" and f.attr in SUBPROCESS_TEXT_CALLS:
+            return "subprocess", f.attr
         # Deliberately NOT flagged -- see the blind-spot section.
         return None, owner
     return None, None
@@ -220,6 +246,17 @@ def scan(sources):
                 continue
             kind, owner = _classify(node)
             if kind is None:
+                continue
+            if kind == "subprocess":
+                if exempt(node.lineno):
+                    continue
+                kws = _kwnames(node)
+                # A pipe is only a DECODE when something asks for str.
+                if not any(k in kws for k in SUBPROCESS_TEXT_KWS):
+                    continue
+                if "encoding" not in kws:
+                    out.append(Violation(path, node.lineno, MISSING_ENCODING,
+                                         f"subprocess.{owner}()"))
                 continue
             if kind == "open":
                 if owner in NON_FILE_OPEN_OWNERS:
@@ -296,6 +333,23 @@ def self_test():
         "g.py": "Path(p).write_text(s)\n",
         # (h) attribute opens with other semantics are NOT violations
         "h.py": "os.open(p, flags)\ngzip.open(p)\n",
+        # (j) SUBPROCESS TEXT PIPES -- the class this gate named in its own
+        #     blind-spot section as "the largest thing the gate misses", left
+        #     for a follow-up that did not happen for eleven days. It happened
+        #     on the Windows lane instead, to three paragraph_markers vectors.
+        "sub_text.py": "subprocess.run(cmd, capture_output=True, text=True)\n",
+        # (k) universal_newlines is text=True's older spelling and decodes the
+        #     same way. A gate watching only `text=` would miss every legacy
+        #     call site, which is how a rename hides a class.
+        "sub_univ.py": "subprocess.check_output(cmd, universal_newlines=True)\n",
+        # (l) A PIPE THAT NAMES ITS ENCODING IS CLEAN.
+        "sub_named.py": 'subprocess.run(cmd, text=True, encoding="utf-8")\n',
+        # (m) BYTES ARE NOT A VIOLATION -- `check_output` returns bytes unless
+        #     something asks for str. Flagging every subprocess call would
+        #     overcount by exactly the arithmetic error case (d) already cost
+        #     this gate once, in the other direction.
+        "sub_bytes.py": "subprocess.run(cmd, capture_output=True)\n"
+                        "subprocess.check_output(cmd)\n",
         # (i) a call SPLIT ACROSS LINES is still caught. This is precisely
         #     what a line-oriented grep cannot see, and why this walks the AST.
         "i.py": "open(\n    p,\n    'w',\n)\n",
@@ -321,8 +375,14 @@ def self_test():
         "f.py": [MISSING_ENCODING],
         "g.py": [MISSING_ENCODING, MISSING_NEWLINE],
         "i.py": [MISSING_ENCODING, MISSING_NEWLINE],
+        # The subprocess arm. Both decoding spellings must fire; neither
+        # carries a newline= duty, because a pipe is not a file.
+        "sub_text.py": [MISSING_ENCODING],
+        "sub_univ.py": [MISSING_ENCODING],
     }
-    silent = ["d.py", "h.py", "j.py", "k.py", "jas/x.py", "jas_ocaml/y.py"]
+    silent = ["d.py", "h.py", "j.py", "k.py", "jas/x.py", "jas_ocaml/y.py",
+              # A pipe that names its encoding, and pipes that stay BYTES.
+              "sub_named.py", "sub_bytes.py"]
 
     failures = []
     for path, kinds in expected.items():

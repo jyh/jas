@@ -336,7 +336,7 @@ def _git_tracked(pathspec):
     """
     try:
         out = subprocess.run(["git", "ls-files", pathspec], cwd=REPO,
-                             capture_output=True, text=True,
+                             capture_output=True, text=True, encoding="utf-8",
                              check=True).stdout
     except (OSError, subprocess.CalledProcessError) as e:
         raise RuntimeError(
@@ -357,7 +357,7 @@ def _git_tracks(path):
         return False
     try:
         out = subprocess.run(["git", "ls-files", "--", rel], cwd=REPO,
-                             capture_output=True, text=True,
+                             capture_output=True, text=True, encoding="utf-8",
                              check=True).stdout
     except (OSError, subprocess.CalledProcessError):
         return False

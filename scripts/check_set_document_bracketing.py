@@ -120,7 +120,7 @@ def load_sources():
     try:
         listed = subprocess.run(
             ["git", "ls-files", "jas_dioxus/src/*.rs", "jas_dioxus/src/**/*.rs"],
-            cwd=REPO, capture_output=True, text=True, check=True).stdout.split()
+            cwd=REPO, capture_output=True, text=True, encoding="utf-8", check=True).stdout.split()
     except (OSError, subprocess.CalledProcessError):
         # `.as_posix()`, not `str()`: these relpaths are KEYED (they go into
         # the exemption ledger's "file::fn" keys), so backslashes on Windows
