@@ -283,6 +283,21 @@ before it swallowed them and there was no way to start a targetable window. The
 app already parsed both flags. Input injection is `jas_gui_harness.py` (pyobjc
 Quartz `CGEventPost`) plus the fifo verbs `tool <id>` / `action <name> [json]`.
 
+> **UNBLOCKED 2026-08-04 (`PROBEIDENTITY`).** `.accessibilityIdentifier` is now
+> attached in `YamlPanelBodyView.swift` — at the ONE seam every widget kind
+> passes through (`var body`), not at the twenty `render*` arms this note
+> suggested, so a kind added tomorrow is addressable without anyone remembering
+> to tag it. The stated reason for deferring — *"that file is owned by a
+> parallel wave"* — expired when that wave landed.
+>
+> What that buys and what it does not: every YAML widget id is now visible to
+> the Accessibility API, so an out-of-process probe can resolve an id to a
+> screen rect and read its role/value. **The probe half is NOT written**, so no
+> pair assertion is ported yet and this lane is still partial — the blocker has
+> moved from "impossible" to "unbuilt", which is a different queue.
+>
+> The paragraph below is kept as written; it is the record of why this sat.
+
 **Blocked: READ-BACK.** Swift has no equivalent of `Runtime.evaluate`, so the
 *declared* half of every pair assertion is unavailable — nothing can ask the
 running app "is this widget checked?", and no YAML widget id can be resolved to

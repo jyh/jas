@@ -155,7 +155,31 @@ struct YamlElementView: View {
     /// repeat so the grid's icon_button children inherit it.
     var onToolOptionsRequest: (() -> Void)? = nil
 
+    /// GUIEYES Swift lane: expose every YAML widget's `id` to the Accessibility
+    /// API, so an out-of-process probe can ask "where is `lp_filter_button`, and
+    /// is it checked?" without a screenshot.
+    ///
+    /// GUI_EYES.md §"Swift lane — partial, and the blocker" names this as THE
+    /// unblock: *"one line per widget site ... after which the already-granted
+    /// Accessibility API gives Swift the same id-addressed reflection CDP gives
+    /// Rust."* It also records why it was not done then — *"that file is owned
+    /// by a parallel wave, so it is deliberately untouched here"* — a
+    /// precondition that expired when that wave landed.
+    ///
+    /// ATTACHED AT THE ONE SEAM, not at the twenty `render*` arms the note
+    /// suggested. Every widget kind passes through this `body`, so a kind added
+    /// tomorrow is addressable without anyone remembering to tag it. Tagging
+    /// per-arm is the dispatch-ledger shape this repository keeps paying for.
+    ///
+    /// Anonymous widgets get `""`, which is the default anyway — the id is the
+    /// YAML's own, so it is exactly the name a scenario file would use.
     var body: some View {
+        bodyContent
+            .accessibilityIdentifier((element["id"] as? String) ?? "")
+    }
+
+    @ViewBuilder
+    private var bodyContent: some View {
         // Check bind.visible — if the expression evaluates to false, hide the element.
         if !isVisible() {
             EmptyView()
