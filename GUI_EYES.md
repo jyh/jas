@@ -138,6 +138,26 @@ same bundle and cannot observe wiring.
 
 ---
 
+## HEALTH, MEASURED 2026-08-04 — the instrument still works, and still bites
+
+Unrun for eleven days (built 2026-07-24). Re-run end to end on a cold tree:
+
+```
+./scripts/gui_drive.sh                 9/9 ok
+every --regress MODE (all ten)         10/10 TEETH ok
+wasm build                             24s
+```
+
+Both halves matter and only one of them is usually taken. **9/9 green says the
+app is well; 10/10 TEETH says the checks can still tell.** A suite that has not
+had its faults injected since it was written is a suite whose greens are
+unaudited, and this one had gone eleven days.
+
+One defect found and fixed in the same pass: `--list` and `--help` started
+`dx serve` before answering from a static table — ~5 minutes to print nine lines
+it already had. They now short-circuit before the server block: **0.14s with
+nothing serving**, proven by killing the server and re-running.
+
 ## Fault injection — a green check proves nothing until it goes red
 
 `--regress MODE` reproduces a real defect at the layer it escaped from. **Each
