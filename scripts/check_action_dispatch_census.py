@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Which log-only actions does each port actually implement? (council O2.1)
+"""Which log-only actions does each port NAME? (council O2.1)
+
+READ THIS FIRST: THE FIRST RUN PRODUCED FOUR CANDIDATES AND ALL FOUR WERE FALSE.
+This gate measures NAMES, not behaviour, and the gap between those two swallowed
+every candidate it found. The categories were called `native-*` for one commit;
+they are called `named-*` now because that is what they mean. See
+VERIFIED_NON_DIVERGENCES for the four worked examples — they are the useful
+output of this census, not the table.
 
 WHY THIS EXISTS
 ---------------
@@ -11,10 +18,10 @@ An action whose `workspace/actions.yaml` effect list is a bare `- log:` does
 NOTHING by itself. It works only if a port carries a native arm for it. So for
 every such action there are four possibilities, and only one of them is fine:
 
-  native-both        both ports implement it
-  native-rust-only   works in Rust, DOES NOTHING in Swift
-  native-swift-only  the mirror
-  dead-both          neither implements it — the action is a stub
+  named-both         both ports name it as a dispatch arm
+  named-rust-only    only Rust names it — a QUESTION, not a finding
+  named-swift-only   the mirror
+  named-neither      neither names it
 
 The `(native)` log-string convention this replaces was wrong on 2 of its own 9
 uses, which is why the census is derived rather than annotated.
@@ -73,16 +80,52 @@ RUST_SKIP = ("cross_language_test", "test_")
 ANCHORS = {
     # Dispatches from the menu bar in both ports. The anchor that caught a
     # curated file list.
-    "undo": ("native-both", None),
+    "undo": ("named-both", None),
     # Declared in the spec, implemented by neither. Still true.
-    "toggle_artboard_orientation": ("dead-both", None),
+    "toggle_artboard_orientation": ("named-neither", None),
     # WAS `divergent` when ruled; queue item O1.1 repaired it.
-    "save_as": ("native-both",
+    "save_as": ("named-both",
                 "was 'divergent' at the 2026-07-30 council; O1.1 wired the Rust "
                 "half (see menu_bar.rs), so the anchor moved rather than broke"),
-    # A CURRENTLY divergent action, so the divergent classification itself stays
-    # proven. Verified by hand: absent from JasSwift/Sources entirely.
-    "rearrange_artboards": ("native-rust-only", None),
+    # An ASYMMETRY (named by Rust only), kept so the one-port classification
+    # itself stays proven. NOT a divergence: see VERIFIED_NON_DIVERGENCES — the
+    # spec defers it and Rust's arm only routes. The anchor pins what the scan
+    # SEES, which is deliberately not the same as what is wrong.
+    "rearrange_artboards": ("named-rust-only", None),
+}
+
+
+# ---------------------------------------------------------------------------
+# VERIFIED NON-DIVERGENCES. Every candidate this census produced on its first
+# run was investigated by hand, and ALL FOUR dissolved. They are recorded with
+# their evidence rather than filtered silently, because the reasons are four
+# different ways a name asymmetry is not a defect — which is the census's real
+# teaching, and worth more than its headline was.
+#
+# A row here is a CLAIM someone checked. Deleting one re-opens the candidate.
+# ---------------------------------------------------------------------------
+VERIFIED_NON_DIVERGENCES = {
+    "convert_to_artboards":
+        "DEFERRED BY THE SPEC. actions.yaml effect is "
+        "`log: convert_to_artboards (deferred)`, and the Rust arm in "
+        "panels/artboards_panel.rs only ROUTES to dispatch_action, which runs "
+        "that log. It does nothing in Rust either.",
+    "rearrange_artboards":
+        "DEFERRED BY THE SPEC, exactly as convert_to_artboards — "
+        "`log: rearrange_artboards (deferred)`, routing arm only.",
+    "delete_empty_artboards":
+        "Routing arm only in Rust; no body anywhere. The spec says "
+        "`(Flask stub; native ports implement)`, so NEITHER port has built it "
+        "yet. A real gap against the spec's stated intent, but not a "
+        "port-to-port divergence.",
+    "delete_symbol_orphan_confirm_ok":
+        "SWIFT IMPLEMENTS THE BEHAVIOUR UNDER A DIFFERENT SHAPE. Rust splits "
+        "it in two — delete_symbol_action opens a YAML dialog, and this action "
+        "is the OK handler. Swift folds the confirm into delete_symbol_action "
+        "with a native alert (`confirmOrphaningDeleteSymbol(usage)`, "
+        "SymbolsPanel.swift, 'verbatim wording matching the YAML dialog'). "
+        "Both ports warn before orphaning instances. THE ARTIST SEES THE SAME "
+        "THING; only the action decomposition differs.",
 }
 
 MIN_LOG_ONLY = 63    # zero slack (council O3.3): the population, not a floor
@@ -107,6 +150,33 @@ def log_only_actions() -> list[str]:
     return sorted(out)
 
 
+CFG_TEST = re.compile(r'#\[cfg\(test\)\]\s*mod\s+\w+\s*\{')
+
+
+def strip_test_modules(src: str) -> str:
+    """Remove `#[cfg(test)] mod ... { ... }` bodies by brace matching.
+
+    `artboards_panel.rs` carries a LEXICAL menu test that lists every artboard
+    command as a string. Counting it made three actions look implemented when
+    the production code only ROUTES them.
+    """
+    out, i = [], 0
+    for m in CFG_TEST.finditer(src):
+        out.append(src[i:m.start()])
+        depth, j = 0, m.end() - 1
+        while j < len(src):
+            if src[j] == "{":
+                depth += 1
+            elif src[j] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        i = j + 1
+    out.append(src[i:])
+    return "".join(out)
+
+
 def arm_names(root: pathlib.Path, suffix: str, skip=()) -> set:
     names = set()
     for f in root.rglob("*" + suffix):
@@ -117,7 +187,10 @@ def arm_names(root: pathlib.Path, suffix: str, skip=()) -> set:
         if any(s in f.as_posix() for s in skip):
             continue
         try:
-            names |= set(ARM.findall(f.read_text(encoding="utf-8", errors="replace")))
+            txt = f.read_text(encoding="utf-8", errors="replace")
+            if suffix == ".rs":
+                txt = strip_test_modules(txt)
+            names |= set(ARM.findall(txt))
         except OSError:
             continue
     return names
@@ -127,9 +200,9 @@ def classify(actions, rust, swift) -> dict:
     out = collections.defaultdict(list)
     for a in actions:
         r, s = a in rust, a in swift
-        key = ("native-both" if r and s else
-               "dead-both" if not r and not s else
-               "native-rust-only" if r else "native-swift-only")
+        key = ("named-both" if r and s else
+               "named-neither" if not r and not s else
+               "named-rust-only" if r else "named-swift-only")
         out[key].append(a)
     return out
 
@@ -200,26 +273,33 @@ def main() -> int:
         return 1
 
     cls = classify(actions, rust, swift)
-    for k in ("native-both", "native-rust-only", "native-swift-only", "dead-both"):
+    for k in ("named-both", "named-rust-only", "named-swift-only", "named-neither"):
         print(f"  {k:<20} {len(cls[k]):>3}")
     if args.table:
-        for k in ("native-rust-only", "native-swift-only", "dead-both", "native-both"):
+        for k in ("named-rust-only", "named-swift-only", "named-neither", "named-both"):
             if cls[k]:
                 print(f"\n{k}:")
                 for a in cls[k]:
                     print(f"  {a}")
 
-    divergent = cls["native-rust-only"] + cls["native-swift-only"]
-    print(f"\ncheck_action_dispatch_census: {len(actions)} log-only actions; "
-          f"{len(divergent)} DIVERGENT — implemented by one port and doing "
-          f"nothing in the other.")
-    for a in cls["native-rust-only"]:
-        print(f"  rust-only : {a}")
-    for a in cls["native-swift-only"]:
-        print(f"  swift-only: {a}")
-    print("\nReported, not failed: this is a census, and each divergence is a "
-          "stone someone must schedule (council O1). It reds only when the scan "
-          "itself collapses or an anchor stops reproducing.")
+    candidates = cls["named-rust-only"] + cls["named-swift-only"]
+    confirmed = [a for a in candidates if a not in VERIFIED_NON_DIVERGENCES]
+    excused = [a for a in candidates if a in VERIFIED_NON_DIVERGENCES]
+
+    print(f"\n{len(candidates)} asymmetr{'y' if len(candidates)==1 else 'ies'} "
+          f"(named by one port only); {len(excused)} verified NOT divergences; "
+          f"{len(confirmed)} unexplained.")
+    for a in excused:
+        print(f"  explained : {a}")
+    for a in confirmed:
+        print(f"  UNEXPLAINED: {a}  <- investigate before acting")
+
+    if not confirmed:
+        print("\nNo unexplained asymmetry. THIS CENSUS MEASURES NAMES, NOT "
+              "BEHAVIOUR: a routing arm names an action without implementing "
+              "it, and a port may implement the same behaviour under a "
+              "different action name. Every candidate on the first run was one "
+              "of those. Treat an asymmetry as a QUESTION, never a finding.")
     return 0
 
 
