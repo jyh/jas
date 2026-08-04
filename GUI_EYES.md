@@ -383,6 +383,18 @@ It checks **correctness, not feel**. Staying on JYH's manual floor:
   gesture feels responsive.
 * **Cursors and native chrome.** No cursor glyph is captured; menus, sheets and
   window furniture are outside it.
+* **ANY PANEL THAT IS NOT OPEN BY DEFAULT.** Measured 2026-08-04 against the
+  live DOM: the reachable id prefixes are `cp_` (60), `stk_` (33), `ch_` (24),
+  `align_`/`distribute_` (9 each), `ap_` (9) and `btn_` (13) — and **every
+  `btn_` is a TOOL button** (`btn_pen_slot`, `btn_lasso`, …), not a panel
+  toggle. There is no menu in the DOM and no dock handle, so **a check cannot
+  open Layers, Swatches, Gradient, Symbols, Concepts or Boolean.** Zero
+  `lp_*` ids are present in a default document.
+
+  This is sharper than "menus are outside it" above, and it is what actually
+  bites: it puts every closed-by-default panel out of reach, not just the menu
+  bar. Anything needing one waits on a handle — a `toggle_panel` verb the probe
+  can drive, or a test-only dock button.
 * **Retina fidelity.** The Rust lane runs headless at
   `--force-device-scale-factor=1`; it is not a subpixel or hairline oracle.
 * **Anything a mouse cannot reach.** Flyout long-press, IME, real focus/tab
