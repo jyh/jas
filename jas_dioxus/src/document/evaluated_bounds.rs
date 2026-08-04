@@ -110,6 +110,68 @@ pub fn selection_evaluated_bounds(doc: &Document) -> (f64, f64, f64, f64) {
     (min_x, min_y, max_x - min_x, max_y - min_y)
 }
 
+/// Ids of the artboards that hold NO artwork, in document order, already
+/// filtered by the preserve-one rule — i.e. exactly what
+/// `delete_empty_artboards` may remove.
+///
+/// The semantics are the action's own, in `workspace/actions.yaml`: *"Native
+/// ports compute intersection against the element tree and delete artboards
+/// with no intersecting geometry, preserving position 1 if all are empty."*
+///
+/// WHY A SHALLOW WALK IS CORRECT. Only each layer's top-level children are
+/// tested, not every descendant. A container's evaluated box CONTAINS its
+/// members' — so if a top-level element's box misses an artboard, nothing
+/// inside it can hit that artboard either. Testing parents is a sound
+/// over-approximation of testing the whole tree, and a cheaper one.
+///
+/// WHY THE PRESERVE-ONE RULE LIVES HERE and not in the YAML that consumes this:
+/// a `foreach` deleting by id has no way to say "unless this is the last one".
+/// Encoding it in the derivation keeps the effect list a plain mirror of
+/// `delete_artboards` and makes the rule testable on its own.
+// STEP 1 OF 2, and deliberately not wired yet. Exposing this in
+// `active_document` and flipping `delete_empty_artboards`'s YAML must happen in
+// the SAME change as JasSwift's twin: the action's effects would become a
+// `foreach` over this list, and a port without the read iterates nothing and
+// silently deletes nothing. Landing the YAML half alone would MANUFACTURE the
+// divergence this work exists to close.
+#[allow(dead_code)]
+pub fn deletable_empty_artboard_ids(doc: &Document) -> Vec<String> {
+    let occupied: Vec<(f64, f64, f64, f64)> = doc
+        .layers
+        .iter()
+        .enumerate()
+        .flat_map(|(li, layer)| {
+            let n = layer.children().map(|c| c.len()).unwrap_or(0);
+            (0..n).filter_map(move |ci| element_evaluated_bbox(doc, &[li, ci]))
+        })
+        .collect();
+
+    let empty: Vec<String> = doc
+        .artboards
+        .iter()
+        .filter(|ab| {
+            !occupied.iter().any(|&(x, y, w, h)| {
+                // Half-open overlap, the same predicate `rects_intersect` uses:
+                // an element merely TOUCHING an artboard edge occupies no area
+                // inside it and must not keep the artboard alive.
+                x < ab.x + ab.width
+                    && x + w > ab.x
+                    && y < ab.y + ab.height
+                    && y + h > ab.y
+            })
+        })
+        .map(|ab| ab.id.clone())
+        .collect();
+
+    // Preserve position 1 when EVERY artboard is empty: a document always has
+    // at least one artboard (`ensure_artboards_invariant`), so deleting them
+    // all would break that invariant rather than tidy the document.
+    if !doc.artboards.is_empty() && empty.len() == doc.artboards.len() {
+        return empty[1..].to_vec();
+    }
+    empty
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,5 +283,79 @@ mod tests {
         let inst = &doc.layers[0].children().unwrap()[0];
         assert_eq!(inst.bounds(), (0.0, 0.0, 0.0, 0.0));
         assert_eq!(inst.geometric_bounds(), (0.0, 0.0, 0.0, 0.0));
+    }
+
+    // ── delete_empty_artboards: the derivation the action consumes ──────────
+
+    use crate::document::artboard::Artboard;
+
+    fn ab(id: &str, x: f64, y: f64) -> Artboard {
+        Artboard { id: id.into(), name: id.into(), x, y, width: 100.0, height: 100.0,
+                   ..Artboard::default_with_id(id.into()) }
+    }
+
+    fn doc_with(artboards: Vec<Artboard>, elements: Vec<Element>) -> Document {
+        let mut doc = Document::default();
+        doc.artboards = artboards;
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: elements.into_iter().map(Rc::new).collect(),
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        })];
+        doc
+    }
+
+    fn rect_at(x: f64, y: f64) -> Element {
+        Element::Rect(RectElem {
+            x, y, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, fill_gradient: None, stroke_gradient: None,
+            common: CommonProps::default(),
+        })
+    }
+
+    #[test]
+    fn an_artboard_holding_artwork_is_not_deletable() {
+        let doc = doc_with(vec![ab("a", 0.0, 0.0)], vec![rect_at(5.0, 5.0)]);
+        assert!(deletable_empty_artboard_ids(&doc).is_empty());
+    }
+
+    #[test]
+    fn an_artboard_holding_nothing_is_deletable() {
+        // Artwork sits on "a"; "b" is 500 away and holds nothing.
+        let doc = doc_with(vec![ab("a", 0.0, 0.0), ab("b", 500.0, 0.0)],
+                           vec![rect_at(5.0, 5.0)]);
+        assert_eq!(deletable_empty_artboard_ids(&doc), vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn when_every_artboard_is_empty_position_one_survives() {
+        // The action's own rule: "preserving position 1 if all are empty".
+        // A document must keep at least one artboard, so emptying them all is
+        // not a tidy-up, it is a broken invariant.
+        let doc = doc_with(vec![ab("a", 0.0, 0.0), ab("b", 500.0, 0.0), ab("c", 900.0, 0.0)],
+                           vec![]);
+        assert_eq!(deletable_empty_artboard_ids(&doc),
+                   vec!["b".to_string(), "c".to_string()]);
+    }
+
+    #[test]
+    fn an_element_merely_touching_an_edge_does_not_occupy_the_artboard() {
+        // Artboard "b" spans x 500..600; the rect ends exactly at x=500 and so
+        // covers no area inside it. Half-open, matching `rects_intersect`.
+        let doc = doc_with(vec![ab("a", 0.0, 0.0), ab("b", 500.0, 0.0)],
+                           vec![rect_at(490.0, 5.0)]);
+        assert_eq!(deletable_empty_artboard_ids(&doc), vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn a_transformed_element_is_found_where_it_is_drawn() {
+        // The whole reason this reads element_evaluated_bbox rather than
+        // `bounds()`: a rect authored at the origin but TRANSFORMED onto "b"
+        // occupies "b", and leaves "a" empty.
+        let mut moved = rect_at(0.0, 0.0);
+        moved.common_mut().transform = Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0,
+                                                        e: 520.0, f: 20.0 });
+        let doc = doc_with(vec![ab("a", 0.0, 0.0), ab("b", 500.0, 0.0)], vec![moved]);
+        assert_eq!(deletable_empty_artboard_ids(&doc), vec!["a".to_string()]);
     }
 }
