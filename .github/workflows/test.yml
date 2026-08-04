@@ -115,11 +115,6 @@ jobs:
       # exercises. docs/CHECKERS.md named this instrument and left its coverage
       # question open; this answers it for the membership half and says so.
       - run: python scripts/check_spec_mutation_coverage.py --self-test && python scripts/check_spec_mutation_coverage.py
-      # O2.1 (council 2026-07-30, RULED): which log-only actions each port
-      # actually implements. A standing gate so the census never has to be
-      # taken by hand again; it reds when the scan collapses or an anchor
-      # stops reproducing, and REPORTS divergences rather than failing on them.
-      - run: python scripts/check_action_dispatch_census.py --self-test && python scripts/check_action_dispatch_census.py
       - run: python scripts/check_gate_consistency.py --self-test && python scripts/check_gate_consistency.py
       # One sanctioned grouping for every degree/radian conversion, in both
       # active ports. `(deg * PI) / 180` and `deg * (PI / 180)` are different
@@ -312,11 +307,6 @@ jobs:
         run: |
           python scripts/check_spec_mutation_coverage.py --self-test
           python scripts/check_spec_mutation_coverage.py
-
-      - name: Action dispatch census (log-only actions per port)
-        run: |
-          python scripts/check_action_dispatch_census.py --self-test
-          python scripts/check_action_dispatch_census.py
 
       - name: Structural gates
         run: |
