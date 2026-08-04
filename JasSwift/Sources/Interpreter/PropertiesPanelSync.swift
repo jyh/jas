@@ -316,3 +316,45 @@ public func applyPropertiesField(controller: Controller, field: String, value: A
         break
     }
 }
+
+/// Ids of the artboards that hold NO artwork, in document order, already
+/// filtered by the preserve-one rule — exactly what `delete_empty_artboards`
+/// may remove. Mirrors Rust `deletable_empty_artboard_ids`
+/// (document/evaluated_bounds.rs); read that for the full reasoning.
+///
+/// The semantics are the action's own, in `workspace/actions.yaml`: *"Native
+/// ports compute intersection against the element tree and delete artboards
+/// with no intersecting geometry, preserving position 1 if all are empty."*
+///
+/// Three rules that are easy to get wrong, each pinned by a test:
+/// * It reads `elementEvaluatedBBox`, NOT `bounds` — a rect authored at the
+///   origin and TRANSFORMED onto artboard B occupies B and leaves A empty.
+/// * A shallow walk over each layer's top-level children is sound: a
+///   container's evaluated box CONTAINS its members', so a parent that misses
+///   an artboard guarantees nothing inside it hits that artboard.
+/// * Half-open overlap, matching `rectsIntersect`: an element merely touching
+///   an artboard edge covers no area inside it and must not keep it alive.
+///
+/// The preserve-one rule lives HERE and not in the YAML that consumes this: a
+/// `foreach` deleting by id cannot say "unless this is the last one", and a
+/// document must keep at least one artboard (`ensureArtboardsInvariant`).
+public func deletableEmptyArtboardIds(_ doc: Document) -> [String] {
+    var occupied: [BBox] = []
+    for (li, layer) in doc.layers.enumerated() {
+        for ci in layer.children.indices {
+            if let b = elementEvaluatedBBox(doc, [li, ci]) { occupied.append(b) }
+        }
+    }
+
+    let empty = doc.artboards.filter { ab in
+        !occupied.contains { b in
+            b.x < ab.x + ab.width && b.x + b.width > ab.x
+                && b.y < ab.y + ab.height && b.y + b.height > ab.y
+        }
+    }.map(\.id)
+
+    if !doc.artboards.isEmpty && empty.count == doc.artboards.count {
+        return Array(empty.dropFirst())
+    }
+    return empty
+}

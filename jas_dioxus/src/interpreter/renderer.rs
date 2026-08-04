@@ -2028,9 +2028,24 @@ fn apply_set_panel_state_with_ctx(
                         .collect()
                 })
                 .unwrap_or_default();
+            // `delete_empty_artboards` dispatches through THIS context, so the
+            // ids it iterates must resolve here too. A `foreach` over a key
+            // this map lacks does nothing and says nothing.
+            let deletable_empty: Vec<serde_json::Value> = st
+                .tabs
+                .get(st.active_tab)
+                .map(|t| {
+                    crate::document::evaluated_bounds::deletable_empty_artboard_ids(
+                        t.model.document())
+                        .into_iter()
+                        .map(serde_json::Value::String)
+                        .collect()
+                })
+                .unwrap_or_default();
             let active_doc = serde_json::json!({
                 "artboards": artboards_json,
                 "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
+                "deletable_empty_artboard_ids": deletable_empty,
             });
             let panel_json = serde_json::json!({
                 "artboards_panel_selection": st.artboards_panel_selection.clone(),
@@ -2642,6 +2657,9 @@ pub(crate) fn build_active_document_view(
             "next_artboard_name": "Artboard 1",
             "current_artboard_id": serde_json::Value::Null,
             "current_artboard": {},
+            // Empty, not absent: a `foreach` over a MISSING key and one over an
+            // empty list are different failures, and only one of them is quiet.
+            "deletable_empty_artboard_ids": [],
             "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
             "artboards_panel_anchor": st.artboards_panel_anchor.clone()
                 .map(serde_json::Value::String)
@@ -2887,6 +2905,19 @@ pub(crate) fn build_active_document_view(
         m.insert("symbols".to_string(), serde_json::Value::Array(symbols_json));
         // Concepts panel Slice 2: attached here too (macro recursion ceiling).
         m.insert("selected_concept".to_string(), selected_concept);
+        // The ids `delete_empty_artboards` may remove — already filtered by the
+        // preserve-position-1 rule, so the action's `foreach` stays a plain
+        // mirror of `delete_artboards`. See
+        // `document::evaluated_bounds::deletable_empty_artboard_ids`.
+        m.insert(
+            "deletable_empty_artboard_ids".to_string(),
+            serde_json::Value::Array(
+                crate::document::evaluated_bounds::deletable_empty_artboard_ids(doc)
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
     }
     view
 }

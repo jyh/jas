@@ -134,7 +134,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 63
+MIN_LOG_ONLY = 62
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -448,9 +448,12 @@ def self_test() -> int:
     if len(lo) != MIN_LOG_ONLY:
         failures.append(f"  c: {len(lo)} log-only actions, floor is exactly {MIN_LOG_ONLY}")
     # 64 when this gate was written; 63 once `toggle_layers_type_filter` gained
-    # real effects (council Q3.2). The floor is EXACT so a stub leaving the set
+    # real effects (council Q3.2); 62 once `delete_empty_artboards` gained real
+    # effects (EMPTYARTBOARDS) -- it had been a log-only stub whose menu command
+    # did nothing in either port. The floor is EXACT so a stub leaving the set
     # -- or a new one joining it -- has to be noticed and accounted for, which
-    # is the friction working rather than an obstacle to it.
+    # is the friction working rather than an obstacle to it. It worked: this
+    # gate is how the change announced itself.
     if len(rust) < MIN_RUST_ARMS:
         failures.append(f"  c: only {len(rust)} rust dispatch labels parsed "
                         f"(floor {MIN_RUST_ARMS}) -- the extraction is broken")
