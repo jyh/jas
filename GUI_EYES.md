@@ -405,6 +405,48 @@ It checks **correctness, not feel**. Staying on JYH's manual floor:
 
 ---
 
+## FOUND BY DRIVING, 2026-08-04 — the Window menu lies at startup
+
+The first defect this harness turned up that was not already known, found while
+looking for a way to OPEN a panel.
+
+**At startup the Window menu reports six panels as checked — `Boolean`,
+`Layers`, `Paragraph`, `Properties`, `Swatches`, `Symbols` — and their widgets
+are not in the DOM at all.** Not off-screen, not clipped: `lp_root`,
+`lp_filter_button` and `layers_panel_content` all return
+`document.getElementById(...) === null` while `cp_black_swatch` (Color) and
+`ap_new` (Artboards), also checked, resolve normally.
+
+**The panels themselves are fine.** Toggling the menu entry twice — off, then
+on — renders them. Verified with ids taken from each panel's own YAML:
+
+```
+Layers    lp_root      absent at startup -> absent after 1 click -> PRESENT after 2
+Symbols   sym_*        0 widgets at startup -> 3 after two toggles
+```
+
+So the render path works and the STARTUP STATE is wrong: `panels.<name>` is true
+while nothing is placed. What an artist sees is a menu insisting a panel is open
+when it is not, which then appears to need turning *off* before it will come on.
+
+**Verified for Layers and Symbols only.** `Boolean`, `Paragraph`, `Properties`
+and `Swatches` show the same checked-but-absent shape in the menu, but the id
+prefixes used to probe them were GUESSED and returned nothing either way —
+inconclusive, not confirmed, and listed here so nobody quotes six as measured.
+
+Not fixed here: the cause is in startup layout/panel state, not in the render,
+and a rushed fix at the end of a long shift is how this repository acquires its
+next correction. **Reproduction is exact and scripted** (drive `.jas-menu-title`
+text `Window`, then the `.jas-menu-item` whose text matches, twice).
+
+### And this is the panel-opening handle the harness was missing
+
+`GUI_EYES.md` §Limits records that no closed-by-default panel is reachable. The
+route above IS a handle — menu title by class and text, then the item by text —
+so a check CAN now reach Layers. It is text-addressed rather than
+spec-addressed, which the house prefers against; the durable fix is an `id` on
+menu items, exactly as every other widget already carries.
+
 ## Findings from building it
 
 What the harness reported while being validated, kept honest: a finding stays
