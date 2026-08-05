@@ -150,8 +150,6 @@
         "blendMode",
         "fillGradient",
         "mask",
-        "strokeBrush",
-        "strokeBrushOverrides",
         "strokeGradient"
       ]
     },

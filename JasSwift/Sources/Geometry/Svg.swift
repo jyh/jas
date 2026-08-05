@@ -142,6 +142,52 @@ private func colorStr(_ c: Color) -> String {
     return "rgb(\(r),\(g),\(b))"
 }
 
+/// The workspace-private stroke PROFILE attributes: the variable-width points,
+/// the brush slug and its per-instance overrides.
+///
+/// SVG is this app's SAVE format, so an attribute the writer omits is artwork
+/// the artist loses on save. Rust's importer already accepted
+/// `jas:stroke-brush` and neither port's writer ever emitted it; width points
+/// were carried by neither side at all.
+///
+/// `jas:width-points` is a space-separated list of `t,left,right` triples,
+/// each number through the same `fmt` as every other coordinate, so it
+/// inherits the four-decimal floor rather than inventing a second precision
+/// rule. Emitted ONLY when non-default, so existing files stay byte-identical.
+/// Twin of Rust's `stroke_profile_attrs`.
+func widthPointsValue(_ pts: [StrokeWidthPoint]) -> String {
+    pts.map { "\(fmt($0.t)),\(fmt($0.widthLeft)),\(fmt($0.widthRight))" }
+       .joined(separator: " ")
+}
+
+func parseWidthPoints(_ s: String) -> [StrokeWidthPoint] {
+    s.split(whereSeparator: { $0 == " " || $0 == "\n" || $0 == "\t" }).compactMap { triple in
+        let f = triple.split(separator: ",", omittingEmptySubsequences: false)
+        // A trailing field means a newer writer; refuse the row rather than
+        // silently reading three of four.
+        guard f.count == 3,
+              let t = Double(f[0]), let l = Double(f[1]), let r = Double(f[2])
+        else { return nil }
+        return StrokeWidthPoint(t: t, widthLeft: l, widthRight: r)
+    }
+}
+
+func strokeProfileAttrs(_ widthPoints: [StrokeWidthPoint],
+                        _ strokeBrush: String?,
+                        _ strokeBrushOverrides: String?) -> String {
+    var s = ""
+    if !widthPoints.isEmpty {
+        s += " jas:width-points=\"\(widthPointsValue(widthPoints))\""
+    }
+    if let b = strokeBrush, !b.isEmpty {
+        s += " jas:stroke-brush=\"\(escapeXml(b))\""
+    }
+    if let o = strokeBrushOverrides, !o.isEmpty {
+        s += " jas:stroke-brush-overrides=\"\(escapeXml(o))\""
+    }
+    return s
+}
+
 private func escapeXml(_ s: String) -> String {
     s.replacingOccurrences(of: "&", with: "&amp;")
      .replacingOccurrences(of: "<", with: "&lt;")
@@ -533,7 +579,8 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
         return "\(indent)<path d=\"\(pathData(v.d))\"" +
             "\(fillAttrs(v.fill))\(strokeAttrs(v.stroke))\(fillRuleAttr)" +
             "\(opacityAttr(v.opacity))\(transformAttr(v.transform))" +
-            "\(toolOriginAttr)\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
+            "\(toolOriginAttr)\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))" +
+            "\(strokeProfileAttrs(v.widthPoints, v.strokeBrush, v.strokeBrushOverrides))/>"
 
     case .text(let v):
         let areaAttrs = v.isAreaText
@@ -1612,8 +1659,18 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
         let fillRule: FillRule =
             (elem.attribute(forName: "fill-rule")?.stringValue == "evenodd")
                 ? .evenodd : .nonzero
+        let widthPoints = parseWidthPoints(
+            elem.attribute(forName: "jas:width-points")?.stringValue ?? "")
+        // `XMLElement` decodes entities for us, so the JSON overrides come
+        // back with their quotes intact; Rust hand-parses and unescapes.
+        let strokeBrush = elem.attribute(forName: "jas:stroke-brush")?.stringValue
+        let strokeBrushOverrides =
+            elem.attribute(forName: "jas:stroke-brush-overrides")?.stringValue
         return .path(Path(d: d, fill: fill, stroke: stroke,
+                              widthPoints: widthPoints,
                               opacity: opacity, transform: transform,
+                              strokeBrush: strokeBrush,
+                              strokeBrushOverrides: strokeBrushOverrides,
                               toolOrigin: toolOrigin,
                               name: name, id: id,
                               fillRule: fillRule))

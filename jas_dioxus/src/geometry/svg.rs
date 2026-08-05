@@ -21,6 +21,63 @@ fn pt(v: f64) -> f64 {
     v * PX_TO_PT
 }
 
+/// The workspace-private stroke PROFILE attributes: the brush slug, its
+/// per-instance overrides, and the variable-width points.
+///
+/// SVG is this app's SAVE format (`menu_bar`'s `"save"` arm writes
+/// `document_to_svg`), so an attribute the writer omits is artwork the artist
+/// loses on save. The reader already accepted `jas:stroke-brush` and the writer
+/// never wrote it — an asymmetry that made the round trip lossy in one
+/// direction only. Width points were carried by neither side.
+///
+/// `jas:width-points` is a space-separated list of `t,left,right` triples,
+/// each number through the same `fmt` as every other coordinate (so it
+/// inherits the four-decimal floor rather than inventing a second precision
+/// rule — see BOARD-the-four-decimal-floor). Emitted ONLY when non-default, so
+/// existing files stay byte-identical.
+fn width_points_value(pts: &[crate::geometry::element::StrokeWidthPoint]) -> String {
+    pts.iter()
+        .map(|p| format!("{},{},{}", fmt(p.t), fmt(p.width_left), fmt(p.width_right)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn parse_width_points(s: &str) -> Vec<crate::geometry::element::StrokeWidthPoint> {
+    use crate::geometry::element::StrokeWidthPoint;
+    s.split_whitespace()
+        .filter_map(|triple| {
+            let mut it = triple.split(',');
+            let t = it.next()?.parse().ok()?;
+            let width_left = it.next()?.parse().ok()?;
+            let width_right = it.next()?.parse().ok()?;
+            // A trailing field means a newer writer; refuse the row rather
+            // than silently reading three of four.
+            if it.next().is_some() {
+                return None;
+            }
+            Some(StrokeWidthPoint { t, width_left, width_right })
+        })
+        .collect()
+}
+
+fn stroke_profile_attrs(
+    width_points: &[crate::geometry::element::StrokeWidthPoint],
+    stroke_brush: &Option<String>,
+    stroke_brush_overrides: &Option<String>,
+) -> String {
+    let mut s = String::new();
+    if !width_points.is_empty() {
+        s += &format!(" jas:width-points=\"{}\"", width_points_value(width_points));
+    }
+    if let Some(b) = stroke_brush.as_deref().filter(|b| !b.is_empty()) {
+        s += &format!(" jas:stroke-brush=\"{}\"", escape_xml(b));
+    }
+    if let Some(o) = stroke_brush_overrides.as_deref().filter(|o| !o.is_empty()) {
+        s += &format!(" jas:stroke-brush-overrides=\"{}\"", escape_xml(o));
+    }
+    s
+}
+
 fn fmt(v: f64) -> String {
     let s = format!("{:.4}", v);
     let s = s.trim_end_matches('0');
@@ -549,7 +606,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 crate::geometry::element::FillRule::NonZero => "",
             };
             format!(
-                "{}<path d=\"{}\"{}{}{}{}{}{}{}{}/>\n",
+                "{}<path d=\"{}\"{}{}{}{}{}{}{}{}{}/>\n",
                 indent,
                 path_data(&e.d),
                 fill_attrs(&e.fill), stroke_attrs(&e.stroke), fr_attr,
@@ -557,6 +614,9 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 tool_origin_attr(&e.common.tool_origin),
                 id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
+                stroke_profile_attrs(
+                    &e.width_points, &e.stroke_brush, &e.stroke_brush_overrides,
+                ),
             )
         }
         Element::Text(e) => {
@@ -1912,17 +1972,21 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 d,
                 fill: parse_fill(node),
                 stroke: parse_stroke(node),
-                width_points: vec![],
+                width_points: parse_width_points(get_s(node, "jas:width-points", "")),
                 common,
                             fill_gradient: None,
                 stroke_gradient: None,
+                // Unescaped on the way in: the OVERRIDES are a JSON object,
+                // so the value is full of quotes the writer must escape. The
+                // brush read here predates the writer and never unescaped —
+                // latent until something with a special character rode it.
                 stroke_brush: {
                     let s = get_s(node, "jas:stroke-brush", "");
-                    if s.is_empty() { None } else { Some(s.to_string()) }
+                    if s.is_empty() { None } else { Some(unescape_xml(s)) }
                 },
                 stroke_brush_overrides: {
                     let s = get_s(node, "jas:stroke-brush-overrides", "");
-                    if s.is_empty() { None } else { Some(s.to_string()) }
+                    if s.is_empty() { None } else { Some(unescape_xml(s)) }
                 },
                 fill_rule: {
                     match get_s(node, "fill-rule", "") {
@@ -2983,6 +3047,60 @@ mod tests {
     }
 
     #[test]
+    /// BRUSHSAVE: SVG *is* the save format (menu_bar's `"save"` arm calls
+    /// `document_to_svg` and downloads it), so anything the writer omits is
+    /// artwork the artist loses on save. The reader already accepts
+    /// `jas:stroke-brush`; the writer never emitted it, and neither side ever
+    /// carried the variable-width profile.
+    #[test]
+    fn roundtrip_path_keeps_its_stroke_brush_and_width_profile() {
+        use crate::geometry::element::{PathCommand, PathElem, StrokeWidthPoint};
+        let path = Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 30.0, y: 40.0 },
+            ],
+            fill: None,
+            stroke: Some(Stroke::new(Color::BLACK, 2.0)),
+            width_points: vec![
+                StrokeWidthPoint { t: 0.25, width_left: 3.5, width_right: 1.25 },
+                StrokeWidthPoint { t: 0.75, width_left: 2.0, width_right: 2.0 },
+            ],
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+            stroke_brush: Some("default_brushes/flat_10".to_string()),
+            stroke_brush_overrides: Some("{\"size\":4}".to_string()),
+            fill_rule: crate::geometry::element::FillRule::NonZero,
+        });
+        let doc = make_doc(vec![path]);
+        let svg = document_to_svg(&doc);
+        let doc2 = svg_to_document(&svg);
+        let children = doc2.layers[0].children().unwrap();
+        let Element::Path(p) = &*children[0] else {
+            panic!("expected Path, got {:?}", &*children[0]);
+        };
+        assert_eq!(
+            p.stroke_brush.as_deref(),
+            Some("default_brushes/flat_10"),
+            "a brushed stroke must survive save-and-reopen"
+        );
+        assert_eq!(
+            p.stroke_brush_overrides.as_deref(),
+            Some("{\"size\":4}"),
+            "and its per-instance overrides with it"
+        );
+        assert_eq!(
+            p.width_points.len(),
+            2,
+            "a variable-width profile must survive save-and-reopen"
+        );
+        assert_eq!(p.width_points[0].t, 0.25);
+        assert_eq!(p.width_points[0].width_left, 3.5);
+        assert_eq!(p.width_points[0].width_right, 1.25);
+        assert_eq!(p.width_points[1].width_left, 2.0);
+    }
+
     fn roundtrip_rect() {
         let doc = make_doc(vec![make_rect(10.0, 20.0, 30.0, 40.0)]);
         let svg = document_to_svg(&doc);
