@@ -849,7 +849,11 @@ public class Controller {
     public func directSelectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
         let resolver = hitResolver
         selectRecursive(model, leafHandler: { path, elem in
-            let cps = elem.controlPointPositions
+            // RESOLVED: the resolver-less form collapses a symbol instance's
+            // four corners onto the document ORIGIN, so a direct-select
+            // marquee dropped anywhere near (0,0) partially-selected every
+            // instance in the document.
+            let cps = elem.controlPointPositions(resolvedBy: resolver)
             let hitCPs: [Int] = cps.enumerated().compactMap { (i, pt) in
                 pointInRect(pt.0, pt.1, x, y, width, height) ? i : nil
             }

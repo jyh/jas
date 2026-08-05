@@ -2211,6 +2211,7 @@ private func pathProbePartialHit(
 private func findElementCpNear(
     _ doc: Document, x: Double, y: Double, radius: Double
 ) -> (ElementPath, Int)? {
+    let cpResolver = IdIndexResolver(index: rebuildIdIndex(doc))
     func recurse(_ elem: Element, _ path: ElementPath) -> (ElementPath, Int)? {
         if elem.visibility == .invisible { return nil }
         if case .group(let g) = elem {
@@ -2220,7 +2221,10 @@ private func findElementCpNear(
             }
             return nil
         }
-        let cps = elem.controlPointPositions
+        // RESOLVED: the resolver-less form collapses a symbol instance's four
+        // corners onto the document ORIGIN, so a click near (0,0) grabbed a
+        // "handle" of an instance drawn somewhere else entirely.
+        let cps = elem.controlPointPositions(resolvedBy: cpResolver)
         for (i, pt) in cps.enumerated() {
             if hypot(x - pt.0, y - pt.1) < radius {
                 return (path, i)

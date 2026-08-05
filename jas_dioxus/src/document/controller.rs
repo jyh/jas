@@ -927,7 +927,11 @@ impl Controller {
         let index = hit_index(model);
         let resolver = IndexResolver(&index);
         select_recursive(model, |path, elem| {
-            let cps = control_points(elem);
+            // RESOLVED: the resolver-less form collapses a symbol instance's
+            // four corners onto the document ORIGIN, so a direct-select
+            // marquee dropped anywhere near (0,0) partially-selected every
+            // instance in the document.
+            let cps = crate::geometry::element::control_points_with(elem, &resolver);
             let hit_cps: Vec<usize> = cps
                 .iter()
                 .enumerate()
@@ -6207,6 +6211,55 @@ mod tests {
         let new: Selection = vec![ElementSelection::all(vec![0, 0])];
         let result = toggle_selection(&current, &new);
         assert!(result.is_empty(), "expected All XOR All to drop, got {:?}", result);
+    }
+
+    /// HANDLEPHANTOM, at the gesture: a direct-select marquee dropped near the
+    /// document ORIGIN must not partially-select a symbol instance that is
+    /// drawn somewhere else. The resolver-less `control_points` collapsed an
+    /// instance's four corners onto (0,0), so every instance in the document
+    /// answered a marquee there.
+    #[test]
+    fn a_marquee_at_the_origin_does_not_grab_an_instance_drawn_elsewhere() {
+        use crate::geometry::element::RectElem;
+        use crate::geometry::live::{ElementRef, LiveVariant, ReferenceElem};
+        let master = Element::Rect(RectElem {
+            x: 200.0, y: 200.0, width: 10.0, height: 20.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, fill_gradient: None, stroke_gradient: None,
+            common: CommonProps { id: Some("m1".into()), ..CommonProps::default() },
+        });
+        let instance = Element::Live(LiveVariant::Reference(ReferenceElem::new(
+            ElementRef("m1".into()),
+            CommonProps { id: Some("i1".into()), ..CommonProps::default() },
+        )));
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(instance)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc = Document {
+            layers: vec![layer],
+            symbols: vec![master],
+            selected_layer: 0,
+            selection: vec![],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        // A small marquee at the origin. The instance is drawn at (200,200).
+        Controller::partial_select_rect(&mut model, 0.0, 0.0, 5.0, 5.0, false);
+        assert!(
+            model.document().selection.is_empty(),
+            "nothing is drawn at the origin, so nothing may be selected there; \
+             got {:?}",
+            model.document().selection
+        );
+        // And the marquee DOES find it where it actually is.
+        Controller::partial_select_rect(&mut model, 195.0, 195.0, 30.0, 40.0, false);
+        assert_eq!(
+            model.document().selection.len(),
+            1,
+            "the instance is selectable at the corners it really has"
+        );
     }
 
     #[test]

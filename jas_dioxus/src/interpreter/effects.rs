@@ -4346,6 +4346,7 @@ fn path_probe_partial_hit(
     fn cp_recursive(
         elem: &Element, path: &[usize], ancestor_vis: Visibility,
         x: f64, y: f64, radius: f64,
+        resolver: &dyn crate::geometry::live::ElementResolver,
     ) -> Option<(Vec<usize>, usize)> {
         let eff = std::cmp::min(ancestor_vis, elem.visibility());
         if eff == Visibility::Invisible { return None; }
@@ -4355,14 +4356,17 @@ fn path_probe_partial_hit(
                     if child.locked() { continue; }
                     let mut child_path = path.to_vec();
                     child_path.push(i);
-                    if let Some(r) = cp_recursive(child, &child_path, eff, x, y, radius) {
+                    if let Some(r) = cp_recursive(child, &child_path, eff, x, y, radius, resolver) {
                         return Some(r);
                     }
                 }
             }
             return None;
         }
-        let cps = control_points(elem);
+        // RESOLVED: the resolver-less form collapses a symbol instance's four
+        // corners onto the document ORIGIN, so a click near (0,0) grabbed a
+        // "handle" of an instance drawn somewhere else entirely.
+        let cps = crate::geometry::element::control_points_with(elem, resolver);
         for (i, &(px, py)) in cps.iter().enumerate() {
             if (x - px).hypot(y - py) < radius {
                 return Some((path.to_vec(), i));
@@ -4372,6 +4376,8 @@ fn path_probe_partial_hit(
     }
     let cp_hit = {
         let doc = model.document();
+        let index = crate::document::id_index::rebuild_id_index(doc);
+        let resolver = crate::document::id_index::IndexResolver(&index);
         let mut hit: Option<(Vec<usize>, usize)> = None;
         'outer: for (li, layer) in doc.layers.iter().enumerate() {
             let layer_vis = layer.visibility();
@@ -4381,7 +4387,7 @@ fn path_probe_partial_hit(
                     if child.locked() { continue; }
                     let child_vis = std::cmp::min(layer_vis, child.visibility());
                     if child_vis == Visibility::Invisible { continue; }
-                    if let Some(r) = cp_recursive(child, &[li, ci], child_vis, x, y, radius) {
+                    if let Some(r) = cp_recursive(child, &[li, ci], child_vis, x, y, radius, &resolver) {
                         hit = Some(r);
                         break 'outer;
                     }

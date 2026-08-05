@@ -203,6 +203,30 @@ mod tests {
     }
 
     /// A group holding that same instance plus a rect at (100,100,10,10).
+    /// HANDLEPHANTOM: the four resize handles a selected instance shows.
+    ///
+    /// `selection_evaluated_bounds` resolves (it goes through
+    /// `element_evaluated_bbox`), so the selection BOX lands on the artwork.
+    /// The HANDLES come from `control_points`, whose catch-all reads the
+    /// resolver-less `bounds()` — so they stack on top of each other at the
+    /// document origin while the box sits correctly around the shape.
+    #[test]
+    fn a_selected_instance_gets_handles_on_its_artwork_not_at_the_origin() {
+        let doc = doc_with_instance();
+        let instance = doc.get_element(&vec![0, 0]).expect("the instance");
+        let box_ = element_evaluated_bbox(&doc, &[0, 0]).expect("a resolved box");
+        assert_eq!(box_, (5.0, 7.0, 10.0, 20.0), "the selection box resolves");
+
+        let index = crate::document::id_index::rebuild_id_index(&doc);
+        let resolver = crate::document::id_index::IndexResolver(&index);
+        let cps = crate::geometry::element::control_points_with(instance, &resolver);
+        assert_eq!(
+            cps,
+            vec![(5.0, 7.0), (15.0, 7.0), (15.0, 27.0), (5.0, 27.0)],
+            "the handles sit on the corners of the box the artist can see"
+        );
+    }
+
     /// FITPHANTOM: what `Fit in Window` actually sees. The document holds ONE
     /// symbol instance whose master is a rect at (5,7,10,20) — so the artwork
     /// occupies exactly that box and nothing is anywhere near the origin.

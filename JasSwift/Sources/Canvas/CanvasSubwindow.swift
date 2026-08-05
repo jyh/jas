@@ -2514,7 +2514,11 @@ func selectionHandleRects(_ doc: Document, _ path: ElementPath) -> [CGRect] {
     let chain: [Transform?] = [elem.transform] + ancestors.reversed()
     let half = handleDrawSize / 2
     var rects: [CGRect] = []
-    for (px0, py0) in elem.controlPointPositions {
+    // RESOLVED: a symbol instance measures its TARGET, so the resolver-less
+    // form collapsed its four corners onto the document origin — the selection
+    // BOX resolved while its handles sat in the corner of the canvas.
+    let resolver = IdIndexResolver(index: rebuildIdIndex(doc))
+    for (px0, py0) in elem.controlPointPositions(resolvedBy: resolver) {
         var px = px0
         var py = py0
         for t in chain {

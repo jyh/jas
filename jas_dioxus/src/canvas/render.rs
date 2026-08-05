@@ -2427,7 +2427,13 @@ pub fn selection_handle_rects(
         }
     }
     let half = HANDLE_DRAW_SIZE / 2.0;
-    control_points(elem)
+    // RESOLVED: a symbol instance measures its TARGET, so the resolver-less
+    // `control_points` collapsed its four corners onto the document origin —
+    // the selection BOX resolved (it goes through `element_evaluated_bbox`)
+    // while its handles sat in the corner of the canvas.
+    let index = crate::document::id_index::rebuild_id_index(doc);
+    let resolver = crate::document::id_index::IndexResolver(&index);
+    crate::geometry::element::control_points_with(elem, &resolver)
         .into_iter()
         .map(|(mut px, mut py)| {
             for t in &chain {

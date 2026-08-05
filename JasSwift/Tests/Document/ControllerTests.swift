@@ -317,6 +317,47 @@ private func makeLockedLayerCtrl(lockFirst: Bool) -> Controller {
 
 // MARK: - Direct selection tests
 
+/// HANDLEPHANTOM, at the gesture. Twin of Rust's
+/// `a_marquee_at_the_origin_does_not_grab_an_instance_drawn_elsewhere`.
+/// The resolver-less `controlPointPositions` collapsed a symbol instance's four
+/// corners onto (0,0), so every instance in the document answered a marquee
+/// dropped near the origin.
+@Test func aMarqueeAtTheOriginDoesNotGrabAnInstanceDrawnElsewhere() {
+    let master = Element.rect(Rect(x: 200, y: 200, width: 10, height: 20, id: "m1"))
+    let instance = Element.live(.reference(ReferenceElem(
+        target: ElementRef("m1"), name: nil, id: "i1")))
+    let doc = Document(layers: [Layer(name: "L0", children: [instance])],
+                       symbols: [master])
+    let ctrl = Controller(model: Model(document: doc))
+
+    ctrl.directSelectRect(x: 0, y: 0, width: 5, height: 5)
+    #expect(ctrl.document.selection.isEmpty,
+            "nothing is drawn at the origin, so nothing may be selected there")
+
+    ctrl.directSelectRect(x: 195, y: 195, width: 30, height: 40)
+    #expect(ctrl.document.selection.count == 1,
+            "the instance is selectable at the corners it really has")
+}
+
+/// The handles themselves: the selection BOX already resolved, so a selected
+/// instance drew its box on the artwork with its four handles in the corner of
+/// the document.
+@Test func aSelectedInstanceGetsHandlesOnItsArtworkNotAtTheOrigin() {
+    let master = Element.rect(Rect(x: 5, y: 7, width: 10, height: 20, id: "m1"))
+    let instance = Element.live(.reference(ReferenceElem(
+        target: ElementRef("m1"), name: nil, id: "i1")))
+    let doc = Document(layers: [Layer(name: "L0", children: [instance])],
+                       symbols: [master])
+
+    let resolver = IdIndexResolver(index: rebuildIdIndex(doc))
+    let cps = doc.layers[0].children[0].controlPointPositions(resolvedBy: resolver)
+    #expect(cps.count == 4)
+    #expect(cps[0] == (5, 7) && cps[1] == (15, 7)
+            && cps[2] == (15, 27) && cps[3] == (5, 27),
+            "the handles sit on the corners of the box the artist can see")
+}
+
+
 @Test func directSelectRectNoGroupExpansion() {
     let line1 = Element.line(Line(x1: 0, y1: 0, x2: 5, y2: 5))
     let line2 = Element.line(Line(x1: 50, y1: 50, x2: 55, y2: 55))

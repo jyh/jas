@@ -994,6 +994,28 @@ public enum Element: Equatable {
         }
     }
 
+    /// ``controlPointPositions`` for an element that may measure something
+    /// ELSEWHERE in the document — a symbol instance and its recorded /
+    /// generated siblings.
+    ///
+    /// The kinds that carry their own coordinates answer identically; the
+    /// resolver-backed ones fall to the bbox-corner branch, and THAT is where
+    /// the two differ. `bounds` has no resolver, so it answers a zero box at
+    /// the ORIGIN for them and the four "corners" collapse onto (0,0): a
+    /// selected instance drew its box correctly (the box resolves) with its
+    /// four resize handles stacked in the corner of the document. Spelled as a
+    /// second NAME rather than a defaulted argument so no caller can get the
+    /// narrow answer by omission. Twin of Rust's `control_points_with`.
+    public func controlPointPositions(resolvedBy resolver: ElementResolver)
+        -> [(Double, Double)] {
+        guard case .live = self else { return controlPointPositions }
+        // Resolved to nothing (dangling / cyclic): no handles at all is the
+        // honest answer — the origin would be a claim about where it is.
+        guard let b = resolvedBoundsWith(self, resolver, { $0.bounds }) else { return [] }
+        return [(b.x, b.y), (b.x + b.width, b.y),
+                (b.x + b.width, b.y + b.height), (b.x, b.y + b.height)]
+    }
+
     public func moveControlPoints(_ kind: SelectionKind, dx: Double, dy: Double) -> Element {
         // `.partial([])` — "element selected, no CPs highlighted" —
         // is a no-op: return unchanged. Without this guard, the

@@ -2008,15 +2008,38 @@ pub fn control_points(elem: &Element) -> Vec<(f64, f64)> {
         Element::Polygon(e) => e.points.clone(),
         Element::Path(e) => path_anchor_points(&e.d),
         Element::TextPath(e) => path_anchor_points(&e.d),
-        _ => {
-            let (bx, by, bw, bh) = elem.bounds();
-            vec![
-                (bx, by),
-                (bx + bw, by),
-                (bx + bw, by + bh),
-                (bx, by + bh),
-            ]
-        }
+        _ => bbox_corners(elem.bounds()),
+    }
+}
+
+fn bbox_corners((bx, by, bw, bh): Bounds) -> Vec<(f64, f64)> {
+    vec![(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]
+}
+
+/// [`control_points`] for an element that may measure something ELSEWHERE in
+/// the document — a symbol instance and its recorded / generated siblings.
+///
+/// The kinds that carry their own coordinates answer identically; the
+/// resolver-backed ones fall to the bbox-corner branch, and THAT is where the
+/// two differ. `bounds()` has no resolver, so it answers a zero box at the
+/// ORIGIN for them, and the four "corners" collapse onto (0,0): a selected
+/// instance drew its box correctly (the box resolves) with its four resize
+/// handles stacked in the corner of the document. Spelled as a second NAME
+/// rather than a defaulted argument so no caller can get the narrow answer by
+/// omission.
+pub fn control_points_with(
+    elem: &Element,
+    resolver: &dyn super::live::ElementResolver,
+) -> Vec<(f64, f64)> {
+    match elem {
+        Element::Live(_) => match resolved_bounds_with(elem, resolver, Element::bounds) {
+            // Resolved to nothing (dangling / cyclic): no handles at all is
+            // the honest answer — the origin would be a claim about where it
+            // is. Mirrors `resolved_bounds_with` returning None.
+            None => Vec::new(),
+            Some(b) => bbox_corners(b),
+        },
+        _ => control_points(elem),
     }
 }
 
