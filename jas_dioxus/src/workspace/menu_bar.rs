@@ -475,7 +475,10 @@ pub(crate) fn MenuBarView(
     // (None for separators / dynamic submenus) so the renderer can evaluate
     // them live against the menu ctx below — the SAME evaluation the cross-app
     // `menu_state` gate pins.
-    type MenuItem = (String, String, String, Option<String>, Option<String>);
+    // (id, label, cmd, shortcut, enabled_when, checked_when). `id` is the
+    // menubar.yaml item id, emitted as the DOM id so a menu entry is
+    // spec-addressed rather than matched on its text.
+    type MenuItem = (String, String, String, String, Option<String>, Option<String>);
     let menus_owned: Vec<(String, Vec<MenuItem>)> =
         super::menu::menu_bar_model()
             .iter()
@@ -485,16 +488,17 @@ pub(crate) fn MenuBarView(
                     .iter()
                     .map(|e| match e {
                         super::menu::MenuEntry::Separator => {
-                            ("---".to_string(), String::new(), String::new(), None, None)
+                            (String::new(), "---".to_string(), String::new(), String::new(), None, None)
                         }
                         super::menu::MenuEntry::DynamicSubmenu { label, kind } => {
                             let cmd = match kind {
                                 super::menu::SubmenuKind::Workspace => "workspace_submenu",
                                 super::menu::SubmenuKind::Appearance => "appearance_submenu",
                             };
-                            (strip_mnemonic(label), cmd.to_string(), String::new(), None, None)
+                            (String::new(), strip_mnemonic(label), cmd.to_string(), String::new(), None, None)
                         }
                         super::menu::MenuEntry::Action {
+                            id,
                             label,
                             action,
                             params,
@@ -502,6 +506,7 @@ pub(crate) fn MenuBarView(
                             enabled_when,
                             checked_when,
                         } => (
+                            id.clone(),
                             strip_mnemonic(label),
                             cmd_for(action, params),
                             shortcut.clone(),
@@ -536,7 +541,7 @@ pub(crate) fn MenuBarView(
 
         // Pre-build item nodes for this menu
         let item_nodes: Vec<Result<VNode, RenderError>> = if is_open {
-            items.iter().flat_map(|(label, cmd, shortcut, enabled_when, checked_when)| {
+            items.iter().flat_map(|(item_id, label, cmd, shortcut, enabled_when, checked_when)| {
                 if label.as_str() == "---" {
                     vec![rsx! {
                         div {
@@ -794,8 +799,10 @@ pub(crate) fn MenuBarView(
                     let item_class = if enabled { "jas-menu-item" } else { "" };
                     let cursor = if enabled { "pointer" } else { "default" };
                     let text_color = if enabled { THEME_TEXT } else { THEME_TEXT_DIM };
+                    let dom_id = item_id.clone();
                     vec![rsx! {
                         div {
+                            id: "{dom_id}",
                             class: "{item_class}",
                             style: "padding:4px 24px 4px 8px; cursor:{cursor}; font-size:13px; color:{text_color}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
                             onmousedown: move |evt: Event<MouseData>| {

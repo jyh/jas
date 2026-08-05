@@ -383,7 +383,12 @@ It checks **correctness, not feel**. Staying on JYH's manual floor:
   gesture feels responsive.
 * **Cursors and native chrome.** No cursor glyph is captured; menus, sheets and
   window furniture are outside it.
-* **ANY PANEL THAT IS NOT OPEN BY DEFAULT.** Measured 2026-08-04 against the
+* ~~**ANY PANEL THAT IS NOT OPEN BY DEFAULT.**~~ **LIFTED 2026-08-04
+  (`MENUADDRESSED`)** — menu items now emit their `menubar.yaml` id, so
+  `p.click("menu_layers")` opens the Layers panel and every closed-by-default
+  panel is reachable. The measurement below is kept as the record of why it was
+  a limit.
+* **(historic)** Measured 2026-08-04 against the
   live DOM: the reachable id prefixes are `cp_` (60), `stk_` (33), `ch_` (24),
   `align_`/`distribute_` (9 each), `ap_` (9) and `btn_` (13) — and **every
   `btn_` is a TOOL button** (`btn_pen_slot`, `btn_lasso`, …), not a panel
