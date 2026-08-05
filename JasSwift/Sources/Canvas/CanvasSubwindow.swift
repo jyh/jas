@@ -2086,6 +2086,26 @@ func containerSelectionOutlineRect(_ elem: Element) -> CGRect? {
     }
 }
 
+/// ``containerSelectionOutlineRect`` for a container whose members may measure
+/// something ELSEWHERE in the document.
+///
+/// A container's box is the UNION of its children, so a symbol-instance child
+/// does not merely go unmeasured — its zero box is a phantom point AT THE
+/// ORIGIN that the union swallows, and the group's outline stretches back
+/// across empty canvas to (0,0). Twin of the resolved arm in Rust's
+/// `draw_selection_overlays`.
+func containerSelectionOutlineRect(_ elem: Element,
+                                   resolvedBy resolver: ElementResolver) -> CGRect? {
+    switch elem {
+    case .group, .layer:
+        guard let b = resolvedBoundsWith(elem, resolver, { $0.bounds }),
+              b.width > 0, b.height > 0 else { return nil }
+        return CGRect(x: b.x, y: b.y, width: b.width, height: b.height)
+    default:
+        return nil
+    }
+}
+
 /// Draw an element's selection overlay (outline + control handles).
 /// Internal so tools can call it via the ToolContext. `kind` decides
 /// which control points are highlighted (and gets handle decoration);
@@ -2106,7 +2126,8 @@ func containerSelectionOutlineRect(_ elem: Element) -> CGRect? {
 /// are individually in the selection (see `selectElement`) and draw
 /// their own highlights.
 func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind = .partial(SortedCps()),
-                        outlineScale: Double = 1.0) {
+                        outlineScale: Double = 1.0,
+                        resolvedBy resolver: ElementResolver) {
     // Counter-scale fixed pen widths / circle radii by the element transform's
     // scale (`outlineScale`) so the overlay — drawn UNDER that transform —
     // renders at a constant width regardless of the element's scale (it stays
@@ -2155,7 +2176,7 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
     // zero-extent guard is mirrored from there: stroking an empty container's
     // bounds would draw a dot at its origin. Handle squares stay absent —
     // `selectionHandleRects` already returns [] for containers in both ports.
-    if let outline = containerSelectionOutlineRect(elem) {
+    if let outline = containerSelectionOutlineRect(elem, resolvedBy: resolver) {
         ctx.addRect(outline)
         ctx.strokePath()
         return
@@ -2514,7 +2535,11 @@ func selectionHandleRects(_ doc: Document, _ path: ElementPath) -> [CGRect] {
     let chain: [Transform?] = [elem.transform] + ancestors.reversed()
     let half = handleDrawSize / 2
     var rects: [CGRect] = []
-    for (px0, py0) in elem.controlPointPositions {
+    // RESOLVED: a symbol instance measures its TARGET, so the resolver-less
+    // form collapsed its four corners onto the document origin — the selection
+    // BOX resolved while its handles sat in the corner of the canvas.
+    let resolver = IdIndexResolver(index: rebuildIdIndex(doc))
+    for (px0, py0) in elem.controlPointPositions(resolvedBy: resolver) {
         var px = px0
         var py = py0
         for t in chain {
@@ -2529,6 +2554,9 @@ func selectionHandleRects(_ doc: Document, _ path: ElementPath) -> [CGRect] {
 }
 
 private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjectPath: ElementPath? = nil) {
+    // Built once for the whole overlay pass: a container's outline is the union
+    // of its children, and a symbol instance child measures its TARGET.
+    let overlayResolver = IdIndexResolver(index: rebuildIdIndex(doc))
     for es in doc.selection {
         let path = es.path
         guard !path.isEmpty else { continue }
@@ -2576,13 +2604,14 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjec
             case .live(let v): applyTransform(ctx, v.transform)
             }
             drawElementOverlay(ctx, node, kind: es.kind,
-                               outlineScale: selectionOutlineScale(doc, path))
+                               outlineScale: selectionOutlineScale(doc, path),
+                               resolvedBy: overlayResolver)
             // Key-object indicator: thicker accent outline around the
             // element's bounds so the user can see which selected element
             // is currently the Align panel's key. Drawn on top of the
             // normal selection overlay so it never disappears.
-            if let kp = keyObjectPath, kp == path {
-                let b = node.bounds
+            if let kp = keyObjectPath, kp == path,
+               let b = resolvedBoundsWith(node, overlayResolver, { $0.bounds }) {
                 ctx.setStrokeColor(selectionColor)
                 ctx.setLineWidth(3.0)
                 ctx.setLineDash(phase: 0, lengths: [])
@@ -3021,7 +3050,11 @@ class CanvasNSView: NSView {
             hitTestText: { [weak self] pos in self?.hitTestText(pos) },
             hitTestPathCurve: { [weak self] x, y in self?.hitTestPathCurve(x, y) },
             requestUpdate: { [weak self] in self?.needsDisplay = true },
-            drawElementOverlay: { ctx, elem, kind in drawElementOverlay(ctx, elem, kind: kind) }
+            drawElementOverlay: { [weak self] ctx, elem, kind in
+                let doc = self?.controller?.document ?? Document()
+                drawElementOverlay(ctx, elem, kind: kind,
+                                   resolvedBy: IdIndexResolver(index: rebuildIdIndex(doc)))
+            }
         )
     }
 
@@ -3112,6 +3145,30 @@ class CanvasNSView: NSView {
         // Restored after the selection overlays, which also evaluate live
         // geometry.
         let priorRefResolver = _currentRefResolver
+        // AMBIENT-CONTEXT AUDIT 2026-08-04 — restored by the CALLER below, not
+        // by scope, and left that way DELIBERATELY.
+        //
+        // Rust guards every ambient context with `Drop` (`DocGuard`,
+        // `RefIndexGuard`), and this port already carries the same shape for the
+        // document: `DocPrimitives.DocRegistration`, whose comment says it
+        // "Matches the DocGuard RAII pattern from the Rust port". This site is
+        // the one that does not, so the class that produced CACHEEPOCH — "some
+        // other caller runs before/after me" treated as an invariant when it is
+        // a habit — is structurally possible here and nowhere else in the port.
+        //
+        // MEASURED, not assumed: it does not bite today. The only `return`
+        // between here and the restore is inside a nested closure, so no path
+        // leaks a live resolver.
+        //
+        // NOT converted to `defer`, and the reason is the trap: `defer` fires at
+        // SCOPE END, which is after `ctx.restoreGState()` and the screen-space
+        // tool-overlay pass. The explicit call fires BEFORE them, deliberately —
+        // "now the live-evaluating passes are done". A bare `defer` silently
+        // hands those later passes the model's resolver instead of the prior
+        // one. Scoping it correctly means wrapping ~65 lines of paint code in a
+        // `do { }` and re-indenting them, and the visual result of this function
+        // has no test. A latent hazard is not worth a blind edit to untested
+        // paint code; it IS worth the next reader not having to re-derive this.
         if let model = controller?.model {
             setCanvasRefResolver(IdIndexResolver(index: model.idIndex))
             // Phase 4c: epoch the reference-geometry recompute cache off the
@@ -3119,7 +3176,7 @@ class CanvasNSView: NSView {
             // no-edit repaints reuse the cached target geometry. Per-app perf
             // cache; no behavior change (gated by a per-hit assert that
             // cached == fresh in LiveElement.swift).
-            setRecomputeCacheEpoch(owner: ObjectIdentifier(model), generation: model.generation)
+            setRecomputeCacheEpoch(owner: model.recomputeIdentity, generation: model.generation)
         } else {
             setCanvasRefResolver(RebuildResolver(document: document))
         }

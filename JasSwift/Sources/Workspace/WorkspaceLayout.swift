@@ -636,8 +636,39 @@ public struct WorkspaceLayout: Codable {
     }
 
     public mutating func showPanel(_ kind: PanelKind) {
-        // Already on screen in some group? Nothing to do.
-        guard !isPanelVisible(kind) else { return }
+        // Already a MEMBER of some group? Never add a duplicate — raise the
+        // tab it already occupies instead. A member is NOT necessarily on
+        // screen: the dock draws one panel per group, so returning early here
+        // left "show" silently doing nothing for a background tab. (Raising
+        // the tab is all this low-level op does — unlike `revealPanel`, it
+        // does not touch dock or pane visibility.) Mirrors Rust `show_panel`.
+        if isPanelVisible(kind) {
+            var raised = false
+            for di in anchored.indices {
+                for gi in anchored[di].1.groups.indices {
+                    if let idx = anchored[di].1.groups[gi].panels.firstIndex(of: kind),
+                       anchored[di].1.groups[gi].active != idx
+                        || anchored[di].1.groups[gi].collapsed {
+                        anchored[di].1.groups[gi].active = idx
+                        anchored[di].1.groups[gi].collapsed = false
+                        raised = true
+                    }
+                }
+            }
+            for fi in floating.indices {
+                for gi in floating[fi].dock.groups.indices {
+                    if let idx = floating[fi].dock.groups[gi].panels.firstIndex(of: kind),
+                       floating[fi].dock.groups[gi].active != idx
+                        || floating[fi].dock.groups[gi].collapsed {
+                        floating[fi].dock.groups[gi].active = idx
+                        floating[fi].dock.groups[gi].collapsed = false
+                        raised = true
+                    }
+                }
+            }
+            if raised { bump() }
+            return
+        }
         // Un-hide if it was a user-closed panel. This is a no-op for a
         // panel that was never shown (in no group AND not in hiddenPanels,
         // e.g. Brushes, which is toggle-only and not in the default
@@ -665,7 +696,9 @@ public struct WorkspaceLayout: Codable {
     /// pane visibility). Both active ports (Swift + Rust) implement this
     /// identically; see jas_dioxus `WorkspaceLayout::show_panel_in_last_group`.
     ///
-    /// No-op when the panel is already on screen (never a duplicate).
+    /// No-op when the panel is already a MEMBER anywhere (never a duplicate).
+    /// Note that is membership, not on-screen: a background tab lands here,
+    /// which is why the Window-menu toggle goes through `revealPanel`.
     public mutating func showPanelInLastGroup(_ kind: PanelKind) {
         guard !isPanelVisible(kind) else { return }
         // Drop any stale closed-panel record: the summon places the panel at
@@ -689,6 +722,66 @@ public struct WorkspaceLayout: Codable {
         bump()
     }
 
+    /// True iff the panel is actually DRAWN right now: it is its group's
+    /// active tab, that group is expanded, its dock is expanded, and — for an
+    /// anchored dock — the dock pane is not hidden. This is exactly the
+    /// postcondition `showPanelInLastGroup` establishes.
+    ///
+    /// Strictly stronger than `isPanelVisible`, which answers only "is it a
+    /// MEMBER of some group". A background tab is a member and is drawn
+    /// nowhere — the dock renders one panel per group. Anything user-facing
+    /// that means "on screen" (the Window-menu checkmark, the toggle's
+    /// hide/show routing) must ask THIS one. Mirrors Rust `panel_on_screen`.
+    public func panelOnScreen(_ kind: PanelKind) -> Bool {
+        func frontTab(of dock: Dock) -> Bool {
+            guard !dock.collapsed else { return false }
+            return dock.groups.contains { g in
+                !g.collapsed && g.active >= 0 && g.active < g.panels.count
+                    && g.panels[g.active] == kind
+            }
+        }
+        // A floating dock is its own window; the dock PANE gates only the
+        // anchored docks that live inside it.
+        let dockPaneShown = paneLayout.map { $0.isPaneVisible(.dock) } ?? true
+        return (dockPaneShown && anchored.contains { frontTab(of: $0.1) })
+            || floating.contains { frontTab(of: $0.dock) }
+    }
+
+    /// Bring a panel to the front, wherever it already lives: activate it in
+    /// place when it is a member that simply is not drawn (a background tab, a
+    /// collapsed group or dock, a hidden dock pane), and only summon it into
+    /// dock_main's last group when it is a member of nothing. Never duplicates.
+    /// Mirrors Rust `reveal_panel`.
+    public mutating func revealPanel(_ kind: PanelKind) {
+        if panelOnScreen(kind) { return }
+        guard isPanelVisible(kind) else {
+            showPanelInLastGroup(kind)
+            return
+        }
+        var inAnchored = false
+        for di in anchored.indices {
+            for gi in anchored[di].1.groups.indices {
+                if let idx = anchored[di].1.groups[gi].panels.firstIndex(of: kind) {
+                    anchored[di].1.groups[gi].active = idx
+                    anchored[di].1.groups[gi].collapsed = false
+                    anchored[di].1.collapsed = false
+                    inAnchored = true
+                }
+            }
+        }
+        if inAnchored { paneLayout?.showPane(.dock) }
+        for fi in floating.indices {
+            for gi in floating[fi].dock.groups.indices {
+                if let idx = floating[fi].dock.groups[gi].panels.firstIndex(of: kind) {
+                    floating[fi].dock.groups[gi].active = idx
+                    floating[fi].dock.groups[gi].collapsed = false
+                    floating[fi].dock.collapsed = false
+                }
+            }
+        }
+        bump()
+    }
+
     public func isPanelVisible(_ kind: PanelKind) -> Bool {
         // True iff the panel currently appears in some loaded dock group
         // (anchored or floating). `hiddenPanels` only remembers
@@ -706,7 +799,7 @@ public struct WorkspaceLayout: Codable {
     }
 
     public func panelMenuItems() -> [(PanelKind, Bool)] {
-        PanelKind.all.map { ($0, isPanelVisible($0)) }
+        PanelKind.all.map { ($0, panelOnScreen($0)) }
     }
 
     // MARK: - Z-Index

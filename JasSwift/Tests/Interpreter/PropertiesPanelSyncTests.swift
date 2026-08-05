@@ -191,3 +191,53 @@ private func expectBBox(_ got: BBox?, _ want: (Double, Double, Double, Double),
     #expect(instance.bounds == (x: 0, y: 0, width: 0, height: 0))
     #expect(instance.geometricBounds == (x: 0, y: 0, width: 0, height: 0))
 }
+
+// MARK: - delete_empty_artboards: the derivation the action consumes
+//
+// Twins of Rust's tests in document/evaluated_bounds.rs. The action's semantics
+// are ruled in its own actions.yaml description: intersection against the
+// element tree, delete artboards with no intersecting geometry, preserve
+// position 1 if all are empty.
+
+private func abAt(_ id: String, _ x: Double, _ y: Double) -> Artboard {
+    Artboard(id: id, name: id, x: x, y: y, width: 100, height: 100)
+}
+
+private func docWith(_ artboards: [Artboard], _ elements: [Element]) -> Document {
+    Document(layers: [Layer(children: elements)], artboards: artboards)
+}
+
+private func rectAt(_ x: Double, _ y: Double) -> Element {
+    .rect(Rect(x: x, y: y, width: 10, height: 10))
+}
+
+@Test func anArtboardHoldingArtworkIsNotDeletable() {
+    #expect(deletableEmptyArtboardIds(docWith([abAt("a", 0, 0)], [rectAt(5, 5)])).isEmpty)
+}
+
+@Test func anArtboardHoldingNothingIsDeletable() {
+    let doc = docWith([abAt("a", 0, 0), abAt("b", 500, 0)], [rectAt(5, 5)])
+    #expect(deletableEmptyArtboardIds(doc) == ["b"])
+}
+
+@Test func whenEveryArtboardIsEmptyPositionOneSurvives() {
+    // "preserving position 1 if all are empty" — a document must keep an
+    // artboard, so emptying them all is a broken invariant, not a tidy-up.
+    let doc = docWith([abAt("a", 0, 0), abAt("b", 500, 0), abAt("c", 900, 0)], [])
+    #expect(deletableEmptyArtboardIds(doc) == ["b", "c"])
+}
+
+@Test func anElementMerelyTouchingAnEdgeDoesNotOccupyTheArtboard() {
+    // "b" spans x 500..600; the rect ends exactly at 500 and covers no area
+    // inside it. Half-open, matching rectsIntersect.
+    let doc = docWith([abAt("a", 0, 0), abAt("b", 500, 0)], [rectAt(490, 5)])
+    #expect(deletableEmptyArtboardIds(doc) == ["b"])
+}
+
+@Test func aTransformedElementIsFoundWhereItIsDrawn() {
+    // The whole reason this reads elementEvaluatedBBox and not `bounds`.
+    let moved = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                  transform: Transform(a: 1, b: 0, c: 0, d: 1, e: 520, f: 20)))
+    let doc = docWith([abAt("a", 0, 0), abAt("b", 500, 0)], [moved])
+    #expect(deletableEmptyArtboardIds(doc) == ["a"])
+}

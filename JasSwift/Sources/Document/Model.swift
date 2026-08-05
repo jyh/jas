@@ -186,6 +186,35 @@ private struct Checkpoint {
 /// Views register callbacks via onDocumentChanged to be notified
 /// whenever the document is replaced.
 public class Model: ObservableObject {
+    // ── RESOLVEDHIT follow-up: an identity that is never REUSED ────────────
+    //
+    // The recompute cache is epoched on (owner, generation). `owner` was
+    // `ObjectIdentifier(model)` — which is the object's ADDRESS, and addresses
+    // are recycled the moment a Model deallocates. Two Models that never
+    // coexist can therefore share an owner token, and two freshly-built ones
+    // also share a generation, so the epoch matched and a stale entry was
+    // served. It surfaced as `reference geometry recompute cache diverged from
+    // fresh eval` on roughly one test run in four.
+    //
+    // This is ABA, and the irony is on the record: the RESOLVEDHIT commit named
+    // ABA as the hazard a POINTER cannot rule out, gave Rust an epoch call to
+    // close it, and then used an address as identity on this side.
+    //
+    // A monotonic counter is never reused within a process, so the collision
+    // cannot recur however the allocator behaves.
+    private static let identityLock = NSLock()
+    private static var identityCounter: UInt64 = 0
+    private static func nextIdentity() -> UInt64 {
+        identityLock.lock()
+        defer { identityLock.unlock() }
+        identityCounter &+= 1
+        return identityCounter
+    }
+
+    /// Process-unique, never-reused identity for cache epoching. NOT the
+    /// object's address: see the note above.
+    public let recomputeIdentity: UInt64 = Model.nextIdentity()
+
     /// The current document. The setter is `private(set)`, so external code
     /// CANNOT write `model.document = ...`; it must funnel through one of the
     /// three intent methods (`setDocument` / `editDocument` /

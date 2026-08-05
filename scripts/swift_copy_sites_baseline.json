@@ -106,8 +106,7 @@
         "strokeBrush",
         "strokeBrushOverrides",
         "strokeGradient",
-        "toolOrigin",
-        "widthPoints"
+        "toolOrigin"
       ]
     },
     "JasSwift/Sources/Document/Controller.swift::Polygon": {
@@ -151,8 +150,6 @@
         "blendMode",
         "fillGradient",
         "mask",
-        "strokeBrush",
-        "strokeBrushOverrides",
         "strokeGradient"
       ]
     },

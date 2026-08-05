@@ -2258,6 +2258,14 @@ pass where a golden shows a duplicated selection entry.
   instance; it does not make the class impossible. Note that the marquee
   deliberately PRODUCES such a selection, so the invariant cannot simply be
   asserted — it would have to be scoped, and that is the ruling §16.4 wants.
+
+  > **SUPERSEDED 2026-08-04 — §16.4 WAS RULED on 2026-07-29** (`50885f0e`; see
+  > §16.4's own heading and §22). Ruled **no**: the model does not permit an
+  > ancestor and its own descendant simultaneously, because the marquee ASKS
+  > about members and ANSWERS with the group alone. The premise this bullet
+  > rests on — "the marquee deliberately PRODUCES such a selection" — is the
+  > behaviour the ruling changed. Left in place rather than deleted because it
+  > records what was true when written; a reader must not act on it.
 * **`copy_selection` still leaves the selection in DESCENDING path order** in
   both ports, which the new golden now pins. Whether that is the intended
   post-copy selection order or an artifact of iterating backwards to keep
@@ -2559,6 +2567,23 @@ for §20, not a sibling of it.
   **13 such pairs live in 4 goldens today.** §16.4 is not assertable after §20
   lands; it needs a ruling on the marquee first. **STILL OPEN, and now with a
   measured obstacle rather than an assumed clear path.**
+
+  > **SUPERSEDED 2026-08-04, AND THE OBSTACLE IS GONE — RE-MEASURED, not
+  > inherited.** §16.4 was ruled on 2026-07-29 (`50885f0e`, §22), and the ruling
+  > is precisely what removed the pairs: a band now answers with the group
+  > alone, so it no longer emits an ancestor beside its own descendant.
+  >
+  > At HEAD: **ZERO ancestor+descendant pairs across the whole corpus.** 172
+  > non-empty selections examined; only THREE mix path depths at all
+  > (`actions/group_flatten.json` twice, `operations/
+  > select_all_dup_across_parents_expected.json` once) and not one of those is a
+  > prefix of another, so none is such a pair.
+  >
+  > Both earlier counts are stale and neither should be quoted: this passage's
+  > **13 in 4**, and the **15 in 5** that `seat/fleet/REVIEW-marquee-ruling.md`
+  > RIDER 3 measured at `630633e0` while asking for this amendment. Each was
+  > true at its own commit. **The obstacle this bullet reports as measured no
+  > longer exists**, so "STILL OPEN" reads as a live blocker and is not one.
 
 ### 21.3 The durable half — an invariant, not a patch
 **For an ALL selection, moving IS translating:**

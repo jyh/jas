@@ -2674,14 +2674,33 @@ actions:
 
   delete_empty_artboards:
     description: >
-      Flask-side stub — element bounds aren't available server-side,
-      so nothing is ever detected as empty. Native ports compute
-      intersection against the element tree and delete artboards with
-      no intersecting geometry, preserving position 1 if all are
-      empty. Single undo op when native.
+      Delete every artboard that no artwork intersects, preserving the
+      artboard at position 1 when all of them are empty (a document must
+      always keep one). One undo step.
+
+      The membership question is answered by the derived read
+      `active_document.deletable_empty_artboard_ids`, which each native port
+      computes from its own element tree using EVALUATED bounds — so a shape
+      that was authored at the origin and transformed onto an artboard
+      occupies the artboard it is DRAWN on, not the one it was typed at. The
+      preserve-position-1 rule is applied inside that derivation, because a
+      `foreach` deleting by id has no way to say "unless this is the last
+      one"; that keeps these effects a plain mirror of `delete_artboards`.
+
+      Flask computes an empty list — element bounds are not available
+      server-side — so it deletes nothing, which is the same behaviour it had
+      as a stub and is a correct degradation rather than a divergence.
     category: artboards
     effects:
-      - log: "delete_empty_artboards (Flask stub; native ports implement)"
+      - snapshot
+      - foreach:
+          source: active_document.deletable_empty_artboard_ids
+          as: ab_id
+        do:
+          - doc.delete_artboard_by_id: ab_id
+      - set_panel_state: { panel: artboards, key: artboards_panel_selection, value: "[]" }
+      - set_panel_state: { panel: artboards, key: panel_selection_anchor, value: "null" }
+      - set_panel_state: { panel: artboards, key: rearrange_dirty, value: "true" }
 
   artboards_panel_select:
     description: >

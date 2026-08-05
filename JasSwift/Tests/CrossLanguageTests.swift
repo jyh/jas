@@ -2620,6 +2620,45 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Panel on-screen (the derivation menu_state takes as GIVEN)
+
+/// menu_state.json feeds the `panels` map in as INPUT, so nothing watched how
+/// that map is computed from a dock layout — the seam where a panel can be a
+/// group MEMBER while being off screen (a background tab, a collapsed
+/// group/dock, a hidden dock pane). These vectors pin the predicate itself.
+@Test func testAlgorithmPanelOnScreen() throws {
+    let json = readFixture("algorithms/panel_on_screen.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    let all16: [(String, PanelKind)] = [
+        ("layers", .layers), ("color", .color), ("swatches", .swatches),
+        ("brushes", .brushes), ("gradient", .gradient), ("stroke", .stroke),
+        ("properties", .properties), ("character", .character),
+        ("paragraph", .paragraph), ("artboards", .artboards), ("align", .align),
+        ("boolean", .boolean), ("opacity", .opacity), ("magic_wand", .magicWand),
+        ("symbols", .symbols), ("concepts", .concepts),
+    ]
+
+    #expect(!tests.isEmpty, "panel_on_screen corpus is empty")
+    for tc in tests {
+        let name = tc["name"] as! String
+        let function = tc["function"] as! String
+        #expect(function == "panel_on_screen", "Unknown function: \(function)")
+        let args = tc["args"] as! [String: Any]
+        let layoutJson = try JSONSerialization.data(withJSONObject: args["layout"]!)
+        let layout = testJsonToWorkspace(String(data: layoutJson, encoding: .utf8)!)
+        let expected = tc["expected"] as! [String: Bool]
+        #expect(expected.count == all16.count, "'\(name)' must name every kind")
+        for (id, kind) in all16 {
+            let want = expected[id]!
+            #expect(
+                layout.panelOnScreen(kind) == want,
+                "'\(name)': panelOnScreen(\(id)) should be \(want)")
+        }
+    }
+}
+
 // MARK: - Menu enabled/checked state (chrome seam) algorithm vectors
 
 @Test func testAlgorithmMenuState() throws {

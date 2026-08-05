@@ -2603,9 +2603,15 @@ public func tryDesignateAlignKeyObject(model: Model, store: StateStore,
     // Hit-test against the current selection using preview bounds
     // (matches what the user sees).
     var hit: ElementPath? = nil
+    // RESOLVED: a symbol instance measures its TARGET, so the narrow form put
+    // its box at the ORIGIN — Align To in key-object mode could not designate
+    // a selected instance as the key, and a click near (0,0) designated one
+    // that is drawn nowhere near there. Twin of Rust's
+    // `try_designate_align_key_object`.
+    let keyResolver = IdIndexResolver(index: rebuildIdIndex(doc))
     for es in doc.selection {
         guard let el = doc.tryGetElement(es.path) else { continue }
-        let b = el.bounds
+        guard let b = resolvedBoundsWith(el, keyResolver, { $0.bounds }) else { continue }
         if x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height {
             hit = es.path
             break

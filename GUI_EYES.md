@@ -138,6 +138,26 @@ same bundle and cannot observe wiring.
 
 ---
 
+## HEALTH, MEASURED 2026-08-04 — the instrument still works, and still bites
+
+Unrun for eleven days (built 2026-07-24). Re-run end to end on a cold tree:
+
+```
+./scripts/gui_drive.sh                 9/9 ok
+every --regress MODE (all ten)         10/10 TEETH ok
+wasm build                             24s
+```
+
+Both halves matter and only one of them is usually taken. **9/9 green says the
+app is well; 10/10 TEETH says the checks can still tell.** A suite that has not
+had its faults injected since it was written is a suite whose greens are
+unaudited, and this one had gone eleven days.
+
+One defect found and fixed in the same pass: `--list` and `--help` started
+`dx serve` before answering from a static table — ~5 minutes to print nine lines
+it already had. They now short-circuit before the server block: **0.14s with
+nothing serving**, proven by killing the server and re-running.
+
 ## Fault injection — a green check proves nothing until it goes red
 
 `--regress MODE` reproduces a real defect at the layer it escaped from. **Each
@@ -283,6 +303,21 @@ before it swallowed them and there was no way to start a targetable window. The
 app already parsed both flags. Input injection is `jas_gui_harness.py` (pyobjc
 Quartz `CGEventPost`) plus the fifo verbs `tool <id>` / `action <name> [json]`.
 
+> **UNBLOCKED 2026-08-04 (`PROBEIDENTITY`).** `.accessibilityIdentifier` is now
+> attached in `YamlPanelBodyView.swift` — at the ONE seam every widget kind
+> passes through (`var body`), not at the twenty `render*` arms this note
+> suggested, so a kind added tomorrow is addressable without anyone remembering
+> to tag it. The stated reason for deferring — *"that file is owned by a
+> parallel wave"* — expired when that wave landed.
+>
+> What that buys and what it does not: every YAML widget id is now visible to
+> the Accessibility API, so an out-of-process probe can resolve an id to a
+> screen rect and read its role/value. **The probe half is NOT written**, so no
+> pair assertion is ported yet and this lane is still partial — the blocker has
+> moved from "impossible" to "unbuilt", which is a different queue.
+>
+> The paragraph below is kept as written; it is the record of why this sat.
+
 **Blocked: READ-BACK.** Swift has no equivalent of `Runtime.evaluate`, so the
 *declared* half of every pair assertion is unavailable — nothing can ask the
 running app "is this widget checked?", and no YAML widget id can be resolved to
@@ -348,6 +383,23 @@ It checks **correctness, not feel**. Staying on JYH's manual floor:
   gesture feels responsive.
 * **Cursors and native chrome.** No cursor glyph is captured; menus, sheets and
   window furniture are outside it.
+* ~~**ANY PANEL THAT IS NOT OPEN BY DEFAULT.**~~ **LIFTED 2026-08-04
+  (`MENUADDRESSED`)** — menu items now emit their `menubar.yaml` id, so
+  `p.click("menu_layers")` opens the Layers panel and every closed-by-default
+  panel is reachable. The measurement below is kept as the record of why it was
+  a limit.
+* **(historic)** Measured 2026-08-04 against the
+  live DOM: the reachable id prefixes are `cp_` (60), `stk_` (33), `ch_` (24),
+  `align_`/`distribute_` (9 each), `ap_` (9) and `btn_` (13) — and **every
+  `btn_` is a TOOL button** (`btn_pen_slot`, `btn_lasso`, …), not a panel
+  toggle. There is no menu in the DOM and no dock handle, so **a check cannot
+  open Layers, Swatches, Gradient, Symbols, Concepts or Boolean.** Zero
+  `lp_*` ids are present in a default document.
+
+  This is sharper than "menus are outside it" above, and it is what actually
+  bites: it puts every closed-by-default panel out of reach, not just the menu
+  bar. Anything needing one waits on a handle — a `toggle_panel` verb the probe
+  can drive, or a test-only dock button.
 * **Retina fidelity.** The Rust lane runs headless at
   `--force-device-scale-factor=1`; it is not a subpixel or hairline oracle.
 * **Anything a mouse cannot reach.** Flyout long-press, IME, real focus/tab
@@ -357,6 +409,48 @@ It checks **correctness, not feel**. Staying on JYH's manual floor:
   between a browser canvas and a Core Graphics one.
 
 ---
+
+## FOUND BY DRIVING, 2026-08-04 — the Window menu lies at startup
+
+The first defect this harness turned up that was not already known, found while
+looking for a way to OPEN a panel.
+
+**At startup the Window menu reports six panels as checked — `Boolean`,
+`Layers`, `Paragraph`, `Properties`, `Swatches`, `Symbols` — and their widgets
+are not in the DOM at all.** Not off-screen, not clipped: `lp_root`,
+`lp_filter_button` and `layers_panel_content` all return
+`document.getElementById(...) === null` while `cp_black_swatch` (Color) and
+`ap_new` (Artboards), also checked, resolve normally.
+
+**The panels themselves are fine.** Toggling the menu entry twice — off, then
+on — renders them. Verified with ids taken from each panel's own YAML:
+
+```
+Layers    lp_root      absent at startup -> absent after 1 click -> PRESENT after 2
+Symbols   sym_*        0 widgets at startup -> 3 after two toggles
+```
+
+So the render path works and the STARTUP STATE is wrong: `panels.<name>` is true
+while nothing is placed. What an artist sees is a menu insisting a panel is open
+when it is not, which then appears to need turning *off* before it will come on.
+
+**Verified for Layers and Symbols only.** `Boolean`, `Paragraph`, `Properties`
+and `Swatches` show the same checked-but-absent shape in the menu, but the id
+prefixes used to probe them were GUESSED and returned nothing either way —
+inconclusive, not confirmed, and listed here so nobody quotes six as measured.
+
+Not fixed here: the cause is in startup layout/panel state, not in the render,
+and a rushed fix at the end of a long shift is how this repository acquires its
+next correction. **Reproduction is exact and scripted** (drive `.jas-menu-title`
+text `Window`, then the `.jas-menu-item` whose text matches, twice).
+
+### And this is the panel-opening handle the harness was missing
+
+`GUI_EYES.md` §Limits records that no closed-by-default panel is reachable. The
+route above IS a handle — menu title by class and text, then the item by text —
+so a check CAN now reach Layers. It is text-addressed rather than
+spec-addressed, which the house prefers against; the durable fix is an `id` on
+menu items, exactly as every other widget already carries.
 
 ## Findings from building it
 

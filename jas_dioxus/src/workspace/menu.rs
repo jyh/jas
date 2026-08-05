@@ -26,6 +26,16 @@ pub enum MenuEntry {
         kind: SubmenuKind,
     },
     Action {
+        /// The menubar.yaml item's own `id` (e.g. `menu_layers`), carried
+        /// through to the DOM so a menu entry is SPEC-ADDRESSED like every
+        /// other widget. Empty when the bundle item declares none.
+        ///
+        /// GUI_EYES.md's addressing rule is "every YAML widget id is emitted as
+        /// the DOM element id ... spec-addressed targets are immune to layout
+        /// and theme churn". Menu items were the one surface that broke it, so
+        /// the only way to drive a menu was to match on its TEXT — which
+        /// changes with wording, mnemonics and the check glyph.
+        id: String,
         label: String,
         action: String,
         params: serde_json::Map<String, serde_json::Value>,
@@ -95,6 +105,7 @@ fn project_entry(item: &serde_json::Value) -> MenuEntry {
         .cloned()
         .unwrap_or_default();
     MenuEntry::Action {
+        id: item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
         label: item
             .get("label")
             .and_then(|v| v.as_str())

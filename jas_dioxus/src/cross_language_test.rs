@@ -6203,6 +6203,68 @@ mod tests {
         }
     }
 
+    /// The derivation `layout -> panels.<id>` that `menu_state` takes as
+    /// GIVEN. menu_state.json feeds the panels map in as input, so nothing
+    /// watched how that map is computed from a dock layout — the seam where
+    /// a panel can be a group MEMBER while being off screen (a background
+    /// tab, a collapsed group/dock, a hidden dock pane). These vectors pin
+    /// the predicate itself: on screen iff it is its group's active tab and
+    /// every container above it is expanded and shown.
+    #[test]
+    fn algorithm_panel_on_screen_vectors() {
+        use crate::workspace::layout_apply::panel_kind_str;
+        use crate::workspace::workspace::{PanelKind, WorkspaceLayout};
+        #[allow(unused_imports)]
+        use crate::workspace::test_json;
+
+        let json_str = read_fixture("algorithms/panel_on_screen.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        const ALL16: &[PanelKind] = &[
+            PanelKind::Layers,
+            PanelKind::Color,
+            PanelKind::Swatches,
+            PanelKind::Brushes,
+            PanelKind::Gradient,
+            PanelKind::Stroke,
+            PanelKind::Properties,
+            PanelKind::Character,
+            PanelKind::Paragraph,
+            PanelKind::Artboards,
+            PanelKind::Align,
+            PanelKind::Boolean,
+            PanelKind::Opacity,
+            PanelKind::MagicWand,
+            PanelKind::Symbols,
+            PanelKind::Concepts,
+        ];
+
+        let cases = tests.as_array().unwrap();
+        assert!(!cases.is_empty(), "panel_on_screen corpus is empty");
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            let func = tc["function"].as_str().unwrap();
+            assert_eq!(func, "panel_on_screen", "Unknown function: {}", func);
+            let layout: WorkspaceLayout = crate::workspace::test_json::test_json_to_workspace(
+                &tc["args"]["layout"].to_string(),
+            );
+            let expected = tc["expected"].as_object().unwrap();
+            assert_eq!(expected.len(), ALL16.len(), "'{}' must name every kind", name);
+            for &kind in ALL16 {
+                let id = panel_kind_str(kind);
+                let want = expected[id].as_bool().unwrap();
+                assert_eq!(
+                    layout.panel_on_screen(kind),
+                    want,
+                    "'{}': panel_on_screen({}) should be {}",
+                    name,
+                    id,
+                    want
+                );
+            }
+        }
+    }
+
     // ---------------------------------------------------------------
     // Toolbar and menu structure tests
     // ---------------------------------------------------------------

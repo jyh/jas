@@ -195,7 +195,7 @@ def capture(window: dict, path: str) -> tuple[str, float]:
     require_capturable_display()   # named stop if locked/asleep, never a blank
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     r = subprocess.run([SCREENCAPTURE, "-x", "-o", f"-l{window['id']}", path],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, encoding="utf-8")
     if r.returncode != 0 or not os.path.exists(path):
         raise ProbeFailure(f"screencapture -l{window['id']} failed: "
                            f"{r.stderr.strip() or 'no output file'}")

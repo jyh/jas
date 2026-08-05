@@ -7,6 +7,24 @@ on:
     branches: [main]
 
 jobs:
+  # SCRUBGUARD: the 2026-07-22 history rewrite has no other guard. Its own job
+  # because it is the ONLY one needing full history -- `fetch-depth: 0` costs a
+  # slower checkout and buying it for every lane would be waste. A shallow
+  # checkout here would let the gate scan one commit and report success, so the
+  # gate refuses to run on one rather than trusting this file to stay right.
+  commit-trailers:
+    name: commit messages carry no session trailer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/check_commit_trailers.py --self-test
+      - run: python scripts/check_commit_trailers.py
+
   workspace-json-fresh:
     name: workspace.json up-to-date
     runs-on: ubuntu-latest
@@ -46,6 +64,11 @@ jobs:
       # containers, or carry a ledger row saying why not. Five defects wore
       # that shape in one week, all invisible in Rust and live in JasSwift.
       - run: python scripts/check_element_dispatch.py --self-test && python scripts/check_element_dispatch.py
+      # Every resolver-less bounds call in production carries a written
+      # verdict. `bounds()` answers a zero box AT THE ORIGIN for the live
+      # kinds, and five fixes in a week wore that shape; a new blind reader
+      # must be declared rather than discovered by an artist.
+      - run: python scripts/check_bounds_resolver_ledger.py --self-test && python scripts/check_bounds_resolver_ledger.py
       # §16.4 asserted over the corpus: no selection holds an element AND its
       # own descendant. Four producers had to be closed before this could pass
       # at all, and it reds on the pre-§20 tree with 13 violations.
@@ -87,6 +110,16 @@ jobs:
       # was a premise and wrote it down. Per-port claims, because a cross-port
       # premise checked by a single grep answers for the wrong port.
       - run: python scripts/check_deferral_expiry.py --self-test && python scripts/check_deferral_expiry.py
+      # INDEXBLIND: reds while untracked files exist, because eight gates
+      # derive their subject list from `git ls-files` and cannot see one. Always
+      # green in CI (a checkout has no untracked files) -- its value is the
+      # LOCAL sweep, which is where a red gate once shipped inside a commit
+      # claiming every gate was green.
+      - run: python scripts/check_index_blindspot.py --self-test && python scripts/check_index_blindspot.py
+      # SPECMUTANTS: which clauses of the analytic law the corpus actually
+      # exercises. docs/CHECKERS.md named this instrument and left its coverage
+      # question open; this answers it for the membership half and says so.
+      - run: python scripts/check_spec_mutation_coverage.py --self-test && python scripts/check_spec_mutation_coverage.py
       - run: python scripts/check_gate_consistency.py --self-test && python scripts/check_gate_consistency.py
       # One sanctioned grouping for every degree/radian conversion, in both
       # active ports. `(deg * PI) / 180` and `deg * (PI / 180)` are different
@@ -217,7 +250,13 @@ jobs:
       run:
         shell: bash
     steps:
+      # fetch-depth: 0 for check_commit_trailers.py below — it guards HISTORY,
+      # and on a depth-1 checkout it would scan one commit. It refuses to run
+      # shallow rather than trusting this line to stay here, so deleting this
+      # reds the lane instead of quietly hollowing the gate.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -255,6 +294,25 @@ jobs:
           python scripts/check_encoding_hygiene.py --self-test
           python scripts/check_encoding_hygiene.py
 
+      # SCRUBGUARD on the lane that matters most: every commit that has ever
+      # carried the forbidden trailer was authored on this platform. A gate
+      # watching only ubuntu would have watched the one place the violation
+      # does not originate. Needs full history, and refuses to run without it.
+      - name: Commit messages carry no session trailer
+        run: |
+          python scripts/check_commit_trailers.py --self-test
+          python scripts/check_commit_trailers.py
+
+      - name: Untracked files are invisible to index-reading gates
+        run: |
+          python scripts/check_index_blindspot.py --self-test
+          python scripts/check_index_blindspot.py
+
+      - name: Corpus coverage of the analytic law's clauses
+        run: |
+          python scripts/check_spec_mutation_coverage.py --self-test
+          python scripts/check_spec_mutation_coverage.py
+
       - name: Structural gates
         run: |
           bash scripts/check_workspace_json.sh
@@ -282,6 +340,8 @@ jobs:
           python scripts/check_geometry_checkers.py
           python scripts/check_element_dispatch.py --self-test
           python scripts/check_element_dispatch.py
+          python scripts/check_bounds_resolver_ledger.py --self-test
+          python scripts/check_bounds_resolver_ledger.py
           python scripts/check_selection_invariant.py --self-test
           python scripts/check_selection_invariant.py
           python scripts/check_widget_kind_dispatch.py --self-test
@@ -337,6 +397,14 @@ jobs:
 
       - name: Reference interpreter conformance
         run: python -m pytest workspace_interpreter/tests -q
+
+      # SPECUNTESTED: the analytic tier is what the geometry checkers RULE BY,
+      # and until 2026-08-03 nothing tested it -- there was no test directory
+      # under spec/ and CI names its pytest paths explicitly, so a bare
+      # `pytest` never reached it either. Named separately from the reference
+      # interpreter because it is a different tier with a different job.
+      - name: Analytic tier (spec/geometry) conformance
+        run: python -m pytest spec/geometry/tests -q
 
       - name: Rust tests
         run: cd jas_dioxus && cargo test
@@ -422,6 +490,7 @@ jobs:
       # the code actually imports.
       - run: pip install -r requirements.txt
       - run: python -m pytest workspace_interpreter/tests
+      - run: python -m pytest spec/geometry/tests
 
   # The jas/ Qt app is FROZEN at the five-port-parity tag (POLICY.md): this
   # lane checks out the WHOLE repo at the tag — not just fixtures — because

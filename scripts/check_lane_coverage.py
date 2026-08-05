@@ -105,7 +105,7 @@ def _tracked_check_scripts() -> int:
         out = subprocess.run(
             ["git", "ls-files", "scripts/check_*.py"],
             cwd=pathlib.Path(__file__).resolve().parent.parent,
-            capture_output=True, text=True, check=True).stdout
+            capture_output=True, text=True, encoding="utf-8", check=True).stdout
     except (OSError, subprocess.CalledProcessError) as e:
         raise RuntimeError(
             f"cannot derive MIN_CHECK_SCRIPTS: `git ls-files` is unavailable "

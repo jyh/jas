@@ -146,6 +146,40 @@ private func expectTriple(_ got: (Double, Double, Double),
         "\(verb): view_offset_y is \(got.2), spec says \(want.2)")
 }
 
+// MARK: - FITPHANTOM: what Fit in Window frames when the artwork is an instance
+
+/// Twin of Rust's `document_bounds_must_not_invent_a_point_at_the_origin`
+/// (document/evaluated_bounds.rs). A symbol instance measures its TARGET's
+/// geometry; the resolver-less `Element.bounds` answers a zero box at the
+/// ORIGIN for it, so the frame used to be dragged back there.
+@Test func documentBoundsMustNotInventAPointAtTheOrigin() {
+    let master = Element.rect(Rect(x: 5, y: 7, width: 10, height: 20, id: "m1"))
+    let instance = Element.live(.reference(ReferenceElem(
+        target: ElementRef("m1"), name: nil, id: "i1")))
+    let doc = Document(layers: [Layer(children: [instance])], symbols: [master])
+
+    let b = documentBounds(doc)
+    #expect(b.x == 5 && b.y == 7 && b.w == 10 && b.h == 20,
+            "Fit in Window frames the ARTWORK, not a phantom point at the origin")
+}
+
+/// And the union case: an instance beside a distant rect must not stretch the
+/// frame back to (0,0).
+@Test func documentBoundsUnionSkipsWhatResolvesToNothing() {
+    let master = Element.rect(Rect(x: 5, y: 7, width: 10, height: 20, id: "m1"))
+    let instance = Element.live(.reference(ReferenceElem(
+        target: ElementRef("m1"), name: nil, id: "i1")))
+    let dangling = Element.live(.reference(ReferenceElem(
+        target: ElementRef("gone"), name: nil, id: "i2")))
+    let far = Element.rect(Rect(x: 100, y: 100, width: 10, height: 10))
+    let doc = Document(layers: [Layer(children: [instance, dangling, far])],
+                       symbols: [master])
+
+    let b = documentBounds(doc)
+    #expect(b.x == 5 && b.y == 7 && b.w == 105 && b.h == 103,
+            "the resolved instance and the far rect bound it; a dangling reference contributes nothing, not the origin")
+}
+
 // MARK: - The geometry pin the batteries below lean on
 
 /// The fit_in_window expectations use `contentRect` as the document's element

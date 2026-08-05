@@ -147,17 +147,25 @@ private func normalizeElement(_ elem: Element) -> Element {
         // the existing one. Pinned by test_fixtures/gestures/blob_import_merge.
         //
         // Deliberately narrow: this arm still omits blendMode, mask,
-        // fillGradient, strokeGradient, strokeBrush and strokeBrushOverrides,
-        // and the other nine arms of this function omit their own sets. None
-        // of those are reachable by any current fixture (the corpus manifest's
-        // declared `codec-optional-fields-unset` gap: those keys appear in
-        // zero of the expected goldens), so forwarding them here would be an
-        // unpinned change. Reported for a ruling rather than smuggled in.
+        // strokeBrush / strokeBrushOverrides ARE forwarded as of BRUSHSAVE
+        // (2026-08-05): this arm's own note said forwarding them "would be an
+        // unpinned change ... reported for a ruling rather than smuggled in",
+        // and the condition it named is now met — the SVG codec carries them
+        // and `roundtripPathKeepsItsStrokeBrushAndWidthProfile` pins the round
+        // trip in both ports. Without the forward, a brushed path imported
+        // correctly and then lost its brush HERE, one call later.
+        //
+        // fillGradient / strokeGradient stay omitted, and stay declared: the
+        // SVG writer does not carry them either (codec_field_survival records
+        // both as DROPPED for svg), so forwarding them alone would still be
+        // unpinned. They wait on the gradients-as-paint amendment.
         return .path(Path(d: e.d,
                           fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
                           widthPoints: e.widthPoints,
                           opacity: e.opacity, transform: e.transform,
                           locked: e.locked, visibility: e.visibility,
+                          strokeBrush: e.strokeBrush,
+                          strokeBrushOverrides: e.strokeBrushOverrides,
                           toolOrigin: e.toolOrigin,
                           name: e.name, id: e.id,
                           fillRule: e.fillRule))

@@ -567,7 +567,11 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
     if action == "toggle_panel" {
         if let Some(panel_id) = params.get("panel").and_then(|v| v.as_str()) {
             let kind = crate::workspace::layout_apply::parse_panel_kind(panel_id);
-            if st.workspace_layout.is_panel_visible(kind) {
+            // Routed on `panel_on_screen`, NOT on group membership: a
+            // background tab is a member that is drawn nowhere, and routing
+            // it to the close branch deleted the panel the artist was asking
+            // to see (they saw nothing happen, then had to click twice).
+            if st.workspace_layout.panel_on_screen(kind) {
                 if let Some(addr) =
                     crate::workspace::clipboard::find_panel(&st.workspace_layout, kind)
                 {
@@ -577,7 +581,7 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                     );
                 }
             } else {
-                st.workspace_layout.show_panel_in_last_group(kind);
+                st.workspace_layout.reveal_panel(kind);
                 // COLOR.md §Panel initialization rule: color_panel_mode is
                 // panel-local and resets to its default (HSB) on each reopen —
                 // not persisted across close. Preserved from the legacy
@@ -2028,9 +2032,24 @@ fn apply_set_panel_state_with_ctx(
                         .collect()
                 })
                 .unwrap_or_default();
+            // `delete_empty_artboards` dispatches through THIS context, so the
+            // ids it iterates must resolve here too. A `foreach` over a key
+            // this map lacks does nothing and says nothing.
+            let deletable_empty: Vec<serde_json::Value> = st
+                .tabs
+                .get(st.active_tab)
+                .map(|t| {
+                    crate::document::evaluated_bounds::deletable_empty_artboard_ids(
+                        t.model.document())
+                        .into_iter()
+                        .map(serde_json::Value::String)
+                        .collect()
+                })
+                .unwrap_or_default();
             let active_doc = serde_json::json!({
                 "artboards": artboards_json,
                 "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
+                "deletable_empty_artboard_ids": deletable_empty,
             });
             let panel_json = serde_json::json!({
                 "artboards_panel_selection": st.artboards_panel_selection.clone(),
@@ -2642,6 +2661,9 @@ pub(crate) fn build_active_document_view(
             "next_artboard_name": "Artboard 1",
             "current_artboard_id": serde_json::Value::Null,
             "current_artboard": {},
+            // Empty, not absent: a `foreach` over a MISSING key and one over an
+            // empty list are different failures, and only one of them is quiet.
+            "deletable_empty_artboard_ids": [],
             "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
             "artboards_panel_anchor": st.artboards_panel_anchor.clone()
                 .map(serde_json::Value::String)
@@ -2887,6 +2909,19 @@ pub(crate) fn build_active_document_view(
         m.insert("symbols".to_string(), serde_json::Value::Array(symbols_json));
         // Concepts panel Slice 2: attached here too (macro recursion ceiling).
         m.insert("selected_concept".to_string(), selected_concept);
+        // The ids `delete_empty_artboards` may remove — already filtered by the
+        // preserve-position-1 rule, so the action's `foreach` stays a plain
+        // mirror of `delete_artboards`. See
+        // `document::evaluated_bounds::deletable_empty_artboard_ids`.
+        m.insert(
+            "deletable_empty_artboard_ids".to_string(),
+            serde_json::Value::Array(
+                crate::document::evaluated_bounds::deletable_empty_artboard_ids(doc)
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
     }
     view
 }

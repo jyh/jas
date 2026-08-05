@@ -332,7 +332,20 @@ class Fault:
 # Every mode owns exactly ONE check. `marker` is a stable fragment of that
 # check's own failing `ctx.want` message; the regress scorer requires it in the
 # failure before reporting TEETH ok (see module doc + main()).
+def _fault_menu_tick_lies(p: GuiProbe):
+    """Put a check glyph on the Window ▸ Layers row while the Layers panel is
+    absent from the DOM. This is MENULIES itself: the menu asserting a panel is
+    on screen when the dock is drawing a different tab of its group. Browser
+    side and read before the click, so no re-render can launder it."""
+    p.cdp.evaluate(
+        "(()=>{const e=document.getElementById('menu_layers');"
+        "if(!e)return false;const s=e.querySelector('span');"
+        "if(s)s.textContent='\u2713 Layers';return !!s;})()")
+
+
 FAULTS = {
+    "menu_tick_lies": Fault(_fault_menu_tick_lies, "menu_tick_matches_screen",
+                            "agrees with what is on screen"),
     "invisible_highlight": Fault(_fault_invisible_highlight, "chain_visible",
                                  "RENDERED style moved"),
     "dead_tile": Fault(_fault_dead_tile, "tile_click_responds",
@@ -389,10 +402,10 @@ def _click_by_text(p: GuiProbe, selector: str, text: str) -> bool:
     """Trusted-click the first element matching `selector` whose textContent
     contains `text`, and return True; False when none matches.
 
-    The top-level menu titles and their items render as TEXT (the menu bar
-    emits no per-item DOM id — menu_bar.rs), so the Window menu and its Brushes
-    item are reached by text, not by a spec id. `selector` is a raw CSS
-    selector (a leading `css:` handle, as elsewhere in the harness, is stripped).
+    The top-level menu TITLES render as text with no id, so a menu is opened by
+    its title text. (Menu ITEMS do carry their spec id since MENUADDRESSED, so
+    prefer `p.click("menu_layers")` for those.) `selector` is a raw CSS selector
+    (a leading `css:` handle, as elsewhere in the harness, is stripped).
     """
     if selector.startswith("css:"):
         selector = selector[4:]
@@ -701,6 +714,71 @@ def tile_click_responds(ctx: Ctx):
              "the tile's DECLARED effect landed: the fill swatch is now black")
 
 
+@check("menu_tick_matches_screen",
+       "a Window-menu tick means the panel is on screen, and ONE click reaches it")
+def menu_tick_matches_screen(ctx: Ctx):
+    """MENULIES (JYH's board, 2026-07-29): the Window menu ticked six panels at
+    startup that the dock was not drawing. The dock renders ONE panel per group
+    and the stock layout stacks panels in tabbed groups, so Layers was a group
+    MEMBER sitting behind Artboards — and the tick was computed from membership.
+    Worse, the toggle routed on the same predicate, so clicking the ticked row
+    ran the CLOSE branch: the artist asked to see Layers and it silently left
+    the workspace. A second click summoned it back, visible this time.
+
+    Two properties, because either alone can be satisfied by a lie: the tick
+    AGREES with the DOM, and one click flips both together.
+    """
+    p = ctx.p
+    LAYERS_ROOT = "lp_root"   # the Layers panel's root; verified live
+    COLOR_BODY = "cp_content"  # the Color panel's body; verified live
+
+    def open_window_menu():
+        _click_by_text(p, "css:.jas-menu-title", "Window")
+        time.sleep(0.3)
+
+    def ticked(row: str) -> bool:
+        return "\u2713" in (p.cdp.evaluate(
+            f"(document.getElementById({json.dumps(row)})||{{}}).textContent") or "")
+
+    open_window_menu()
+    ctx.want(p.exists("menu_layers"), "the Window menu lists a Layers row")
+    ctx.inject("menu_tick_lies")
+
+    # A background tab: a member of a group, drawn nowhere.
+    layers_ticked, layers_drawn = ticked("menu_layers"), p.exists(LAYERS_ROOT)
+    ctx.note(f"Layers: tick={layers_ticked} drawn={layers_drawn}")
+    ctx.want(layers_ticked == layers_drawn,
+             f"the Layers tick ({layers_ticked}) agrees with what is on screen "
+             f"({layers_drawn}); a tick on an undrawn panel is the menu lying "
+             f"about a tab it is not showing")
+
+    # A front tab, for contrast — otherwise a menu that ticks NOTHING passes.
+    color_ticked, color_drawn = ticked("menu_color"), p.exists(COLOR_BODY)
+    ctx.note(f"Color: tick={color_ticked} drawn={color_drawn}")
+    ctx.want(color_ticked == color_drawn,
+             f"the Color tick ({color_ticked}) agrees with what is on screen "
+             f"({color_drawn})")
+    ctx.want(color_ticked and not layers_ticked,
+             "the stock layout ticks its front tab (Color) and not its "
+             "background tab (Layers) — if both read alike this check is blind")
+
+    # ONE click must reach the panel. This is what the shipped build failed:
+    # the first click deleted Layers instead of raising it.
+    p.click("menu_layers")
+    time.sleep(0.4)
+    reached = p.exists(LAYERS_ROOT)
+    ctx.shot("after_one_click_on_layers")
+    ctx.note(f"after one click: Layers drawn={reached}")
+    ctx.want(reached,
+             "ONE click on Window ▸ Layers puts the Layers panel on screen; "
+             "if it takes two, the first click ran the close branch on a panel "
+             "the artist could not see")
+
+    open_window_menu()
+    ctx.want(ticked("menu_layers"),
+             "and the tick followed the panel onto the screen")
+
+
 @check("brush_promotes_line",
        "applying a brush to a Line thickens its ink (Line→Path promotion)")
 def brush_promotes_line(ctx: Ctx):
@@ -714,8 +792,8 @@ def brush_promotes_line(ctx: Ctx):
     p = ctx.p
     tile = 'css:[id^="bp_tile_"]'
 
-    # Open the Brushes panel via Window ▸ Brushes (a top-level menu title + item,
-    # both text-addressed — the menu bar emits no per-item DOM id). Opened BEFORE
+    # Open the Brushes panel via Window ▸ Brushes (the title is text-addressed;
+    # the item could now use its id, left as-is deliberately). Opened BEFORE
     # drawing so the canvas layout — and the doc→screen mapping the ink reads
     # depend on — is stable across the before/after measurements. Skip if already
     # open.

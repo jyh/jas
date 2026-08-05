@@ -1693,3 +1693,39 @@ private func spelledMultiplier(_ v: Double) -> String {
     #expect(svg.contains("data-jas-instance-transform=\"matrix(0.8660254037844387,0.49999999999999994,-0.49999999999999994,0.8660254037844387,0,0)\""),
             "instance transform not spelled at full multiplier precision:\n\(svg)")
 }
+
+// MARK: - BRUSHSAVE: the save format must not drop the stroke profile
+
+/// Twin of Rust's `roundtrip_path_keeps_its_stroke_brush_and_width_profile`.
+/// SVG *is* the save format, so anything the writer omits is artwork the artist
+/// loses on save — the same hole ARROWTRIM found for arrowheads.
+@Test func roundtripPathKeepsItsStrokeBrushAndWidthProfile() {
+    let path = Element.path(Path(
+        d: [.moveTo(0, 0), .lineTo(30, 40)],
+        stroke: Stroke(color: .black, width: 2.0),
+        widthPoints: [
+            StrokeWidthPoint(t: 0.25, widthLeft: 3.5, widthRight: 1.25),
+            StrokeWidthPoint(t: 0.75, widthLeft: 2.0, widthRight: 2.0),
+        ],
+        strokeBrush: "default_brushes/flat_10",
+        strokeBrushOverrides: "{\"size\":4}",
+        fillRule: .nonzero))
+    let doc = Document(layers: [Layer(name: "L0", children: [path])])
+
+    let svg = documentToSvg(doc)
+    let doc2 = svgToDocument(svg)
+    guard case .path(let p) = doc2.layers[0].children[0] else {
+        Issue.record("expected a Path back")
+        return
+    }
+    #expect(p.strokeBrush == "default_brushes/flat_10",
+            "a brushed stroke must survive save-and-reopen")
+    #expect(p.strokeBrushOverrides == "{\"size\":4}",
+            "and its per-instance overrides with it")
+    #expect(p.widthPoints.count == 2,
+            "a variable-width profile must survive save-and-reopen")
+    #expect(p.widthPoints[0].t == 0.25)
+    #expect(p.widthPoints[0].widthLeft == 3.5)
+    #expect(p.widthPoints[0].widthRight == 1.25)
+    #expect(p.widthPoints[1].widthLeft == 2.0)
+}

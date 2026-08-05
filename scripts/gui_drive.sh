@@ -72,6 +72,18 @@ fi
 
 # Fail fast and legibly if the browser the probe drives is missing, instead of
 # a bare FileNotFoundError deep inside the first check.
+# --list and --help answer from static tables and never touch the app, so they
+# must not pay for a wasm build. MEASURED 2026-08-04: `--list` on a cold tree
+# blocked ~5 minutes behind `dx serve` (24s build plus the poll) to print nine
+# lines it already had in hand — and the driver's own help advertises it as the
+# cheap way to see what can be checked.
+for _a in "$@"; do
+  case "$_a" in
+    --list|--help|-h)
+      exec "$PYTHON" "$ROOT/scripts/gui_checks.py" "$@" ;;
+  esac
+done
+
 CHROME_BIN="${JAS_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
 if [ ! -x "$CHROME_BIN" ]; then
   echo "gui_drive: Chrome not executable at '$CHROME_BIN'." >&2

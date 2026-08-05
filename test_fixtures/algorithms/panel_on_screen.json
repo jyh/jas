@@ -1,0 +1,1229 @@
+[
+ {
+  "name": "stock_layout_only_front_tabs_are_on_screen",
+  "function": "panel_on_screen",
+  "args": {
+   "layout": {
+    "anchored": [
+     {
+      "dock": {
+       "auto_hide": false,
+       "collapsed": false,
+       "groups": [
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "color",
+          "swatches"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "align",
+          "boolean"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "character",
+          "paragraph"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "stroke",
+          "properties"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "artboards",
+          "layers",
+          "symbols"
+         ]
+        }
+       ],
+       "id": 0,
+       "min_width": 150.0,
+       "width": 240.0
+      },
+      "edge": "right"
+     }
+    ],
+    "appearance": "dark_gray",
+    "floating": [],
+    "focused_panel": null,
+    "hidden_panels": [],
+    "name": "Default",
+    "next_id": 1,
+    "pane_layout": null,
+    "version": 3,
+    "z_order": []
+   }
+  },
+  "expected": {
+   "layers": false,
+   "color": true,
+   "swatches": false,
+   "brushes": false,
+   "gradient": false,
+   "stroke": true,
+   "properties": false,
+   "character": true,
+   "paragraph": false,
+   "artboards": true,
+   "align": true,
+   "boolean": false,
+   "opacity": false,
+   "magic_wand": false,
+   "symbols": false,
+   "concepts": false
+  }
+ },
+ {
+  "name": "activating_a_background_tab_swaps_which_one_is_on_screen",
+  "function": "panel_on_screen",
+  "args": {
+   "layout": {
+    "anchored": [
+     {
+      "dock": {
+       "auto_hide": false,
+       "collapsed": false,
+       "groups": [
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "color",
+          "swatches"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "align",
+          "boolean"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "character",
+          "paragraph"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "stroke",
+          "properties"
+         ]
+        },
+        {
+         "active": 1,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "artboards",
+          "layers",
+          "symbols"
+         ]
+        }
+       ],
+       "id": 0,
+       "min_width": 150.0,
+       "width": 240.0
+      },
+      "edge": "right"
+     }
+    ],
+    "appearance": "dark_gray",
+    "floating": [],
+    "focused_panel": null,
+    "hidden_panels": [],
+    "name": "Default",
+    "next_id": 1,
+    "pane_layout": null,
+    "version": 3,
+    "z_order": []
+   }
+  },
+  "expected": {
+   "layers": true,
+   "color": true,
+   "swatches": false,
+   "brushes": false,
+   "gradient": false,
+   "stroke": true,
+   "properties": false,
+   "character": true,
+   "paragraph": false,
+   "artboards": false,
+   "align": true,
+   "boolean": false,
+   "opacity": false,
+   "magic_wand": false,
+   "symbols": false,
+   "concepts": false
+  }
+ },
+ {
+  "name": "a_collapsed_group_puts_even_its_front_tab_off_screen",
+  "function": "panel_on_screen",
+  "args": {
+   "layout": {
+    "anchored": [
+     {
+      "dock": {
+       "auto_hide": false,
+       "collapsed": false,
+       "groups": [
+        {
+         "active": 0,
+         "collapsed": true,
+         "height": null,
+         "panels": [
+          "color",
+          "swatches"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "align",
+          "boolean"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "character",
+          "paragraph"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "stroke",
+          "properties"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "artboards",
+          "layers",
+          "symbols"
+         ]
+        }
+       ],
+       "id": 0,
+       "min_width": 150.0,
+       "width": 240.0
+      },
+      "edge": "right"
+     }
+    ],
+    "appearance": "dark_gray",
+    "floating": [],
+    "focused_panel": null,
+    "hidden_panels": [],
+    "name": "Default",
+    "next_id": 1,
+    "pane_layout": null,
+    "version": 3,
+    "z_order": []
+   }
+  },
+  "expected": {
+   "layers": false,
+   "color": false,
+   "swatches": false,
+   "brushes": false,
+   "gradient": false,
+   "stroke": true,
+   "properties": false,
+   "character": true,
+   "paragraph": false,
+   "artboards": true,
+   "align": true,
+   "boolean": false,
+   "opacity": false,
+   "magic_wand": false,
+   "symbols": false,
+   "concepts": false
+  }
+ },
+ {
+  "name": "a_collapsed_dock_puts_every_panel_it_holds_off_screen",
+  "function": "panel_on_screen",
+  "args": {
+   "layout": {
+    "anchored": [
+     {
+      "dock": {
+       "auto_hide": false,
+       "collapsed": true,
+       "groups": [
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "color",
+          "swatches"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "align",
+          "boolean"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "character",
+          "paragraph"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "stroke",
+          "properties"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "artboards",
+          "layers",
+          "symbols"
+         ]
+        }
+       ],
+       "id": 0,
+       "min_width": 150.0,
+       "width": 240.0
+      },
+      "edge": "right"
+     }
+    ],
+    "appearance": "dark_gray",
+    "floating": [],
+    "focused_panel": null,
+    "hidden_panels": [],
+    "name": "Default",
+    "next_id": 1,
+    "pane_layout": null,
+    "version": 3,
+    "z_order": []
+   }
+  },
+  "expected": {
+   "layers": false,
+   "color": false,
+   "swatches": false,
+   "brushes": false,
+   "gradient": false,
+   "stroke": false,
+   "properties": false,
+   "character": false,
+   "paragraph": false,
+   "artboards": false,
+   "align": false,
+   "boolean": false,
+   "opacity": false,
+   "magic_wand": false,
+   "symbols": false,
+   "concepts": false
+  }
+ },
+ {
+  "name": "a_visible_dock_pane_changes_nothing",
+  "function": "panel_on_screen",
+  "args": {
+   "layout": {
+    "anchored": [
+     {
+      "dock": {
+       "auto_hide": false,
+       "collapsed": false,
+       "groups": [
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "color",
+          "swatches"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "align",
+          "boolean"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "character",
+          "paragraph"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "stroke",
+          "properties"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "artboards",
+          "layers",
+          "symbols"
+         ]
+        }
+       ],
+       "id": 0,
+       "min_width": 150.0,
+       "width": 240.0
+      },
+      "edge": "right"
+     }
+    ],
+    "appearance": "dark_gray",
+    "floating": [],
+    "focused_panel": null,
+    "hidden_panels": [],
+    "name": "Default",
+    "next_id": 1,
+    "pane_layout": {
+     "canvas_maximized": false,
+     "hidden_panes": [],
+     "next_pane_id": 3,
+     "panes": [
+      {
+       "config": {
+        "collapsed_width": null,
+        "double_click_action": "none",
+        "fixed_width": true,
+        "label": "Tools",
+        "min_height": 200.0,
+        "min_width": 72.0
+       },
+       "height": 800.0,
+       "id": 0,
+       "kind": "toolbar",
+       "width": 72.0,
+       "x": 0.0,
+       "y": 0.0
+      },
+      {
+       "config": {
+        "collapsed_width": null,
+        "double_click_action": "maximize",
+        "fixed_width": false,
+        "label": "Canvas",
+        "min_height": 200.0,
+        "min_width": 200.0
+       },
+       "height": 800.0,
+       "id": 1,
+       "kind": "canvas",
+       "width": 888.0,
+       "x": 72.0,
+       "y": 0.0
+      },
+      {
+       "config": {
+        "collapsed_width": 36.0,
+        "double_click_action": "redock",
+        "fixed_width": false,
+        "label": "Panels",
+        "min_height": 100.0,
+        "min_width": 150.0
+       },
+       "height": 800.0,
+       "id": 2,
+       "kind": "dock",
+       "width": 240.0,
+       "x": 960.0,
+       "y": 0.0
+      }
+     ],
+     "snaps": [
+      {
+       "edge": "left",
+       "pane": 0,
+       "target": {
+        "window": "left"
+       }
+      },
+      {
+       "edge": "top",
+       "pane": 0,
+       "target": {
+        "window": "top"
+       }
+      },
+      {
+       "edge": "bottom",
+       "pane": 0,
+       "target": {
+        "window": "bottom"
+       }
+      },
+      {
+       "edge": "right",
+       "pane": 0,
+       "target": {
+        "pane": {
+         "edge": "left",
+         "id": 1
+        }
+       }
+      },
+      {
+       "edge": "top",
+       "pane": 1,
+       "target": {
+        "window": "top"
+       }
+      },
+      {
+       "edge": "bottom",
+       "pane": 1,
+       "target": {
+        "window": "bottom"
+       }
+      },
+      {
+       "edge": "right",
+       "pane": 1,
+       "target": {
+        "pane": {
+         "edge": "left",
+         "id": 2
+        }
+       }
+      },
+      {
+       "edge": "right",
+       "pane": 2,
+       "target": {
+        "window": "right"
+       }
+      },
+      {
+       "edge": "top",
+       "pane": 2,
+       "target": {
+        "window": "top"
+       }
+      },
+      {
+       "edge": "bottom",
+       "pane": 2,
+       "target": {
+        "window": "bottom"
+       }
+      }
+     ],
+     "viewport_height": 800.0,
+     "viewport_width": 1200.0,
+     "z_order": [
+      1,
+      0,
+      2
+     ]
+    },
+    "version": 3,
+    "z_order": []
+   }
+  },
+  "expected": {
+   "layers": false,
+   "color": true,
+   "swatches": false,
+   "brushes": false,
+   "gradient": false,
+   "stroke": true,
+   "properties": false,
+   "character": true,
+   "paragraph": false,
+   "artboards": true,
+   "align": true,
+   "boolean": false,
+   "opacity": false,
+   "magic_wand": false,
+   "symbols": false,
+   "concepts": false
+  }
+ },
+ {
+  "name": "a_hidden_dock_pane_puts_every_anchored_panel_off_screen",
+  "function": "panel_on_screen",
+  "args": {
+   "layout": {
+    "anchored": [
+     {
+      "dock": {
+       "auto_hide": false,
+       "collapsed": false,
+       "groups": [
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "color",
+          "swatches"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "align",
+          "boolean"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "character",
+          "paragraph"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "stroke",
+          "properties"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "artboards",
+          "layers",
+          "symbols"
+         ]
+        }
+       ],
+       "id": 0,
+       "min_width": 150.0,
+       "width": 240.0
+      },
+      "edge": "right"
+     }
+    ],
+    "appearance": "dark_gray",
+    "floating": [],
+    "focused_panel": null,
+    "hidden_panels": [],
+    "name": "Default",
+    "next_id": 1,
+    "pane_layout": {
+     "canvas_maximized": false,
+     "hidden_panes": [
+      "dock"
+     ],
+     "next_pane_id": 3,
+     "panes": [
+      {
+       "config": {
+        "collapsed_width": null,
+        "double_click_action": "none",
+        "fixed_width": true,
+        "label": "Tools",
+        "min_height": 200.0,
+        "min_width": 72.0
+       },
+       "height": 800.0,
+       "id": 0,
+       "kind": "toolbar",
+       "width": 72.0,
+       "x": 0.0,
+       "y": 0.0
+      },
+      {
+       "config": {
+        "collapsed_width": null,
+        "double_click_action": "maximize",
+        "fixed_width": false,
+        "label": "Canvas",
+        "min_height": 200.0,
+        "min_width": 200.0
+       },
+       "height": 800.0,
+       "id": 1,
+       "kind": "canvas",
+       "width": 888.0,
+       "x": 72.0,
+       "y": 0.0
+      },
+      {
+       "config": {
+        "collapsed_width": 36.0,
+        "double_click_action": "redock",
+        "fixed_width": false,
+        "label": "Panels",
+        "min_height": 100.0,
+        "min_width": 150.0
+       },
+       "height": 800.0,
+       "id": 2,
+       "kind": "dock",
+       "width": 240.0,
+       "x": 960.0,
+       "y": 0.0
+      }
+     ],
+     "snaps": [
+      {
+       "edge": "left",
+       "pane": 0,
+       "target": {
+        "window": "left"
+       }
+      },
+      {
+       "edge": "top",
+       "pane": 0,
+       "target": {
+        "window": "top"
+       }
+      },
+      {
+       "edge": "bottom",
+       "pane": 0,
+       "target": {
+        "window": "bottom"
+       }
+      },
+      {
+       "edge": "right",
+       "pane": 0,
+       "target": {
+        "pane": {
+         "edge": "left",
+         "id": 1
+        }
+       }
+      },
+      {
+       "edge": "top",
+       "pane": 1,
+       "target": {
+        "window": "top"
+       }
+      },
+      {
+       "edge": "bottom",
+       "pane": 1,
+       "target": {
+        "window": "bottom"
+       }
+      },
+      {
+       "edge": "right",
+       "pane": 1,
+       "target": {
+        "pane": {
+         "edge": "left",
+         "id": 2
+        }
+       }
+      },
+      {
+       "edge": "right",
+       "pane": 2,
+       "target": {
+        "window": "right"
+       }
+      },
+      {
+       "edge": "top",
+       "pane": 2,
+       "target": {
+        "window": "top"
+       }
+      },
+      {
+       "edge": "bottom",
+       "pane": 2,
+       "target": {
+        "window": "bottom"
+       }
+      }
+     ],
+     "viewport_height": 800.0,
+     "viewport_width": 1200.0,
+     "z_order": [
+      1,
+      0,
+      2
+     ]
+    },
+    "version": 3,
+    "z_order": []
+   }
+  },
+  "expected": {
+   "layers": false,
+   "color": false,
+   "swatches": false,
+   "brushes": false,
+   "gradient": false,
+   "stroke": false,
+   "properties": false,
+   "character": false,
+   "paragraph": false,
+   "artboards": false,
+   "align": false,
+   "boolean": false,
+   "opacity": false,
+   "magic_wand": false,
+   "symbols": false,
+   "concepts": false
+  }
+ },
+ {
+  "name": "a_floating_dock_is_not_gated_by_the_dock_pane",
+  "function": "panel_on_screen",
+  "args": {
+   "layout": {
+    "anchored": [
+     {
+      "dock": {
+       "auto_hide": false,
+       "collapsed": false,
+       "groups": [
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "color",
+          "swatches"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "align",
+          "boolean"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "character",
+          "paragraph"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "stroke",
+          "properties"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "artboards",
+          "layers",
+          "symbols"
+         ]
+        }
+       ],
+       "id": 0,
+       "min_width": 150.0,
+       "width": 240.0
+      },
+      "edge": "right"
+     }
+    ],
+    "appearance": "dark_gray",
+    "floating": [
+     {
+      "dock": {
+       "auto_hide": false,
+       "collapsed": false,
+       "groups": [
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "gradient",
+          "brushes"
+         ]
+        }
+       ],
+       "id": 1,
+       "min_width": 150.0,
+       "width": 220.0
+      },
+      "x": 100.0,
+      "y": 200.0
+     }
+    ],
+    "focused_panel": null,
+    "hidden_panels": [],
+    "name": "Default",
+    "next_id": 1,
+    "pane_layout": {
+     "canvas_maximized": false,
+     "hidden_panes": [
+      "dock"
+     ],
+     "next_pane_id": 3,
+     "panes": [
+      {
+       "config": {
+        "collapsed_width": null,
+        "double_click_action": "none",
+        "fixed_width": true,
+        "label": "Tools",
+        "min_height": 200.0,
+        "min_width": 72.0
+       },
+       "height": 800.0,
+       "id": 0,
+       "kind": "toolbar",
+       "width": 72.0,
+       "x": 0.0,
+       "y": 0.0
+      },
+      {
+       "config": {
+        "collapsed_width": null,
+        "double_click_action": "maximize",
+        "fixed_width": false,
+        "label": "Canvas",
+        "min_height": 200.0,
+        "min_width": 200.0
+       },
+       "height": 800.0,
+       "id": 1,
+       "kind": "canvas",
+       "width": 888.0,
+       "x": 72.0,
+       "y": 0.0
+      },
+      {
+       "config": {
+        "collapsed_width": 36.0,
+        "double_click_action": "redock",
+        "fixed_width": false,
+        "label": "Panels",
+        "min_height": 100.0,
+        "min_width": 150.0
+       },
+       "height": 800.0,
+       "id": 2,
+       "kind": "dock",
+       "width": 240.0,
+       "x": 960.0,
+       "y": 0.0
+      }
+     ],
+     "snaps": [
+      {
+       "edge": "left",
+       "pane": 0,
+       "target": {
+        "window": "left"
+       }
+      },
+      {
+       "edge": "top",
+       "pane": 0,
+       "target": {
+        "window": "top"
+       }
+      },
+      {
+       "edge": "bottom",
+       "pane": 0,
+       "target": {
+        "window": "bottom"
+       }
+      },
+      {
+       "edge": "right",
+       "pane": 0,
+       "target": {
+        "pane": {
+         "edge": "left",
+         "id": 1
+        }
+       }
+      },
+      {
+       "edge": "top",
+       "pane": 1,
+       "target": {
+        "window": "top"
+       }
+      },
+      {
+       "edge": "bottom",
+       "pane": 1,
+       "target": {
+        "window": "bottom"
+       }
+      },
+      {
+       "edge": "right",
+       "pane": 1,
+       "target": {
+        "pane": {
+         "edge": "left",
+         "id": 2
+        }
+       }
+      },
+      {
+       "edge": "right",
+       "pane": 2,
+       "target": {
+        "window": "right"
+       }
+      },
+      {
+       "edge": "top",
+       "pane": 2,
+       "target": {
+        "window": "top"
+       }
+      },
+      {
+       "edge": "bottom",
+       "pane": 2,
+       "target": {
+        "window": "bottom"
+       }
+      }
+     ],
+     "viewport_height": 800.0,
+     "viewport_width": 1200.0,
+     "z_order": [
+      1,
+      0,
+      2
+     ]
+    },
+    "version": 3,
+    "z_order": []
+   }
+  },
+  "expected": {
+   "layers": false,
+   "color": false,
+   "swatches": false,
+   "brushes": false,
+   "gradient": true,
+   "stroke": false,
+   "properties": false,
+   "character": false,
+   "paragraph": false,
+   "artboards": false,
+   "align": false,
+   "boolean": false,
+   "opacity": false,
+   "magic_wand": false,
+   "symbols": false,
+   "concepts": false
+  }
+ },
+ {
+  "name": "a_collapsed_floating_dock_is_off_screen_too",
+  "function": "panel_on_screen",
+  "args": {
+   "layout": {
+    "anchored": [
+     {
+      "dock": {
+       "auto_hide": false,
+       "collapsed": false,
+       "groups": [
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "color",
+          "swatches"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "align",
+          "boolean"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "character",
+          "paragraph"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "stroke",
+          "properties"
+         ]
+        },
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "artboards",
+          "layers",
+          "symbols"
+         ]
+        }
+       ],
+       "id": 0,
+       "min_width": 150.0,
+       "width": 240.0
+      },
+      "edge": "right"
+     }
+    ],
+    "appearance": "dark_gray",
+    "floating": [
+     {
+      "dock": {
+       "auto_hide": false,
+       "collapsed": true,
+       "groups": [
+        {
+         "active": 0,
+         "collapsed": false,
+         "height": null,
+         "panels": [
+          "gradient",
+          "brushes"
+         ]
+        }
+       ],
+       "id": 1,
+       "min_width": 150.0,
+       "width": 220.0
+      },
+      "x": 100.0,
+      "y": 200.0
+     }
+    ],
+    "focused_panel": null,
+    "hidden_panels": [],
+    "name": "Default",
+    "next_id": 1,
+    "pane_layout": null,
+    "version": 3,
+    "z_order": []
+   }
+  },
+  "expected": {
+   "layers": false,
+   "color": true,
+   "swatches": false,
+   "brushes": false,
+   "gradient": false,
+   "stroke": true,
+   "properties": false,
+   "character": true,
+   "paragraph": false,
+   "artboards": true,
+   "align": true,
+   "boolean": false,
+   "opacity": false,
+   "magic_wand": false,
+   "symbols": false,
+   "concepts": false
+  }
+ }
+]

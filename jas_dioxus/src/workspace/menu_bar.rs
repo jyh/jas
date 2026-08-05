@@ -475,7 +475,10 @@ pub(crate) fn MenuBarView(
     // (None for separators / dynamic submenus) so the renderer can evaluate
     // them live against the menu ctx below — the SAME evaluation the cross-app
     // `menu_state` gate pins.
-    type MenuItem = (String, String, String, Option<String>, Option<String>);
+    // (id, label, cmd, shortcut, enabled_when, checked_when). `id` is the
+    // menubar.yaml item id, emitted as the DOM id so a menu entry is
+    // spec-addressed rather than matched on its text.
+    type MenuItem = (String, String, String, String, Option<String>, Option<String>);
     let menus_owned: Vec<(String, Vec<MenuItem>)> =
         super::menu::menu_bar_model()
             .iter()
@@ -485,16 +488,17 @@ pub(crate) fn MenuBarView(
                     .iter()
                     .map(|e| match e {
                         super::menu::MenuEntry::Separator => {
-                            ("---".to_string(), String::new(), String::new(), None, None)
+                            (String::new(), "---".to_string(), String::new(), String::new(), None, None)
                         }
                         super::menu::MenuEntry::DynamicSubmenu { label, kind } => {
                             let cmd = match kind {
                                 super::menu::SubmenuKind::Workspace => "workspace_submenu",
                                 super::menu::SubmenuKind::Appearance => "appearance_submenu",
                             };
-                            (strip_mnemonic(label), cmd.to_string(), String::new(), None, None)
+                            (String::new(), strip_mnemonic(label), cmd.to_string(), String::new(), None, None)
                         }
                         super::menu::MenuEntry::Action {
+                            id,
                             label,
                             action,
                             params,
@@ -502,6 +506,7 @@ pub(crate) fn MenuBarView(
                             enabled_when,
                             checked_when,
                         } => (
+                            id.clone(),
                             strip_mnemonic(label),
                             cmd_for(action, params),
                             shortcut.clone(),
@@ -536,7 +541,7 @@ pub(crate) fn MenuBarView(
 
         // Pre-build item nodes for this menu
         let item_nodes: Vec<Result<VNode, RenderError>> = if is_open {
-            items.iter().flat_map(|(label, cmd, shortcut, enabled_when, checked_when)| {
+            items.iter().flat_map(|(item_id, label, cmd, shortcut, enabled_when, checked_when)| {
                 if label.as_str() == "---" {
                     vec![rsx! {
                         div {
@@ -794,8 +799,10 @@ pub(crate) fn MenuBarView(
                     let item_class = if enabled { "jas-menu-item" } else { "" };
                     let cursor = if enabled { "pointer" } else { "default" };
                     let text_color = if enabled { THEME_TEXT } else { THEME_TEXT_DIM };
+                    let dom_id = item_id.clone();
                     vec![rsx! {
                         div {
+                            id: "{dom_id}",
                             class: "{item_class}",
                             style: "padding:4px 24px 4px 8px; cursor:{cursor}; font-size:13px; color:{text_color}; display:flex; justify-content:space-between; white-space:nowrap; border-radius:3px; margin:0 4px;",
                             onmousedown: move |evt: Event<MouseData>| {
@@ -881,7 +888,7 @@ pub(crate) fn MenuBarView(
 ///   modified, has_filename = filename does NOT start with "Untitled-",
 ///   active_layer_locked).
 /// - `workspace.has_saved_layout`: active layout != the system "Workspace".
-/// - `panels.<id>`: is_panel_visible for all 16 Window-menu panel ids.
+/// - `panels.<id>`: panel_on_screen for all 16 Window-menu panel ids.
 /// - `panes.<id>`: is_pane_visible for toolbar / dock.
 fn build_menu_ctx(st: &AppState) -> serde_json::Value {
     use super::workspace::{PaneKind, PanelKind, WORKSPACE_LAYOUT_NAME};
@@ -943,7 +950,7 @@ fn build_menu_ctx(st: &AppState) -> serde_json::Value {
     ];
     let mut panels = serde_json::Map::new();
     for (id, kind) in panel_kinds {
-        panels.insert(id.to_string(), J::Bool(st.workspace_layout.is_panel_visible(kind)));
+        panels.insert(id.to_string(), J::Bool(st.workspace_layout.panel_on_screen(kind)));
     }
 
     let mut panes = serde_json::Map::new();
@@ -1173,7 +1180,8 @@ mod tests {
             );
         }
 
-        // checked_when wiring: panels.<id> must equal live is_panel_visible.
+        // checked_when wiring: panels.<id> must equal live panel_on_screen
+        // (what is DRAWN), not mere group membership.
         crate::workspace::layout_apply::layout_apply(
             &mut st.workspace_layout,
             &crate::workspace::layout_apply::op_show_panel(PanelKind::Layers),
@@ -1182,8 +1190,8 @@ mod tests {
         let eval2 = |e: &str| crate::interpreter::expr::eval(e, &ctx2).to_bool();
         assert_eq!(
             eval2("panels.layers"),
-            st.workspace_layout.is_panel_visible(PanelKind::Layers),
-            "panels.layers checked_when must equal is_panel_visible",
+            st.workspace_layout.panel_on_screen(PanelKind::Layers),
+            "panels.layers checked_when must equal panel_on_screen",
         );
         assert!(eval2("panels.layers"), "Layers checked after op_show_panel");
         // concepts now HAS a PanelKind but is not in the default layout, so it
@@ -1263,12 +1271,16 @@ mod tests {
         let (_, dock) = st.workspace_layout.anchored.first().unwrap();
         let dock_id = dock.id;
         let before = dock.groups.len();
-        // Default group 0 = [color, swatches]; both are on screen, so the
-        // first toggle of each HIDES it. Emptying the group must drop it.
-        assert!(st.workspace_layout.is_panel_visible(PanelKind::Color));
-        assert!(st.workspace_layout.is_panel_visible(PanelKind::Swatches));
-        toggle_panel(&mut st, "swatches");
-        toggle_panel(&mut st, "color");
+        // Default group 0 = [color, swatches] — a TAB STACK, so only Color
+        // is drawn. Swatches is a member that is on screen nowhere, and the
+        // toggle raises it before it can hide it.
+        assert!(st.workspace_layout.panel_on_screen(PanelKind::Color));
+        assert!(!st.workspace_layout.panel_on_screen(PanelKind::Swatches));
+        toggle_panel(&mut st, "swatches"); // raise: Swatches to the front
+        assert!(st.workspace_layout.panel_on_screen(PanelKind::Swatches));
+        assert!(!st.workspace_layout.panel_on_screen(PanelKind::Color));
+        toggle_panel(&mut st, "swatches"); // now drawn, so this hides it
+        toggle_panel(&mut st, "color"); // sole survivor, drawn again, hides
         assert!(!st.workspace_layout.is_panel_visible(PanelKind::Color));
         assert!(!st.workspace_layout.is_panel_visible(PanelKind::Swatches));
         let after = st.workspace_layout.dock(dock_id).unwrap().groups.len();

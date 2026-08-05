@@ -202,7 +202,7 @@ EXEMPT_PREFIXES = (
 def tracked_files(root: pathlib.Path) -> list[str]:
     out = subprocess.run(
         ["git", "ls-files", "-z"],
-        cwd=root, capture_output=True, text=True, check=True,
+        cwd=root, capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout
     return [p for p in out.split("\0") if p]
 

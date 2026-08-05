@@ -2952,9 +2952,21 @@ impl AppState {
         // Hit-test against the current selection using preview
         // bounds (matches what the user sees).
         let mut hit: Option<crate::document::document::ElementPath> = None;
+        // RESOLVED: a symbol instance measures its TARGET, so the narrow form
+        // put its box at the ORIGIN — Align To in key-object mode could not
+        // designate a selected instance as the key, and a click near (0,0)
+        // designated one that is drawn nowhere near there.
+        let key_index = crate::document::id_index::rebuild_id_index(doc);
+        let key_resolver = crate::document::id_index::IndexResolver(&key_index);
         for es in &doc.selection {
             if let Some(e) = doc.get_element(&es.path) {
-                let (bx, by, bw, bh) = e.bounds();
+                let Some((bx, by, bw, bh)) = crate::geometry::element::resolved_bounds_with(
+                    e,
+                    &key_resolver,
+                    crate::geometry::element::Element::bounds,
+                ) else {
+                    continue;
+                };
                 if doc_x >= bx && doc_x <= bx + bw && doc_y >= by && doc_y <= by + bh {
                     hit = Some(es.path.clone());
                     break;

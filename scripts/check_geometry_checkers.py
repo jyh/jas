@@ -336,7 +336,7 @@ def _git_tracked(pathspec):
     """
     try:
         out = subprocess.run(["git", "ls-files", pathspec], cwd=REPO,
-                             capture_output=True, text=True,
+                             capture_output=True, text=True, encoding="utf-8",
                              check=True).stdout
     except (OSError, subprocess.CalledProcessError) as e:
         raise RuntimeError(
@@ -357,7 +357,7 @@ def _git_tracks(path):
         return False
     try:
         out = subprocess.run(["git", "ls-files", "--", rel], cwd=REPO,
-                             capture_output=True, text=True,
+                             capture_output=True, text=True, encoding="utf-8",
                              check=True).stdout
     except (OSError, subprocess.CalledProcessError):
         return False
@@ -368,9 +368,29 @@ def _git_tracks(path):
 # The rules
 # ---------------------------------------------------------------------------
 
+# A TEST of the law is not the law. `spec/geometry/tests/test_*.py` exercises
+# the analytic tier and must be able to import a test framework -- but ONLY a
+# test framework. The purity rule protects the INSTRUMENT from reaching into an
+# implementation; it was never about forbidding the instrument from being
+# tested, and until 2026-08-03 the analytic tier had no tests at all, so the
+# distinction had never come up.
+#
+# Deliberately NOT solved by adding `pytest` to TCB_ALLOWED_IMPORTS: that would
+# let the LAW ITSELF import pytest, which is a different and much worse thing.
+# The extra permission is scoped to files that are tests, and to that one name.
+TCB_TEST_EXTRA_IMPORTS = {"pytest"}
+
+
+def _is_tcb_test(rel):
+    """A test file under the TCB root, by path shape."""
+    parts = rel.replace("\\", "/").split("/")
+    return "tests" in parts and parts[-1].startswith("test_")
+
+
 def import_leaks(rel, src):
     """Non-stdlib imports in one `spec/` module. Pure, so the self-test can
     prove the red on synthetic source rather than by writing into the tree."""
+    allowed = TCB_ALLOWED_IMPORTS | (TCB_TEST_EXTRA_IMPORTS if _is_tcb_test(rel) else set())
     errors = []
     for node in ast.walk(ast.parse(src, filename=rel)):
         if isinstance(node, ast.Import):
@@ -382,7 +402,7 @@ def import_leaks(rel, src):
         else:
             continue
         for name in names:
-            if name not in TCB_ALLOWED_IMPORTS:
+            if name not in allowed:
                 errors.append(
                     f"tcb: {rel} imports `{name}`, which is not standard "
                     f"library. The analytic tier must import nothing from "

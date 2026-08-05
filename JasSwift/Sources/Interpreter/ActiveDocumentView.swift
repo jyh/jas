@@ -43,6 +43,9 @@ public func buildActiveDocumentView(
             "artboards_panel_selection_ids": artboardsPanelSelection,
             "symbols": [] as [Any],
             "selected_concept": NSNull(),
+            // Empty, not absent: a `foreach` over a MISSING key and one over an
+            // empty list are different failures, and only one of them is quiet.
+            "deletable_empty_artboard_ids": [] as [Any],
         ]
     }
     var topLevelLayers: [[String: Any]] = []
@@ -183,6 +186,10 @@ public func buildActiveDocumentView(
         // Concepts panel Slice 2: the single selected Generated instance's
         // concept (param schema merged with its current values), or null.
         "selected_concept": selectedConceptView(m.document),
+        // The ids `delete_empty_artboards` may remove — already filtered by the
+        // preserve-position-1 rule, so the action's `foreach` stays a plain
+        // mirror of `delete_artboards`. See `deletableEmptyArtboardIds`.
+        "deletable_empty_artboard_ids": deletableEmptyArtboardIds(m.document),
     ]
 }
 

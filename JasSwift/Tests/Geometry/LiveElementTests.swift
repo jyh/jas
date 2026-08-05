@@ -6,11 +6,10 @@ import Foundation
 /// generation-epoch tests below exercise the GENERATION half of the epoch with
 /// the owner held fixed. The owner half has its own test
 /// (`twoOwnersAtTheSameGenerationDoNotShareCacheEntries`).
-private final class TestCacheOwner {}
-private let testCacheOwner = TestCacheOwner()
+private let testCacheOwner: UInt64 = 900_001
 
 private func setTestRecomputeEpoch(_ generation: UInt64) {
-    setRecomputeCacheEpoch(owner: ObjectIdentifier(testCacheOwner), generation: generation)
+    setRecomputeCacheEpoch(owner: testCacheOwner, generation: generation)
 }
 
 /// Tests for the LiveElement framework — mirror jas_dioxus live.rs
@@ -927,12 +926,12 @@ private func ringAreaAbs(_ ring: BoolRing) -> Double {
 /// ("two tabs whose independent generation counters could otherwise collide at
 /// the same value"); the recompute cache did not.
 @Test func twoOwnersAtTheSameGenerationDoNotShareCacheEntries() {
-    final class Owner {}
-    let tabA = Owner(), tabB = Owner()
+    // Distinct never-reused identities, as `Model.recomputeIdentity` mints.
+    let tabA: UInt64 = 900_100, tabB: UInt64 = 900_101
     clearRecomputeCacheForTest()
 
     // Tab A: "shared-id" is a 10x10 at the origin. Populate the cache.
-    setRecomputeCacheEpoch(owner: ObjectIdentifier(tabA), generation: 4)
+    setRecomputeCacheEpoch(owner: tabA, generation: 4)
     let resolverA = CellResolver()
     resolverA.set("shared-id", rectAt(0, 0))
     var vA = VisitSet()
@@ -941,7 +940,7 @@ private func ringAreaAbs(_ ring: BoolRing) -> Double {
     #expect(recomputeCacheStateForTest("shared-id", DEFAULT_PRECISION) == .pure)
 
     // Tab B: SAME id, SAME generation, DIFFERENT geometry.
-    setRecomputeCacheEpoch(owner: ObjectIdentifier(tabB), generation: 4)
+    setRecomputeCacheEpoch(owner: tabB, generation: 4)
     #expect(recomputeCacheStateForTest("shared-id", DEFAULT_PRECISION) == nil,
             "a different owner at the same generation must not inherit the entry")
     let resolverB = CellResolver()
