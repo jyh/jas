@@ -106,8 +106,7 @@
         "strokeBrush",
         "strokeBrushOverrides",
         "strokeGradient",
-        "toolOrigin",
-        "widthPoints"
+        "toolOrigin"
       ]
     },
     "JasSwift/Sources/Document/Controller.swift::Polygon": {

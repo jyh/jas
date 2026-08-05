@@ -111,6 +111,31 @@ private func booleanToolOrigin(_ e: Element) -> String? {
 /// `applyDestructiveBoolean` already wait on. Before this fix EVERY container
 /// operand answered `nil` at every one of those sites, so this narrows the open
 /// class rather than widening it.
+/// The three stroke-PROFILE fields a `Polygon` has no slot for, resolved
+/// through a container exactly as ``booleanPaintSource`` resolves paint.
+///
+/// `nil` when the source carries none of them — the common case, which keeps a
+/// profile-less survivor demoting to `Polygon` exactly as before. When it is
+/// non-nil a boolean survivor MUST emit `Path`: EDIT_SEMANTICS_FREEZE.md §3.5
+/// rules the demotion a VIOLATION of §3.1 for the 1 -> 1 arms, because the
+/// output representation has nowhere to put these. Twin of Rust's
+/// `resolved_stroke_profile`.
+struct StrokeProfile {
+    var widthPoints: [StrokeWidthPoint]
+    var strokeBrush: String?
+    var strokeBrushOverrides: String?
+}
+
+func resolvedStrokeProfile(_ e: Element) -> StrokeProfile? {
+    guard case .path(let p) = booleanPaintSource(e) else { return nil }
+    if p.widthPoints.isEmpty && p.strokeBrush == nil && p.strokeBrushOverrides == nil {
+        return nil
+    }
+    return StrokeProfile(widthPoints: p.widthPoints,
+                         strokeBrush: p.strokeBrush,
+                         strokeBrushOverrides: p.strokeBrushOverrides)
+}
+
 func booleanPaintSource(_ e: Element) -> Element {
     var first: Element?
     e.forEachPaintable { leaf in if first == nil { first = leaf } }
@@ -1738,7 +1763,11 @@ public class Controller {
 
         // outputs: one (polygonSet, fill, stroke, common) tuple per fragment —
         // the same shape Rust's `apply_destructive_boolean_minting` builds.
-        var outputs: [(BoolPolygonSet, Fill?, Stroke?, BooleanCommon)] = []
+        // The 5th slot is the survivor's STROKE PROFILE — the width points /
+        // brush a `Polygon` has no slot for. `nil` for every N -> 1 arm (the
+        // product is new material) and for a survivor carrying none, so
+        // nothing moves unless something would be LOST.
+        var outputs: [(BoolPolygonSet, Fill?, Stroke?, BooleanCommon, StrokeProfile?)] = []
         switch opName {
         case "union", "intersection", "exclude":
             let sets = elements.map { elementToPolygonSet($0, precision: precision) }
@@ -1783,8 +1812,9 @@ public class Controller {
                 }
                 common.id = minted[0]
             }
+            // N -> 1: the product is new material, not a survivor.
             outputs.append((applyOperation(op, sets), front.fill, front.stroke,
-                            common))
+                            common, nil))
         case "subtract_front", "crop":
             let cutter = elementToPolygonSet(elements.last!, precision: precision)
             for (i, survivor) in elements.dropLast().enumerated() {
@@ -1798,7 +1828,8 @@ public class Controller {
                 // geometry and lost its paint before this.
                 let src = paintSources[i]
                 outputs.append((res, src.fill, src.stroke,
-                                BooleanCommon(preserving: src, operand: survivor)))
+                                BooleanCommon(preserving: src, operand: survivor),
+                                resolvedStrokeProfile(survivor)))
             }
         case "subtract_back":
             let cutter = elementToPolygonSet(elements.first!, precision: precision)
@@ -1807,7 +1838,8 @@ public class Controller {
                 let src = paintSources[i]
                 outputs.append((booleanSubtract(sSet, cutter),
                                 src.fill, src.stroke,
-                                BooleanCommon(preserving: src, operand: survivor)))
+                                BooleanCommon(preserving: src, operand: survivor),
+                                resolvedStrokeProfile(survivor)))
             }
         case "divide":
             // Walk operands back-to-front, maintaining a partition
@@ -1841,13 +1873,18 @@ public class Controller {
                 // ports in one commit, exactly as the transform-blind class is
                 // scheduled to.
                 let src = paintSources[paintIdx]
+                // DIVIDE splits: a piece is not a 1 -> 1 survivor, and a
+                // width profile is parameterised along the WHOLE path, so
+                // copying it onto each piece would invent a shape the artist
+                // never drew.
                 outputs.append((region, src.fill, src.stroke,
                                 BooleanCommon(preserving: src,
-                                              operand: elements[paintIdx])))
+                                              operand: elements[paintIdx]),
+                                nil))
             }
         case "trim", "merge":
             let operandSets = elements.map { elementToPolygonSet($0, precision: precision) }
-            var trimmed: [(BoolPolygonSet, Fill?, Stroke?, BooleanCommon)] = []
+            var trimmed: [(BoolPolygonSet, Fill?, Stroke?, BooleanCommon, StrokeProfile?)] = []
             for i in 0..<elements.count {
                 var region = operandSets[i]
                 for later in operandSets[(i + 1)...] {
@@ -1861,7 +1898,8 @@ public class Controller {
                     let src = paintSources[i]
                     trimmed.append((region, src.fill, src.stroke,
                                     BooleanCommon(preserving: src,
-                                                  operand: elements[i])))
+                                                  operand: elements[i]),
+                                    resolvedStrokeProfile(elements[i])))
                 }
             }
             if opName == "trim" {
@@ -1895,7 +1933,7 @@ public class Controller {
                             }
                         }
                     }
-                    outputs.append((merged, fillI, strokeWinner, commonWinner))
+                    outputs.append((merged, fillI, strokeWinner, commonWinner, nil))
                 }
             }
         default:
@@ -1940,7 +1978,7 @@ public class Controller {
         // ratified four-property paint list), so it waits on a ruling and is
         // not guessed here.
         var newElements: [Element] = []
-        for (ps, fill, stroke, common) in outputs {
+        for (ps, fill, stroke, common, profile) in outputs {
             if opName == "divide" && options.divideRemoveUnpainted
                && fill == nil && stroke == nil {
                 continue
@@ -1951,7 +1989,13 @@ public class Controller {
                     : ring
             }.filter { $0.count >= 3 }
             if kept.isEmpty { continue }
-            if kept.count == 1 {
+            // A single ring is a Polygon — UNLESS the survivor carried a
+            // stroke profile, which Polygon has no slot for. §3.5 rules that
+            // demotion a VIOLATION of §3.1 for the 1 -> 1 arms: the artist's
+            // variable-width or brushed stroke would vanish at the instant of
+            // the cut. Path is the superset. A profile-less survivor still
+            // emits Polygon, so nothing else moves.
+            if kept.count == 1 && profile == nil {
                 // A Polygon has no `toolOrigin` slot in this port; see
                 // `BooleanCommon`'s note.
                 newElements.append(.polygon(Polygon(
@@ -1974,16 +2018,22 @@ public class Controller {
                     for p in ring[1...] { d.append(.lineTo(p.0, p.1)) }
                     d.append(.closePath)
                 }
+                // Same law on the multi-ring side: this arm passed no profile
+                // at all, so a cut that happened to produce two rings lost it
+                // just as silently as the single-ring demotion above.
                 newElements.append(.path(Path(
                     d: d,
                     fill: fill,
                     stroke: stroke,
+                    widthPoints: profile?.widthPoints ?? [],
                     opacity: common.opacity,
                     transform: common.transform,
                     locked: common.locked,
                     visibility: common.visibility,
                     blendMode: common.blendMode,
                     mask: common.mask,
+                    strokeBrush: profile?.strokeBrush,
+                    strokeBrushOverrides: profile?.strokeBrushOverrides,
                     toolOrigin: common.toolOrigin,
                     name: common.name,
                     id: common.id,

@@ -2229,7 +2229,17 @@ impl Controller {
 
         // (PolygonSet, fill, stroke, common) tuples; flattened to
         // Polygon elements below. Empty polygon sets are skipped.
-        let mut outputs: Vec<(PolygonSet, Option<Fill>, Option<Stroke>, CommonProps)> = Vec::new();
+        // The 5th slot is the survivor's STROKE PROFILE — the width points /
+        // brush a `Polygon` has no slot for. `None` for every N -> 1 arm (the
+        // product is new material and inherits no profile) and for a survivor
+        // that carries none, so nothing moves unless something would be LOST.
+        let mut outputs: Vec<(
+            PolygonSet,
+            Option<Fill>,
+            Option<Stroke>,
+            CommonProps,
+            Option<crate::geometry::element::StrokeProfile>,
+        )> = Vec::new();
         let precision = options.precision;
 
         match op_name {
@@ -2315,6 +2325,8 @@ impl Controller {
                     crate::geometry::element::resolved_fill(front),
                     crate::geometry::element::resolved_stroke(front),
                     common,
+                    // N -> 1: the product is new material, not a survivor.
+                    None,
                 ));
             }
             "subtract_front" | "crop" => {
@@ -2337,6 +2349,7 @@ impl Controller {
                         crate::geometry::element::resolved_fill(survivor),
                         crate::geometry::element::resolved_stroke(survivor),
                         source_common(survivor),
+                        crate::geometry::element::resolved_stroke_profile(survivor),
                     ));
                 }
             }
@@ -2350,6 +2363,7 @@ impl Controller {
                         crate::geometry::element::resolved_fill(survivor),
                         crate::geometry::element::resolved_stroke(survivor),
                         source_common(survivor),
+                        crate::geometry::element::resolved_stroke_profile(survivor),
                     ));
                 }
             }
@@ -2447,6 +2461,13 @@ impl Controller {
                         crate::geometry::element::resolved_fill(src),
                         crate::geometry::element::resolved_stroke(src),
                         common,
+                        // DIVIDE splits: a piece is not a 1 -> 1 survivor, and
+                        // a width profile is parameterised along the WHOLE
+                        // path, so copying it onto each piece would invent a
+                        // shape the artist never drew. The unsplit-divide
+                        // degenerate case (one operand, one region) is the
+                        // only 1 -> 1 divide and is left with the rest.
+                        None,
                     ));
                 }
             }
@@ -2487,6 +2508,9 @@ impl Controller {
                     for (region, fill, stroke, i) in trimmed {
                         outputs.push((
                             region, fill, stroke, source_common(&elements[i]),
+                            crate::geometry::element::resolved_stroke_profile(
+                                &elements[i],
+                            ),
                         ));
                     }
                 } else {
@@ -2580,7 +2604,7 @@ impl Controller {
                             }
                             c
                         };
-                        outputs.push((merged, fill_i, stroke_winner, common));
+                        outputs.push((merged, fill_i, stroke_winner, common, None));
                     }
                 }
             }
@@ -2609,7 +2633,7 @@ impl Controller {
         // produce when run on the polygon result.
         use crate::geometry::element::{FillRule, PathCommand, PathElem};
         let mut new_elements: Vec<Rc<Element>> = Vec::new();
-        for (ps, fill, stroke, common) in outputs {
+        for (ps, fill, stroke, common, profile) in outputs {
             if op_name == "divide"
                 && options.divide_remove_unpainted
                 && fill.is_none()
@@ -2630,6 +2654,40 @@ impl Controller {
                 .collect();
             match kept.len() {
                 0 => {}
+                // A single ring is a Polygon — UNLESS the survivor carried a
+                // stroke profile, which Polygon has no slot for. §3.5 rules
+                // that demotion a VIOLATION of §3.1 for the 1 -> 1 arms: the
+                // artist's variable-width or brushed stroke would vanish at
+                // the instant of the cut. Path is the superset, so the
+                // survivor emits Path and keeps its profile. A profile-less
+                // survivor still emits Polygon, so nothing else moves.
+                1 if profile.is_some() => {
+                    let profile = profile.unwrap();
+                    let ring = kept.into_iter().next().unwrap();
+                    let mut d: Vec<PathCommand> =
+                        vec![PathCommand::MoveTo { x: ring[0].0, y: ring[0].1 }];
+                    for &(x, y) in &ring[1..] {
+                        d.push(PathCommand::LineTo { x, y });
+                    }
+                    d.push(PathCommand::ClosePath);
+                    new_elements.push(Rc::new(Element::Path(PathElem {
+                        d,
+                        fill,
+                        stroke,
+                        width_points: profile.width_points,
+                        common: common.clone(),
+                        fill_gradient: None,
+                        stroke_gradient: None,
+                        stroke_brush: profile.stroke_brush,
+                        stroke_brush_overrides: profile.stroke_brush_overrides,
+                        // One ring has no holes, so the rule is moot for the
+                        // geometry; it still declares the op's rule so a later
+                        // edit that adds a subpath reads the same law.
+                        fill_rule: FillRule::from(
+                            crate::algorithms::boolean::RESULT_FILL_RULE,
+                        ),
+                    })));
+                }
                 1 => {
                     new_elements.push(Rc::new(Element::Polygon(PolygonElem {
                         points: kept.into_iter().next().unwrap(),
@@ -2649,16 +2707,26 @@ impl Controller {
                         }
                         d.push(PathCommand::ClosePath);
                     }
+                    // Same law on the multi-ring side: this arm wrote the
+                    // three profile fields EMPTY, so a cut that happened to
+                    // produce two rings lost the profile just as silently.
+                    let profile = profile.clone().unwrap_or(
+                        crate::geometry::element::StrokeProfile {
+                            width_points: Vec::new(),
+                            stroke_brush: None,
+                            stroke_brush_overrides: None,
+                        },
+                    );
                     new_elements.push(Rc::new(Element::Path(PathElem {
                         d,
                         fill,
                         stroke,
-                        width_points: Vec::new(),
+                        width_points: profile.width_points,
                         common: common.clone(),
                         fill_gradient: None,
                         stroke_gradient: None,
-                        stroke_brush: None,
-                        stroke_brush_overrides: None,
+                        stroke_brush: profile.stroke_brush,
+                        stroke_brush_overrides: profile.stroke_brush_overrides,
                         // Clause 4 of the carried-rule law: a generated
                         // result DECLARES even-odd, from the one named
                         // constant rather than a literal here.
@@ -7754,6 +7822,80 @@ mod preservation_law_tests {
     /// A rect whose `common` differs from the default in EVERY field the
     /// preservation law legislates. `tag` distinguishes the sources so a
     /// disagreement fixture really disagrees.
+    /// PROFILESURVIVOR: a Path survivor carrying a stroke PROFILE — one width
+    /// point and a brush slug. EDIT_SEMANTICS_FREEZE.md §3.5 (the "Boolean
+    /// flatten, single-ring arm" row) rules the demotion of such a survivor to
+    /// `Polygon` a VIOLATION of §3.1, not an amendment: per T1's
+    /// representation term the survivor arms emit the survivor's own kind, or
+    /// Path as the superset, never a lossy demotion.
+    fn profiled_path_survivor(x: f64, w: f64) -> Element {
+        use crate::geometry::element::{PathCommand, PathElem, StrokeWidthPoint};
+        Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x, y: 0.0 },
+                PathCommand::LineTo { x: x + w, y: 0.0 },
+                PathCommand::LineTo { x: x + w, y: 10.0 },
+                PathCommand::LineTo { x, y: 10.0 },
+                PathCommand::ClosePath,
+            ],
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: Some(Stroke::new(Color::BLACK, 2.0)),
+            width_points: vec![StrokeWidthPoint { t: 0.5, width_left: 3.5, width_right: 3.5 }],
+            common: CommonProps { id: Some("survivor".into()), ..Default::default() },
+            fill_gradient: None,
+            stroke_gradient: None,
+            stroke_brush: Some("b1".to_string()),
+            stroke_brush_overrides: None,
+            fill_rule: crate::geometry::element::FillRule::NonZero,
+        })
+    }
+
+    #[test]
+    fn a_subtract_survivor_keeps_its_stroke_profile() {
+        let survivor = profiled_path_survivor(0.0, 10.0);
+        // A cutter overlapping the right half: the survivor survives 1 -> 1.
+        let cutter = rich_rect(5.0, 10.0, "id-cutter", None, 1.0);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(survivor), Rc::new(cutter)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps { name: Some("L0".into()), ..Default::default() },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![
+                ElementSelection::all(vec![0, 0]),
+                ElementSelection::all(vec![0, 1]),
+            ],
+            ..Document::default()
+        };
+        let mut model = Model::new(doc, None);
+        Controller::apply_destructive_boolean(
+            &mut model, "subtract_front", &BooleanOptions::default());
+
+        let out = only_child(&model);
+        match out.as_ref() {
+            Element::Path(p) => {
+                assert_eq!(
+                    p.width_points.len(),
+                    1,
+                    "the survivor's variable-width profile must survive the cut"
+                );
+                assert_eq!(
+                    p.stroke_brush.as_deref(),
+                    Some("b1"),
+                    "the survivor's brush must survive the cut"
+                );
+            }
+            other => panic!(
+                "a survivor carrying a stroke profile must emit Path (the \
+                 superset), never a lossy demotion; got {:?}",
+                std::mem::discriminant(other)
+            ),
+        }
+    }
+
     fn rich_rect(
         x: f64, w: f64, id: &str, name: Option<&str>, opacity: f64,
     ) -> Element {

@@ -1833,3 +1833,36 @@ private func setupTwoRectSelection() -> Controller {
     ctrl.addElement(Element.rect(Rect(x: 100, y: 100, width: 5, height: 5)))
     #expect(ctrl.document.layers[0].children.count == layerCountBefore + 1)
 }
+
+// MARK: - PROFILESURVIVOR: a cut must not strip the survivor's stroke profile
+
+/// Twin of Rust's `a_subtract_survivor_keeps_its_stroke_profile`.
+/// EDIT_SEMANTICS_FREEZE.md §3.5 ("Boolean flatten, single-ring arm") rules the
+/// demotion of a profiled survivor to `Polygon` a VIOLATION of §3.1, not an
+/// amendment: per T1's representation term the 1 -> 1 arms emit the survivor's
+/// own kind, or Path as the superset, never a lossy demotion.
+@Test func aSubtractSurvivorKeepsItsStrokeProfile() {
+    let survivor = Element.path(Path(
+        d: [.moveTo(0, 0), .lineTo(10, 0), .lineTo(10, 10), .lineTo(0, 10), .closePath],
+        fill: Fill(color: .black),
+        stroke: Stroke(color: .black, width: 2.0),
+        widthPoints: [StrokeWidthPoint(t: 0.5, widthLeft: 3.5, widthRight: 3.5)],
+        strokeBrush: "b1",
+        id: "survivor",
+        fillRule: .nonzero))
+    let cutter = Element.rect(Rect(x: 5, y: 0, width: 10, height: 10))
+    let doc = Document(layers: [Layer(name: "L0", children: [survivor, cutter])],
+                       selection: [.all([0, 0]), .all([0, 1])])
+    let ctrl = Controller(model: Model(document: doc))
+
+    ctrl.applyDestructiveBoolean("subtract_front")
+
+    let out = ctrl.document.layers[0].children[0]
+    guard case .path(let p) = out else {
+        Issue.record("a survivor carrying a stroke profile must emit Path (the superset), never a lossy demotion")
+        return
+    }
+    #expect(p.widthPoints.count == 1,
+            "the survivor's variable-width profile must survive the cut")
+    #expect(p.strokeBrush == "b1", "the survivor's brush must survive the cut")
+}

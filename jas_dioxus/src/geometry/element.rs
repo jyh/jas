@@ -3208,6 +3208,41 @@ pub fn resolved_stroke(elem: &Element) -> Option<Stroke> {
     first_paintable(elem).and_then(|leaf| leaf.stroke().copied())
 }
 
+/// The three stroke-PROFILE fields a `Polygon` has no slot for, resolved
+/// through a container exactly as [`resolved_fill`] resolves paint.
+///
+/// `None` when the source carries none of them — which is the common case, and
+/// keeps a profile-less survivor demoting to `Polygon` exactly as before. When
+/// it is `Some`, a boolean survivor MUST emit `Path`: EDIT_SEMANTICS_FREEZE.md
+/// §3.5 rules the demotion a VIOLATION of §3.1 for the 1->1 arms, because the
+/// output representation has nowhere to put these ("emit the survivor's own
+/// kind or Path, the superset, never a lossy demotion" — T1's representation
+/// term).
+pub fn resolved_stroke_profile(elem: &Element) -> Option<StrokeProfile> {
+    let leaf = first_paintable(elem)?;
+    let Element::Path(p) = leaf else { return None };
+    if p.width_points.is_empty()
+        && p.stroke_brush.is_none()
+        && p.stroke_brush_overrides.is_none()
+    {
+        return None;
+    }
+    Some(StrokeProfile {
+        width_points: p.width_points.clone(),
+        stroke_brush: p.stroke_brush.clone(),
+        stroke_brush_overrides: p.stroke_brush_overrides.clone(),
+    })
+}
+
+/// What [`resolved_stroke_profile`] carries: the fields that make a survivor
+/// un-demotable.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrokeProfile {
+    pub width_points: Vec<StrokeWidthPoint>,
+    pub stroke_brush: Option<String>,
+    pub stroke_brush_overrides: Option<String>,
+}
+
 pub fn map_paintable(elem: &Element, f: &dyn Fn(&Element) -> Element) -> Element {
     match elem {
         Element::Group(e) => Element::Group(GroupElem {
