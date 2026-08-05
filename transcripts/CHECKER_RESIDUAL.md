@@ -13,6 +13,32 @@
 > the standing declaration, so the next author inherits *the decision* rather
 > than *the fatigue*.
 
+> **PROVE THE FAILURE FIRST. RATIFIED BY JYH, 2026-08-05. BINDS ALL THREE OF US.**
+>
+> **A new gate, test or checker must be shown RED on input it should reject
+> before it may be reported green. An empty scan is a failure, not a pass.
+> State in the commit message what the red was.**
+>
+> The value is entirely in the ORDERING. This is not "write a test for the fix";
+> a loosely-worded version degrades into exactly the habit it replaces.
+>
+> Ratified on a tally, most of it the mac seat's own: a mutation harness that
+> killed two mutants by mutating a DOCSTRING; a gate sweep green because the
+> files it should have flagged were UNTRACKED and eight of its checks read the
+> git index; a self-test whose cases were silently dropped by a key collision;
+> a flake declared fixed on three green runs and still live; a Windows
+> `commit-msg` hook that was installed, executable, correct — and did nothing,
+> because `python3` there is a Store stub that answers `command -v` and dies on
+> execution; and that hook's own proof script, whose phase "forbidden shape
+> absent from the stored message" PASSED because the commit had aborted and no
+> message existed.
+>
+> That last one is the argument, and it is why the rule is law rather than
+> advice: it was built by the windows seat with the mac seat's file open beside
+> it, having read the rule, and it reproduced the identical shape — *checking
+> the absence of a thing in a thing that was not there.* **The rule does not
+> transfer by being read. It transfers by being a line of code that fails.**
+
 This document exists because the same defect shape arrived **four times in one
 phase**, each fix correct and each one abstraction short of the last:
 
