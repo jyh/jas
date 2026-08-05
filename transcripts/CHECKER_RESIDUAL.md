@@ -13,6 +13,46 @@
 > the standing declaration, so the next author inherits *the decision* rather
 > than *the fatigue*.
 
+> **THE DIFFERENTIAL BLIND SPOT. Named 2026-08-05, three sightings, both seats.**
+>
+> **The equivalence law is a differential instrument, and a differential
+> instrument is structurally blind to a shared error.**
+>
+> This house's prime directive is exact functional equivalence across the active
+> ports, pinned by shared corpora. That machinery compares the ports to EACH
+> OTHER. When both ports make the same mistake, every vector is green, both
+> ports agree, and the corpus certifies the agreement — which is exactly what it
+> was built to do. The law is not weakened by this. It simply cannot see it.
+>
+> Three sightings, weakest first so the strength of the case is visible:
+>
+> 1. **The workspace oracle at 4 dp.** Both ports collapsed the same band. The
+>    WEAKEST specimen, and it is listed anyway: the ports agreeing was CORRECT
+>    here. What was blind was the oracle, not the law. (Windows seat's
+>    calibration, letter 28 — offered against his own case.)
+> 2. **`panel_ops.json`'s `close_and_show_panel`.** The fixture recorded a
+>    silent no-op as the expected result, and both ports matched it exactly.
+>    Equivalence held perfectly over a shared error (`TABTRUTH`).
+> 3. **`inflate_bounds` / `inflateBounds` ignoring `stroke.align`.** The
+>    cleanest specimen: two independent implementations, the same omission,
+>    every vector green — and the RENDERER beside them getting it right, since
+>    `element_render` lowers alignment to a clip. So it is not one spec read
+>    wrongly. It is two readers making the same reasonable elision of a field
+>    nobody thought about (`STROKEALIGN`).
+>
+> **THE COROLLARY, and it is uncomfortable in a document about instruments:
+> what catches this class is never more corpus.** More vectors compare the same
+> two answers more times. What caught all three was a human noticing a field and
+> wondering — the resolver-less `bounds()` census, a `panels` map taken as
+> input, a `stroke.align` that appeared in the renderer and nowhere in the
+> bounds. The instruments are what make that wondering CHEAP and what hold the
+> answer once found; they are not what produces it.
+>
+> Practical consequence, and the only actionable half: when a field is added to
+> an element, ask which READERS of it exist and whether each was updated —
+> a question no differential gate asks, because both ports skipping a reader is
+> agreement.
+
 > **PROVE THE FAILURE FIRST. RATIFIED BY JYH, 2026-08-05. BINDS ALL THREE OF US.**
 >
 > **A new gate, test or checker must be shown RED on input it should reject
