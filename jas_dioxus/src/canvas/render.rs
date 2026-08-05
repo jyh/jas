@@ -2508,6 +2508,14 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
     ctx.set_stroke_style_str(sel_color);
     ctx.set_line_width(1.0);
 
+    // Built once for the whole overlay pass: a container's outline is the union
+    // of its children, and a symbol instance child measures its TARGET. The
+    // resolver-less union swallows the instance's zero box as a phantom point
+    // AT THE ORIGIN, so selecting a group that holds one drew its box back
+    // across empty canvas to (0,0).
+    let sel_index = crate::document::id_index::rebuild_id_index(doc);
+    let sel_resolver = crate::document::id_index::IndexResolver(&sel_index);
+
     for es in &doc.selection {
         let elem = match doc.get_element(&es.path) {
             Some(e) => e,
@@ -2548,8 +2556,12 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
             let is_container = matches!(elem, Element::Group(_) | Element::Layer(_));
 
             if is_container {
-                let (bx, by, bw, bh) = elem.bounds();
-                if bw > 0.0 && bh > 0.0 {
+                if let Some((bx, by, bw, bh)) =
+                    crate::geometry::element::resolved_bounds_with(
+                        elem, &sel_resolver, Element::bounds)
+                    && bw > 0.0
+                    && bh > 0.0
+                {
                     ctx.stroke_rect(bx, by, bw, bh);
                 }
             } else {

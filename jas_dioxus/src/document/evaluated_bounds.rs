@@ -203,6 +203,39 @@ mod tests {
     }
 
     /// A group holding that same instance plus a rect at (100,100,10,10).
+    /// GROUPPHANTOM: the OUTLINE a selected container draws. A group's box is
+    /// the union of its children, so an instance child's zero box is not
+    /// absent — it is a phantom point AT THE ORIGIN that the union swallows,
+    /// and the group's outline stretches back across empty canvas to (0,0).
+    /// This is the value `draw_selection_overlays` strokes for a container.
+    #[test]
+    fn a_selected_group_holding_an_instance_does_not_stretch_to_the_origin() {
+        let doc = doc_with_group_holding_instance();
+        let group = doc.get_element(&vec![0, 0]).expect("the group");
+        let index = crate::document::id_index::rebuild_id_index(&doc);
+        let resolver = crate::document::id_index::IndexResolver(&index);
+
+        let resolved = crate::geometry::element::resolved_bounds_with(
+            group, &resolver, Element::bounds,
+        )
+        .expect("a group with drawn members has a box");
+        // Members: the instance at (5,7,10,20) and a rect at (100,100,10,10).
+        assert_eq!(
+            resolved,
+            (5.0, 7.0, 105.0, 103.0),
+            "the outline bounds what is DRAWN, and reaches the origin only if \
+             something is drawn there"
+        );
+        // The un-resolved union is what shipped, and it starts at the origin.
+        let (bx, by, _, _) = group.bounds();
+        assert_eq!(
+            (bx, by),
+            (0.0, 0.0),
+            "the narrow form still answers from the origin — that is why the \
+             overlay must ask the resolved one"
+        );
+    }
+
     /// HANDLEPHANTOM: the four resize handles a selected instance shows.
     ///
     /// `selection_evaluated_bounds` resolves (it goes through

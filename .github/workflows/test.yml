@@ -64,6 +64,11 @@ jobs:
       # containers, or carry a ledger row saying why not. Five defects wore
       # that shape in one week, all invisible in Rust and live in JasSwift.
       - run: python scripts/check_element_dispatch.py --self-test && python scripts/check_element_dispatch.py
+      # Every resolver-less bounds call in production carries a written
+      # verdict. `bounds()` answers a zero box AT THE ORIGIN for the live
+      # kinds, and five fixes in a week wore that shape; a new blind reader
+      # must be declared rather than discovered by an artist.
+      - run: python scripts/check_bounds_resolver_ledger.py --self-test && python scripts/check_bounds_resolver_ledger.py
       # §16.4 asserted over the corpus: no selection holds an element AND its
       # own descendant. Four producers had to be closed before this could pass
       # at all, and it reds on the pre-§20 tree with 13 violations.
@@ -335,6 +340,8 @@ jobs:
           python scripts/check_geometry_checkers.py
           python scripts/check_element_dispatch.py --self-test
           python scripts/check_element_dispatch.py
+          python scripts/check_bounds_resolver_ledger.py --self-test
+          python scripts/check_bounds_resolver_ledger.py
           python scripts/check_selection_invariant.py --self-test
           python scripts/check_selection_invariant.py
           python scripts/check_widget_kind_dispatch.py --self-test

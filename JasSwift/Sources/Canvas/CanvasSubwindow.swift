@@ -2086,6 +2086,26 @@ func containerSelectionOutlineRect(_ elem: Element) -> CGRect? {
     }
 }
 
+/// ``containerSelectionOutlineRect`` for a container whose members may measure
+/// something ELSEWHERE in the document.
+///
+/// A container's box is the UNION of its children, so a symbol-instance child
+/// does not merely go unmeasured — its zero box is a phantom point AT THE
+/// ORIGIN that the union swallows, and the group's outline stretches back
+/// across empty canvas to (0,0). Twin of the resolved arm in Rust's
+/// `draw_selection_overlays`.
+func containerSelectionOutlineRect(_ elem: Element,
+                                   resolvedBy resolver: ElementResolver) -> CGRect? {
+    switch elem {
+    case .group, .layer:
+        guard let b = resolvedBoundsWith(elem, resolver, { $0.bounds }),
+              b.width > 0, b.height > 0 else { return nil }
+        return CGRect(x: b.x, y: b.y, width: b.width, height: b.height)
+    default:
+        return nil
+    }
+}
+
 /// Draw an element's selection overlay (outline + control handles).
 /// Internal so tools can call it via the ToolContext. `kind` decides
 /// which control points are highlighted (and gets handle decoration);
@@ -2106,7 +2126,8 @@ func containerSelectionOutlineRect(_ elem: Element) -> CGRect? {
 /// are individually in the selection (see `selectElement`) and draw
 /// their own highlights.
 func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind = .partial(SortedCps()),
-                        outlineScale: Double = 1.0) {
+                        outlineScale: Double = 1.0,
+                        resolvedBy resolver: ElementResolver) {
     // Counter-scale fixed pen widths / circle radii by the element transform's
     // scale (`outlineScale`) so the overlay — drawn UNDER that transform —
     // renders at a constant width regardless of the element's scale (it stays
@@ -2155,7 +2176,7 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
     // zero-extent guard is mirrored from there: stroking an empty container's
     // bounds would draw a dot at its origin. Handle squares stay absent —
     // `selectionHandleRects` already returns [] for containers in both ports.
-    if let outline = containerSelectionOutlineRect(elem) {
+    if let outline = containerSelectionOutlineRect(elem, resolvedBy: resolver) {
         ctx.addRect(outline)
         ctx.strokePath()
         return
@@ -2533,6 +2554,9 @@ func selectionHandleRects(_ doc: Document, _ path: ElementPath) -> [CGRect] {
 }
 
 private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjectPath: ElementPath? = nil) {
+    // Built once for the whole overlay pass: a container's outline is the union
+    // of its children, and a symbol instance child measures its TARGET.
+    let overlayResolver = IdIndexResolver(index: rebuildIdIndex(doc))
     for es in doc.selection {
         let path = es.path
         guard !path.isEmpty else { continue }
@@ -2580,13 +2604,14 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjec
             case .live(let v): applyTransform(ctx, v.transform)
             }
             drawElementOverlay(ctx, node, kind: es.kind,
-                               outlineScale: selectionOutlineScale(doc, path))
+                               outlineScale: selectionOutlineScale(doc, path),
+                               resolvedBy: overlayResolver)
             // Key-object indicator: thicker accent outline around the
             // element's bounds so the user can see which selected element
             // is currently the Align panel's key. Drawn on top of the
             // normal selection overlay so it never disappears.
-            if let kp = keyObjectPath, kp == path {
-                let b = node.bounds
+            if let kp = keyObjectPath, kp == path,
+               let b = resolvedBoundsWith(node, overlayResolver, { $0.bounds }) {
                 ctx.setStrokeColor(selectionColor)
                 ctx.setLineWidth(3.0)
                 ctx.setLineDash(phase: 0, lengths: [])
@@ -3025,7 +3050,11 @@ class CanvasNSView: NSView {
             hitTestText: { [weak self] pos in self?.hitTestText(pos) },
             hitTestPathCurve: { [weak self] x, y in self?.hitTestPathCurve(x, y) },
             requestUpdate: { [weak self] in self?.needsDisplay = true },
-            drawElementOverlay: { ctx, elem, kind in drawElementOverlay(ctx, elem, kind: kind) }
+            drawElementOverlay: { [weak self] ctx, elem, kind in
+                let doc = self?.controller?.document ?? Document()
+                drawElementOverlay(ctx, elem, kind: kind,
+                                   resolvedBy: IdIndexResolver(index: rebuildIdIndex(doc)))
+            }
         )
     }
 

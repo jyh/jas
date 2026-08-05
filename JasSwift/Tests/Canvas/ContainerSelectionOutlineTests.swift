@@ -72,3 +72,31 @@ struct ContainerSelectionOutlineTests {
                 "an empty group has no extent and must not stroke a dot")
     }
 }
+
+/// GROUPPHANTOM: a container's box is the UNION of its children, so a symbol
+/// instance child's zero box is not absent — it is a phantom point AT THE
+/// ORIGIN that the union swallows, and the outline stretches back across empty
+/// canvas. Twin of Rust's
+/// `a_selected_group_holding_an_instance_does_not_stretch_to_the_origin`.
+@Test func aSelectedGroupHoldingAnInstanceDoesNotStretchToTheOrigin() {
+    let master = Element.rect(Rect(x: 5, y: 7, width: 10, height: 20, id: "m1"))
+    let instance = Element.live(.reference(ReferenceElem(
+        target: ElementRef("m1"), name: nil, id: "i1")))
+    let sibling = Element.rect(Rect(x: 100, y: 100, width: 10, height: 10))
+    let group = Element.group(Group(children: [instance, sibling]))
+    let doc = Document(layers: [Layer(name: "L0", children: [group])], symbols: [master])
+    let resolver = IdIndexResolver(index: rebuildIdIndex(doc))
+
+    guard let r = containerSelectionOutlineRect(group, resolvedBy: resolver) else {
+        Issue.record("a group with drawn members must have an outline")
+        return
+    }
+    #expect(r.origin.x == 5 && r.origin.y == 7
+            && r.width == 105 && r.height == 103,
+            "the outline bounds what is DRAWN, and reaches the origin only if something is drawn there")
+
+    // The narrow form still answers from the origin — that is why the overlay
+    // must ask the resolved one.
+    let narrow = containerSelectionOutlineRect(group)
+    #expect(narrow?.origin.x == 0 && narrow?.origin.y == 0)
+}
