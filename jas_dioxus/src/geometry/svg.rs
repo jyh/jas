@@ -78,6 +78,28 @@ fn stroke_profile_attrs(
     s
 }
 
+/// FLOATSPELL — the one spelling of a FULL-PRECISION f64 both ports must write.
+///
+/// RULED 2026-08-05 (`fleet/RULING-four-decimal-floor-2026-08-05.md`): the
+/// transform matrix carries full precision while positions and radii stay at
+/// 4 dp. "Full precision" has no single spelling, and the two ports do not
+/// agree on one — Rust's `Display` writes `1e-7` as `0.0000001` where Swift
+/// writes `1e-07`, and Swift gives integral values a trailing `.0` that Rust
+/// omits. **The 4 dp floor was accidentally shielding us from this**, because
+/// `{:.4}` is fixed-notation in both languages; removing the floor without
+/// fixing the spelling would make the two ports write DIFFERENT FILES for the
+/// same document.
+///
+/// The rule: the shortest decimal that round-trips, in FIXED notation, never
+/// exponent, no trailing `.0`. Rust's `Display` already satisfies it — this
+/// function exists to NAME the contract and give the cross-language corpus
+/// (`test_fixtures/algorithms/float_format.json`) something to bind to, so a
+/// future formatting change reds instead of silently diverging from Swift.
+/// Twin: `fmtFull` in JasSwift/Sources/Geometry/Svg.swift.
+pub fn fmt_full(v: f64) -> String {
+    format!("{}", v)
+}
+
 fn fmt(v: f64) -> String {
     let s = format!("{:.4}", v);
     let s = s.trim_end_matches('0');

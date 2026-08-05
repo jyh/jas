@@ -6265,6 +6265,44 @@ mod tests {
         }
     }
 
+    /// FLOATSPELL: the one spelling of a full-precision f64. Expected values
+    /// come from the RULE (computed in Python), not from either port, so this
+    /// binds Rust as tightly as it binds Swift.
+    #[test]
+    fn algorithm_float_format_vectors() {
+        let json_str = read_fixture("algorithms/float_format.json");
+        let doc: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let cases = doc["cases"].as_array().unwrap();
+        assert!(!cases.is_empty(), "float_format corpus is empty");
+        let mut exponent_cases = 0;
+        for c in cases {
+            let v = c["value"].as_f64().unwrap();
+            let want = c["expected"].as_str().unwrap();
+            let got = crate::geometry::svg::fmt_full(v);
+            assert_eq!(got, want, "fmt_full({v:?})");
+            // Round-trip: the whole point of "shortest that round-trips".
+            assert_eq!(
+                got.parse::<f64>().unwrap().to_bits(),
+                v.to_bits(),
+                "fmt_full({v:?}) = {got} does not read back as the same f64"
+            );
+            if format!("{v:?}").contains('e') {
+                exponent_cases += 1;
+            }
+            assert!(
+                !got.contains('e') && !got.contains('E'),
+                "fixed notation only, got {got}"
+            );
+        }
+        // ANTI-VACUITY: the corpus must actually contain the cases where the
+        // two ports diverge, or it proves nothing about the hazard it exists
+        // for.
+        assert!(
+            exponent_cases >= 6,
+            "corpus must carry exponent-boundary values; found {exponent_cases}"
+        );
+    }
+
     // ---------------------------------------------------------------
     // Toolbar and menu structure tests
     // ---------------------------------------------------------------

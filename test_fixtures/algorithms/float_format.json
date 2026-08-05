@@ -1,0 +1,120 @@
+{
+ "_doc": [
+  "FLOATSPELL \u2014 the one spelling of a full-precision f64 both ports must",
+  "write. RULED 2026-08-05 (fleet/RULING-four-decimal-floor): the transform",
+  "matrix goes to full precision, and 'full precision' has no single",
+  "spelling \u2014 Rust's Display writes 1e-7 as 0.0000001 while Swift writes",
+  "1e-07, and Swift writes integral values with a trailing '.0' that Rust",
+  "omits. The 4dp floor was accidentally shielding both ports because",
+  "{:.4} is fixed-notation in both; removing it would have made the two",
+  "ports write DIFFERENT FILES for the same document.",
+  "",
+  "THE RULE: the shortest decimal that round-trips, in FIXED notation,",
+  "never exponent, no trailing '.0'.",
+  "",
+  "Expected values are computed in Python from that DEFINITION, not read",
+  "out of either port, so this corpus can catch either one."
+ ],
+ "cases": [
+  {
+   "value": 0.0,
+   "expected": "0"
+  },
+  {
+   "value": 1.0,
+   "expected": "1"
+  },
+  {
+   "value": -1.0,
+   "expected": "-1"
+  },
+  {
+   "value": 0.5,
+   "expected": "0.5"
+  },
+  {
+   "value": 2.5,
+   "expected": "2.5"
+  },
+  {
+   "value": 100.0,
+   "expected": "100"
+  },
+  {
+   "value": 0.8660254037844387,
+   "expected": "0.8660254037844387"
+  },
+  {
+   "value": 0.4999999999999999,
+   "expected": "0.4999999999999999"
+  },
+  {
+   "value": 0.001,
+   "expected": "0.001"
+  },
+  {
+   "value": 0.0001,
+   "expected": "0.0001"
+  },
+  {
+   "value": 1e-05,
+   "expected": "0.00001"
+  },
+  {
+   "value": 1e-06,
+   "expected": "0.000001"
+  },
+  {
+   "value": 1e-07,
+   "expected": "0.0000001"
+  },
+  {
+   "value": -1e-07,
+   "expected": "-0.0000001"
+  },
+  {
+   "value": 0.00012345,
+   "expected": "0.00012345"
+  },
+  {
+   "value": 1000000000000000.0,
+   "expected": "1000000000000000"
+  },
+  {
+   "value": 1e+16,
+   "expected": "10000000000000000"
+  },
+  {
+   "value": 1e+17,
+   "expected": "100000000000000000"
+  },
+  {
+   "value": 1e+21,
+   "expected": "1000000000000000000000"
+  },
+  {
+   "value": 1.2345678901234568e+17,
+   "expected": "123456789012345680"
+  },
+  {
+   "value": 0.1,
+   "expected": "0.1"
+  },
+  {
+   "value": 0.2,
+   "expected": "0.2"
+  },
+  {
+   "value": 0.30000000000000004,
+   "expected": "0.30000000000000004"
+  },
+  {
+   "value": 1.0000000000000002,
+   "expected": "1.0000000000000002"
+  },
+  {
+   "value": -0.0,
+   "expected": "-0"
+  }
+ ]
+}

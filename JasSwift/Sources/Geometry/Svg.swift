@@ -9,6 +9,61 @@ private let ptToPx = 96.0 / 72.0
 
 private func px(_ v: Double) -> Double { v * ptToPx }
 
+/// FLOATSPELL — the one spelling of a FULL-PRECISION Double both ports must
+/// write. Twin of Rust's `fmt_full`, and the port that actually needs work.
+///
+/// RULED 2026-08-05: the transform matrix carries full precision, positions and
+/// radii stay 4 dp. Swift's default description diverges from Rust's in TWO
+/// ways, both of which the old 4 dp floor was accidentally hiding (`{:.4}` and
+/// `String(format:)` are fixed-notation in both languages):
+///
+///     value   Rust "{}"                 Swift "\(v)"
+///     1e-7    0.0000001                 1e-07
+///     1e21    1000000000000000000000    1e+21
+///     1e15    1000000000000000          1000000000000000.0
+///
+/// The rule: shortest decimal that round-trips, FIXED notation, never exponent,
+/// no trailing `.0`. Swift's interpolation already gives the shortest
+/// round-trip digits, so this only has to re-spell them — expand any exponent
+/// and drop a trailing `.0`. Pinned by
+/// `test_fixtures/algorithms/float_format.json`, whose expected values are
+/// computed from the RULE in Python rather than read out of either port, so the
+/// corpus can catch Swift AND Rust.
+func fmtFull(_ v: Double) -> String {
+    var s = "\(v)"
+    if s == "inf" || s == "-inf" || s == "nan" { return s }
+    if s.hasSuffix(".0") { s.removeLast(2) }
+    guard let eIdx = s.firstIndex(where: { $0 == "e" || $0 == "E" }) else { return s }
+
+    var mant = String(s[s.startIndex..<eIdx])
+    guard let exp = Int(s[s.index(after: eIdx)...]) else { return s }
+    let neg = mant.hasPrefix("-")
+    if neg { mant.removeFirst() }
+
+    let parts = mant.split(separator: ".", maxSplits: 1, omittingEmptySubsequences: false)
+    let intPart = String(parts[0])
+    let fracPart = parts.count > 1 ? String(parts[1]) : ""
+    let digits = intPart + fracPart
+    // Where the decimal point lands once the exponent is spent.
+    let point = intPart.count + exp
+
+    var out: String
+    if point <= 0 {
+        out = "0." + String(repeating: "0", count: -point) + digits
+    } else if point >= digits.count {
+        out = digits + String(repeating: "0", count: point - digits.count)
+    } else {
+        let idx = digits.index(digits.startIndex, offsetBy: point)
+        out = String(digits[..<idx]) + "." + String(digits[idx...])
+    }
+    if out.contains(".") {
+        while out.hasSuffix("0") { out.removeLast() }
+        if out.hasSuffix(".") { out.removeLast() }
+    }
+    if out.isEmpty { out = "0" }
+    return (neg ? "-" : "") + out
+}
+
 private func fmt(_ v: Double) -> String {
     let s = String(format: "%.4f", v)
     // Strip trailing zeros and dot

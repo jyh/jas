@@ -5658,3 +5658,33 @@ private func wireUnhex(_ s: String) -> Data {
     #expect(keepOf(hidden) == Set(d["expected_keep"] as! [[Int]]),
             "the defect's blank tree is not what the fixture records")
 }
+
+// MARK: - FLOATSPELL: one spelling of a full-precision Double, both ports
+
+/// Twin of Rust's `algorithm_float_format_vectors`. Expected values are
+/// computed from the RULE in Python, not read out of either port.
+@Test func testAlgorithmFloatFormat() throws {
+    let json = readFixture("algorithms/float_format.json")
+    let data = json.data(using: .utf8)!
+    let doc = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    let cases = doc["cases"] as! [[String: Any]]
+    #expect(!cases.isEmpty, "float_format corpus is empty")
+
+    var exponentCases = 0
+    for c in cases {
+        let v = (c["value"] as! NSNumber).doubleValue
+        let want = c["expected"] as! String
+        let got = fmtFull(v)
+        #expect(got == want, "fmtFull(\(v)) gave \(got), want \(want)")
+        // Round-trip: the whole point of "shortest that round-trips".
+        #expect(Double(got)?.bitPattern == v.bitPattern,
+                "fmtFull(\(v)) = \(got) does not read back as the same Double")
+        #expect(!got.contains("e") && !got.contains("E"),
+                "fixed notation only, got \(got)")
+        if "\(v)".contains("e") { exponentCases += 1 }
+    }
+    // ANTI-VACUITY: this corpus exists for the exponent boundary; if it holds
+    // none, it is not watching the hazard.
+    #expect(exponentCases >= 6,
+            "corpus must carry exponent-boundary values; found \(exponentCases)")
+}
