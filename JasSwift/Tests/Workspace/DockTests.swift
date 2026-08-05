@@ -620,20 +620,70 @@ private func testLayout() -> WorkspaceLayout {
     #expect(layoutPanelKindStr(.concepts) == "concepts")
 }
 
-@Test func panelMenuItemsVisibilityFollowsGroups() {
+@Test func aBackgroundTabIsAMemberButNotOnScreen() {
+    let l = testLayout()
+    #expect(l.isPanelVisible(.swatches), "it IS a member")
+    #expect(!l.panelOnScreen(.swatches), "but it is not drawn")
+    #expect(l.panelOnScreen(.color), "its group-mate at the front is")
+}
+
+@Test func revealPanelRaisesABackgroundTabWithoutDuplicatingIt() {
+    var l = testLayout()
+    let before = l.anchored[0].1.groups[0].panels
+    l.revealPanel(.swatches)
+    #expect(l.anchored[0].1.groups[0].panels == before, "no second copy")
+    #expect(l.panelOnScreen(.swatches))
+    // Raising one tab lowers its group-mate; that is what a tab IS.
+    #expect(!l.panelOnScreen(.color))
+    #expect(l.isPanelVisible(.color), "lowered, not closed")
+}
+
+@Test func revealPanelExpandsACollapsedGroupAndDock() {
+    var l = testLayout()
+    l.anchored[0].1.groups[0].collapsed = true
+    l.anchored[0].1.collapsed = true
+    #expect(!l.panelOnScreen(.color))
+    l.revealPanel(.color)
+    #expect(l.panelOnScreen(.color))
+    #expect(!l.anchored[0].1.collapsed)
+    #expect(!l.anchored[0].1.groups[0].collapsed)
+}
+
+@Test func revealPanelSummonsAPanelThatIsAMemberOfNothing() {
+    var l = testLayout()
+    #expect(!l.isPanelVisible(.gradient))
+    l.revealPanel(.gradient)
+    #expect(l.panelOnScreen(.gradient))
+}
+
+@Test func revealPanelUnhidesTheDockPane() {
+    var l = testLayout()
+    l.ensurePaneLayout(viewportW: 1440, viewportH: 900)
+    l.paneLayout?.hidePane(.dock)
+    #expect(!l.panelOnScreen(.color), "a hidden dock pane draws nothing")
+    l.revealPanel(.color)
+    #expect(l.panelOnScreen(.color))
+    #expect(l.paneLayout?.isPaneVisible(.dock) == true)
+}
+
+@Test func panelMenuItemsReportWhatIsDrawnNotMereMembership() {
     let l = testLayout()
     let items = l.panelMenuItems()
     #expect(items.count == PanelKind.all.count)
-    // `isPanelVisible` follows on-screen state: a panel is visible iff it
-    // appears in some loaded dock group. testLayout()'s groups hold
-    // {color, swatches, stroke, properties, layers}; every other defined
-    // kind is absent from all groups and so reports not-visible. (Mirrors
-    // the OCaml `is_panel_visible` group-scan; the Window-menu checkmark
-    // tracks on-screen state, not the closed-list state.)
-    let inLayout: Set<PanelKind> = [.color, .swatches, .stroke, .properties, .layers]
-    for (kind, visible) in items {
-        #expect(visible == inLayout.contains(kind), "visibility mismatch for \(kind)")
+    // A menu item is ticked iff the panel is DRAWN — the front tab of its
+    // group. testLayout()'s groups are {color, swatches}, {stroke,
+    // properties}, {layers}, and the dock draws ONE panel per group, so
+    // Swatches and Properties are members drawn nowhere. This test used to
+    // assert membership, which is how a ticked-but-invisible panel shipped.
+    let drawn: Set<PanelKind> = [.color, .stroke, .layers]
+    let members: Set<PanelKind> = [.color, .swatches, .stroke, .properties, .layers]
+    for (kind, ticked) in items {
+        #expect(ticked == drawn.contains(kind), "menu tick mismatch for \(kind)")
+        #expect(l.isPanelVisible(kind) == members.contains(kind),
+                "membership mismatch for \(kind)")
     }
+    // And the two really do differ here — otherwise this test is vacuous.
+    #expect(members.count > drawn.count)
 }
 
 @Test func panelMenuItemsWithHidden() {

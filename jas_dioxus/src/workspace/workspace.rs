@@ -761,20 +761,35 @@ impl WorkspaceLayout {
     /// fallback). This covers two cases: re-opening a previously-closed panel
     /// (it is in `hidden_panels`), AND summoning a panel that is in NO group
     /// and was never hidden — e.g. a "toggle-only, not in the default layout"
-    /// panel like Brushes. Only a no-op when the panel is already on screen
-    /// (already in some dock group), so a Window-menu toggle-ON always adds it.
+    /// panel like Brushes. A panel that is already a group MEMBER is never
+    /// duplicated: if it is a background tab it is raised to the front of the
+    /// group it already sits in, and if it is already the front tab this is a
+    /// no-op. (Raising the tab is all this low-level op does — unlike the
+    /// UX-level `reveal_panel`, it does not touch dock or pane visibility.)
     pub fn show_panel(&mut self, kind: PanelKind) {
-        // Already in a dock group (anchored or floating)? It is on screen;
-        // nothing to do (and never add a duplicate).
-        let already_shown = self
-            .anchored
-            .iter()
-            .any(|(_, d)| d.groups.iter().any(|g| g.panels.contains(&kind)))
-            || self
-                .floating
-                .iter()
-                .any(|fd| fd.dock.groups.iter().any(|g| g.panels.contains(&kind)));
-        if already_shown {
+        // Already a member of some dock group (anchored or floating)? Never
+        // add a duplicate — raise the tab it already occupies instead. A
+        // member is NOT necessarily on screen: the dock draws one panel per
+        // group, so returning early here left "show" silently doing nothing.
+        if self.is_panel_visible(kind) {
+            let mut raised = false;
+            let groups = self
+                .anchored
+                .iter_mut()
+                .flat_map(|(_, d)| d.groups.iter_mut())
+                .chain(self.floating.iter_mut().flat_map(|fd| fd.dock.groups.iter_mut()));
+            for group in groups {
+                if let Some(idx) = group.panels.iter().position(|&k| k == kind)
+                    && (group.active != idx || group.collapsed)
+                {
+                    group.active = idx;
+                    group.collapsed = false;
+                    raised = true;
+                }
+            }
+            if raised {
+                self.bump();
+            }
             return;
         }
         // Drop it from the closed-panel list if it was a previously-closed
@@ -822,7 +837,10 @@ impl WorkspaceLayout {
     /// previously-recorded hidden state (closed-list membership, saved
     /// position) is cleared, since the panel is being re-placed at the tail.
     pub fn show_panel_in_last_group(&mut self, kind: PanelKind) {
-        // Already in some dock group? It is on screen; nothing to do.
+        // Already a MEMBER of some dock group? Nothing to append — a second
+        // copy would be a duplicate. Note this is membership, not on-screen:
+        // a background tab lands here, which is why the Window-menu toggle
+        // goes through `reveal_panel` and not this function directly.
         if self.is_panel_visible(kind) {
             return;
         }
@@ -857,6 +875,79 @@ impl WorkspaceLayout {
     }
 
     /// Check if a panel kind is currently visible (not hidden).
+    /// True iff the panel is actually DRAWN right now: it is its group's
+    /// active tab, that group is expanded, its dock is expanded, and — for
+    /// an anchored dock — the dock pane is not hidden. This is exactly the
+    /// postcondition `show_panel_in_last_group` establishes, which is what
+    /// makes the pair coherent: summon puts a panel on screen, and this
+    /// says whether it is there.
+    ///
+    /// Strictly stronger than `is_panel_visible`, which answers only "is it
+    /// a MEMBER of some group". A background tab is a member and is drawn
+    /// nowhere — the dock renders one panel per group. Anything user-facing
+    /// that means "on screen" (the Window-menu checkmark, the toggle's
+    /// hide/show routing) must ask THIS one.
+    pub fn panel_on_screen(&self, kind: PanelKind) -> bool {
+        let front_tab_of = |d: &Dock| {
+            !d.collapsed
+                && d.groups
+                    .iter()
+                    .any(|g| !g.collapsed && g.panels.get(g.active) == Some(&kind))
+        };
+        // A floating dock is its own window; the dock PANE gates only the
+        // anchored docks that live inside it.
+        let dock_pane_shown = self
+            .pane_layout
+            .as_ref()
+            .is_none_or(|pl| pl.is_pane_visible(PaneKind::Dock));
+        (dock_pane_shown && self.anchored.iter().any(|(_, d)| front_tab_of(d)))
+            || self.floating.iter().any(|fd| front_tab_of(&fd.dock))
+    }
+
+    /// Bring a panel to the front, wherever it already lives: activate it in
+    /// place when it is a member that simply is not drawn (a background tab,
+    /// a collapsed group or dock, a hidden dock pane), and only summon it
+    /// into dock_main's last group when it is a member of nothing. Never
+    /// duplicates a panel.
+    ///
+    /// `show_panel_in_last_group` alone cannot do this: it returns early on
+    /// membership, so asking it to show a background tab was a silent no-op.
+    pub fn reveal_panel(&mut self, kind: PanelKind) {
+        if self.panel_on_screen(kind) {
+            return;
+        }
+        if !self.is_panel_visible(kind) {
+            self.show_panel_in_last_group(kind);
+            return;
+        }
+        // A member that is not drawn: raise it where it stands, expanding
+        // every container above it.
+        let mut in_anchored = false;
+        for (_, dock) in self.anchored.iter_mut() {
+            for group in dock.groups.iter_mut() {
+                if let Some(idx) = group.panels.iter().position(|&k| k == kind) {
+                    group.active = idx;
+                    group.collapsed = false;
+                    dock.collapsed = false;
+                    in_anchored = true;
+                }
+            }
+        }
+        if in_anchored && let Some(pl) = self.pane_layout.as_mut() {
+            pl.show_pane(PaneKind::Dock);
+        }
+        for fd in self.floating.iter_mut() {
+            for group in fd.dock.groups.iter_mut() {
+                if let Some(idx) = group.panels.iter().position(|&k| k == kind) {
+                    group.active = idx;
+                    group.collapsed = false;
+                    fd.dock.collapsed = false;
+                }
+            }
+        }
+        self.bump();
+    }
+
     pub fn is_panel_visible(&self, kind: PanelKind) -> bool {
         // True iff the panel currently appears in some loaded dock group
         // (anchored or floating). `hidden_panels` only remembers user-closed
@@ -877,7 +968,7 @@ impl WorkspaceLayout {
 
     /// Return all panel kinds with their visibility, for a Window menu.
     pub fn panel_menu_items(&self) -> Vec<(PanelKind, bool)> {
-        PanelKind::ALL.iter().map(|&k| (k, self.is_panel_visible(k))).collect()
+        PanelKind::ALL.iter().map(|&k| (k, self.panel_on_screen(k))).collect()
     }
 
     // -----------------------------------------------------------------------
@@ -2122,22 +2213,28 @@ mod tests {
     }
 
     #[test]
-    fn panel_menu_items_reflect_dock_membership() {
+    fn panel_menu_items_reflect_what_is_drawn_not_mere_membership() {
         let l = WorkspaceLayout::default_layout();
         let items = l.panel_menu_items();
         assert_eq!(items.len(), PanelKind::ALL.len());
-        // `is_panel_visible` is dock-group based (mirrors OCaml): a panel
-        // reports visible iff it currently appears in some loaded group.
-        // Assert each menu item's flag tracks actual group membership in the
-        // default layout (toggle-only panels absent from every group, e.g.
-        // Brushes, report not-visible until shown on demand).
-        for (kind, visible) in &items {
-            let docked = l
-                .anchored
-                .iter()
-                .any(|(_, d)| d.groups.iter().any(|g| g.panels.contains(kind)));
-            assert_eq!(*visible, docked, "visibility mismatch for {:?}", kind);
+        // A menu item is ticked iff the panel is DRAWN — the front tab of an
+        // expanded group in an expanded dock. Membership is strictly weaker:
+        // the default layout stacks panels in tabbed groups, so several are
+        // members and drawn nowhere. This test used to assert membership,
+        // which is how a ticked-but-invisible Layers shipped.
+        for (kind, ticked) in &items {
+            let front_tab = l.anchored.iter().any(|(_, d)| {
+                !d.collapsed
+                    && d.groups
+                        .iter()
+                        .any(|g| !g.collapsed && g.panels.get(g.active) == Some(kind))
+            });
+            assert_eq!(*ticked, front_tab, "menu tick mismatch for {:?}", kind);
         }
+        // And the two really do differ here — otherwise this test is vacuous.
+        let members = PanelKind::ALL.iter().filter(|&&k| l.is_panel_visible(k)).count();
+        let drawn = items.iter().filter(|(_, v)| *v).count();
+        assert!(members > drawn, "default layout must stack tabs: {members} vs {drawn}");
     }
 
     #[test]
@@ -2149,8 +2246,11 @@ mod tests {
         let items = l.panel_menu_items();
         let stroke_item = items.iter().find(|(k, _)| *k == PanelKind::Stroke).unwrap();
         assert!(!stroke_item.1);
+        // Layers shares a group and is not its front tab, so it is a member
+        // that is drawn nowhere — untick, same as the closed Stroke.
         let layers_item = items.iter().find(|(k, _)| *k == PanelKind::Layers).unwrap();
-        assert!(layers_item.1);
+        assert!(!layers_item.1);
+        assert!(l.is_panel_visible(PanelKind::Layers), "still a member, though");
     }
 
     // -----------------------------------------------------------------------
@@ -2713,6 +2813,113 @@ mod tests {
         assert_eq!(l.name, "MyLayout");
         assert_eq!(l.version, LAYOUT_VERSION);
         assert_eq!(l.anchored.len(), 1);
+    }
+
+    // ---------------------------------------------------------------
+    // On-screen vs. membership: the dock draws ONE panel per group, so a
+    // background tab is a member that is drawn nowhere. The Window menu and
+    // its toggle must both speak about what is drawn.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn a_background_tab_is_a_member_but_not_on_screen() {
+        let l = WorkspaceLayout::default_layout();
+        let id = right_dock_id(&l);
+        let (gi, _) = panel_of(&l, id, PanelKind::Layers);
+        let group = &l.dock(id).unwrap().groups[gi];
+        assert!(group.panels.len() > 1, "Layers must share a group for this test");
+        assert_ne!(group.panels[group.active], PanelKind::Layers);
+        assert!(l.is_panel_visible(PanelKind::Layers), "it IS a member");
+        assert!(!l.panel_on_screen(PanelKind::Layers), "but it is not drawn");
+        // Its group-mate at the front is the one on screen.
+        let front = group.panels[group.active];
+        assert!(l.panel_on_screen(front));
+    }
+
+    #[test]
+    fn reveal_panel_raises_a_background_tab_without_duplicating_it() {
+        let mut l = WorkspaceLayout::default_layout();
+        let id = right_dock_id(&l);
+        let (gi, _) = panel_of(&l, id, PanelKind::Layers);
+        let before = l.dock(id).unwrap().groups[gi].panels.clone();
+        let displaced = before[l.dock(id).unwrap().groups[gi].active];
+
+        l.reveal_panel(PanelKind::Layers);
+
+        let group = &l.dock(id).unwrap().groups[gi];
+        assert_eq!(group.panels, before, "membership unchanged — no second copy");
+        assert!(l.panel_on_screen(PanelKind::Layers));
+        // Raising one tab lowers its group-mate; that is what a tab IS.
+        assert!(!l.panel_on_screen(displaced));
+        assert!(l.is_panel_visible(displaced), "lowered, not closed");
+    }
+
+    #[test]
+    fn reveal_panel_expands_a_collapsed_group_and_dock() {
+        let mut l = WorkspaceLayout::default_layout();
+        let id = right_dock_id(&l);
+        let (gi, _) = panel_of(&l, id, PanelKind::Color);
+        l.dock_mut(id).unwrap().groups[gi].collapsed = true;
+        l.dock_mut(id).unwrap().collapsed = true;
+        assert!(!l.panel_on_screen(PanelKind::Color));
+
+        l.reveal_panel(PanelKind::Color);
+
+        assert!(l.panel_on_screen(PanelKind::Color));
+        assert!(!l.dock(id).unwrap().collapsed);
+        assert!(!l.dock(id).unwrap().groups[gi].collapsed);
+    }
+
+    #[test]
+    fn reveal_panel_summons_a_panel_that_is_a_member_of_nothing() {
+        let mut l = WorkspaceLayout::default_layout();
+        assert!(!l.is_panel_visible(PanelKind::Gradient));
+        l.reveal_panel(PanelKind::Gradient);
+        assert!(l.panel_on_screen(PanelKind::Gradient));
+    }
+
+    #[test]
+    fn reveal_panel_is_a_noop_when_the_panel_is_already_drawn() {
+        let mut l = WorkspaceLayout::default_layout();
+        let id = right_dock_id(&l);
+        let front = {
+            let g = &l.dock(id).unwrap().groups[0];
+            g.panels[g.active]
+        };
+        l.mark_saved();
+        l.reveal_panel(front);
+        assert!(!l.needs_save(), "nothing changed, so nothing to save");
+    }
+
+    #[test]
+    fn reveal_panel_unhides_the_dock_pane() {
+        let mut l = WorkspaceLayout::default_layout();
+        l.ensure_pane_layout(1440.0, 900.0);
+        l.pane_layout.as_mut().unwrap().hide_pane(PaneKind::Dock);
+        let id = right_dock_id(&l);
+        let front = {
+            let g = &l.dock(id).unwrap().groups[0];
+            g.panels[g.active]
+        };
+        assert!(!l.panel_on_screen(front), "a hidden dock pane draws nothing");
+
+        l.reveal_panel(front);
+
+        assert!(l.panel_on_screen(front));
+        assert!(l.pane_layout.as_ref().unwrap().is_pane_visible(PaneKind::Dock));
+    }
+
+    #[test]
+    fn panel_menu_items_report_what_is_drawn() {
+        let l = WorkspaceLayout::default_layout();
+        let items: std::collections::HashMap<_, _> = l.panel_menu_items().into_iter().collect();
+        assert!(!items[&PanelKind::Layers], "background tab");
+        let id = right_dock_id(&l);
+        let front = {
+            let g = &l.dock(id).unwrap().groups[0];
+            g.panels[g.active]
+        };
+        assert!(items[&front], "front tab");
     }
 
     #[test]

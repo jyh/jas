@@ -888,7 +888,7 @@ pub(crate) fn MenuBarView(
 ///   modified, has_filename = filename does NOT start with "Untitled-",
 ///   active_layer_locked).
 /// - `workspace.has_saved_layout`: active layout != the system "Workspace".
-/// - `panels.<id>`: is_panel_visible for all 16 Window-menu panel ids.
+/// - `panels.<id>`: panel_on_screen for all 16 Window-menu panel ids.
 /// - `panes.<id>`: is_pane_visible for toolbar / dock.
 fn build_menu_ctx(st: &AppState) -> serde_json::Value {
     use super::workspace::{PaneKind, PanelKind, WORKSPACE_LAYOUT_NAME};
@@ -950,7 +950,7 @@ fn build_menu_ctx(st: &AppState) -> serde_json::Value {
     ];
     let mut panels = serde_json::Map::new();
     for (id, kind) in panel_kinds {
-        panels.insert(id.to_string(), J::Bool(st.workspace_layout.is_panel_visible(kind)));
+        panels.insert(id.to_string(), J::Bool(st.workspace_layout.panel_on_screen(kind)));
     }
 
     let mut panes = serde_json::Map::new();
@@ -1180,7 +1180,8 @@ mod tests {
             );
         }
 
-        // checked_when wiring: panels.<id> must equal live is_panel_visible.
+        // checked_when wiring: panels.<id> must equal live panel_on_screen
+        // (what is DRAWN), not mere group membership.
         crate::workspace::layout_apply::layout_apply(
             &mut st.workspace_layout,
             &crate::workspace::layout_apply::op_show_panel(PanelKind::Layers),
@@ -1189,8 +1190,8 @@ mod tests {
         let eval2 = |e: &str| crate::interpreter::expr::eval(e, &ctx2).to_bool();
         assert_eq!(
             eval2("panels.layers"),
-            st.workspace_layout.is_panel_visible(PanelKind::Layers),
-            "panels.layers checked_when must equal is_panel_visible",
+            st.workspace_layout.panel_on_screen(PanelKind::Layers),
+            "panels.layers checked_when must equal panel_on_screen",
         );
         assert!(eval2("panels.layers"), "Layers checked after op_show_panel");
         // concepts now HAS a PanelKind but is not in the default layout, so it
@@ -1270,12 +1271,16 @@ mod tests {
         let (_, dock) = st.workspace_layout.anchored.first().unwrap();
         let dock_id = dock.id;
         let before = dock.groups.len();
-        // Default group 0 = [color, swatches]; both are on screen, so the
-        // first toggle of each HIDES it. Emptying the group must drop it.
-        assert!(st.workspace_layout.is_panel_visible(PanelKind::Color));
-        assert!(st.workspace_layout.is_panel_visible(PanelKind::Swatches));
-        toggle_panel(&mut st, "swatches");
-        toggle_panel(&mut st, "color");
+        // Default group 0 = [color, swatches] — a TAB STACK, so only Color
+        // is drawn. Swatches is a member that is on screen nowhere, and the
+        // toggle raises it before it can hide it.
+        assert!(st.workspace_layout.panel_on_screen(PanelKind::Color));
+        assert!(!st.workspace_layout.panel_on_screen(PanelKind::Swatches));
+        toggle_panel(&mut st, "swatches"); // raise: Swatches to the front
+        assert!(st.workspace_layout.panel_on_screen(PanelKind::Swatches));
+        assert!(!st.workspace_layout.panel_on_screen(PanelKind::Color));
+        toggle_panel(&mut st, "swatches"); // now drawn, so this hides it
+        toggle_panel(&mut st, "color"); // sole survivor, drawn again, hides
         assert!(!st.workspace_layout.is_panel_visible(PanelKind::Color));
         assert!(!st.workspace_layout.is_panel_visible(PanelKind::Swatches));
         let after = st.workspace_layout.dock(dock_id).unwrap().groups.len();

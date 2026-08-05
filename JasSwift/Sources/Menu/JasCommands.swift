@@ -399,12 +399,16 @@ public struct JasCommands: Commands {
             // group, activate (showPanelInLastGroup); HIDE -> close_panel + drop
             // the emptied group (shared layout-op runtime). This makes Gradient
             // and Concepts reachable, same as every other panel.
-            if ws.workspaceLayout.isPanelVisible(kind) {
+            // Routed on `panelOnScreen`, NOT on group membership: a
+            // background tab is a member that is drawn nowhere, and routing it
+            // to the close branch deleted the panel the artist was asking to
+            // see (they saw nothing happen, then had to click twice).
+            if ws.workspaceLayout.panelOnScreen(kind) {
                 if let addr = findPanel(ws.workspaceLayout, kind) {
                     layoutApply(&ws.workspaceLayout, opClosePanel(addr))
                 }
             } else {
-                ws.workspaceLayout.showPanelInLastGroup(kind)
+                ws.workspaceLayout.revealPanel(kind)
             }
             ws.workspaceLayout.saveIfNeeded()
         default:
@@ -834,7 +838,7 @@ func panelKindForMenuId(_ id: String) -> PanelKind? {
 ///   `Untitled-`) / active_layer_locked; all-false when no document is active.
 /// - `workspace.has_saved_layout` — the active layout is not the system
 ///   "Workspace" layout.
-/// - `panels` — `isPanelVisible(kind)` for each of the 14 ids (concepts → false).
+/// - `panels` — `panelOnScreen(kind)` for each of the 14 ids (concepts → false).
 /// - `panes` — `isPaneVisible(kind)` for `toolbar` / `dock`.
 func buildMenuContext(model: Model?, tabCount: Int, hasSelection: Bool?,
                       canUndo: Bool?, canRedo: Bool?,
@@ -876,7 +880,7 @@ func buildMenuContext(model: Model?, tabCount: Int, hasSelection: Bool?,
         for pid in menuPanelIds {
             // All 16 ids map to a PanelKind now; the checkmark tracks live
             // on-screen state (unknown id would defensively resolve to false).
-            panels[pid] = panelKindForMenuId(pid).map { layout.isPanelVisible($0) } ?? false
+            panels[pid] = panelKindForMenuId(pid).map { layout.panelOnScreen($0) } ?? false
         }
         let paneLayout = layout.panes()
         for pnid in ["toolbar", "dock"] {

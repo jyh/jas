@@ -567,7 +567,11 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
     if action == "toggle_panel" {
         if let Some(panel_id) = params.get("panel").and_then(|v| v.as_str()) {
             let kind = crate::workspace::layout_apply::parse_panel_kind(panel_id);
-            if st.workspace_layout.is_panel_visible(kind) {
+            // Routed on `panel_on_screen`, NOT on group membership: a
+            // background tab is a member that is drawn nowhere, and routing
+            // it to the close branch deleted the panel the artist was asking
+            // to see (they saw nothing happen, then had to click twice).
+            if st.workspace_layout.panel_on_screen(kind) {
                 if let Some(addr) =
                     crate::workspace::clipboard::find_panel(&st.workspace_layout, kind)
                 {
@@ -577,7 +581,7 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                     );
                 }
             } else {
-                st.workspace_layout.show_panel_in_last_group(kind);
+                st.workspace_layout.reveal_panel(kind);
                 // COLOR.md §Panel initialization rule: color_panel_mode is
                 // panel-local and resets to its default (HSB) on each reopen —
                 // not persisted across close. Preserved from the legacy
