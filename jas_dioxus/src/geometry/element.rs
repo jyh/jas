@@ -3869,6 +3869,63 @@ mod tests {
         assert_eq!(e.geometric_bounds(), (10.0, 20.0, 30.0, 40.0));
     }
 
+    /// PINS AN UNRULED SIMPLIFICATION. Preview bounds inflate by HALF the
+    /// stroke width whatever the stroke's alignment is, and that is exactly
+    /// right for `Center` and wrong for the other two:
+    ///
+    /// ```text
+    /// rect (10,20,100,50), stroke width 10
+    ///   align            bounds() says        the ink actually covers
+    ///   Center           (5,15,110,60)        (5,15,110,60)     <- agrees
+    ///   Inside           (5,15,110,60)        (10,20,100,50)    <- 5pt/side out
+    ///   Outside          (5,15,110,60)        (0,10,120,70)     <- 5pt/side out
+    /// ```
+    ///
+    /// `inflate_bounds` never reads `stroke.align`. Neither does JasSwift's
+    /// `inflateBounds`, so BOTH ACTIVE PORTS AGREE AND ARE WRONG TOGETHER —
+    /// the equivalence law cannot see this class, only a question the corpus
+    /// was not built to ask can. `set_stroke_align` is a real user-reachable
+    /// action and the alignment survives the binary codec, so the input is
+    /// reachable; these bounds feed Align/Distribute, the transform pivot and
+    /// the drawn selection box, which is the same set of organs RESOLVEDALIGN
+    /// repaired for an unrelated cause.
+    ///
+    /// Whether preview bounds SHOULD honour alignment is a product question
+    /// (a deliberate cheap approximation is a defensible answer), so this test
+    /// asserts today's behaviour rather than the corrected one, and exists so
+    /// that changing it has to be a decision instead of an accident. If the
+    /// ruling lands, this test is the thing that reds.
+    #[test]
+    fn preview_bounds_ignore_stroke_align_pending_a_ruling() {
+        let stroked = |align: StrokeAlign| {
+            let mut s = Stroke::new(Color::BLACK, 10.0);
+            s.align = align;
+            Element::Rect(RectElem {
+                x: 10.0, y: 20.0, width: 100.0, height: 50.0, rx: 0.0, ry: 0.0,
+                fill: None, stroke: Some(s), common: CommonProps::default(),
+                fill_gradient: None, stroke_gradient: None,
+            })
+        };
+
+        // Correct for Center, and the only one of the three that is.
+        assert_eq!(stroked(StrokeAlign::Center).bounds(), (5.0, 15.0, 110.0, 60.0));
+
+        // Both of these return the Center answer. Asserted as equality to the
+        // Center box so the omission is stated, not implied by a magic tuple.
+        let center = stroked(StrokeAlign::Center).bounds();
+        assert_eq!(stroked(StrokeAlign::Inside).bounds(), center,
+                   "Inside no longer matches Center -- if alignment was ruled \
+                    to matter, this test is the record of the old behaviour");
+        assert_eq!(stroked(StrokeAlign::Outside).bounds(), center,
+                   "Outside no longer matches Center -- see above");
+
+        // And the honest answers, kept beside the pinned ones so the size of
+        // the gap is in the file rather than in a letter.
+        assert_eq!(stroked(StrokeAlign::Inside).geometric_bounds(),
+                   (10.0, 20.0, 100.0, 50.0),
+                   "geometric_bounds IS what an Inside stroke covers");
+    }
+
     #[test]
     fn geometric_bounds_circle() {
         let e = circle(50.0, 50.0, 20.0);
