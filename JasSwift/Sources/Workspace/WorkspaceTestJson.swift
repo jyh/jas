@@ -10,12 +10,23 @@ import Foundation
 
 // MARK: - Float formatting (same rules as Geometry/TestJson.swift)
 
+// SIX decimals, not four, since 2026-08-05 — mirrors
+// jas_dioxus/src/workspace/test_json.rs, which carries the full reasoning.
+// In short: WorkspaceLayout holds tool TOLERANCES beside its pixel geometry,
+// and a 4-decimal grid could not tell a 3e-5pt tolerance from exactly zero,
+// while the workspace save path (serde / Codable) is lossless — so the oracle
+// was the only lossy step in the round trip it exists to police.
+//
+// The 6dp grid is measured to agree with Rust's `format!("{:.6}")` across 589
+// tie-stressing values (R3, geometry oracle). Not full precision: the two
+// ports have no agreed spelling for that yet (Rust `0.0000001` vs Swift
+// `1e-07`) and the shared fixed-notation formatter is unbuilt.
 private func fmt(_ v: Double) -> String {
-    let rounded = (v * 10000.0).rounded() / 10000.0
+    let rounded = (v * 1000000.0).rounded() / 1000000.0
     if rounded == rounded.rounded(.towardZero) && rounded.truncatingRemainder(dividingBy: 1) == 0 {
         return String(format: "%.1f", rounded)
     }
-    var s = String(format: "%.4f", rounded)
+    var s = String(format: "%.6f", rounded)
     while s.hasSuffix("0") && !s.hasSuffix(".0") {
         s.removeLast()
     }

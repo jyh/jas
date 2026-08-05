@@ -2,9 +2,26 @@
 //! equivalence testing.
 //!
 //! Follows the same conventions as `geometry::test_json`: sorted keys,
-//! normalized floats (4 decimals), all optional fields explicit (`null`),
+//! normalized floats (6 decimals), all optional fields explicit (`null`),
 //! enums as lowercase strings. Byte-for-byte comparison is a valid
 //! equivalence check.
+//!
+//! SIX decimals, not four, since 2026-08-05. `WorkspaceLayout` carries tool
+//! TOLERANCES (`boolean_options.precision`, default 0.0283pt = 0.01mm) beside
+//! its pixel geometry, and at a 4-decimal grid this oracle could not tell a
+//! 3e-5pt tolerance from exactly zero. The workspace save path is serde and
+//! therefore lossless, so the oracle was the only lossy step in the round trip
+//! it was meant to police: a real divergence between the ports below 1e-4
+//! compared EQUAL. R3 made the same argument about `geometry::test_json` and
+//! the same 6-decimal grid was measured there to agree between Rust's
+//! `format!("{:.6}")` and Swift's `String(format: "%.6f")` across 589
+//! tie-stressing values.
+//!
+//! Six rather than full precision deliberately: full precision has no agreed
+//! spelling across the two ports yet (Rust prints `0.0000001`, Swift prints
+//! `1e-07`), and the shared fixed-notation formatter the 2026-08-05
+//! four-decimal ruling calls for is not built. Six is the widest grid that is
+//! measured to agree today.
 
 use super::workspace::*;
 use super::pane::*;
@@ -14,11 +31,11 @@ use super::pane::*;
 // ---------------------------------------------------------------------------
 
 fn fmt(v: f64) -> String {
-    let rounded = (v * 10000.0).round() / 10000.0;
+    let rounded = (v * 1000000.0).round() / 1000000.0;
     if rounded == rounded.trunc() {
         format!("{:.1}", rounded)
     } else {
-        let s = format!("{:.4}", rounded);
+        let s = format!("{:.6}", rounded);
         let s = s.trim_end_matches('0');
         s.to_string()
     }
@@ -712,7 +729,46 @@ mod tests {
         assert_eq!(fmt(0.0), "0.0");
         assert_eq!(fmt(240.0), "240.0");
         assert_eq!(fmt(72.0), "72.0");
-        assert_eq!(fmt(3.14159), "3.1416");
+        assert_eq!(fmt(3.14159), "3.14159");
+    }
+
+    /// The workspace oracle must be able to tell apart values that a tool
+    /// tolerance can actually hold.
+    ///
+    /// `WorkspaceLayout` carries `boolean_options.precision`, a GEOMETRIC
+    /// TOLERANCE in points whose default is 0.0283pt (0.01mm) — not a pixel
+    /// coordinate. At the old 4-decimal grid this oracle could not distinguish
+    /// a tolerance of 3e-5pt from a tolerance of EXACTLY ZERO, and those are
+    /// different instructions to the flattener, not different roundings of one
+    /// instruction. Two tolerances a full 10% apart (0.000283 vs 0.000311)
+    /// also collapsed to one string.
+    ///
+    /// This is the same argument R3 made about the geometry oracle: an oracle
+    /// quantising where its subject does not cannot see the band its subject
+    /// still carries. The workspace SAVE path is serde — lossless — so the
+    /// oracle was the only lossy step, and a divergence between the two ports
+    /// below 1e-4 would have compared EQUAL.
+    ///
+    /// Each pair below is byte-identical at 4dp and distinct at 6dp, so this
+    /// test reds if the grid is ever coarsened back.
+    #[test]
+    fn fmt_discriminates_below_the_old_four_decimal_grid() {
+        let collapsed_at_4dp = [
+            // a tiny tolerance versus no tolerance at all
+            (0.00003_f64, 0.0_f64),
+            // two tolerances 10% apart, both under the old grid
+            (0.000283_f64, 0.000311_f64),
+            // a hair off the default 0.01mm tolerance
+            (0.0283_f64, 0.028301_f64),
+        ];
+        for (a, b) in collapsed_at_4dp {
+            assert_ne!(
+                fmt(a),
+                fmt(b),
+                "the oracle cannot distinguish {a} from {b}; a divergence \
+                 between the ports in this band would compare EQUAL"
+            );
+        }
     }
 
     #[test]

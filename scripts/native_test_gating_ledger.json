@@ -17,9 +17,28 @@
     "D1 put a sixth port on this Rust core. A shared law verified in one build",
     "is a law with one witness, and this repo has already paid for that shape",
     "once: the text-width law lived in web-gated `tools` while being the only",
-    "definition, and the native arm drifted unwatched (CHARWIDTH)."
+    "definition, and the native arm drifted unwatched (CHARWIDTH).",
+    "",
+    "MEASURED 2026-08-05 -- the 16 debt rows reduce to exactly TWO root",
+    "blockers, 8 rows each, and three rows named the wrong one before this:",
+    "",
+    "  app_state         8 rows. NOT web-bound. Ungating `panels` natively",
+    "                    gives 31 errors and every one is a workspace::",
+    "                    app_state / workspace::theme import -- no web_sys,",
+    "                    wasm_bindgen or js_sys among them.",
+    "  yaml_tool overlay 8 rows. Ungating `tools` natively gives 54 errors,",
+    "                    38 of them in yaml_tool.rs alone (js_sys/wasm_bindgen",
+    "                    canvas dash-pattern calls inside overlay drawing).",
+    "",
+    "The cheapest crack in the app_state blocker, for whoever takes it: the",
+    "panel-state types the blocked tests actually need are pure data living",
+    "inside a 6874-line web-gated file -- StrokePanelState (app_state.rs:301)",
+    "and CharacterPanelState (app_state.rs:606), both `pub(crate)`. Lifting",
+    "those into a native workspace submodule is what frees",
+    "character_panel_defaults_match_the_workspace and the two panel-edit",
+    "corpora, without touching the app shell. Not attempted here; measured",
+    "and named so the next reader starts from a fact."
   ],
-
   "modules": {
     "jas_dioxus/src/lib.rs::canvas": {
       "kind": "frontend",
@@ -28,7 +47,7 @@
     "jas_dioxus/src/lib.rs::panels": {
       "kind": "debt",
       "reason": "Panel VIEWS are Dioxus components and belong behind the gate, but the module also holds panel STRUCTURE and state that is plain data -- panel_menu.rs alone carries 8 tests and imports nothing from Dioxus or web_sys. 50 tests are invisible natively; an unknown fraction of them could come home.",
-      "blocked_by": "Not yet split. Needs the treatment workspace/mod.rs got on 2026-07-30: gate per submodule, not per module. Measure first -- panel_menu.rs and panel_menu_state.rs are the candidates."
+      "blocked_by": "crate::workspace::app_state, not web bindings. MEASURED 2026-08-05 by ungating `pub mod panels` and reading a native build: 31 errors, and EVERY ONE is an unresolved `crate::workspace::app_state` or `crate::workspace::theme` import -- not one web_sys, wasm_bindgen or js_sys among them. So the per-submodule treatment this row asks for does not apply: the module is not web-bound, it is app-shell-bound. 17 of the 18 panel files fail on that import; panel_menu.rs is the only clean one, and panel_menu_state.rs -- named here as a candidate -- is NOT clean. This module comes home with app_state, alongside the six item rows that name it directly."
     },
     "jas_dioxus/src/recorder/mod.rs::core": {
       "kind": "frontend",
@@ -45,7 +64,7 @@
     "jas_dioxus/src/lib.rs::tools": {
       "kind": "debt",
       "reason": "The tool implementations import web_sys, but 268 tests live here -- the largest single block of natively-invisible verification in the crate -- and the tool LAWS (hit radius, drag threshold, paste offset, and the pointer state machines) are document behaviour every port must agree on. Two extractions have already been made from this module for exactly this reason and both were forced by a defect: tool_consts (the scalars) and text_measure (the width law, after the native arm reimplemented it wrongly twice over).",
-      "blocked_by": "web_sys imports in the tool implementations. The CanvasTool trait itself is the thing recorder::replay needs; whether the trait can be separated from its web-bound implementors has not been measured."
+      "blocked_by": "yaml_tool.rs's overlay-drawing path. MEASURED 2026-08-05 by ungating `pub mod tools` and reading a native build: 54 errors across 12 files. The trait separation this row used to call unmeasured IS clean -- tools/tool.rs has exactly one web binding (`use web_sys::CanvasRenderingContext2d`) used by exactly one method (`draw_overlay`), and all three CanvasTool implementors live in files that stay gated. But separating the trait buys NOTHING, because recorder::replay::build_gesture_tool constructs a concrete crate::tools::yaml_tool::YamlTool, and yaml_tool.rs alone carries 38 of the 54 errors -- js_sys/wasm_bindgen JsValue calls setting canvas dash patterns, all inside overlay drawing helpers, in a 7043-line file. Ungating also cascades into workspace::clipboard (6), crate::canvas (2) and workspace::app_state (1). The 7 gesture rows come home when yaml_tool's overlay path is split from its gesture seam, not when the trait is."
     },
     "jas_dioxus/src/painter/mod.rs::canvas2d": {
       "kind": "frontend",
@@ -104,7 +123,6 @@
       "reason": "Emits CSS strings and baked SVG. Zero tests, and all eight consumers are themselves web-gated views. Leaving it native bought 24 dead-code warnings and not one measurable line -- so this row is a judgement, not a compiler verdict, and is marked as such."
     }
   },
-
   "items": {
     "jas_dioxus/src/cross_language_test.rs::gesture_corpus": {
       "kind": "debt",
@@ -174,7 +192,7 @@
     "jas_dioxus/src/cross_language_test.rs::layout_production_route_close_panel": {
       "kind": "debt",
       "reason": "Proves the production close-panel route and the corpus route are the same body. The only test in this file blocked by panels rather than by recorder or app_state.",
-      "blocked_by": "crate::panels. See the panels module row -- it has not been split."
+      "blocked_by": "crate::workspace::app_state, directly. MEASURED 2026-08-05: this row used to blame crate::panels and defer to the panels module row, and that is wrong in a way that would have wasted the next reader's time -- the test body opens with `use crate::workspace::app_state::AppState`, so splitting panels would not free it even if panels were split perfectly. It is an app_state row and always was."
     },
     "jas_dioxus/src/interpreter/effects.rs::brush_tile_click_applies_composed_brush_id_via_action": {
       "kind": "frontend",
