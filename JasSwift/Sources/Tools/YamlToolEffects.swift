@@ -3445,28 +3445,34 @@ internal func fitRectIntoViewport(model: Model, x: Double, y: Double,
     model.viewOffsetY = vh / 2.0 - rectCy * z
 }
 
-/// Document bounding box: union of all top-level layer bounds.
-/// Returns (0, 0, 0, 0) for an empty document. Mirrors
-/// Document::bounds() in Rust.
+/// Document bounding box: union of all top-level layer bounds — what
+/// `Fit in Window` frames. Returns (0, 0, 0, 0) for an empty document.
+/// Mirrors Document::bounds() in Rust.
+///
+/// RESOLVED, because a symbol instance measures its TARGET's geometry: the
+/// resolver-less `Element.bounds` answers a zero box at the ORIGIN for
+/// reference, recorded and generated kinds, so a document whose artwork is
+/// instances used to fold a phantom point at the origin into the frame (and a
+/// document of nothing BUT instances framed a zero box there). An element that
+/// resolves to nothing — a dangling reference — contributes nothing rather
+/// than the origin.
 internal func documentBounds(_ doc: Document) -> (x: Double, y: Double, w: Double, h: Double) {
     if doc.layers.isEmpty {
         return (0, 0, 0, 0)
     }
-    var minX = Double.infinity
-    var minY = Double.infinity
-    var maxX = -Double.infinity
-    var maxY = -Double.infinity
+    let resolver = IdIndexResolver(index: rebuildIdIndex(doc))
+    var acc: BBox?
     for layer in doc.layers {
-        let b = layer.bounds
-        let bx = Double(b.x), by = Double(b.y)
-        let bw = Double(b.width), bh = Double(b.height)
-        minX = min(minX, bx)
-        minY = min(minY, by)
-        maxX = max(maxX, bx + bw)
-        maxY = max(maxY, by + bh)
+        guard let b = resolvedBoundsWith(.layer(layer), resolver, { $0.bounds })
+        else { continue }
+        guard let a = acc else { acc = b; continue }
+        let minX = min(a.x, b.x), minY = min(a.y, b.y)
+        let maxX = max(a.x + a.width, b.x + b.width)
+        let maxY = max(a.y + a.height, b.y + b.height)
+        acc = (x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
-    if minX.isInfinite || minY.isInfinite { return (0, 0, 0, 0) }
-    return (minX, minY, maxX - minX, maxY - minY)
+    guard let b = acc else { return (0, 0, 0, 0) }
+    return (Double(b.x), Double(b.y), Double(b.width), Double(b.height))
 }
 
 private func evalBool(_ arg: Any?, store: StateStore, ctx: [String: Any]) -> Bool {

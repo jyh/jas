@@ -333,23 +333,40 @@ impl Document {
         out
     }
 
-    /// Return the bounding box of all layers combined.
+    /// Return the bounding box of all layers combined — what `Fit in Window`
+    /// frames.
+    ///
+    /// RESOLVED, because a symbol instance measures its TARGET's geometry: the
+    /// resolver-less `Element::bounds` answers `(0,0,0,0)` for reference,
+    /// recorded and generated kinds, so a document whose artwork is instances
+    /// used to fold a phantom point at the origin into the frame (and a
+    /// document of nothing BUT instances framed a zero box there). An element
+    /// that resolves to nothing — a dangling reference — now contributes
+    /// nothing rather than the origin.
     pub fn bounds(&self) -> (f64, f64, f64, f64) {
-        if self.layers.is_empty() {
-            return (0.0, 0.0, 0.0, 0.0);
+        let index = crate::document::id_index::rebuild_id_index(self);
+        let resolver = crate::document::id_index::IndexResolver(&index);
+        let mut acc: Option<(f64, f64, f64, f64)> = None;
+        for layer in &self.layers {
+            let Some((x, y, w, h)) = crate::geometry::element::resolved_bounds_with(
+                layer,
+                &resolver,
+                Element::bounds,
+            ) else {
+                continue;
+            };
+            acc = Some(match acc {
+                None => (x, y, w, h),
+                Some((ax, ay, aw, ah)) => {
+                    let min_x = ax.min(x);
+                    let min_y = ay.min(y);
+                    let max_x = (ax + aw).max(x + w);
+                    let max_y = (ay + ah).max(y + h);
+                    (min_x, min_y, max_x - min_x, max_y - min_y)
+                }
+            });
         }
-        let all: Vec<_> = self.layers.iter().map(|l| l.bounds()).collect();
-        let min_x = all.iter().map(|b| b.0).fold(f64::INFINITY, f64::min);
-        let min_y = all.iter().map(|b| b.1).fold(f64::INFINITY, f64::min);
-        let max_x = all
-            .iter()
-            .map(|b| b.0 + b.2)
-            .fold(f64::NEG_INFINITY, f64::max);
-        let max_y = all
-            .iter()
-            .map(|b| b.1 + b.3)
-            .fold(f64::NEG_INFINITY, f64::max);
-        (min_x, min_y, max_x - min_x, max_y - min_y)
+        acc.unwrap_or((0.0, 0.0, 0.0, 0.0))
     }
 
     /// Return a reference to the element at the given path.

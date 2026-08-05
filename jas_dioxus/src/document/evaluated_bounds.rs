@@ -203,6 +203,48 @@ mod tests {
     }
 
     /// A group holding that same instance plus a rect at (100,100,10,10).
+    /// FITPHANTOM: what `Fit in Window` actually sees. The document holds ONE
+    /// symbol instance whose master is a rect at (5,7,10,20) — so the artwork
+    /// occupies exactly that box and nothing is anywhere near the origin.
+    #[test]
+    fn document_bounds_must_not_invent_a_point_at_the_origin() {
+        let doc = doc_with_instance();
+        let (x, y, w, h) = doc.bounds();
+        assert_eq!(
+            (x, y, w, h),
+            (5.0, 7.0, 10.0, 20.0),
+            "Fit in Window frames the ARTWORK; a live element that answers \
+             (0,0,0,0) drags the frame back to the origin"
+        );
+    }
+
+    /// And the union case: an instance beside a distant rect must not stretch
+    /// the frame back to (0,0), and a dangling reference must contribute
+    /// nothing rather than the origin.
+    #[test]
+    fn document_bounds_union_skips_what_resolves_to_nothing() {
+        let mut doc = doc_with_instance();
+        let dangling = Element::Live(LiveVariant::Reference(ReferenceElem::new(
+            ElementRef("gone".into()),
+            CommonProps { id: Some("i2".into()), ..CommonProps::default() },
+        )));
+        let far = Element::Rect(RectElem {
+            x: 100.0, y: 100.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, fill_gradient: None, stroke_gradient: None,
+            common: CommonProps::default(),
+        });
+        if let Element::Layer(l) = &mut doc.layers[0] {
+            l.children.push(Rc::new(dangling));
+            l.children.push(Rc::new(far));
+        }
+        assert_eq!(
+            doc.bounds(),
+            (5.0, 7.0, 105.0, 103.0),
+            "the resolved instance and the far rect bound it; a dangling \
+             reference contributes nothing, not the origin"
+        );
+    }
+
     fn doc_with_group_holding_instance() -> Document {
         let mut doc = doc_with_instance();
         let sibling = Element::Rect(RectElem {
