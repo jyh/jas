@@ -56,9 +56,15 @@ LEDGER: dict[str, dict[str, str]] = {
         "let (x, y, w, h) = elem.bounds();":
             "REACHABLE, UNCONVERTED — the Layers-panel thumbnail "
             "(`tree_preview_svg`). An instance yields w=h=0 and the function "
-            "returns an empty string, so instances show no thumbnail. Needs "
-            "RESOLVED GEOMETRY, not just a resolved box (the svg traces the "
-            "element), so it is a feature-sized change, not an accessor swap.",
+            "returns an empty string, so instances show no thumbnail. MEASURED "
+            "2026-08-05: resolving the box alone would NOT fix it. The body "
+            "calls `geometry::svg::element_svg`, whose Reference arm emits "
+            "`<use href=\"#id\"/>` — correct for a saved FILE (it round-trips "
+            "back to a live reference, F-svg-use) and empty in a standalone "
+            "thumbnail that carries no defs. So the thumbnail needs its own "
+            "geometry path; widening the shared writer would bake the instance "
+            "into every saved document. Feature-sized, and it touches the file "
+            "format's boundary — not an accessor swap.",
     },
     "interpreter/effects.rs": {
         "let bounds = model.document().bounds();":
