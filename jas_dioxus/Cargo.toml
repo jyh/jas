@@ -49,6 +49,9 @@ harness = false
 default = ["web"]
 # The extern "C" surface for a native shell. Additive and off by default.
 ffi = []
+# The Direct2D backend for the ratified Painter seam (B1). Additive, off by
+# default; its deps are target-gated to Windows at the foot of this file.
+d2d = ["dep:windows", "dep:windows-numerics"]
 web = ["dep:dioxus", "dep:web-sys", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:dioxus-logger", "dep:console_error_panic_hook"]
 
 [dependencies]
@@ -102,3 +105,18 @@ console_error_panic_hook = { version = "0.1", optional = true }
 
 [dev-dependencies]
 dioxus-sdk = "0.6"
+
+# B1 -- Direct2D / DirectWrite / WIC, behind feature = "d2d".
+# windows-numerics is a SEPARATE crate: there is no D2D_POINT_2F in windows
+# 0.62, every point is windows_numerics::Vector2.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", optional = true, features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Imaging",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_System_Com",
+] }
+windows-numerics = { version = "0.3", optional = true }

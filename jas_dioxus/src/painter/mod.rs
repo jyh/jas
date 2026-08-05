@@ -276,6 +276,11 @@ pub enum TextRun {
 /// stable (see `SPIKE_FINDINGS.md`).
 ///
 /// [`push_state`]: Painter::push_state
+// B1 -- the Direct2D backend. Behind feature = "d2d" so the web build and the
+// wasm target never see it.
+#[cfg(all(feature = "d2d", windows))]
+pub mod direct2d;
+
 pub trait Painter {
     /// Fill a path. `winding` is `EvenOdd` for boolean-op output that carries
     /// holes (AMENDMENT A3, RATIFIED 2026-07-23: fills carry a winding, not

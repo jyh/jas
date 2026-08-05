@@ -27,18 +27,53 @@ use crate::document::print_preferences::{
 use crate::geometry::element::*;
 
 // ---------------------------------------------------------------------------
-// Float formatting: round to 4 decimal places
+// Float formatting: round to 6 decimal places
+//
+// R3 (JYH, 2026-08-01). This was 4dp until 2026-08-02, which is the SAME
+// quantizer the SVG writer uses for positions — so the oracle shared its
+// subject's resolution and every divergence below 1e-4 was invisible BY
+// CONSTRUCTION. The codec gates passed because they could not see, not because
+// the ports agreed: the circularity law from `check_lane_coverage.py` (never
+// derive a floor from the parse it guards) living inside a codec.
+//
+// SIX, and not more. Measured across the corpus: 9 and 12 buy nothing over 6 --
+// identical file count, identical delta count, identical leaf set. A fixed 17
+// breaks BOTH ports' readers, `serde_json` and `JSONSerialization` each
+// mis-rounding 19-significant-digit literals by one ulp. And "shortest
+// round-trip" is spelled three different ways by Rust, Swift and Python, so
+// adopting it here would make byte-level float formatting a cross-language
+// contract in the very layer that exists to detect contract breaks.
+//
+// UNIFORM, including the matrix multipliers `a`/`b`/`c`/`d`. An earlier
+// amendment would have given those full precision here, on the argument that
+// MATRIXPRECISION made the SVG writer infinitely fine for them and the oracle
+// must be strictly finer than every writer. WITHDRAWN 2026-08-02, for two
+// reasons that only appear when you read `svg.rs`:
+//
+//   1. `fmt_matrix_entry` states its scope and forbids exactly this -- "the two
+//      `matrix(...)` writers below and nothing else ... would make byte-level
+//      float formatting a cross-language contract in the very layer that exists
+//      to detect contract breaks. DO NOT WIDEN IT." That layer is this file.
+//   2. The property the amendment protected is ALREADY pinned, and harder than
+//      any print precision can pin it: `matrix_multipliers_survive_a_save_and_
+//      reopen_bit_exactly` and `a_reopened_matrix_is_bit_identical_on_every_
+//      later_save_and_reopen` compare `to_bits()` over all 360 rotations. Raw
+//      bits beat printed decimals at every precision. The oracle does not need
+//      to carry a duty a dedicated test already discharges.
+//
+// So the oracle's job here is cross-port equivalence of computed documents,
+// which 6dp serves, and matrix drift stays where its own tests already hold it.
 // ---------------------------------------------------------------------------
 
 fn fmt(v: f64) -> String {
-    let rounded = (v * 10000.0).round() / 10000.0;
+    let rounded = (v * 1000000.0).round() / 1000000.0;
     // Ensure there is always a decimal point.
     if rounded == rounded.trunc() {
         format!("{:.1}", rounded)
     } else {
         // Format with enough decimals, strip trailing zeros but keep at
         // least one digit after the decimal point.
-        let s = format!("{:.4}", rounded);
+        let s = format!("{:.6}", rounded);
         let s = s.trim_end_matches('0');
         s.to_string()
     }
@@ -2105,6 +2140,69 @@ mod tests {
         assert!(json.contains("\"selection\":[]"));
     }
 
+    /// CANONICAL TEST JSON IS STRICT, and that is a decision with a test now.
+    ///
+    /// The model lost its circle kind on 2026-07-30 (one round kind, JYH). The
+    /// PERSISTED binary format stays read-tolerant — `TAG_CIRCLE` still loads,
+    /// pinned by `binary.rs::a_legacy_circle_tag_still_reads_as_a_round_ellipse`,
+    /// because a file saved the day before the migration must still open.
+    ///
+    /// This format is the opposite and deliberately so. It had no test: the
+    /// strictness was real (`parse_element_base` ends in a panic) and nothing
+    /// pinned it, so someone could add a `"circle" => Element::Ellipse(…)` arm
+    /// "for compatibility" and no lane would red. That asymmetry — the
+    /// forgiving half measured, the strict half only reasoned — is what this
+    /// closes. Verified by adding exactly that arm: this test reds.
+    ///
+    /// **And the reason for strictness is not the one first written down.** The
+    /// migration note said tolerance here "would let a port keep writing the old
+    /// kind and it would read as agreement". It would not:
+    /// `assert_operation_test` compares `actual != expected` — the emitted
+    /// string against the pinned golden — so a port emitting `"type":"circle"`
+    /// fails on the string whatever the reader accepts. The WRITER side was
+    /// never the reader's job.
+    ///
+    /// What strictness actually buys is this: **a stale fixture INPUT is refused
+    /// rather than silently reinterpreted.** 51 goldens were rewritten in that
+    /// migration. A setup document that kept `"type":"circle"` would, under a
+    /// tolerant reader, quietly become a round ellipse and the test would PASS
+    /// while testing something other than what the fixture says. A passing test
+    /// measuring the wrong thing is worse than a failing one.
+    #[test]
+    #[should_panic(expected = "Unknown element type: circle")]
+    fn a_stale_circle_in_canonical_json_is_refused_not_reinterpreted() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"type":"circle","cx":36,"cy":36,"r":18}"#,
+        ).unwrap();
+        let _ = parse_element(&v);
+    }
+
+    /// The writer-side half of the same claim, so the pair is not left resting
+    /// on the reader: a round ellipse SERIALISES as `ellipse`. This is what
+    /// actually catches a port that kept the old kind — the golden comparison
+    /// is a string comparison, and this is the string.
+    #[test]
+    fn a_round_ellipse_serialises_as_ellipse_never_as_circle() {
+        let e = Element::Ellipse(EllipseElem {
+            cx: 36.0, cy: 36.0, rx: 18.0, ry: 18.0,
+            fill: None, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let mut doc = Document::default();
+        doc.layers = vec![Element::Layer(LayerElem {
+            children: vec![Rc::new(e)],
+            common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        })];
+        let json = document_to_test_json(&doc);
+        assert!(json.contains("\"type\":\"ellipse\""),
+                "a round ellipse must serialise as ellipse: {json}");
+        assert!(!json.contains("\"type\":\"circle\""),
+                "nothing may emit the retired kind: {json}");
+    }
+
     /// The corpus JSON boundary must round-trip the fill rule, not just
     /// emit it. The serializer has written `fill_rule` since the rule
     /// joined PathElem, but `parse_element` hardcoded NonZero — so a
@@ -2254,13 +2352,44 @@ mod tests {
     }
 
     #[test]
+    /// R3 (JYH, 2026-08-01): the canonical-JSON oracle prints SIX decimals.
+    ///
+    /// The oracle must be strictly finer than every writer it adjudicates, and
+    /// the writers quantize positions at 4dp. At 4dp the oracle shared the
+    /// writer's quantizer, so a divergence below 1e-4 was invisible BY
+    /// CONSTRUCTION — the gate passed because it could not see, not because the
+    /// ports agreed.
+    ///
+    /// Six and not more: 9 and 12 buy nothing measurable over 6 on this corpus,
+    /// and a fixed 17 breaks BOTH ports' readers — `serde_json` and
+    /// `JSONSerialization` each mis-round 19-significant-digit literals by one
+    /// ulp. Precision is not fidelity.
+    #[test]
     fn float_formatting() {
+        // Unchanged: integral values keep exactly one fractional digit.
         assert_eq!(fmt(1.0), "1.0");
         assert_eq!(fmt(0.0), "0.0");
-        assert_eq!(fmt(3.14159), "3.1416");
-        assert_eq!(fmt(0.5), "0.5");
         assert_eq!(fmt(72.0), "72.0");
-        assert_eq!(fmt(0.12345), "0.1235");
+        assert_eq!(fmt(0.5), "0.5");
+
+        // THE CHANGE. These two were "3.1416" and "0.1235" at 4dp.
+        assert_eq!(fmt(3.14159), "3.14159");
+        assert_eq!(fmt(0.12345), "0.12345");
+
+        // Rounding still happens — it happens two digits later.
+        assert_eq!(fmt(3.14159265), "3.141593");
+        assert_eq!(fmt(0.123456789), "0.123457");
+
+        // The band the 4dp oracle could not resolve at all is now visible.
+        // 1pt written to SVG as px at 4dp (4/3 -> 1.3333) and read back is
+        // 1.3333 * 0.75 = 0.999975; at 4dp that printed as "1.0" and agreed
+        // with a lossless 1.0 that had never crossed the conversion.
+        assert_eq!(fmt(0.999975), "0.999975");
+        assert_ne!(fmt(0.999975), fmt(1.0));
+
+        // Trailing zeros are still stripped to one digit, now out to six.
+        assert_eq!(fmt(2.5000004), "2.5");
+        assert_eq!(fmt(1.100000), "1.1");
     }
 
     #[test]

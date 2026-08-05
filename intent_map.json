@@ -138,6 +138,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "clear_layers_type_filter": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "close_panel": {
       "class": "ui-state",
       "doc_verbs": []
@@ -222,8 +226,10 @@
       "doc_verbs": []
     },
     "delete_empty_artboards": {
-      "class": "ui-state",
-      "doc_verbs": []
+      "class": "journaling",
+      "doc_verbs": [
+        "doc.delete_artboard_by_id"
+      ]
     },
     "delete_layer_orphan_confirm_ok": {
       "class": "journaling",
@@ -944,6 +950,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "solo_layers_type_filter": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "sort_brushes_by_name": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1141,11 +1151,11 @@
     ],
     "by_class": {
       "doc-direct": 3,
-      "journaling": 24,
+      "journaling": 25,
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 200,
+      "ui-state": 201,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1195,11 +1205,11 @@
       "doc.zoom.scrubby",
       "doc.zoom.set_full"
     ],
-    "journaling_actions": 24,
+    "journaling_actions": 25,
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 237,
+    "total_actions": 239,
     "verb_table": {
       "always": [
         "doc.copy_selection",

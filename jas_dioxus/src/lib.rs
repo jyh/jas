@@ -28,9 +28,20 @@ pub mod geometry;
 pub mod painter;
 #[cfg(feature = "web")]
 pub mod panels;
-#[cfg(feature = "web")]
+// NOT gated as a whole. recorder/replay.rs is the SHARED corpus replay path --
+// the gesture, action and key corpora, the record-stop fidelity check and the
+// corpus_replay bin all call it, deliberately, so that corpus replay and
+// recording verification cannot drift apart. Gating the module gated that too,
+// so the instrument of the cross-port prime directive ran in exactly one build
+// configuration. The gate now lives per-submodule and per-function.
 pub mod recorder;
 #[cfg(feature = "web")]
 pub mod tools;
-#[cfg(feature = "web")]
+// NOT gated as a whole. Nine of its seventeen submodules are pure data and pure
+// functions -- layout types, the layout-op dispatcher, pane geometry, key-chord
+// resolution, the menu structure, the fixture serializer -- and two of those are
+// pinned CROSS-LANGUAGE by corpora. Gating the module gated them too: 185 tests
+// that could run natively did not. The gate now lives per-submodule in
+// workspace/mod.rs, which explains each one. Same disease as CHARWIDTH, where a
+// shared law lived inside web-gated `tools` and the native arm drifted unwatched.
 pub mod workspace;

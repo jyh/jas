@@ -9,12 +9,32 @@
 //! No function here reads fixture FILES — setups are passed as SVG
 //! content (the wasm fidelity path has no filesystem); the test-side
 //! wrappers and the bin do the file I/O.
+//!
+//! # Why the `web` gate is per-function here
+//!
+//! Until 2026-07-31 the whole `recorder` module sat behind `feature = "web"`,
+//! and this file went with it. Since this file IS the shared replay path, **the
+//! gesture, action and key conformance corpora ran in exactly one build
+//! configuration** — and exact functional equivalence across the active ports
+//! is the prime directive, with those corpora as the instrument that enforces
+//! it. D1 then put a sixth port on this same core.
+//!
+//! 332 lines, and the entire reason was two imports inside two function bodies:
+//! `tools::tool::CanvasTool` (gesture replay drives a tool's pointer seam) and
+//! `workspace::app_state` (action replay drives the app shell). The KEY path
+//! touches neither — `resolve_key` is pure — so it had no reason to be gated at
+//! all beyond its address.
+//!
+//! The gate is now on the gesture and action replay functions, which genuinely
+//! need the frontend. Everything else, `canon_value` and the key path included,
+//! builds and is tested natively.
 
 use crate::document::model::Model;
 use crate::geometry::svg::svg_to_document;
 use crate::geometry::test_json::document_to_test_json;
 use serde_json::Value;
 
+#[cfg(feature = "web")]
 /// Build the YamlTool for `tool_id` from the embedded workspace bundle
 /// (`Workspace::load()`), the same path the running app uses.
 pub fn build_gesture_tool(tool_id: &str) -> crate::tools::yaml_tool::YamlTool {
@@ -58,6 +78,7 @@ fn seed_case_view(model: &mut Model, tc: &Value) {
     if let Some(v) = num("viewport_h") { model.viewport_h = v; }
 }
 
+#[cfg(feature = "web")]
 /// Run a gesture case against `setup_svg` CONTENT and return the
 /// resulting Model. Loads the setup into a Model (identity view unless
 /// the case names a `view` block — see [`seed_case_view`]), builds the
@@ -105,11 +126,13 @@ pub fn run_gesture_case(tc: &Value, setup_svg: &str) -> Model {
     model
 }
 
+#[cfg(feature = "web")]
 /// Gesture case -> canonical document test-JSON (the golden format).
 pub fn run_gesture_case_json(tc: &Value, setup_svg: &str) -> String {
     document_to_test_json(run_gesture_case(tc, setup_svg).document())
 }
 
+#[cfg(feature = "web")]
 /// Run an action case against `setup_svg` CONTENT and return the
 /// resulting `AppState`. Dispatches each `actions[i]` through the REAL
 /// `dispatch_action` (the same generic dispatcher the UI calls) with
@@ -219,6 +242,7 @@ pub(crate) fn run_action_case(
     st
 }
 
+#[cfg(feature = "web")]
 /// Action case -> canonical document test-JSON (the golden format).
 pub fn run_action_case_json(tc: &Value, setup_svg: &str) -> String {
     let st = run_action_case(tc, setup_svg);

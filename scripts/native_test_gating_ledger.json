@@ -1,0 +1,184 @@
+{
+  "_doc": [
+    "Every `#[cfg(feature = \"web\")]` that hides VERIFICATION from a native",
+    "build, declared with the reason it is there. Read by",
+    "scripts/check_native_test_gating.py, which reds on an undeclared gate AND",
+    "on a row whose gate is gone.",
+    "",
+    "kind = 'frontend'  the item genuinely needs Dioxus, web_sys, or the",
+    "                   AppState/TabState shell. It will not come home.",
+    "kind = 'debt'      it COULD run natively and does not, because something",
+    "                   it reaches is gated. `blocked_by` names what.",
+    "",
+    "Every reason below was MEASURED by ungating the item and reading the",
+    "compiler, not inferred from the module's name. That is why the debt rows",
+    "name a specific path rather than saying 'web stuff'.",
+    "",
+    "D1 put a sixth port on this Rust core. A shared law verified in one build",
+    "is a law with one witness, and this repo has already paid for that shape",
+    "once: the text-width law lived in web-gated `tools` while being the only",
+    "definition, and the native arm drifted unwatched (CHARWIDTH)."
+  ],
+
+  "modules": {
+    "jas_dioxus/src/lib.rs::canvas": {
+      "kind": "frontend",
+      "reason": "The Dioxus canvas component and its render loop. Draws through CanvasRenderingContext2d; there is no canvas in a --no-default-features build for it to draw on. Holds 65 tests, which are frontend tests by construction."
+    },
+    "jas_dioxus/src/lib.rs::panels": {
+      "kind": "debt",
+      "reason": "Panel VIEWS are Dioxus components and belong behind the gate, but the module also holds panel STRUCTURE and state that is plain data -- panel_menu.rs alone carries 8 tests and imports nothing from Dioxus or web_sys. 50 tests are invisible natively; an unknown fraction of them could come home.",
+      "blocked_by": "Not yet split. Needs the treatment workspace/mod.rs got on 2026-07-30: gate per submodule, not per module. Measure first -- panel_menu.rs and panel_menu_state.rs are the candidates."
+    },
+    "jas_dioxus/src/recorder/mod.rs::core": {
+      "kind": "frontend",
+      "reason": "The recorder's live capture state -- it hooks the running app's four seams and holds the in-progress recording. There is no app to record in a --no-default-features build. (Was inside the whole-module `recorder` gate until 2026-07-31; that gate is gone and this one is what remains of it.)"
+    },
+    "jas_dioxus/src/recorder/mod.rs::fidelity": {
+      "kind": "frontend",
+      "reason": "The record-stop fidelity check, which replays a just-captured recording through the live app to prove the recording reproduces what the user did. It needs the app. Note that the SHARED path it replays through, recorder::replay, is now native -- so the thing being checked is verifiable natively even though the checker is not."
+    },
+    "jas_dioxus/src/recorder/mod.rs::hooks": {
+      "kind": "frontend",
+      "reason": "The capture hooks themselves, installed into the Dioxus event seams."
+    },
+    "jas_dioxus/src/lib.rs::tools": {
+      "kind": "debt",
+      "reason": "The tool implementations import web_sys, but 268 tests live here -- the largest single block of natively-invisible verification in the crate -- and the tool LAWS (hit radius, drag threshold, paste offset, and the pointer state machines) are document behaviour every port must agree on. Two extractions have already been made from this module for exactly this reason and both were forced by a defect: tool_consts (the scalars) and text_measure (the width law, after the native arm reimplemented it wrongly twice over).",
+      "blocked_by": "web_sys imports in the tool implementations. The CanvasTool trait itself is the thing recorder::replay needs; whether the trait can be separated from its web-bound implementors has not been measured."
+    },
+    "jas_dioxus/src/painter/mod.rs::canvas2d": {
+      "kind": "frontend",
+      "reason": "The Canvas2D backend of the Painter contract. It IS a web backend; the Direct2D backend beside it is its native counterpart and carries its own tests (37, running natively under feature d2d)."
+    },
+    "jas_dioxus/src/interpreter/mod.rs::renderer": {
+      "kind": "frontend",
+      "reason": "The Dioxus renderer and dispatch_action's view half."
+    },
+    "jas_dioxus/src/interpreter/mod.rs::dialog_view": {
+      "kind": "frontend",
+      "reason": "Renders the YAML dialog system as Dioxus components."
+    },
+    "jas_dioxus/src/interpreter/mod.rs::timer": {
+      "kind": "frontend",
+      "reason": "Wall-clock timers via web_sys; a native build has no equivalent seam and no test asserts through it."
+    },
+    "jas_dioxus/src/workspace/mod.rs::app": {
+      "kind": "frontend",
+      "reason": "The Dioxus component tree for the whole application."
+    },
+    "jas_dioxus/src/workspace/mod.rs::app_state": {
+      "kind": "frontend",
+      "reason": "AppState/TabState and the live signal graph -- the app shell itself. Measured: it is the blocker named by 11 of the compiler errors when the corpus file is fully ungated."
+    },
+    "jas_dioxus/src/workspace/mod.rs::clipboard": {
+      "kind": "frontend",
+      "reason": "Reads and writes the browser clipboard through web_sys."
+    },
+    "jas_dioxus/src/workspace/mod.rs::color_panel_view": {
+      "kind": "frontend",
+      "reason": "A Dioxus view."
+    },
+    "jas_dioxus/src/workspace/mod.rs::dock_panel": {
+      "kind": "frontend",
+      "reason": "A Dioxus view; measured as a blocker of assert_action_panel_state."
+    },
+    "jas_dioxus/src/workspace/mod.rs::fill_stroke_widget": {
+      "kind": "frontend",
+      "reason": "A Dioxus view."
+    },
+    "jas_dioxus/src/workspace/mod.rs::keyboard": {
+      "kind": "frontend",
+      "reason": "Event plumbing bound to web_sys KeyboardEvent. Note that the pure chord-to-action LAW is resolve_key, which is deliberately NOT gated and is pinned by the key corpus."
+    },
+    "jas_dioxus/src/workspace/mod.rs::menu_bar": {
+      "kind": "frontend",
+      "reason": "A Dioxus view. The menu STRUCTURE is workspace::menu, which is not gated."
+    },
+    "jas_dioxus/src/workspace/mod.rs::session": {
+      "kind": "frontend",
+      "reason": "save_session takes &[TabState] -- the app shell. This one was decided by the compiler: it was the single error left when the workspace gate was first moved inward."
+    },
+    "jas_dioxus/src/workspace/mod.rs::theme": {
+      "kind": "frontend",
+      "reason": "Emits CSS strings and baked SVG. Zero tests, and all eight consumers are themselves web-gated views. Leaving it native bought 24 dead-code warnings and not one measurable line -- so this row is a judgement, not a compiler verdict, and is marked as such."
+    }
+  },
+
+  "items": {
+    "jas_dioxus/src/cross_language_test.rs::gesture_corpus": {
+      "kind": "debt",
+      "reason": "THE GESTURE CONFORMANCE CORPUS. Pure fixture replay against pinned goldens -- it drives no frontend of its own.",
+      "blocked_by": "crate::recorder::replay::run_gesture_case, via run_gesture_model. replay.rs is NATIVE as of 2026-07-31; run_gesture_case itself is function-gated because it drives tools::tool::CanvasTool. It comes home with the `tools` split, not before."
+    },
+    "jas_dioxus/src/cross_language_test.rs::generate_gesture_expected": {
+      "kind": "debt",
+      "reason": "The #[ignore]d bootstrap generator for the gesture goldens; shares run_gesture_model with the corpus test above.",
+      "blocked_by": "crate::recorder::replay::run_gesture_case, function-gated on tools::tool::CanvasTool."
+    },
+    "jas_dioxus/src/cross_language_test.rs::gesture_alt_mid_drag_copy_is_one_undo_step": {
+      "kind": "debt",
+      "reason": "PATH B of the alt-drag-copy undo law -- a document-level invariant, not a view assertion.",
+      "blocked_by": "crate::recorder::replay::run_gesture_case, via run_gesture_model and before_drag_oracle; run_gesture_case is function-gated on tools::tool::CanvasTool."
+    },
+    "jas_dioxus/src/cross_language_test.rs::gesture_alt_at_press_copy_is_one_undo_step": {
+      "kind": "debt",
+      "reason": "PATH A of the same undo law.",
+      "blocked_by": "crate::recorder::replay::run_gesture_case, function-gated on tools::tool::CanvasTool."
+    },
+    "jas_dioxus/src/cross_language_test.rs::shift_constrain_witnesses": {
+      "kind": "debt",
+      "reason": "THE NAMED WITNESS CORPUS of the Shift-constrain law -- deterministic, and it asserts each witness's recorded `discriminating` flag against the DYADICSIDE mutant every run, so the corpus proves its own teeth rather than trusting a comment. Pure fixture replay; it drives no frontend of its own.",
+      "blocked_by": "crate::recorder::replay::run_gesture_case, reached via check_shift_constrain -> run_gesture_model; run_gesture_case is function-gated on tools::tool::CanvasTool. MEASURED 2026-08-01 by ungating all 18 `web` gates in the cluster (cross_language_test.rs 1335-1860) and reading the compiler: the ONLY unresolved symbols were run_gesture_model (1x) and gesture_exact_field (2x), all three inside check_shift_constrain. Every test and helper in the cluster is otherwise native-ready -- gesture_exact_field is a pure match table over Element fields and is gated by neighbourhood alone. It comes home with the `tools` split, not before."
+    },
+    "jas_dioxus/src/cross_language_test.rs::shift_constrain_generative": {
+      "kind": "debt",
+      "reason": "THE GENERATIVE LANE of the same law -- fresh vectors on a fresh seed each run, asserting that at least `min_discriminating` of them are vectors the pre-DYADICSIDE spelling gets WRONG, measured live against the mutant. The third of the ruled three (predicate, witnesses, generative).",
+      "blocked_by": "Identical to shift_constrain_witnesses above -- same check_shift_constrain predicate, same run_gesture_case blocker, same measurement. It comes home with the `tools` split, not before."
+    },
+    "jas_dioxus/src/cross_language_test.rs::action_corpus": {
+      "kind": "debt",
+      "reason": "THE ACTION CONFORMANCE CORPUS.",
+      "blocked_by": "crate::workspace::app_state, via run_action_case. Predicted before the recorder split that this one would not come home with it, and confirmed after: the recorder split landed 2026-07-31 and this still needs the app shell."
+    },
+    "jas_dioxus/src/cross_language_test.rs::generate_action_expected": {
+      "kind": "debt",
+      "reason": "The #[ignore]d bootstrap generator for the action goldens.",
+      "blocked_by": "crate::workspace::app_state, via run_action_case."
+    },
+    "jas_dioxus/src/cross_language_test.rs::preservation_invariants": {
+      "kind": "debt",
+      "reason": "The preservation invariants over the gesture corpus -- a document law with its own gate (check_preservation_corpus.py) watching the fixture side.",
+      "blocked_by": "crate::recorder::replay::run_gesture_case, via run_gesture_model; function-gated on tools::tool::CanvasTool."
+    },
+    "jas_dioxus/src/cross_language_test.rs::an_operation_on_a_group_equals_the_same_operation_on_its_member": {
+      "kind": "debt",
+      "reason": "CONTAINER-SEEDING -- the relation that found the seven, four of which turned out to be a real defect (a destructive boolean on a container produces unpainted artwork). It compares the app against itself under a transformation that must not matter, so it can see defects BOTH ports share, which no differential gate can. It runs in one build.",
+      "blocked_by": "crate::recorder::replay::run_action_case, which needs workspace::app_state. MEASURED 2026-07-31 by ungating it after the recorder split: the first guess, `crate::recorder in unwrap_seeds`, was wrong -- the recorder module is native now and this still does not build. It comes home only when action replay does, i.e. with the app shell."
+    },
+    "jas_dioxus/src/cross_language_test.rs::stroke_apply_panel_edit_corpus": {
+      "kind": "debt",
+      "reason": "The stroke panel-edit corpus.",
+      "blocked_by": "crate::workspace::app_state, via the stroke_panel_from_attrs helper."
+    },
+    "jas_dioxus/src/cross_language_test.rs::character_apply_panel_edit_corpus": {
+      "kind": "debt",
+      "reason": "The character panel-edit corpus.",
+      "blocked_by": "crate::workspace::app_state, via character_attrs_from_json and character_panel_from_json."
+    },
+    "jas_dioxus/src/cross_language_test.rs::character_panel_defaults_match_the_workspace": {
+      "kind": "debt",
+      "reason": "Pins the character panel's defaults against the workspace YAML.",
+      "blocked_by": "crate::workspace::app_state, via character_panel_default_map."
+    },
+    "jas_dioxus/src/cross_language_test.rs::layout_production_route_close_panel": {
+      "kind": "debt",
+      "reason": "Proves the production close-panel route and the corpus route are the same body. The only test in this file blocked by panels rather than by recorder or app_state.",
+      "blocked_by": "crate::panels. See the panels module row -- it has not been split."
+    },
+    "jas_dioxus/src/interpreter/effects.rs::brush_tile_click_applies_composed_brush_id_via_action": {
+      "kind": "frontend",
+      "reason": "Genuinely frontend, and it says so in its own comment: it drives AppState/TabState and renderer::dispatch_action, i.e. the app shell and the Dioxus renderer. There is no frontend in a --no-default-features build for it to drive, and every other test in that module runs natively. This is what a legitimate item-level gate looks like."
+    }
+  }
+}

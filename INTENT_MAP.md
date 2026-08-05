@@ -7,7 +7,7 @@
 ## Scope -- read this first
 
 **This map covers the ACTION seam (`dispatch_action`) ONLY**: the
-237 actions in the workspace bundle's `actions` map, plus the
+239 actions in the workspace bundle's `actions` map, plus the
 bundle's declared `native_intercepts`. It is the machine enumeration
 of which actions journal through `op_apply` (the enumeration
 OP_LOG.md's actions.yaml<->op_apply unification prose refers to).
@@ -38,18 +38,18 @@ verb list is in `intent_map.json` under
 | class | actions |
 |---|---|
 | `doc-direct` | 3 |
-| `journaling` | 24 |
+| `journaling` | 25 |
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
-| `ui-state` | 200 |
+| `ui-state` | 201 |
 | `view` | 6 |
-| **total** | **238** |
+| **total** | **240** |
 
-(The bundle's `actions` map has 237 entries; `native-intercept` entries
+(The bundle's `actions` map has 239 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
-## Journaling actions (24)
+## Journaling actions (25)
 
 | action | doc.* verbs reached |
 |---|---|
@@ -59,6 +59,7 @@ come additively from `native_intercepts`.)
 | `confirm_artboard_rename` | `doc.set_artboard_field` |
 | `delete_artboard_from_dialog` | `doc.delete_artboard_by_id` |
 | `delete_artboards` | `doc.delete_artboard_by_id` |
+| `delete_empty_artboards` | `doc.delete_artboard_by_id` |
 | `delete_layer_orphan_confirm_ok` | `doc.delete_at` |
 | `delete_layer_selection` | `doc.delete_at` |
 | `document_setup_confirm` | `doc.set_document_setup_field` |
@@ -113,7 +114,7 @@ come additively from `native_intercepts`.)
 
 - `export_to_pdf` -- declared in native_intercepts; no actions-map entry -- handled natively.
 
-## UI-state actions (200)
+## UI-state actions (201)
 
 No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 
@@ -124,11 +125,11 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `boolean_exclude`, `boolean_exclude_compound`, `boolean_intersection`, `boolean_intersection_compound`,
 `boolean_merge`, `boolean_options_confirm`, `boolean_subtract_back`, `boolean_subtract_front`,
 `boolean_subtract_front_compound`, `boolean_trim`, `boolean_union`, `boolean_union_compound`,
-`brush_options_confirm`, `cancel_artboard_rename`, `cancel_rename`, `close_panel`,
-`close_tab`, `close_without_saving`, `collapse_dock`, `complement_active_color`,
-`concepts_panel_select`, `confirm_rename`, `convert_to_artboards`, `copy`,
-`cut`, `cut_orphan_confirm_ok`, `cycle_element_visibility`, `delete_brush`,
-`delete_empty_artboards`, `delete_orphan_confirm_ok`, `delete_selection`, `delete_swatch`,
+`brush_options_confirm`, `cancel_artboard_rename`, `cancel_rename`, `clear_layers_type_filter`,
+`close_panel`, `close_tab`, `close_without_saving`, `collapse_dock`,
+`complement_active_color`, `concepts_panel_select`, `confirm_rename`, `convert_to_artboards`,
+`copy`, `cut`, `cut_orphan_confirm_ok`, `cycle_element_visibility`,
+`delete_brush`, `delete_orphan_confirm_ok`, `delete_selection`, `delete_swatch`,
 `delete_symbol_action`, `delete_symbol_orphan_confirm_ok`, `delete_workspace`, `dismiss_dialog`,
 `distribute_bottom`, `distribute_horizontal_center`, `distribute_horizontal_spacing`, `distribute_left`,
 `distribute_right`, `distribute_top`, `distribute_vertical_center`, `distribute_vertical_spacing`,
@@ -159,14 +160,15 @@ No `doc.*` verb reachable (state/panel/layout/dialog/log-only trees):
 `set_concept_param`, `set_fill_none`, `set_fill_type_gradient`, `set_fill_type_solid`,
 `set_layers_search`, `set_stroke_align`, `set_stroke_cap`, `set_stroke_join`,
 `set_stroke_none`, `set_stroke_profile`, `set_swatch_thumbnail_size`, `shear_options_reset`,
-`show_all`, `show_panel`, `solo_element_visibility`, `sort_brushes_by_name`,
-`sort_swatches_by_name`, `swap_arrowheads`, `swap_fill_stroke`, `swatch_options_confirm`,
-`switch_appearance`, `switch_workspace`, `symbols_panel_select`, `tile_panes`,
-`toggle_artboard_chain_link`, `toggle_artboard_orientation`, `toggle_brush_category`, `toggle_brush_library_persistent`,
-`toggle_canvas_maximize`, `toggle_dashed_line`, `toggle_dock_collapse`, `toggle_element_lock`,
-`toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`, `toggle_layers_type_filter`,
-`toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`, `toggle_use_preview_bounds`,
-`undo`, `ungroup`, `ungroup_all`, `unlock_all`
+`show_all`, `show_panel`, `solo_element_visibility`, `solo_layers_type_filter`,
+`sort_brushes_by_name`, `sort_swatches_by_name`, `swap_arrowheads`, `swap_fill_stroke`,
+`swatch_options_confirm`, `switch_appearance`, `switch_workspace`, `symbols_panel_select`,
+`tile_panes`, `toggle_artboard_chain_link`, `toggle_artboard_orientation`, `toggle_brush_category`,
+`toggle_brush_library_persistent`, `toggle_canvas_maximize`, `toggle_dashed_line`, `toggle_dock_collapse`,
+`toggle_element_lock`, `toggle_element_twirl`, `toggle_fill_on_top`, `toggle_hanging_punctuation`,
+`toggle_layers_type_filter`, `toggle_link_arrowhead_scale`, `toggle_pane`, `toggle_panel`,
+`toggle_use_preview_bounds`, `undo`, `ungroup`, `ungroup_all`,
+`unlock_all`
 
 ## Verb -> journaling evidence table
 

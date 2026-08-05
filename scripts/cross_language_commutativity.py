@@ -76,6 +76,10 @@ FIXTURE_NAMES = [
 ]
 
 
+# Every runner passes `encoding="utf-8"` explicitly -- `text=True` alone
+# decodes with the locale codec, which is cp1252 on Windows and mangles any
+# non-ASCII a lane emits. See the runner note in
+# `cross_language_algorithms.py` for the failure this actually caused.
 def run_rust(mode: str, svg_path: str) -> str:
     result = subprocess.run(
         ["cargo", "run", "--bin", "svg_roundtrip", "--no-default-features",

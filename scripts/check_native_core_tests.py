@@ -28,27 +28,40 @@ repair stay repaired.
 WHAT IT ASSERTS
 ---------------
 1. `cargo test --no-default-features --lib --no-run` exits 0.
-2. The native lib test target contains AT LEAST `FLOOR` tests.
 
-WHY (2) IS NOT OPTIONAL
------------------------
+That is now the WHOLE claim. The test count is printed and not asserted.
+
+WHERE THE ANTI-VACUITY HALF WENT (read this before adding a number back)
+------------------------------------------------------------------------
 Assertion (1) alone is trivially satisfiable by deleting tests or by wrapping
-every offending test in `#[cfg(feature = "web")]`. That "fix" turns the gate
-green while REDUCING what is verified natively -- the precise outcome this gate
-exists to prevent. The floor is the anti-vacuity half, and it is the half that
-does the work. It may be RAISED when the native surface grows; lowering it is a
-deliberate act that should arrive with a written reason.
+every offending test in `#[cfg(feature = "web")]` -- a "fix" that turns this
+gate green while REDUCING what is verified natively. From 2026-07-29 to
+2026-07-30 the guard against that was `FLOOR`, an exact pin on the test count.
+
+**`FLOOR` is retired, and `scripts/check_native_test_gating.py` holds the claim
+instead**: every `web` gate on a module or on a test item must be DECLARED with
+a reason, and no declaration may outlive its gate.
+
+The pin was retired on the evidence of its own last movement. It went
+1839 -> 2024 because `lib.rs` read `#[cfg(feature = "web")] pub mod workspace;`,
+which hid the entire workspace layer from a native build though nine of its
+seventeen submodules import nothing from the frontend. 185 tests could always
+have run natively and did not -- and a count could not say so. The most a count
+can report is "185 more than yesterday"; the property NAMES them, on the day the
+module is gated. (It was also drifting: five values in two days, one of them
+wrong, in a file nobody else was reading. Council O3.3, DERIVEDFLOOR.)
 
 WHAT IT DOES NOT COVER
 ----------------------
-* It asserts the tests BUILD and that enough of them EXIST. Running them and
-  requiring green is `cargo test --no-default-features --lib` itself, which the
-  CI lanes invoke directly -- this gate is about the target existing at all.
+* It asserts the tests BUILD. Running them and requiring green is
+  `cargo test --no-default-features --lib` itself, which the CI lanes invoke
+  directly -- this gate is about the target existing at all.
 * It says nothing about the four bin targets. `workspace_roundtrip` is repaired
   alongside this gate; the gate does not watch it.
-* A test gated behind `web` for a GOOD reason (it drives `AppState` or the
-  Dioxus renderer) is invisible here. The floor is the only pressure against
-  over-gating, and it is a blunt one.
+* Nothing here now watches tests being DELETED outright. The exact pin did, and
+  the replacement does not; the trade was deliberate. Gating a test is a
+  one-line attribute that leaves every lane green, which is the move that needs
+  a machine. Deleting a test deletes test code, which review sees.
 """
 
 import argparse
@@ -60,23 +73,45 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 CRATE = REPO / "jas_dioxus"
 
-# Anti-vacuity floor: the native lib test target must carry at least this many
-# tests.
+# THE HISTORY OF THE NUMBER THAT USED TO LIVE HERE, kept because it is the
+# argument for what replaced it.
 #
-# Measured 1830 immediately after the 2026-07-29 repair (from 0 -- the target did
-# not build at all).
+# `FLOOR` was an exact pin on the native test count, added 2026-07-29 at 1830 as
+# the anti-vacuity half of this gate. It was RIGHT that assertion (1) needs a
+# partner and WRONG about which partner.
 #
-# TIGHT, deliberately, in the shape the preservation gate already uses in this
-# repo ("14 against a floor of 14"). A first attempt set it to 1800 for ~1.6% of
-# slack; a mutation then gated `painter::tests` off, the native count fell to
-# 1824, and THE GATE STILL PASSED. A floor with slack is a floor with a hole
-# exactly the size of the slack, and the hole admits precisely the move this
-# assertion exists to forbid.
+#   1830  measured after the repair (from 0 -- the target did not build at all)
+#   1832  drift found on a branch; the pin had never been raised
+#   1833  the same drift on main -- and the council record already SAID 1833,
+#         so the number was measured and reported while the pin stayed put
+#   1836  an hour later
+#   1839  the next day
+#   2024  the `web` gate MOVED off `pub mod workspace` (GATEINWARD)
 #
-# So: adding native tests REQUIRES raising this number, and that friction is the
-# feature -- it makes every change to native coverage a visible, deliberate line
-# in a diff. Lowering it should arrive with a written reason.
-FLOOR = 1830
+# Two lessons, in order of importance.
+#
+# FIRST: the check was one-sided. The comment claimed "adding native tests
+# REQUIRES raising this number" from day one and the CODE DID NOT DO IT -- it
+# read `count < floor`, so additions passed silently. Documentation wider than
+# behaviour, in the file that exists to police exactly that. Fixed to an exact
+# comparison, which then earned itself immediately on drift that was not mine.
+#
+# SECOND, and why the constant is gone: the last movement, 1839 -> 2024, was not
+# drift and not a test anyone wrote. `lib.rs` read `#[cfg(feature = "web")] pub
+# mod workspace;`, hiding the whole workspace layer from a native build though
+# nine of its seventeen submodules import nothing from the frontend. **185 tests
+# could always have run natively and did not, and the count could not say so.**
+# The most a count reports is "185 more than yesterday". The property NAMES them.
+#
+# That property now lives in `scripts/check_native_test_gating.py`: every `web`
+# gate on a module or a test item is declared with a reason, and no declaration
+# outlives its gate. It has no number in it -- its anti-vacuity guard is derived,
+# because a scanner that finds nothing makes every ledger row stale.
+#
+# Council O3.3 (DERIVEDFLOOR) had already ruled on the species: a floor computed
+# from the tree cannot go slack, and this repo's record on hand-typed floors is
+# that two of four replacement numbers were wrong on the first attempt. Five
+# values in two days, one of them wrong, was this constant proving the point.
 
 
 def parse_test_count(listing: str) -> int:
@@ -92,20 +127,22 @@ def parse_test_count(listing: str) -> int:
     return len(re.findall(r"^\S.*: test$", listing, re.MULTILINE))
 
 
-def verdict(build_ok: bool, count: int, floor: int) -> tuple[bool, str]:
-    """Pure decision, so the self-test can exercise it without cargo."""
+def verdict(build_ok: bool, count: int) -> tuple[bool, str]:
+    """Pure decision, so the self-test can exercise it without cargo.
+
+    `count` is REPORTED, never compared. Nothing restates it, so it cannot
+    drift -- see the note above on the constant that used to live here.
+    """
     if not build_ok:
         return False, (
             "the native lib TEST target does not build "
             "(`cargo test --no-default-features --lib --no-run`)"
         )
-    if count < floor:
-        return False, (
-            f"only {count} tests in the native lib test target, floor is {floor} -- "
-            "the target builds but too little is verified natively. If tests were "
-            "deliberately gated behind `web`, say why and lower the floor on purpose"
-        )
-    return True, f"native lib test target builds; {count} tests (floor {floor})"
+    return True, (
+        f"native lib test target builds; {count} tests "
+        f"(reported, not pinned -- check_native_test_gating.py holds the "
+        f"anti-vacuity claim)"
+    )
 
 
 def run() -> int:
@@ -123,7 +160,7 @@ def run() -> int:
         )
         count = parse_test_count(listing.stdout)
 
-    ok, msg = verdict(build_ok, count, FLOOR)
+    ok, msg = verdict(build_ok, count)
     if ok:
         print(f"native core tests: {msg}")
         return 0
@@ -150,16 +187,28 @@ def self_test() -> int:
         # (label, build_ok, count, expect_pass)
         ("build fails", False, 9999, False),
         ("build fails, zero tests", False, 0, False),
-        ("builds but empty", True, 0, False),
-        ("builds, one short of floor", True, FLOOR - 1, False),
-        ("builds, exactly at floor", True, FLOOR, True),
-        ("builds, comfortably above", True, FLOOR + 500, True),
+        ("builds", True, 2041, True),
+        # THE COUNT NO LONGER DECIDES. These two cases exist to PIN that: a
+        # count moving in either direction is not this gate's business any
+        # more, and reintroducing a comparison here would red them. The claim
+        # they used to carry lives in check_native_test_gating.py, which names
+        # the hidden tests instead of counting the visible ones.
+        ("builds, count far below what it was", True, 3, True),
+        ("builds, count far above", True, 99999, True),
     ]
     failures = []
     for label, build_ok, count, expect in cases:
-        got, msg = verdict(build_ok, count, FLOOR)
+        got, msg = verdict(build_ok, count)
         if got != expect:
             failures.append(f"  {label}: expected {'PASS' if expect else 'RED'}, got {'PASS' if got else 'RED'} ({msg})")
+
+    # The partner gate must EXIST. Retiring a floor into a sibling and then
+    # losing the sibling is how a claim evaporates while both files look fine.
+    partner = REPO / "scripts" / "check_native_test_gating.py"
+    if not partner.exists():
+        failures.append(f"  partner: {partner.name} is missing -- this gate gave up "
+                        f"its anti-vacuity half to it, so without it the only "
+                        f"remaining claim is trivially satisfiable by gating tests")
 
     parse_cases = [
         ("summary line", "a: test\nb: test\n\n2 tests, 0 benchmarks\n", 2),

@@ -45,6 +45,10 @@ ALL_LANGUAGES = ["rust", "swift", "ocaml", "python"]
 LANGUAGES: list = []
 
 
+# Every runner passes `encoding="utf-8"` explicitly -- `text=True` alone
+# decodes with the locale codec, which is cp1252 on Windows and mangles any
+# non-ASCII a lane emits. See the runner note in
+# `cross_language_algorithms.py` for the failure this actually caused.
 def run_rust(args: list[str]) -> str:
     result = subprocess.run(
         ["cargo", "run", "--bin", "workspace_roundtrip",

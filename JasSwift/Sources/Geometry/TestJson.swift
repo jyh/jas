@@ -10,12 +10,24 @@ import Foundation
 // MARK: - Float formatting
 
 /// Round to 4 decimal places, always include decimal point.
+/// R3 (JYH, 2026-08-01): the canonical-JSON oracle prints SIX decimals.
+///
+/// MIRRORS `jas_dioxus/src/geometry/test_json.rs::fmt` — see the long note
+/// there for why 6 and not 4, 9, 12 or 17. In short: at 4dp this oracle shared
+/// the SVG writer's own quantizer, so every divergence below 1e-4 was invisible
+/// BY CONSTRUCTION and the codec gates passed because they could not see.
+///
+/// Uniform, INCLUDING the matrix multipliers. An amendment giving `a`/`b`/`c`/`d`
+/// full precision here was withdrawn: `svg.rs::fmt_matrix_entry` scopes that
+/// spelling to the two `matrix(...)` writers and says DO NOT WIDEN IT, naming
+/// this layer as the hazard — and the property it protected is already pinned
+/// harder, by `to_bits()` comparison across all 360 rotations.
 private func fmt(_ v: Double) -> String {
-    let rounded = (v * 10000.0).rounded() / 10000.0
+    let rounded = (v * 1000000.0).rounded() / 1000000.0
     if rounded == rounded.rounded(.towardZero) && rounded.truncatingRemainder(dividingBy: 1) == 0 {
         return String(format: "%.1f", rounded)
     }
-    var s = String(format: "%.4f", rounded)
+    var s = String(format: "%.6f", rounded)
     // Strip trailing zeros but keep at least one digit after decimal.
     while s.hasSuffix("0") && !s.hasSuffix(".0") {
         s.removeLast()

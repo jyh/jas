@@ -418,7 +418,151 @@ private func readFixtureData(_ path: String) -> Data {
         let doc = try! binaryToDocument(binData)
         let actual = documentToTestJson(doc)
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
-        #expect(actual == expected, "Python binary fixture '\(name)' did not produce expected JSON")
+        expectDocsEqualAtWriterResolution(actual, expected, name)
+    }
+}
+
+/// The resolution of the SVG writer, in decimal places: `Svg.swift::fmt`
+/// quantizes lengths with `(v * 10000.0).rounded() / 10000.0`.
+private let svgWriterDP = 4
+
+/// Compare two canonical-JSON documents AT THE SVG WRITER'S RESOLUTION.
+///
+/// MIRRORS `cross_language_test.rs::assert_docs_equal_at_writer_resolution` —
+/// the full reasoning lives there. In short: this test asserts *decoding the
+/// Python-written binary yields the same document as parsing the source SVG*.
+/// Binary is lossless `Double`; SVG stores px at 4dp. A 1pt stroke goes out as
+/// `4/3 = 1.3333` and returns as `1.3333 × 0.75 = 0.999975` — the px grid, not a
+/// defect, and R2 ruled FOR 4dp on lengths precisely because they SETTLE there.
+///
+/// Until R3 the oracle also printed 4dp, so both sides rendered `1.0` and this
+/// held BY CONSTRUCTION, not by correctness. At 6dp it became false, and it
+/// should be: asserting agreement below 1e-4 across a boundary the ruling calls
+/// not exactly invertible asserts something already ruled untrue.
+///
+/// The allowance is deliberately narrow and is named here rather than left as a
+/// bare epsilon. Everything that is not a number is compared EXACTLY.
+private func expectDocsEqualAtWriterResolution(
+    _ actual: String, _ expected: String, _ name: String
+) {
+    // Identical bytes is the common case and needs no parsing.
+    if actual == expected { return }
+
+    func quantize(_ v: Any) -> Any {
+        if let n = v as? NSNumber {
+            // Bools bridge to NSNumber; they must not be treated as numeric.
+            if CFGetTypeID(n) == CFBooleanGetTypeID() { return v }
+            let s = pow(10.0, Double(svgWriterDP))
+            return NSNumber(value: (n.doubleValue * s).rounded() / s)
+        }
+        if let a = v as? [Any] { return a.map(quantize) }
+        if let o = v as? [String: Any] { return o.mapValues(quantize) }
+        return v
+    }
+
+    func canonical(_ s: String, _ side: String) -> String {
+        guard let data = s.data(using: .utf8),
+              let parsed = try? JSONSerialization.jsonObject(with: data) else {
+            Issue.record("'\(name)': \(side) is not JSON")
+            return s
+        }
+        let q = quantize(parsed)
+        guard let out = try? JSONSerialization.data(
+            withJSONObject: q, options: [.sortedKeys]),
+              let text = String(data: out, encoding: .utf8) else {
+            Issue.record("'\(name)': \(side) could not be re-serialised")
+            return s
+        }
+        return text
+    }
+
+    #expect(
+        canonical(actual, "actual") == canonical(expected, "expected"),
+        """
+        Python binary fixture '\(name)' disagrees with the SVG-parsed golden AT \
+        THE SVG WRITER'S RESOLUTION (\(svgWriterDP) dp). A difference this large \
+        is a real divergence, not the pt<->px grid: the lossy-boundary allowance \
+        covers only differences below 1e-\(svgWriterDP).
+          binary-decoded: \(actual)
+          svg-parsed    : \(expected)
+        """
+    )
+}
+
+// MARK: - R3: the writer-resolution helper's own tests
+//
+// `expectDocsEqualAtWriterResolution` was written on a box with no Swift
+// toolchain and had never been compiled, let alone exercised. Its author named
+// the two places he could not check from there — whether the `CFBooleanGetTypeID`
+// guard really keeps booleans out of the numeric path, and whether `.sortedKeys`
+// behaves like the Rust `serde_json::Value` comparison it mirrors — and said
+// that if either is wrong "the test passes or fails for the wrong reason".
+//
+// A green corpus does not answer either question, because the corpus contains
+// no case that separates a right answer from a lucky one. These do.
+
+/// The comparison must be able to FAIL. A helper that returns early on every
+/// input is the empty-set instrument, and it would look exactly as green as a
+/// correct one on a corpus that never disagrees.
+@Test func writerResolutionComparisonCanStillFail() {
+    withKnownIssue("a real divergence must be reported") {
+        expectDocsEqualAtWriterResolution(
+            #"{"x": 1.0}"#, #"{"x": 2.0}"#, "probe-real-divergence")
+    }
+}
+
+/// THE BOOLEAN GUARD. If bools fell through to the numeric branch they would
+/// quantize to 1.0 / 0.0, and `true` would then compare EQUAL to `1` — the
+/// helper would silently stop distinguishing a flag from a number. The pair
+/// below is the only shape that separates the guard working from it not
+/// working: two documents that differ ONLY in bool-versus-number.
+@Test func writerResolutionComparisonKeepsBooleansOutOfTheNumericPath() {
+    withKnownIssue("true must not compare equal to 1") {
+        expectDocsEqualAtWriterResolution(
+            #"{"locked": true}"#, #"{"locked": 1}"#, "probe-bool-vs-one")
+    }
+    withKnownIssue("false must not compare equal to 0") {
+        expectDocsEqualAtWriterResolution(
+            #"{"locked": false}"#, #"{"locked": 0}"#, "probe-bool-vs-zero")
+    }
+    // And a bool that genuinely matches must still pass, so the guard is not
+    // simply making every boolean document unequal.
+    expectDocsEqualAtWriterResolution(
+        #"{"locked": true, "v": false}"#, #"{"locked": true, "v": false}"#, "probe-bool-equal")
+}
+
+/// `.sortedKeys` normalises key order on BOTH sides, which is what makes this
+/// helper equivalent to Rust's structural `Value == Value`. Pinned, because the
+/// day it stops being order-insensitive it starts reporting divergences that
+/// are not divergences.
+@Test func writerResolutionComparisonIsInsensitiveToKeyOrder() {
+    expectDocsEqualAtWriterResolution(
+        #"{"a": 1.0, "b": 2.0, "z": {"p": 1.0, "q": 2.0}}"#,
+        #"{"z": {"q": 2.0, "p": 1.0}, "b": 2.0, "a": 1.0}"#,
+        "probe-key-order")
+}
+
+/// THE ALLOWANCE IS NARROW, in both directions. The px grid produces
+/// differences around 2.5e-5 and those must be absorbed; anything at 1e-4 or
+/// above is a real divergence and must red. Mirrors the mutation the Rust twin
+/// was proven with, so the two ports' tolerances cannot drift apart silently.
+@Test func writerResolutionComparisonAbsorbsThePxGridAndCatchesMore() {
+    // 0.999975 vs 1.0 -- the exact pt<->px round trip R2 ruled on. Absorbed.
+    expectDocsEqualAtWriterResolution(
+        #"{"width": 0.999975}"#, #"{"width": 1.0}"#, "probe-px-grid")
+    // 5e-4 -- twenty times larger, and above the writer's resolution. Caught.
+    withKnownIssue("a 5e-4 divergence is larger than the px grid and must red") {
+        expectDocsEqualAtWriterResolution(
+            #"{"width": 1.0005}"#, #"{"width": 1.0}"#, "probe-above-grid")
+    }
+}
+
+/// Non-numeric content is compared EXACTLY -- the allowance is for the lossy
+/// pt<->px boundary only and must not leak into strings.
+@Test func writerResolutionComparisonComparesStringsExactly() {
+    withKnownIssue("differing strings must red") {
+        expectDocsEqualAtWriterResolution(
+            #"{"name": "a"}"#, #"{"name": "b"}"#, "probe-strings")
     }
 }
 

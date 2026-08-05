@@ -33,7 +33,10 @@
 //! See RECORDER.md at the repository root for activation, the record-stop
 //! fidelity check, the ingest flow, and the v1 boundaries.
 
+#[cfg(feature = "web")]
 pub mod core;
+#[cfg(feature = "web")]
 pub mod fidelity;
+#[cfg(feature = "web")]
 pub mod hooks;
 pub mod replay;
