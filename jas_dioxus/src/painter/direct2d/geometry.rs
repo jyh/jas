@@ -150,10 +150,39 @@ pub fn build(factory: &ID2D1Factory, path: &[PathCommand], winding: FillRule)
                     last_cubic_ctrl = None;
                 }
                 PathCommand::ArcTo { .. } => {
-                    // Refuse rather than approximate. B1: no production call
-                    // site emits an arc and no golden covers one, so any
-                    // implementation ships untested -- and a wrong arc reads as
-                    // a slightly different curve, not as a failure.
+                    // Refuse rather than approximate: a wrong arc reads as a
+                    // slightly different curve, not as a failure, so building
+                    // it blind would ship untested geometry. That much stands.
+                    //
+                    // THE REASON THIS USED TO GIVE WAS FALSE, and it is
+                    // corrected here rather than quietly dropped, because the
+                    // next reader would have acted on it. It said "B1
+                    // established no production call site emits an arc and no
+                    // golden covers one." Measured 2026-08-05:
+                    //
+                    //   svg.rs:1828 / :1842   the SVG parser EMITS ArcTo, for
+                    //                         both `A` and `a`
+                    //   binary.rs:998         arcs survive the binary codec
+                    //   element_render.rs:428 path_painter_inputs does NOT
+                    //                         filter them -- it refuses
+                    //                         freeform gradients, brushes,
+                    //                         width points, arrowheads and
+                    //                         anchor-dash, then passes `e.d`
+                    //                         through verbatim
+                    //
+                    // So the route from "open an SVG containing an arc" to this
+                    // panic is unbroken, and every rounded shape exported by a
+                    // mainstream tool arrives as an arc. What is true is only
+                    // that Direct2D IS NOT PRODUCTION-WIRED: nothing outside
+                    // painter/direct2d/ references it and `d2d` is off by
+                    // default. This panic is armed by wiring it up, which is
+                    // what B1 is building toward -- so it needs a gate before
+                    // that lands, not after.
+                    //
+                    // A golden does cover an arc, incidentally:
+                    // test_fixtures/svg/path_all_commands.svg. It is consumed
+                    // only by the SVG-parse and binary round-trip checks, both
+                    // structural, so nothing renders it.
                     if open {
                         sink.EndFigure(D2D1_FIGURE_END_OPEN);
                     }

@@ -1320,4 +1320,67 @@ mod tests {
         assert!((cp2.0 - expected_cp2.0).abs() < 1e-9);
         assert!((cp2.1 - expected_cp2.1).abs() < 1e-9);
     }
+
+    /// PINS A DEFERRAL, and records the divergence sitting next to it.
+    ///
+    /// An SVG arc exports as a straight `l` to the endpoint — the Phase 1B
+    /// arc-as-line fallback. **JasSwift's PDF export does the same** (`Pdf.swift`,
+    /// same deferral, same comment), so the two ports AGREE here and this test
+    /// is a pin, not a bug report.
+    ///
+    /// What it is really here to record is where they stop agreeing. On SCREEN:
+    ///
+    /// ```text
+    ///                       arc on canvas          arc in exported PDF
+    ///   jas_dioxus          straight line          straight line
+    ///   JasSwift            a real arc             straight line
+    /// ```
+    ///
+    /// Rust flattens arcs everywhere — `canvas/render.rs:723`,
+    /// `painter/canvas2d.rs:130`, and here — and has no arc→bezier conversion
+    /// anywhere in the crate. JasSwift's canvas has one:
+    /// `CanvasSubwindow.swift::arcToBeziers`, W3C SVG F.6, on the real drawing
+    /// path. So the same document draws a chord in one port and a curve in the
+    /// other, and JasSwift additionally shows a curve it will not export.
+    ///
+    /// Nothing catches either half. `test_fixtures/svg/path_all_commands.svg`
+    /// HAS an arc and is consumed only by the SVG-parse and binary round-trip
+    /// checks, both structural. And `RecordingPainter` stores path commands
+    /// verbatim, so both ports emit an IDENTICAL display list and diverge only
+    /// when each painter consumes it — below the level the house defined
+    /// painter equivalence at.
+    ///
+    /// Arcs are reachable by the commonest route there is: `svg.rs:1828`/`:1842`
+    /// emit `ArcTo` for `A` and `a`, so every rounded shape from any mainstream
+    /// tool arrives as one.
+    ///
+    /// This asserts today's behaviour rather than the correct one, because
+    /// making Rust draw real arcs moves goldens across the shipping port and is
+    /// a ruling. When that lands, this test is what reds.
+    #[test]
+    fn an_arc_exports_as_a_straight_line_and_the_ports_only_agree_here() {
+        let mut out = String::new();
+        emit_path_geom(&mut out, &[
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::ArcTo {
+                rx: 10.0, ry: 10.0, x_rotation: 0.0,
+                large_arc: false, sweep: true, x: 20.0, y: 0.0,
+            },
+        ]);
+
+        // A line operator to the endpoint, and NOT a curve operator: an arc
+        // that emitted `c` would mean the deferral had been paid.
+        assert!(out.contains(" l\n") || out.ends_with("l\n"),
+                "expected a straight-line operator for the arc, got: {out:?}");
+        assert!(!out.contains("c\n"),
+                "a curve operator means arcs are no longer flattened -- the \
+                 deferral has been paid and this pin should be replaced by a \
+                 real arc assertion: {out:?}");
+
+        // The endpoint is the only part of the arc that survives. Every other
+        // parameter -- both radii, rotation, large-arc and sweep -- is dropped,
+        // which is why the fallback is a CHORD and not an approximation.
+        assert!(out.contains("20") && out.contains('0'),
+                "the endpoint must survive even though the curvature does not: {out:?}");
+    }
 }

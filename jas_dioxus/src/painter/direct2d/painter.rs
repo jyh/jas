@@ -345,6 +345,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
 mod tests {
     use super::*;
     use crate::painter::direct2d::device::HeadlessTarget;
+    use crate::geometry::element::{LineCap, LineJoin};
 
     fn red() -> Brush {
         Brush::Solid(Color::new(1.0, 0.0, 0.0, 1.0))
@@ -521,6 +522,134 @@ mod tests {
         });
         assert_eq!(px(&buf, 16, 4, 4), [0, 0, 255, 255], "inside the clip");
         assert_eq!(px(&buf, 16, 12, 12), [0, 0, 0, 0], "outside the clip is untouched");
+    }
+
+    /// `clip` takes a `FillRule` and until now NOTHING exercised it — the one
+    /// clip test uses a single square, where NonZero and EvenOdd agree. A
+    /// backend that ignored the argument and always used NonZero would have
+    /// passed it forever, and the first report would be a clipped group with a
+    /// hole in it rendering solid.
+    ///
+    /// The discriminating shape is a donut whose two rings wind the SAME way:
+    /// EvenOdd makes the inner square a hole, NonZero fills it. Both windings
+    /// are asserted, so the test states that the argument CHANGES the answer
+    /// rather than merely that one value works.
+    #[test]
+    fn clip_honours_the_winding_rule_it_is_given() {
+        let ident = Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 0.0, f: 0.0 };
+        // Outer ring (2,2)-(14,14) and inner ring (6,6)-(10,10), same direction.
+        let donut = [
+            PathCommand::MoveTo { x: 2.0, y: 2.0 },
+            PathCommand::LineTo { x: 14.0, y: 2.0 },
+            PathCommand::LineTo { x: 14.0, y: 14.0 },
+            PathCommand::LineTo { x: 2.0, y: 14.0 },
+            PathCommand::ClosePath,
+            PathCommand::MoveTo { x: 6.0, y: 6.0 },
+            PathCommand::LineTo { x: 10.0, y: 6.0 },
+            PathCommand::LineTo { x: 10.0, y: 10.0 },
+            PathCommand::LineTo { x: 6.0, y: 10.0 },
+            PathCommand::ClosePath,
+        ];
+        let under = |rule: FillRule| {
+            draw(16, 16, |p| {
+                p.push_state(ident);
+                p.clip(&donut, rule);
+                p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 }, &red(), 1.0);
+                p.pop_state();
+            })
+        };
+
+        let eo = under(FillRule::EvenOdd);
+        assert_eq!(px(&eo, 16, 4, 8), [0, 0, 255, 255], "EvenOdd: the ring paints");
+        assert_eq!(px(&eo, 16, 8, 8), [0, 0, 0, 0],
+                   "EvenOdd: the inner square must be a HOLE");
+
+        let nz = under(FillRule::NonZero);
+        assert_eq!(px(&nz, 16, 4, 8), [0, 0, 255, 255], "NonZero: the ring paints");
+        assert_eq!(px(&nz, 16, 8, 8), [0, 0, 255, 255],
+                   "NonZero: same-wound inner square is FILLED -- if this matches \
+                    the EvenOdd result, clip is ignoring the winding argument");
+    }
+
+    /// `stroke_rect` had NO test at all. It is one of the two contract methods
+    /// the shared proof scene never exercises, so no painter had been checked
+    /// on it in any port.
+    ///
+    /// The load-bearing property is the one that separates it from `fill_rect`:
+    /// it draws a BORDER and leaves the interior alone. A backend that
+    /// implemented it as a fill would look right on a small dark shape and
+    /// wrong on everything else.
+    #[test]
+    fn stroke_rect_draws_a_border_and_leaves_the_interior_empty() {
+        let s = StrokeStyle {
+            width: 2.0, cap: LineCap::Butt, join: LineJoin::Miter,
+            miter: 10.0, dash: vec![],
+        };
+        let buf = draw(16, 16, |p| {
+            p.stroke_rect(Rect { x: 4.0, y: 4.0, w: 8.0, h: 8.0 }, &red(), &s, 1.0);
+        });
+        assert_eq!(px(&buf, 16, 4, 8), [0, 0, 255, 255], "the left edge is painted");
+        assert_eq!(px(&buf, 16, 8, 8), [0, 0, 0, 0],
+                   "the INTERIOR must be untouched -- this is what separates \
+                    stroke_rect from fill_rect");
+    }
+
+    /// The stroke STRADDLES the edge rather than sitting inside it: a width-2
+    /// stroke on an edge at x=4 covers x in [3,5]. Pinned because the three
+    /// plausible conventions (centred / inside / outside) differ by exactly
+    /// half a stroke width, and Canvas2D's `strokeRect` centres — so a D2D
+    /// backend that inset its rectangle would be a silent half-width
+    /// divergence, the same shape as the aligned-stroke dash-divisor trap B1
+    /// carried into this build.
+    #[test]
+    fn stroke_rect_straddles_the_edge_it_is_given() {
+        let s = StrokeStyle {
+            width: 2.0, cap: LineCap::Butt, join: LineJoin::Miter,
+            miter: 10.0, dash: vec![],
+        };
+        let buf = draw(16, 16, |p| {
+            p.stroke_rect(Rect { x: 4.0, y: 4.0, w: 8.0, h: 8.0 }, &red(), &s, 1.0);
+        });
+        assert_eq!(px(&buf, 16, 3, 8), [0, 0, 255, 255],
+                   "OUTSIDE the geometric edge is painted -- the stroke straddles");
+        assert_eq!(px(&buf, 16, 6, 8), [0, 0, 0, 0],
+                   "two units inside the edge is clear -- the stroke is not inset");
+    }
+
+    /// A dashed `stroke_rect` must actually leave gaps. This is the only test
+    /// that drives `dash_multiples` through `stroke_rect`, and the dash-unit
+    /// conversion is the trap B1 named: D2D dash entries are MULTIPLES OF THE
+    /// STROKE WIDTH while the contract carries user units, so a missing divide
+    /// draws one dash the length of the whole side and reads as a solid border.
+    ///
+    /// Counted rather than pixel-probed, so it does not encode a phase: a
+    /// dashed border must paint strictly fewer pixels than a solid one and
+    /// strictly more than none.
+    #[test]
+    fn a_dashed_stroke_rect_leaves_gaps() {
+        let base = StrokeStyle {
+            width: 2.0, cap: LineCap::Butt, join: LineJoin::Miter,
+            miter: 10.0, dash: vec![],
+        };
+        let dashed = StrokeStyle { dash: vec![2.0, 2.0], ..base.clone() };
+        let painted = |s: &StrokeStyle| {
+            let buf = draw(16, 16, |p| {
+                p.stroke_rect(Rect { x: 4.0, y: 4.0, w: 8.0, h: 8.0 }, &red(), s, 1.0);
+            });
+            (0..16).flat_map(|y| (0..16).map(move |x| (x, y)))
+                .filter(|(x, y)| px(&buf, 16, *x, *y)[3] != 0)
+                .count()
+        };
+        let solid_px = painted(&base);
+        let dashed_px = painted(&dashed);
+        assert!(solid_px > 0, "the solid border painted nothing; the probe is broken");
+        assert!(dashed_px > 0,
+                "the dashed border painted NOTHING -- a dash pattern that erases \
+                 the stroke means the unit conversion overshot");
+        assert!(dashed_px < solid_px,
+                "the dashed border painted {dashed_px} pixels and the solid one \
+                 {solid_px}: no gaps, so the dash array reached D2D without being \
+                 divided by the emit width");
     }
 
     /// Masks must REFUSE, not draw something plausible. A backend that quietly
