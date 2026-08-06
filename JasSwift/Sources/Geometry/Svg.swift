@@ -796,7 +796,12 @@ public func documentToSvg(_ doc: Document) -> String {
     let vb = "\(fmt(px(b.x))) \(fmt(px(b.y))) \(fmt(px(b.width))) \(fmt(px(b.height)))"
     let setupDefault = doc.documentSetup == DocumentSetup.default
     let prefsDefault = doc.printPreferences == PrintPreferences.default
-    let needsNamedview = !setupDefault || !prefsDefault
+    // PAGESAVE (2026-08-06): artboards ride the namedview too. This port READ
+    // `<inkscape:page>` from the day artboards landed and never WROTE one, so a
+    // Swift save silently dropped every artboard while a Rust save round-tripped
+    // them — a one-directional loss, which is why it survived: a file from the
+    // other port always looked fine coming in.
+    let needsNamedview = !setupDefault || !prefsDefault || !doc.artboards.isEmpty
 
     // Build the body (symbols + layers) first so we can decide whether the root
     // <svg> must declare xmlns:jas: an arrowed stroke emits jas:*-namespaced
@@ -856,6 +861,14 @@ public func documentToSvg(_ doc: Document) -> String {
     // port's SVG (separate cross-port follow-up).
     if needsNamedview {
         lines.append("  <sodipodi:namedview id=\"namedview1\">")
+        // Byte-identical to Rust's `document_to_svg`: same attribute order,
+        // same pt->px scale, same escaping. The two ports write one format.
+        for ab in doc.artboards {
+            lines.append(
+                "    <inkscape:page x=\"\(fmt(px(ab.x)))\" y=\"\(fmt(px(ab.y)))\""
+                + " width=\"\(fmt(px(ab.width)))\" height=\"\(fmt(px(ab.height)))\""
+                + " id=\"\(escapeXml(ab.id))\" inkscape:label=\"\(escapeXml(ab.name))\"/>")
+        }
         if !setupDefault {
             lines.append(documentSetupToSvg(doc.documentSetup, indent: "    "))
         }

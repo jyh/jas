@@ -1729,3 +1729,39 @@ private func spelledMultiplier(_ v: Double) -> String {
     #expect(p.widthPoints[0].widthRight == 1.25)
     #expect(p.widthPoints[1].widthLeft == 2.0)
 }
+
+// MARK: - PAGESAVE: artboards must survive a save in this port too
+
+/// Swift READS `<inkscape:page>` (`parseArtboards`, "Mirrors Rust
+/// `parse_artboards`") and never WROTE it — the writer's own comment said
+/// "Artboards aren't yet persisted in this port's SVG (separate cross-port
+/// follow-up)". So the loss is ONE-DIRECTIONAL and easy to miss: a Rust-saved
+/// file keeps its artboards when opened in Swift, and a Swift-saved one loses
+/// every one of them. Rust has round-tripped pages all along.
+@Test func artboardsSurviveASaveInSwift() {
+    let doc = Document(
+        layers: [Layer(name: "L0", children: [
+            .rect(Rect(x: 10, y: 10, width: 40, height: 30)),
+        ])],
+        artboards: [
+            Artboard(id: "ab1", name: "Artboard 1", x: 0, y: 0, width: 600, height: 400),
+            Artboard(id: "ab2", name: "Second Board", x: 700, y: 0, width: 300, height: 200),
+        ])
+
+    let svg = documentToSvg(doc)
+    let back = svgToDocument(svg)
+
+    #expect(back.artboards.count == 2,
+            "both artboards must survive save-and-reopen; before this fix the writer emitted no page at all and every artboard was silently dropped")
+    #expect(back.artboards.first?.name == "Artboard 1")
+    #expect(back.artboards.first?.width == 600)
+    #expect(back.artboards.last?.id == "ab2")
+    // 700pt round-trips as 699.999975, NOT 700 — the ruled four-decimal floor
+    // on a POSITION (2026-08-05: positions and radii stay at 4dp; only the
+    // transform matrix went to full precision). Measured identical in Rust:
+    // `700pt -> "933.3333" -> 699.999975`, so this is the shared, ruled floor
+    // and not a divergence. Asserted as a tolerance rather than loosened to
+    // `>0`, so a REAL drift still reds.
+    #expect(abs((back.artboards.last?.x ?? 0) - 700) < 1e-4,
+            "an artboard position must survive within the ruled 4dp floor")
+}
