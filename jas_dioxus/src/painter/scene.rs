@@ -71,6 +71,59 @@ pub fn build_proof_scene(p: &mut impl Painter) {
         1.0,
     );
 
+    // 5) The vocabulary the scene MISSED until 2026-08-05, added because the
+    // coverage gate in painter/tests.rs measured it rather than assuming: a
+    // clip, a fill_path, and a stroke_rect were emitted by NO painter test in
+    // ANY port. `fill_path` was doubly hidden — it appears in
+    // `build_synthetic_scene` below, which has no golden, so a source grep
+    // counted it as covered while the recorded output never carried it.
+    //
+    // The fill_path deliberately contains an ARC. The windows seat measured
+    // (2026-08-05) that Rust FLATTENS every `ArcTo` to a line
+    // (`painter/canvas2d.rs:130`, and no arc-to-bezier exists in this crate)
+    // while Swift draws a real curve via `arcToBeziers` — a live artist-visible
+    // divergence, reachable by any rounded shape exported from another tool.
+    // A golden pinned WITHOUT an arc would certify a vocabulary real files use
+    // and this corpus never sees. It does not catch the divergence — both
+    // ports emit an identical display list and differ strictly below it — but
+    // it locates the flattening in the consumer and leaves a scene ready for a
+    // consumption-level check.
+    p.push_state(Transform::IDENTITY);
+    p.clip(
+        &[
+            PathCommand::MoveTo { x: 200.0, y: 200.0 },
+            PathCommand::LineTo { x: 320.0, y: 200.0 },
+            PathCommand::LineTo { x: 320.0, y: 280.0 },
+            PathCommand::ClosePath,
+        ],
+        FillRule::NonZero,
+    );
+    p.fill_path(
+        &[
+            PathCommand::MoveTo { x: 210.0, y: 250.0 },
+            PathCommand::ArcTo {
+                rx: 40.0,
+                ry: 25.0,
+                x_rotation: 15.0,
+                large_arc: false,
+                sweep: true,
+                x: 300.0,
+                y: 250.0,
+            },
+            PathCommand::ClosePath,
+        ],
+        FillRule::EvenOdd,
+        &Brush::Solid(Color::rgb(0.9, 0.3, 0.1)),
+        0.75,
+    );
+    p.stroke_rect(
+        Rect { x: 210.0, y: 210.0, w: 90.0, h: 30.0 },
+        &Brush::Solid(Color::rgb(0.1, 0.6, 0.3)),
+        &demo_stroke(2.0),
+        1.0,
+    );
+    p.pop_state();
+
     p.pop_state();
 }
 

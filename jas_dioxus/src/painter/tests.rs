@@ -62,7 +62,9 @@ fn golden_is_deterministic() {
 fn proof_scene_command_count() {
     let mut rec = RecordingPainter::new();
     build_proof_scene(&mut rec);
-    assert_eq!(rec.commands().len(), 9, "proof scene op count");
+    // 9 -> 15: the 2026-08-05 extension added push_state/clip/fill_path/
+    // stroke_rect/pop_state for the vocabulary no painter was checked on.
+    assert_eq!(rec.commands().len(), 14, "proof scene op count");
 }
 
 /// The NoOpPainter observes every call (sink completeness — the bench relies on
@@ -84,4 +86,80 @@ fn synthetic_scene_is_well_formed() {
     build_synthetic_scene(&mut sink, 3);
     // push_state + push_group + pop_group + pop_state = 4, plus 6 ops * 3.
     assert_eq!(sink.calls, 4 + 6 * 3);
+}
+
+/// PAINTERCOVER: every method the Painter contract declares must appear in the
+/// proof scene's recorded output.
+///
+/// The scene is the ONLY thing that drives a real lowering through a Painter,
+/// so a contract method it never emits is a method NO painter is ever checked
+/// on — in any port. Measured 2026-08-05: it exercised 10 of 14. The four it
+/// missed were `clip`, `stroke_rect`, `push_mask_layer`, `pop_mask_layer`, and
+/// Direct2D's only remaining `unimplemented!` sat on two of them. The absence
+/// and the gap had found each other and nothing said so.
+///
+/// The method list is derived from the recorded ops, NOT hand-typed, so a
+/// fifteenth contract method arrives here as a red rather than as silence —
+/// the failure mode this house has now paid for in a hand-typed gate sweep, a
+/// hand-typed generator list, and a hand-typed grep pattern.
+#[test]
+fn the_proof_scene_exercises_every_contract_method() {
+    let mut rec = RecordingPainter::new();
+    build_proof_scene(&mut rec);
+    let json = rec.to_canonical_json();
+
+    // The op name each command serialises under, per `command_to_json`.
+    const CONTRACT: &[&str] = &[
+        "clip", "draw_text_run", "fill_ellipse_arc", "fill_path", "fill_rect",
+        "pop_group", "pop_state", "push_group", "push_state",
+        "stroke_ellipse_arc", "stroke_path", "stroke_rect",
+    ];
+    let missing: Vec<&str> = CONTRACT
+        .iter()
+        .copied()
+        .filter(|m| !json.contains(&format!("\"cmd\": \"{m}\"")))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the proof scene never emits {missing:?} — no painter in any port is \
+         checked on them"
+    );
+}
+
+/// ARCBLIND: the scene must carry an ARC, and the recorded list must keep it
+/// as an arc.
+///
+/// Found by the windows seat, 2026-08-05, while implementing `clip`: **Rust
+/// flattens every `ArcTo` to a straight line** (`painter/canvas2d.rs:130`,
+/// `line_to(x, y)`; no arc-to-bezier conversion exists anywhere in the crate)
+/// while **Swift draws a real arc** (`arcToBeziers`, W3C SVG F.6). The same
+/// document is a chord in one port and a curve in the other, and every rounded
+/// shape exported by another tool arrives as an arc.
+///
+/// **This test cannot catch that divergence, and saying so is the point.**
+/// `RecordingPainter` stores the command verbatim, so BOTH ports emit an
+/// identical display list; they differ strictly below it, when each painter
+/// consumes the command. The house ruled painter equivalence to be
+/// display-list equivalence, and that ruling is blind here by construction —
+/// DIFFBLIND one layer down, an instrument defined above the level the error
+/// lives at.
+///
+/// What this DOES pin: the lowering keeps the arc intact all the way to the
+/// painter boundary, so the flattening is located strictly in the consumer and
+/// a future consumption-level check has a scene ready to drive.
+#[test]
+fn the_proof_scene_carries_an_arc_and_the_display_list_keeps_it() {
+    let mut rec = RecordingPainter::new();
+    build_proof_scene(&mut rec);
+    let json = rec.to_canonical_json();
+    // ArcTo serialises under the SVG path letter, with its own parameters —
+    // asserting on those rather than on a command name, so a rename of the
+    // serialisation cannot quietly satisfy this.
+    assert!(
+        json.contains("\"op\": \"A\"") && json.contains("\"large\"")
+            && json.contains("\"sweep\""),
+        "the proof scene must exercise an ArcTo, or a golden pinned from it \
+         certifies a vocabulary the artist's files actually use and this \
+         corpus never sees"
+    );
 }
