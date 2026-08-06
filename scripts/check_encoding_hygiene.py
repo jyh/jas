@@ -170,6 +170,41 @@ SUBPROCESS_TEXT_KWS = ("text", "universal_newlines")
 MISSING_ENCODING = "missing encoding="
 MISSING_NEWLINE = "missing newline="
 
+# The half of a pipe this gate could not see until 2026-08-06.
+#
+# `encoding="utf-8"` tells the PARENT how to decode. It says nothing about how
+# the CHILD encodes, and a Python child writing to a pipe encodes with the
+# LOCALE codec -- cp1252 on Windows. So a call that satisfies the arm above can
+# still mojibake, and the way it fails is the worst shape found this fortnight:
+# the parent's decode raises inside subprocess's internal reader THREAD, the
+# traceback is swallowed, `communicate()` returns None for stdout, and `run()`
+# hands back returncode 0. rc says success, stderr is empty, stdout is None,
+# and the crash lands several frames later as a TypeError.
+#
+# That took main's Windows CI job red for four consecutive runs on 2026-08-05
+# while both seats reported green from machines that happened to have
+# PYTHONIOENCODING set. Only a Python child is watched: `git`, `cargo` and
+# `swift` do not consult PYTHONIOENCODING, and flagging them would be the same
+# overcount the binary-mode case already cost this gate once.
+UNFORCED_CHILD_ENCODING = "child encoding not forced (PYTHONIOENCODING)"
+
+# What forcing looks like. Matched as TEXT rather than by interpreting the
+# `env=` expression, because the shapes people actually write are
+# `{**os.environ, ...}`, `dict(os.environ, ...)` and a name bound earlier --
+# and an evaluator that understood only the first would pass the other two
+# silently.
+#
+# Searched over the ENCLOSING FUNCTION, not the call. The first version of this
+# arm searched the call's own source segment and immediately red-flagged both
+# already-correct sites in this repo, because both build the env on a previous
+# line. The comment above this one already listed "a prebuilt name" as a shape
+# that occurs, and the implementation still could not see it -- an instrument
+# narrower than the question it was written to ask, one paragraph after naming
+# the question. Widening trades a theoretical false GREEN (a function that
+# mentions the variable for an unrelated reason) for the false REDS that make a
+# gate get switched off.
+CHILD_ENCODING_VAR = "PYTHONIOENCODING"
+
 
 class Violation:
     def __init__(self, path, line, kind, what):
@@ -224,6 +259,43 @@ def _classify(call):
     return None, None
 
 
+def _spawns_python(call):
+    """Does this call launch a PYTHON child (`sys.executable`)?
+
+    Walks the whole first argument rather than checking element [0], because
+    the argv list is often built by concatenation (`[sys.executable, x] + args`)
+    and a positional check would miss every one of those.
+    """
+    if not call.args:
+        return False
+    for node in ast.walk(call.args[0]):
+        if (isinstance(node, ast.Attribute) and node.attr == "executable"
+                and isinstance(node.value, ast.Name) and node.value.id == "sys"):
+            return True
+    return False
+
+
+def _forcing_scope(src, tree, call):
+    """Source text in which forcing the child's encoding counts as done.
+
+    The innermost enclosing function, or the whole module when the call sits at
+    module level. See CHILD_ENCODING_VAR for why this is not the call itself.
+    """
+    best = None
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        end = getattr(node, "end_lineno", None)
+        if end is None or not (node.lineno <= call.lineno <= end):
+            continue
+        # Innermost wins: a nested helper is a tighter scope than its parent.
+        if best is None or node.lineno > best.lineno:
+            best = node
+    if best is None:
+        return src
+    return ast.get_source_segment(src, best) or src
+
+
 def scan(sources):
     """Find violations in {path: source_text}. Injectable so the self-test can
     drive a fake corpus rather than the real tree."""
@@ -257,6 +329,16 @@ def scan(sources):
                 if "encoding" not in kws:
                     out.append(Violation(path, node.lineno, MISSING_ENCODING,
                                          f"subprocess.{owner}()"))
+                elif _spawns_python(node):
+                    # The parent decodes correctly; does the CHILD encode that
+                    # way? Only asked when `encoding=` is already present,
+                    # because otherwise the call is reported once above and two
+                    # findings for one line would double-count the class.
+                    seg = _forcing_scope(src, tree, node)
+                    if CHILD_ENCODING_VAR not in seg:
+                        out.append(Violation(path, node.lineno,
+                                             UNFORCED_CHILD_ENCODING,
+                                             f"subprocess.{owner}([sys.executable, ...])"))
                 continue
             if kind == "open":
                 if owner in NON_FILE_OPEN_OWNERS:
@@ -344,6 +426,56 @@ def self_test():
         "sub_univ.py": "subprocess.check_output(cmd, universal_newlines=True)\n",
         # (l) A PIPE THAT NAMES ITS ENCODING IS CLEAN.
         "sub_named.py": 'subprocess.run(cmd, text=True, encoding="utf-8")\n',
+        # (m) A PYTHON CHILD WHOSE OWN ENCODING IS NOT FORCED. The parent
+        #     decodes as utf-8 and the child encodes with the locale codec, so
+        #     this passes the arm above and still mojibakes. It is the shape
+        #     that took main's Windows CI red for four runs.
+        "spawn_unforced.py":
+            'subprocess.run([sys.executable, "x.py"], capture_output=True,\n'
+            '               text=True, encoding="utf-8")\n',
+        # (n) FORCED IS CLEAN. Asserted so the rule cannot be "always red on a
+        #     python child", which would be unfixable and therefore ignored.
+        "spawn_forced.py":
+            'subprocess.run([sys.executable, "x.py"], capture_output=True,\n'
+            '               text=True, encoding="utf-8",\n'
+            '               env={**os.environ, "PYTHONIOENCODING": "utf-8"})\n',
+        # (o) THE ARGV IS OFTEN BUILT BY CONCATENATION. A check that looked at
+        #     element [0] of the list would miss every call of this shape --
+        #     cross_language_workspace.py is written exactly like this.
+        "spawn_concat.py":
+            'subprocess.run([sys.executable, "x.py"] + args, capture_output=True,\n'
+            '               text=True, encoding="utf-8")\n',
+        # (p) A NON-PYTHON CHILD IS NOT A VIOLATION. git, cargo and swift do
+        #     not consult PYTHONIOENCODING; flagging them would be the same
+        #     overcount case (d) already cost this gate once.
+        "spawn_git.py":
+            'subprocess.run(["git", "status"], capture_output=True,\n'
+            '               text=True, encoding="utf-8")\n',
+        # (q) THE ENV BUILT ON AN EARLIER LINE. This is the shape BOTH correct
+        #     sites in this repo use, and the first version of this arm flagged
+        #     both of them because it searched only the call's own source. The
+        #     case exists so that narrowing it again reds here.
+        "spawn_prebuilt.py":
+            'def go():\n'
+            '    env = dict(os.environ, PYTHONIOENCODING="utf-8")\n'
+            '    return subprocess.run([sys.executable, "x.py"],\n'
+            '                          capture_output=True, text=True,\n'
+            '                          encoding="utf-8", env=env)\n',
+        # (r) THE SCOPE IS THE FUNCTION, NOT THE FILE. One forced call and one
+        #     unforced call in the same module must produce EXACTLY ONE
+        #     violation -- if the scope widened to the whole file, the forced
+        #     function would vouch for the unforced one and this case would go
+        #     silent.
+        "spawn_two_fns.py":
+            'def forced():\n'
+            '    env = dict(os.environ, PYTHONIOENCODING="utf-8")\n'
+            '    return subprocess.run([sys.executable, "a.py"],\n'
+            '                          capture_output=True, text=True,\n'
+            '                          encoding="utf-8", env=env)\n'
+            'def unforced():\n'
+            '    return subprocess.run([sys.executable, "b.py"],\n'
+            '                          capture_output=True, text=True,\n'
+            '                          encoding="utf-8")\n',
         # (m) BYTES ARE NOT A VIOLATION -- `check_output` returns bytes unless
         #     something asks for str. Flagging every subprocess call would
         #     overcount by exactly the arithmetic error case (d) already cost
@@ -375,6 +507,12 @@ def self_test():
         "f.py": [MISSING_ENCODING],
         "g.py": [MISSING_ENCODING, MISSING_NEWLINE],
         "i.py": [MISSING_ENCODING, MISSING_NEWLINE],
+        # The child-encoding arm. Only the two unforced python spawns fire:
+        # spawn_forced.py names the variable and spawn_git.py is not a python
+        # child. Neither carries a newline= duty, because a pipe is not a file.
+        "spawn_unforced.py": [UNFORCED_CHILD_ENCODING],
+        "spawn_concat.py": [UNFORCED_CHILD_ENCODING],
+        "spawn_two_fns.py": [UNFORCED_CHILD_ENCODING],
         # The subprocess arm. Both decoding spellings must fire; neither
         # carries a newline= duty, because a pipe is not a file.
         "sub_text.py": [MISSING_ENCODING],
