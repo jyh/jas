@@ -2812,5 +2812,34 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
     // effect that pairs with this one); dialog defaults are not
     // reset here.
     effects["reset_boolean_panel"] = { _, _, _ in nil }
+
+    // CAPREACH (2026-08-05): the panel-write hook belongs on the SHARED map,
+    // not only on the text-input commit route.
+    //
+    // `set_panel_state` fires this hook so the host can push the written
+    // attribute onto the selection, and its own comment warns it is a "silent
+    // no-op if the host hasn't registered the effect". It was registered in
+    // exactly ONE place — `runInputCommitBehavior` — so typing a stroke weight
+    // applied to the selected element and CLICKING A CAP BUTTON DID NOTHING.
+    // Every route that runs a YAML action without going through an input
+    // commit (`runYamlActionByName`, which is how the cap/join radios and the
+    // panel hamburger dispatch) built its map here and got no hook.
+    //
+    // JYH found it at the canvas: "in the stroke panel it is round, but it
+    // comes up a square. Clicking on a different cap does not do anything."
+    // Rust has never had this shape — `panels/stroke_panel.rs` calls
+    // `apply_stroke_panel_to_selection("cap")` directly from the dispatch.
+    //
+    // No `field` fallback here, deliberately: this route has no
+    // "field being committed" to fall back TO. A write that names its key
+    // applies; one that does not is not this hook's business, and inventing a
+    // guess is what applied the wrong group in the linked-scale case.
+    // `runInputCommitBehavior` still overrides this with its richer version.
+    effects["notify_panel_state_changed"] = { arg, _, store in
+        if let (panelId, wroteField) = parseNotifyPayload(arg), let edited = wroteField {
+            notifyPanelStateChanged(panelId, store: store, model: model, edited: edited)
+        }
+        return nil
+    }
     return effects
 }

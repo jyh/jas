@@ -134,6 +134,14 @@ private func rectXAt(_ model: Model, path: ElementPath) -> Double {
         // `apply_active_color` and `apply_active_tool` were both here, so the
         // gradient hook was the ONLY missing one of the three.
         "apply_gradient_panel",
+        // CAPREACH (2026-08-05): `set_panel_state` fires
+        // `notify_panel_state_changed` so the host can push the written
+        // attribute onto the selection, and it silently no-ops when the host
+        // has not registered it. It lived ONLY on the text-input commit route,
+        // so typing a stroke weight applied and CLICKING A CAP BUTTON DID
+        // NOTHING — every YAML action run through `runYamlActionByName` built
+        // its map here and got no hook. Found at the canvas by JYH.
+        "notify_panel_state_changed",
     ]
     // THIS ASSERTION IS THE REGISTRY GATE IN EMBRYO, and it is worth saying so.
     // It compares the built map against a HAND-MAINTAINED literal, which catches
