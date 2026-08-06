@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SMOKE 2 — BRUSHSAVE. A brushed stroke AND a variable-width stroke, both
+     carried in the save format for the first time (2026-08-05).
+     PASS: open this, then File>Save, then reopen the saved file. The brush and
+     the width profile must both still be there. Before BRUSHSAVE they were
+     silently dropped on every save. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 600 400" width="600" height="400">
+  <g inkscape:groupmode="layer" inkscape:label="Brush and width">
+    <path d="M60,120 C180,40 360,200 520,100" fill="none" stroke="rgb(30,60,140)" stroke-width="8"
+          jas:stroke-brush="default_brushes/flat_10"
+          inkscape:label="brushed — must survive save+reopen"/>
+    <path d="M60,280 C180,200 360,360 520,260" fill="none" stroke="rgb(30,120,60)" stroke-width="10"
+          jas:width-points="0.15,2,2 0.5,9,9 0.85,1.5,1.5"
+          inkscape:label="variable width — must survive save+reopen"/>
+  </g>
+</svg>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SMOKE 1 — ARROWTRIM. JYH's original screenshot case, 2026-07-24:
+     a CURVED path, arrowheads on BOTH ends, arrowhead scale 200.
+     PASS: both heads point along the path's true end tangents, and the curve
+     does not poke through or past either head.
+     The two banked questions live here too: look at the fat-stroke shoulders
+     beside the narrow head, and at the FREE end of the single-arrow path
+     below (it should be round; today it is butt-cut). -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 600 400" width="600" height="400">
+  <g inkscape:groupmode="layer" inkscape:label="Arrowheads">
+    <path d="M60,300 C160,60 340,60 440,300" fill="none" stroke="rgb(20,20,20)" stroke-width="6"
+          jas:start-arrow="closed_arrow" jas:end-arrow="closed_arrow"
+          jas:start-arrow-scale="200" jas:end-arrow-scale="200"
+          inkscape:label="both heads, scale 200 — the repro"/>
+    <path d="M60,360 C200,330 360,390 520,350" fill="none" stroke="rgb(180,40,40)" stroke-width="18"
+          jas:end-arrow="closed_arrow" stroke-linecap="round"
+          inkscape:label="fat stroke, one head — shoulders and the free-end cap"/>
+  </g>
+</svg>
