@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import pathlib
 import subprocess
 import sys
 
@@ -76,6 +77,8 @@ FORBIDDEN = [
 # not "tidy" it into the forbidden list.
 PRESERVED = "Co-Authored-By"
 
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
 
 def commit_messages(rev_range: str) -> list[tuple[str, str]]:
     """(sha, message) for every commit in `rev_range`, newest first."""
@@ -93,6 +96,42 @@ def commit_messages(rev_range: str) -> list[tuple[str, str]]:
             continue
         sha, _, body = chunk.partition("\x1f")
         rows.append((sha.strip(), body))
+    return rows
+
+
+def tracked_files() -> list[tuple[str, str]]:
+    """Every tracked TEXT file, as (path, contents).
+
+    WHY THIS EXISTS. The trailer gate scanned commit MESSAGES only, and said so
+    proudly — it is a history gate. But on 2026-08-05 the windows seat found a
+    real session URL sitting in his hook's proof script AS TEST DATA, caught it
+    by eye, and sanitised it before sending. **Nothing in this repository would
+    have caught it.** A forbidden string in a FILE ships to a public repo just
+    as surely as one in a commit message, and the message gate is structurally
+    blind to it — it is not scanning the wrong thing, it is scanning a
+    different thing.
+
+    Same FORBIDDEN list, deliberately: the patterns have exactly one definition
+    in this tree and both scans read it.
+
+    This file needs no exemption. Its patterns are assembled from parts
+    (`_SESSION_KEY`, `_HOST`) precisely so its own source never matches them —
+    verified by the self-test, which would otherwise pass vacuously by
+    excluding the only interesting file.
+    """
+    out = subprocess.run(["git", "ls-files", "-z"],
+                         capture_output=True, text=True, encoding="utf-8",
+                         check=True)
+    rows: list[tuple[str, str]] = []
+    for rel in out.stdout.split("\0"):
+        if not rel:
+            continue
+        path = ROOT / rel
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
+            continue  # binary, or a submodule/symlink pointing nowhere
+        rows.append((rel, text))
     return rows
 
 
@@ -128,7 +167,13 @@ def self_test() -> int:
     # ASSERTION, not the gate -- kept as written because a reader will
     # otherwise make the same arithmetic slip.)
     planted_trailer = [("aaa1", f"Subject\n\n{_SESSION_KEY}: session_x\n")]
-    planted_url = [("aaa2", "Subject\n\nSee https://claude.ai/code/session_abc\n")]
+    # ASSEMBLED, not written literally — the same trick FORBIDDEN itself uses,
+    # and for a sharper reason since 2026-08-05: this gate now scans FILE
+    # CONTENTS, and its first run caught THIS LINE, which used to carry the URL
+    # verbatim. A detector's test data contains the thing it detects, so a
+    # detector that also scans files must never spell its own fixture out.
+    planted_url = [("aaa2", "Subject\n\nSee https://" + _HOST.replace(chr(92), "")
+                    + "/code/session_abc\n")]
     if len(scan(planted_trailer)) != 1:
         failures.append(f"trailer shape must be caught, got {len(scan(planted_trailer))}")
     if len(scan(planted_url)) != 1:
@@ -222,8 +267,29 @@ def main() -> int:
               "before merging — never after.")
         return 1
 
-    print(f"check_commit_trailers: OK ({len(rows)} commit messages scanned, "
-          f"0 forbidden trailers; {PRESERVED} attribution untouched)")
+    # SECOND SUBJECT, added 2026-08-05: the FILE CONTENTS. A forbidden string
+    # in a tracked file ships to a public repo exactly as surely as one in a
+    # commit message, and the message scan above is structurally blind to it.
+    # The windows seat found a real session URL in his hook's proof script, as
+    # test data, and caught it BY EYE.
+    files = tracked_files()
+    if not files:
+        print("FAIL: scanned ZERO tracked files. An empty scan is a failure, "
+              "not a pass — the ls-files call or the decode filter has drifted.")
+        return 1
+    bad_files = scan(files)
+    if bad_files:
+        print(f"FAIL: {len(bad_files)} tracked file(s) carry a forbidden string.\n")
+        print("Unlike a commit message this is trivially fixable — edit the file")
+        print("— but only BEFORE it is pushed. This repository is public.\n")
+        for path, what, line in bad_files:
+            print(f"  {path}  {what}")
+            print(f"      {line[:100]}")
+        return 1
+
+    print(f"check_commit_trailers: OK ({len(rows)} commit messages and "
+          f"{len(files)} tracked files scanned, 0 forbidden strings; "
+          f"{PRESERVED} attribution untouched)")
     return 0
 
 
