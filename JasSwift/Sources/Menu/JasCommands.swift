@@ -563,7 +563,7 @@ public struct JasCommands: Commands {
                 return
             }
             let svg = try String(contentsOf: url, encoding: .utf8)
-            let newModel = Model(document: svgToDocument(svg), filename: url.path)
+            let newModel = Model(document: documentForOpen(svg), filename: url.path)
             addCanvas?(newModel)
         } catch {
             let alert = NSAlert(error: error)

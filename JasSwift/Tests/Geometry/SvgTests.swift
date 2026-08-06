@@ -1765,3 +1765,40 @@ private func spelledMultiplier(_ v: Double) -> String {
     #expect(abs((back.artboards.last?.x ?? 0) - 700) < 1e-4,
             "an artboard position must survive within the ruled 4dp floor")
 }
+
+// MARK: - OPENBOARD: opening an SVG must leave the document with an artboard
+
+/// JYH, first thirty seconds of the first smoke in weeks: "although there is no
+/// artboard" (2026-08-05).
+///
+/// `svgToDocument` leaves `artboards` empty BY DESIGN — both ports' parsers say
+/// so, and the at-least-one-artboard repair belongs at the OPEN layer, where
+/// session restore already does it. Rust's `open_file_dialog` calls
+/// `ensure_artboards_invariant` immediately after its parse. **This port's
+/// `openFile` never did**, so a document opened in JasSwift had no canvas to
+/// zoom against and Fit-to-artboard had nothing to fit.
+///
+/// A parse and an OPEN are different acts, which is why this is tested at
+/// `documentForOpen` and not by loosening the parser: 59 of the 70 corpus setup
+/// SVGs carry a viewBox and no page, so moving this into the parser would have
+/// added an artboard to 237 expected goldens for a behaviour that is not a
+/// parse fact.
+@Test func openingAnSvgLeavesTheDocumentWithAnArtboard() {
+    let svg = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 400" width="600" height="400">
+      <rect x="10" y="10" width="40" height="30" fill="rgb(0,0,0)"/>
+    </svg>
+    """
+    // The PARSE still yields none — that contract is unchanged and load-bearing
+    // for the corpus.
+    #expect(svgToDocument(svg).artboards.isEmpty,
+            "the parser must keep leaving artboards empty; 237 goldens depend on it")
+
+    // The OPEN repairs it, as Rust's open path does.
+    let opened = documentForOpen(svg)
+    #expect(!opened.artboards.isEmpty,
+            "opening an SVG must leave at least one artboard, or Fit-to-artboard has nothing to fit and the canvas has nothing to zoom against")
+    #expect(opened.layers.first?.children.count == 1,
+            "and the repair must not disturb the artwork")
+}

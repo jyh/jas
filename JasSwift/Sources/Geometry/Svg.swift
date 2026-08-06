@@ -2296,3 +2296,30 @@ private func parseJasPrintBlocks(_ root: XMLElement) -> (DocumentSetup, PrintPre
     return (setup, prefs)
 }
 
+/// Parse an SVG for OPENING it — parse, then repair the invariants that a
+/// parse deliberately does not.
+///
+/// `svgToDocument` leaves `artboards` empty BY DESIGN; both ports say so in
+/// their parsers, and the repair belongs at the open layer where session
+/// restore already does it. Rust's `open_file_dialog` calls
+/// `ensure_artboards_invariant` immediately after its parse, with the reason
+/// spelled out: "without it, current_artboard is {} after open and
+/// fit_active_artboard / Cmd+0 silently no-op against a zero rect, making the
+/// document look like it has no canvas to zoom against."
+///
+/// **This port's `openFile` never did.** JYH opened an SVG in JasSwift and said
+/// "there is no artboard" (2026-08-06). Not a missing feature — a repair one
+/// port performs and the other skips, on the same file.
+///
+/// Named rather than inline so it is testable: `openFile` wraps `NSOpenPanel`
+/// and cannot be driven from a test. The single line inside `openFile` that
+/// calls this is covered only by an artist opening a file, which is how the
+/// gap was found.
+func documentForOpen(_ svgText: String) -> Document {
+    let doc = svgToDocument(svgText)
+    let (repaired, _) = ensureArtboardsInvariant(doc.artboards)
+    guard repaired.count != doc.artboards.count else { return doc }
+    // Clone-then-mutate: `replacing` touches ONLY `artboards`, so the repair
+    // cannot eat a field the way a field-by-field rebuild did in Session.swift.
+    return doc.replacing(artboards: repaired)
+}
