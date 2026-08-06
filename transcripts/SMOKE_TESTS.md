@@ -149,3 +149,61 @@ derived token appeared to expose is therefore essentially unreachable in
 practice, and the token is far more stable than its `rx == ry` spelling suggests.
 That is a property nobody would have predicted from reading the code; it took a
 hand on the mouse failing to do something.
+
+---
+
+# Judgment smokes, 2026-08-05 (JasSwift native, release build, `82186880`)
+
+Driver: JYH at the canvas. Scenes: `smoke/`. Recorded the same day, because
+three separate firings had re-asked whether ARROWTRIM was ever re-smoked.
+
+## S1 — ARROWTRIM re-smoke: **PASS**
+
+`smoke/01-arrowtrim.svg` — curved path, arrowheads both ends, arrowhead scale
+200. This is JYH's original screenshot case of 2026-07-24 rebuilt.
+
+> "Looks great" — JYH
+
+Both heads sit on the path's true end tangents (start head down-left, end head
+down-right, matching where the curve arrives). **No poke-through at either
+head.** The two symptoms the ARROWTRIM stone was raised for — orientation flip
+at scale 200, and the curve protruding past the head — are both gone.
+
+## S1a — banked question 1: **NOT ASKED. The scene was wrong.**
+
+The scene was supposed to pose "stroke wider than its arrowhead, so the butt-cut
+shoulders show at the sides". The ratio was authored backwards: the red path's
+head is far WIDER than its 18pt stroke, so there are no shoulders to see. The
+question is still open and still unasked; a corrected scene needs a head
+narrower than the stroke.
+
+## S1b — banked question 2: **CONFIRMED, and worse than documented**
+
+> "In the stroke panel it is round, but it comes up a square. Clicking on a
+> different cap does not do anything." — JYH
+
+Measured immediately, and the first two links are INNOCENT: the importer parses
+`stroke-linecap` (svg.rs:1488) and it survives a round trip, so the model
+genuinely holds `LineCap::Round`; the Stroke panel correctly displays round.
+Only the render disagrees.
+
+So this is not merely "a single-arrow path loses the round cap on its free end",
+which is how it was banked. **The cap control appears inert to the artist** —
+all three buttons look like they do nothing — which is a live interaction defect,
+not a documented simplification. Under diagnosis in both ports; the owner rules
+on the fix, because per-end caps may require stroke splitting.
+
+## S1c — INCIDENTAL FINDING, ruled the same hour
+
+> "although there is no artboard" — JYH
+
+Artboards are parsed ONLY from `<inkscape:page>` inside `<sodipodi:namedview>`,
+so a jas-authored file round-trips but ANY foreign SVG imports with no page at
+all — despite its `viewBox` stating the page exactly. **RULED by JYH the same
+hour: the viewBox becomes an artboard on import, always** (an unwanted artboard
+is visible and deletable; a missing one is silent). An `<inkscape:page>` still
+wins where present.
+
+**Found thirty seconds into the first smoke in weeks** — which is the empirical
+argument for human contact with the product that the phase-end discussion had
+just made in the abstract.
