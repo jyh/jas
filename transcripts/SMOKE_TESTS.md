@@ -207,3 +207,47 @@ wins where present.
 **Found thirty seconds into the first smoke in weeks** — which is the empirical
 argument for human contact with the product that the phase-end discussion had
 just made in the abstract.
+
+## S2 — BRUSHSAVE round trip: **PASS**
+
+`smoke/02-brushsave.svg`, JYH at the canvas.
+
+> "the round trip (with the simple stroke) passes" — JYH
+
+Open, File>Save, reopen: **the brush id and the variable-width profile both
+survive**. That is precisely the BRUSHSAVE claim, and precisely what every save
+silently discarded until 2026-08-05. The variable-width path also rendered
+correctly on the way in ("the green one has variable width").
+
+**Scope, stated so this is not over-read:** BRUSHSAVE was a PERSISTENCE fix,
+never a rendering one. What is proven is that the attributes survive the codec.
+
+## S2a — TWO SCENE DEFECTS, both mine, and the second is the instructive one
+
+The blue path rendered as a plain stroke. Cause: I authored
+`default_brushes/flat_10`, which **does not exist** — the library holds
+`basic, round_3pt, round_7pt, flat_5pt, oval_5pt, round_10pt, art_tapered,
+pattern_diamonds, bristle_round`. The renderer falls back to a plain stroke for
+an unresolvable brush. Second invalid id I authored today, after
+`jas:start-arrow="triangle"`.
+
+**The instructive part is that my verification passed it.** I round-tripped this
+scene through the real codec before committing, exactly to avoid wasting the
+smoke hour — and it went green, because `jas:stroke-brush="default_brushes/flat_10"`
+survives the codec perfectly AS A STRING. My check asked *does the attribute
+survive?* when the question was *does the value resolve to a real brush?*
+**Round-trip fidelity is not referential validity.** The subject-list class
+again, this time inside the step built to prevent it.
+
+Scenes now validated for RESOLUTION, not just survival: every `jas:stroke-brush`
+and every arrowhead name in `smoke/` is checked against
+`workspace.json`'s actual libraries.
+
+## S2b — OPEN QUESTION raised by that accident
+
+An unresolvable brush id renders as a plain stroke with **no complaint anywhere**
+— no panel warning, no log line. A document referencing a brush from a library
+you do not have therefore opens looking *fine and wrong*: the artwork is not
+lost, it is silently downgraded. Graceful fallback is defensible in a renderer;
+silence about it may not be. For the council queue, beside the other spec
+silences.

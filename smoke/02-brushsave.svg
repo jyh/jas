@@ -7,7 +7,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 600 400" width="600" height="400">
   <g inkscape:groupmode="layer" inkscape:label="Brush and width">
     <path d="M60,120 C180,40 360,200 520,100" fill="none" stroke="rgb(30,60,140)" stroke-width="8"
-          jas:stroke-brush="default_brushes/flat_10"
+          jas:stroke-brush="default_brushes/flat_5pt"
           inkscape:label="brushed — must survive save+reopen"/>
     <path d="M60,280 C180,200 360,360 520,260" fill="none" stroke="rgb(30,120,60)" stroke-width="10"
           jas:width-points="0.15,2,2 0.5,9,9 0.85,1.5,1.5"
