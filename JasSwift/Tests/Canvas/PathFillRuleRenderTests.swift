@@ -177,3 +177,50 @@ private func anchorDashedStroke() -> Stroke {
         stroke: Stroke(color: black, width: 1.0), fillRule: .nonzero))
     #expect(winding.hole > 0, "under nonzero the fill covers the inner square")
 }
+
+// MARK: - BRUSHREGISTRY: the paint path must supply the registry itself
+
+/// JYH, driving the app 2026-08-05: a document with a brushed stroke rendered as
+/// a plain one. Cause: `_currentBrushLibraries` was populated ONLY by three
+/// Brush Options dialog modes, so it stayed empty for a whole session and every
+/// `lookupBrush` returned nil.
+///
+/// **Every test above seeds the registry by hand** (`installThinCalligraphicBrush`)
+/// — supplying the one value production never supplied, which is exactly why a
+/// suite of brushed-render tests sat green over a feature that never rendered.
+/// This test seeds only the MODEL, the way a loaded document does.
+///
+/// THE PROBE HAD TO BE REBUILT. The first version reused `renderDonut` and
+/// asserted `hole == 0`, and a deliberate mutant PASSED it: for an even-odd
+/// path BOTH arms leave the hole empty and both paint the ring, so the probe
+/// could not tell the brush arm from the fallback. It measured something true
+/// and irrelevant. This one contrasts a FAT brush (size 14) against a HAIRLINE
+/// stroke (width 1) and probes a pixel only the brush can reach.
+@Test func theModelsBrushLibrariesReachTheCanvasRegistry() {
+    setCanvasBrushLibraries([:])            // the state a fresh session is in
+    defer { setCanvasBrushLibraries([:]) }
+
+    let model = Model(document: Document(layers: [Layer(name: "L0", children: [])]))
+    model.stateStore.setDataPath("brush_libraries", [
+        "t": ["brushes": [["slug": "fat", "type": "calligraphic",
+                           "angle": 0.0, "roundness": 100.0, "size": 14.0]]],
+    ])
+    installCanvasBrushRegistry(from: model)
+
+    // A horizontal hairline across the middle. A width-1 plain stroke covers
+    // roughly y=49...51; a size-14 calligraphic nib covers ~y=43...57.
+    let line = Path(d: [.moveTo(20, 50), .lineTo(80, 50)],
+                    fill: nil,
+                    stroke: Stroke(color: black, width: 1.0),
+                    strokeBrush: "t/fat", fillRule: .nonzero)
+    let (ctx, buf) = makeBitmap()
+    defer { buf.deallocate() }
+    drawElement(ctx, .path(line))
+
+    let onTheLine = alphaAt(buf, 50, 50)
+    let farOffTheLine = alphaAt(buf, 50, 45)   // only a fat brush reaches here
+
+    #expect(onTheLine > 0, "something must be drawn at all")
+    #expect(farOffTheLine > 0,
+            "the FAT brush must have painted 5pt off the centreline; a hairline plain stroke cannot reach here, so this pixel is what separates the brush arm from the fallback")
+}

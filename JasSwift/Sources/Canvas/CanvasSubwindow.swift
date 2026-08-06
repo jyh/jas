@@ -27,6 +27,34 @@ public func setCanvasBrushLibraries(_ libs: [String: Any]) {
     _currentBrushLibraries = libs
 }
 
+/// Install the model's brush libraries into the canvas registry, so the paint
+/// about to happen can resolve `strokeBrush` slugs.
+///
+/// WHY THIS EXISTS. The declaration above says "AppState updates this before
+/// each render." Nothing did. The only callers were three Brush Options dialog
+/// modes (`create`, `library_edit`, `instance_edit`) inside YamlToolEffects, so
+/// `_currentBrushLibraries` stayed EMPTY for a whole session unless the artist
+/// happened to open that dialog and edit a brush — and every brushed path,
+/// imported or freshly applied, fell through `lookupBrush` -> nil to a plain
+/// stroke. JYH found it by opening a document with a brushed stroke and asking
+/// why it looked ordinary (2026-08-05).
+///
+/// Rust has never had this bug: `canvas::render::render()` installs the
+/// registry at the top of every paint, guard-restored on exit. This is that,
+/// mirrored. Cheap by construction — the dictionary is shared, not copied
+/// deeply, and the paint is already O(elements).
+///
+/// LIMIT, stated rather than hidden: a unit test can prove this function
+/// populates the registry, but not that `draw(_:)` calls it. That one line is
+/// covered only by an artist looking at the canvas — which is precisely how the
+/// bug was found, and why the render tests never caught it: they seed the
+/// registry by hand (`installThinCalligraphicBrush`), supplying the one value
+/// production never supplied.
+public func installCanvasBrushRegistry(from model: Model) {
+    let libs = (model.stateStore.getDataPath("brush_libraries") as? [String: Any]) ?? [:]
+    setCanvasBrushLibraries(libs)
+}
+
 // MARK: - Reference resolution (REFERENCE_GRAPH.md Phase 1b)
 //
 // The live element draw arm resolves by-id references against a
@@ -3070,6 +3098,10 @@ class CanvasNSView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        // Brush registry for THIS paint, mirroring Rust's render(). Without
+        // it every brushed path renders as a plain stroke — see
+        // `installCanvasBrushRegistry`.
+        if let model = controller?.model { installCanvasBrushRegistry(from: model) }
         // Layer 1: pasteboard (canvas background). Medium gray; the
         // artboard fills draw white over it so the artboard reads as
         // "paper on a layout table." Filled in screen-space before the
