@@ -108,7 +108,18 @@ def run_python(mode: str, svg_path: str) -> str:
         [sys.executable, os.path.join(REPO_ROOT, "jas", "tools", "svg_roundtrip.py"),
          mode, svg_path],
         capture_output=True, text=True, encoding="utf-8", timeout=30,
+        # The CHILD must emit UTF-8, not just the parent decode it. A
+        # Python child writing to a pipe encodes with the LOCALE codec
+        # (cp1252 on Windows); the parent's utf-8 decode then dies inside
+        # subprocess's reader THREAD and hands back stdout=None with
+        # returncode 0. Canonical explanation in
+        # scripts/check_corpus_manifest.py, self-test item 11.
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
     )
+    if result.stdout is None:
+        raise RuntimeError(
+            "stdout was not captured: the reader thread died decoding the "
+            f"child. rc={result.returncode} stderr={(result.stderr or '')[:200]!r}")
     if result.returncode != 0:
         raise RuntimeError(f"Python {mode} failed: {result.stderr}")
     return result.stdout

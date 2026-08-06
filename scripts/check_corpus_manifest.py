@@ -1054,10 +1054,43 @@ def self_test() -> int:
         with open(MANIFEST_PATH, encoding="utf-8") as fh:
             declared_ids = [g["id"] for g in json.load(fh)["coverage_gaps"]]
         import subprocess
+        # THE CHILD'S ENCODING MUST BE FORCED, NOT ONLY THE PARENT'S DECODE.
+        # This is the canonical explanation for every `sys.executable` spawn in
+        # scripts/; the others point here.
+        #
+        # `encoding="utf-8"` tells the PARENT how to decode. It says nothing
+        # about how the CHILD encodes, and a Python child writing to a PIPE
+        # encodes with the locale codec -- cp1252 on Windows. This gate prints
+        # an em-dash, which is 0x97 in cp1252 and an invalid UTF-8 start byte.
+        #
+        # The failure that follows is the worst shape we have found this
+        # fortnight, because it reports SUCCESS:
+        #
+        #   the parent's decode raises UnicodeDecodeError inside subprocess's
+        #   internal reader THREAD -> the traceback goes to stderr and the
+        #   thread dies -> communicate() returns None for stdout -> run()
+        #   hands back CompletedProcess(returncode=0, stdout=None, stderr='')
+        #
+        # rc is 0. stderr is empty. stdout is None. Every later line then
+        # crashes with `TypeError: argument of type 'NoneType' is not
+        # iterable`, four stack frames from the cause. That is exactly how
+        # main's Windows CI job went red for four consecutive runs on
+        # 2026-08-05 while both seats reported green from their own machines
+        # (where PYTHONIOENCODING happened to be set).
+        #
+        # So: force the child to emit UTF-8, and then CHECK the capture
+        # happened rather than trusting a returncode that cannot see a dead
+        # reader thread.
+        child_env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
         proc = subprocess.run(
             [sys.executable, os.path.abspath(__file__)],
-            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT)
-        unsurfaced = [i for i in declared_ids if i not in proc.stdout]
+            capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT,
+            env=child_env)
+        check(proc.stdout is not None,
+              "the child's stdout was CAPTURED at all -- None here means the "
+              "reader thread died decoding it, and rc says nothing about that "
+              f"(rc={proc.returncode}, stderr={(proc.stderr or '')[:200]!r})")
+        unsurfaced = [i for i in declared_ids if i not in (proc.stdout or "")]
         check(proc.returncode == 0 and declared_ids and not unsurfaced,
               f"the real gate SURFACES every declared coverage gap "
               f"(rc={proc.returncode}, unsurfaced={unsurfaced})")
