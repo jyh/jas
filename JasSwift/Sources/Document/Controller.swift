@@ -846,7 +846,10 @@ public class Controller {
     /// state it wants is asking to be served someone else's answer.
     private var hitResolver: ElementResolver {
         setRecomputeCacheEpoch(owner: model.recomputeIdentity, generation: model.generation)
-        return IdIndexResolver(index: model.idIndex)
+        return IdIndexResolver(
+            index: model.idIndex,
+            identity: recomputeIdentity(owner: model.recomputeIdentity,
+                                        generation: model.generation))
     }
 
     public func selectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {

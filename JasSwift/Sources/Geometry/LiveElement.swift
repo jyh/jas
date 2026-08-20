@@ -49,6 +49,24 @@ public struct ConceptDef {
 
 public protocol ElementResolver {
     func resolve(_ id: ElementRef) -> Element?
+    /// Never-reused identity of the DOCUMENT STATE this resolver resolves
+    /// against, or 0 for "I am not naming one".
+    ///
+    /// THE RECOMPUTE CACHE IS OPT-IN PER RESOLVER, and this is the opt-in.
+    /// It used to be opt-in per THREAD -- a caller declared an epoch and every
+    /// later caller on that thread inherited it, including callers that had
+    /// never named a document state at all. That is the hole three previous
+    /// repairs each closed one caller of; see
+    /// ``setRecomputeCacheEpoch(owner:generation:)``.
+    ///
+    /// A resolver IS a document context: it is the thing that answers "what is
+    /// behind this id". Asking it, rather than the thread, is what makes the
+    /// question answerable at the point the cache is read.
+    ///
+    /// Defaulted to 0 so every existing conformer keeps compiling and FAILS
+    /// CLOSED -- an unidentified resolver is never served a cached answer and
+    /// never writes one. Correct, and slower, is the right default here.
+    var evaluationIdentity: UInt64 { get }
     /// Resolve a concept pack by id from the workspace registry (CONCEPTS.md).
     /// Defaulted to nil so resolver-unaware paths (and tests with no concept
     /// registry) treat a `Generated` element as empty, never a trap.
@@ -57,6 +75,8 @@ public protocol ElementResolver {
 
 public extension ElementResolver {
     func resolveConcept(_ conceptId: String) -> ConceptDef? { nil }
+    /// See ``ElementResolver/evaluationIdentity``. Fail-closed default.
+    var evaluationIdentity: UInt64 { 0 }
 }
 
 /// A resolver that resolves nothing. Used on the resolver-unaware call paths
@@ -867,13 +887,39 @@ enum RecomputeCacheState: Equatable { case pure, hasRefs }
 /// nested reference, so its geometry is NOT cacheable; it only short-circuits
 /// the purity walk on a repeat lookup — it never serves geometry.
 private enum RecomputeCacheEntry {
-    case pure(BoolPolygonSet)
+    /// Geometry, and the `evaluationIdentity` of the resolver that produced it.
+    /// The identity is re-checked on every hit: an entry computed for one
+    /// document state is never served to another, however the thread's epoch
+    /// happens to stand.
+    case pure(BoolPolygonSet, identity: UInt64)
     case hasRefs
 }
 
 private struct RecomputeKey: Hashable {
     let id: String
     let precisionBits: UInt64
+}
+
+/// One-line shape summary of a ring set, for the recompute-cache divergence
+/// message. Rings and point counts distinguish "different geometry" from
+/// "same geometry, different numbers"; the bounding box distinguishes "the same
+/// shape somewhere else" from "a different shape". Deliberately not a full dump
+/// -- a diverging entry can hold thousands of points, and an assertion message
+/// nobody reads to the end is the tally mark this replaces.
+func recomputeDigest(_ ps: BoolPolygonSet) -> String {
+    if ps.isEmpty { return "empty (0 rings)" }
+    var minX = Double.infinity, minY = Double.infinity
+    var maxX = -Double.infinity, maxY = -Double.infinity
+    for ring in ps {
+        for (x, y) in ring {
+            minX = Swift.min(minX, x); minY = Swift.min(minY, y)
+            maxX = Swift.max(maxX, x); maxY = Swift.max(maxY, y)
+        }
+    }
+    let counts = ps.map { String($0.count) }.joined(separator: "+")
+    if minX > maxX { return "\(ps.count) ring(s) [\(counts)] with no points" }
+    return "\(ps.count) ring(s) [\(counts)] "
+        + "bbox(\(minX), \(minY))-(\(maxX), \(maxY))"
 }
 
 // THREAD-LOCAL storage, mirroring Rust's `thread_local! RECOMPUTE_CACHE`. The
@@ -944,6 +990,16 @@ func nextAdHocEpochOwner() -> UInt64 {
     defer { adHocLock.unlock() }
     adHocCounter &+= 1
     return adHocCounter
+}
+
+/// Combine a never-reused owner and a per-edit generation into the single
+/// `evaluationIdentity` a resolver carries. Distinct owners never collide
+/// because the owner occupies the high half; distinct generations within one
+/// owner never collide because the generation occupies the low half.
+public func recomputeIdentity(owner: UInt64, generation: UInt64) -> UInt64 {
+    // 0 is reserved for "names no document state", so never return it.
+    let combined = (owner &* 0x1_0000_0000) &+ (generation & 0xFFFF_FFFF)
+    return combined == 0 ? 1 : combined
 }
 
 func setRecomputeCacheEpoch(owner: UInt64, generation: UInt64) {
@@ -1024,23 +1080,76 @@ func cachedTargetGeometry(
     // The earlier repair added `owner` to the epoch and did not fix this,
     // because it only helps callers that CALL it. The lesson is the one this
     // file already learned once: "some other caller runs before me" is not an
-    // invariant, it is a habit. Caching is now OPT-IN -- a caller that wants it
-    // declares an epoch, and one that does not gets a correct fresh answer.
-    guard box.owner != nil else {
+    // invariant, it is a habit.
+    //
+    // 2026-08-20, THE FOURTH SIGHTING, and the reason the opt-in moved: making
+    // caching opt-in PER THREAD was still a habit, because an epoch declared by
+    // one caller stays live for every later caller on that thread. Serialized,
+    // the suite trapped on the same test every run -- a reader reaching
+    // `controlPointPositions` through a hand-built resolver, inheriting a
+    // Controller's epoch and being served that Controller's `m1`.
+    //
+    // The opt-in is now PER RESOLVER (``ElementResolver/evaluationIdentity``).
+    // A resolver is the thing that answers "what is behind this id", so it is
+    // the document context; a caller holding one that names no state gets a
+    // fresh answer no matter what the thread's epoch says. The epoch survives
+    // as the CLEARING trigger -- it drops the box on an edit -- but it is no
+    // longer what authorises a hit.
+    guard resolver.evaluationIdentity != 0, box.owner != nil else {
         return elementToPolygonSetWith(
             target, precision: precision, resolver: resolver, visiting: &visiting)
     }
 
     let key = RecomputeKey(id: targetId, precisionBits: precision.bitPattern)
     switch box.entries[key] {
-    case .pure(let geom):
-        assert({
+    case .pure(let geom, let identity) where identity == resolver.evaluationIdentity:
+        // WHY `#if DEBUG` RATHER THAN THE BARE `assert` AUTOCLOSURE THIS USED
+        // TO BE: `assert(_:_:)` autocloses its MESSAGE as well as its
+        // condition, so a message that names the two geometries would have had
+        // to evaluate `fresh` a second time to describe it. Computing it once
+        // here costs the same in debug and still nothing in release -- SwiftPM
+        // defines DEBUG only for the debug configuration, which is what the
+        // whole test suite runs under.
+        //
+        // The message is the point. This assertion fired on three recorded
+        // occasions naming NOTHING -- not the id, not the epoch, not the two
+        // answers -- so every sighting was a tally mark rather than evidence,
+        // and the defect stayed "a flake" for two weeks.
+        #if DEBUG
+        do {
             var freshVisit = VisitSet()
             let fresh = elementToPolygonSetWith(
                 target, precision: precision, resolver: resolver, visiting: &freshVisit)
-            return boolPolygonSetsEqual(geom, fresh)
-        }(), "reference geometry recompute cache diverged from fresh eval")
+            assert(
+                boolPolygonSetsEqual(geom, fresh),
+                """
+                reference geometry recompute cache diverged from fresh eval
+                  targetId   = \(targetId)
+                  precision  = \(precision)
+                  epoch      = (owner: \(box.owner.map(String.init) ?? "nil"), \
+                generation: \(box.generation))
+                  entries    = \(box.entries.count) in this thread's box
+                  cached     = \(recomputeDigest(geom))
+                  fresh      = \(recomputeDigest(fresh))
+                  resolver   = evaluationIdentity \(resolver.evaluationIdentity)
+                The entry matched this resolver's evaluationIdentity, so both
+                answers claim the same document state and one of them is wrong.
+                That is a real divergence, NOT the cross-caller inheritance this
+                cache used to suffer -- see ElementResolver.evaluationIdentity.
+                """
+            )
+        }
+        #endif
         return geom
+    case .pure:
+        // An entry for this (id, precision) exists but was computed for a
+        // DIFFERENT document state. This is the case the thread epoch could not
+        // see, because it is not a property of the thread. Evaluate fresh and
+        // leave the incumbent alone: two live document states sharing an id is
+        // ordinary, and evicting on every alternation would make the cache
+        // worse than none.
+        return elementToPolygonSetWith(
+            target, precision: precision, resolver: resolver, visiting: &visiting)
     case .hasRefs:
         // Target contains a nested reference: never serve cached geometry.
         return elementToPolygonSetWith(
@@ -1049,7 +1158,9 @@ func cachedTargetGeometry(
         // Cache miss: evaluate fresh, then record by purity.
         let fresh = elementToPolygonSetWith(
             target, precision: precision, resolver: resolver, visiting: &visiting)
-        box.entries[key] = subtreeHasReference(target) ? .hasRefs : .pure(fresh)
+        box.entries[key] = subtreeHasReference(target)
+            ? .hasRefs
+            : .pure(fresh, identity: resolver.evaluationIdentity)
         return fresh
     }
 }
