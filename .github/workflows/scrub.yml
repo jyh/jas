@@ -1,0 +1,60 @@
+name: Scrub
+
+# EVERY PUSHED BRANCH, DELIBERATELY UNFILTERED.
+#
+# This workflow exists because the gate it runs was correct and still did not
+# stop what it was built to stop. `scripts/check_commit_trailers.py` forbids
+# chat-service session URLs in commit messages and file contents; its self-test
+# proves it fails on an empty scan and catches both forbidden shapes; run over
+# the two commits that carried them, it reports both.
+#
+# It lived in `test.yml`, whose trigger is `branches: [main]`. A branch pushed
+# to origin without a pull request targeting main therefore never ran it, and
+# two such branches reached the public remote carrying session URLs. The gate
+# was never wrong. Its TRIGGER was -- and no test the gate has could see that,
+# because a gate cannot observe whether anything invoked it.
+#
+# So this workflow is separate from `test.yml` rather than being achieved by
+# widening that file's trigger: the Tests workflow carries ~16 jobs including a
+# multi-minute Windows lane, and running all of it on every scratch-branch push
+# would buy this guarantee at a price nobody would keep paying. A leak guard
+# must be cheap enough that no future reader is tempted to narrow it again.
+#
+# `scripts/check_scrub_trigger.py` asserts that property mechanically, so the
+# trigger cannot silently narrow a second time.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Supersede an in-flight run for the same ref; a leak check is only ever
+# interesting for the tip.
+concurrency:
+  group: scrub-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  commit-trailers:
+    name: commit messages carry no session trailer
+    runs-on: ubuntu-latest
+    steps:
+      # `fetch-depth: 0` is load-bearing. A shallow checkout would let the gate
+      # scan one commit and report success; the gate refuses to run on one
+      # rather than trusting this file to stay right, and check_scrub_trigger.py
+      # asserts the pairing so neither half can drift from the other.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install PyYAML
+      # Both gates prove themselves before either is believed.
+      - run: python scripts/check_commit_trailers.py --self-test
+      - run: python scripts/check_scrub_trigger.py --self-test
+      - run: python scripts/check_commit_trailers.py
+      - run: python scripts/check_scrub_trigger.py

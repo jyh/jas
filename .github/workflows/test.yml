@@ -7,23 +7,23 @@ on:
     branches: [main]
 
 jobs:
-  # SCRUBGUARD: the 2026-07-22 history rewrite has no other guard. Its own job
-  # because it is the ONLY one needing full history -- `fetch-depth: 0` costs a
-  # slower checkout and buying it for every lane would be waste. A shallow
-  # checkout here would let the gate scan one commit and report success, so the
-  # gate refuses to run on one rather than trusting this file to stay right.
-  commit-trailers:
-    name: commit messages carry no session trailer
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: python scripts/check_commit_trailers.py --self-test
-      - run: python scripts/check_commit_trailers.py
+  # SCRUBGUARD MOVED, 2026-08-20, and the move is the repair.
+  #
+  # The trailer gate used to be a job here. This workflow triggers on
+  # `branches: [main]`, so a branch pushed to origin without a pull request
+  # targeting main never ran it -- and two such branches reached the public
+  # remote carrying session URLs. The gate was sound the whole time; nothing
+  # invoked it where it was needed.
+  #
+  # It now lives in `scrub.yml`, whose `on: push` carries no branch filter.
+  # Widening THIS file's trigger instead would have run ~16 jobs including the
+  # Windows lane on every scratch-branch push -- a price that invites the next
+  # reader to narrow it again. `scripts/check_scrub_trigger.py` asserts the
+  # reachability property mechanically so it cannot narrow silently.
+  #
+  # The Windows lane still runs the trailer gate (see the `windows` job): every
+  # commit that ever carried the forbidden trailer was authored on that
+  # platform, and check_lane_coverage.py requires both platform families.
 
   workspace-json-fresh:
     name: workspace.json up-to-date
@@ -302,6 +302,8 @@ jobs:
         run: |
           python scripts/check_commit_trailers.py --self-test
           python scripts/check_commit_trailers.py
+          python scripts/check_scrub_trigger.py --self-test
+          python scripts/check_scrub_trigger.py
 
       - name: Untracked files are invisible to index-reading gates
         run: |
