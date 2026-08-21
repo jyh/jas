@@ -8087,6 +8087,89 @@ mod preservation_law_tests {
                    "a unanimous capability marker carries (T6)");
     }
 
+    /// THE MULTI-MEMBER RELATION, twin of JasSwift's
+    /// `groupingTheBackOperandsDoesNotChangeTheBooleanResult`.
+    ///
+    /// The cross-language container relation seeds with `wrap_at`, which wraps
+    /// exactly ONE leaf, because the property it serves -- an operation on a
+    /// group equals the same operation on its member -- is only true for one.
+    /// No single-member document can express a two-member electorate
+    /// disagreeing, so that whole class sits outside what the relation can say.
+    /// JasSwift carried four divergences in that blind spot; this port did not,
+    /// and this test is what keeps it that way.
+    ///
+    /// The generalisation: GROUPING A CONTIGUOUS RUN OF OPERANDS DOES NOT
+    /// CHANGE THE RESULT, which follows from the container ruling (a selected
+    /// group is shorthand for its members).
+    ///
+    /// SCOPED TO THE BACK RUN, deliberately. Paint, opacity and blend mode all
+    /// resolve through the FRONTMOST operand's first paintable leaf, so wrapping
+    /// the frontmost operand legitimately changes the answer and the relation is
+    /// false there. Wrapping the back run leaves it exact.
+    #[test]
+    fn grouping_the_back_operands_does_not_change_the_boolean_result() {
+        fn plain(x: f64, name: Option<&str>, id: Option<&str>, locked: bool) -> Element {
+            Element::Rect(RectElem {
+                x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::BLACK)),
+                stroke: None,
+                common: CommonProps {
+                    locked,
+                    name: name.map(|s| s.to_string()),
+                    id: id.map(|s| s.to_string()),
+                    ..Default::default()
+                },
+                fill_gradient: None,
+                stroke_gradient: None,
+            })
+        }
+        fn build(grouped: bool) -> Model {
+            // Two back operands that DISAGREE, so a lost vote is visible.
+            let a = plain(0.0, Some("aye"), Some("id-a"), true);
+            let b = plain(2.0, Some("bee"), None, false);
+            let c = plain(4.0, None, None, true);
+            let children: Vec<Rc<Element>> = if grouped {
+                vec![
+                    Rc::new(Element::Group(GroupElem {
+                        children: vec![Rc::new(a), Rc::new(b)],
+                        common: CommonProps::default(),
+                        isolated_blending: false,
+                        knockout_group: false,
+                    })),
+                    Rc::new(c),
+                ]
+            } else {
+                vec![Rc::new(a), Rc::new(b), Rc::new(c)]
+            };
+            let selection = (0..children.len())
+                .map(|i| ElementSelection::all(vec![0, i]))
+                .collect();
+            let layer = Element::Layer(LayerElem {
+                children,
+                isolated_blending: false,
+                knockout_group: false,
+                common: CommonProps { name: Some("L0".into()), ..Default::default() },
+            });
+            Model::new(Document {
+                layers: vec![layer], selected_layer: 0, selection,
+                ..Document::default()
+            }, None)
+        }
+        for op in ["union", "intersection", "exclude"] {
+            let (mut g, mut u) = (build(true), build(false));
+            Controller::apply_destructive_boolean(&mut g, op, &BooleanOptions::default());
+            Controller::apply_destructive_boolean(&mut u, op, &BooleanOptions::default());
+            let (go, uo) = (only_child(&g), only_child(&u));
+            let (gc, uc) = (go.common(), uo.common());
+            assert_eq!(gc.name, uc.name, "{op}: grouping the back run moved `name`");
+            assert_eq!(gc.locked, uc.locked, "{op}: grouping moved `locked`");
+            assert_eq!(gc.visibility, uc.visibility, "{op}: grouping moved `visibility`");
+            assert_eq!(gc.mode, uc.mode, "{op}: grouping moved `mode`");
+            assert_eq!(gc.id.is_none(), uc.id.is_none(),
+                       "{op}: grouping moved whether an identity was at stake");
+        }
+    }
+
     /// §3.3: sources DISAGREE on `visibility`, so the fresh element's
     /// documented default stands. Nothing geometric elects a winner.
     #[test]

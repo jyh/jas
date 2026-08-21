@@ -59,6 +59,41 @@ struct BooleanCommon {
     }
 
     init() {}
+
+    /// The `BooleanCommon` a 1 -> 1 SURVIVOR wears. Twin of Rust's
+    /// `source_common`, and the reason it is a separate initializer from
+    /// `init(preserving:operand:)`: a survivor that is a CONTAINER holds N
+    /// members, and one of them is not entitled to speak for the rest.
+    ///
+    /// This port used to pass `booleanPaintSource(survivor)` here -- the first
+    /// paintable leaf -- so subtract-front over a two-member group carried the
+    /// FIRST member's name and id onto the product while Rust, merging over all
+    /// leaves, killed both. With a one-member wrapper the two agree exactly,
+    /// which is why the corpus never saw it.
+    ///
+    /// `mode` stays the CONTAINER's own: blend mode is still OPEN
+    /// (BOOLEAN.md), and until it is ruled the product keeps what the container
+    /// wore. `opacity` composes down the container chain (RULED 2026-07-31).
+    init(survivor: Element) {
+        let leaves = booleanOperandLeaves(survivor)
+        switch leaves.count {
+        case 0:
+            // An empty container reaches no leaf and has no member to speak
+            // for it, so it speaks for itself.
+            self.init(preserving: survivor, operand: survivor)
+        case 1:
+            self.init(preserving: leaves[0], operand: survivor)
+        default:
+            self = booleanMergedCommon(leaves, front: leaves[0],
+                                       frontOperand: survivor)
+            // A merge of several members elects no identity. `booleanMergedCommon`
+            // already declines to carry a disputed name; the id is never carried
+            // by a merge at all -- the caller mints when one is at stake.
+            self.id = nil
+        }
+        self.opacity = booleanComposedOpacity(survivor)
+        self.blendMode = survivor.blendMode
+    }
 }
 
 /// `toolOrigin` reader over an `Element`. Path is the only Swift kind that
@@ -140,6 +175,32 @@ func booleanPaintSource(_ e: Element) -> Element {
     var first: Element?
     e.forEachPaintable { leaf in if first == nil { first = leaf } }
     return first ?? e
+}
+
+/// EVERY member an operand speaks for — the ELECTORATE, which is not the paint
+/// source. Twin of Rust's `operand_leaves`.
+///
+/// BOOLEAN.md:63 rules that "the operands' MEMBERS vote", plural. This port used
+/// to hand `booleanPaintSource` — the FIRST paintable leaf — to the unanimity
+/// merge, which is the correct answer to a DIFFERENT question: fill and stroke
+/// resolve to the frontmost operand's first paintable leaf, because a container
+/// has no paint of its own and the member's paint is the only available answer.
+///
+/// Collapsing the two disenfranchised every member after the first. Measured: a
+/// two-member group whose members disagreed on `locked` reported a UNANIMOUS
+/// `locked = true`, because the dissenting member never got a vote. The single
+/// -member wrapper the cross-language relation seeds with cannot express the
+/// case, so nothing went red for it.
+///
+/// A leaf is its own sole member, so nothing moves for a selection of leaves.
+func booleanOperandLeaves(_ e: Element) -> [Element] {
+    switch e {
+    case .group, .layer: break
+    default: return [e]      // a leaf is its own sole member
+    }
+    var out: [Element] = []
+    e.forEachPaintable { out.append($0) }
+    return out
 }
 
 /// THE OPACITY A BOOLEAN PRODUCT WEARS for one operand: the product of every
@@ -1791,7 +1852,12 @@ public class Controller {
             // members, so a group's own `name` is not a voter — it is not an
             // operand, its members are. Reading `elements` here is what put the
             // CONTAINER'S NAME on the product of a union.
-            var common = booleanMergedCommon(paintSources, front: front,
+            // THE ELECTORATE IS EVERY MEMBER (BOOLEAN.md:63), not one voter per
+            // operand. `paintSources` still settles fill and stroke above --
+            // that is the frontmost operand's first paintable leaf, and a
+            // different question from who votes on unanimity.
+            let voters = elements.flatMap(booleanOperandLeaves)
+            var common = booleanMergedCommon(voters, front: front,
                                              frontOperand: elements.last!)
             // Identity is minted only when an identity is actually AT STAKE —
             // i.e. when some operand carried one. Identity in this app is LAZY
@@ -1804,7 +1870,14 @@ public class Controller {
             // container operand is destroyed along with its members, so its own
             // id counts. What the product INHERITS is a different question —
             // that is the line above, and only what spoke may answer it.
-            if elements.contains(where: { $0.id != nil }) {
+            // Reads the operands AND their members: "at stake" asks what this
+            // edit DESTROYS, and a container is destroyed along with everything
+            // it holds, so an identified leaf inside an id-less group counts.
+            // This used to read `elements` alone while its comment claimed
+            // "Rust's arm is guarded identically" -- it was not, and an
+            // identified leaf died without minting a replacement.
+            if elements.contains(where: { $0.id != nil })
+                || voters.contains(where: { $0.id != nil }) {
                 var existing = doc.elementIds
                 guard let minted = mintUniqueIds(1, existing: &existing,
                                                  mint: { generateElementId() })
@@ -1831,7 +1904,7 @@ public class Controller {
                 // geometry and lost its paint before this.
                 let src = paintSources[i]
                 outputs.append((res, src.fill, src.stroke,
-                                BooleanCommon(preserving: src, operand: survivor),
+                                BooleanCommon(survivor: survivor),
                                 resolvedStrokeProfile(survivor)))
             }
         case "subtract_back":
@@ -1841,7 +1914,7 @@ public class Controller {
                 let src = paintSources[i]
                 outputs.append((booleanSubtract(sSet, cutter),
                                 src.fill, src.stroke,
-                                BooleanCommon(preserving: src, operand: survivor),
+                                BooleanCommon(survivor: survivor),
                                 resolvedStrokeProfile(survivor)))
             }
         case "divide":
@@ -1881,8 +1954,7 @@ public class Controller {
                 // copying it onto each piece would invent a shape the artist
                 // never drew.
                 outputs.append((region, src.fill, src.stroke,
-                                BooleanCommon(preserving: src,
-                                              operand: elements[paintIdx]),
+                                BooleanCommon(survivor: elements[paintIdx]),
                                 nil))
             }
         case "trim", "merge":
@@ -1900,8 +1972,7 @@ public class Controller {
                     // `nil` would have looked identical for the wrong reason.
                     let src = paintSources[i]
                     trimmed.append((region, src.fill, src.stroke,
-                                    BooleanCommon(preserving: src,
-                                                  operand: elements[i]),
+                                    BooleanCommon(survivor: elements[i]),
                                     resolvedStrokeProfile(elements[i])))
                 }
             }
