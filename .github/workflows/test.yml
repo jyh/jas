@@ -65,6 +65,11 @@ jobs:
       # there is stdlib-only). This job pip-installs PyYAML, and it is where the
       # yaml-importing sibling above already runs.
       - run: python scripts/check_step_cannot_hide.py --self-test && python scripts/check_step_cannot_hide.py
+      # A gate that ASSERTS must never be skipped into silence by a red
+      # dependency. `cross-language` -- the prime-directive gate -- was
+      # skipped on 5095060d because an unrelated cargo fault reddened the
+      # rust job, and a skipped job reads as 'not applicable'.
+      - run: python scripts/check_gate_cannot_skip.py --self-test && python scripts/check_gate_cannot_skip.py
       # TOTALITY over the checker tier: every family classified, every floor
       # declared in its fixture, every mutant carrying a named prior bug, and
       # spec/ importing nothing from this repository. A checker lane that
@@ -366,6 +371,11 @@ jobs:
         run: |
           python scripts/check_index_blindspot.py --self-test
           python scripts/check_index_blindspot.py
+
+      - name: A gate that asserts cannot be skipped into silence
+        run: |
+          python scripts/check_gate_cannot_skip.py --self-test
+          python scripts/check_gate_cannot_skip.py
 
       - name: Corpus coverage of the analytic law's clauses
         if: ${{ !cancelled() }}
@@ -701,7 +711,28 @@ jobs:
   # is anchored to pinned goldens, not mutual agreement.
   cross-language:
     name: Cross-language equivalence (active ports)
+    # `needs:` ORDERS this job; it must never SILENCE it. Without the `if:`,
+    # a red `rust` or `swift` job skips this one, and GitHub renders a skipped
+    # job as neutral -- "0s", which reads as *not applicable* rather than
+    # *not checked*.
+    #
+    # MEASURED, run 31114155047 on 5095060d: the macOS `rust` job died inside
+    # cargo's own bookkeeping (`could not parse/generate dep info ... Invalid
+    # argument (os error 22)`) before one test ran, and this gate -- the
+    # blocking check for the project's prime directive -- was skipped. An
+    # unrelated filesystem fault on a runner silenced port-parity for a commit.
+    #
+    # `!cancelled()` rather than `always()`: an operator who cancels a run means
+    # it. A dependency FAILING is not a reason to stop judging; a human pressing
+    # cancel is. The job builds its own binaries (see `Build all` below), so it
+    # does not need its dependencies to have succeeded in order to be correct --
+    # only to have finished, which is what `needs:` still buys.
+    #
+    # scripts/check_gate_cannot_skip.py asserts this property so it cannot be
+    # dropped silently, and distinguishes a job that JUDGES (must not skip) from
+    # one that ACTS (pages.yml's deploy, which must).
     needs: [rust, swift]
+    if: ${{ !cancelled() }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
