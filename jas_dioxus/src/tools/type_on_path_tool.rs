@@ -108,8 +108,8 @@ impl TypeOnPathTool {
     /// The twin is JasSwift `hitTestPathCurve(in:x:y:)`. The two deliberately
     /// differ in SEARCH DEPTH — this port stops at layer children, Swift
     /// descends one level into Groups — which is an UNRULED divergence
-    /// recorded in `seat/fleet/SCOPE-lock-immutable.md` §4 D-A and §8 Q3,
-    /// awaiting a ruling. Lock and depth are separate questions; only lock is
+    /// awaiting a ruling: no corpus reaches the Type-on-Path tool in either
+    /// port, so nothing gates which depth is canonical. Lock and depth are separate questions; only lock is
     /// settled.
     fn hit_test_path_curve(model: &Model, x: f64, y: f64) -> Option<(Vec<usize>, Element)> {
         let doc = model.document();
@@ -1210,8 +1210,8 @@ mod tests {
     // SEARCH DEPTH — A PROBE OF UNRULED BEHAVIOUR
     //
     // This pins what this port does TODAY. It is NOT a ruling, and nothing
-    // here should be read as one. `seat/fleet/SCOPE-lock-immutable.md` §8 Q3
-    // asks which depth is canonical and the question is open. Its job is to
+    // here should be read as one. Which depth is canonical is an open
+    // question and no corpus reaches this tool in either port. Its job is to
     // make a ruling VISIBLE: whichever way it lands, this test turns red and
     // says the behaviour changed out loud, instead of drifting silently.
     //

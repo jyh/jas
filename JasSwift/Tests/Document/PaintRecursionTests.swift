@@ -307,7 +307,9 @@ struct BooleanContainerPaintTests {
 }
 
 /// A DESTRUCTIVE BOOLEAN OVER A CONTAINER TAKES **COMPOSED** OPACITY.
-/// RULED 2026-07-31 (`seat/fleet/RULING-boolean-container-paint-2026-07-31.md`).
+/// RULED 2026-07-31; the ruling is spec at `transcripts/BOOLEAN.md` §Container
+/// operands ("Opacity COMPOSES: result.opacity = container.opacity ×
+/// frontmost-leaf.opacity").
 ///
 /// The suite above settled `fill` and `stroke`: a container has NO paint of its
 /// own, so resolving to its first paintable leaf was the ONLY available answer.

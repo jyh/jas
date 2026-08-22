@@ -1088,7 +1088,7 @@ private func clickAndCapture(_ tool: TypeOnPathTool, _ ctx: ToolContext,
 
 @Test func typeOnPathLeavesAPathInsideALockedGroupByteIdentical() {
     // This port searches one level deeper than Rust (the UNRULED depth
-    // divergence, seat/fleet/SCOPE-lock-immutable.md §8 Q3). While it does,
+    // divergence, unruled and ungated — no corpus reaches this tool). While it does,
     // the guard has to cover that depth too.
     let model = Model()
     model.setDocumentForTest(Document(layers: [
@@ -1156,7 +1156,7 @@ private func clickAndCapture(_ tool: TypeOnPathTool, _ ctx: ToolContext,
 // MARK: - Type-on-path SEARCH DEPTH — PROBES OF UNRULED BEHAVIOUR
 //
 // These two pin what this port does TODAY. They are NOT a ruling, and nothing
-// here should be read as one. seat/fleet/SCOPE-lock-immutable.md §8 Q3 asks
+// here should be read as one. Which depth is canonical is open, and it asks
 // which depth is canonical, and the question is open. Their job is to make a
 // ruling VISIBLE: whichever way it lands, one of them turns red and says the
 // behaviour changed out loud, instead of a silent drift.

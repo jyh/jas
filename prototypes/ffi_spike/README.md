@@ -3,8 +3,8 @@
 **Flask (jas/windows), 2026-07-29.** A throwaway-shaped but repo-resident spike that
 prices the `extern "C"` seam between the Rust core and a native C# shell.
 
-Design: `seat/fleet/DESIGN-ffi-surface.md`. Architecture: Stubb's thirteenth letter
-(boundary laws BL1–BL6). Authorised by JYH as item 3 of the ratified order, with the
+Design and the boundary laws BL1–BL6: `jas_dioxus/src/ffi.rs`, which states each
+law at the item it governs. Authorised by JYH as item 3 of the ratified order, with the
 extern surface **authored during the spike** rather than pre-specified.
 
 ## What it answers

@@ -2,8 +2,8 @@
 //
 // A console harness, deliberately NOT WinUI: gate (i) is "builds headless from
 // the CLI on kenai, cargo + dotnet, no Visual Studio", and a GUI would make that
-// unanswerable. See seat/fleet/DESIGN-ffi-surface.md for the surface and the
-// boundary laws BL1-BL6 this file obeys.
+// unanswerable. The surface and the boundary laws BL1-BL6 this file obeys are
+// documented in jas_dioxus/src/ffi.rs.
 //
 // BL5 is why there is not one `string` in any DllImport signature below. The
 // default P/Invoke CharSet is Ansi -- the active code page, cp1252 on this box --

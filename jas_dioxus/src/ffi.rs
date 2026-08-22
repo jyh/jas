@@ -1,7 +1,8 @@
 //! The `extern "C"` boundary between the Rust core and a native shell.
 //!
-//! S-A (2026-07-29). Design: `seat/fleet/DESIGN-ffi-surface.md`; boundary laws
-//! BL1-BL6 from Stubb's thirteenth letter, cited per item below.
+//! S-A (2026-07-29). The boundary laws BL1-BL6 this surface obeys are stated
+//! in this file: BL2/BL3/BL4 in the safety contract below, BL5 in the paragraph
+//! above, BL1 and BL6 at the functions that turn on them.
 //!
 //! Behind `feature = "ffi"`, so the default web build and the wasm target never
 //! see it. Every type here is repr(C) and every string that crosses is a UTF-8
