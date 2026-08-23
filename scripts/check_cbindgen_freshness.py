@@ -113,7 +113,7 @@ class Unavailable(Exception):
     """The oracle cannot be reached. FAIL; never skip."""
 
 
-def _run(argv: list[str], cwd: pathlib.Path) -> subprocess.CompletedProcess:
+def _run(argv: list, cwd: pathlib.Path) -> subprocess.CompletedProcess:
     # encoding= is NOT decoration here, and check_encoding_hygiene.py caught its
     # absence in this very file. `text=True` alone decodes with the LOCALE codec
     # -- cp1252 on the Windows runner -- while cbindgen emits UTF-8, including
@@ -125,14 +125,22 @@ def _run(argv: list[str], cwd: pathlib.Path) -> subprocess.CompletedProcess:
     )
 
 
-def cbindgen_path() -> str:
-    """Locate cbindgen, including the cargo bin dir that may not be on PATH."""
+def cbindgen_path() -> str | pathlib.Path:
+    """Locate cbindgen, including the cargo bin dir that may not be on PATH.
+
+    Returns the Path UNCONVERTED. `subprocess` accepts PathLike and renders it
+    with the platform's own rules, so there is no reason to flatten it to text
+    first -- and check_path_keying.py caught exactly that here: `str(Path)`
+    yields backslashes on Windows, which is the defect class this repo's Windows
+    lane exists to find. It was harmless at this site (argv, not a comparison
+    key) and it is still not worth an exemption when not converting is simpler.
+    """
     found = shutil.which("cbindgen")
     if found:
         return found
     cargo_bin = pathlib.Path.home() / ".cargo" / "bin" / "cbindgen"
     if cargo_bin.exists():
-        return str(cargo_bin)
+        return cargo_bin
     raise Unavailable(
         "cbindgen is not installed. This gate FAILS rather than skipping: a "
         "freshness check that passes when its generator is missing reports "
@@ -141,7 +149,7 @@ def cbindgen_path() -> str:
     )
 
 
-def check_version(exe: str) -> str:
+def check_version(exe: str | pathlib.Path) -> str:
     proc = _run([exe, "--version"], ROOT)
     if proc.returncode != 0:
         raise Unavailable(f"`cbindgen --version` exited {proc.returncode}")
@@ -156,9 +164,9 @@ def check_version(exe: str) -> str:
     return version
 
 
-def generate(exe: str) -> tuple[str, str]:
+def generate(exe: str | pathlib.Path) -> tuple[str, str]:
     """Return (generated header text, cbindgen stderr)."""
-    proc = _run([exe, "--config", str(CONFIG), "--lang", "c"], CRATE)
+    proc = _run([exe, "--config", CONFIG, "--lang", "c"], CRATE)
     if proc.returncode != 0:
         raise Unavailable(
             f"cbindgen exited {proc.returncode}: {proc.stderr.strip()[:400]}"

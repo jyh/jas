@@ -458,6 +458,7 @@ jobs:
       # no prebuilt artifact matches this platform.
       - uses: cargo-bins/cargo-binstall@main
       - name: Install cbindgen 0.29.4
+        id: cbindgen
         run: |
           if cbindgen --version 2>/dev/null | grep -q '^cbindgen 0\.29\.4$'; then
             echo "cbindgen 0.29.4 already present"
@@ -473,8 +474,17 @@ jobs:
       # lands on a C consumer OUTSIDE the repo — so it needs a referee, not a
       # test. Runs in both platform families; check_lane_coverage.py enforces
       # the pair.
+      # COUPLED TO ITS PREMISE, not merely isolated -- and the first version of
+      # this step got that wrong in a way CI caught. `!cancelled()` alone freed
+      # it from every earlier step INCLUDING its own tool install, so when an
+      # unrelated `Structural gates` failure skipped the fail-fast install, this
+      # step ran anyway and failed closed on a missing cbindgen: a second red
+      # whose real cause was three steps above it. That is precisely the case
+      # `Corpus freshness` already handles by coupling to `steps.lf`, written on
+      # this same lane and not carried across. Isolation is from UNRELATED
+      # steps; a step's own premise is not one of them.
       - name: FFI header matches the Rust it describes
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.cbindgen.conclusion == 'success' }}
         run: |
           python scripts/check_cbindgen_freshness.py --self-test
           python scripts/check_cbindgen_freshness.py
