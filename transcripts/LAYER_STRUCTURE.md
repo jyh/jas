@@ -861,7 +861,7 @@ locked layer" could not be answered honestly until that was known, because the
 premise — that lock protects anything — was false.
 
 **RULED: lock must protect its contents.** An artist locks a layer in order to
-work around it. Scoping is under way (`seat/fleet/SCOPE-effective-locked.md`);
+work around it. Scoping is under way;
 it is a change well beyond paste, touching selection, hit-testing and every
 operation that walks children, and the SVG codec may not persist `locked` at all
 — which would make persistence a prerequisite rather than a detail.
@@ -1107,8 +1107,7 @@ The full set was run, not the subset expected to matter: `check_menu_structure`,
 > JYH: *"yes, let's choose inheritance: a locked layer locks everything inside,
 > and those elements cannot be unlocked."*
 
-This settles the fork the scope uncovered. Full costing:
-`seat/fleet/SCOPE-effective-locked.md`.
+This settles the fork the scope uncovered. What that scope found follows.
 
 ### What the scope found, and why this was a fork at all
 **The shipped spec already contained a lock-propagation design, and it was the
@@ -1669,7 +1668,7 @@ Selection-level enforcement (§13, Stone 4) was deliberately scoped narrow becau
 Q3 was unruled. It is ruled now: **locked means immutable.** An operation must
 not mutate a locked element even if it somehow reaches one.
 
-The measured surface, from `seat/fleet/SCOPE-effective-locked.md` — every one of
+The measured surface — every one of
 these ignores lock TODAY even for a **directly** locked element:
 delete · move / drag / nudge · group / ungroup · boolean ops ·
 fill / stroke / brush apply · anchor drag (Rust's direct-Path arm) ·
@@ -1958,13 +1957,13 @@ selected simultaneously at all?
 **RULED: no.** The marquee ASKS about a group's members — a band touching any
 unlocked member selects the group — but ANSWERS with the group alone, exactly as
 Select All does (§16.3). Banked to the Mac seat overnight by JYH, **reversible in
-council**; the reasoning and the evidence that would overturn it are in
-`seat/fleet/BANKED-overnight-2026-07-29.md`, the measurement in **§22**.
+council**; the reasoning and the evidence that would overturn it were banked alongside it,
+and the measurement is in **§22**.
 
 It was ruled on evidence, not taste: `copy_selection` reads the old shape as a
 copy of the group PLUS a copy of each member INTO the source group, so
 marquee-then-duplicate left the SOURCE group holding four children instead of
-two. An adversarial review (`seat/fleet/REVIEW-marquee-ruling.md`) found a
+two. An adversarial review found a
 second, sharper consequence — **under the old shape, DESELECT could SELECT**:
 Select All then shift-marquee over a group XORed the group entry OUT and its two
 members IN.
@@ -1978,7 +1977,7 @@ Other producers still violate it — see §22.4.
 
 > JYH: *"defer layer 4. I believe we need to add LockedTarget."*
 
-Full costing: `seat/fleet/SCOPE-lock-immutable.md`.
+Full costing follows in §17.1.
 
 ### 17.1 The ruling was priced as one thing; it is four
 Scoping separated what §15 actually requires, and only the last is expensive:
@@ -2580,8 +2579,8 @@ for §20, not a sibling of it.
   > prefix of another, so none is such a pair.
   >
   > Both earlier counts are stale and neither should be quoted: this passage's
-  > **13 in 4**, and the **15 in 5** that `seat/fleet/REVIEW-marquee-ruling.md`
-  > RIDER 3 measured at `630633e0` while asking for this amendment. Each was
+  > **13 in 4**, and the **15 in 5** that an adversarial review's RIDER 3
+  > measured at `630633e0` while asking for this amendment. Each was
   > true at its own commit. **The obstacle this bullet reports as measured no
   > longer exists**, so "STILL OPEN" reads as a live blocker and is not one.
 

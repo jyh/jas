@@ -3929,8 +3929,8 @@ class CanvasNSView: NSView {
 /// The twin is jas_dioxus `TypeOnPathTool::hit_test_path_curve`. The two
 /// deliberately differ in SEARCH DEPTH — Rust stops at layer children, this
 /// port descends one level into Groups — which is an UNRULED divergence
-/// recorded in `seat/fleet/SCOPE-lock-immutable.md` §4 D-A and §8 Q3, awaiting
-/// a ruling. The lock guards below are written to cover whatever depth this
+/// awaiting a ruling: no corpus reaches the Type-on-Path tool in either port,
+/// so nothing gates which depth is canonical. The lock guards below are written to cover whatever depth this
 /// port searches, so a ruling either way moves the loops, not the rule.
 func hitTestPathCurve(in document: Document, x: Double, y: Double) -> (ElementPath, Element)? {
     let threshold = hitRadius + 2
