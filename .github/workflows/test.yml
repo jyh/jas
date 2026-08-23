@@ -466,6 +466,26 @@ jobs:
           # arm alone, half-watched by construction.
           python scripts/check_geometry_checkers.py --reconcile checker-report.json
           python scripts/cross_language_commutativity.py --lang rust
+          # RE-BUILD, because the line above just invalidated the first one.
+          # cross_language_commutativity.py invokes `cargo run --bin svg_roundtrip
+          # --no-default-features` -- a DIFFERENT feature set, so cargo rebuilds
+          # the graph without `web`, and the default-features build this step
+          # pre-made at the top is no longer current. The next call then pays a
+          # full rebuild inside its own 30s timeout and dies there.
+          #
+          # MEASURED on this branch's first attempt: the top-of-step pre-build
+          # reported `Finished in 0.37s` (nothing to do), commutativity passed its
+          # 16 checks, and `cargo run --bin workspace_roundtrip` STILL timed out at
+          # 30s. So compilation was not removed from the window -- it was moved
+          # back into it by the feature switch in between.
+          #
+          # Deterministic rather than a larger timeout: a bigger number would be a
+          # guess at a cold Windows rebuild (flask measured ~90s for a full cold
+          # build here), and it would let a silent recompile keep hiding inside a
+          # step that is supposed to be measuring agreement. Note both drivers pass
+          # `-q`, so a rebuild emits no `Compiling` lines at all -- absence of them
+          # in a log is not evidence that none happened.
+          cargo build --bins --manifest-path jas_dioxus/Cargo.toml
           python scripts/cross_language_workspace.py --lang rust
 
   rust:
