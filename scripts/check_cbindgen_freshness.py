@@ -57,7 +57,12 @@ WHAT IT DOES NOT COVER
 * It does not check that the header is CORRECT, only that it is CURRENT. If
   cbindgen mis-translates a signature, this gate is satisfied by the
   mis-translation.
-* **cbindgen emits ~170 warnings on this config and they are not all alike.**
+* **cbindgen emits 174 RAW warning lines / 153 DISTINCT on this config, and they are
+  not all alike.** (Both units, because this gate deduplicates and a reader counting
+  raw lines gets a different and equally correct number -- see the note beside the
+  classifier. This line first read "~170", which pinned neither the figure nor its
+  unit, in a file whose whole argument is that a count without its unit is half a
+  claim.)
   The overwhelming majority are `Skip <name> - (not pub)`, which is cbindgen
   narrating every private constant it correctly ignored -- pure noise. This gate
   COUNTS those and prints the count. The handful that are not skips it prints in
