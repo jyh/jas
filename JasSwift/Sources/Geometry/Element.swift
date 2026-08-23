@@ -748,11 +748,31 @@ public enum PathCommand: Equatable {
 /// Bounding box as (x, y, width, height).
 public typealias BBox = (x: Double, y: Double, width: Double, height: Double)
 
-/// Expand bounding box (x, y, w, h) by half-stroke-width on each side.
+/// Expand bounding box (x, y, w, h) by the ink the stroke actually puts
+/// OUTSIDE the path, which depends on `stroke.align`.
+///
+/// RULED 2026-08-21: Center inflates by w/2 on each side, Inside not at all,
+/// Outside by the full w. Twin: Rust's `inflate_bounds`.
+///
+/// This used to inflate by w/2 unconditionally — exactly right for Center and
+/// wrong for the other two by w/2 per side, an error that SCALES with the
+/// stroke (20pt on a 40pt stroke). Both ports were wrong in the same way, so
+/// the cross-language equivalence law was blind to it by construction: a shared
+/// defect agrees with itself.
+///
+/// NO CLOSEDNESS BRANCH — see the twin's note. `actions.yaml`'s "Inside and
+/// outside behave as center on open paths" is implemented by no renderer, and
+/// bounds follow the ink rather than the stale sentence.
 private func inflateBounds(_ bbox: BBox, _ stroke: Stroke?) -> BBox {
     guard let stroke = stroke else { return bbox }
-    let half = stroke.width / 2.0
-    return (bbox.x - half, bbox.y - half, bbox.width + 2 * half, bbox.height + 2 * half)
+    let outward: Double
+    switch stroke.align {
+    case .center: outward = stroke.width / 2.0
+    case .inside: outward = 0
+    case .outside: outward = stroke.width
+    }
+    return (bbox.x - outward, bbox.y - outward,
+            bbox.width + 2 * outward, bbox.height + 2 * outward)
 }
 
 /// Bounding box of a point list, no stroke inflation.

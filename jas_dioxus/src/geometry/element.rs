@@ -771,17 +771,40 @@ fn fill_rule_is_default(r: &FillRule) -> bool { matches!(r, FillRule::NonZero) }
 /// Axis-aligned bounding box (x, y, width, height).
 pub type Bounds = (f64, f64, f64, f64);
 
-/// Expand bounding box (x, y, w, h) by half-stroke-width on each side.
+/// Expand bounding box (x, y, w, h) by the ink the stroke actually puts
+/// OUTSIDE the path, which depends on `stroke.align`.
+///
+/// RULED 2026-08-21: Center inflates by w/2 on each side, Inside not at all,
+/// Outside by the full w. Twin: JasSwift's `inflateBounds`.
+///
+/// This used to inflate by w/2 unconditionally -- exactly right for Center and
+/// wrong for the other two by w/2 per side, an error that SCALES with the
+/// stroke (20pt on a 40pt stroke). Both ports were wrong in the same way, so
+/// the cross-language equivalence law was blind to it by construction: a shared
+/// defect agrees with itself.
+///
+/// NO CLOSEDNESS BRANCH. `workspace/actions.yaml` says "Inside and outside
+/// behave as center on open paths", and no renderer implements that sentence:
+/// `canvas/render.rs::stroke_aligned` draws Inside by clipping to the path's
+/// fill area at 2x width, and canvas implicitly closes an open path for
+/// clipping, so an open path's ink is clipped exactly as a closed one's is.
+/// Bounds are a claim about where the ink IS, so they follow the ink. That
+/// stale sentence needs a ruling of its own; it is not honoured by guessing
+/// here.
 fn inflate_bounds(bbox: Bounds, stroke: Option<&Stroke>) -> Bounds {
     match stroke {
         None => bbox,
         Some(s) => {
-            let half = s.width / 2.0;
+            let outward = match s.align {
+                StrokeAlign::Center => s.width / 2.0,
+                StrokeAlign::Inside => 0.0,
+                StrokeAlign::Outside => s.width,
+            };
             (
-                bbox.0 - half,
-                bbox.1 - half,
-                bbox.2 + 2.0 * half,
-                bbox.3 + 2.0 * half,
+                bbox.0 - outward,
+                bbox.1 - outward,
+                bbox.2 + 2.0 * outward,
+                bbox.3 + 2.0 * outward,
             )
         }
     }
@@ -3869,62 +3892,6 @@ mod tests {
         assert_eq!(e.geometric_bounds(), (10.0, 20.0, 30.0, 40.0));
     }
 
-    /// PINS AN UNRULED SIMPLIFICATION. Preview bounds inflate by HALF the
-    /// stroke width whatever the stroke's alignment is, and that is exactly
-    /// right for `Center` and wrong for the other two:
-    ///
-    /// ```text
-    /// rect (10,20,100,50), stroke width 10
-    ///   align            bounds() says        the ink actually covers
-    ///   Center           (5,15,110,60)        (5,15,110,60)     <- agrees
-    ///   Inside           (5,15,110,60)        (10,20,100,50)    <- 5pt/side out
-    ///   Outside          (5,15,110,60)        (0,10,120,70)     <- 5pt/side out
-    /// ```
-    ///
-    /// `inflate_bounds` never reads `stroke.align`. Neither does JasSwift's
-    /// `inflateBounds`, so BOTH ACTIVE PORTS AGREE AND ARE WRONG TOGETHER —
-    /// the equivalence law cannot see this class, only a question the corpus
-    /// was not built to ask can. `set_stroke_align` is a real user-reachable
-    /// action and the alignment survives the binary codec, so the input is
-    /// reachable; these bounds feed Align/Distribute, the transform pivot and
-    /// the drawn selection box, which is the same set of organs RESOLVEDALIGN
-    /// repaired for an unrelated cause.
-    ///
-    /// Whether preview bounds SHOULD honour alignment is a product question
-    /// (a deliberate cheap approximation is a defensible answer), so this test
-    /// asserts today's behaviour rather than the corrected one, and exists so
-    /// that changing it has to be a decision instead of an accident. If the
-    /// ruling lands, this test is the thing that reds.
-    #[test]
-    fn preview_bounds_ignore_stroke_align_pending_a_ruling() {
-        let stroked = |align: StrokeAlign| {
-            let mut s = Stroke::new(Color::BLACK, 10.0);
-            s.align = align;
-            Element::Rect(RectElem {
-                x: 10.0, y: 20.0, width: 100.0, height: 50.0, rx: 0.0, ry: 0.0,
-                fill: None, stroke: Some(s), common: CommonProps::default(),
-                fill_gradient: None, stroke_gradient: None,
-            })
-        };
-
-        // Correct for Center, and the only one of the three that is.
-        assert_eq!(stroked(StrokeAlign::Center).bounds(), (5.0, 15.0, 110.0, 60.0));
-
-        // Both of these return the Center answer. Asserted as equality to the
-        // Center box so the omission is stated, not implied by a magic tuple.
-        let center = stroked(StrokeAlign::Center).bounds();
-        assert_eq!(stroked(StrokeAlign::Inside).bounds(), center,
-                   "Inside no longer matches Center -- if alignment was ruled \
-                    to matter, this test is the record of the old behaviour");
-        assert_eq!(stroked(StrokeAlign::Outside).bounds(), center,
-                   "Outside no longer matches Center -- see above");
-
-        // And the honest answers, kept beside the pinned ones so the size of
-        // the gap is in the file rather than in a letter.
-        assert_eq!(stroked(StrokeAlign::Inside).geometric_bounds(),
-                   (10.0, 20.0, 100.0, 50.0),
-                   "geometric_bounds IS what an Inside stroke covers");
-    }
 
     #[test]
     fn geometric_bounds_circle() {
@@ -5544,4 +5511,91 @@ mod rect_promotion_preservation_tests {
         assert_eq!(round[2].first().copied(), Some((100.0, 50.0)));
         assert_eq!(round[2].last().copied(), Some((80.0, 60.0)));
     }
+    /// P1.7, RULED 2026-08-21 council: **bounds follow `stroke.align`** --
+    /// Center inflates by w/2 on each side, Inside not at all, Outside by w.
+    ///
+    /// Both active ports inflated by w/2 REGARDLESS of alignment, which is
+    /// exactly right for Center and wrong for the other two -- and wrong
+    /// IDENTICALLY, so the cross-language equivalence law could not see it. A
+    /// shared defect is invisible to every differential gate this project owns.
+    ///
+    /// The figures are the board's own table, kept verbatim so the fix is
+    /// checked against the measurement that found it rather than against
+    /// itself.
+    ///
+    /// NO CLOSEDNESS BRANCH, and that is deliberate. `workspace/actions.yaml`
+    /// says "Inside and outside behave as center on open paths", but no
+    /// renderer implements that sentence: `canvas/render.rs::stroke_aligned`
+    /// draws Inside by CLIPPING to the path's fill area at 2x width, and canvas
+    /// implicitly closes an open path for clipping, so an open path's ink is
+    /// clipped the same way a closed one's is. Bounds are a claim about where
+    /// the ink is, so they follow the ink. The stale sentence is flagged for a
+    /// ruling of its own rather than silently honoured here.
+    #[test]
+    fn bounds_follow_stroke_alignment() {
+        fn rect_with(align: StrokeAlign) -> Element {
+            let mut stroke = Stroke::new(Color::BLACK, 10.0);
+            stroke.align = align;
+            Element::Rect(RectElem {
+                x: 10.0, y: 20.0, width: 100.0, height: 50.0, rx: 0.0, ry: 0.0,
+                fill: None,
+                stroke: Some(stroke),
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+            })
+        }
+        assert_eq!(rect_with(StrokeAlign::Center).bounds(), (5.0, 15.0, 110.0, 60.0),
+                   "Center: the stroke straddles the path, so w/2 on each side");
+        assert_eq!(rect_with(StrokeAlign::Inside).bounds(), (10.0, 20.0, 100.0, 50.0),
+                   "Inside: the ink never leaves the path, so no inflation at all");
+        assert_eq!(rect_with(StrokeAlign::Outside).bounds(), (0.0, 10.0, 120.0, 70.0),
+                   "Outside: the whole width lies outside, so w on each side");
+
+        // `geometric_bounds` is the ink-free box and does not move: it was the
+        // honest answer all along, and Inside's preview bounds now agree with
+        // it because an Inside stroke covers exactly the path.
+        assert_eq!(rect_with(StrokeAlign::Inside).geometric_bounds(),
+                   (10.0, 20.0, 100.0, 50.0),
+                   "geometric_bounds is unchanged by this ruling");
+        assert_eq!(rect_with(StrokeAlign::Inside).bounds(),
+                   rect_with(StrokeAlign::Inside).geometric_bounds(),
+                   "an Inside stroke adds no ink outside the path, so preview \
+                    and geometric bounds coincide");
+    }
+
+    /// SUPERSEDED, and recorded rather than deleted.
+    ///
+    /// `preview_bounds_ignore_stroke_align_pending_a_ruling` lived here from
+    /// the 2026-08-05 measurement until the 2026-08-21 council. It pinned the
+    /// WRONG behaviour on purpose -- Inside and Outside both answering the
+    /// Center box -- so that changing it had to be a decision instead of an
+    /// accident, and its own comment said: "If the ruling lands, this test is
+    /// the thing that reds."
+    ///
+    /// The ruling landed and it did red, which is the whole reason to write a
+    /// test that way. Its content is folded into
+    /// `bounds_follow_stroke_alignment` above; this note is what remains so a
+    /// reader of the history does not think the pin was lost.
+    #[test]
+    fn the_pending_ruling_pin_was_retired_by_the_2026_08_21_council() {
+        // The behaviour it pinned is now false, which is the assertion.
+        let mut s = Stroke::new(Color::BLACK, 10.0);
+        s.align = StrokeAlign::Inside;
+        let inside = Element::Rect(RectElem {
+            x: 10.0, y: 20.0, width: 100.0, height: 50.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: Some(s), common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let mut c = Stroke::new(Color::BLACK, 10.0);
+        c.align = StrokeAlign::Center;
+        let center = Element::Rect(RectElem {
+            x: 10.0, y: 20.0, width: 100.0, height: 50.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: Some(c), common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        assert_ne!(inside.bounds(), center.bounds(),
+                   "Inside no longer answers the Center box -- that is the ruling");
+    }
+
 }

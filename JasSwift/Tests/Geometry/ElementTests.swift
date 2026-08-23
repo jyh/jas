@@ -892,3 +892,38 @@ private let straightPath: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0)]
     let pts = flattenPathCommands([.moveTo(6, 7), .closePath])
     #expect(pts.map { [$0.0, $0.1] } == [[6, 7], [6, 7]])
 }
+
+/// P1.7, RULED 2026-08-21 council: **bounds follow `stroke.align`** — Center
+/// inflates by w/2 on each side, Inside not at all, Outside by w.
+///
+/// Both active ports inflated by w/2 REGARDLESS of alignment, which is exactly
+/// right for Center and wrong for the other two — and wrong IDENTICALLY, so the
+/// cross-language equivalence law could not see it. A shared defect is
+/// invisible to every differential gate this project owns, which is why this
+/// arrived as a measurement rather than as a red lane.
+///
+/// The figures are the board's own table, kept verbatim so the fix is checked
+/// against the measurement that found it rather than against itself.
+///
+/// NO CLOSEDNESS BRANCH, deliberately. `workspace/actions.yaml` says "Inside
+/// and outside behave as center on open paths", but no renderer implements that
+/// sentence — Inside is drawn by CLIPPING to the path's fill area at 2× width,
+/// and canvas implicitly closes an open path for clipping, so an open path's
+/// ink is clipped exactly as a closed one's is. Bounds are a claim about where
+/// the ink is, so they follow the ink. The stale sentence is flagged for its
+/// own ruling rather than silently honoured here.
+@Test func boundsFollowStrokeAlignment() {
+    func rect(_ align: StrokeAlign) -> Element {
+        let stroke = Stroke(color: Color(r: 0, g: 0, b: 0), width: 10, align: align)
+        return .rect(Rect(x: 10, y: 20, width: 100, height: 50, stroke: stroke))
+    }
+    func eq(_ a: BBox, _ b: BBox) -> Bool {
+        a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height
+    }
+    #expect(eq(rect(.center).bounds, (5, 15, 110, 60)),
+            "Center: the stroke straddles the path, so w/2 on each side")
+    #expect(eq(rect(.inside).bounds, (10, 20, 100, 50)),
+            "Inside: the ink never leaves the path, so no inflation at all")
+    #expect(eq(rect(.outside).bounds, (0, 10, 120, 70)),
+            "Outside: the whole width lies outside, so w on each side")
+}
