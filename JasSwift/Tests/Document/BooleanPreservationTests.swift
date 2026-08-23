@@ -318,3 +318,177 @@ private func polygonPointBBox(_ e: Element) -> (Double, Double, Double, Double) 
     #expect(before.withChildren(after.children) == after,
             "the boolean's layer rebuild changed a field other than children")
 }
+
+// MARK: - Multi-member container operands (BOOLEAN.md:63, the MEMBERS vote)
+
+/// A container holding TWO members that disagree, wrapped around the front
+/// operand. The single-member wrapper the cross-language relation seeds with
+/// (`wrap_at`) cannot express this, which is why the divergences below survived
+/// a gate that was otherwise watching this exact seam.
+private func twoMemberFrontOperand(aName: String?, bName: String?,
+                                   aLocked: Bool, bLocked: Bool) -> Element {
+    let a = Element.rect(Rect(x: 5, y: 0, width: 10, height: 10,
+                              fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+                              locked: aLocked, name: aName, id: nil))
+    let b = Element.rect(Rect(x: 7, y: 0, width: 10, height: 10,
+                              fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+                              locked: bLocked, name: bName, id: nil))
+    return .group(Group(children: [a, b]))
+}
+
+private func twoMemberModel(aName: String?, bName: String?,
+                            aLocked: Bool, bLocked: Bool) -> Model {
+    let back = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                 fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+                                 locked: true, name: nil, id: nil))
+    let front = twoMemberFrontOperand(aName: aName, bName: bName,
+                                      aLocked: aLocked, bLocked: bLocked)
+    let layer = Layer(name: "L0", children: [back, front])
+    return Model(document: Document(layers: [layer], selectedLayer: 0,
+                                    selection: [ElementSelection.all([0, 0]),
+                                                ElementSelection.all([0, 1])]))
+}
+
+/// BOOLEAN.md:63 — "the operands' MEMBERS vote". MEMBERS, plural.
+///
+/// This port took ONE voter per operand (`booleanPaintSource`, the FIRST
+/// paintable leaf), which is the right answer to a DIFFERENT question: fill and
+/// stroke resolve to the frontmost operand's first paintable leaf, because a
+/// container has no paint of its own. The electorate is not the paint source,
+/// and collapsing the two disenfranchises every member after the first.
+///
+/// Measured before the repair: a two-member group whose members disagree on
+/// `locked` reported a UNANIMOUS `locked = true`, because the dissenting member
+/// never got a vote. Rust, which flat-maps `operand_leaves` over every operand,
+/// reported the disagreement and fell to the default.
+@Test func aMultiMemberContainersMembersAllVoteOnUnanimity() {
+    let m = twoMemberModel(aName: nil, bName: nil, aLocked: true, bLocked: false)
+    Controller(model: m).applyDestructiveBoolean("union")
+    let out = onlyChild(m)
+    #expect(out.isLocked == false,
+            "member b is unlocked, so the sources disagree and the default stands")
+}
+
+/// The same electorate, on `name`. Two members that both ASSERT a name and
+/// disagree must kill the name (§3.3); this port saw only the first, read it as
+/// the sole asserting source, and carried it onto the product.
+@Test func twoMembersAssertingDifferentNamesKillTheName() {
+    let m = twoMemberModel(aName: "a", bName: "b", aLocked: true, bLocked: true)
+    Controller(model: m).applyDestructiveBoolean("union")
+    let out = onlyChild(m)
+    #expect(out.name == nil,
+            "two asserting members disagree, so the name dies")
+}
+
+/// The mint guard asks what the edit DESTROYS, and a container is destroyed
+/// along with everything it holds. An id-less container whose LEAF carries an
+/// id therefore has an identity at stake.
+///
+/// This port read `elements` only — the operands, not their members — so a
+/// group with an identified leaf minted nothing and the identity died silently.
+/// Rust reads `elements.chain(sources)`. The comment beside this port's guard
+/// claimed "Rust's arm is guarded identically"; it was not.
+@Test func anIdentifiedLeafInsideAnIdlessContainerIsAnIdentityAtStake() {
+    let a = Element.rect(Rect(x: 5, y: 0, width: 10, height: 10,
+                              fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+                              name: nil, id: "leaf-identity"))
+    let front = Element.group(Group(children: [a]))
+    let back = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                                 fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+                                 name: nil, id: nil))
+    let layer = Layer(name: "L0", children: [back, front])
+    let m = Model(document: Document(layers: [layer], selectedLayer: 0,
+                                     selection: [ElementSelection.all([0, 0]),
+                                                 ElementSelection.all([0, 1])]))
+    Controller(model: m).applyDestructiveBoolean("union")
+    let out = onlyChild(m)
+    #expect(out.id != nil,
+            "the leaf's identity is destroyed, so one is at stake and a fresh id is minted")
+    #expect(out.id != "leaf-identity",
+            "the dead id is never re-worn; a fresh one is minted")
+}
+
+/// The 1 -> 1 SURVIVOR arms, where the divergence hid behind the same
+/// single-member assumption. Twin of Rust's `source_common`.
+///
+/// subtract-front keeps the back operand. When that survivor is a container
+/// holding TWO members with different names and ids, no one member is entitled
+/// to speak for the rest: Rust merges over all leaves and kills both, this port
+/// took the first leaf's and carried them onto the product. With a one-member
+/// wrapper the two agree exactly, which is why the corpus never saw it.
+@Test func aMultiMemberSurvivorElectsNoSingleMembersIdentity() {
+    let a = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10,
+                              fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+                              name: "member-a", id: "id-a"))
+    let b = Element.rect(Rect(x: 2, y: 0, width: 10, height: 10,
+                              fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+                              name: "member-b", id: "id-b"))
+    let survivor = Element.group(Group(children: [a, b]))
+    let cutter = Element.rect(Rect(x: 20, y: 0, width: 4, height: 4,
+                                   fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+                                   name: nil, id: nil))
+    let layer = Layer(name: "L0", children: [survivor, cutter])
+    let m = Model(document: Document(layers: [layer], selectedLayer: 0,
+                                     selection: [ElementSelection.all([0, 0]),
+                                                 ElementSelection.all([0, 1])]))
+    Controller(model: m).applyDestructiveBoolean("subtract_front")
+    let out = m.document.layers[0].children[0]
+    #expect(out.name == nil,
+            "two members assert different names, so no name survives")
+    #expect(out.id != "id-a" && out.id != "id-b",
+            "no single member's identity is elected to speak for the container")
+}
+
+/// THE RELATION THE CORPUS CANNOT STATE, and the one that would have caught
+/// every divergence above at the moment it was written.
+///
+/// `wrap_at` in the cross-language relation wraps exactly ONE leaf, because the
+/// property it serves — an operation on a group equals the same operation on
+/// its member — is only true for one. There is no single-member document in
+/// which a two-member electorate can disagree, so the entire multi-member class
+/// is invisible to that gate by construction. It is not a gap in the corpus; it
+/// is outside what that relation can express.
+///
+/// The multi-member generalisation is: GROUPING A CONTIGUOUS RUN OF OPERANDS
+/// DOES NOT CHANGE THE RESULT. That follows from the container ruling — a
+/// selected group is shorthand for its members — and it is checkable without
+/// the action corpus, because it needs only the controller called twice.
+///
+/// SCOPED DELIBERATELY TO THE BACK RUN. Fill, stroke, opacity and blend mode all
+/// resolve through the FRONTMOST operand's first paintable leaf. Wrapping the
+/// frontmost operand changes which leaf that is — `group{b, c}` answers with
+/// `b` where bare `c` answers with `c` — so the relation is false there and
+/// saying so is not a cop-out. Wrapping the back run leaves the frontmost
+/// operand untouched and the relation exact.
+@Test func groupingTheBackOperandsDoesNotChangeTheBooleanResult() {
+    func rect(_ x: Double, _ name: String?, _ id: String?, locked: Bool) -> Element {
+        .rect(Rect(x: x, y: 0, width: 10, height: 10,
+                   fill: Fill(color: Color(r: 0, g: 0, b: 0)),
+                   locked: locked, name: name, id: id))
+    }
+    // Two back operands that DISAGREE, so a lost vote is visible, plus a
+    // frontmost operand left bare in both arms.
+    func build(grouped: Bool) -> Model {
+        let a = rect(0, "aye", "id-a", locked: true)
+        let b = rect(2, "bee", nil, locked: false)
+        let c = rect(4, nil, nil, locked: true)
+        let children: [Element] = grouped
+            ? [.group(Group(children: [a, b])), c]
+            : [a, b, c]
+        let sel = (0..<children.count).map { ElementSelection.all([0, $0]) }
+        return Model(document: Document(layers: [Layer(name: "L0", children: children)],
+                                        selectedLayer: 0, selection: sel))
+    }
+    for op in ["union", "intersection", "exclude"] {
+        let g = build(grouped: true), u = build(grouped: false)
+        Controller(model: g).applyDestructiveBoolean(op)
+        Controller(model: u).applyDestructiveBoolean(op)
+        let go = onlyChild(g), uo = onlyChild(u)
+        #expect(go.name == uo.name, "\(op): grouping the back run moved `name`")
+        #expect(go.isLocked == uo.isLocked, "\(op): grouping moved `locked`")
+        #expect(go.visibility == uo.visibility, "\(op): grouping moved `visibility`")
+        #expect(go.blendMode == uo.blendMode, "\(op): grouping moved `blendMode`")
+        #expect((go.id == nil) == (uo.id == nil),
+                "\(op): grouping moved whether an identity was at stake")
+    }
+}
