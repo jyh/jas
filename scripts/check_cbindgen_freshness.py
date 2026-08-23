@@ -311,14 +311,28 @@ def main() -> int:
     # ~170 undifferentiated warnings would bury the finding this gate exists to
     # report: the `Skip ... (not `pub`)` majority is cbindgen narrating private
     # constants it correctly ignored, and only the remainder carries signal.
-    warns = sorted({l.strip() for l in stderr.splitlines() if l.startswith("WARN")})
+    raw = [l.strip() for l in stderr.splitlines() if l.startswith("WARN")]
+    warns = sorted(set(raw))
     skips = [w for w in warns if w.startswith("WARN: Skip ")]
+    raw_skips = [w for w in raw if w.startswith("WARN: Skip ")]
     signal = [w for w in warns if not w.startswith("WARN: Skip ")]
+    raw_signal = [w for w in raw if not w.startswith("WARN: Skip ")]
+
+    # BOTH UNITS, ALWAYS. This gate deduplicates, so its counts are DISTINCT
+    # warnings; a reader counting raw lines gets a different and equally correct
+    # number. Two seats compared 148 against 149 and 5 against 24 before noticing
+    # they were counting two populations -- the difference is `feature = "ffi"`
+    # alone, which cbindgen emits 21 times. A count without its unit is half a
+    # claim, so neither number is printed without the other.
     for w in signal:
         print(f"  note: cbindgen {w[:180]}")
+    if signal:
+        print(f"  note: {len(signal)} distinct signal warning(s) "
+              f"over {len(raw_signal)} raw line(s)")
     if skips:
-        print(f"  note: cbindgen also skipped {len(skips)} non-exported item(s) "
-              f"(`not pub` / unsupported literal) -- expected, not reported here")
+        print(f"  note: cbindgen also skipped {len(skips)} distinct non-exported "
+              f"item(s) over {len(raw_skips)} raw line(s) (`not pub` / unsupported "
+              f"literal) -- expected, not reported individually")
 
     if findings:
         print("FAIL: the committed C header does not match the Rust it describes.")
