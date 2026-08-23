@@ -456,6 +456,50 @@ jobs:
           python scripts/check_naming_rule.py --self-test
           python scripts/check_naming_rule.py
 
+      # cbindgen, for the header-freshness referee below. Prebuilt via binstall
+      # (seconds) rather than compiled from source (minutes) — and PINNED, because
+      # check_cbindgen_freshness.py REFUSES on any other version: a version bump
+      # changes generated formatting and would red the gate for a reason that has
+      # nothing to do with the source.
+      #
+      # The `--version` guard is pages.yml's lesson, not a precaution: a restored
+      # cargo cache carries install METADATA without the binary, so a plain
+      # `cargo binstall -y` can exit 0 in ~0s while the tool is absent. Trust only
+      # a real binary check. The `cargo install` fallback keeps the lane alive if
+      # no prebuilt artifact matches this platform.
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install cbindgen 0.29.4
+        id: cbindgen
+        run: |
+          if cbindgen --version 2>/dev/null | grep -q '^cbindgen 0\.29\.4$'; then
+            echo "cbindgen 0.29.4 already present"
+          else
+            cargo binstall -y --force cbindgen@0.29.4 \
+              || cargo install cbindgen --version 0.29.4 --locked --force
+          fi
+          cbindgen --version
+
+      # The FFI header is the one generated artifact in this tree with no
+      # freshness referee, and it had drifted 16 lines behind src/ffi.rs since
+      # 2026-07-29. Nothing in this repository reds when it is stale — the cost
+      # lands on a C consumer OUTSIDE the repo — so it needs a referee, not a
+      # test. Runs in both platform families; check_lane_coverage.py enforces
+      # the pair.
+      # COUPLED TO ITS PREMISE, not merely isolated -- and the first version of
+      # this step got that wrong in a way CI caught. `!cancelled()` alone freed
+      # it from every earlier step INCLUDING its own tool install, so when an
+      # unrelated `Structural gates` failure skipped the fail-fast install, this
+      # step ran anyway and failed closed on a missing cbindgen: a second red
+      # whose real cause was three steps above it. That is precisely the case
+      # `Corpus freshness` already handles by coupling to `steps.lf`, written on
+      # this same lane and not carried across. Isolation is from UNRELATED
+      # steps; a step's own premise is not one of them.
+      - name: FFI header matches the Rust it describes
+        if: ${{ !cancelled() && steps.cbindgen.conclusion == 'success' }}
+        run: |
+          python scripts/check_cbindgen_freshness.py --self-test
+          python scripts/check_cbindgen_freshness.py
+
       # These five are the newline half's blast radius: each regenerates a
       # corpus and byte-compares it against the committed golden, so a text
       # write without newline="" turns all five red on data that is current.
@@ -594,6 +638,39 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cd jas_dioxus && cargo test
+      # cbindgen, for the header-freshness referee below. Prebuilt via binstall
+      # (seconds) rather than compiled from source (minutes) — and PINNED, because
+      # check_cbindgen_freshness.py REFUSES on any other version: a version bump
+      # changes generated formatting and would red the gate for a reason that has
+      # nothing to do with the source.
+      #
+      # The `--version` guard is pages.yml's lesson, not a precaution: a restored
+      # cargo cache carries install METADATA without the binary, so a plain
+      # `cargo binstall -y` can exit 0 in ~0s while the tool is absent. Trust only
+      # a real binary check. The `cargo install` fallback keeps the lane alive if
+      # no prebuilt artifact matches this platform.
+      - uses: cargo-bins/cargo-binstall@main
+      - name: Install cbindgen 0.29.4
+        run: |
+          if cbindgen --version 2>/dev/null | grep -q '^cbindgen 0\.29\.4$'; then
+            echo "cbindgen 0.29.4 already present"
+          else
+            cargo binstall -y --force cbindgen@0.29.4 \
+              || cargo install cbindgen --version 0.29.4 --locked --force
+          fi
+          cbindgen --version
+
+      # The FFI header is the one generated artifact in this tree with no
+      # freshness referee, and it had drifted 16 lines behind src/ffi.rs since
+      # 2026-07-29. Nothing in this repository reds when it is stale — the cost
+      # lands on a C consumer OUTSIDE the repo — so it needs a referee, not a
+      # test. Runs in both platform families; check_lane_coverage.py enforces
+      # the pair.
+      - name: FFI header matches the Rust it describes
+        run: |
+          python3 scripts/check_cbindgen_freshness.py --self-test
+          python3 scripts/check_cbindgen_freshness.py
+
       # The core must also build and pass WITHOUT the `web` feature. D1
       # (2026-07-29) keeps this core for port six, so it has to be verifiable on
       # a platform with no frontend. Runs in this lane and in the Windows lane;

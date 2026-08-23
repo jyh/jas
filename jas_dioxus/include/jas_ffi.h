@@ -37,6 +37,16 @@
 #define MARKER_GAP_PT 12.0
 
 /**
+ * Segments per cap semicircle when the renderer flattens one.
+ *
+ * The chord error of an `n`-segment semicircle is `r * (1 - cos(pi/(2n)))`;
+ * at 32 that is `r * 0.0012`, i.e. 0.006pt for a 10pt-wide stroke and 0.12pt
+ * for a 200pt one. Both ports use this same number, and it travels on the
+ * algorithm wire as `default_arc_steps` so it cannot drift between them.
+ */
+#define CAP_ARC_STEPS 32
+
+/**
  * Penalty value above which a candidate is treated as "forbidden"
  * (never broken at). Matches Knuth's INFINITY threshold.
  */
@@ -105,6 +115,12 @@
  * Ratio of inner radius to outer radius for the default star.
  */
 #define STAR_INNER_RATIO 0.4
+
+/**
+ * The DPI every headless target is pinned to. See the module note: DIPs are
+ * CSS pixels only here.
+ */
+#define PINNED_DPI 96.0
 
 /**
  * Cursor blink half-period in milliseconds (matches the macOS default).
