@@ -427,6 +427,10 @@ private func bareReference(_ target: String) -> Element {
 /// can simulate an edit to the target. Mirrors Rust `CellResolver`.
 private final class CellResolver: ElementResolver {
     var map: [String: Element] = [:]
+    /// Each CellResolver names its own document state, so these tests exercise
+    /// the CACHING path rather than silently falling through to fresh
+    /// evaluation. Minted never-reused, exactly as production identities are.
+    let evaluationIdentity: UInt64 = nextAdHocEpochOwner()
     func resolve(_ id: ElementRef) -> Element? { map[id.id] }
     func set(_ id: String, _ elem: Element) { map[id] = elem }
 }
@@ -951,4 +955,62 @@ private func ringAreaAbs(_ ring: BoolRing) -> Double {
 
     #expect(!boolPolygonSetsEqual(a, b),
             "tab B must get its own master's geometry, not tab A's")
+}
+
+/// HANDLEPHANTOM'S TWIN, and the fourth sighting of one class.
+///
+/// The `cached == fresh` assertion fired on three recorded occasions and was
+/// carried as a flake for two weeks. It is not a flake: serialized, the suite
+/// trapped on the same test every run, at the 616th of 616. The diagnostic
+/// message added with this test named the collision in one line -- id `m1`,
+/// epoch `(owner: 275, generation: 1)`, cached bbox (200,200)-(210,220) against
+/// a fresh (5,7)-(15,27) -- and disabling one predecessor turned the whole
+/// serial suite green, which is the proof that it is CONTAMINATION and not a
+/// defect in the failing test.
+///
+/// The shape, stated once so the next reader does not re-derive it:
+///
+///   1. A caller that DECLARES an epoch evaluates a reference and leaves a
+///      `.pure` entry keyed on (id, precision) in this thread's box.
+///   2. A later caller on the same thread that declares NO epoch inherits the
+///      first one's epoch -- `guard box.owner != nil` is satisfied by somebody
+///      else's declaration -- and is served that entry for the same id.
+///
+/// Step 2 is the hole. `setRecomputeCacheEpoch`'s own comment names it: "A
+/// caller that does not epoch inherits whatever epoch the last caller on this
+/// thread left live." Three repairs have been made to this class already (a
+/// never-reused owner; opt-in caching; an ad-hoc epoch minted in
+/// `RebuildResolver.init`). Each closed a caller. None closed the class.
+///
+/// This test forces the two steps directly, so the proof costs milliseconds
+/// instead of a 616-test serial run.
+@Test func aReaderThatDeclaresNoEpochIsNotServedAnotherCallersGeometry() {
+    clearRecomputeCacheForTest()
+
+    // 1. A caller with a document context: master "m1" is a 10x20 at (200,200).
+    setRecomputeCacheEpoch(owner: 900_200, generation: 1)
+    let seeded = CellResolver()
+    seeded.set("m1", .rect(Rect(x: 200, y: 200, width: 10, height: 20, id: "m1")))
+    var seedVisit = VisitSet()
+    _ = ReferenceElem(target: ElementRef("m1"), name: nil)
+        .evaluateWith(precision: DEFAULT_PRECISION, resolver: seeded, visiting: &seedVisit)
+    #expect(recomputeCacheStateForTest("m1", DEFAULT_PRECISION) == .pure,
+            "the seeding caller must actually populate the entry")
+
+    // 2. A DIFFERENT document, same id, different geometry -- and a reader that
+    //    declares no epoch of its own, exactly as `controlPointPositions`
+    //    reached through a hand-built IdIndexResolver does.
+    let other = CellResolver()
+    other.set("m1", .rect(Rect(x: 5, y: 7, width: 10, height: 20, id: "m1")))
+    var visit = VisitSet()
+    let got = ReferenceElem(target: ElementRef("m1"), name: nil)
+        .evaluateWith(precision: DEFAULT_PRECISION, resolver: other, visiting: &visit)
+
+    var freshVisit = VisitSet()
+    let fresh = elementToPolygonSetWith(
+        .rect(Rect(x: 5, y: 7, width: 10, height: 20, id: "m1")),
+        precision: DEFAULT_PRECISION, resolver: other, visiting: &freshVisit)
+
+    #expect(boolPolygonSetsEqual(got, fresh),
+            "a reader that declared no epoch was served the seeding caller's geometry for id m1")
 }

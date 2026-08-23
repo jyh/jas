@@ -3202,7 +3202,10 @@ class CanvasNSView: NSView {
         // has no test. A latent hazard is not worth a blind edit to untested
         // paint code; it IS worth the next reader not having to re-derive this.
         if let model = controller?.model {
-            setCanvasRefResolver(IdIndexResolver(index: model.idIndex))
+            setCanvasRefResolver(IdIndexResolver(
+                index: model.idIndex,
+                identity: recomputeIdentity(owner: model.recomputeIdentity,
+                                            generation: model.generation)))
             // Phase 4c: epoch the reference-geometry recompute cache off the
             // Model's generation (cleared on any edit / undo / redo), so
             // no-edit repaints reuse the cached target geometry. Per-app perf

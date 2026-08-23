@@ -689,7 +689,35 @@ private func collectRefIds(_ elem: Element, into index: inout IdIndex) {
 /// map. Mirrors Rust's `RenderResolver` reading the installed `IdIndex`.
 public struct IdIndexResolver: ElementResolver {
     private let index: IdIndex
-    public init(index: IdIndex) { self.index = index }
+
+    /// See ``ElementResolver/evaluationIdentity``. 0 unless the caller names a
+    /// document state, and 0 means "never cached" -- correct, and slower.
+    public let evaluationIdentity: UInt64
+
+    /// Resolve against `index` WITHOUT naming a document state. Every lookup
+    /// through this resolver is evaluated fresh.
+    ///
+    /// This is the right initializer for a caller that built its own index from
+    /// a Document in hand and has no persistent identity to offer. It used to
+    /// be the only one, and callers using it were nonetheless served the last
+    /// epoch-declaring caller's cached geometry; that is the defect the
+    /// identity closes.
+    public init(index: IdIndex) {
+        self.index = index
+        self.evaluationIdentity = 0
+    }
+
+    /// Resolve against `index` AS a named document state, so evaluated
+    /// reference geometry may be cached and reused across repaints of it.
+    ///
+    /// `identity` must be never-reused for the life of the process and must
+    /// change whenever the document changes -- ``Model/recomputeIdentity``
+    /// paired with ``Model/generation`` is exactly such a value, and
+    /// ``recomputeIdentity(owner:generation:)`` combines them.
+    public init(index: IdIndex, identity: UInt64) {
+        self.index = index
+        self.evaluationIdentity = identity
+    }
     public func resolve(_ id: ElementRef) -> Element? { index[id.id] }
     public func resolveConcept(_ conceptId: String) -> ConceptDef? {
         conceptDefFromRegistry(conceptId)
@@ -723,15 +751,22 @@ public struct RebuildResolver: ElementResolver {
     /// Build the index from `doc` (via the shared ``rebuildIdIndex`` walk) and
     /// wrap it in an ``IdIndexResolver``.
     public init(document doc: Document) {
-        self.inner = IdIndexResolver(index: rebuildIdIndex(doc))
+        // A rebuilt index from a Document IS a named document state, so this
+        // resolver carries an identity of its own. It is minted fresh per
+        // construction: two RebuildResolvers over equal Documents are still two
+        // states as far as this cache is concerned, which is the conservative
+        // answer and the one that cannot be wrong.
+        let identity = nextAdHocEpochOwner()
+        self.inner = IdIndexResolver(index: rebuildIdIndex(doc), identity: identity)
         // Building an index from a Document IS declaring a document context, so
         // it declares an epoch too. Without this the resolver inherits whichever
         // epoch was last live on this thread and reads that caller's cached
         // geometry for any id they share — measured as an intermittent
         // `cached == fresh` assert failure at roughly one run in ten.
-        setRecomputeCacheEpoch(owner: nextAdHocEpochOwner(), generation: 0)
+        setRecomputeCacheEpoch(owner: identity, generation: 0)
     }
 
+    public var evaluationIdentity: UInt64 { inner.evaluationIdentity }
     public func resolve(_ id: ElementRef) -> Element? { inner.resolve(id) }
     public func resolveConcept(_ conceptId: String) -> ConceptDef? {
         inner.resolveConcept(conceptId)

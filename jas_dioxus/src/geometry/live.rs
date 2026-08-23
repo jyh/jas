@@ -194,14 +194,30 @@ pub(crate) type VisitSet = std::collections::BTreeSet<ElementRef>;
 // for correctness.)
 
 /// One cache slot keyed by `(target_id, precision_bits)`. `Pure` holds the
-/// target's untransformed geometry, valid while `ptr` still matches the
-/// resolved target's `Rc::as_ptr` (a pure-geometry target's geometry is a pure
-/// function of its `Rc`). `HasRefs` records that the target's subtree contains a
-/// nested reference, so its geometry is NOT cacheable; the entry exists only to
-/// short-circuit the purity walk on a repeat lookup — it never serves geometry.
+/// target's untransformed geometry, valid while `target` is still the same
+/// allocation the geometry was computed from (a pure-geometry target's geometry
+/// is a pure function of its `Rc`). `HasRefs` records that the target's subtree
+/// contains a nested reference, so its geometry is NOT cacheable; the entry
+/// exists only to short-circuit the purity walk on a repeat lookup — it never
+/// serves geometry.
+///
+/// THE ENTRY OWNS A STRONG `Rc`, AND THAT IS THE CORRECTNESS ARGUMENT, not a
+/// convenience. These slots used to store `ptr: usize` from `Rc::as_ptr` and
+/// compare it on every hit. A raw address identifies an allocation only while
+/// that allocation is alive: drop the target, allocate a different element of
+/// the same size, and the allocator will hand back the same address — measured
+/// here as immediate reuse on the first attempt. The guard then passes and the
+/// wrong geometry is served. That is textbook ABA, and it is what reddened
+/// main's Windows lane at HEAD, where `symbols_basic`'s `m1` rect was dropped
+/// and `locked_all_kinds`' different `m1` rect landed on its address.
+///
+/// Holding the `Rc` makes the pointer a sound identity by construction: the
+/// address cannot be recycled while the entry that names it exists. The cost is
+/// bounded and already paid — the whole map is cleared on every generation
+/// change, which is every edit, undo and redo.
 enum CacheEntry {
-    Pure { ptr: usize, geom: PolygonSet },
-    HasRefs { ptr: usize },
+    Pure { target: Rc<Element>, geom: PolygonSet },
+    HasRefs { target: Rc<Element> },
 }
 
 /// The thread-local recompute cache, epoched by `generation`. Entries are
@@ -293,6 +309,38 @@ fn subtree_has_reference(elem: &Rc<Element>) -> bool {
 /// (mirroring the P4b index==rebuild gate). Combined with the per-paint
 /// generation epoch and the `Rc::as_ptr` check, this is the proof the cache
 /// never diverges from a fresh eval.
+/// One-line shape summary of a ring set, for the divergence message above.
+/// Ring and point counts separate "different geometry" from "same shape,
+/// different numbers"; the bounding box separates "the same shape somewhere
+/// else" from "a different shape". Deliberately not a full dump: a diverging
+/// entry can hold thousands of points, and a message nobody reads to the end is
+/// the tally mark this replaces.
+#[cfg(debug_assertions)]
+fn polygon_set_digest(ps: &PolygonSet) -> String {
+    if ps.is_empty() {
+        return "empty (0 rings)".to_string();
+    }
+    let (mut min_x, mut min_y) = (f64::INFINITY, f64::INFINITY);
+    let (mut max_x, mut max_y) = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for ring in ps {
+        for (x, y) in ring {
+            min_x = min_x.min(*x);
+            min_y = min_y.min(*y);
+            max_x = max_x.max(*x);
+            max_y = max_y.max(*y);
+        }
+    }
+    let counts: Vec<String> = ps.iter().map(|r| r.len().to_string()).collect();
+    if min_x > max_x {
+        return format!("{} ring(s) [{}] with no points", ps.len(), counts.join("+"));
+    }
+    format!(
+        "{} ring(s) [{}] bbox({min_x}, {min_y})-({max_x}, {max_y})",
+        ps.len(),
+        counts.join("+")
+    )
+}
+
 fn cached_target_geometry(
     target_id: &str,
     target: &Rc<Element>,
@@ -300,7 +348,6 @@ fn cached_target_geometry(
     resolver: &dyn ElementResolver,
     visiting: &mut VisitSet,
 ) -> PolygonSet {
-    let tptr = Rc::as_ptr(target) as usize;
     let key = (target_id.to_string(), precision.to_bits());
 
     // Fast path: a live entry whose ptr still matches.
@@ -308,8 +355,10 @@ fn cached_target_geometry(
     let hit = RECOMPUTE_CACHE.with(|c| {
         let cache = c.borrow();
         match cache.entries.get(&key) {
-            Some(CacheEntry::Pure { ptr, geom }) if *ptr == tptr => Hit::Reuse(geom.clone()),
-            Some(CacheEntry::HasRefs { ptr }) if *ptr == tptr => Hit::FreshUncached,
+            Some(CacheEntry::Pure { target: t, geom }) if Rc::ptr_eq(t, target) => {
+                Hit::Reuse(geom.clone())
+            }
+            Some(CacheEntry::HasRefs { target: t }) if Rc::ptr_eq(t, target) => Hit::FreshUncached,
             _ => Hit::Miss,
         }
     });
@@ -318,15 +367,33 @@ fn cached_target_geometry(
         Hit::Reuse(geom) => {
             // GATE: the cached geometry must equal a fresh eval. Mirrors the
             // P4b model.rs index==rebuild debug-assert.
-            debug_assert!(
-                {
-                    let mut fresh_visit = VisitSet::new();
-                    let fresh = element_to_polygon_set_with(
-                        target, precision, resolver, &mut fresh_visit);
-                    geom == fresh
-                },
-                "reference geometry recompute cache diverged from fresh eval",
-            );
+            //
+            // THE MESSAGE NAMES THE COLLISION. This assertion fired on three
+            // recorded occasions saying only that it had fired -- no id, no
+            // key, no geometry -- so every sighting was a tally mark and the
+            // defect was carried as "a flake" for two weeks. A guard that
+            // cannot describe what it caught costs more than it saves.
+            #[cfg(debug_assertions)]
+            {
+                let mut fresh_visit = VisitSet::new();
+                let fresh = element_to_polygon_set_with(
+                    target, precision, resolver, &mut fresh_visit);
+                assert!(
+                    geom == fresh,
+                    "reference geometry recompute cache diverged from fresh eval\n  \
+                     target_id = {target_id:?}\n  precision = {precision}\n  \
+                     generation = {}\n  entries = {} in this thread's cache\n  \
+                     cached = {}\n  fresh  = {}\n\
+                     The entry's `target` Rc is the SAME allocation as the one \
+                     being evaluated, so both answers claim the same element and \
+                     one of them is wrong. This is a real divergence, not the \
+                     address-reuse (ABA) hazard the entry's owned Rc closes.",
+                    RECOMPUTE_CACHE.with(|c| c.borrow().generation),
+                    RECOMPUTE_CACHE.with(|c| c.borrow().entries.len()),
+                    polygon_set_digest(&geom),
+                    polygon_set_digest(&fresh),
+                );
+            }
             geom
         }
         Hit::FreshUncached => {
@@ -337,9 +404,9 @@ fn cached_target_geometry(
             // Cache miss or stale ptr: evaluate fresh, then record by purity.
             let fresh = element_to_polygon_set_with(target, precision, resolver, visiting);
             let entry = if subtree_has_reference(target) {
-                CacheEntry::HasRefs { ptr: tptr }
+                CacheEntry::HasRefs { target: Rc::clone(target) }
             } else {
-                CacheEntry::Pure { ptr: tptr, geom: fresh.clone() }
+                CacheEntry::Pure { target: Rc::clone(target), geom: fresh.clone() }
             };
             RECOMPUTE_CACHE.with(|c| { c.borrow_mut().entries.insert(key, entry); });
             fresh
@@ -2781,4 +2848,68 @@ mod tests {
         assert_eq!(ps_coarse, fresh_target_geom(&target, coarse, &resolver));
         assert_eq!(ps_fine, fresh_target_geom(&target, fine, &resolver));
     }
+    /// THE ABA HAZARD, MADE FALSIFIABLE.
+    ///
+    /// The cache validates a `Pure` entry by comparing `Rc::as_ptr(target)`
+    /// against the pointer it stored. A raw address is only an identity while
+    /// the thing it addresses is alive: drop the target, allocate a different
+    /// element of the same size, and the allocator may hand back the same
+    /// address -- at which point the guard passes and stale geometry is served.
+    ///
+    /// That is not theoretical. It is what reddened main's Windows lane at
+    /// HEAD: inside `svg_roundtrip_all_fixtures`, `symbols_basic`'s `m1` rect
+    /// is dropped and `locked_all_kinds`' DIFFERENT `m1` rect lands on the same
+    /// address. Measured on mac at 2 failures in 200 full runs; on the Windows
+    /// lane, both runs that ever reached the step.
+    ///
+    /// The repair keeps the target ALIVE inside the entry, so its address
+    /// cannot be reused while the entry that names it exists. This test asserts
+    /// exactly that property, and it is deterministic in both directions:
+    /// before the repair the address is reused within a few thousand tries;
+    /// after it, reuse is impossible rather than merely unlikely.
+    #[test]
+    fn a_cached_targets_address_is_never_reused_by_a_different_element() {
+        clear_recompute_cache_for_test();
+
+        let mut map = std::collections::HashMap::new();
+        let seeded = rc_rect(200.0, 200.0, 10.0, 20.0);
+        let seeded_addr = Rc::as_ptr(&seeded) as usize;
+        map.insert("m1".to_string(), Rc::clone(&seeded));
+        let resolver = MapResolver(map);
+        let reference =
+            ReferenceElem::new(ElementRef("m1".into()), CommonProps::default());
+        let mut visiting = VisitSet::new();
+        let _ = reference.evaluate_with(DEFAULT_PRECISION, &resolver, &mut visiting);
+        assert_eq!(
+            recompute_cache_state_for_test("m1", DEFAULT_PRECISION),
+            Some(CacheState::Pure),
+            "the seeding evaluation must populate the entry, or this test \
+             proves nothing"
+        );
+
+        // Release every handle this test holds. If the cache does not keep one,
+        // the allocation is now free for reuse.
+        drop(seeded);
+        drop(resolver);
+
+        // Try hard to land a DIFFERENT element on that address.
+        let mut collided = None;
+        let mut ballast: Vec<Rc<Element>> = Vec::new();
+        for _ in 0..20_000 {
+            let candidate = rc_rect(5.0, 7.0, 10.0, 20.0);
+            if Rc::as_ptr(&candidate) as usize == seeded_addr {
+                collided = Some(candidate);
+                break;
+            }
+            ballast.push(candidate);
+        }
+
+        assert!(
+            collided.is_none(),
+            "a different element was allocated at {seeded_addr:#x}, the exact \
+             address a live cache entry still names. The entry's pointer guard \
+             would accept it and serve the seeded geometry for it."
+        );
+    }
+
 }

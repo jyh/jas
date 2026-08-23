@@ -438,6 +438,29 @@ jobs:
       # not replace it and must not be read as doing so.
       - name: Cross-language — rust oracle against the pinned goldens
         run: |
+          # PRE-BUILD THE BINARIES THE DRIVERS INVOKE, so the first driver call
+          # does not compile inside its per-command timeout. This is the repo's
+          # own finding #25 and its own remedy -- the macOS `cross-language` job
+          # has carried a `Build all` step for exactly this reason since that
+          # finding landed. The Windows lane never got one because it never got
+          # this far: the step below has been `skipped` behind an earlier failure
+          # on every run, so nobody discovered that `cargo run --bin
+          # workspace_roundtrip` must COMPILE here first.
+          #
+          # MEASURED, on this PR's own run: the drivers' 16 oracle checks all
+          # PASSED and the step still failed on
+          #   subprocess.TimeoutExpired: 'cargo run --bin workspace_roundtrip'
+          #   timed out after 30 seconds
+          # because a GitHub Windows runner has no cargo cache -- the only cache
+          # in this workflow is `cache: pip` -- so every run compiles cold.
+          # Raising the timeout would be guessing at a cold-build duration;
+          # pre-building removes compilation from the timed window entirely,
+          # which is what the macOS job already does.
+          # ...and --no-default-features SECOND, because that is the set the next
+          # two drivers invoke. The default set is needed only by the workspace
+          # runner at the end, which gets its own rebuild below.
+          cargo build --bins --manifest-path jas_dioxus/Cargo.toml
+          cargo build --bins --no-default-features --manifest-path jas_dioxus/Cargo.toml
           python scripts/lane_report.py --self-test
           python scripts/cross_language_algorithms.py --lang rust --checker-report checker-report.json
           # The geometry checkers ride SEAM 1 — the out-of-process roundtrip
@@ -447,6 +470,26 @@ jobs:
           # arm alone, half-watched by construction.
           python scripts/check_geometry_checkers.py --reconcile checker-report.json
           python scripts/cross_language_commutativity.py --lang rust
+          # RE-BUILD, because the line above just invalidated the first one.
+          # cross_language_commutativity.py invokes `cargo run --bin svg_roundtrip
+          # --no-default-features` -- a DIFFERENT feature set, so cargo rebuilds
+          # the graph without `web`, and the default-features build this step
+          # pre-made at the top is no longer current. The next call then pays a
+          # full rebuild inside its own 30s timeout and dies there.
+          #
+          # MEASURED on this branch's first attempt: the top-of-step pre-build
+          # reported `Finished in 0.37s` (nothing to do), commutativity passed its
+          # 16 checks, and `cargo run --bin workspace_roundtrip` STILL timed out at
+          # 30s. So compilation was not removed from the window -- it was moved
+          # back into it by the feature switch in between.
+          #
+          # Deterministic rather than a larger timeout: a bigger number would be a
+          # guess at a cold Windows rebuild (flask measured ~90s for a full cold
+          # build here), and it would let a silent recompile keep hiding inside a
+          # step that is supposed to be measuring agreement. Note both drivers pass
+          # `-q`, so a rebuild emits no `Compiling` lines at all -- absence of them
+          # in a log is not evidence that none happened.
+          cargo build --bins --manifest-path jas_dioxus/Cargo.toml
           python scripts/cross_language_workspace.py --lang rust
 
   rust:
@@ -593,7 +636,21 @@ jobs:
       # timing out `measure swift` after 60s).
       - name: Build all
         run: |
+          # BUILD THE CONFIGURATION THE DRIVERS ACTUALLY RUN. Both rust drivers in
+          # this job invoke `--no-default-features`
+          # (cross_language_algorithms.py:241, cross_language_commutativity.py:85),
+          # so a default-features pre-build leaves every driver call to rebuild
+          # inside its own 30s per-command timeout. That is finding #25's remedy
+          # applied to the wrong feature set, and here it has been ERRORING rather
+          # than failing loudly:
+          #   ERROR: s4/leading-close element_bounds rust: 'cargo run --bin
+          #   algorithm_roundtrip --no-default-features ...' timed out after 30s
+          # Measured on this stack: 1 error against 1861 passing checks -- rare
+          # enough to read as noise, and caused by the BUILD, not by disagreement.
+          # The no-default build goes LAST so it is the current one when the
+          # drivers run.
           (cd jas_dioxus && cargo build --bins)
+          (cd jas_dioxus && cargo build --bins --no-default-features)
           (cd JasSwift && swift build)
       # Self-test the summary's own reporting rules before trusting a summary
       # (scripts/lane_report.py). A cloud referee's single-lane replay on
