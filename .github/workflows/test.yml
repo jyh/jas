@@ -55,6 +55,16 @@ jobs:
       # written is watched on one platform and unwatched on the other, silently.
       # That is how the line above was wrong on Windows for its whole life.
       - run: python scripts/check_lane_coverage.py --self-test && python scripts/check_lane_coverage.py
+      # The STEP-level sibling of the gate above: check_lane_coverage asserts
+      # every gate is watched on both platform families, and this asserts that
+      # being in a lane's list is enough to actually RUN -- a gate sitting below
+      # a step that aborts is watched on paper only.
+      #
+      # It lives HERE and not in `genericity` for a reason CI had to teach: it
+      # imports yaml, and the genericity job installs NO dependencies (every gate
+      # there is stdlib-only). This job pip-installs PyYAML, and it is where the
+      # yaml-importing sibling above already runs.
+      - run: python scripts/check_step_cannot_hide.py --self-test && python scripts/check_step_cannot_hide.py
       # TOTALITY over the checker tier: every family classified, every floor
       # declared in its fixture, every mutant carrying a named prior bug, and
       # spec/ importing nothing from this repository. A checker lane that
@@ -223,15 +233,6 @@ jobs:
         run: python scripts/check_encoding_hygiene.py --self-test
       - name: Encoding hygiene (explicit encoding= on text I/O, newline= on writes)
         run: python scripts/check_encoding_hygiene.py
-      # Pure YAML reading -- it needs no Windows to be true, only to have been
-      # noticed there, same as the encoding gate above. It runs on both families
-      # because check_lane_coverage.py requires it of every gate, and because a
-      # gate that judges the Windows lane while running ONLY in the Windows lane
-      # cannot report on the day that lane fails to start.
-      - name: Self-test the step-isolation gate
-        run: python scripts/check_step_cannot_hide.py --self-test
-      - name: Full-surface lanes (one red step must not hide the rest)
-        run: python scripts/check_step_cannot_hide.py
 
   # THE WINDOWS LANE. Added 2026-07-28, the day this project's gates ran on
   # Windows for the first time: 11 of 24 invocations failed and NOT ONE failure
