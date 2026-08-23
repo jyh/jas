@@ -868,4 +868,33 @@ jobs:
       - name: SVG commutativity
         run: python scripts/cross_language_commutativity.py --lang rust,swift --require-comparisons
       - name: Workspace equivalence
-        run: python scripts/cross_language_workspace.py --lang rust,swift --require-comparisons
+        run: |
+          # RE-BUILD THE DEFAULT FEATURE SET BEFORE THE TIMED CALL. `Build all`
+          # above ends on `--no-default-features`, and both drivers between here
+          # and there (algorithms, commutativity) invoke that set -- so the
+          # default-features graph is stale by the time we arrive. But
+          # cross_language_workspace.py runs `cargo run --bin workspace_roundtrip`
+          # with DEFAULT features, so cargo rebuilds it INSIDE that driver's own
+          # 30s per-command timeout, on a runner with no cargo cache.
+          #
+          # MEASURED, not inferred: this reddened main at 9aa5b6b1 and PR #8 at
+          # 917e21a9 with the identical traceback --
+          #   subprocess.TimeoutExpired: Command '['cargo', 'run', '--bin',
+          #   'workspace_roundtrip', '-q', '--', 'default']' timed out after 30s
+          #
+          # AND MEASURED AT MY OWN HAND, WITH A CONTROL, on a WARM local tree:
+          #   --no-default-features build ..... 6.67s
+          #   default-features build .......... 25.91s   (1 crate recompiled)
+          #   repeat the default build ........  0.09s   <- control: the 26s was real
+          # 26s against a 30s timeout on a warm box. A runner is slower and fully
+          # cold, which is why this fails INTERMITTENTLY rather than always -- and
+          # why raising the timeout only moves the coin-flip.
+          #
+          # THE WINDOWS LANE ALREADY CARRIES THIS EXACT RE-BUILD, with a comment
+          # saying the commutativity call "just invalidated the first one". That
+          # remedy was written on the lane that happened to bite and never crossed
+          # to this one -- finding #25's family, fourth instance. Raising the
+          # timeout would be guessing at a cold-build duration; pre-building takes
+          # compilation out of the timed window entirely.
+          (cd jas_dioxus && cargo build --bins)
+          python scripts/cross_language_workspace.py --lang rust,swift --require-comparisons
