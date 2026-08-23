@@ -438,6 +438,25 @@ jobs:
       # not replace it and must not be read as doing so.
       - name: Cross-language — rust oracle against the pinned goldens
         run: |
+          # PRE-BUILD THE BINARIES THE DRIVERS INVOKE, so the first driver call
+          # does not compile inside its per-command timeout. This is the repo's
+          # own finding #25 and its own remedy -- the macOS `cross-language` job
+          # has carried a `Build all` step for exactly this reason since that
+          # finding landed. The Windows lane never got one because it never got
+          # this far: the step below has been `skipped` behind an earlier failure
+          # on every run, so nobody discovered that `cargo run --bin
+          # workspace_roundtrip` must COMPILE here first.
+          #
+          # MEASURED, on this PR's own run: the drivers' 16 oracle checks all
+          # PASSED and the step still failed on
+          #   subprocess.TimeoutExpired: 'cargo run --bin workspace_roundtrip'
+          #   timed out after 30 seconds
+          # because a GitHub Windows runner has no cargo cache -- the only cache
+          # in this workflow is `cache: pip` -- so every run compiles cold.
+          # Raising the timeout would be guessing at a cold-build duration;
+          # pre-building removes compilation from the timed window entirely,
+          # which is what the macOS job already does.
+          cargo build --bins --manifest-path jas_dioxus/Cargo.toml
           python scripts/lane_report.py --self-test
           python scripts/cross_language_algorithms.py --lang rust --checker-report checker-report.json
           # The geometry checkers ride SEAM 1 — the out-of-process roundtrip
