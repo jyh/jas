@@ -456,7 +456,11 @@ jobs:
           # Raising the timeout would be guessing at a cold-build duration;
           # pre-building removes compilation from the timed window entirely,
           # which is what the macOS job already does.
+          # ...and --no-default-features SECOND, because that is the set the next
+          # two drivers invoke. The default set is needed only by the workspace
+          # runner at the end, which gets its own rebuild below.
           cargo build --bins --manifest-path jas_dioxus/Cargo.toml
+          cargo build --bins --no-default-features --manifest-path jas_dioxus/Cargo.toml
           python scripts/lane_report.py --self-test
           python scripts/cross_language_algorithms.py --lang rust --checker-report checker-report.json
           # The geometry checkers ride SEAM 1 — the out-of-process roundtrip
@@ -632,7 +636,21 @@ jobs:
       # timing out `measure swift` after 60s).
       - name: Build all
         run: |
+          # BUILD THE CONFIGURATION THE DRIVERS ACTUALLY RUN. Both rust drivers in
+          # this job invoke `--no-default-features`
+          # (cross_language_algorithms.py:241, cross_language_commutativity.py:85),
+          # so a default-features pre-build leaves every driver call to rebuild
+          # inside its own 30s per-command timeout. That is finding #25's remedy
+          # applied to the wrong feature set, and here it has been ERRORING rather
+          # than failing loudly:
+          #   ERROR: s4/leading-close element_bounds rust: 'cargo run --bin
+          #   algorithm_roundtrip --no-default-features ...' timed out after 30s
+          # Measured on this stack: 1 error against 1861 passing checks -- rare
+          # enough to read as noise, and caused by the BUILD, not by disagreement.
+          # The no-default build goes LAST so it is the current one when the
+          # drivers run.
           (cd jas_dioxus && cargo build --bins)
+          (cd jas_dioxus && cargo build --bins --no-default-features)
           (cd JasSwift && swift build)
       # Self-test the summary's own reporting rules before trusting a summary
       # (scripts/lane_report.py). A cloud referee's single-lane replay on
