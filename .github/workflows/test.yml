@@ -373,6 +373,7 @@ jobs:
           python scripts/check_index_blindspot.py
 
       - name: A gate that asserts cannot be skipped into silence
+        if: ${{ !cancelled() }}
         run: |
           python scripts/check_gate_cannot_skip.py --self-test
           python scripts/check_gate_cannot_skip.py
