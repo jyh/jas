@@ -55,6 +55,16 @@ jobs:
       # written is watched on one platform and unwatched on the other, silently.
       # That is how the line above was wrong on Windows for its whole life.
       - run: python scripts/check_lane_coverage.py --self-test && python scripts/check_lane_coverage.py
+      # The STEP-level sibling of the gate above: check_lane_coverage asserts
+      # every gate is watched on both platform families, and this asserts that
+      # being in a lane's list is enough to actually RUN -- a gate sitting below
+      # a step that aborts is watched on paper only.
+      #
+      # It lives HERE and not in `genericity` for a reason CI had to teach: it
+      # imports yaml, and the genericity job installs NO dependencies (every gate
+      # there is stdlib-only). This job pip-installs PyYAML, and it is where the
+      # yaml-importing sibling above already runs.
+      - run: python scripts/check_step_cannot_hide.py --self-test && python scripts/check_step_cannot_hide.py
       # TOTALITY over the checker tier: every family classified, every floor
       # declared in its fixture, every mutant carrying a named prior bug, and
       # spec/ importing nothing from this repository. A checker lane that
@@ -243,6 +253,49 @@ jobs:
   # PYTHONUTF8=1 repairs the encoding half without editing a single file — that
   # made it the instrument that PROVED the two defects independent, and it would
   # make this lane pass straight over the class it exists to catch.
+  #
+  # FULL SURFACE: every judging step below carries `if: ${{ !cancelled() }}`, so
+  # this lane reports its WHOLE surface in one run. It did not always. GitHub
+  # gives every step an implicit `if: success()`, which makes a step list a
+  # CHAIN — the first red aborts the rest and they report `skipped`, and a run
+  # page renders that as *not applicable* rather than *not checked*. That is the
+  # same misreading `check_gate_cannot_skip.py` exists to prevent between JOBS;
+  # this is the same defect one level down, inside a job that ran.
+  #
+  # It cost real coverage. Across f40ecff1..6721cd09 — 61 first-parent commits —
+  # an early red meant the Rust steps at the bottom of this list never executed.
+  # PIN THE UNIT: 61 counts commits during which those steps were DARK, not
+  # commits that changed Rust; `jas_dioxus/` moved in 28 of the 61. Both numbers
+  # are real and they answer different questions.
+  #
+  # WHY STEP-LEVEL `if:` AND NOT SEVERAL JOBS. Splitting into a `needs:` chain
+  # would buy the same isolation and pay for it twice: a fresh checkout,
+  # setup-python, Rust toolchain and pip install per job — on the slowest runner
+  # image we use — plus a cold cargo `target/` for the Rust half, which is the
+  # part we most want to keep warm. It would also put every new job under
+  # `check_gate_cannot_skip.py`, so each would need this very condition anyway.
+  # Same isolation, several minutes dearer, more moving parts.
+  #
+  # NOT `continue-on-error`. That is the trade run backwards: the step runs and
+  # the lane goes GREEN over a real failure. This lane is BLOCKING on purpose
+  # (see above), and coverage bought by discarding the verdict is exactly the
+  # "claim wider than its evidence" this file already refuses. `check_step_
+  # cannot_hide.py` fails on it.
+  #
+  # WHAT THIS COSTS, stated rather than discovered later: if `pip install` fails,
+  # the Python gates below now RUN and fail on the missing module instead of
+  # skipping — a dozen reds whose real cause is the one red above them. That is
+  # accepted deliberately. It is strictly more information than the old
+  # behaviour (one red and thirteen silent skips), the cause is named at the top
+  # of the same page, and the steps that need no Python at all — `Rust tests`
+  # above all — now survive a pip failure instead of vanishing with it. The
+  # alternative, coupling eleven steps to a pip `id`, rebuilds the chain this
+  # change exists to break.
+  #
+  # SETUP STEPS STAY FAIL-FAST, and are not an omission. checkout, setup-python,
+  # the toolchain and pip install judge nothing; running the Rust tests after a
+  # failed checkout produces noise, not coverage. The gate derives that
+  # distinction from each step's own content rather than a hand list.
   windows:
     name: Windows gates (the platform that can see encoding + newline)
     runs-on: windows-latest
@@ -281,6 +334,7 @@ jobs:
       # ever stops holding, the corpus-freshness gates below would be measuring
       # git's behaviour rather than ours, and would fail confusingly.
       - name: Preflight — the checkout must be LF
+        id: lf
         run: |
           if git ls-files --eol | grep -q 'w/crlf'; then
             echo "CRLF in the working tree — .gitattributes did not hold:" >&2
@@ -290,6 +344,7 @@ jobs:
           echo "working tree is LF"
 
       - name: Encoding hygiene — self-test, then the lint
+        if: ${{ !cancelled() }}
         run: |
           python scripts/check_encoding_hygiene.py --self-test
           python scripts/check_encoding_hygiene.py
@@ -299,6 +354,7 @@ jobs:
       # watching only ubuntu would have watched the one place the violation
       # does not originate. Needs full history, and refuses to run without it.
       - name: Commit messages carry no session trailer
+        if: ${{ !cancelled() }}
         run: |
           python scripts/check_commit_trailers.py --self-test
           python scripts/check_commit_trailers.py
@@ -306,16 +362,19 @@ jobs:
           python scripts/check_scrub_trigger.py
 
       - name: Untracked files are invisible to index-reading gates
+        if: ${{ !cancelled() }}
         run: |
           python scripts/check_index_blindspot.py --self-test
           python scripts/check_index_blindspot.py
 
       - name: Corpus coverage of the analytic law's clauses
+        if: ${{ !cancelled() }}
         run: |
           python scripts/check_spec_mutation_coverage.py --self-test
           python scripts/check_spec_mutation_coverage.py
 
       - name: Structural gates
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/check_workspace_json.sh
           python scripts/check_menu_structure.py
@@ -338,6 +397,13 @@ jobs:
           # absence, so it must appear in both lanes or it fails immediately.
           python scripts/check_lane_coverage.py --self-test
           python scripts/check_lane_coverage.py
+          # The step-level half of the same argument, and it judges THIS lane:
+          # check_lane_coverage.py asserts every gate is watched on both
+          # platform families, and this asserts that being in the list is
+          # enough to actually run. A gate present in a lane that aborts above
+          # it is watched on paper only.
+          python scripts/check_step_cannot_hide.py --self-test
+          python scripts/check_step_cannot_hide.py
           python scripts/check_geometry_checkers.py --self-test
           python scripts/check_geometry_checkers.py
           python scripts/check_element_dispatch.py --self-test
@@ -382,7 +448,16 @@ jobs:
       # These five are the newline half's blast radius: each regenerates a
       # corpus and byte-compares it against the committed golden, so a text
       # write without newline="" turns all five red on data that is current.
+      #
+      # THE ONE STEP WITH A REAL PREMISE, so it is the one step not isolated
+      # from everything. It is isolated from every OTHER step, but stays coupled
+      # to the LF preflight: on a CRLF checkout these five would be measuring
+      # git's behaviour rather than ours and would fail confusingly — the
+      # preflight's own comment says so, and that argument survives the split.
+      # Coupling to `steps.lf` keeps the confusing red from being manufactured,
+      # while `!cancelled()` still frees it from every unrelated step above.
       - name: Corpus freshness
+        if: ${{ !cancelled() && steps.lf.conclusion == 'success' }}
         run: |
           bash scripts/check_expr_corpus.sh
           bash scripts/check_concept_corpus.sh
@@ -393,11 +468,13 @@ jobs:
       # The separator half: genericity's exclude patterns are "/"-anchored, and
       # matching them against str(Path) silently no-opped every exclusion here.
       - name: Genericity
+        if: ${{ !cancelled() }}
         run: |
           python scripts/genericity_check_test.py
           python scripts/genericity_check.py
 
       - name: Reference interpreter conformance
+        if: ${{ !cancelled() }}
         run: python -m pytest workspace_interpreter/tests -q
 
       # SPECUNTESTED: the analytic tier is what the geometry checkers RULE BY,
@@ -406,9 +483,11 @@ jobs:
       # `pytest` never reached it either. Named separately from the reference
       # interpreter because it is a different tier with a different job.
       - name: Analytic tier (spec/geometry) conformance
+        if: ${{ !cancelled() }}
         run: python -m pytest spec/geometry/tests -q
 
       - name: Rust tests
+        if: ${{ !cancelled() }}
         run: cd jas_dioxus && cargo test
 
       # The native half of the same claim. Windows is the platform that would
@@ -417,6 +496,7 @@ jobs:
       # here while `cargo check` exited 0, and the divergent text-width arm it
       # was hiding had been live for as long as the gate had not existed.
       - name: Native core tests (no web feature)
+        if: ${{ !cancelled() }}
         run: |
           python scripts/check_native_core_tests.py --self-test
           python scripts/check_native_core_tests.py
@@ -427,6 +507,7 @@ jobs:
       # declaration outlives its gate. Pure source scanning -- it needs no
       # toolchain and would run anywhere -- but it belongs beside its sibling.
       - name: Native test gating (nothing verifiable is hidden behind `web`)
+        if: ${{ !cancelled() }}
         run: |
           python scripts/check_native_test_gating.py --self-test
           python scripts/check_native_test_gating.py
@@ -439,6 +520,7 @@ jobs:
       # The blocking two-lane equivalence gate remains the macOS job; this does
       # not replace it and must not be read as doing so.
       - name: Cross-language — rust oracle against the pinned goldens
+        if: ${{ !cancelled() }}
         run: |
           # PRE-BUILD THE BINARIES THE DRIVERS INVOKE, so the first driver call
           # does not compile inside its per-command timeout. This is the repo's

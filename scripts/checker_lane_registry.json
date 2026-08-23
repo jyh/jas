@@ -65,7 +65,11 @@
   ],
   "lanes": {
     "windows:rust": {
-      "reason": "THE LANE THIS FILE WAS WRITTEN FOR. The Windows seat has no Swift toolchain, so it legitimately requests one lane -- which makes it the lane most easily lost, because losing it changes no comparison count anywhere. It is also the only platform that can see the encoding, newline and separator classes (11 of 24 invocations failed on its first day and not one was a content defect), so a Windows box that stops adjudicating geometry is a referee that reports coverage it no longer has. Seam 1 exists precisely so this box can rule in full: one Python predicate, no second toolchain."
+      "reason": "THE LANE THIS FILE WAS WRITTEN FOR. The Windows seat has no Swift toolchain, so it legitimately requests one lane -- which makes it the lane most easily lost, because losing it changes no comparison count anywhere. It is also the only platform that can see the encoding, newline and separator classes (11 of 24 invocations failed on its first day and not one was a content defect), so a Windows box that stops adjudicating geometry is a referee that reports coverage it no longer has. Seam 1 exists precisely so this box can rule in full: one Python predicate, no second toolchain.",
+      "permitted_if": {
+        "condition": "${{ !cancelled() }}",
+        "why": "Declared for the Windows lane's judging STEPS, isolated by P1.5. The condition is false only when the run is CANCELLED, and a cancelled run publishes no verdict -- it is not a green build over an unadjudicated lane, which is what R8 exists to forbid. It STRICTLY REDUCES the unadjudicated set: before P1.5 every step carried GitHub's implicit `if: success()`, so this writer step was SKIPPED on every run where any earlier step went red -- and measured at 5095060d it WAS skipped, along with two other judging steps, behind a step-17 failure. Eight of the last ten runs skipped 7-9 steps that way. So the set shrinks from 'any run with an earlier red step' to 'runs a human cancelled'. `always()` is deliberately not used: an operator who cancels means it."
+      }
     },
     "macos:rust": {
       "reason": "The reference arm of the BLOCKING cross-language job. Every checker verdict on macOS is computed against this lane's roundtrip output, so if it stops being adjudicated the swift arm has nothing to disagree with and the equivalence claim degrades to a single-port oracle run without saying so."
