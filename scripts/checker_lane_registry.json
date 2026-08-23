@@ -72,10 +72,18 @@
       }
     },
     "macos:rust": {
-      "reason": "The reference arm of the BLOCKING cross-language job. Every checker verdict on macOS is computed against this lane's roundtrip output, so if it stops being adjudicated the swift arm has nothing to disagree with and the equivalence claim degrades to a single-port oracle run without saying so."
+      "reason": "The reference arm of the BLOCKING cross-language job. Every checker verdict on macOS is computed against this lane's roundtrip output, so if it stops being adjudicated the swift arm has nothing to disagree with and the equivalence claim degrades to a single-port oracle run without saying so.",
+      "permitted_if": {
+        "condition": "${{ !cancelled() }}",
+        "why": "Declared for the `cross-language` job's condition, added by P1.4. The condition is FALSE ONLY WHEN THE RUN IS CANCELLED, and a cancelled run publishes no verdict at all -- it is not a green build over an unadjudicated lane, which is the outcome this rule exists to forbid. Crucially the condition STRICTLY REDUCES the set of runs where this lane goes unadjudicated. Before it, `cross-language` carried NO `if:` and declared `needs: [rust, swift]`, so it was SKIPPED on every run where either dependency went red -- and a skipped job renders as 'not applicable' while the build stays green, which is precisely an unadjudicated lane under a green build. Measured: run 31114155047 at 5095060d, where the macOS `rust` job died in cargo's own bookkeeping and the prime-directive gate did not run at all. So the set shrinks from 'any run with a red dependency' to 'runs a human deliberately cancelled'. `always()` would shrink it further and is deliberately NOT used: an operator who cancels a run means it, and forcing adjudication through a cancellation would be the opposite defect -- a verdict nobody asked for on a tree nobody finished testing."
+      }
     },
     "macos:swift": {
-      "reason": "The only lane in CI that adjudicates the Swift port's geometry at all -- `swift test` is macOS-only here, so no other platform can carry it. One SKIP_LANG_ALGO entry, or a `--lang` edited down from rust,swift to rust, empties it; R5's reconcile catches that from inside a run, and this row catches the CI edit that stops the run from ever requesting it."
+      "reason": "The only lane in CI that adjudicates the Swift port's geometry at all -- `swift test` is macOS-only here, so no other platform can carry it. One SKIP_LANG_ALGO entry, or a `--lang` edited down from rust,swift to rust, empties it; R5's reconcile catches that from inside a run, and this row catches the CI edit that stops the run from ever requesting it.",
+      "permitted_if": {
+        "condition": "${{ !cancelled() }}",
+        "why": "Declared for the `cross-language` job's condition, added by P1.4. The condition is FALSE ONLY WHEN THE RUN IS CANCELLED, and a cancelled run publishes no verdict at all -- it is not a green build over an unadjudicated lane, which is the outcome this rule exists to forbid. Crucially the condition STRICTLY REDUCES the set of runs where this lane goes unadjudicated. Before it, `cross-language` carried NO `if:` and declared `needs: [rust, swift]`, so it was SKIPPED on every run where either dependency went red -- and a skipped job renders as 'not applicable' while the build stays green, which is precisely an unadjudicated lane under a green build. Measured: run 31114155047 at 5095060d, where the macOS `rust` job died in cargo's own bookkeeping and the prime-directive gate did not run at all. So the set shrinks from 'any run with a red dependency' to 'runs a human deliberately cancelled'. `always()` would shrink it further and is deliberately NOT used: an operator who cancels a run means it, and forcing adjudication through a cancellation would be the opposite defect -- a verdict nobody asked for on a tree nobody finished testing."
+      }
     }
   }
 }
