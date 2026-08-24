@@ -58,6 +58,14 @@ if ($env:SB_MODE) { $extraEnv += '$env:SB_MODE=''' + $env:SB_MODE + '''; ' }
 # a setting that is ignored rather than rejected is how a measurement ends up
 # describing a different experiment than the one that was requested.
 if ($env:SB_FRAMES) { $extraEnv += '$env:SB_FRAMES=''' + $env:SB_FRAMES + '''; ' }
+# SB_FULLSCREEN forwarded HERE, in the same edit that introduced it. The comment
+# above records SB_FRAMES being silently dropped; the trap is that the fix was
+# applied to SB_FRAMES and the NEXT variable added needs it again -- a correction
+# arrives attached to its own instance and gives no signal that a neighbour
+# exists. An unforwarded SB_FULLSCREEN would fail the identical way: the app
+# falls back to its default window size, every timing looks reasonable, and the
+# run is labelled 4K while measuring 1904x941.
+if ($env:SB_FULLSCREEN) { $extraEnv += '$env:SB_FULLSCREEN=''' + $env:SB_FULLSCREEN + '''; ' }
 $launchArg = '-NoProfile -ExecutionPolicy Bypass -Command ' +
     '"$env:DOTNET_ROOT=''' + "$env:LOCALAPPDATA\Microsoft\dotnet" + '''; ' + $extraEnv + '& ''' + $Exe + '''"'
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $launchArg

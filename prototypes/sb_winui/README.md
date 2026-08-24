@@ -55,6 +55,49 @@ assumed. `Present` is ~5.2-5.5 ms on both routes: vsync-bound at
 2.3-4.3 ms against a 0.5 ms steady state, and an earlier version of this harness
 folded a 1092 ms first frame into a "mean" of 19.20 ms that described nothing.
 
+### Re-measured 2026-08-24 at a second surface size — and the area model is dead
+
+Four runs, one session, one binary: `{direct, offscreen}` x `{default,
+fullscreen}`, 300 frames each. The default pair is the CONTROL, so the comparison
+never has to cross sessions.
+
+| run | surface | Mpx | paint mean | present mean | **present max** | paint+present |
+|---|---|---|---|---|---|---|
+| DIRECT | 1904x941 | 1.79 | 1.14 | 5.09 | **11.95** | 6.23 |
+| OFFSCREEN | 1904x941 | 1.79 | 1.26 | 4.92 | **6.25** | 6.18 |
+| DIRECT | 2560x1405 | 3.60 | 1.14 | 5.30 | **12.20** | 6.44 |
+| OFFSCREEN | 2560x1405 | 3.60 | 1.27 | 4.92 | **6.50** | 6.19 |
+
+**The copy is 0.12 ms at 1.79 Mpx and 0.13 ms at 3.60 Mpx. Area doubled; the copy
+grew 8%.** A linear-in-area model predicted 0.24 ms. **It is dominated by fixed
+cost, not bandwidth**, across this range — so "16% on the paint" is a ratio that
+falls as documents get real AND does not climb as windows get bigger.
+
+**Per frame the routes are indistinguishable**: totals 6.18-6.44 ms all bracket
+the 6.25 ms vsync interval at this display's 160 Hz. ⚠️ **But the tail reverses
+the mean** — `present max` hit 11.95 and 12.20 ms on both DIRECT runs (nearly two
+intervals: a dropped frame) against 6.25 and 6.50 ms on both OFFSCREEN runs.
+2 of 2 versus 0 of 2.
+
+⚠️ **The control did not reproduce its own banked figure**: paint was 0.92 ms on
+08-24 morning and 1.14 ms in this session, +24%. **The cross-session drift is
+larger than the effect being measured**, which is why the copy is only ever
+quoted as a within-session delta.
+
+### ⛔ DEFECT FOUND BY THIS RUN: the swapchain is sized in DIPs, not pixels
+
+`SB_FULLSCREEN=1` reports **2560x1405, not 3840x2160**. The desktop is at 150%
+scaling: 3840x2160 physical is 2560x1440 in DIPs, less 35 DIPs for the status
+row. `Canvas.SizeChanged` gives DIPs and that value goes straight into swapchain
+creation; **`CompositionScaleX/Y` is read nowhere in this prototype**.
+
+**So the core renders 3.60 Mpx and the compositor upscales 1.5x to fill 8.29 Mpx**
+— on a vector illustration app, a fidelity defect rather than a tuning detail. It
+is invisible in every timing above because it makes the work smaller for both
+routes equally. **Not fixed here**: it is real work with consequences for the pen
+pipeline, and it belongs on a backlog rather than inside a measurement run. It
+also means the true physical-4K copy cost remains unmeasured.
+
 ### What is still open
 
 The **direct route is the one the variant wants** and it now works, so the

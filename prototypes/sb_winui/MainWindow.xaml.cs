@@ -20,6 +20,25 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         Title = VerifyTitle;
 
+        // SB_FULLSCREEN: THE COPY COST IS FIXED BY SURFACE AREA, so pricing it
+        // needs a run at the display's full resolution and not at whatever size
+        // WinUI happens to give a new window. The default 1904x941 is 1.79 Mpx
+        // against this display's 8.29 Mpx -- 22% -- so a copy priced only there
+        // understates the full-screen cost by ~4.6x.
+        //
+        // Set BEFORE the panel is laid out, so the FIRST SizeChanged (the one
+        // that starts the run, because of the _started latch below) is already
+        // the fullscreen size. If this ran after layout the latch would capture
+        // the default size and the run would report 4K in its label while
+        // measuring a small window -- and the numbers would look entirely
+        // plausible. `LastStatus` prints the ACTUAL {_width}x{_height} beside
+        // every timing for exactly that reason: verify the size from the run's
+        // own output, never from the flag that was passed to it.
+        if (Environment.GetEnvironmentVariable("SB_FULLSCREEN") == "1")
+        {
+            AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+        }
+
         // SizeChanged rather than Loaded: a SwapChainPanel has no useful size
         // until it has been laid out, and creating a swapchain at 0x0 fails in a
         // way that reads as a device fault.
