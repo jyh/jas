@@ -54,9 +54,14 @@ all — that is an open council question and this is the moment to form a view.
 
 ## 4 — Painter PH2 shapes (banked since 2026-07-24)
 
-No scene file: draw one of each of the six multi-paint kinds and confirm they
-render as they did before the painter conversion. Blocks nothing; simply has
-never been eyeballed.
+Scene file: **`03-painter-ph2.svg`** (landed on main in #15 — this section
+predates it and used to say "no scene file, draw one of each"). It holds one
+*convertible* instance of each of the six multi-paint kinds — Rect · Circle ·
+Ellipse · Polygon · Polyline · Path — so every one is drawn by the NEW painter
+path. Confirm they render as they did before the painter conversion. Blocks
+nothing; simply has never been eyeballed.
+
+Full pass criteria and the pre-flight live in **`RUNSHEET-2026-08-24.md`**.
 
 ---
 
