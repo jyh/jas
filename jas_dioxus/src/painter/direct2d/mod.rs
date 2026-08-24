@@ -10,4 +10,7 @@ pub mod device;
 pub mod geometry;
 pub mod painter;
 pub mod replay;
+// Route (b): a D2D context over a caller-owned DXGI surface. This is the whole
+// gap between headless B1 and a live SwapChainPanel; see the module's own note.
+pub mod surface;
 pub mod text;
