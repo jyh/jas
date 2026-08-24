@@ -50,8 +50,9 @@ Remove-Item $png, "$png.json", "$png.error.txt" -ErrorAction SilentlyContinue
 # (Program Files, 8.0.13) that shadows the real SDK in LOCALAPPDATA, and an app
 # built against net10 dies with "You must install or update .NET" without it.
 $principal = New-ScheduledTaskPrincipal -UserId $uid -LogonType Interactive -RunLevel Limited
+$extraEnv = if ($env:SB_SKIP_PAINT -eq '1') { '$env:SB_SKIP_PAINT=''1''; ' } else { '' }
 $launchArg = '-NoProfile -ExecutionPolicy Bypass -Command ' +
-    '"$env:DOTNET_ROOT=''' + "$env:LOCALAPPDATA\Microsoft\dotnet" + '''; & ''' + $Exe + '''"'
+    '"$env:DOTNET_ROOT=''' + "$env:LOCALAPPDATA\Microsoft\dotnet" + '''; ' + $extraEnv + '& ''' + $Exe + '''"'
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $launchArg
 Register-ScheduledTask -TaskName $launchTask -Action $action -Principal $principal -Force -ErrorAction Stop | Out-Null
 if (-not (Get-ScheduledTask -TaskName $launchTask -ErrorAction SilentlyContinue)) {

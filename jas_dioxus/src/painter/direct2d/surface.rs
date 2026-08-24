@@ -69,6 +69,26 @@ pub struct SurfaceTarget {
     _factory: ID2D1Factory1,
 }
 
+// A THREAD-LOCAL D2D DEVICE CACHE WAS TRIED HERE AND REVERTED, and the reason is
+// worth more than the code was.
+//
+// The hypothesis was sound: the documented D2D-on-swapchain pattern keeps the
+// factory, device and context alive ACROSS the present, while this file builds
+// and destroys all three per call, so every Direct2D object is gone by the time
+// the host calls `Present`. Caching them is also what S-C will want for its
+// number.
+//
+// It did not fix the E_NOINTERFACE, AND IT HUNG THE TEST SUITE -- because a
+// cached D2D device belongs to ONE D3D device, and each test here fabricates its
+// own WARP device. The second test then handed a surface from a different device
+// to a context built on the first. A cache like this has to be KEYED on the
+// device it was built from, and an unkeyed one is not a simpler version of that,
+// it is a broken one.
+//
+// Left out rather than fixed: it is not the defect's cause, so adding a keyed
+// cache now would be tuning inside an open bug. It belongs with S-C's
+// performance work, where its cost can be measured instead of assumed.
+
 impl SurfaceTarget {
     /// Wrap a caller-owned DXGI surface as a D2D target.
     ///
@@ -130,8 +150,10 @@ impl SurfaceTarget {
 }
 
 impl Drop for SurfaceTarget {
-    /// UNBIND THE BACK BUFFER. Not tidiness — without it the host's next
-    /// `Present` fails.
+    /// UNBIND THE BACK BUFFER — correct practice, and NOT the fix for the open
+    /// Present defect. This docstring claimed it was; that claim was wrong and is
+    /// corrected here rather than quietly deleted, because the exclusion is worth
+    /// as much to the next reader as a fix would have been.
     ///
     /// MEASURED, by bisect, against a live WinUI-3 SwapChainPanel: presenting an
     /// UNTOUCHED back buffer succeeds, and presenting the same buffer after this
@@ -143,6 +165,8 @@ impl Drop for SurfaceTarget {
     ///
     /// `EndDraw` is NOT sufficient — it ends the draw, it does not release the
     /// target. `SetTarget(None)` is what drops D2D's reference to the surface.
+    /// Adding it did NOT clear the E_NOINTERFACE, so the cause lies elsewhere;
+    /// it is kept because releasing a target you no longer own is right anyway.
     ///
     /// Doing it in `Drop` rather than asking callers to remember is deliberate:
     /// the failure it prevents appears in the HOST, one language and one process

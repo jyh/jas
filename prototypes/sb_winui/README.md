@@ -10,6 +10,43 @@ Scope boundary inherited from S-A, stated in `../ffi_spike/README.md`:
 > No swapchain, no rendering. That is S-B, and its seam should be designed
 > against a real `SwapChainPanel` rather than in advance.
 
+## OPEN DEFECT — `Present` returns `E_NOINTERFACE` after Rust paints
+
+The chain runs end to end and the last step fails. **Rust's paint returns 0**;
+`Present` then returns `0x80004002`.
+
+**The reproduction is exact.** `SB_SKIP_PAINT=1` acquires the back buffer and
+does everything else identically, without calling Rust:
+
+    SB_SKIP_PAINT=1 -> "RUSTOK presented 1904x941 on hardware"     Present SUCCEEDS
+    (default)       -> "Present 0x80004002 [paint rc=ok]"          Present FAILS
+
+So the variable is the Direct2D paint, not `GetBuffer`, and not the shell.
+
+**Ruled out by experiment, each one run rather than reasoned away:**
+
+| hypothesis | result |
+|---|---|
+| interface dispatch is broken | NO — `GetDesc1` returns a healthy 1904x941, buffers=2 |
+| `Present` specifically | NO — `Present1` fails identically |
+| the derived-interface `new` redeclaration | NO — presenting via base `IDXGISwapChain` fails identically |
+| the D3D device was removed or reset | NO — `GetDeviceRemovedReason` reports device ok |
+| `ISwapChainPanelNative` release | NO — omitting the release changes nothing |
+| back-buffer RCW still referenced | NO — releasing it changes nothing (`FinalReleaseComObject` crashes the app: over-release) |
+| a second `Present` in one frame | NO — the bisect probe was removed; a single post-paint `Present` still fails |
+| D2D still holding the target | NO — `SetTarget(None)` now runs in `SurfaceTarget::Drop` and does not clear it |
+| back buffer still bound to the D3D pipeline | NO — `OMSetRenderTargets(0,null,null)` + `Flush()` does not clear it |
+| D2D objects destroyed before `Present` | NO — a device cache was tried, did not fix it, and hung the tests (see `surface.rs`) |
+
+**The instrument that would answer it is unavailable.** The D3D11 debug layer
+would state the reason outright, and `D3D11_CREATE_DEVICE_DEBUG` fails here
+(`dbg=unavailable`) because the **Graphics Tools optional Windows feature is not
+installed**. Installing it is a machine change and is the Captain's call, not
+this spike's. That is the recommended next step and it is cheap and reversible.
+
+Everything above is instrumented in the code, so re-running reproduces the whole
+table rather than requiring it to be trusted.
+
 ## Status
 
 **Checkpoint 1 PASSES (2026-08-24): the shell builds and puts a window on the
