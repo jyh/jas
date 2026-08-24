@@ -275,6 +275,30 @@ def scan(docs: dict[str, dict]) -> list[str]:
             )
             continue
 
+        # A JOB-LEVEL `if:` TAKES THE WHOLE LANE DARK, and nothing in this repo
+        # would notice. check_gate_cannot_skip.py -- the job-level sibling --
+        # only examines jobs that declare `needs:`, and a full-surface lane
+        # deliberately declares none, so it is out of that gate's scope by the
+        # very property that makes it unskippable by a dependency. One line
+        # (`if: ${{ github.event_name == 'push' }}`) would then skip the entire
+        # lane on every pull request while every meta-gate stayed green.
+        #
+        # Not hypothetical: an adversarial reviewer injected exactly that line
+        # into `windows-native` while attacking this branch, and all four
+        # workflow gates passed over it.
+        try:
+            job_cond = job.get("if")
+            if job_cond is not None and not condition_survives_step_failure(job_cond):
+                findings.append(
+                    f"{key}: the JOB carries `if: {job_cond}`, which does not "
+                    f"survive -- a full-surface lane declares no `needs:` (that "
+                    f"is what makes it unskippable), so a job-level condition is "
+                    f"the one way left to take it dark, and the job-level gate "
+                    f"cannot see it because it only inspects jobs WITH `needs:`"
+                )
+        except Unresolvable as exc:
+            findings.append(f"{key}: REFUSING to guess -- {exc}")
+
         # THE JOB-LEVEL HALF OF ASSERTION 2. Step-level `continue-on-error` was
         # forbidden from this file's first commit; the job-level spelling does
         # the same damage -- every step runs, every failure is reported, and the

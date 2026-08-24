@@ -187,6 +187,18 @@ PROFILES: dict[str, dict] = {
 # "this is a runner stream" a checked premise rather than an assumption.
 RESULT_SUMMARY = re.compile(r"^test result: (?:ok|FAILED)\.", re.MULTILINE)
 
+# The banner libtest prints before it executes anything. Required ALONGSIDE the
+# summary, because one `test result:` line alone is a thin premise: an
+# adversarial review passed a THREE-LINE FILE -- an anchor and a summary -- as
+# evidence that a 1,958-line backend had been built. Both markers together are
+# the shape of a real harness run, and both appear in the genuine log locally and
+# on the runner, so requiring the pair costs no working lane.
+#
+# A SHAPE ASSERTION, NOT A COUNT. The banner appears 5x in the real log; that
+# number is an observation and is asserted nowhere, for the same reason the
+# anchor's multiplicity is not.
+HARNESS_BANNER = re.compile(r"^running \d+ tests?[ \t\r]*$", re.MULTILINE)
+
 # Anti-vacuity floor on the declaration itself. A profile with no anchors asserts
 # nothing and reports success; that is the same class this gate exists to catch,
 # one level up.
@@ -310,9 +322,10 @@ def log_findings(profile_name: str, log: str, label: str) -> list[str]:
             f"{label} is empty -- a lane that produced no output produced no "
             f"evidence, and absent evidence is RED, never a skip"
         ]
-    if not RESULT_SUMMARY.search(log):
+    if not RESULT_SUMMARY.search(log) or not HARNESS_BANNER.search(log):
         return [
-            f"{label} carries no `test result:` summary line, so it is not a "
+            f"{label} lacks the `running N tests` banner and `test result:` "
+            f"summary that a real harness run prints, so it is not a "
             f"cargo-test stream. This gate reads the RUNNER'S STDOUT by design; "
             f"pointed at anything else -- a source file, a build log, a truncated "
             f"capture -- it refuses rather than searching it"
@@ -362,11 +375,12 @@ def self_test() -> int:
         return log_findings(profile, log, "<self-test log>")
 
     summary = "\ntest result: ok. 2189 passed; 0 failed; 16 ignored\n"
-    good = "".join(f"test {a} ... ok\n" for a in anchors) + summary
+    banner = "running 2205 tests\n"
+    good = banner + "".join(f"test {a} ... ok\n" for a in anchors) + summary
 
     # (a) THE VACUOUS LANE, FIRST -- the whole reason this file exists. A run
     #     that passed thousands of tests without building the backend must RED.
-    vacuous = "test geometry::tests::something_else ... ok\n" + summary
+    vacuous = banner + "test geometry::tests::something_else ... ok\n" + summary
     found = run(vacuous)
     if len(found) != len(anchors):
         failures.append(
@@ -384,7 +398,12 @@ def self_test() -> int:
     #     detector. The names are present, as they are in every checkout on every
     #     platform, but nothing executed them.
     short = d2d.rsplit("::", 1)[-1]
-    as_source = f"    fn {short}() {{\n// see {d2d}\n// see {ffi}\n" + summary
+    as_source = (
+        banner
+        + f"    fn {short}() {{\n"
+        + "".join(f"// see {a}\n" for a in anchors)
+        + summary
+    )
     found = run(as_source)
     if len(found) != len(anchors):
         failures.append(
@@ -429,6 +448,16 @@ def self_test() -> int:
     truncated = good.replace(summary, "\n")
     if not any("not a cargo-test stream" in f for f in run(truncated)):
         failures.append("a log with no `test result:` summary must refuse")
+
+    # (h2) THE THIN-PREMISE HALF, and it was a real finding: an anchor line plus
+    #      a summary line -- three lines total -- was accepted as evidence that a
+    #      1,958-line backend had been compiled and run. A real harness prints
+    #      its `running N tests` banner first, so the pair is now required.
+    if not any("not a cargo-test stream" in f for f in run(good.replace(banner, ""))):
+        failures.append(
+            "a stub with an anchor and a summary but no harness banner must be "
+            "refused as evidence of a backend build"
+        )
 
     # (i) An empty log is refused, not treated as nothing-to-check.
     if not any("is empty" in f for f in run("")):
