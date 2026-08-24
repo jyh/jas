@@ -50,3 +50,8 @@ screenshot.png
 # check_geometry_checkers.py asserts both halves -- that this entry exists,
 # and that the file it reads is untracked.
 checker-report.json
+
+# Captured cargo-test streams from the native backend lanes (windows-native,
+# native-ffi). The lane guard reads them; nothing tracks them.
+native-lane.log
+ffi-lane.log

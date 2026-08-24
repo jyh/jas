@@ -117,6 +117,21 @@ FULL_SURFACE: dict[str, str] = {
         "encoding, newline and path-separator defects. A red at step 5 of 19 "
         "hid its Rust steps for 61 first-parent commits (f40ecff1..6721cd09)."
     ),
+    "test.yml:windows-native": (
+        "The only lane in which the Direct2D backend compiles at all "
+        "(painter/mod.rs:281 is `#[cfg(all(feature = \"d2d\", windows))]`), and "
+        "its two steps are the build and the proof the build was not vacuous. "
+        "If the cargo step could hide the guard, the lane would report a green "
+        "tick over exactly the failure the guard exists to detect -- and unlike "
+        "the `windows` lane, this one is short enough that nobody would notice "
+        "a step missing from the tail."
+    ),
+    "test.yml:native-ffi": (
+        "The FFI surface's second platform family, and the same argument as "
+        "`windows-native` with a smaller blast radius: two steps, the second of "
+        "which is the only thing standing between `cargo test` exiting 0 and "
+        "the surface having actually been built."
+    ),
 }
 
 # Judging steps that must STAY fail-fast, because a later step's result would be
