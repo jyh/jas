@@ -110,6 +110,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import re
+import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -138,6 +139,7 @@ PROFILES: dict[str, dict] = {
             "does not need, and the `web` half is already covered by the "
             "`windows` job's own `cargo test` step."
         ),
+        "runner_family": "windows",
         "features": {"d2d": "painter::direct2d::", "ffi": "ffi::"},
         "anchors": {
             "painter::direct2d::painter::tests::"
@@ -168,6 +170,7 @@ PROFILES: dict[str, dict] = {
             "honestly, rather than taking an EXEMPT row for a script that had no "
             "platform reason to be Windows-only."
         ),
+        "runner_family": "other",
         "features": {"ffi": "ffi::"},
         "anchors": {
             "ffi::tests::the_five_frozen_classes_map_by_position": (
@@ -201,8 +204,15 @@ def executed_ok(log: str, name: str) -> int:
     # through bash, and a CRLF capture would otherwise fail to match a line that
     # is plainly there -- a red lane over a green build, from a line ending. The
     # self-test's case (j) is what caught it, on the first run of this file.
+    #
+    # ` - should panic` is libtest's own decoration on a `#[should_panic]` test:
+    # it prints `test foo - should panic ... ok`. No anchor uses it today, so
+    # this is not a live path -- it is here because the day someone picks a
+    # should_panic test as an anchor, the failure would be a RED LANE OVER A
+    # GREEN BUILD, and that is the shape that gets a gate switched off.
     pattern = re.compile(
-        r"^test[ \t]+" + re.escape(name) + r"[ \t]+\.\.\.[ \t]+ok[ \t\r]*$",
+        r"^test[ \t]+" + re.escape(name) + r"(?:[ \t]+-[ \t]+should[ \t]+panic)?"
+        r"[ \t]+\.\.\.[ \t]+ok[ \t\r]*$",
         re.MULTILINE,
     )
     return len(pattern.findall(log))
@@ -243,7 +253,44 @@ def declaration_findings(profile_name: str) -> list[str]:
 
     # THE STRUCTURAL HALF. Each feature the profile claims must be proved by an
     # anchor whose module path could only have compiled under that feature.
-    for feature, prefix in (profile.get("features") or {}).items():
+    #
+    # THE FLOOR IS CHECKED BEFORE IT IS APPLIED, because an OPT-IN floor is not a
+    # floor. A profile written without a `features` map would sail through the
+    # loop below -- zero iterations, zero findings -- and lose the entire
+    # structural guarantee silently, which is this gate's own vacuity class
+    # turned on its declaration.
+    # Fail-closed already (an absent value matches no family, so the run reds),
+    # but named here so the message points at the declaration rather than at the
+    # runner the author is standing on.
+    if profile.get("runner_family") not in ("windows", "other"):
+        findings.append(
+            f"profile {profile_name!r} declares runner_family="
+            f"{profile.get('runner_family')!r}, which is not 'windows' or "
+            f"'other' -- without it nothing stops a lane being pointed at a "
+            f"profile whose anchors are a strict subset of the ones it owes"
+        )
+
+    features = profile.get("features")
+    if not isinstance(features, dict) or not features:
+        findings.append(
+            f"profile {profile_name!r} declares no `features` map, so the "
+            f"structural floor below never runs -- a profile that names no "
+            f"feature cannot be shown to prove one, and its anchors could be any "
+            f"test in the crate"
+        )
+        features = {}
+    for feature, prefix in features.items():
+        # A prefix is what ties an anchor to a feature-gated module. An empty or
+        # trivial one is satisfied by every test in the crate, which is the
+        # broadened-prefix attack: the check still passes and asserts nothing.
+        if not isinstance(prefix, str) or not prefix.endswith("::"):
+            findings.append(
+                f"profile {profile_name!r}: feature {feature!r} maps to prefix "
+                f"{prefix!r}, which is not a module path ending in '::' -- a "
+                f"prefix that is not a module path is matched by tests the "
+                f"feature does not gate"
+            )
+            continue
         if not any(name.startswith(prefix) for name in anchors):
             findings.append(
                 f"profile {profile_name!r} claims to cover feature {feature!r} "
@@ -296,22 +343,35 @@ def self_test() -> int:
     """Prove this checker FAILS before trusting any green it reports."""
     failures: list[str] = []
     profile = "windows-d2d-ffi"
-    d2d, ffi = list(PROFILES[profile]["anchors"])
+
+    # SELECTED BY PREFIX, NOT BY POSITION, and that is a repair rather than a
+    # preference. This read `d2d, ffi = list(...)` until an adversarial review
+    # executed the documented way to extend coverage: ADDING A THIRD ANCHOR
+    # raised `ValueError: too many values to unpack`, and merely REORDERING the
+    # two made the self-test accuse a sound profile of being unsound. Both are a
+    # red lane over a green build, produced by following the instructions -- and
+    # both were invisible while the dict happened to hold exactly two entries in
+    # exactly one order. A test coupled to the incidental shape of the data it
+    # checks fails the first time that data changes legitimately.
+    anchors = list(PROFILES[profile]["anchors"])
+    by_prefix = PROFILES[profile]["features"]
+    d2d = next(a for a in anchors if a.startswith(by_prefix["d2d"]))
+    ffi = next(a for a in anchors if a.startswith(by_prefix["ffi"]))
 
     def run(log: str) -> list[str]:
         return log_findings(profile, log, "<self-test log>")
 
     summary = "\ntest result: ok. 2189 passed; 0 failed; 16 ignored\n"
-    good = f"test {d2d} ... ok\ntest {ffi} ... ok\n" + summary
+    good = "".join(f"test {a} ... ok\n" for a in anchors) + summary
 
     # (a) THE VACUOUS LANE, FIRST -- the whole reason this file exists. A run
     #     that passed thousands of tests without building the backend must RED.
     vacuous = "test geometry::tests::something_else ... ok\n" + summary
     found = run(vacuous)
-    if len(found) != 2:
+    if len(found) != len(anchors):
         failures.append(
-            f"a lane that built neither backend must red on BOTH anchors, got "
-            f"{len(found)}"
+            f"a lane that built neither backend must red on EVERY anchor "
+            f"({len(anchors)}), got {len(found)}"
         )
     if not any("is ABSENT" in f for f in found):
         failures.append("the vacuous lane's finding must say the anchor is ABSENT")
@@ -326,7 +386,7 @@ def self_test() -> int:
     short = d2d.rsplit("::", 1)[-1]
     as_source = f"    fn {short}() {{\n// see {d2d}\n// see {ffi}\n" + summary
     found = run(as_source)
-    if len(found) != 2:
+    if len(found) != len(anchors):
         failures.append(
             "a log that MENTIONS both names without running them must red on "
             "both -- this is the mutation that makes 'grep the source' wrong"
@@ -385,7 +445,7 @@ def self_test() -> int:
         PROFILES[profile]["anchors"] = {}
         if not any("floor is" in f for f in declaration_findings(profile)):
             failures.append("a profile with no anchors must red")
-        PROFILES[profile]["anchors"] = {ffi: "only the portable half"}
+        PROFILES[profile]["anchors"] = {ffi: "only the portable half"}  # noqa
         if not any("'d2d'" in f for f in declaration_findings(profile)):
             failures.append(
                 "a profile claiming d2d with only an ffi anchor must red -- that "
@@ -396,6 +456,21 @@ def self_test() -> int:
             failures.append("an anchor with no reason must red")
     finally:
         PROFILES[profile]["anchors"] = saved
+
+    # (n) THE PROFILE-SWAP BINDING. The two profiles' anchor sets nest, so the
+    #     narrower one must not be usable on the wider one's lane; a bogus or
+    #     missing family must red the DECLARATION rather than silently matching
+    #     no runner and reading as an ordinary environment mismatch.
+    saved_family = PROFILES[profile]["runner_family"]
+    try:
+        PROFILES[profile]["runner_family"] = "linux-ish"
+        if not any("runner_family" in f for f in declaration_findings(profile)):
+            failures.append("an unrecognised runner_family must red")
+        del PROFILES[profile]["runner_family"]
+        if not any("runner_family" in f for f in declaration_findings(profile)):
+            failures.append("a missing runner_family must red")
+    finally:
+        PROFILES[profile]["runner_family"] = saved_family
 
     # (l) An unknown profile refuses instead of passing over nothing.
     if not any("unknown profile" in f for f in declaration_findings("no-such-lane")):
@@ -432,11 +507,41 @@ def main() -> int:
     parser.add_argument("--log", help="the log captured from the lane's cargo run")
     args = parser.parse_args()
 
+    # THE SELF-TEST NO LONGER SHORT-CIRCUITS THE REAL CHECK. It returned here
+    # unconditionally until an adversarial review pointed out that
+    # `--self-test --profile P --log L` exits 0 having never opened the log --
+    # a single command that looks like it did both jobs and did one. The two
+    # CI steps invoke it separately, so this was never live; it was a loaded
+    # gun for whoever condensed those two lines into one.
     if args.self_test:
-        return self_test()
+        rc = self_test()
+        if rc:
+            return rc
+
+    # BARE INVOCATION IS THE STATIC HALF, NOT AN ERROR -- and this is a repair.
+    # `scripts/sweep.sh` is this repo's canonical "run every gate" tool and it
+    # GLOBS `scripts/check_*.py`, running each with no arguments. Exiting 1 there
+    # made the sweep permanently red on a clean tree the moment this file landed,
+    # with this gate the only culprit. A gate that reds the sweep gets the sweep
+    # abandoned, which costs far more than this gate is worth.
+    #
+    # So with no log to read, it asserts everything that can be asserted without
+    # a runner stream -- every declaration, plus the self-test -- and says
+    # plainly that it adjudicated no lane. Silence there would be the vacuity
+    # this file exists to forbid, reproduced in its own reporting.
+    if not args.log and not args.profile:
+        if not args.self_test:
+            rc = self_test()
+            if rc:
+                return rc
+        print("check_native_backend_lane: OK (declarations sound, self-test passed)")
+        print("  NO LANE ADJUDICATED -- this run read no log. The assertion this")
+        print("  gate exists for needs a cargo stream captured by a CI step; pass")
+        print("  --profile and --log to make it. Both jobs in test.yml do.")
+        return 0
 
     if not args.profile or not args.log:
-        print("FAIL: --profile and --log are both required.")
+        print("FAIL: --profile and --log go together.")
         print(f"  declared profiles: {', '.join(sorted(PROFILES))}")
         return 1
 
@@ -447,15 +552,69 @@ def main() -> int:
             print(f"  {f}")
         return 1
 
+    # THE PROFILE IS BOUND TO THE RUNNER FAMILY IT CAN ACTUALLY BE SATISFIED ON,
+    # and this closes a swap an adversarial review executed. The two profiles'
+    # anchor sets NEST -- `ffi-second-family` asserts a strict subset of
+    # `windows-d2d-ffi` -- so editing one token on the Windows job's `--profile`
+    # argument left every gate in the repo green while dropping 100% of the
+    # Direct2D assertion. Nothing tied a profile to the job that invoked it.
+    #
+    # Binding to the PLATFORM needs no registry, no YAML parser (this gate is
+    # stdlib-only so its lanes can skip `pip install`), and no list to fall out
+    # of date: the d2d profile is unsatisfiable off Windows BY CONSTRUCTION, and
+    # the second-family profile exists precisely to run somewhere else. So each
+    # profile states where it belongs and the gate checks where it is.
+    here = "windows" if sys.platform == "win32" else "other"
+    wanted = PROFILES[args.profile].get("runner_family")
+    if wanted != here:
+        print("FAIL: this profile cannot be satisfied on this runner.")
+        print(f"  profile {args.profile!r} declares runner_family={wanted!r};")
+        print(f"  this is a {here!r} runner (sys.platform={sys.platform!r}).")
+        print("  The profiles' anchor sets NEST, so pointing a lane at the")
+        print("  narrower one is a green tick over an assertion that was")
+        print("  silently dropped. Pick the profile that names this family, or")
+        print("  add one. (Reading a log captured on another platform is not")
+        print("  what this gate is for -- it adjudicates the lane it runs in.)")
+        return 1
+
+    # RESOLVED AGAINST THE CALLER'S CWD, not against ROOT. It resolved against
+    # ROOT until a review showed what that buys: run from jas_dioxus/ with
+    # `--log native-lane.log`, and a STALE log at the repo root silently
+    # substitutes for the run just captured beside you -- a green verdict about
+    # a different build. Normal path semantics make the file you named the file
+    # that is read.
     path = pathlib.Path(args.log)
-    if not path.is_absolute():
-        path = ROOT / path
     label = args.log
     if not path.exists():
         print("FAIL: the lane's evidence could not be read.")
-        print(f"  {label} does not exist. The cargo step is what produces it; a")
-        print("  missing log means the lane did not run, and a lane that did not")
-        print("  run is RED, never a skip.")
+        print(f"  {label} does not exist (looked in {path.resolve().parent}).")
+        print("  The cargo step is what produces it; a missing log means the lane")
+        print("  did not run, and a lane that did not run is RED, never a skip.")
+        return 1
+
+    # A TRACKED LOG IS A PERMANENT FALSE GREEN, so it is refused outright. If
+    # this file is ever committed, every future run reads a frozen stream that
+    # says the backend was built, forever, on every platform -- the gate would
+    # then certify its own fossil. `checker-report.json` is defended on exactly
+    # this half (check_geometry_checkers.py asserts it stays untracked); the
+    # same argument applies here and .gitignore alone does not enforce it.
+    try:
+        tracked = subprocess.run(
+            # The Path itself, NOT str(path): it is an ARGUMENT to git, not text
+            # being keyed on, and `str(Path)` yields backslashes here and slashes
+            # everywhere else. check_path_keying.py caught this line within
+            # minutes of it being written -- on the one platform that can see it.
+            ["git", "ls-files", "--error-unmatch", path],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        ).returncode == 0
+    except OSError:
+        tracked = False  # no git here; the CI lanes always have it
+    if tracked:
+        print("FAIL: the lane's evidence is COMMITTED to the repository.")
+        print(f"  {label} is git-tracked. A tracked log is read identically on")
+        print("  every platform and every run, so this gate would pass over a")
+        print("  build that never happened -- permanently, and everywhere. Remove")
+        print("  it from the index; .gitignore already lists it.")
         return 1
 
     # errors="replace" is deliberate: this file is a CAPTURED RUNNER STREAM, not
