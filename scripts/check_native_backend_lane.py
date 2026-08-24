@@ -28,6 +28,19 @@ EVERY FIELD AN OPERATOR WOULD CHECK READS EXACTLY LIKE SUCCESS:
     builds the 41 backend tests, so it prints the IDENTICAL baseline count.
     Nothing sums wrong.
 
+AND THIS IS REPRODUCED, NOT ARGUED. Run from the Windows seat, 2026-08-23:
+
+    cargo check --no-default-features --features d2d \
+        --target x86_64-unknown-linux-gnu
+        Finished `dev` profile ... exit 0
+
+    diagnostics naming direct2d/, linux target ... 0
+    diagnostics naming direct2d/, windows host .. 1
+
+The feature resolved, the crate built, the command succeeded, and NOT ONE LINE
+of the backend was compiled. That is the whole failure mode, on demand, in four
+seconds -- and every signal a lane would publish about it says success.
+
 A NAMED TEST is immune to all three -- but only if the guard reads the right
 stream.
 
