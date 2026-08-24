@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SMOKE 4 — PAINTER PH2, the six multi-paint kinds. Banked 2026-07-24, never
+     eyeballed. Prepared 2026-08-23 so the hour is judgment, not drawing.
+
+     PH2 converted Rect / Circle / Ellipse / Polygon / Polyline / Path onto the
+     Painter seam, but ONLY when the paint is display-list-equivalent to the
+     legacy body (contract R4): a fill (A3 winding, A4 alpha) THEN a stroke.
+     Anything the seam cannot reproduce exactly routes back to the legacy arm.
+
+     Every shape below is a CONVERTIBLE case — plain solid fill, plain solid
+     centre-aligned stroke — so each one is drawn by the NEW path. That is the
+     arm that has never been looked at.
+
+     PASS: all six render as they did before the painter conversion — fill under
+     stroke, stroke centred on the outline, no doubled or missing edges, no
+     alpha shift where fill meets stroke. -->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 600 400" width="600" height="400">
+  <g inkscape:groupmode="layer" inkscape:label="PH2 multi-paint kinds">
+    <rect x="40" y="40" width="130" height="90" fill="rgb(210,90,70)" stroke="rgb(30,30,30)" stroke-width="8"
+          inkscape:label="1 Rect — convertible"/>
+    <circle cx="290" cy="85" r="48" fill="rgb(80,150,200)" stroke="rgb(30,30,30)" stroke-width="8"
+            inkscape:label="2 Circle — convertible"/>
+    <ellipse cx="470" cy="85" rx="70" ry="45" fill="rgb(120,180,110)" stroke="rgb(30,30,30)" stroke-width="8"
+             inkscape:label="3 Ellipse — convertible"/>
+    <polygon points="40,320 105,200 170,320" fill="rgb(230,180,60)" stroke="rgb(30,30,30)" stroke-width="8"
+             inkscape:label="4 Polygon — convertible, closed"/>
+    <polyline points="220,320 260,220 300,320 340,220" fill="none" stroke="rgb(150,90,180)" stroke-width="8"
+              inkscape:label="5 Polyline — convertible, open"/>
+    <path d="M400,320 C420,210 520,210 545,320 Z" fill="rgb(90,170,170)" stroke="rgb(30,30,30)" stroke-width="8"
+          inkscape:label="6 Path — convertible"/>
+  </g>
+</svg>
