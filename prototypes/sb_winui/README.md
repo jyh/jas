@@ -10,10 +10,65 @@ Scope boundary inherited from S-A, stated in `../ffi_spike/README.md`:
 > No swapchain, no rendering. That is S-B, and its seam should be designed
 > against a real `SwapChainPanel` rather than in advance.
 
-## OPEN DEFECT — `Present` returns `E_NOINTERFACE` after Rust paints
+## RESOLVED — and both defects had ONE cause
 
-The chain runs end to end and the last step fails. **Rust's paint returns 0**;
-`Present` then returns `0x80004002`.
+**S-B checkpoint 3 works. Both routes run 300 frames on hardware with no
+failure.** `Present` succeeds every frame, the heap corruption is gone, and the
+`E_NOINTERFACE` never returns.
+
+### The cause: the wrong interface pointer
+
+The host handed Rust `Marshal.GetIUnknownForObject(...)` — the object's
+**IUnknown** pointer — and Rust called through it as an `IDXGISurface*`. For a
+COM object exposing several interfaces those are **different pointers**, so every
+call landed on a wrong vtable slot. The fix is one call per site:
+
+```csharp
+Marshal.GetComInterfaceForObject(surface, typeof(IDXGISurface))
+```
+
+**One bug, two very different symptoms, and that is why it took so long.** On the
+direct route the back buffer's IUnknown happens to coincide with its
+IDXGISurface, so the paint "worked" and only the later `Present` failed —
+`E_NOINTERFACE`, from a call that never names an interface. On the offscreen
+route the target is an `ID3D11Texture2D`, whose IUnknown is **not** its
+IDXGISurface, so the same code corrupted the heap (`0xC0000374`). A latent defect
+that one of two callers could not expose.
+
+Every hypothesis in the table below was **correctly excluded** — none of them was
+the cause. The table is kept because the exclusions are what made the remaining
+space small enough to see the real one, and because re-running reproduces them.
+
+### Measured, 1904x941, hardware, 300 frames each
+
+| route | steady-mean | min | max |
+|---|---|---|---|
+| DIRECT paint (zero-copy) | **0.92 ms** | 0.48 | 1.38 |
+| OFFSCREEN paint + GPU copy | **1.07 ms** | 0.63 | 1.73 |
+
+**The full-surface GPU copy costs ~0.15 ms, about 16% on top of the paint.**
+That is the figure S-C exists to weigh, and it is now measured rather than
+assumed. `Present` is ~5.2-5.5 ms on both routes: vsync-bound at
+`SyncInterval 1`, identical either way, so it does not separate them.
+
+**The first frame is excluded from every mean and reported separately** — it runs
+2.3-4.3 ms against a 0.5 ms steady state, and an earlier version of this harness
+folded a 1092 ms first frame into a "mean" of 19.20 ms that described nothing.
+
+### What is still open
+
+The **direct route is the one the variant wants** and it now works, so the
+Graphics Tools install docketed for the Captain is no longer blocking: it was
+wanted to explain the `E_NOINTERFACE`, and the `E_NOINTERFACE` is explained.
+
+---
+
+## Historical: the defect as it stood before the cause was found
+
+Kept because the exclusion method is the transferable part.
+
+The chain ran end to end and the last step failed. **Rust's paint returned 0**;
+`Present` then returned `0x80004002`.
 
 **The reproduction is exact.** `SB_SKIP_PAINT=1` acquires the back buffer and
 does everything else identically, without calling Rust:
@@ -49,8 +104,12 @@ table rather than requiring it to be trusted.
 
 ## Status
 
-**Checkpoint 1 PASSES (2026-08-24): the shell builds and puts a window on the
-desktop.** Verified, not assumed:
+**Checkpoints 1, 2 and 3 PASS (2026-08-24).** The shell builds, puts a window on
+the desktop, creates a D3D11 device and composition swapchain, binds it to a
+SwapChainPanel, and the Rust core paints it through Direct2D for 300 consecutive
+frames on both the direct and offscreen routes.
+
+Checkpoint 1's original evidence, kept because the harness is the point:
 
 ```
 ok  : capture ran in session 1, bounds 2560x1440 at (0,0)

@@ -281,8 +281,24 @@ internal sealed unsafe class SwapChainHost : IDisposable
                 // that way -- splitting paint from copy would need two crossings
                 // and would measure the split, not the work.
                 _swapChain.GetBuffer<IDXGISurface>(0, out var back);
-                var backPtr = Marshal.GetIUnknownForObject(back);
-                var offPtr = Marshal.GetIUnknownForObject((IDXGISurface)_offscreen!);
+                // GetComInterfaceForObject, NOT GetIUnknownForObject, AND THIS IS
+                // THE HEAP CORRUPTION.
+                //
+                // GetIUnknownForObject returns the object's IUnknown pointer.
+                // Rust receives it as an IDXGISurface* and calls through that
+                // vtable. For a COM object exposing several interfaces those are
+                // DIFFERENT pointers, so every call lands on a wrong slot -- which
+                // is undefined behaviour, and manifested as 0xC0000374 in ntdll
+                // rather than as a clean failure.
+                //
+                // It survived on the direct route because a swapchain back buffer
+                // hands back an IUnknown that coincides with its IDXGISurface, so
+                // the wrong-pointer bug was invisible there. The offscreen target
+                // is an ID3D11Texture2D, whose IUnknown is NOT its IDXGISurface,
+                // and the same code then corrupts the heap. A latent defect that
+                // only one of two callers could expose.
+                var backPtr = Marshal.GetComInterfaceForObject(back, typeof(IDXGISurface));
+                var offPtr = Marshal.GetComInterfaceForObject(_offscreen!, typeof(IDXGISurface));
                 try
                 {
                     sw.Restart();
@@ -300,7 +316,11 @@ internal sealed unsafe class SwapChainHost : IDisposable
             else
             {
                 _swapChain.GetBuffer<IDXGISurface>(0, out var target);
-                var ptr = Marshal.GetIUnknownForObject(target);
+                // Same correction as the offscreen branch above: ask for the
+                // interface Rust will actually call through. This route happened
+                // to work with the IUnknown pointer, which is precisely why it
+                // was worth fixing here too rather than only where it broke.
+                var ptr = Marshal.GetComInterfaceForObject(target, typeof(IDXGISurface));
                 try
                 {
                     sw.Restart();
@@ -325,11 +345,18 @@ internal sealed unsafe class SwapChainHost : IDisposable
         static string Stat(string name, List<double> xs)
         {
             if (xs.Count == 0) return $"{name} n/a";
-            var mean = xs.Average();
-            // The FIRST frame is reported separately: it carries device warm-up
-            // and one-time allocation, and folding it into a mean is how a
-            // steady-state number gets quietly inflated.
-            return $"{name} first={xs[0]:F2}ms mean={mean:F2}ms min={xs.Min():F2}ms n={xs.Count}";
+            if (xs.Count == 1) return $"{name} first={xs[0]:F2}ms (one frame only)";
+
+            // THE FIRST FRAME IS EXCLUDED FROM THE MEAN, not merely printed
+            // beside it. It carries device warm-up, shader compilation and
+            // one-time allocation: measured here at 1092ms on the offscreen route
+            // against a 0.71ms minimum. Averaging that in produced a "mean" of
+            // 19.20ms that described nothing -- not the first frame, not the
+            // steady state, and it would have gone into S-C's comparison as the
+            // cost of a copy.
+            var rest = xs.Skip(1).ToList();
+            return $"{name} first={xs[0]:F2}ms steady-mean={rest.Average():F2}ms " +
+                   $"min={rest.Min():F2}ms max={rest.Max():F2}ms n={rest.Count}+1";
         }
 
         var route = offscreen ? "OFFSCREEN+copy" : "DIRECT";

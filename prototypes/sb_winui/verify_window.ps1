@@ -53,6 +53,11 @@ $principal = New-ScheduledTaskPrincipal -UserId $uid -LogonType Interactive -Run
 $extraEnv = ''
 if ($env:SB_SKIP_PAINT -eq '1') { $extraEnv += '$env:SB_SKIP_PAINT=''1''; ' }
 if ($env:SB_MODE) { $extraEnv += '$env:SB_MODE=''' + $env:SB_MODE + '''; ' }
+# SB_FRAMES was silently NOT forwarded: a run asked for 120 frames and quietly
+# measured 60. The app's own default filled the gap, so nothing looked wrong --
+# a setting that is ignored rather than rejected is how a measurement ends up
+# describing a different experiment than the one that was requested.
+if ($env:SB_FRAMES) { $extraEnv += '$env:SB_FRAMES=''' + $env:SB_FRAMES + '''; ' }
 $launchArg = '-NoProfile -ExecutionPolicy Bypass -Command ' +
     '"$env:DOTNET_ROOT=''' + "$env:LOCALAPPDATA\Microsoft\dotnet" + '''; ' + $extraEnv + '& ''' + $Exe + '''"'
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $launchArg
