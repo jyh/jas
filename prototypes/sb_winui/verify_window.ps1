@@ -18,7 +18,11 @@
 param(
     [Parameter(Mandatory = $true)][string]$Title,
     [Parameter(Mandatory = $true)][string]$Exe,
-    [int]$Seconds = 12
+    [int]$Seconds = 12,
+    # "r,g,b" values that must appear in the capture. Used from checkpoint 3 on,
+    # where the question stops being "is there a window" and becomes "did the
+    # RUST core's pixels reach the screen".
+    [string[]]$ExpectColor = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -116,6 +120,46 @@ if (Test-Path $png) {
     $ok = $false
 }
 
+# THE CHECKPOINT-3 ARM: exact probe colours, counted.
+#
+# The window title proves the SHELL ran. It says nothing about whether the Rust
+# core painted, because a WinUI window with a dead SwapChainPanel has the same
+# title as a live one. These colours are produced by `jas_paint_probe_surface`
+# and by nothing else on this desktop, which is what makes them evidence.
+#
+# A CAVEAT THAT MUST NOT BE READ AS A RESULT: a GDI screen copy does not always
+# capture hardware-composed swapchain content. If the colours are absent, that is
+# EITHER a rendering failure OR a capture limitation, and the two are not
+# distinguishable from this arm alone. It is reported as INCONCLUSIVE rather than
+# FAIL for exactly that reason -- calling it a failure would be asserting
+# something this instrument cannot see.
+if ($ExpectColor.Count -gt 0 -and (Test-Path $png)) {
+    Add-Type -AssemblyName System.Drawing
+    $bmp = [System.Drawing.Bitmap]::FromFile($png)
+    $want = @{}
+    foreach ($c in $ExpectColor) { $want[$c] = 0 }
+    for ($y = 0; $y -lt $bmp.Height; $y += 3) {
+        for ($x = 0; $x -lt $bmp.Width; $x += 3) {
+            $p = $bmp.GetPixel($x, $y)
+            $key = "$($p.R),$($p.G),$($p.B)"
+            if ($want.ContainsKey($key)) { $want[$key]++ }
+        }
+    }
+    $bmp.Dispose()
+    $missing = @()
+    foreach ($c in $ExpectColor) {
+        if ($want[$c] -ge 50) { $verdicts += "ok  : probe colour $c found ($($want[$c]) sampled pixels)" }
+        else { $missing += "$c ($($want[$c]))"; }
+    }
+    if ($missing.Count -gt 0) {
+        $verdicts += "INCONCLUSIVE: probe colour(s) not found: $($missing -join ', ')"
+        $verdicts += "              either the core did not paint, OR a GDI screen copy"
+        $verdicts += "              cannot see hardware-composed swapchain content."
+        $verdicts += "              This arm cannot tell those apart; do not report either."
+        $inconclusive = $true
+    }
+}
+
 # Leave nothing running on JYH's desktop.
 Get-Process -Name ([IO.Path]::GetFileNameWithoutExtension($Exe)) -ErrorAction SilentlyContinue |
     Stop-Process -Force -ErrorAction SilentlyContinue
@@ -123,4 +167,7 @@ Drop-Task $launchTask
 Drop-Task $capTask
 
 $verdicts | ForEach-Object { Write-Output "  $_" }
-if ($ok) { Write-Output "VERIFY: PASS"; exit 0 } else { Write-Output "VERIFY: FAIL"; exit 1 }
+if (-not $ok) { Write-Output "VERIFY: FAIL"; exit 1 }
+if ($inconclusive) { Write-Output "VERIFY: WINDOW OK, PIXELS INCONCLUSIVE"; exit 2 }
+Write-Output "VERIFY: PASS"
+exit 0

@@ -129,6 +129,32 @@ impl SurfaceTarget {
     }
 }
 
+impl Drop for SurfaceTarget {
+    /// UNBIND THE BACK BUFFER. Not tidiness — without it the host's next
+    /// `Present` fails.
+    ///
+    /// MEASURED, by bisect, against a live WinUI-3 SwapChainPanel: presenting an
+    /// UNTOUCHED back buffer succeeds, and presenting the same buffer after this
+    /// target has drawn into it returns `E_NOINTERFACE` (0x80004002) from both
+    /// `Present` and `Present1`, while `GetDesc1` on the same swapchain still
+    /// reports a healthy 1904x941 with 2 buffers. So the swapchain is fine and
+    /// the interface dispatch is fine; what is not fine is that Direct2D still
+    /// holds the buffer as its render target.
+    ///
+    /// `EndDraw` is NOT sufficient — it ends the draw, it does not release the
+    /// target. `SetTarget(None)` is what drops D2D's reference to the surface.
+    ///
+    /// Doing it in `Drop` rather than asking callers to remember is deliberate:
+    /// the failure it prevents appears in the HOST, one language and one process
+    /// boundary away from the code responsible, as an error code that names
+    /// neither Direct2D nor this file.
+    fn drop(&mut self) {
+        unsafe {
+            self.context.SetTarget(None);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

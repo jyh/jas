@@ -48,10 +48,17 @@ use crate::painter::direct2d::surface::SurfaceTarget;
 /// the frozen five-class contract of the S-A surface, and widening a frozen
 /// vocabulary for a spike is how a spike becomes load-bearing by accident.
 pub const JAS_PAINT_OK: i32 = 0;
-pub const JAS_PAINT_NULL_SURFACE: i32 = -1;
-pub const JAS_PAINT_NOT_A_SURFACE: i32 = -2;
-pub const JAS_PAINT_TARGET_FAILED: i32 = -3;
-pub const JAS_PAINT_DRAW_FAILED: i32 = -4;
+/// Caller passed NULL. POSITIVE so it cannot collide with an HRESULT.
+pub const JAS_PAINT_NULL_SURFACE: i32 = 1;
+/// The pointer was not a usable `IDXGISurface`. Positive, same reason.
+pub const JAS_PAINT_NOT_A_SURFACE: i32 = 2;
+
+// ANY OTHER NON-ZERO RETURN IS THE RAW HRESULT, and that is a repair rather than
+// a design. The first version collapsed every COM failure into a single -3, so
+// the host learned only that `SurfaceTarget::from_dxgi_surface` had failed --
+// which is the WHERE and never the WHY. Diagnosing it then required editing and
+// rebuilding both sides. HRESULTs are negative on failure and the two sentinels
+// above are positive, so the spaces cannot overlap.
 
 /// The probe pattern's background, as `(r, g, b)` in 0..=255.
 ///
@@ -75,8 +82,8 @@ fn srgb(c: (u8, u8, u8)) -> D2D1_COLOR_F {
 
 /// Paint the S-B probe pattern into a caller-owned DXGI surface.
 ///
-/// Returns `JAS_PAINT_OK` (0) or one of the negative codes above. The host
-/// presents; this function does not.
+/// Returns `JAS_PAINT_OK` (0), a positive sentinel for a bad pointer, or the
+/// raw HRESULT of whichever COM call failed. The host presents; this does not.
 ///
 /// # Safety
 /// `surface` must be NULL or a valid `IDXGISurface` COM pointer that stays
@@ -99,7 +106,7 @@ pub unsafe extern "C" fn jas_paint_probe_surface(surface: *mut c_void, width: f3
 
     let target = match SurfaceTarget::from_dxgi_surface(surface) {
         Ok(t) => t,
-        Err(_) => return JAS_PAINT_TARGET_FAILED,
+        Err(e) => return e.code().0,
     };
 
     let dc = target.context();
@@ -114,9 +121,9 @@ pub unsafe extern "C" fn jas_paint_probe_surface(surface: *mut c_void, width: f3
         let (cx, cy) = (width / 2.0, height / 2.0);
         let brush = match dc.CreateSolidColorBrush(&srgb(PROBE_FG), None) {
             Ok(b) => b,
-            Err(_) => {
+            Err(e) => {
                 let _ = dc.EndDraw(None, None);
-                return JAS_PAINT_DRAW_FAILED;
+                return e.code().0;
             }
         };
         dc.FillRectangle(
@@ -129,8 +136,8 @@ pub unsafe extern "C" fn jas_paint_probe_surface(surface: *mut c_void, width: f3
             &brush,
         );
 
-        if dc.EndDraw(None, None).is_err() {
-            return JAS_PAINT_DRAW_FAILED;
+        if let Err(e) = dc.EndDraw(None, None) {
+            return e.code().0;
         }
     }
 

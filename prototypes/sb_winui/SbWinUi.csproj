@@ -34,6 +34,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
@@ -44,6 +45,15 @@
       would be guessing at a number I have not read.
     -->
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.*" />
+    <!--
+      Build-time only (PrivateAssets=all): CsWin32 generates the D3D11/DXGI
+      interop from Win32 metadata, so nothing ships with the app and no
+      vtable slot is transcribed by hand. See NativeMethods.txt.
+    -->
+    <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.*">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
   </ItemGroup>
 
 </Project>

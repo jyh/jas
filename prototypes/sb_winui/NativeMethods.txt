@@ -1,0 +1,29 @@
+// CsWin32 generation list for the S-B swapchain host.
+//
+// WHY A GENERATOR RATHER THAN HAND-WRITTEN COM DECLARATIONS. IDXGIFactory2
+// inherits about twenty methods across IDXGIObject, IDXGIFactory and
+// IDXGIFactory1, and a hand-written [ComImport] interface must repeat every one
+// of them in exact vtable order. Getting a slot wrong compiles cleanly and then
+// calls the wrong function at runtime, which is the worst available failure
+// mode: it looks like a Direct3D bug. The generator reads the same Win32
+// metadata the OS headers are generated from.
+//
+// CsWin32 is build-time only; nothing ships with the app.
+
+D3D11CreateDevice
+D3D_DRIVER_TYPE
+D3D11_CREATE_DEVICE_FLAG
+ID3D11Device
+
+CreateDXGIFactory2
+IDXGIFactory2
+IDXGIDevice
+IDXGIAdapter
+IDXGISwapChain1
+IDXGISurface
+DXGI_SWAP_CHAIN_DESC1
+DXGI_FORMAT
+DXGI_SCALING
+DXGI_SWAP_EFFECT
+DXGI_ALPHA_MODE
+DXGI_USAGE

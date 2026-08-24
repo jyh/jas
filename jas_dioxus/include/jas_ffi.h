@@ -99,19 +99,17 @@
 #endif
 
 #if (defined(JAS_WITH_D2D) && defined(_WIN32))
-#define JAS_PAINT_NULL_SURFACE -1
+/**
+ * Caller passed NULL. POSITIVE so it cannot collide with an HRESULT.
+ */
+#define JAS_PAINT_NULL_SURFACE 1
 #endif
 
 #if (defined(JAS_WITH_D2D) && defined(_WIN32))
-#define JAS_PAINT_NOT_A_SURFACE -2
-#endif
-
-#if (defined(JAS_WITH_D2D) && defined(_WIN32))
-#define JAS_PAINT_TARGET_FAILED -3
-#endif
-
-#if (defined(JAS_WITH_D2D) && defined(_WIN32))
-#define JAS_PAINT_DRAW_FAILED -4
+/**
+ * The pointer was not a usable `IDXGISurface`. Positive, same reason.
+ */
+#define JAS_PAINT_NOT_A_SURFACE 2
 #endif
 
 /**
@@ -349,8 +347,8 @@ struct JasBytes jas_widget_tree(struct JasEngine *e,
 /**
  * Paint the S-B probe pattern into a caller-owned DXGI surface.
  *
- * Returns `JAS_PAINT_OK` (0) or one of the negative codes above. The host
- * presents; this function does not.
+ * Returns `JAS_PAINT_OK` (0), a positive sentinel for a bad pointer, or the
+ * raw HRESULT of whichever COM call failed. The host presents; this does not.
  *
  * # Safety
  * `surface` must be NULL or a valid `IDXGISurface` COM pointer that stays
