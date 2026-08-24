@@ -34,7 +34,7 @@ guarantees below.
 | Implementation | UI framework           | Directory      | Status | How to run                |
 |----------------|------------------------|----------------|--------|---------------------------|
 | Rust           | Dioxus (HTML5 canvas)  | [`jas_dioxus/`](jas_dioxus/) | **active** | `cd jas_dioxus && dx serve`   |
-| Swift          | AppKit                 | [`JasSwift/`](JasSwift/)     | **active** | `cd JasSwift && swift run`    |
+| Swift          | AppKit                 | [`JasSwift/`](JasSwift/)     | **active** | `cd JasSwift && swift run Jas` |
 | Python         | Qt / PySide6           | [`jas/`](jas/)               | frozen at `five-port-parity` | `cd jas && python jas_app.py` |
 | OCaml          | GTK 3 / lablgtk3       | [`jas_ocaml/`](jas_ocaml/)   | frozen at `five-port-parity` | `cd jas_ocaml && ./run.sh`    |
 | Flask (ref.)   | Flask + JS (web)       | [`jas_flask/`](jas_flask/)   | reference renderer | `cd jas_flask && flask run`   |
@@ -178,8 +178,12 @@ Requires the Dioxus CLI (`dx`) and a recent Rust toolchain.
 
 ```bash
 cd JasSwift
-swift run
+swift run Jas
 ```
+
+The product name is required: the package declares four executable targets
+(`Jas`, `SvgRoundtrip`, `WorkspaceRoundtrip`, `AlgorithmRoundtrip`), so a bare
+`swift run` exits with *"multiple executable products available"*.
 
 Requires macOS and a recent Swift toolchain.
 
