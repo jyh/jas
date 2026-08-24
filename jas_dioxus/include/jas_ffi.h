@@ -89,6 +89,31 @@
  */
 #define SMOOTH_SIZE 100.0
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Status codes for the spike seam. Deliberately NOT `JasStatus`: that enum is
+ * the frozen five-class contract of the S-A surface, and widening a frozen
+ * vocabulary for a spike is how a spike becomes load-bearing by accident.
+ */
+#define JAS_PAINT_OK 0
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+#define JAS_PAINT_NULL_SURFACE -1
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+#define JAS_PAINT_NOT_A_SURFACE -2
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+#define JAS_PAINT_TARGET_FAILED -3
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+#define JAS_PAINT_DRAW_FAILED -4
+#endif
+
 /**
  * How many draws one collision-free id gets before the mint is reported
  * failed. 100 — the value every open-coded copy of this loop used before
@@ -116,11 +141,13 @@
  */
 #define STAR_INNER_RATIO 0.4
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
 /**
  * The DPI every headless target is pinned to. See the module note: DIPs are
  * CSS pixels only here.
  */
 #define PINNED_DPI 96.0
+#endif
 
 /**
  * Cursor blink half-period in milliseconds (matches the macOS default).
@@ -317,6 +344,21 @@ struct JasBytes jas_widget_tree(struct JasEngine *e,
                                 uintptr_t panel_len,
                                 const uint8_t *ctx_json,
                                 uintptr_t ctx_len);
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Paint the S-B probe pattern into a caller-owned DXGI surface.
+ *
+ * Returns `JAS_PAINT_OK` (0) or one of the negative codes above. The host
+ * presents; this function does not.
+ *
+ * # Safety
+ * `surface` must be NULL or a valid `IDXGISurface` COM pointer that stays
+ * alive for the duration of the call. Ownership is NOT transferred: the caller
+ * still releases it.
+ */
+int32_t jas_paint_probe_surface(void *surface, float width, float height);
+#endif
 
 #ifdef __cplusplus
 }  // extern "C"
