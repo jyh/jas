@@ -51,6 +51,19 @@ internal static class JasCore
     internal static extern int jas_paint_probe_surface(IntPtr dxgiSurface, float width, float height);
 
     /// <summary>
+    /// Paint an offscreen surface and GPU-copy it into the back buffer, both
+    /// host-owned and both borrowed for the call.
+    ///
+    /// The copy is on the Rust side because C#'s CopyResource threw
+    /// InvalidCastException out of InterfaceMarshaler.ConvertToNative even with
+    /// both arguments already typed as ID3D11Resource. windows-rs calls COM
+    /// directly, with no CLR marshaller in between.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_paint_probe_offscreen(
+        IntPtr backSurface, IntPtr offscreenSurface, float width, float height);
+
+    /// <summary>
     /// Point the loader at the cdylib.
     ///
     /// The DLL is a cargo build artifact, not a NuGet asset, so it is not beside

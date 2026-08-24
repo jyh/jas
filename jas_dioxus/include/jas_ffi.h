@@ -358,6 +358,30 @@ struct JasBytes jas_widget_tree(struct JasEngine *e,
 int32_t jas_paint_probe_surface(void *surface, float width, float height);
 #endif
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Paint an OFFSCREEN surface, then GPU-copy it into the host's back buffer.
+ *
+ * The route the direct path cannot currently take. `jas_paint_probe_surface`
+ * paints the back buffer itself and the host's subsequent `Present` fails with
+ * `E_NOINTERFACE`; here Direct2D never touches the back buffer at all, so if
+ * `Present` succeeds afterwards it confirms the mechanism by sidestepping it.
+ *
+ * THE COPY LIVES HERE RATHER THAN IN THE HOST, and not for tidiness. C#'s
+ * `ID3D11DeviceContext::CopyResource` threw `InvalidCastException` out of
+ * `InterfaceMarshaler.ConvertToNative` even with both arguments already typed
+ * as `ID3D11Resource` -- a CLR marshalling wrinkle around the generated
+ * interop. windows-rs calls COM directly with no marshaller in between.
+ *
+ * Ownership is unchanged: BOTH surfaces are the host's, borrowed for the call.
+ *
+ * # Safety
+ * Both pointers must be NULL or valid `IDXGISurface` COM pointers alive for the
+ * duration of the call. Neither is released here.
+ */
+int32_t jas_paint_probe_offscreen(void *back, void *offscreen, float width, float height);
+#endif
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

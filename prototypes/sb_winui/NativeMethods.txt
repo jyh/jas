@@ -30,3 +30,11 @@ DXGI_SCALING
 DXGI_SWAP_EFFECT
 DXGI_ALPHA_MODE
 DXGI_USAGE
+
+# Offscreen path: Rust paints a texture we own, we copy it to the back buffer.
+ID3D11Texture2D
+ID3D11Resource
+D3D11_TEXTURE2D_DESC
+D3D11_BIND_FLAG
+D3D11_USAGE
+DXGI_SAMPLE_DESC

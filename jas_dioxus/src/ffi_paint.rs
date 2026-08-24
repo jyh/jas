@@ -40,7 +40,8 @@ use core::ffi::c_void;
 
 use windows::core::Interface;
 use windows::Win32::Graphics::Direct2D::Common::{D2D1_COLOR_F, D2D_RECT_F};
-use windows::Win32::Graphics::Dxgi::IDXGISurface;
+use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext, ID3D11Resource};
+use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGISurface};
 
 use crate::painter::direct2d::surface::SurfaceTarget;
 
@@ -144,6 +145,81 @@ pub unsafe extern "C" fn jas_paint_probe_surface(surface: *mut c_void, width: f3
     JAS_PAINT_OK
 }
 
+/// Paint an OFFSCREEN surface, then GPU-copy it into the host's back buffer.
+///
+/// The route the direct path cannot currently take. `jas_paint_probe_surface`
+/// paints the back buffer itself and the host's subsequent `Present` fails with
+/// `E_NOINTERFACE`; here Direct2D never touches the back buffer at all, so if
+/// `Present` succeeds afterwards it confirms the mechanism by sidestepping it.
+///
+/// THE COPY LIVES HERE RATHER THAN IN THE HOST, and not for tidiness. C#'s
+/// `ID3D11DeviceContext::CopyResource` threw `InvalidCastException` out of
+/// `InterfaceMarshaler.ConvertToNative` even with both arguments already typed
+/// as `ID3D11Resource` -- a CLR marshalling wrinkle around the generated
+/// interop. windows-rs calls COM directly with no marshaller in between.
+///
+/// Ownership is unchanged: BOTH surfaces are the host's, borrowed for the call.
+///
+/// # Safety
+/// Both pointers must be NULL or valid `IDXGISurface` COM pointers alive for the
+/// duration of the call. Neither is released here.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_paint_probe_offscreen(
+    back: *mut c_void,
+    offscreen: *mut c_void,
+    width: f32,
+    height: f32,
+) -> i32 {
+    if back.is_null() || offscreen.is_null() {
+        return JAS_PAINT_NULL_SURFACE;
+    }
+
+    // Paint the offscreen surface with the ordinary path first. If that fails
+    // there is nothing worth copying, and its status code is already meaningful.
+    let rc = unsafe { jas_paint_probe_surface(offscreen, width, height) };
+    if rc != JAS_PAINT_OK {
+        return rc;
+    }
+
+    let back_s: &IDXGISurface = match unsafe { IDXGISurface::from_raw_borrowed(&back) } {
+        Some(s) => s,
+        None => return JAS_PAINT_NOT_A_SURFACE,
+    };
+    let off_s: &IDXGISurface = match unsafe { IDXGISurface::from_raw_borrowed(&offscreen) } {
+        Some(s) => s,
+        None => return JAS_PAINT_NOT_A_SURFACE,
+    };
+
+    unsafe {
+        // The device again comes FROM the surface, so no D3D11CreateDevice.
+        let dxgi_device: IDXGIDevice = match off_s.GetDevice() {
+            Ok(d) => d,
+            Err(e) => return e.code().0,
+        };
+        let d3d: ID3D11Device = match dxgi_device.cast() {
+            Ok(d) => d,
+            Err(e) => return e.code().0,
+        };
+        let ctx: ID3D11DeviceContext = match d3d.GetImmediateContext() {
+            Ok(c) => c,
+            Err(e) => return e.code().0,
+        };
+
+        let dst: ID3D11Resource = match back_s.cast() {
+            Ok(r) => r,
+            Err(e) => return e.code().0,
+        };
+        let src: ID3D11Resource = match off_s.cast() {
+            Ok(r) => r,
+            Err(e) => return e.code().0,
+        };
+        ctx.CopyResource(&dst, &src);
+        ctx.Flush();
+    }
+
+    JAS_PAINT_OK
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +314,41 @@ mod tests {
         let buf = read(&dev, &ctx, &t);
         assert_eq!(rgb_at(&buf, W / 2, H / 2), PROBE_FG, "centre is the square");
         assert_eq!(rgb_at(&buf, 2, 2), PROBE_BG, "corner is the background");
+    }
+
+    /// THE OFFSCREEN ROUTE, tested WITHOUT a GUI.
+    ///
+    /// Written because the WinUI host died with `0xC0000374`
+    /// (STATUS_HEAP_CORRUPTION) in ntdll the first time it took this route, while
+    /// the direct route ran fine in the same build. Heap corruption deserves a
+    /// deterministic reproduction rather than another launch of a windowed app:
+    /// if this passes, the Rust half is not the corrupting side and the search
+    /// moves to the host's COM reference handling.
+    ///
+    /// Two WARP textures on ONE device, exactly as the host has one device with a
+    /// back buffer and an offscreen target.
+    #[test]
+    fn the_offscreen_route_paints_and_copies_without_corrupting_the_heap() {
+        let (dev, ctx) = warp();
+        let dst = tex(&dev, false);
+        let src = tex(&dev, false);
+        let dst_s: IDXGISurface = dst.cast().expect("dst surface");
+        let src_s: IDXGISurface = src.cast().expect("src surface");
+
+        // Run it repeatedly: a single call can corrupt the heap without tripping
+        // over the damage, and the host was doing sixty frames.
+        for _ in 0..16 {
+            let rc = unsafe {
+                jas_paint_probe_offscreen(dst_s.as_raw(), src_s.as_raw(), W as f32, H as f32)
+            };
+            assert_eq!(rc, JAS_PAINT_OK, "offscreen paint+copy status");
+        }
+
+        // The DESTINATION must carry the pattern -- proving the copy happened and
+        // not merely that the paint did.
+        let buf = read(&dev, &ctx, &dst);
+        assert_eq!(rgb_at(&buf, W / 2, H / 2), PROBE_FG, "copied centre");
+        assert_eq!(rgb_at(&buf, 2, 2), PROBE_BG, "copied corner");
     }
 
     /// A NULL surface must be a status code, never a crash. The host is C#, and
