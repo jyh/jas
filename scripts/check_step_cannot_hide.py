@@ -101,6 +101,7 @@ WHAT IT DOES NOT COVER
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 import yaml
@@ -116,6 +117,21 @@ FULL_SURFACE: dict[str, str] = {
         "The slowest and most expensive lane, and the only one that can see "
         "encoding, newline and path-separator defects. A red at step 5 of 19 "
         "hid its Rust steps for 61 first-parent commits (f40ecff1..6721cd09)."
+    ),
+    "test.yml:windows-native": (
+        "The only lane in which the Direct2D backend compiles at all "
+        "(painter/mod.rs:281 is `#[cfg(all(feature = \"d2d\", windows))]`), and "
+        "its two steps are the build and the proof the build was not vacuous. "
+        "If the cargo step could hide the guard, the lane would report a green "
+        "tick over exactly the failure the guard exists to detect -- and unlike "
+        "the `windows` lane, this one is short enough that nobody would notice "
+        "a step missing from the tail."
+    ),
+    "test.yml:native-ffi": (
+        "The FFI surface's second platform family, and the same argument as "
+        "`windows-native` with a smaller blast radius: two steps, the second of "
+        "which is the only thing standing between `cargo test` exiting 0 and "
+        "the surface having actually been built."
     ),
 }
 
@@ -140,6 +156,39 @@ JUDGES_RUNNERS = ("pytest", "cargo test", "swift test")
 # job-level sibling on purpose: two gates disagreeing about what "survives"
 # means would be worse than either being wrong alone.
 SURVIVES = ("always()", "!cancelled()", "! cancelled()")
+
+# `steps.<id>.` references inside an `if:`. Used to prove the id resolves.
+STEP_REF = re.compile(r"\bsteps\.([A-Za-z_][A-Za-z0-9_-]*)\.")
+
+
+def continue_on_error_set(node: dict) -> bool:
+    """True iff `continue-on-error` is set to something that suppresses failure.
+
+    NOT `is True`, and the difference is a real hole rather than pedantry. That
+    identity test was what this file used, and PyYAML hands back a STRING for
+    `continue-on-error: ${{ true }}` -- a spelling GitHub honours and the test
+    silently passed. So the check reads the VALUE, and refuses on anything it
+    cannot decide, per this file's standing posture: a shape the scanner cannot
+    read is a shape whose safety nobody has checked.
+    """
+    value = node.get("continue-on-error")
+    if value is None or value is False:
+        return False
+    if value is True:
+        return True
+    if isinstance(value, str):
+        text = value.replace("${{", " ").replace("}}", " ").strip().lower()
+        if text in ("false", ""):
+            return False
+        if text in ("true", "1"):
+            return True
+        raise Unresolvable(
+            f"`continue-on-error: {value}` is an expression this scanner cannot "
+            f"evaluate; it may suppress failure at runtime"
+        )
+    raise Unresolvable(
+        f"unrecognised `continue-on-error` shape: {type(value).__name__}"
+    )
 
 # A lane with one judging step cannot hide anything, so finding one or fewer in
 # a lane declared full-surface means the SCANNER broke, not that the lane is
@@ -226,6 +275,86 @@ def scan(docs: dict[str, dict]) -> list[str]:
             )
             continue
 
+        # A JOB-LEVEL `if:` TAKES THE WHOLE LANE DARK, and nothing in this repo
+        # would notice. check_gate_cannot_skip.py -- the job-level sibling --
+        # only examines jobs that declare `needs:`, and a full-surface lane
+        # deliberately declares none, so it is out of that gate's scope by the
+        # very property that makes it unskippable by a dependency. One line
+        # (`if: ${{ github.event_name == 'push' }}`) would then skip the entire
+        # lane on every pull request while every meta-gate stayed green.
+        #
+        # Not hypothetical: an adversarial reviewer injected exactly that line
+        # into `windows-native` while attacking this branch, and all four
+        # workflow gates passed over it.
+        try:
+            job_cond = job.get("if")
+            if job_cond is not None and not condition_survives_step_failure(job_cond):
+                findings.append(
+                    f"{key}: the JOB carries `if: {job_cond}`, which does not "
+                    f"survive -- a full-surface lane declares no `needs:` (that "
+                    f"is what makes it unskippable), so a job-level condition is "
+                    f"the one way left to take it dark, and the job-level gate "
+                    f"cannot see it because it only inspects jobs WITH `needs:`"
+                )
+        except Unresolvable as exc:
+            findings.append(f"{key}: REFUSING to guess -- {exc}")
+
+        # THE JOB-LEVEL HALF OF ASSERTION 2. Step-level `continue-on-error` was
+        # forbidden from this file's first commit; the job-level spelling does
+        # the same damage -- every step runs, every failure is reported, and the
+        # WORKFLOW still concludes success -- and nothing checked it. It is not a
+        # hypothetical spelling either: `test.yml` already uses job-level
+        # `continue-on-error` legitimately on its non-blocking reference lanes,
+        # so it is idiomatic here and one copy-paste away from a lane that
+        # reports without judging.
+        try:
+            if continue_on_error_set(job):
+                findings.append(
+                    f"{key}: the JOB carries `continue-on-error` -- its steps "
+                    f"would run and report, and the workflow would conclude "
+                    f"success over their failures. That is assertion 2's damage "
+                    f"with a wider blast radius than the step-level spelling "
+                    f"this file has always forbidden."
+                )
+        except Unresolvable as exc:
+            findings.append(f"{key}: REFUSING to guess -- {exc}")
+
+        # A DANGLING `steps.<id>` REFERENCE SILENTLY DISARMS A GATE, and this is
+        # the sharpest hole an adversarial review found in the lane this gate
+        # was extended to cover. GitHub evaluates an unknown step id to null, so
+        # `steps.typo.conclusion == 'success'` is simply FALSE: the step is
+        # skipped, the job is green, the workflow is green, and the assertion
+        # that was supposed to run never ran. Renaming a step's `id:` and
+        # forgetting one reference is enough.
+        #
+        # It is exactly the failure this file exists to prevent, arriving through
+        # the mechanism this file RECOMMENDS -- coupling a step to its own
+        # premise via `steps.<id>.conclusion` is the documented right answer, and
+        # until now nothing checked that the id resolved. Both existing
+        # production uses (`steps.cbindgen`, `steps.lf` in the `windows` lane)
+        # were unprotected too.
+        declared_ids = {
+            s["id"] for s in (job.get("steps") or [])
+            if isinstance(s, dict) and isinstance(s.get("id"), str)
+        }
+        for index, step in enumerate(job.get("steps") or []):
+            if not isinstance(step, dict):
+                continue
+            cond = step.get("if")
+            if not isinstance(cond, str):
+                continue
+            for ref in STEP_REF.findall(cond):
+                if ref not in declared_ids:
+                    findings.append(
+                        f"{key}:{step_label(step, index)} refers to "
+                        f"`steps.{ref}`, which no step in this job declares as "
+                        f"an `id:`. GitHub resolves that to null, so the "
+                        f"condition is permanently FALSE and this step is "
+                        f"skipped on every run -- a gate disarmed without a "
+                        f"single red anywhere. Declared ids here: "
+                        f"{sorted(declared_ids) or 'none'}"
+                    )
+
         judging = 0
         for index, step in enumerate(job.get("steps") or []):
             if not isinstance(step, dict):
@@ -247,7 +376,12 @@ def scan(docs: dict[str, dict]) -> list[str]:
                 seen_premises.add(premise_key)
                 continue
 
-            if step.get("continue-on-error") is True:
+            try:
+                suppressed = continue_on_error_set(step)
+            except Unresolvable as exc:
+                findings.append(f"{key}:{label}: REFUSING to guess -- {exc}")
+                continue
+            if suppressed:
                 findings.append(
                     f"{key}:{label} is `continue-on-error: true` -- that "
                     f"restores the coverage and throws away the REPORT. The "

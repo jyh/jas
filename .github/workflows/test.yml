@@ -631,6 +631,120 @@ jobs:
           cargo build --bins --manifest-path jas_dioxus/Cargo.toml
           python scripts/cross_language_workspace.py --lang rust
 
+  # THE HALF NOTHING HAD EVER COMPILED. `--features d2d` and `--features ffi`
+  # were never built by any job in this workflow, so the Direct2D backend and the
+  # extern "C" surface were carried as source with no evidence they compiled at
+  # all, let alone passed.
+  #
+  # A SEPARATE JOB, NOT A STEP IN `windows`, AND THE REASON IS MEASURED. On run
+  # 32671926038 (green main, e4a3e874) the `windows` job took 500s and was the
+  # critical path -- the next longest job was 327s. Adding this work as a step
+  # there would extend the whole workflow's wall clock by its full duration; as a
+  # parallel job it costs additional runner minutes and NO wall clock, because it
+  # finishes well inside the 500s already being spent.
+  #
+  # ONE JOB FOR BOTH FEATURES, not one each. CI has no cargo cache at all (the
+  # only cache in this workflow is `cache: pip`), so every run compiles cold, and
+  # a cold build is dominated by the dependency tree rather than by the feature.
+  # Measured cold on the Windows seat over six builds: default 86s, d2d 91s, ffi
+  # 89s, d2d+ffi 90s, all within +-5s. So a second lane would cost an entire
+  # additional cold build to buy ~1s of feature compilation.
+  #
+  # NO `needs:`, DELIBERATELY. A job with no dependency cannot be skipped into
+  # silence by one, which is the failure check_gate_cannot_skip.py exists to
+  # catch. This lane reports its own verdict or it reports nothing.
+  windows-native:
+    name: Native backends (Direct2D + FFI, the half nothing compiled)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # For the lane guard below, which is stdlib-only ON PURPOSE: this job runs
+      # no `pip install -r requirements.txt`, which costs 28s in the `windows`
+      # job. A guard that needed the project's dependency set would have made
+      # this lane pay for a toolchain it does not use.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # `--no-default-features` drops the dioxus/wasm graph neither backend
+      # needs; the `web` configuration is already covered by the `windows` job's
+      # own `cargo test`. ONE cargo invocation, ONE feature set -- so nothing in
+      # this job can invalidate a build a later step depends on, which is the
+      # shape that made `cross_language_workspace.py` time out one lane over.
+      #
+      # `tee` under `set -o pipefail` so the log is captured WITHOUT discarding
+      # cargo's exit status. Without pipefail the pipeline would report tee's
+      # status and a failing test suite would read as green.
+      - name: Direct2D and FFI backends compile, and their tests execute
+        id: nativetests
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          cargo test --no-default-features --features d2d,ffi \
+            --manifest-path jas_dioxus/Cargo.toml 2>&1 | tee native-lane.log
+
+      # THE ANTI-VACUITY HALF, and the reason this job is not just `cargo test`.
+      # painter/mod.rs:281 is `#[cfg(all(feature = "d2d", windows))]`, so this
+      # lane on a non-Windows runner would enable the feature, compile none of
+      # the 1,958 lines, run the suite, print the baseline test total and exit 0.
+      # Exit status, duration and test count all read as success; only a named
+      # test that could not have been built otherwise can tell the difference.
+      #
+      # COUPLED TO ITS OWN PREMISE, per the lesson the cbindgen step recorded
+      # above: `!cancelled()` alone would free this from the cargo step that
+      # PRODUCES its evidence, and a compile failure would then surface as a
+      # second red about a missing log. Isolation is from unrelated steps; a
+      # step's own premise is not one of them.
+      - name: The lane ran the backends it is named for
+        if: ${{ !cancelled() && steps.nativetests.conclusion == 'success' }}
+        run: |
+          python scripts/check_native_backend_lane.py --self-test
+          python scripts/check_native_backend_lane.py \
+            --profile windows-d2d-ffi --log native-lane.log
+
+  # THE SECOND PLATFORM FAMILY, for the half that has no platform reason to be
+  # Windows-only. `feature = "ffi"` carries no cfg at all -- unlike d2d it
+  # compiles everywhere -- so watching it on Windows alone would be watching it
+  # on one family by accident, which is the hole check_lane_coverage.py exists to
+  # forbid. It is also what lets the lane guard satisfy that gate honestly rather
+  # than by taking the first EXEMPT row in a file that has deliberately kept it
+  # empty.
+  #
+  # UBUNTU, NOT MACOS: the surface is platform-neutral, so this buys the same
+  # evidence on the cheapest and fastest runner family available.
+  native-ffi:
+    name: FFI surface on the second platform family
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # `set -o pipefail` is spelled out rather than assumed: a step with no
+      # `shell:` key runs under `bash -e {0}` on Linux, which does NOT set
+      # pipefail, so `cargo test | tee` would report tee's exit status and a
+      # failing suite would read as green.
+      - name: The FFI surface compiles and its tests execute
+        id: ffitests
+        if: ${{ !cancelled() }}
+        run: |
+          set -o pipefail
+          cargo test --no-default-features --features ffi \
+            --manifest-path jas_dioxus/Cargo.toml 2>&1 | tee ffi-lane.log
+
+      - name: The lane ran the surface it is named for
+        if: ${{ !cancelled() && steps.ffitests.conclusion == 'success' }}
+        run: |
+          python scripts/check_native_backend_lane.py --self-test
+          python scripts/check_native_backend_lane.py \
+            --profile ffi-second-family --log ffi-lane.log
+
   rust:
     name: Rust tests
     runs-on: macos-latest
