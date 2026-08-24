@@ -825,6 +825,28 @@ fn mask_plan(mask: &Mask) -> Option<MaskPlan> {
     })
 }
 
+/// The alpha the masked element's composited scratch is blitted at.
+///
+/// THE MULTIPLICATIVE LAW — `painter/mod.rs:62-64` (effective alpha = product
+/// of open group alphas x paint alpha), `OPACITY.md`, and this file's own
+/// unmasked path (`base_alpha = parent_alpha * elem.opacity()`, :1205):
+/// **each factor applies EXACTLY ONCE.**
+///
+/// The body pass already multiplied `own_opacity` into every primitive on the
+/// scratch (it runs with the scratch ctx's `parent_alpha` = 1.0), so the blit
+/// contributes the INHERITED ancestor-group product and must NOT re-apply
+/// `own_opacity`. Re-applying it squares the element's own alpha, and because
+/// `set_global_alpha` REPLACES the context's alpha rather than multiplying
+/// into it, it also discards every ancestor group's contribution.
+///
+/// `own_opacity` is taken deliberately and deliberately unused: it is the
+/// factor a future edit is most likely to re-introduce here, and naming it
+/// makes that edit visible to `mask_blit_alpha_is_independent_of_own_opacity`.
+fn mask_blit_alpha(parent_alpha: f64, own_opacity: f64) -> f64 {
+    let _ = own_opacity;
+    parent_alpha
+}
+
 /// Return the transform that should be applied when rendering the
 /// mask's subtree on top of the ancestor coord system. Track C
 /// phase 3, OPACITY.md §Document model:
@@ -1039,6 +1061,11 @@ fn draw_element_with_mask(
     precision: f64,
     element_scale: f64,
 ) {
+    // The inherited ancestor-group alpha product, read BEFORE this function
+    // touches `ctx`. Same idiom as the unmasked path (`draw_element_body`
+    // captures `ctx.global_alpha()` for exactly this reason); it is what the
+    // blit below multiplies the composited scratch by.
+    let parent_alpha = ctx.global_alpha();
     let main_canvas = ctx.canvas();
     let (w, h) = match &main_canvas {
         Some(c) => (c.width(), c.height()),
@@ -1147,13 +1174,18 @@ fn draw_element_with_mask(
     }
 
     // Copy the composited offscreen pixels onto the main ctx at
-    // device coordinates (0, 0). The main ctx's alpha / blend_mode
-    // will apply to the final blit, matching the non-mask path.
+    // device coordinates (0, 0), under the INHERITED ancestor-group alpha —
+    // which is what the comment here always claimed ("the main ctx's alpha
+    // will apply to the final blit, matching the non-mask path") and what
+    // `set_global_alpha(elem.opacity())` used to contradict on the line below
+    // it: that both squared the element's own opacity (the body pass already
+    // applied it on the scratch) and REPLACED the ancestors' product rather
+    // than multiplying into it. See [mask_blit_alpha] for the law.
     // Guarded: the identity transform + blend state pop when this
     // function returns, on every path (see CtxSaveGuard).
     let _ctx_guard = CtxSaveGuard::new(ctx);
     ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
-    ctx.set_global_alpha(elem.opacity());
+    ctx.set_global_alpha(mask_blit_alpha(parent_alpha, elem.opacity()));
     ctx.set_global_composite_operation(blend_mode_css(elem.mode())).ok();
     ctx.draw_image_with_html_canvas_element(&off_canvas, 0.0, 0.0).ok();
 }
@@ -3475,6 +3507,38 @@ mod tests {
     }
 
     #[test]
+    #[test]
+    fn mask_blit_alpha_carries_the_inherited_ancestor_product() {
+        // D-alpha, half 1: set_global_alpha REPLACES, so the blit must carry
+        // the ancestors or their alpha is silently dropped.
+        assert_eq!(mask_blit_alpha(0.5, 1.0), 0.5);
+        assert_eq!(mask_blit_alpha(0.25, 0.8), 0.25);
+    }
+
+    #[test]
+    fn mask_blit_alpha_is_independent_of_own_opacity() {
+        // D-alpha, half 2: the scratch already carries own_opacity. Re-applying
+        // it here squares it. This is the assertion that fails if anyone
+        // reinstates `elem.opacity()` -- or "fixes" it to parent * opacity.
+        for own in [0.0, 0.25, 0.5, 1.0] {
+            assert_eq!(
+                mask_blit_alpha(0.5, own), 0.5,
+                "blit alpha must not vary with own_opacity (got own={own})"
+            );
+        }
+    }
+
+    #[test]
+    fn masked_effective_alpha_is_the_product_each_factor_once() {
+        // The net the artist sees: scratch (own) x blit (ancestors).
+        // Discriminating cases -- 0.5/0.5 is NOT one, because the squared
+        // defect and the correct law both yield 0.25 there.
+        let net = |parent: f64, own: f64| own * mask_blit_alpha(parent, own);
+        assert_eq!(net(1.0, 0.5), 0.5);  // squared defect would give 0.25
+        assert_eq!(net(0.5, 1.0), 0.5);  // ancestor-ignored would give 1.0
+        assert_eq!(net(0.5, 0.5), 0.25); // the design block's example
+    }
+
     fn mask_plan_clip_not_inverted_is_clip_in() {
         let m = test_mask(true, false, false);
         assert_eq!(mask_plan(&m), Some(MaskPlan::ClipIn));
