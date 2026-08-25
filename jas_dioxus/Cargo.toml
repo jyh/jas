@@ -48,6 +48,16 @@ name = "ffi_boundary_counter"
 path = "tests/ffi_boundary_counter.rs"
 required-features = ["ffi"]
 
+# S-C.2 gate-② premise probe: does the ruled SECOND panel actually grow with the
+# document on the surface the gate is measured against? `required-features`
+# because it calls the ABI directly; without the line, a default `cargo test`
+# tries to compile it and fails on absent symbols -- the same omission that cost
+# `workspace_roundtrip` ten E0433s from one cause.
+[[test]]
+name = "sc2_second_panel_growth"
+path = "tests/sc2_second_panel_growth.rs"
+required-features = ["ffi"]
+
 # R10 de-risking-spike bench: native scene-BUILD cost through the no-op Painter
 # sink. Custom harness (no criterion dependency) so `cargo test` stays lean;
 # run with `cargo bench --bench painter_build`.
