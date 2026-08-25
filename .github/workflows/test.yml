@@ -384,12 +384,26 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           python scripts/check_private_paths.py --self-test
-          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            RANGE="HEAD~100..HEAD"
-            git rev-parse HEAD~100 >/dev/null 2>&1 || RANGE="HEAD~1..HEAD"
-            echo "no BEFORE: falling back to $RANGE (declared limit, same as scrub.yml)"
-          else
+          # ⛔ THE HEAD~100 FALLBACK WAS A GUARANTEED RED, NOT A COVERAGE LIMIT.
+          # On a new branch or a pull_request, github.event.before is empty, so
+          # the old fallback scanned 100 commits back -- reaching PRE-RULING
+          # history, where five commits legitimately carry a commons path. It
+          # fired on the first branch pushed after this gate landed and found 3
+          # of them. That is the red-sweep-gets-abandoned failure this gate's own
+          # header names as the reason it scans a delta at all, re-created by its
+          # fallback.
+          #
+          # The delta a branch push actually introduces is measured against main,
+          # not against a commit count. merge-base, so a stale branch scans what
+          # IT added rather than what main did meanwhile.
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
             RANGE="$BEFORE..HEAD"
+          elif git rev-parse --verify origin/main >/dev/null 2>&1; then
+            RANGE="$(git merge-base origin/main HEAD)..HEAD"
+            echo "no BEFORE: scanning this branch's own delta, $RANGE"
+          else
+            RANGE="HEAD~1..HEAD"
+            echo "no BEFORE and no origin/main: falling back to $RANGE"
           fi
           echo "scanning $RANGE"
           python scripts/check_private_paths.py --range "$RANGE"
