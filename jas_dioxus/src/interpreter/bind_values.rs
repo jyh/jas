@@ -46,10 +46,10 @@ use super::expr_types::Value as EVal;
 /// namespaces, plus any `foreach` item bindings added during the walk); pass
 /// `{}` for a scope in which every binding resolves to null.
 //
-// The cross-app byte-gate (`cross_language_test::algorithm_bind_values_vectors`)
-// is the sole caller (this pass is not yet wired into a render path), so it
-// reads as dead without the test cfg.
-#[allow(dead_code)]
+// WIRED 2026-08-25 (S-C.1): `ffi::jas_bind_values` is now a production caller,
+// so the `#[allow(dead_code)]` that stood here — and the note that this pass was
+// "not yet wired into a render path" — are both retired. The cross-app byte-gate
+// remains the parity pin; it is no longer the only reason this code is reachable.
 pub fn bind_values(panel_node: &Json, ctx: &Json) -> Json {
     let root = match panel_node.get("content") {
         Some(r) if r.is_object() => r,

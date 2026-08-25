@@ -136,6 +136,49 @@ fn json_str(s: &str) -> String {
 pub struct JasEngine {
     model: RefCell<Model>,
     last_error: RefCell<Option<String>>,
+    /// The panel state a materialized panel binds to (S-C.1).
+    ///
+    /// `Model` holds the DOCUMENT — and its own comment says the panel `state`
+    /// namespace is "not in AppState"'s absence here deliberate. The colour
+    /// panel binds 87 times into `state.*` and ~45 into `panel.*`, none of which
+    /// `Model` carries, so wiring `bind_values` against the model alone would
+    /// resolve every one of those to null and materialize 71 controls holding
+    /// document-derived values but not the colour — on a COLOUR panel, where the
+    /// state IS the content. That is a subtler empty shell than an unrendered
+    /// one and would measure just as vacuously.
+    panel: RefCell<PanelState>,
+}
+
+/// The minimum a materialized colour panel needs. **Deliberately not a general
+/// state store**: this is the spike's slice, not an app-state design.
+///
+/// ⛔ **The CHANNELS ARE NOT HERE.** `r/g/bl/h/s/b/c/m/y/k/hex` are DERIVED at
+/// assembly time by `interpreter::color_util::panel_channels`, which the
+/// cross-language corpus pins with 16 vectors. Storing them would create a
+/// second source of truth for values that already have one, and the copy would
+/// be the one that drifts.
+#[derive(Debug, Clone)]
+struct PanelState {
+    /// Float RGB, 0..1. Seeded to a NON-DEGENERATE colour on purpose: at white
+    /// every derivation agrees, so a white seed would let a wrong one pass. This
+    /// is the corpus's own `panel_exact_eighth_bit_values` vector.
+    fill: (f64, f64, f64),
+    stroke: (f64, f64, f64),
+    fill_on_top: bool,
+    mode: String,
+    recent: Vec<String>,
+}
+
+impl Default for PanelState {
+    fn default() -> Self {
+        PanelState {
+            fill: (0.4, 0.25, 0.25),
+            stroke: (0.0, 0.0, 0.0),
+            fill_on_top: true,
+            mode: "hsb".to_string(),
+            recent: vec![],
+        }
+    }
 }
 
 impl JasEngine {
@@ -143,6 +186,7 @@ impl JasEngine {
         JasEngine {
             model: RefCell::new(Model::default()),
             last_error: RefCell::new(None),
+            panel: RefCell::new(PanelState::default()),
         }
     }
 }
@@ -249,6 +293,74 @@ pub unsafe extern "C" fn jas_document_json(e: *mut JasEngine) -> JasBytes {
         model.document(),
     ));
     ffi_instr::record_out(Crossing::DocumentJson, out.len);
+    out
+}
+
+/// Assemble the panel data scope INSIDE the engine.
+///
+/// **BL1, and it is why the extern takes only a panel id.** Exposing the pure
+/// `bind_values(panel_node, ctx)` would have forced the shell to build this map,
+/// which puts app state in C# — the third interpreter's state half arriving
+/// through a parameter list rather than through a rewrite.
+///
+/// Shape follows the cross-language byte-gate's own ctx
+/// (`cross_language_test.rs`): `state.fill_color` carries the `#`, `panel.hex`
+/// does not.
+fn panel_ctx(engine: &JasEngine) -> serde_json::Value {
+    use crate::interpreter::color_util::panel_channels;
+    let p = engine.panel.borrow();
+    let ch = panel_channels(p.fill.0, p.fill.1, p.fill.2);
+    let st = panel_channels(p.stroke.0, p.stroke.1, p.stroke.2);
+    serde_json::json!({
+        "state": {
+            "fill_color": format!("#{}", ch.hex),
+            "stroke_color": format!("#{}", st.hex),
+            "fill_on_top": p.fill_on_top,
+        },
+        "panel": {
+            "mode": p.mode,
+            "hex": ch.hex,
+            "r": ch.r, "g": ch.g, "bl": ch.bl,
+            "h": ch.h, "s": ch.s, "b": ch.b,
+            "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
+            "recent_colors": p.recent,
+        },
+    })
+}
+
+/// The panel's resolved bind VALUES — the ninth materializer function.
+///
+/// `jas_widget_tree` is **value-blind by design**: it records the sorted KEY
+/// NAMES of `bind`/`style`, which is what makes it stable across ports. So a
+/// shell built on the surface without this one materializes native controls with
+/// nothing in them. This returns the third pass — `interpreter::bind_values` —
+/// against a scope the ENGINE assembles.
+///
+/// # Safety
+/// `panel_id` must be NULL or valid for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_bind_values(
+    e: *mut JasEngine,
+    panel_id: *const u8,
+    len: usize,
+) -> JasBytes {
+    ffi_instr::record(Crossing::BindValues, len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    let Ok(id) = (unsafe { utf8(panel_id, len) }) else {
+        return JasBytes::empty();
+    };
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let Some(spec) = ws.panel(id) else {
+        return JasBytes::empty();
+    };
+    let ctx = panel_ctx(engine);
+    let rows = crate::interpreter::bind_values::bind_values(spec, &ctx);
+    let out = JasBytes::from_string(serde_json::to_string(&rows).unwrap_or_default());
+    ffi_instr::record_out(Crossing::BindValues, out.len);
     out
 }
 

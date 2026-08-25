@@ -21,12 +21,24 @@
 //!
 //! # Population, stated rather than implied
 //!
-//! [`Crossing`] enumerates the **8 functions of the materializer surface** as it
-//! stands on `main` at `22e5e30e` (all in `ffi.rs`). It deliberately does NOT
+//! [`Crossing`] enumerates the **9 functions of the materializer surface**: the
+//! 8 that stood on `main` at `22e5e30e` plus `jas_bind_values`, added for S-C.1
+//! because `widget_tree` is value-blind by design (all in `ffi.rs`). It deliberately does NOT
 //! include the two S-B paint probes, which exist only on the S-B branch and are
 //! not part of a panel's surface — a distinction that cost a round of correction
 //! to establish, because "half-unbuilt" is a ratio whose denominator IS the tree
 //! being counted.
+//!
+//! # One list, written once
+//!
+//! [`Crossing::ALL`] is the single place the variants are enumerated. An earlier
+//! test re-listed them by hand and went out of bounds the moment a ninth was
+//! added — and because the index panic happened while holding the tests' shared
+//! mutex, it POISONED the lock and failed four unrelated tests at their
+//! `lock().unwrap()`. One omission produced five reds, four of them innocent and
+//! all four pointing at a line nowhere near the defect. The tests now take the
+//! lock through a poison-tolerant helper for the same reason: a cascade that
+//! renames the culprit is worse than the original failure.
 //!
 //! The two instrumentation entry points — `jas_instr_reset` and
 //! `jas_instr_counters_json`, which live in `ffi.rs` beside every other
@@ -50,6 +62,7 @@ pub enum Crossing {
     DispatchEvent = 5,
     LastErrorJson = 6,
     WidgetTree = 7,
+    BindValues = 8,
 }
 
 impl Crossing {
@@ -64,6 +77,7 @@ impl Crossing {
         "jas_dispatch_event",
         "jas_last_error_json",
         "jas_widget_tree",
+        "jas_bind_values",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -73,7 +87,24 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 8;
+    pub(crate) const COUNT: usize = 9;
+
+    /// Every variant, in discriminant order. Exists so the variant list is
+    /// written ONCE: a test that re-listed the variants by hand went out of
+    /// bounds the moment a ninth was added, and the index panic it raised
+    /// poisoned the shared mutex and failed four unrelated tests with it. One
+    /// omission, five reds, and the four loudest were innocent.
+    pub(crate) const ALL: [Crossing; Crossing::COUNT] = [
+        Crossing::EngineNew,
+        Crossing::EngineFree,
+        Crossing::Free,
+        Crossing::Version,
+        Crossing::DocumentJson,
+        Crossing::DispatchEvent,
+        Crossing::LastErrorJson,
+        Crossing::WidgetTree,
+        Crossing::BindValues,
+    ];
 
     pub fn name(self) -> &'static str {
         Crossing::NAMES[self as usize]
@@ -167,7 +198,7 @@ pub fn snapshot_json() -> String {
         ));
     }
     format!(
-        "{{\"surface\":\"main@22e5e30e\",\"functions\":{},\"crossings\":{},\"bytes_in\":{},\"bytes_out\":{},\"bytes_total\":{},\"per_fn\":[{}]}}",
+        "{{\"surface\":\"main@22e5e30e+jas_bind_values\",\"functions\":{},\"crossings\":{},\"bytes_in\":{},\"bytes_out\":{},\"bytes_total\":{},\"per_fn\":[{}]}}",
         Crossing::COUNT,
         tc,
         ti,
@@ -188,28 +219,30 @@ mod tests {
     /// manufactured by the instrument rather than found by it.
     static SERIAL: Mutex<()> = Mutex::new(());
 
+    /// Take the lock WITHOUT propagating poison.
+    ///
+    /// A panic in any test poisons this mutex, and `.unwrap()` on a poisoned
+    /// lock panics in turn — so one genuine failure reports as five, and the
+    /// four bystanders panic at the lock line, which is nowhere near the defect.
+    /// The counters are plain atomics with no invariant a panic can break, so
+    /// recovering the guard is sound: the poison flag carries no information here
+    /// beyond "some other test failed", which the runner already says.
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     #[test]
     fn a_fresh_counter_reads_zero() {
-        let _g = SERIAL.lock().unwrap();
+        let _g = serial();
         reset();
-        for i in 0..Crossing::COUNT {
-            let c = [
-                Crossing::EngineNew,
-                Crossing::EngineFree,
-                Crossing::Free,
-                Crossing::Version,
-                Crossing::DocumentJson,
-                Crossing::DispatchEvent,
-                Crossing::LastErrorJson,
-                Crossing::WidgetTree,
-            ][i];
+        for c in Crossing::ALL {
             assert_eq!(read(c), (0, 0, 0), "{} should start at zero", c.name());
         }
     }
 
     #[test]
     fn record_increments_exactly_one_function() {
-        let _g = SERIAL.lock().unwrap();
+        let _g = serial();
         reset();
         record(Crossing::WidgetTree, 12, 340);
 
@@ -223,7 +256,7 @@ mod tests {
 
     #[test]
     fn record_accumulates_across_calls() {
-        let _g = SERIAL.lock().unwrap();
+        let _g = serial();
         reset();
         record(Crossing::DispatchEvent, 10, 0);
         record(Crossing::DispatchEvent, 5, 0);
@@ -232,7 +265,7 @@ mod tests {
 
     #[test]
     fn reset_zeroes_a_used_counter() {
-        let _g = SERIAL.lock().unwrap();
+        let _g = serial();
         reset();
         record(Crossing::Version, 0, 99);
         assert_eq!(read(Crossing::Version).0, 1);
@@ -242,7 +275,7 @@ mod tests {
 
     #[test]
     fn snapshot_names_every_function_and_totals_agree() {
-        let _g = SERIAL.lock().unwrap();
+        let _g = serial();
         reset();
         record(Crossing::Version, 0, 7);
         record(Crossing::WidgetTree, 3, 11);
@@ -256,22 +289,20 @@ mod tests {
         assert!(js.contains("\"crossings\":2"), "{js}");
         assert!(js.contains("\"bytes_in\":3,\"bytes_out\":18"), "{js}");
         assert!(js.contains("\"bytes_total\":21"), "{js}");
-        assert!(js.contains("\"surface\":\"main@22e5e30e\""), "{js}");
+        assert!(js.contains("\"surface\":\"main@22e5e30e+jas_bind_values\""), "{js}");
     }
 
     #[test]
     fn names_are_in_discriminant_order() {
-        // The dump indexes NAMES by discriminant. If the two ever drift, every
-        // row in every published chatter table is silently mislabelled — the
-        // numbers stay right and the attribution goes wrong, which is the harder
-        // error to spot in a table that looks reasonable.
-        assert_eq!(Crossing::EngineNew.name(), "jas_engine_new");
-        assert_eq!(Crossing::EngineFree.name(), "jas_engine_free");
-        assert_eq!(Crossing::Free.name(), "jas_free");
-        assert_eq!(Crossing::Version.name(), "jas_version");
-        assert_eq!(Crossing::DocumentJson.name(), "jas_document_json");
-        assert_eq!(Crossing::DispatchEvent.name(), "jas_dispatch_event");
-        assert_eq!(Crossing::LastErrorJson.name(), "jas_last_error_json");
-        assert_eq!(Crossing::WidgetTree.name(), "jas_widget_tree");
+        // The dump indexes NAMES by discriminant. If the two drift, every row in
+        // every published chatter table is silently mislabelled -- the numbers
+        // stay right and the attribution goes wrong, which is the harder error to
+        // spot in a table that looks reasonable.
+        for (i, c) in Crossing::ALL.into_iter().enumerate() {
+            assert_eq!(c as usize, i, "ALL must be in discriminant order");
+            assert_eq!(c.name(), Crossing::NAMES[i]);
+        }
+        assert_eq!(Crossing::BindValues.name(), "jas_bind_values");
+        assert_eq!(Crossing::ALL.len(), Crossing::COUNT);
     }
 }
