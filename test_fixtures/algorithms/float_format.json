@@ -1,7 +1,7 @@
 {
  "_doc": [
   "FLOATSPELL \u2014 the one spelling of a full-precision f64 both ports must",
-  "write. RULED 2026-08-05 (fleet/RULING-four-decimal-floor): the transform",
+  "write. RULED 2026-08-05 (council): the transform",
   "matrix goes to full precision, and 'full precision' has no single",
   "spelling \u2014 Rust's Display writes 1e-7 as 0.0000001 while Swift writes",
   "1e-07, and Swift writes integral values with a trailing '.0' that Rust",
