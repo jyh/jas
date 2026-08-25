@@ -6106,42 +6106,22 @@ fn render_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
 }
 
 /// Compute a color from panel state with one field changed.
+///
+/// The arithmetic MOVED to `interpreter::color_util::color_from_panel_edit`
+/// (2026-08-25, S-C.2) and this is now the `Color`-typed adapter over it. It was
+/// `feature = "web"`-gated here, so the native FFI shell's colour-drag tick
+/// could not reach it and would have had to re-derive the same rules — which is
+/// the COLORTIERS shape (`664040` vs `664141` for the same drag) with the two
+/// implementations inside ONE port instead of across two.
+///
+/// It sits beside `panel_channels`, the read half it inverts, for the reason
+/// that function's docstring already gives. `super::widget_commit` is the same
+/// move for the same reason. **No behaviour changed:** the body was extracted
+/// verbatim and returns floats, which this wraps.
 fn compute_color_from_panel(field: &str, new_val: f64, panel: &serde_json::Value) -> Option<crate::geometry::element::Color> {
-    use crate::interpreter::color_util::hsb_to_rgb;
     use crate::geometry::element::Color;
-
-    let pf = |name: &str| -> f64 {
-        if name == field { return new_val; }
-        panel.get(name).and_then(|v| v.as_f64()).unwrap_or(0.0)
-    };
-
-    let mode = panel.get("mode").and_then(|v| v.as_str()).unwrap_or("hsb");
-
-    let color = match mode {
-        "hsb" => {
-            let (r, g, b) = hsb_to_rgb(pf("h"), pf("s"), pf("b"));
-            Color::rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0)
-        }
-        "rgb" | "web_safe_rgb" => {
-            Color::rgb(pf("r") / 255.0, pf("g") / 255.0, pf("bl") / 255.0)
-        }
-        "grayscale" => {
-            let v = 1.0 - pf("k") / 100.0;
-            Color::rgb(v, v, v)
-        }
-        "cmyk" => {
-            let c = pf("c") / 100.0;
-            let m = pf("m") / 100.0;
-            let y = pf("y") / 100.0;
-            let k = pf("k") / 100.0;
-            let r = (1.0 - c) * (1.0 - k);
-            let g = (1.0 - m) * (1.0 - k);
-            let b = (1.0 - y) * (1.0 - k);
-            Color::rgb(r, g, b)
-        }
-        _ => return None,
-    };
-    Some(color)
+    crate::interpreter::color_util::color_from_panel_edit(field, new_val, panel)
+        .map(|(r, g, b)| Color::rgb(r, g, b))
 }
 
 // The widget commit rules themselves live in `super::widget_commit`, outside
