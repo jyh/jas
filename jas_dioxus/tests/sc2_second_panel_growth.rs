@@ -142,19 +142,46 @@ fn the_probe_can_see_growth_at_all() {
 // The finding
 // ---------------------------------------------------------------------------
 
-/// **The colour panel is the LARGEST panel in the workspace at a static scope**,
+/// **The colour panel is the LARGEST panel in the workspace at an empty scope**,
 /// so "a second panel LARGER than the colour panel" cannot be met by picking a
 /// different panel — only by picking a data-driven one and giving it items.
+///
+/// Asserted over every panel rather than stated, because "no other panel is
+/// bigger" is the claim that makes picking one a dead end, and a claim that
+/// closes off an option should be the one that is checked.
 #[test]
-fn the_colour_panel_is_106_and_layers_is_19() {
+fn the_colour_panel_is_the_largest_and_layers_is_ten() {
+    const PANELS: [&str; 16] = [
+        "align_panel_content", "artboards_panel_content", "boolean_panel_content",
+        "brushes_panel_content", "character_panel_content", "color_panel_content",
+        "concepts_panel_content", "gradient_panel_content", "layers_panel_content",
+        "magic_wand_panel_content", "opacity_panel_content", "paragraph_panel_content",
+        "properties_panel_content", "stroke_panel_content", "swatches_panel_content",
+        "symbols_panel_content",
+    ];
+
     let colour = records("color_panel_content", &serde_json::json!({}));
     assert_eq!(colour, 106, "the C1 population, pinned");
 
+    let mut checked = 0;
+    for p in PANELS {
+        let n = records(p, &serde_json::json!({}));
+        assert!(
+            n <= colour,
+            "{p} emits {n} records, more than the colour panel's {colour} — \
+             this test's premise has moved"
+        );
+        checked += 1;
+    }
+    // A loop that iterated nothing would pass every assertion inside it.
+    assert_eq!(checked, 16, "every panel in the workspace was examined");
+
+    // 10, not the golden's 19: that 19 is an isolation_stack of three.
     let layers = records(
         "layers_panel_content",
         &serde_json::json!({ "panel": { "isolation_stack": [] } }),
     );
-    // 10, not 19: the golden's 19 includes an isolation_stack of three.
+    assert_eq!(layers, 10, "layers' static size, document-independent");
     assert!(
         layers < colour,
         "layers ({layers}) is SMALLER than the colour panel ({colour}), \
