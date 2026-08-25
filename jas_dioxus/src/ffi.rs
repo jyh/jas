@@ -22,6 +22,11 @@
 
 use std::cell::RefCell;
 
+// S-C boundary instrumentation. Every extern below records its own crossing;
+// the counter is the receipt for the chatter measurement, and a static count of
+// call sites would pass on a shell that never ran.
+use crate::ffi_instr::{self, Crossing};
+
 use crate::document::model::Model;
 use crate::document::op_apply::{op_apply, OpError};
 
@@ -172,6 +177,7 @@ unsafe fn utf8(ptr: *const u8, len: usize) -> Result<&'static str, JasStatus> {
 /// **BL2**: every subsequent call for this engine must be on this thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn jas_engine_new() -> *mut JasEngine {
+    ffi_instr::record(Crossing::EngineNew, 0, 0);
     Box::into_raw(Box::new(JasEngine::new()))
 }
 
@@ -181,6 +187,7 @@ pub extern "C" fn jas_engine_new() -> *mut JasEngine {
 /// `e` must be a pointer from [`jas_engine_new`] that has not already been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_engine_free(e: *mut JasEngine) {
+    ffi_instr::record(Crossing::EngineFree, 0, 0);
     if !e.is_null() {
         drop(unsafe { Box::from_raw(e) });
     }
@@ -192,6 +199,10 @@ pub unsafe extern "C" fn jas_engine_free(e: *mut JasEngine) {
 /// `b` must be a value returned by this ABI and not already freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_free(b: JasBytes) {
+    // bytes_in is 0 DELIBERATELY: this span's bytes were already counted as
+    // bytes_out when they crossed outward. Counting them again on release would
+    // double every payload and inflate the chatter figure by exactly 2x.
+    ffi_instr::record(Crossing::Free, 0, 0);
     if b.ptr.is_null() || b.len == 0 {
         return;
     }
@@ -204,10 +215,12 @@ pub unsafe extern "C" fn jas_free(b: JasBytes) {
 /// talking to the library it thinks it is.
 #[unsafe(no_mangle)]
 pub extern "C" fn jas_version() -> JasBytes {
-    JasBytes::from_string(format!(
+    let out = JasBytes::from_string(format!(
         r#"{{"crate":"jas_dioxus","version":"{}","abi":1}}"#,
         env!("CARGO_PKG_VERSION")
-    ))
+    ));
+    ffi_instr::record(Crossing::Version, 0, out.len);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -227,13 +240,16 @@ pub extern "C" fn jas_version() -> JasBytes {
 /// `e` must be a live engine pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_document_json(e: *mut JasEngine) -> JasBytes {
+    ffi_instr::record(Crossing::DocumentJson, 0, 0);
     let Some(engine) = (unsafe { e.as_ref() }) else {
         return JasBytes::empty();
     };
     let model = engine.model.borrow();
-    JasBytes::from_string(crate::geometry::test_json::document_to_test_json(
+    let out = JasBytes::from_string(crate::geometry::test_json::document_to_test_json(
         model.document(),
-    ))
+    ));
+    ffi_instr::record_out(Crossing::DocumentJson, out.len);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +271,8 @@ pub unsafe extern "C" fn jas_dispatch_event(
     op_json: *const u8,
     len: usize,
 ) -> JasStatus {
+    // Recorded BEFORE the null check: a refused call still crossed.
+    ffi_instr::record(Crossing::DispatchEvent, len, 0);
     let Some(engine) = (unsafe { e.as_ref() }) else {
         return JasStatus::NullHandle;
     };
@@ -286,13 +304,16 @@ pub unsafe extern "C" fn jas_dispatch_event(
 /// `e` must be a live engine pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_last_error_json(e: *mut JasEngine) -> JasBytes {
+    ffi_instr::record(Crossing::LastErrorJson, 0, 0);
     let Some(engine) = (unsafe { e.as_ref() }) else {
         return JasBytes::empty();
     };
-    match engine.last_error.borrow().as_ref() {
+    let out = match engine.last_error.borrow().as_ref() {
         Some(s) => JasBytes::from_string(s.clone()),
         None => JasBytes::empty(),
-    }
+    };
+    ffi_instr::record_out(Crossing::LastErrorJson, out.len);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +338,10 @@ pub unsafe extern "C" fn jas_widget_tree(
     ctx_json: *const u8,
     ctx_len: usize,
 ) -> JasBytes {
+    // Both inbound spans counted: the panel id AND the context JSON crossed,
+    // and a chatter figure that counted only the "real" payload would understate
+    // a shell that re-sends context on every tick.
+    ffi_instr::record(Crossing::WidgetTree, panel_len + ctx_len, 0);
     if e.is_null() {
         return JasBytes::empty();
     }
@@ -338,7 +363,9 @@ pub unsafe extern "C" fn jas_widget_tree(
         return JasBytes::empty();
     };
     let tree = crate::interpreter::widget_tree::widget_tree(spec, &ctx);
-    JasBytes::from_string(serde_json::to_string(&tree).unwrap_or_default())
+    let out = JasBytes::from_string(serde_json::to_string(&tree).unwrap_or_default());
+    ffi_instr::record_out(Crossing::WidgetTree, out.len);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +411,105 @@ mod tests {
         let st = unsafe { jas_dispatch_event(std::ptr::null_mut(), p, n) };
         assert_eq!(st, JasStatus::NullHandle);
         assert!(st as i32 >= 100, "transport faults must not collide with 1-5");
+    }
+
+    // -----------------------------------------------------------------------
+    // S-C BOUNDARY INSTRUMENTATION — the wiring tests.
+    //
+    // THESE ARE THE TESTS THE CHATTER NUMBER RESTS ON. `ffi_instr`'s own unit
+    // tests prove the counter counts what it is TOLD to count; they would pass
+    // in full on a boundary that was never instrumented at all. What has to be
+    // established here is the other half: that CROSSING THE BOUNDARY is itself
+    // what moves the counter.
+    //
+    // That is the sequencing ruling's §3.3 applied to the instrument rather than
+    // to the shell -- a static count passes on a shell that never ran, and an
+    // untested counter passes on a boundary that never incremented it.
+    // -----------------------------------------------------------------------
+
+    use crate::ffi_instr::{self, Crossing};
+
+    /// The counters are process-global; these tests must not interleave with
+    /// each other. `ffi_instr`'s tests hold their own lock, and they touch no
+    /// extern fn, so the two sets cannot collide.
+    static INSTR_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn calling_the_real_extern_moves_the_counter() {
+        let _g = INSTR_SERIAL.lock().unwrap();
+        ffi_instr::reset();
+        assert_eq!(ffi_instr::read(Crossing::Version), (0, 0, 0), "control: zero before the call");
+
+        let b = jas_version();
+        let produced = b.len;
+        let text = take(b);
+
+        let (calls, bytes_in, bytes_out) = ffi_instr::read(Crossing::Version);
+        assert_eq!(calls, 1, "the crossing itself must increment the counter");
+        assert_eq!(bytes_in, 0, "jas_version takes no payload");
+        // ASSERT A VALUE ONLY THE REAL CALL CAN PRODUCE. A hard-coded number
+        // here would pass against a counter wired to a constant; the returned
+        // span's own length cannot be known without having made the call.
+        assert_eq!(bytes_out, produced as u64, "bytes_out must be the span actually returned");
+        assert!(produced > 0 && text.contains("jas_dioxus"), "sanity: the call really produced the payload");
+    }
+
+    #[test]
+    fn an_uncalled_function_stays_at_zero() {
+        // The negative control for the arm above. Without it, a counter that
+        // incremented every function on every crossing would pass that test.
+        let _g = INSTR_SERIAL.lock().unwrap();
+        ffi_instr::reset();
+        let _ = take(jas_version());
+        assert_eq!(ffi_instr::read(Crossing::Version).0, 1);
+        assert_eq!(ffi_instr::read(Crossing::WidgetTree), (0, 0, 0), "never called: must be zero");
+        assert_eq!(ffi_instr::read(Crossing::DispatchEvent), (0, 0, 0), "never called: must be zero");
+    }
+
+    #[test]
+    fn dispatch_counts_the_payload_it_was_handed() {
+        let _g = INSTR_SERIAL.lock().unwrap();
+        ffi_instr::reset();
+        let e = jas_engine_new();
+        let op = "{\"verb\":\"nope\"}";
+        let (p, n) = bytes(op);
+        let _ = unsafe { jas_dispatch_event(e, p, n) };
+
+        let (calls, bytes_in, _) = ffi_instr::read(Crossing::DispatchEvent);
+        assert_eq!(calls, 1);
+        assert_eq!(bytes_in, op.len() as u64, "bytes_in must be the payload's real length");
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn a_rejected_call_still_counts_as_a_crossing() {
+        // A NULL handle is refused before any work happens -- but the call DID
+        // cross the boundary, and chatter is a count of crossings, not of
+        // successes. Counting only the happy path would understate chatter by
+        // exactly the calls a chatty shell makes and gets nothing for.
+        let _g = INSTR_SERIAL.lock().unwrap();
+        ffi_instr::reset();
+        let (p, n) = bytes("{}");
+        let st = unsafe { jas_dispatch_event(std::ptr::null_mut(), p, n) };
+        assert_eq!(st, JasStatus::NullHandle);
+        assert_eq!(ffi_instr::read(Crossing::DispatchEvent).0, 1, "a refused call is still a crossing");
+    }
+
+    #[test]
+    fn widget_tree_counts_both_directions() {
+        let _g = INSTR_SERIAL.lock().unwrap();
+        ffi_instr::reset();
+        let e = jas_engine_new();
+        let (pid, plen) = bytes("color");
+        let b = unsafe { jas_widget_tree(e, pid, plen, std::ptr::null(), 0) };
+        let produced = b.len;
+        let _ = take(b);
+
+        let (calls, bytes_in, bytes_out) = ffi_instr::read(Crossing::WidgetTree);
+        assert_eq!(calls, 1);
+        assert_eq!(bytes_in, "color".len() as u64);
+        assert_eq!(bytes_out, produced as u64);
+        unsafe { jas_engine_free(e) };
     }
 
     #[test]
