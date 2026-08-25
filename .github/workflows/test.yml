@@ -366,6 +366,34 @@ jobs:
           python scripts/check_scrub_trigger.py --self-test
           python scripts/check_scrub_trigger.py
 
+      # check_private_paths.py ALSO BELONGS ON THIS LANE, and the lane-coverage
+      # gate is what said so: it landed wired to ubuntu only, and main went red
+      # with "a gate that cannot fail on a platform is not watching that
+      # platform". That is not bureaucratic here — this gate matches PATH SHAPES,
+      # and this is the lane that can see a backslash separator and a CRLF, so
+      # ubuntu-only coverage is exactly the blind spot check_swift_copy_sites.py
+      # sat in for its whole life while CI stayed green.
+      #
+      # Range logic mirrors scrub.yml deliberately rather than being shared: a
+      # full-history scan is permanently red here (five pre-ruling commits carry
+      # a commons path, measured before that gate shipped), so both lanes scan
+      # "no NEW path enters" and both must fall back the same way.
+      - name: No NEW path into the private record (Windows lane)
+        if: ${{ !cancelled() }}
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python scripts/check_private_paths.py --self-test
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            RANGE="HEAD~100..HEAD"
+            git rev-parse HEAD~100 >/dev/null 2>&1 || RANGE="HEAD~1..HEAD"
+            echo "no BEFORE: falling back to $RANGE (declared limit, same as scrub.yml)"
+          else
+            RANGE="$BEFORE..HEAD"
+          fi
+          echo "scanning $RANGE"
+          python scripts/check_private_paths.py --range "$RANGE"
+
       - name: Untracked files are invisible to index-reading gates
         if: ${{ !cancelled() }}
         run: |
