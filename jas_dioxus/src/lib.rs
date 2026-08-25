@@ -18,6 +18,11 @@ pub mod ffi;
 // boundary would be a counter with nothing to count.
 #[cfg(feature = "ffi")]
 pub mod ffi_instr;
+// The panel state slice, the scope the engine assembles from it, and the tick's
+// write path (S-C.2). Same gate as the boundary it serves: it exists because
+// BL1 forbids the shell from assembling either.
+#[cfg(feature = "ffi")]
+pub mod panel_scope;
 #[cfg(feature = "web")]
 pub mod canvas;
 #[cfg(test)]

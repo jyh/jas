@@ -147,7 +147,14 @@ fn the_instrumentation_externs_do_not_count_themselves() {
         first.contains("\"crossings\":0"),
         "a dump taken immediately after reset must read zero: {first}"
     );
-    assert!(first.contains("\"surface\":\"main@22e5e30e+jas_bind_values\""), "the dump must name its surface: {first}");
+    assert!(
+        first.contains("\"surface\":\"main@22e5e30e+jas_bind_values+jas_panel_event\""),
+        "the dump must name its surface: {first}"
+    );
+    // The engine counters ride in their own object. A dump that named them as
+    // functions would put apparatus into the surface it prices.
+    assert!(first.contains("\"engine\":{"), "engine work is reported: {first}");
+    assert!(!first.contains("\"fn\":\"jas_instr_"), "apparatus is not a row: {first}");
 
     // AND THE OTHER HALF, which the first version of this test got wrong: the
     // dump does not count itself, but RELEASING it does, because `jas_free` is a

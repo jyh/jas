@@ -58,6 +58,16 @@ name = "sc2_second_panel_growth"
 path = "tests/sc2_second_panel_growth.rs"
 required-features = ["ffi"]
 
+# C2 through the boundary, and C1 re-measured because the scope grew. Its own
+# binary for the same reason `ffi_boundary_counter` has one: the counters are
+# process-global, so anything else crossing the boundary in this process is in
+# the reading. Immune by construction rather than by every other test's
+# discipline.
+[[test]]
+name = "sc2_tick_protocol"
+path = "tests/sc2_tick_protocol.rs"
+required-features = ["ffi"]
+
 # R10 de-risking-spike bench: native scene-BUILD cost through the no-op Painter
 # sink. Custom harness (no criterion dependency) so `cargo test` stays lean;
 # run with `cargo bench --bench painter_build`.
