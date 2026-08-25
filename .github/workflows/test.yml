@@ -366,6 +366,63 @@ jobs:
           python scripts/check_scrub_trigger.py --self-test
           python scripts/check_scrub_trigger.py
 
+      # check_private_paths.py ALSO BELONGS ON THIS LANE, and the lane-coverage
+      # gate is what said so: it landed wired to ubuntu only, and main went red
+      # with "a gate that cannot fail on a platform is not watching that
+      # platform" — the blind spot check_swift_copy_sites.py sat in for its whole
+      # life while CI stayed green.
+      #
+      # ⛔ WHAT THIS LANE DOES *NOT* DO, corrected here because the first version
+      # of this comment claimed it and a reader would have believed it: RUNNING
+      # THIS GATE ON WINDOWS DOES NOT MAKE IT SEE A BACKSLASH. Measured by the
+      # gate's author, not reasoned: both arms read git OBJECT bytes, diff path
+      # headers are forward-slash on every platform, and core.autocrlf rewrites
+      # the WORKING TREE, which this gate never reads. The same regex over the
+      # same objects returns the same verdict wherever it executes.
+      #   ⇒ A LANE CHANGES WHERE A GATE RUNS; ONLY THE PATTERN CHANGES WHAT IT
+      #     CAN MATCH. Separator blindness is a PATTERN fix and is tracked as one.
+      #
+      # So why keep the lane? Because the verdict's platform-invariance is a
+      # property of TODAY's implementation, not a guarantee of the gate's
+      # contract — this is the lane whose non-UTF-8 default encoding is asserted
+      # above, and the first pattern or decoding change that becomes
+      # platform-sensitive is watched here BY CONSTRUCTION instead of by someone
+      # remembering to add a lane at the same time.
+      #
+      # Range logic mirrors scrub.yml deliberately rather than being shared: a
+      # full-history scan is permanently red here (five pre-ruling commits carry
+      # a commons path, measured before that gate shipped), so both lanes scan
+      # "no NEW path enters" and both must fall back the same way.
+      - name: No NEW path into the private record (Windows lane)
+        if: ${{ !cancelled() }}
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python scripts/check_private_paths.py --self-test
+          # ⛔ THE HEAD~100 FALLBACK WAS A GUARANTEED RED, NOT A COVERAGE LIMIT.
+          # On a new branch or a pull_request, github.event.before is empty, so
+          # the old fallback scanned 100 commits back -- reaching PRE-RULING
+          # history, where five commits legitimately carry a commons path. It
+          # fired on the first branch pushed after this gate landed and found 3
+          # of them. That is the red-sweep-gets-abandoned failure this gate's own
+          # header names as the reason it scans a delta at all, re-created by its
+          # fallback.
+          #
+          # The delta a branch push actually introduces is measured against main,
+          # not against a commit count. merge-base, so a stale branch scans what
+          # IT added rather than what main did meanwhile.
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            RANGE="$BEFORE..HEAD"
+          elif git rev-parse --verify origin/main >/dev/null 2>&1; then
+            RANGE="$(git merge-base origin/main HEAD)..HEAD"
+            echo "no BEFORE: scanning this branch's own delta, $RANGE"
+          else
+            RANGE="HEAD~1..HEAD"
+            echo "no BEFORE and no origin/main: falling back to $RANGE"
+          fi
+          echo "scanning $RANGE"
+          python scripts/check_private_paths.py --range "$RANGE"
+
       - name: Untracked files are invisible to index-reading gates
         if: ${{ !cancelled() }}
         run: |
