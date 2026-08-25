@@ -39,7 +39,7 @@ sequencer's standing note that the fork's answer lives in the breakdown):
 | `jas_dispatch_event` | 0 | 0 | 0 |
 | `jas_last_error_json` | 0 | 0 | 0 |
 
-⚠️ **Two frees for two reads** — see §2a. This is the one durable structure C1
+⚠️ **Two frees for two reads** — see §1a. This is the one durable structure C1
 produced, and it is stated there rather than as a footnote here.
 
 📌 **Where the reset falls.** The counter is reset **after** `jas_engine_new`:
@@ -49,7 +49,7 @@ side it fell on.
 
 ---
 
-## 2a. ⭐ THE ONE DURABLE STRUCTURE C1 PRODUCED: a Rust-owns-it ABI doubles every value FETCH
+## 1a. ⭐ THE ONE DURABLE STRUCTURE C1 PRODUCED: a Rust-owns-it ABI doubles every value FETCH
 
 **Every value this shell reads costs two crossings — the read and the release.**
 `JasBytes` is Rust-owned (BL4), so a fetch is `jas_widget_tree` **plus**
