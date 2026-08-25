@@ -68,6 +68,15 @@ name = "sc2_tick_protocol"
 path = "tests/sc2_tick_protocol.rs"
 required-features = ["ffi"]
 
+# The C3 recon probe: is the COMMIT interaction performable on the surface that
+# exists? Its own binary for the counters, and its own file because its answer is
+# a refusal with controls rather than a number — a different kind of result from
+# the file above, and mixing them would bury it.
+[[test]]
+name = "sc3_commit_probe"
+path = "tests/sc3_commit_probe.rs"
+required-features = ["ffi"]
+
 # R10 de-risking-spike bench: native scene-BUILD cost through the no-op Painter
 # sink. Custom harness (no criterion dependency) so `cargo test` stays lean;
 # run with `cargo bench --bench painter_build`.

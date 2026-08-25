@@ -15,7 +15,7 @@ namespace ScPanel;
 /// A static count of the call sites below would pass identically on a shell that
 /// was never run -- which is the whole reason the counter exists.
 ///
-/// The surface is NINE materializer functions plus TWO apparatus functions, and
+/// The surface is TEN materializer functions plus TWO apparatus functions, and
 /// they are kept visibly separate because the disproportion gate is measured
 /// against the materializer budget only. Apparatus that counted toward the
 /// budget would let the instrument consume the thing it exists to measure.
@@ -24,7 +24,7 @@ internal static class JasCore
 {
     private const string Lib = "jas_dioxus";
 
-    // -- MATERIALIZER SURFACE (9) — budget-bearing -------------------------
+    // -- MATERIALIZER SURFACE (10) — budget-bearing -------------------------
 
     [DllImport(Lib)] internal static extern IntPtr jas_engine_new();
     [DllImport(Lib)] internal static extern void jas_engine_free(IntPtr e);
@@ -35,6 +35,23 @@ internal static class JasCore
     [DllImport(Lib)] internal static extern JasBytes jas_last_error_json(IntPtr e);
     [DllImport(Lib)] internal static extern JasBytes jas_widget_tree(IntPtr e, byte[] panelId, nuint panelLen, byte[]? ctx, nuint ctxLen);
     [DllImport(Lib)] internal static extern JasBytes jas_bind_values(IntPtr e, byte[] panelId, nuint len);
+
+    /// <summary>
+    /// THE TICK (S-C.2). One control's new value in; every bind row that MOVED,
+    /// across every open panel, out.
+    ///
+    /// ⚠️ NOTE WHAT IS *NOT* IN THIS SIGNATURE: no channel, no colour, no mode.
+    /// The event names a WIDGET and its new value, and the engine reads that
+    /// widget's `bind.value` out of the panel spec to learn what it means. That
+    /// is what keeps this file a materializer: a shell that sent {"h":210} would
+    /// be naming the engine's model, and one that sent a hex would be doing the
+    /// colour arithmetic.
+    ///
+    /// The reply CARRIES the changed rows, so a tick is ONE crossing plus its
+    /// jas_free -- not a dispatch followed by a separate fetch, which under a
+    /// Rust-owns-it ABI would be three.
+    /// </summary>
+    [DllImport(Lib)] internal static extern JasBytes jas_panel_event(IntPtr e, byte[] panelId, nuint panelLen, byte[] eventJson, nuint eventLen);
 
     // -- APPARATUS (2) — NOT part of the surface, NOT budget-bearing -------
 

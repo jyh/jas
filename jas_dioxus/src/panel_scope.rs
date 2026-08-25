@@ -502,6 +502,61 @@ mod tests {
         assert_eq!(st.apply_edit("panel.r", &json!("not a number")), EditOutcome::NoSuchTarget);
     }
 
+    /// ⚖️ **The sequencer's C3 watch, answered by measurement.**
+    ///
+    /// A commit PUSHES to `recent_colors`, and a commit that mutated a list the
+    /// panel binds to could move the panel's RECORD COUNT — in which case C3's
+    /// denominator would differ from C2's and the two figures could not sit
+    /// adjacent.
+    ///
+    /// **It does not.** The colour panel declares TEN fixed swatch nodes
+    /// (`cp_recent_0` … `cp_recent_9`), each binding `panel.recent_colors.<n>`;
+    /// an empty slot renders as a hollow square rather than not rendering. So
+    /// the count is **constant at every list length** and only the VALUES move.
+    /// C2 and C3 share a denominator.
+    #[test]
+    fn a_recent_colours_push_moves_values_and_not_the_record_count() {
+        let w = ws();
+        let spec = w.panel("color_panel_content").unwrap();
+        let doc = doc_with(0);
+
+        let rows = |recent: Vec<String>| -> (usize, usize) {
+            let st = PanelState { recent, ..PanelState::default() };
+            let v = crate::interpreter::bind_values::bind_values(spec, &st.scope(&doc));
+            let arr = v.as_array().unwrap().clone();
+            let slots = arr.iter().filter(|r| {
+                r["id"].as_str().is_some_and(|s| s.starts_with("cp_recent_"))
+            }).count();
+            (arr.len(), slots)
+        };
+
+        let (empty_rows, empty_slots) = rows(vec![]);
+        let (one_rows, _) = rows(vec!["#ff0000".into()]);
+        let (full_rows, full_slots) = rows(
+            (0..10).map(|i| format!("#ff00{i:02}")).collect(),
+        );
+
+        assert!(empty_rows > 0 && empty_slots > 0, "nothing was examined");
+        assert_eq!(empty_slots, 10, "ten declared recent slots");
+        assert_eq!(full_slots, 10, "and still ten when the list is full");
+        assert_eq!(empty_rows, one_rows, "one push does not move the count");
+        assert_eq!(empty_rows, full_rows, "ten pushes do not move the count");
+
+        // The CONTROL: the values DO move, or this test would pass on a scope
+        // that ignored `recent` entirely and prove nothing about pushes.
+        let value_of = |recent: Vec<String>| -> String {
+            let st = PanelState { recent, ..PanelState::default() };
+            let v = crate::interpreter::bind_values::bind_values(spec, &st.scope(&doc));
+            v.as_array().unwrap().iter()
+                .find(|r| r["id"] == "cp_recent_0")
+                .expect("the first recent slot")["value"].as_str().unwrap().to_string()
+        };
+        assert_ne!(
+            value_of(vec![]), value_of(vec!["#ff0000".into()]),
+            "the first slot must change when a colour is pushed"
+        );
+    }
+
     // -- widget -> binding ------------------------------------------------
 
     fn ws() -> crate::interpreter::workspace::Workspace {
