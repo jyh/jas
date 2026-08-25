@@ -1,0 +1,73 @@
+{
+  "interaction": "C1_open_panel_cold",
+  "panel": "color_panel_content",
+  "vacuous": false,
+  "nodes": 106,
+  "materialized": 71,
+  "placeholders": 35,
+  "values_applied": 15,
+  "counters": {
+    "surface": "main@22e5e30e\u002Bjas_bind_values",
+    "functions": 9,
+    "crossings": 4,
+    "bytes_in": 38,
+    "bytes_out": 23012,
+    "bytes_total": 23050,
+    "per_fn": [
+      {
+        "fn": "jas_engine_new",
+        "calls": 0,
+        "bytes_in": 0,
+        "bytes_out": 0
+      },
+      {
+        "fn": "jas_engine_free",
+        "calls": 0,
+        "bytes_in": 0,
+        "bytes_out": 0
+      },
+      {
+        "fn": "jas_free",
+        "calls": 2,
+        "bytes_in": 0,
+        "bytes_out": 0
+      },
+      {
+        "fn": "jas_version",
+        "calls": 0,
+        "bytes_in": 0,
+        "bytes_out": 0
+      },
+      {
+        "fn": "jas_document_json",
+        "calls": 0,
+        "bytes_in": 0,
+        "bytes_out": 0
+      },
+      {
+        "fn": "jas_dispatch_event",
+        "calls": 0,
+        "bytes_in": 0,
+        "bytes_out": 0
+      },
+      {
+        "fn": "jas_last_error_json",
+        "calls": 0,
+        "bytes_in": 0,
+        "bytes_out": 0
+      },
+      {
+        "fn": "jas_widget_tree",
+        "calls": 1,
+        "bytes_in": 19,
+        "bytes_out": 15974
+      },
+      {
+        "fn": "jas_bind_values",
+        "calls": 1,
+        "bytes_in": 19,
+        "bytes_out": 7038
+      }
+    ]
+  }
+}

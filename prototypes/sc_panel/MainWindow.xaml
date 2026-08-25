@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="ScPanel.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid RowDefinitions="*,Auto">
+        <ScrollViewer Grid.Row="0">
+            <StackPanel x:Name="PanelHost" Padding="8" Spacing="2" />
+        </ScrollViewer>
+        <TextBlock x:Name="StatusLine" Grid.Row="1" Padding="8" FontSize="11" TextWrapping="Wrap" />
+    </Grid>
+</Window>
