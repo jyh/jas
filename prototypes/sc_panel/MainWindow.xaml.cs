@@ -32,10 +32,12 @@ public sealed partial class MainWindow : Window
     private const string SecondPanelId = "artboards_panel_content";
 
     /// <summary>
-    /// The two document sizes, as TOTAL artboards. Pinned in
-    /// `FLAGS-sc2-second-panel-flask-2026-08-25.md` BEFORE anything was
-    /// measured, and accepted as pinned by the sequencer (Amendment 9) — the
-    /// free parameter closed one level below the one Amendment 8 ① closed.
+    /// The two document sizes, as TOTAL artboards. Pinned in the S-C.2 premise
+    /// flags BEFORE anything was measured and accepted as pinned — the free
+    /// parameter closed by the party being measured, before measuring.
+    ///
+    /// ⚠️ Named by role rather than by document path: the working record is
+    /// private and a public source file should not carry a handle into it.
     /// </summary>
     private const int SmallDocument = 8;
     private const int LargeDocument = 200;

@@ -42,9 +42,12 @@ use jas_dioxus::ffi::{
 const COLOUR: &str = "color_panel_content";
 const ARTBOARDS: &str = "artboards_panel_content";
 
-/// The two document sizes, pinned in `FLAGS-sc2-second-panel-flask-2026-08-25.md`
-/// BEFORE anything was measured and accepted as pinned by the sequencer
-/// (Amendment 9). **TOTAL artboards, not created ones** — see [`grow_document`].
+/// The two document sizes, pinned in the S-C.2 premise flags BEFORE anything
+/// was measured, and accepted as pinned. **TOTAL artboards, not created ones** —
+/// see [`grow_document`].
+///
+/// ⚠️ Named by ROLE, not by document path: the working record they were filed in
+/// is private, and a public source file should not carry a handle into it.
 const SMALL: usize = 8;
 const LARGE: usize = 200;
 

@@ -3,10 +3,9 @@
 //! # Why this exists, and why a grep would not do
 //!
 //! S-C prices the materializer by **boundary chatter**: `extern "C"` invocations
-//! AND bytes crossed, per named user interaction. The sequencing ruling
-//! (`SEQUENCE-sc-spike-2026-08-24.md` §3.3) makes one instruction the most
-//! important in the document, and it is this seat's own vacuous-lane law turned
-//! on a counting deliverable:
+//! AND bytes crossed, per named user interaction. The sequencing ruling's §3.3
+//! makes one instruction the most important in that document, and it is this
+//! machine's own vacuous-lane law turned on a counting deliverable:
 //!
 //! > **A static count of call sites in the C# source passes identically on a
 //! > shell that was never run.** The source is on disk whether or not anything
@@ -21,9 +20,10 @@
 //!
 //! # Population, stated rather than implied
 //!
-//! [`Crossing`] enumerates the **9 functions of the materializer surface**: the
-//! 8 that stood on `main` at `22e5e30e` plus `jas_bind_values`, added for S-C.1
-//! because `widget_tree` is value-blind by design (all in `ffi.rs`). It deliberately does NOT
+//! [`Crossing`] enumerates the **10 functions of the materializer surface**: the
+//! 8 that stood on `main` at `22e5e30e`, plus `jas_bind_values` (S-C.1, because
+//! `widget_tree` is value-blind by design) and `jas_panel_event` (S-C.2, the
+//! write path a tick needs) — all in `ffi.rs`. It deliberately does NOT
 //! include the two S-B paint probes, which exist only on the S-B branch and are
 //! not part of a panel's surface — a distinction that cost a round of correction
 //! to establish, because "half-unbuilt" is a ratio whose denominator IS the tree
