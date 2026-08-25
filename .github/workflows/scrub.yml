@@ -58,3 +58,49 @@ jobs:
       - run: python scripts/check_scrub_trigger.py --self-test
       - run: python scripts/check_commit_trailers.py
       - run: python scripts/check_scrub_trigger.py
+
+  private-paths:
+    name: no NEW path into the private record enters a public repo
+    runs-on: ubuntu-latest
+    # Council 2026-08-25 ruled the firewall line at PATHS and booked this gate
+    # as construction. Booked is not built: measured over the 9 commits that
+    # landed on saltworks at or after that stamp, THREE carried a path into the
+    # private record -- the first 1m41s after the ruling. A rule with no
+    # instrument is obeyed for exactly as long as it is remembered.
+    #
+    # ⛔ RANGE DIVERGES FROM THE JOB ABOVE, AND THE DIVERGENCE IS MEASURED.
+    # The sibling trailer gate in this file scans ALL of history here, because
+    # this repo's trailer population is zero. This gate cannot: measured before
+    # it shipped, FIVE commit messages in this history already carry a path
+    # into the commons repo, every one of them genuine and every one predating
+    # the 2026-08-25 ruling that forbade them. A full scan would therefore be
+    # permanently red -- the red-sweep-gets-abandoned failure the trailer gate's
+    # own header describes. So this scans the delta: "no NEW path enters".
+    #
+    # NOTE ON `pull_request`: this workflow also fires on pull_request, where
+    # `github.event.before` is empty and the HEAD~100 fallback takes over. That
+    # is the declared coverage limit, stated here rather than discovered.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # BOTH ARMS DRIVEN BEFORE TRUST: a planted path must fail it, a
+      # role-worded message must pass it, and the fixtures are the real
+      # post-ruling instances rather than invented shapes.
+      - run: python scripts/check_private_paths.py --self-test
+      - name: scan the pushed delta
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            RANGE="HEAD~100..HEAD"
+            git rev-parse HEAD~100 >/dev/null 2>&1 || RANGE="HEAD~1..HEAD"
+            echo "new branch: falling back to $RANGE (declared limit)"
+          else
+            RANGE="$BEFORE..HEAD"
+          fi
+          echo "scanning $RANGE"
+          python scripts/check_private_paths.py --range "$RANGE"
