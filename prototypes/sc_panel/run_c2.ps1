@@ -86,4 +86,19 @@ try {
     # already on disk by the time this runs; the window carries the same verdict
     # in its title and is for a human at the keyboard, not for this script.
     Get-Process ScPanel -ErrorAction SilentlyContinue | Stop-Process -Force
+
+    # AND SAY WHAT THE CLEANUP ACTUALLY DID, because a receipt covers the WORK
+    # and not the cleanup, and is read as covering everything in its
+    # neighbourhood. The measured run above printed a true receipt and left a
+    # registered task and a locked exe behind -- so the next build failed with
+    # MSB3027 and read as a toolchain fault. A line that reports the leftover
+    # state is what turns "the run looked clean" into a checked claim.
+    $leftTask = [bool](Get-ScheduledTask -TaskName $task -ErrorAction SilentlyContinue)
+    $leftProc = [bool](Get-Process ScPanel -ErrorAction SilentlyContinue)
+    if ($leftTask -or $leftProc) {
+        Write-Host "CLEANUP INCOMPLETE: task=$leftTask process=$leftProc"
+        Write-Host "  The next build will fail with MSB3027 and it is NOT a toolchain fault."
+    } else {
+        Write-Host "CLEANUP: no scheduled task, no ScPanel process. Verified, not assumed."
+    }
 }
