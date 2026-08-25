@@ -278,6 +278,23 @@ struct JasBytes jas_version(void);
 struct JasBytes jas_document_json(struct JasEngine *e);
 
 /**
+ * Zero every boundary counter. Call at the START of a named interaction so the
+ * dump that follows describes that interaction alone.
+ */
+void jas_instr_reset(void);
+
+/**
+ * The counter dump as JSON: per-function rows plus totals, naming the surface
+ * it was measured against.
+ *
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ * Releasing it does call `jas_free`, which IS a counted crossing -- so dump
+ * LAST in an interaction, or reset after freeing, or the free will appear in
+ * the next reading.
+ */
+struct JasBytes jas_instr_counters_json(void);
+
+/**
  * Apply one op envelope (BL1: the shell sends events, never state; BL6: the
  * journal's resolved-literal vocabulary, which was built for replay and is
  * therefore already an IPC vocabulary).

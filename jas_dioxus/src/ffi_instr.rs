@@ -28,9 +28,11 @@
 //! to establish, because "half-unbuilt" is a ratio whose denominator IS the tree
 //! being counted.
 //!
-//! The two instrumentation entry points at the foot of this file
-//! (`jas_instr_*`) are **NOT part of that surface** and must never be counted
-//! into it. They are the measuring apparatus, not the thing measured.
+//! The two instrumentation entry points — `jas_instr_reset` and
+//! `jas_instr_counters_json`, which live in `ffi.rs` beside every other
+//! `extern "C"` — are **NOT part of that surface** and must never be counted
+//! into it. They are the measuring apparatus, not the thing measured, and
+//! [`Crossing`] deliberately has no variant for either.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -53,7 +55,7 @@ pub enum Crossing {
 impl Crossing {
     /// The surface, in discriminant order. Kept beside the enum so the JSON dump
     /// carries the ABI's own names rather than Rust identifiers.
-    pub const NAMES: [&'static str; Crossing::COUNT] = [
+    pub(crate) const NAMES: [&'static str; Crossing::COUNT] = [
         "jas_engine_new",
         "jas_engine_free",
         "jas_free",
@@ -64,7 +66,14 @@ impl Crossing {
         "jas_widget_tree",
     ];
 
-    pub const COUNT: usize = 8;
+    /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
+    /// a `pub` const here is emitted by cbindgen into the C header as
+    /// `#define Crossing_COUNT`. The header is the ABI contract a C consumer
+    /// compiles against; it should describe what the shell can CALL, not the
+    /// dimensions of a Rust-side counter that will change whenever the surface
+    /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
+    /// caught the resulting drift immediately.)
+    pub(crate) const COUNT: usize = 8;
 
     pub fn name(self) -> &'static str {
         Crossing::NAMES[self as usize]
