@@ -1,0 +1,11 @@
+# Build outputs. Committed by accident once: `git add prototypes/sc_panel`
+# swept in 99 generated files including a 2,940-line project.assets.json, which
+# would have inflated every line count in REPORT-C1.md's own directory and put
+# NuGet lock state under review. The file that measures a line count should not
+# sit beside 5,000 lines of generated noise.
+bin/
+obj/
+# The C1 receipt is written beside the exe by the run itself; it is DATA, and
+# the copy that matters is quoted in REPORT-C1.md.
+sc-c1.json
+sc-error.txt
