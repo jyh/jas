@@ -39,6 +39,15 @@ if (-not (Test-Path $exe)) { throw "exe not found: $exe" }
 Get-Process ScPanel -ErrorAction SilentlyContinue | Stop-Process -Force
 Remove-Item $out, $err -ErrorAction SilentlyContinue
 
+# AND UNREGISTER ANY LEFTOVER TASK, because the `finally` below is not
+# guaranteed to run. Piping this script's output through `Select-Object -First N`
+# stops the pipeline, PowerShell unwinds without executing `finally`, and the
+# task survives -- measured, not theorised: it is how a leftover task was found
+# registered after a run that printed its receipt and looked clean. Cleaning up
+# at START as well as at exit is immune by construction; a `finally` alone is
+# immune only while nobody truncates the output.
+Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+
 # USE $env:COMPUTERNAME, NOT $env:USERDOMAIN. In an ssh session the latter reads
 # "WORKGROUP" and Register-ScheduledTask dies with "No mapping between account
 # names and security IDs was done".
