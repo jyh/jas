@@ -39,14 +39,51 @@ sequencer's standing note that the fork's answer lives in the breakdown):
 | `jas_dispatch_event` | 0 | 0 | 0 |
 | `jas_last_error_json` | 0 | 0 | 0 |
 
-⚠️ **Two frees for two reads.** Every value this shell reads costs **two**
-crossings — the read and the release — because the ABI is Rust-owns-it (BL4). A
-shell cannot avoid it, so it belongs in the figure rather than being netted out.
+⚠️ **Two frees for two reads** — see §2a. This is the one durable structure C1
+produced, and it is stated there rather than as a footnote here.
 
 📌 **Where the reset falls.** The counter is reset **after** `jas_engine_new`:
 C1 is the cost of opening a *panel*, and engine creation is app startup. Stated
 because that boundary is a choice, and a reader should not have to infer which
 side it fell on.
+
+---
+
+## 2a. ⭐ THE ONE DURABLE STRUCTURE C1 PRODUCED: a Rust-owns-it ABI doubles every value FETCH
+
+**Every value this shell reads costs two crossings — the read and the release.**
+`JasBytes` is Rust-owned (BL4), so a fetch is `jas_widget_tree` **plus**
+`jas_free`. C1's four crossings are two fetches and their two frees.
+
+⇒ **Unlike the missing write path (§4), this is NOT incompleteness.** It is a
+property of the boundary's ownership model, it does not go away when the surface
+is finished, and **painter-drawn chrome pays none of it, because it never
+crosses** — it redraws from engine state. It is therefore the only asymmetry
+between the two arms that C1 was in a position to observe.
+
+📌 **PIN THE UNIT, because the multiplier does not apply to everything.** The
+doubling is **on CROSSINGS, not on bytes**: the `jas_free` carries a payload of
+zero. C1's 23,050 bytes are *not* doubled; its crossing count is.
+
+*This matters for S-C.2's protocol design, and it is an input for the council
+rather than a conclusion of this report:*
+
+| protocol shape | crossings | bytes |
+|---|---|---|
+| many small targeted fetches | **doubled per fetch** — the multiplier lands hardest here | small |
+| few whole-panel fetches | doubled, but on very few fetches | large |
+
+**So "chatty in calls, cheap in bytes" and "few calls, whole-panel payload" are
+not symmetric under this ABI**: a protocol must minimise **value fetches**, not
+calls in general, because the doubling attaches to the fetch and not to the
+byte. A design chosen on a call count alone would be chosen on the wrong
+denominator.
+
+⛔ **AND THIS IS STRUCTURE, NOT A VERDICT.** 4 crossings and 23,050 bytes to open
+a panel cold is a **one-shot**, and the one-shot amortises — the sequencer ruled
+that before the measurement, and the measurement does not disturb it. Nothing
+here says the materializer loses; it says what any future protocol will be priced
+in.
 
 ---
 
