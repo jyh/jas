@@ -369,10 +369,25 @@ jobs:
       # check_private_paths.py ALSO BELONGS ON THIS LANE, and the lane-coverage
       # gate is what said so: it landed wired to ubuntu only, and main went red
       # with "a gate that cannot fail on a platform is not watching that
-      # platform". That is not bureaucratic here — this gate matches PATH SHAPES,
-      # and this is the lane that can see a backslash separator and a CRLF, so
-      # ubuntu-only coverage is exactly the blind spot check_swift_copy_sites.py
-      # sat in for its whole life while CI stayed green.
+      # platform" — the blind spot check_swift_copy_sites.py sat in for its whole
+      # life while CI stayed green.
+      #
+      # ⛔ WHAT THIS LANE DOES *NOT* DO, corrected here because the first version
+      # of this comment claimed it and a reader would have believed it: RUNNING
+      # THIS GATE ON WINDOWS DOES NOT MAKE IT SEE A BACKSLASH. Measured by the
+      # gate's author, not reasoned: both arms read git OBJECT bytes, diff path
+      # headers are forward-slash on every platform, and core.autocrlf rewrites
+      # the WORKING TREE, which this gate never reads. The same regex over the
+      # same objects returns the same verdict wherever it executes.
+      #   ⇒ A LANE CHANGES WHERE A GATE RUNS; ONLY THE PATTERN CHANGES WHAT IT
+      #     CAN MATCH. Separator blindness is a PATTERN fix and is tracked as one.
+      #
+      # So why keep the lane? Because the verdict's platform-invariance is a
+      # property of TODAY's implementation, not a guarantee of the gate's
+      # contract — this is the lane whose non-UTF-8 default encoding is asserted
+      # above, and the first pattern or decoding change that becomes
+      # platform-sensitive is watched here BY CONSTRUCTION instead of by someone
+      # remembering to add a lane at the same time.
       #
       # Range logic mirrors scrub.yml deliberately rather than being shared: a
       # full-history scan is permanently red here (five pre-ruling commits carry
