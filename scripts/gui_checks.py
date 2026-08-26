@@ -343,9 +343,22 @@ def _fault_menu_tick_lies(p: GuiProbe):
         "if(s)s.textContent='\u2713 Layers';return !!s;})()")
 
 
+def _fault_chrome_drop(p: GuiProbe):
+    """Delete the toolbar's first tool button and the dock's Color body from
+    the DOM after the workspace switch -- the exact symptom JasSwift shows when
+    the nil pane layout is saved (PANESNIL). DOM-level, like menu_tick_lies:
+    the symptom is planted where the check READS, so a green under this fault
+    means the check reads nothing."""
+    p.cdp.evaluate(
+        "(()=>{for(const id of ['btn_selection','cp_content']){"
+        "const e=document.getElementById(id);if(e)e.remove();}return true;})()")
+
+
 FAULTS = {
     "menu_tick_lies": Fault(_fault_menu_tick_lies, "menu_tick_matches_screen",
                             "agrees with what is on screen"),
+    "chrome_drop": Fault(_fault_chrome_drop, "workspace_switch_keeps_chrome",
+                         "still drawn after the switch"),
     "invisible_highlight": Fault(_fault_invisible_highlight, "chain_visible",
                                  "RENDERED style moved"),
     "dead_tile": Fault(_fault_dead_tile, "tile_click_responds",
@@ -777,6 +790,76 @@ def menu_tick_matches_screen(ctx: Ctx):
     open_window_menu()
     ctx.want(ticked("menu_layers"),
              "and the tick followed the panel onto the screen")
+
+
+@check("workspace_switch_keeps_chrome",
+       "switching to the Default workspace keeps the toolbar and dock drawn")
+def workspace_switch_keeps_chrome(ctx: Ctx):
+    """PANESNIL (JYH at the canvas, 2026-08-25): in JasSwift, picking the
+    Default workspace dropped the toolbar and every panel, the Window menu kept
+    the panels ticked, and the pane toggles went silently dead -- one nil read
+    three ways. Both ports construct the Default layout with pane_layout=None
+    (workspace.rs:345 / WorkspaceLayout.swift:346) and NEITHER switch path
+    repairs it (app_state.rs:1617 / ContentView.swift:250). Dioxus survives
+    only because the app loop re-creates a missing pane layout on every pass
+    (app.rs:847) -- immune by construction, where Swift repaired per call site
+    and the switch site forgot.
+
+    This check pins the RESCUE on the port that has it: remove or reorder the
+    app-loop repair and the toolbar and dock vanish exactly as Swift's did.
+    The Swift twin is unwritable until that lane grows read-back
+    (GUI_EYES.md section Swift); when it does, port this check first.
+    """
+    p = ctx.p
+    TOOL = "btn_selection"   # first toolbar tool button (workspace/layout.yaml)
+    DOCK = "cp_content"      # Color panel body, stock front tab; verified live
+
+    ctx.want(p.exists(TOOL), "baseline: the toolbar is drawn before the switch")
+    ctx.want(p.exists(DOCK), "baseline: the dock is drawn before the switch")
+
+    def open_workspace_submenu():
+        _click_by_text(p, "css:.jas-menu-title", "Window")
+        time.sleep(0.3)
+        ok = _click_by_text(p, "css:.jas-menu-item", "Workspace")
+        time.sleep(0.3)
+        return ok
+
+    ctx.want(open_workspace_submenu(), "the Window menu lists a Workspace submenu")
+
+    # EXACT match, not contains: "Reset to Default" lives in the same submenu,
+    # and a contains-match on "Default" reaches the right row only by document
+    # order -- correctness by luck is the class this file exists to kill.
+    clicked = p.cdp.evaluate(
+        "(()=>{const els=[...document.querySelectorAll('.jas-menu-item')];"
+        "const e=els.find(x=>{const t=(x.textContent||'').trim();"
+        "return t==='Default'||t==='\u2713 Default';});"
+        "if(!e)return null;const r=e.getBoundingClientRect();"
+        "return [r.x+r.width/2, r.y+r.height/2];})()")
+    ctx.want(bool(clicked),
+             "the Workspace submenu lists the Default layout (exact match)")
+    if clicked:
+        p.click_xy(clicked[0], clicked[1])
+    time.sleep(0.6)
+    ctx.inject("chrome_drop")
+
+    # The switch must have HAPPENED -- a check that examines nothing returns
+    # green (the vacuity class). Re-open and require the tick on Default.
+    open_workspace_submenu()
+    ticked = p.cdp.evaluate(
+        "(()=>{const els=[...document.querySelectorAll('.jas-menu-item')];"
+        "return els.some(e=>(e.textContent||'').trim()==='\u2713 Default');})()")
+    ctx.note(f"Default ticked after switch: {ticked}")
+    ctx.want(bool(ticked),
+             "the switch actually happened: Default carries the tick")
+    _click_by_text(p, "css:.jas-menu-title", "Window")  # toggle the menu shut
+    time.sleep(0.3)
+
+    ctx.shot("after_switch_to_default")
+    ctx.want(p.exists(TOOL),
+             "the toolbar is still drawn after the switch -- in Swift this "
+             "exact step dropped it (nil pane layout, saved)")
+    ctx.want(p.exists(DOCK),
+             "the dock is still drawn after the switch")
 
 
 @check("brush_promotes_line",
