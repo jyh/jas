@@ -313,13 +313,27 @@ def partition(findings, exempt):
     return viol, exm
 
 
-def audit_pins(exempt, ref="HEAD"):
+def audit_pins(exempt):
     """(intact, drifted, unresolvable) -- does each pin still match at its ref?
 
     THE ARM A DELTA SCAN CANNOT HAVE. If a preserved line is deleted or edited,
     a delta of the same push may show nothing at all; the pin stops resolving,
     and only a look at the tree can say so. A pin whose ref is not present in
     this checkout is UNRESOLVABLE, never 'intact' -- reported, never assumed.
+
+    ⛔ THERE IS DELIBERATELY NO `ref` PARAMETER, AND THAT IS A REPAIR. This
+    function shipped as `audit_pins(exempt, ref="HEAD")`, and `main()` dutifully
+    passed it the scanned range's endpoint -- while the first statement of the
+    loop below rebound that same name to None. The argument was discarded before
+    it was ever read: driven with 'HEAD', a garbage ref, '' and None, all four
+    returned the identical verdict. Behaviour was right (each pin is audited at
+    ITS OWN ref, which is what the ruling scopes), but the signature advertised a
+    scoping knob that did not exist and the call site paid it tribute, so a
+    reader of `main()` came away believing this audit was bounded by the push.
+    AN INTERFACE THAT ADVERTISES A CAPABILITY IT DOES NOT HAVE IS A DEAD ARM
+    WEARING A DRIVEN ARM'S SIGNATURE -- the shape this file names 'decoy' three
+    times, found in the second arm written to be the independent one. The
+    loop-local is `found_ref` now so the shadow cannot silently return.
     """
     intact, drifted, unresolvable = [], [], []
     for e in exempt:
@@ -329,16 +343,16 @@ def audit_pins(exempt, ref="HEAD"):
         # simply does not have that branch) and WRONG when the ref is present
         # and the FILE was deleted -- that is the preserved record being
         # destroyed, reported as "not applicable". Found by driving the arm.
-        ref = None
+        found_ref = None
         for cand in (e["ref"], f'origin/{e["ref"]}'):
             if subprocess.run(["git", "rev-parse", "--verify", "--quiet", cand],
                               capture_output=True).returncode == 0:
-                ref = cand
+                found_ref = cand
                 break
-        if ref is None:
+        if found_ref is None:
             unresolvable.append(e)          # the branch is not in this checkout
             continue
-        blob = subprocess.run(["git", "show", f'{ref}:{e["file"]}'],
+        blob = subprocess.run(["git", "show", f'{found_ref}:{e["file"]}'],
                               capture_output=True, text=True, encoding="utf-8")
         if blob.returncode != 0:
             drifted.append(e)               # ref IS here and the FILE is gone
@@ -623,7 +637,7 @@ def main() -> int:
 
     # THE PIN AUDIT — the arm a delta scan cannot have. Run before the verdict,
     # because a drifted pin is a failure even on a push that touches nothing.
-    intact, drifted, unresolvable = audit_pins(exempt, args.range.split("..")[-1])
+    intact, drifted, unresolvable = audit_pins(exempt)
     if drifted:
         print(f"FAIL [gate {self_id()}]: {len(drifted)} PRESERVED-RECORD PIN(S) "
               f"HAVE DRIFTED.\n")
