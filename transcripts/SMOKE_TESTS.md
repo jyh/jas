@@ -251,3 +251,54 @@ you do not have therefore opens looking *fine and wrong*: the artwork is not
 lost, it is silently downgraded. Graceful fallback is defensible in a renderer;
 silence about it may not be. For the council queue, beside the other spec
 silences.
+
+---
+
+## 2026-08-25 — the Captain's canvas hour (interactive, JYH at the controls)
+
+**Build: `main 792c1db6`** (green ×3 at session start; pre-flight re-measured at
+this exact HEAD — both entry commands executed, scene round-tripped 6-of-6).
+
+### SMOKE 4 — Painter PH2, the six multi-paint kinds: **PASS**
+
+First eyeball of the converted painter arm since PH2 landed (banked 2026-07-24).
+Scene `smoke/03-painter-ph2.svg` in the Dioxus port. JYH's verdict, verbatim:
+*"All six render correctly, fill under stroke, no seams, gradient looks good."*
+
+- All six convertible kinds (Rect · Circle · Ellipse · Polygon · Polyline ·
+  Path) render as before the conversion: fill under stroke, no doubled edge,
+  no alpha seam where the paints meet.
+- **The gradient fallback arm was exercised too** — a shape with a gradient
+  routes to the legacy arm, so both sides of PH2's routing decision were seen
+  in one sitting.
+
+### SMOKE 3 — TABTRUTH session: **superseded by a finding (PANESNIL)**
+
+The session set out to judge the one-click panel toggle and instead found a
+defect class no gate could see. In JasSwift, **switching to the Default
+workspace drops the toolbar and every panel; the Window menu keeps the panels
+ticked; the pane toggles go silently dead** — one nil (`paneLayout`) read three
+ways. Confirmed by the falsifiable prediction: Toolbar/Dock rows UNCHECKED in
+the same menu whose panel rows stayed CHECKED.
+
+- Both ports construct the Default layout with `pane_layout=None`; neither
+  switch path repairs it. **Dioxus survives only via the app-loop repair**
+  (`app.rs:847`) — immune by construction where Swift repaired per call site.
+- Cross-port tests were structurally blind: the corpus pins `panel_on_screen`
+  and `default_layout`, both of which MATCH. The divergence lives in which
+  call site runs when. **JYH's eye found it in minutes.**
+- Three Swift defects booked (switch/revert don't repair and persist the nil;
+  `panelOnScreen` fails open on nil; `toggle_pane` fails silent on nil).
+- Regression gate landed the same evening: `workspace_switch_keeps_chrome` in
+  the GUI_EYES harness, green proven AND red proven (`--regress chrome_drop`
+  → TEETH ok). PR #24.
+
+**Still owed from SMOKE 3, deliberately not faked as done:** the one-click
+*feel* judgment in both ports, the same-click-same-feel parity read, and the
+dock-tab-strip council question. The mechanical half is gated
+(`menu_tick_matches_screen`); the judgment half needs the Captain's eye on a
+build where the Swift workspace chrome survives — i.e. after the PANESNIL
+fixes land.
+
+*(Recorded the same evening; the ARROWTRIM lesson — three firings re-asking
+whether a smoke ever happened — is why this entry exists.)*
