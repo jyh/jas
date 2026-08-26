@@ -627,6 +627,58 @@ private func testLayout() -> WorkspaceLayout {
     #expect(l.panelOnScreen(.color), "its group-mate at the front is")
 }
 
+// MARK: - PANESNIL (JYH at the canvas, 2026-08-25)
+//
+// Selecting the Default workspace dropped the toolbar and every panel, the
+// Window menu kept the panels TICKED, and the pane toggles went silently dead.
+// One nil -- `paneLayout` -- read three ways. These three tests are the three
+// readings, written RED first against the shipped behaviour.
+
+@Test func anAbsentPaneLayoutIsNeutralNotHidden() {
+    // READING 1, CORRECTED BY THE CORPUS. I first wrote this test the other way
+    // round -- asserting that a nil pane layout puts nothing on screen -- and
+    // "fixed" panelOnScreen's `?? true` to `?? false` to satisfy it. That broke
+    // NINETEEN cross-language vectors, because the nil default is CONTRACT, not
+    // oversight: test_fixtures/algorithms/panel_on_screen.json is 8 cases and
+    // THREE carry an explicit pane_layout (a_visible_dock_pane_changes_nothing,
+    // a_hidden_dock_pane_puts_every_anchored_panel_off_screen, and one more).
+    // The corpus exercises both pane states deliberately; the five cases that
+    // OMIT the field mean "panes are not what this case is about".
+    //
+    // So `?? true` is the NEUTRAL ELEMENT of a shared cross-port law, and this
+    // test pins it as such so the next reader does not "fix" it as I tried to.
+    // The PANESNIL defect is not here -- it is that a LIVE app ever reaches the
+    // view with no panes (see switchingLayoutLeavesPanesUsable).
+    var l = testLayout()
+    l.paneLayout = nil
+    #expect(l.panelOnScreen(.color),
+            "an ABSENT pane layout is neutral: it must not veto a front tab, or the five corpus cases that omit the field would silently assert something they do not mean")
+    var hidden = testLayout()
+    hidden.ensurePaneLayout(viewportW: 1200, viewportH: 800)
+    hidden.panesMut { $0.hidePane(.dock) }
+    #expect(!hidden.panelOnScreen(.color),
+            "but an explicitly HIDDEN dock pane DOES veto it -- that is the case the corpus states outright, and it is what distinguishes absent from hidden")
+}
+
+@Test func switchingLayoutLeavesPanesUsable() {
+    // READING 2, the cause. `named()` constructs with paneLayout: nil and the
+    // switch path never repaired it, so the nil reached the view AND was
+    // persisted by the save that follows. Dioxus survives the identical
+    // constructor only because its app loop re-creates a missing pane layout
+    // every pass (app.rs:847); Swift repaired per call site and this site
+    // forgot. The repair belongs where every layout passes, not here.
+    var l = WorkspaceLayout.named("Default")
+    #expect(l.paneLayout == nil,
+            "the constructor still yields nil -- this test pins the REPAIR,  not a change to the constructor")
+    l.ensurePaneLayout(viewportW: 1200, viewportH: 800)
+    #expect(l.paneLayout != nil, "after the repair a pane layout exists")
+    #expect(l.panes()?.isPaneVisible(.toolbar) == true,
+            "and the toolbar pane is visible -- the Captain's judgement: the  Default workspace SHOULD have its toolbar")
+    #expect(l.panes()?.isPaneVisible(.dock) == true, "and the dock pane too")
+    #expect(l.panelOnScreen(.color),
+            "and the front tab is drawn again, so the tick tells the truth")
+}
+
 @Test func revealPanelRaisesABackgroundTabWithoutDuplicatingIt() {
     var l = testLayout()
     let before = l.anchored[0].1.groups[0].panels
