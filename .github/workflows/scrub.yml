@@ -107,14 +107,39 @@ jobs:
           # The delta a branch push actually introduces is measured against main,
           # not against a commit count. merge-base, so a stale branch scans what
           # IT added rather than what main did meanwhile.
-          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
+          #
+          # ⛔ TWO ARMS ADDED BY THE evidence SEAT, 2026-08-25 evening, after a
+          # REAL force-push exposed both in the sibling repos. Your reasoning
+          # above is unchanged and still correct; these sit under it.
+          #
+          # (a) A BEFORE-SHA MUST BE REACHABLE, NOT MERELY NON-EMPTY. After a
+          #     history rewrite the next push carries a before-sha naming
+          #     commits that no longer exist. `<dead-sha>..HEAD` makes git exit
+          #     128 and the job REDS with "could not read history" on clean
+          #     content. Measured on salt: the trailer job died exactly this way
+          #     while the paths job survived, because only one had this check.
+          #
+          # (b) THE MERGE-BASE ARM DEGENERATES ON THE DEFAULT BRANCH. Force-push
+          #     to main itself and merge-base(origin/main, HEAD) IS HEAD, so the
+          #     range is empty -- which this gate treats as FATAL by design. The
+          #     tip-only arm you already wrote is the right landing place for it;
+          #     it just needs to be reachable from the degenerate case too.
+          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+             && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
             RANGE="$BEFORE..HEAD"
-          elif git rev-parse --verify origin/main >/dev/null 2>&1; then
-            RANGE="$(git merge-base origin/main HEAD)..HEAD"
-            echo "no BEFORE: scanning this branch's own delta, $RANGE"
-          else
+          elif git rev-parse --verify origin/main >/dev/null 2>&1 \
+               && MB=$(git merge-base origin/main HEAD 2>/dev/null) \
+               && [ -n "$MB" ] && [ "$MB" != "$(git rev-parse HEAD)" ]; then
+            RANGE="$MB..HEAD"
+            echo "no reachable BEFORE: scanning this branch's own delta, $RANGE"
+          elif git rev-parse HEAD~1 >/dev/null 2>&1; then
             RANGE="HEAD~1..HEAD"
-            echo "no BEFORE and no origin/main: falling back to $RANGE"
+            echo "DECLARED PARTIAL COVERAGE: no reachable BEFORE and no usable"
+            echo "  merge-base (the default branch was rewritten). Tip commit"
+            echo "  ONLY -- a stated limit, not a clean scan."
+          else
+            echo "FAIL: cannot determine a delta range. Refusing to guess."
+            exit 1
           fi
           echo "scanning $RANGE"
           python scripts/check_private_paths.py --range "$RANGE"

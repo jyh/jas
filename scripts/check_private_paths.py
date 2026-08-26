@@ -72,22 +72,31 @@ WHAT IS DELIBERATELY *NOT* FORBIDDEN
 
 THE FRAME THIS INSTRUMENT MEASURES (it travels; it must say)
 ------------------------------------------------------------
-This file is byte-identical in salt, saltworks and jas. Every number in it was
-measured in **saltworks**, the repo where it was written, on 2026-08-25. A
-travelling tool that quotes one repo's anchor as if it were universal is a
-shape this fleet has already paid for, so the other two were measured at the
-same hour and are recorded here rather than assumed:
+This file is byte-identical in salt, saltworks and jas. Every number below was
+measured by this gate, and each row NAMES ITS REF.
 
-    repo        commits   tracked   full-history findings (message arm)
-    saltworks      2127       847   14
-    salt           2142      1425    0   <- clean history; the delta rule still
-                                          applies, so it stays clean
-    jas            3191      2114    5   <- all genuine, all one shape: a path
-                                          into the commons repo, in a message
+⛔ THE FIRST VERSION OF THIS BLOCK SAID "salt · 2142 commits · 0 findings" AND
+THAT WAS MEASURED ON THE DEFAULT BRANCH ALONE. A long-lived branch of the same
+repo carried ELEVEN. I NAMED A REPO WHERE I HAD MEASURED A REF -- not false,
+but under-scoped, which is worse: it reads as a repo-level clean bill, and it
+was quoted as a frame disclosure for four hours. A REPO DOES NOT HAVE A FINDING
+COUNT; A REF DOES.
 
-None of the three contains a directory whose top-level name collides with a
-private-record root, checked in all three before this shipped -- a repo that
-did would red on every ordinary reference to its own tree.
+    ref                        commits  tracked  message-arm findings
+    saltworks  master             2138      850  14
+    salt       main               2145     1426   0
+    salt       math/w1-e3-port    2579     1463   0   <- was 11; a Captain-ruled
+                                                         purge cleared them
+    jas        main               3192     2115   5   <- genuine, all one shape,
+                                                         all predating the ruling
+
+These are SNAPSHOTS taken 2026-08-25, not properties. A branch that forked
+before this gate landed has never been scanned end to end; if you own a
+long-lived branch, one full-range run is cheap and yours to own.
+
+No repo contains a directory whose top-level name collides with a private-record
+root, checked in all three before this shipped -- a repo that did would red on
+every ordinary reference to its own tree.
 
 WHY THE SCAN IS A DELTA, NOT ALL OF HISTORY
 -------------------------------------------
@@ -104,9 +113,32 @@ the pushed delta's commit messages, and the delta's added/modified file lines.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import pathlib
 import re
 import subprocess
 import sys
+
+def self_id() -> str:
+    """This file's own content hash, printed in every verdict.
+
+    WHY. A ruling made this gate's verdict a required receipt, and the criterion
+    was "the MECHANISM'S verdict". Four copies of it existed across two repos and
+    two refs at that moment; had any differed, the receipt would have named four
+    objects and nobody would have noticed. I checked them by hand and they
+    matched -- but a receipt whose instrument must be identified BY HAND is one
+    unverified step from meaningless.
+
+    AN INSTRUMENT THAT DOES NOT NAME ITSELF MAKES EVERY RECEIPT ABOUT IT
+    UNFALSIFIABLE. Now every line this tool prints carries the bytes that printed
+    it, and a reader can reproduce or refute the number without trusting the run.
+    """
+    try:
+        return hashlib.sha256(
+            pathlib.Path(__file__).read_bytes()).hexdigest()[:16]
+    except OSError:
+        return "unreadable"
+
 
 # ---------------------------------------------------------------------------
 # THE PRIVATE-RECORD ROOTS. Assembled from parts so this file's own prose above
@@ -117,11 +149,35 @@ _SEAT = "se" + "at"                    # the commons/memory-mirror repo
 _EMPLOYER = ["lo" + "ca", "ho" + "ll", "pcc-" + "bios"]
 _PRIVATE_PROJ = ["si" + "la", "mor" + "pho"]
 _CFGDIR = r"\.claude-" + _SEAT + r"-[A-Za-z0-9_-]+"
-_KIT = "Documents/" + _SEAT
+_KIT_RE = "Documents" + r"[/" + chr(92)*2 + r"]+" + _SEAT   # separator-agnostic
+_KIT = "Documents/" + _SEAT                                      # display form only
 _BUS = "FLEET" + r"\.md"
 
 _ROOTS = [_SEAT] + _EMPLOYER + _PRIVATE_PROJ
 _ROOT_ALT = "|".join(_ROOTS)
+
+# ⛔ THE DURABLE LOCAL TIER (born 2026-08-25) IS A PRIVATE ROOT WHOSE NAME IS AN
+# ORDINARY WORD, so it CANNOT join _ROOTS. Measured before deciding: a bare
+# root of that name matches EIGHT existing occurrences in one sibling repo --
+# every one of them the standard system prefix under a slash, in a CI workflow
+# and two docs. Adding it unqualified would red that repo on ordinary content,
+# which is how a gate earns the reputation that gets it deleted.
+#
+# So it is matched ONLY in the two forms that actually identify the private
+# tier rather than any directory of that name: prefixed by the fleet parent, or
+# as a bare-repository name. Both assembled from parts.
+# DECLARED CONSEQUENCE: an unqualified reference to a directory of that name is
+# NOT caught. That is a real hole, chosen with its measurement in hand.
+_LOCALWORD = "lo" + "cal"
+_BS = chr(92)
+_SEPCLASS = "[/" + _BS + _BS + "]+"
+_FLEETPARENT = "projects" + _SEPCLASS + "claude"
+_LOCAL_QUALIFIED = (_FLEETPARENT + _SEPCLASS + _LOCALWORD
+                    + "(?:[/" + _BS + _BS + "]|" + _BS + "b)")
+_LOCAL_BAREREPO = _LOCALWORD + _BS + ".git"
+# The backup volume that holds it is itself a private-record location.
+_BACKUPVOL = ("Volumes" + _SEPCLASS + "Content[ _]HD" + _SEPCLASS
+              + "Salt" + "works")
 
 # A path REACHES INTO a root when the root name is followed by a separator and
 # at least one more component. A bare root name in prose is not a path; the root
@@ -136,17 +192,36 @@ _ROOT_ALT = "|".join(_ROOTS)
 # not by reading. Plural and suffixed forms are excluded by the RIGHT side
 # instead: a public clone path has another letter after the root, never a
 # separator, so it cannot match.
-_INTO = rf"(?<![A-Za-z0-9_-])(?:{_ROOT_ALT})/[A-Za-z0-9_.-]+"
+# ⛔ SEPARATOR CLASS, NOT A LITERAL SLASH -- ADDED AFTER A MEASUREMENT, 08/25.
+# The first shipped version required a forward slash. Driven against six path
+# shapes, FOUR WERE BLIND: a backslash-separated path, a half-normalised mixed
+# path, a UNC double-backslash form, and a drive-letter absolute path. This
+# fleet has a Windows seat, so those are authored shapes, not exotica.
+#
+# ⚠️ AND THE FIX IS IN THE PATTERN, NOT IN THE CI MATRIX. Wiring this gate onto
+# a Windows runner does NOT make it see a backslash: both arms read git OBJECT
+# bytes (measured -- no CR in either arm's output, and diff path headers are
+# forward-slash on every platform), so the same regex over the same objects
+# returns the same verdict wherever it executes. A lane changes WHERE a gate
+# runs; only the pattern changes WHAT it can match.
+_SEP = r"[/\\]+"
+_INTO = rf"(?<![A-Za-z0-9_-])(?:{_ROOT_ALT}){_SEP}[A-Za-z0-9_.-]+"
 
 FORBIDDEN = [
     (re.compile(_INTO),
      "a path into a private-record repo"),
     (re.compile(_CFGDIR),
      "a per-" + _SEAT + " runtime config directory"),
-    (re.compile(rf"(?<![A-Za-z0-9_-]){_KIT}(?:/|\b)"),
+    (re.compile(rf"(?<![A-Za-z0-9_-]){_KIT_RE}(?:{_SEP}|\b)"),
      "the kit run surface"),
     (re.compile(rf"{_BUS}:\d+"),
      "a line-anchored citation into the fleet bus"),
+    (re.compile(_LOCAL_QUALIFIED),
+     "a path into the durable local tier"),
+    (re.compile(_LOCAL_BAREREPO),
+     "the durable local tier's bare repository"),
+    (re.compile(_BACKUPVOL),
+     "the backup volume holding the private record"),
 ]
 
 # Named so a future reader does not "tidy" these into the forbidden list.
@@ -282,6 +357,22 @@ def self_test() -> int:
         ("p-priv", "see " + _PRIVATE_PROJ[1] + "/design/y.md"),
         ("p-cfg", "config lives in ~/.claude-" + _SEAT + "-evidence/settings.json"),
         ("p-bus", "as minuted at " + _BUS.replace(chr(92), "") + ":171311"),
+        # THE FOUR SHAPES THAT WERE BLIND UNTIL 08/25. Assembled, never spelled.
+        ("p-bslash", "see " + _SEAT + chr(92) + "briefs" + chr(92) + "x.md"),
+        ("p-mixed", "see " + _SEAT + chr(92) + "briefs/x.md"),
+        ("p-unc", "see " + chr(92)*2 + "host" + chr(92) + _SEAT + chr(92) + "briefs"),
+        ("p-drive", "see C:" + chr(92) + "Users" + chr(92) + "j" + chr(92)
+                    + _SEAT + chr(92) + "briefs" + chr(92) + "x.md"),
+        # CRLF was already caught; kept as a control so a future edit cannot
+        # silently lose it.
+        ("p-crlf", "see " + _SEAT + "/briefs/x.md" + chr(13)),
+        # THE DURABLE LOCAL TIER (root born 08/25). Only the QUALIFIED forms;
+        # the bare word is the declared hole and is controlled for below.
+        ("l-qual", "see projects/claude/" + _LOCALWORD + "/x.md"),
+        ("l-qual-bs", "see projects" + chr(92) + "claude" + chr(92)
+                      + _LOCALWORD + chr(92) + "x.md"),
+        ("l-repo", "the bare repo " + _LOCALWORD + ".git"),
+        ("l-vol", "/Volumes/Content HD/" + "Salt" + "works/archives"),
     ]
     for ident, text in planted:
         if not scan([(ident, text)]):
@@ -297,6 +388,13 @@ def self_test() -> int:
         ("c-pubabs", "/Users/x/projects/claude/saltworks/docs/QUEUE.md is public"),
         ("c-clone", "the clone at " + _SEAT + "s/evidence/saltworks is a PUBLIC path"),
         ("c-word", "the evidence " + _SEAT + " and the silicon " + _SEAT + " agree"),
+        ("c-winpub", "C:" + chr(92) + "src" + chr(92) + "saltworks" + chr(92) + "docs"),
+        ("c-plural-bs", "the clone at " + _SEAT + "s" + chr(92) + "evidence"),
+        # THE DECLARED HOLE, KEPT AS A CONTROL: the ordinary word must never
+        # fire, or one sibling repo reds on eight pre-existing occurrences.
+        ("c-usr", "installed to /usr/" + _LOCALWORD + "/bin"),
+        ("c-usrlib", "on the path /usr/" + _LOCALWORD + "/lib/python3.12"),
+        ("c-localprose", _LOCALWORD + "/remote divergence was the cause"),
         ("c-meta", "this gate forbids paths into the private record"),
     ]
     for ident, text in clean:
@@ -326,7 +424,8 @@ def self_test() -> int:
         print(f"SELF-TEST FAIL: {f}")
     if failures:
         return 1
-    print(f"check_private_paths SELF-TEST: OK (empty scan fatal proven FIRST; "
+    print(f"check_private_paths SELF-TEST [gate {self_id()}]: OK "
+          f"(empty scan fatal proven FIRST; "
           f"{len(real)} real post-ruling instances caught; {len(planted)} planted "
           f"shapes caught; {len(clean)} compliant forms passed; own source clean)")
     return 0
@@ -370,7 +469,8 @@ def main() -> int:
 
     bad = scan(msgs) + scan(lines)
     if bad:
-        print(f"FAIL: {len(bad)} private-record path(s) entering a PUBLIC repo.\n")
+        print(f"FAIL [gate {self_id()}]: {len(bad)} private-record path(s) "
+              f"entering a PUBLIC repo.\n")
         print("Council 2026-08-25 ruled the firewall line at PATHS: paths into")
         print("the private record are forbidden on public repos. Bare filenames")
         print("are softened; role-wording is the standard. Rewrite the reference")
@@ -378,6 +478,12 @@ def main() -> int:
         for ident, what, line in bad:
             print(f"  {ident[:40]}  {what}")
             print(f"      {line[:110]}")
+        print("\nIF YOU ARE DEMONSTRATING A FORBIDDEN FORM rather than citing one:")
+        print("assemble it from parts or describe it in words. A literal example")
+        print("is still an instance -- this gate tripped ITSELF three times that")
+        print("way on its first run, and the paragraph explaining how to avoid it")
+        print("sits in this script, which is the one file nobody opens while")
+        print("fixing a commit the tool just refused. (compiler seat, 08/25.)")
         print("\nA commit message already pushed cannot be edited without a")
         print("force-push; fix it BEFORE the push, which is why this runs here.")
         return 1
@@ -388,9 +494,14 @@ def main() -> int:
         arm2 = ("FILE ARM NOT RUN -- '" + args.range + "' is not a two-dot "
                 "range, so `git diff` would compare the working tree, not the "
                 "delta. This is a DECLARED GAP, not a clean result")
-    print(f"check_private_paths: OK ({len(msgs)} commit messages scanned and "
+    print(f"check_private_paths [gate {self_id()}]: OK ({len(msgs)} commit messages scanned and "
           f"{arm2}, for '{args.range}'; 0 paths into the private record). "
-          f"Not scanned, by ruling: {'; '.join(PRESERVED)}.")
+          f"Not scanned, by ruling: {'; '.join(PRESERVED)}.\n"
+          f"  WATCHING {len(FORBIDDEN)} shapes: "
+          + "; ".join(w for _, w in FORBIDDEN) + ".\n"
+          f"  ROOTS ARE A HAND-COPIED SNAPSHOT of a fleet map that lives OUTSIDE"
+          f" these repos and MOVES. Last reconciled 2026-08-25. A private root"
+          f" born after that date is NOT watched until this list is edited.")
     return 0
 
 
