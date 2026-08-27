@@ -114,10 +114,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 def self_id() -> str:
     """This file's own content hash, printed in every verdict.
@@ -286,12 +289,23 @@ def repo_slug() -> str:
     return url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
 
 
+def pins_for(slug: str, pins: list) -> list:
+    """The pins granted to repo `slug`. EXACT match, never a substring.
+
+    Extracted from active_exemptions() so the SELF-TEST DRIVES THE SAME CODE
+    PATH PRODUCTION DRIVES -- a scope check written beside the selector would
+    prove nothing about the selector. The substring hazard is not theoretical:
+    two of the three repos this file ships to differ by a SUFFIX, so a `in`
+    test here would hand one repo's grant to another.
+    """
+    return [e for e in pins if e["repo"] == slug]
+
+
 def active_exemptions() -> list:
     """Only the pins granted for THIS repo. Elsewhere the list is empty and the
     gate behaves as though no exemption exists -- which is correct: the ruling
     exempted five sites in one repository, not five strings everywhere."""
-    slug = repo_slug()
-    return [e for e in EXEMPT if e["repo"] == slug]
+    return pins_for(repo_slug(), EXEMPT)
 
 
 def line_sha(text: str) -> str:
@@ -536,8 +550,126 @@ def self_test() -> int:
 
     # 4c. THE PRESERVED-RECORD EXEMPTION. Byte-exactness is the whole grant,
     #     so the arm that matters is the ONE-CHARACTER change.
+    # ⛔ A BARE `len(EXEMPT) != 5` WAS THE ONLY STRUCTURAL CHECK HERE, AND A
+    #    COUNT HAS NO FAILURE MODE: five well-formed pins and five pins with a
+    #    truncated sha, a blank ref or the same site listed twice are the same
+    #    number. The count stays -- the ruling granted exactly five -- but it is
+    #    no longer alone.
     if len(EXEMPT) != 5:
-        failures.append(f"expected 5 pins, found {len(EXEMPT)}")
+        failures.append(f"the ruling granted 5 sites, found {len(EXEMPT)}")
+    for i, e in enumerate(EXEMPT):
+        if set(e) != {"repo", "ref", "file", "sha"}:
+            failures.append(f"pin {i} has fields {sorted(e)}, want repo/ref/file/sha")
+        elif not all(str(e[k]).strip() for k in e):
+            failures.append(f"pin {i} has an empty or blank field")
+        elif not re.fullmatch(r"[0-9a-f]{16}", e["sha"]):
+            failures.append(f"pin {i} sha {e['sha']!r} is not 16 lowercase hex")
+    if len({(e["repo"], e["ref"], e["file"], e["sha"]) for e in EXEMPT}) != len(EXEMPT):
+        failures.append("two pins are IDENTICAL -- a duplicate hides a lost site "
+                        "behind an unchanged count")
+
+    # 4d. THE REPO SCOPE, WHICH HAD NO ARM AT ALL. `pins_for` promises EXACT
+    #     match because two of the three repos this file ships to DIFFER BY A
+    #     SUFFIX -- so a substring implementation hands one repo's grant to
+    #     another, which is the adjacent-object trap wearing a ruling's
+    #     authority. Driven on a FIXTURE set, so the arm does not break when
+    #     the real grant changes: it is testing the selector, not the data.
+    scope_pins = [{"repo": "salt", "ref": "r", "file": "f", "sha": "0" * 16},
+                  {"repo": "saltworks", "ref": "r", "file": "f", "sha": "1" * 16}]
+    for slug, want in (("salt", 1), ("saltworks", 1), ("jas", 0),
+                       ("sal", 0), ("saltwork", 0), ("saltworks2", 0), ("", 0)):
+        got = len(pins_for(slug, scope_pins))
+        if got != want:
+            failures.append(f"pins_for({slug!r}) must select {want}, got {got}")
+    # ...and the real grant must be scoped to ONE repo, or the note printed at
+    # the landing ("none are scoped here") is describing a different object.
+    if len({e["repo"] for e in EXEMPT}) != 1:
+        failures.append("the grant spans more than one repo; the scope note lies")
+
+    # 4e. ⛔ audit_pins() -- THE SECOND, INDEPENDENT ARM, AND IT HAD NO TEST.
+    #     Its trichotomy was driven ONCE, BY HAND, and the receipt was written
+    #     into a commit message. A receipt in a commit message is not a check:
+    #     it cannot fail, it does not run again, and it certifies the code as
+    #     it was that afternoon. In particular the FAIL-OPEN the author found by
+    #     driving it (ref PRESENT + file DELETED reported as "not applicable"
+    #     instead of drift) had nothing holding it down. It does now.
+    #     Driven against a REAL throwaway repository, through the SAME call
+    #     shape production uses -- audit_pins(pins) with no ref argument, cwd
+    #     being the repo -- so nothing here is a fixture of the test's own.
+    tmp = tempfile.mkdtemp(prefix="ppgate-selftest-")
+    here = os.getcwd()
+    try:
+        repo = os.path.join(tmp, "r")
+        subprocess.run(["git", "init", "-q", "-b", "trunk", repo], capture_output=True)
+
+        def g(*a):
+            return subprocess.run(["git", "-C", repo, *a], capture_output=True,
+                                  text=True, encoding="utf-8")
+
+        g("config", "user.email", "selftest@example.invalid")
+        g("config", "user.name", "selftest")
+        g("config", "commit.gpgsign", "false")
+        os.makedirs(os.path.join(repo, "docs"))
+        # A PLAIN line: audit_pins HASHES, it never scans, so this fixture needs
+        # no forbidden shape -- and therefore cannot make this file an instance.
+        keep = "a preserved observation, recorded 2026-08-25"
+        doc = os.path.join(repo, "docs", "R.md")
+
+        def write(text):
+            # newline="" is not lint-appeasement: without it this arm writes
+            # CRLF on the Windows lane, and an arm whose BYTES depend on the
+            # platform is not driving the same fixture everywhere.
+            with open(doc, "w", encoding="utf-8", newline="") as fh:
+                fh.write("preface\n" + text + "\ntrailer\n")
+
+        write(keep)
+        g("add", "-A"); g("commit", "-qm", "fixture")
+        g("branch", "pres/fix")
+        pin = {"repo": "x", "ref": "pres/fix", "file": "docs/R.md",
+               "sha": line_sha(keep)}
+        os.chdir(repo)
+
+        def buckets(pins):
+            i, d, u = audit_pins(pins)
+            return len(i), len(d), len(u)
+
+        # the detector first: an intact pin must land intact, or every red below
+        # is unreadable.
+        if buckets([pin]) != (1, 0, 0):
+            failures.append(f"an INTACT pin must audit intact, got {buckets([pin])}")
+        # a pin nobody granted must not be conjured out of the tree
+        if buckets([]) != (0, 0, 0):
+            failures.append("an empty grant must audit to three empty buckets")
+        # ONE CHARACTER of drift on the preserved line
+        write(keep + ".")
+        g("add", "-A"); g("commit", "-qm", "drift"); g("branch", "-f", "pres/fix", "HEAD")
+        if buckets([pin]) != (0, 1, 0):
+            failures.append(f"a DRIFTED line must audit drifted, got {buckets([pin])}")
+        # ⛔ THE FAIL-OPEN: the ref is PRESENT and the FILE IS GONE. That is the
+        #    preserved record being destroyed; reporting it "unresolvable" reads
+        #    as not-applicable and is green.
+        os.remove(doc)
+        g("add", "-A"); g("commit", "-qm", "delete"); g("branch", "-f", "pres/fix", "HEAD")
+        if buckets([pin]) != (0, 1, 0):
+            failures.append("a DELETED preserved file must be DRIFT, never "
+                            f"unresolvable, got {buckets([pin])}")
+        # a ref this checkout does not have is UNRESOLVABLE -- and never intact
+        gone = dict(pin, ref="no/such/branch")
+        if buckets([gone]) != (0, 0, 1):
+            failures.append(f"an ABSENT ref must be unresolvable, got {buckets([gone])}")
+        # ...and the origin/<ref> fallback must actually resolve
+        head = g("rev-parse", "HEAD").stdout.strip()
+        g("update-ref", "refs/remotes/origin/only-remote", head)
+        write(keep)
+        g("add", "-A"); g("commit", "-qm", "restore")
+        g("update-ref", "refs/remotes/origin/only-remote", g("rev-parse", "HEAD").stdout.strip())
+        remote_only = dict(pin, ref="only-remote")
+        if buckets([remote_only]) != (1, 0, 0):
+            failures.append("a pin whose ref exists only as origin/<ref> must "
+                            f"resolve, got {buckets([remote_only])}")
+    finally:
+        os.chdir(here)
+        shutil.rmtree(tmp, ignore_errors=True)
     # A line that hashes to a REAL pin cannot be constructed here, so the arms
     # are driven on a SYNTHETIC pin over a line this test controls. The real
     # pins are driven against the live branch separately, and that receipt is
@@ -593,6 +725,22 @@ def self_test() -> int:
           f"(empty scan fatal proven FIRST; "
           f"{len(real)} real post-ruling instances caught; {len(planted)} planted "
           f"shapes caught; {len(clean)} compliant forms passed; own source clean)")
+    print(f"  EXEMPTION ARMS: partition byte-exactness, the {len(EXEMPT)}-pin grant's "
+          f"structure, pins_for's EXACT repo scope, and audit_pins' trichotomy "
+          f"driven against a real throwaway repository (intact / one-character "
+          f"drift / ref-present-file-DELETED / absent ref / origin fallback).")
+    # ⛔ DECLARED, NOT IMPLIED. The arms above prove the MECHANISM. They do not
+    # and cannot prove the CONTENT of the real grant from this repository: the
+    # five pinned sites live on another repo's branch, so here pins_for returns
+    # nothing and there is no tree to audit. A line hashing to a real pin also
+    # cannot be constructed in this file without making this file an instance
+    # of what it forbids. Saying so is the point -- an unstated limit reads as
+    # coverage, and this block used to defer the whole question to a sentence in
+    # a commit message, which is a receipt that cannot fail and never runs again.
+    print(f"  NOT COVERED HERE, BY CONSTRUCTION: the {len(EXEMPT)} real pins are scoped to "
+          f"'{sorted({e['repo'] for e in EXEMPT})[0]}' and are inert in every other "
+          f"repo. Their CONTENT is audited only where that repo is checked out --"
+          f" by this same audit_pins, on every push, which is where it belongs.")
     return 0
 
 
