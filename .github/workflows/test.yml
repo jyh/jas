@@ -366,6 +366,19 @@ jobs:
           python scripts/check_encoding_hygiene.py --self-test
           python scripts/check_encoding_hygiene.py
 
+      # ⛔ ON THIS LANE BECAUSE ITS MARKERS ARE PATH-SHAPED, not because a rule
+      # says every gate runs everywhere. `(^|/)(bin|Scripts)/activate…` and
+      # `site-packages/` are separator-sensitive patterns, and `Scripts/` is the
+      # Windows venv layout specifically — so this is the platform whose venvs it
+      # most needs to recognise. The oracle is `git ls-files`, which emits
+      # forward slashes on every platform; running here proves that rather than
+      # assuming it.
+      - name: No virtualenv is tracked — self-test, then the gate
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_no_vendored_env.py --self-test
+          python scripts/check_no_vendored_env.py
+
       # SCRUBGUARD on the lane that matters most: every commit that has ever
       # carried the forbidden trailer was authored on this platform. A gate
       # watching only ubuntu would have watched the one place the violation
