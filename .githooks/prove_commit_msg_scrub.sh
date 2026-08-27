@@ -42,12 +42,23 @@ cp "$GATE" scripts/check_commit_trailers.py
 echo seed > seed.txt; git add -A 2>/dev/null; git commit -q -m "seed" 2>/dev/null
 BASE=$(git rev-parse HEAD)
 
+# ASSEMBLED FROM PARTS, exactly as scripts/check_commit_trailers.py assembles its
+# own patterns and for the same reason. This script must FEED the hook the
+# forbidden shape, so a literal here would put the real thing in a TRACKED file --
+# which is precisely how a session URL once reached this repo as test data, in an
+# earlier copy of this very script. Building it at run time needs no exemption
+# from the leak gate (the gate stays strict, nothing is muted) and keeps the
+# fixture honest, because the hook still receives the true shape.
+_KEY="Claude-""Session"
+_HOST="claude"".ai"
+TRAILER="$_KEY: https://$_HOST/code/session_EXAMPLEnotArealSession"
+
 MSG_DIRTY="Subject line
 
 Body of the commit.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_EXAMPLEnotArealSession
+$TRAILER
 "
 MSG_CLEAN="Subject line
 
@@ -171,7 +182,7 @@ Body that QUOTES the banner, which is what the hook-installing commit does:
 Everything below here would be discarded under -v, and KEPT under -F.
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_EXAMPLEnotArealSession
+$TRAILER
 "
 if ! committed e "$MSG_SCISSORS"; then
   fail "PHASE 9: the hook refused a message quoting the scissors banner"
