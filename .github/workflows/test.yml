@@ -399,6 +399,7 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           python scripts/check_private_paths.py --self-test
+          sh scripts/pick_scan_range.sh --self-test
           # ⛔ THE HEAD~100 FALLBACK WAS A GUARANTEED RED, NOT A COVERAGE LIMIT.
           # On a new branch or a pull_request, github.event.before is empty, so
           # the old fallback scanned 100 commits back -- reaching PRE-RULING
@@ -411,15 +412,11 @@ jobs:
           # The delta a branch push actually introduces is measured against main,
           # not against a commit count. merge-base, so a stale branch scans what
           # IT added rather than what main did meanwhile.
-          if [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ]; then
-            RANGE="$BEFORE..HEAD"
-          elif git rev-parse --verify origin/main >/dev/null 2>&1; then
-            RANGE="$(git merge-base origin/main HEAD)..HEAD"
-            echo "no BEFORE: scanning this branch's own delta, $RANGE"
-          else
-            RANGE="HEAD~1..HEAD"
-            echo "no BEFORE and no origin/main: falling back to $RANGE"
-          fi
+          # ⛔ THIS LANE'S COPY WAS THE STALE ONE -- no reachability arm, no
+          # merge-base degeneracy arm; the 08/25 hardening never reached it, so
+          # it would still die with git exit 128 on a rewritten before-sha. One
+          # copy now, self-tested, shared with scrub.yml.
+          RANGE="$(scripts/pick_scan_range.sh)" || exit 1
           echo "scanning $RANGE"
           python scripts/check_private_paths.py --range "$RANGE"
 
