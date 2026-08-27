@@ -1,0 +1,67 @@
+[
+{
+    "cmd": "push_group",
+    "alpha": 0.5000,
+    "blend": "normal"
+  },
+{
+    "cmd": "push_isolated_layer",
+    "alpha": 0.5000,
+    "blend": "normal"
+  },
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 0.0000,
+      "y": 0.0000,
+      "w": 20.0000,
+      "h": 20.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 0.9000,
+        "g": 0.3000,
+        "b": 0.1000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "push_mask_layer",
+    "mask": {
+      "kind": "luminance_clip_in"
+    }
+  },
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 5.0000,
+      "y": 5.0000,
+      "w": 10.0000,
+      "h": 10.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 1.0000,
+        "g": 1.0000,
+        "b": 1.0000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "pop_mask_layer"
+  },
+{
+    "cmd": "pop_isolated_layer"
+  },
+{
+    "cmd": "pop_group"
+  }
+]

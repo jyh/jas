@@ -1,0 +1,179 @@
+[
+{
+    "cmd": "push_isolated_layer",
+    "alpha": 1.0000,
+    "blend": "normal"
+  },
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 0.0000,
+      "y": 0.0000,
+      "w": 20.0000,
+      "h": 20.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 0.2000,
+        "g": 0.4000,
+        "b": 0.8000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "push_mask_layer",
+    "mask": {
+      "kind": "luminance_clip_in"
+    }
+  },
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 4.0000,
+      "y": 4.0000,
+      "w": 12.0000,
+      "h": 12.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 1.0000,
+        "g": 1.0000,
+        "b": 1.0000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "pop_mask_layer"
+  },
+{
+    "cmd": "pop_isolated_layer"
+  },
+{
+    "cmd": "push_isolated_layer",
+    "alpha": 1.0000,
+    "blend": "normal"
+  },
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 40.0000,
+      "y": 0.0000,
+      "w": 20.0000,
+      "h": 20.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 0.2000,
+        "g": 0.4000,
+        "b": 0.8000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "push_mask_layer",
+    "mask": {
+      "kind": "alpha_clip_out"
+    }
+  },
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 44.0000,
+      "y": 4.0000,
+      "w": 12.0000,
+      "h": 12.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 1.0000,
+        "g": 1.0000,
+        "b": 1.0000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "pop_mask_layer"
+  },
+{
+    "cmd": "pop_isolated_layer"
+  },
+{
+    "cmd": "push_isolated_layer",
+    "alpha": 1.0000,
+    "blend": "normal"
+  },
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 80.0000,
+      "y": 0.0000,
+      "w": 20.0000,
+      "h": 20.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 0.2000,
+        "g": 0.4000,
+        "b": 0.8000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "push_mask_layer",
+    "mask": {
+      "kind": "alpha_reveal_outside_bbox",
+      "bbox": {
+        "x": 4.0000,
+        "y": 4.0000,
+        "w": 12.0000,
+        "h": 12.0000
+      }
+    }
+  },
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 84.0000,
+      "y": 4.0000,
+      "w": 12.0000,
+      "h": 12.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 1.0000,
+        "g": 1.0000,
+        "b": 1.0000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "pop_mask_layer"
+  },
+{
+    "cmd": "pop_isolated_layer"
+  }
+]

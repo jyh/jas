@@ -2,9 +2,7 @@
 //! Shared by the proof test (via `RecordingPainter`) and the R10 bench (via
 //! `NoOpPainter`) so both drive the SAME lowering code.
 
-use super::{
-    Brush, ColorStop, EllipseArc, LinearGradient, Painter, PathCommand, Rect, StrokeStyle, TextRun,
-};
+use super::{Brush, ColorStop, EllipseArc, LinearGradient, Mask, Painter, PathCommand, Rect, StrokeStyle, TextRun};
 use crate::geometry::element::{BlendMode, Color, FillRule, LineCap, LineJoin, Transform};
 
 fn demo_stroke(width: f64) -> StrokeStyle {
@@ -196,4 +194,112 @@ pub fn build_synthetic_scene(p: &mut impl Painter, n: usize) {
 
     p.pop_group();
     p.pop_state();
+}
+
+// ---------------------------------------------------------------------------
+// AMENDMENT A6 CORPUS (design block §6). Four scenes the block says testdata/
+// owes post-ratification. They are DISPLAY-LIST goldens: they pin the op STREAM
+// and the bracket grammar, not pixels.
+//
+// ⛔ THESE ARE AUTHORED FROM THE CONTRACT, NOT CAPTURED FROM HEAD. That is the
+// point of writing them now: the PH4 conversion must LEARN to emit these. A
+// golden captured from today's renderer would pin defect D-α — the very thing
+// A6 ruled a defect — and would then "pass" forever by describing the bug.
+// ---------------------------------------------------------------------------
+
+/// §6.1 — one scene per law variant. Kills the mask-shaped half of the vacuity
+/// B1 measured: ZERO mask ops across all 14 recorded scenes.
+pub fn build_a6_law_variants_scene(p: &mut impl Painter) {
+    for (i, mask) in [
+        Mask::LuminanceClipIn,
+        Mask::AlphaClipOut,
+        Mask::AlphaRevealOutsideBbox { bbox: Rect { x: 4.0, y: 4.0, w: 12.0, h: 12.0 } },
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let dx = 40.0 * i as f64;
+        p.push_isolated_layer(1.0, BlendMode::Normal);
+        p.fill_rect(
+            Rect { x: dx, y: 0.0, w: 20.0, h: 20.0 },
+            &Brush::Solid(Color::rgb(0.2, 0.4, 0.8)),
+            1.0,
+        );
+        // The mask bracket nests INSIDE the layer and wraps the MASK ARTWORK.
+        p.push_mask_layer(mask);
+        p.fill_rect(
+            Rect { x: dx + 4.0, y: 4.0, w: 12.0, h: 12.0 },
+            &Brush::Solid(Color::rgb(1.0, 1.0, 1.0)),
+            1.0,
+        );
+        p.pop_mask_layer();
+        // Nothing paints between pop_mask_layer and pop_isolated_layer (§3.2).
+        p.pop_isolated_layer();
+    }
+}
+
+/// §6.2 — a masked, HALF-OPACITY element inside a HALF-ALPHA group. This is the
+/// D-α pin, and the numbers are the whole point:
+///
+///   group alpha 0.5  ×  layer alpha 0.5  =  0.25, applied ONCE at the composite.
+///
+/// HEAD renders this at 0.25 from the ELEMENT ALONE (opacity² via a double
+/// apply) and DISCARDS the group's 0.5 by replacing the inherited product
+/// instead of multiplying into it. So the two disagree, and this golden is what
+/// makes the disagreement visible instead of invisible.
+pub fn build_a6_alpha_law_scene(p: &mut impl Painter) {
+    p.push_group(0.5, BlendMode::Normal);
+    p.push_isolated_layer(0.5, BlendMode::Normal);
+    // ⛔ The body paints at paint_alpha 1.0. The element's own opacity rides the
+    // LAYER, consumed once at pop_isolated_layer — it must NOT also be
+    // multiplied into the body primitives, which is exactly D-α's first half.
+    p.fill_rect(
+        Rect { x: 0.0, y: 0.0, w: 20.0, h: 20.0 },
+        &Brush::Solid(Color::rgb(0.9, 0.3, 0.1)),
+        1.0,
+    );
+    p.push_mask_layer(Mask::LuminanceClipIn);
+    p.fill_rect(
+        Rect { x: 5.0, y: 5.0, w: 10.0, h: 10.0 },
+        &Brush::Solid(Color::WHITE),
+        1.0,
+    );
+    p.pop_mask_layer();
+    p.pop_isolated_layer();
+    p.pop_group();
+}
+
+/// §6.3 — layer-in-layer (mask-in-mask). Pins the stack law of §3.5 against
+/// defect D-β, where a STATIC scratch surface self-clobbers at nesting depth ≥ 2:
+/// the inner layer's buffer must not be the outer layer's buffer.
+pub fn build_a6_nested_layers_scene(p: &mut impl Painter) {
+    p.push_isolated_layer(0.8, BlendMode::Normal);
+    p.fill_rect(Rect { x: 0.0, y: 0.0, w: 30.0, h: 30.0 }, &Brush::Solid(Color::rgb(0.1, 0.6, 0.3)), 1.0);
+
+    p.push_isolated_layer(0.6, BlendMode::Normal);
+    p.fill_rect(Rect { x: 5.0, y: 5.0, w: 20.0, h: 20.0 }, &Brush::Solid(Color::rgb(0.8, 0.8, 0.1)), 1.0);
+    p.push_mask_layer(Mask::AlphaClipOut);
+    p.fill_rect(Rect { x: 8.0, y: 8.0, w: 6.0, h: 6.0 }, &Brush::Solid(Color::BLACK), 1.0);
+    p.pop_mask_layer();
+    p.pop_isolated_layer();
+
+    // The OUTER layer's own mask, applied after the inner layer composited in.
+    p.push_mask_layer(Mask::LuminanceClipIn);
+    p.fill_rect(Rect { x: 2.0, y: 2.0, w: 26.0, h: 26.0 }, &Brush::Solid(Color::WHITE), 1.0);
+    p.pop_mask_layer();
+    p.pop_isolated_layer();
+}
+
+/// §6.4 — a masked element with a NON-NORMAL blend. The first golden anywhere in
+/// this repo to see a blend cross the seam operatively: B1 counted one
+/// push_group, blend Normal. The blend rides the LAYER and is consumed at the
+/// closing composite, where the blit sees the true parent backdrop.
+pub fn build_a6_blend_scene(p: &mut impl Painter) {
+    p.fill_rect(Rect { x: 0.0, y: 0.0, w: 40.0, h: 40.0 }, &Brush::Solid(Color::rgb(0.2, 0.2, 0.9)), 1.0);
+    p.push_isolated_layer(1.0, BlendMode::Multiply);
+    p.fill_rect(Rect { x: 10.0, y: 10.0, w: 20.0, h: 20.0 }, &Brush::Solid(Color::rgb(0.9, 0.9, 0.2)), 1.0);
+    p.push_mask_layer(Mask::AlphaClipOut);
+    p.fill_rect(Rect { x: 14.0, y: 14.0, w: 8.0, h: 8.0 }, &Brush::Solid(Color::BLACK), 1.0);
+    p.pop_mask_layer();
+    p.pop_isolated_layer();
 }
