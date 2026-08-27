@@ -12,3 +12,5 @@ jsonschema
 msgpack
 flask
 reportlab
+# GUI_EYES harness (scripts/gui_probe.py drives Chrome over CDP)
+websocket-client

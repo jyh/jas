@@ -80,7 +80,7 @@ fn stroke_profile_attrs(
 
 /// FLOATSPELL — the one spelling of a FULL-PRECISION f64 both ports must write.
 ///
-/// RULED 2026-08-05 (`fleet/RULING-four-decimal-floor-2026-08-05.md`): the
+/// RULED 2026-08-05 (council; the ruling's substance is inlined below): the
 /// transform matrix carries full precision while positions and radii stay at
 /// 4 dp. "Full precision" has no single spelling, and the two ports do not
 /// agree on one — Rust's `Display` writes `1e-7` as `0.0000001` where Swift

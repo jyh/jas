@@ -97,6 +97,8 @@ Baselines are supported (`--shot-dir`, element-clipped PNGs are ~1 KB) but are
 | `canvas_transform_balance` | a brushed repaint must leave the canvas transform exactly where it found it |
 | `button_enter_activates` | a focused native `<button>` must still activate on Enter — the app may claim a key's default action only where the focused element has none of its own |
 | `none_indicator_visible` | a no-paint swatch must *look* like no paint — the white face and the red diagonal, not a colour and not an empty slot (the unrendered-fact class) |
+| `menu_tick_matches_screen` | a Window-menu tick means the panel is on screen, and ONE click reaches it (MENULIES / TABTRUTH) |
+| `workspace_switch_keeps_chrome` | switching to the Default workspace must keep the toolbar and dock drawn (PANESNIL — found by JYH at the canvas 2026-08-25; Swift shows the failure, Dioxus survives only via the app-loop pane repair this check pins) |
 
 ### The generic sweep is the one that scales
 
