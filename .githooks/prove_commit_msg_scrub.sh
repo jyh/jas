@@ -15,6 +15,47 @@ SCRATCH="$(cd "$(dirname "$0")" && pwd)"
 # and none of it about the hook. Resolve it from the repo root instead.
 ROOT="$(git -C "$SCRATCH" rev-parse --show-toplevel)"
 GATE="$ROOT/scripts/check_commit_trailers.py"
+# ⛔ THE INTERPRETER IS CHOSEN BY EXECUTION, exactly as commit-msg beside this
+# script chooses it -- and for the mirror-image reason. That hook picks by
+# execution because Windows ships an App-execution-alias stub named `python3`
+# that answers `command -v` and then refuses to run. THIS script named `python`
+# outright, and macOS has no `python` at all: measured 08/26 -- python3 3.14.4
+# present, `python` and `py` both ABSENT.
+#
+# ⛔⛔ AND THE COST WAS NOT A FAILING PHASE, IT WAS A VACUOUS CONTROL. PHASE 1 IS
+# THE RED ARM -- the one whose entire job is to prove the gate CAN fail before
+# any green below it is believed. Its shape is an `elif` that runs the gate and
+# fails if the gate PASSED, with `ok` in the trailing `else`. With no `python`
+# on PATH that elif exits 127, control falls to the `else`, and PHASE 1 REPORTS
+# ok WITHOUT THE GATE EVER RUNNING. The arm that certifies every later phase
+# passed because an interpreter was missing. PHASE 2 failed loudly in the same
+# run and MISATTRIBUTED it -- "gate still reds with the hook installed", when
+# the gate had not run at all -- so the loud red pointed at the wrong object
+# while the silent green hollowed out the proof.
+#
+# ⇒ THE CURE IS NOT `python` -> `python3`. That merely swaps the macOS hole for
+#   the Windows Store-stub hole this repo's own hook already measured. Resolve
+#   by EXECUTION and REFUSE LOUDLY when nothing works, so a missing interpreter
+#   can never again be mistaken for a verdict.
+#
+# ⭐ AND THE LOOP IS NOT PICKING A *BETTER* PYTHON -- IT IS REMOVING THE
+#   DEPENDENCE ON THE CALLER'S ENVIRONMENT ENTIRELY. The gate it runs imports
+#   nothing but stdlib (argparse, re, pathlib, subprocess, sys, and a __future__
+#   annotations import), and carries no version-gated syntax, so EVERY candidate
+#   that runs at all returns the SAME VERDICT. Measured here rather than
+#   reasoned: Apple's /usr/bin/python3 3.9.6 and Homebrew's 3.14.4 -- five years
+#   apart -- agree on both --range and --self-test, exit 0 and exit 0. That is
+#   why "whichever one works" is a sound rule here and not a coin toss: the
+#   choice cannot change the answer, only whether there IS one.
+PYEXE=
+for _c in python3 python py; do
+  if "$_c" -c "" >/dev/null 2>&1; then PYEXE="$_c"; break; fi
+done
+if [ -z "$PYEXE" ]; then
+  echo "REFUSED: no working python interpreter (tried python3, python, py)." >&2
+  echo "         Refusing rather than reporting phases that never ran." >&2
+  exit 2
+fi
 # The lab is scratch and must not be written inside a TRACKED directory, or a
 # failed run leaves debris in the working tree that looks like source.
 LAB="$(mktemp -d)/hooklab"
@@ -84,7 +125,7 @@ committed() {
 # ---- PHASE 1 (RED): without the hook, the trailer survives and the gate reds
 if ! committed a "$MSG_DIRTY"; then
   fail "PHASE 1: no commit was created even without a hook -- lab is broken"
-elif python "$GATE" --range "$BASE..HEAD" >/dev/null 2>&1; then
+elif "$PYEXE" "$GATE" --range "$BASE..HEAD" >/dev/null 2>&1; then
   fail "PHASE 1: gate PASSED on an unscrubbed commit -- this test proves nothing"
 else
   ok "PHASE 1 (RED): no hook -> trailer survives, gate reds"
@@ -101,7 +142,7 @@ chmod +x .git/hooks/commit-msg
 if ! committed a "$MSG_DIRTY"; then
   fail "PHASE 2: the hook ABORTED the commit -- it must scrub, not refuse"
 else
-  if python "$GATE" --range "$BASE..HEAD" >/dev/null 2>&1; then
+  if "$PYEXE" "$GATE" --range "$BASE..HEAD" >/dev/null 2>&1; then
     ok "PHASE 2 (GREEN): hook present -> gate passes on the same input"
   else
     fail "PHASE 2: gate still reds with the hook installed"
