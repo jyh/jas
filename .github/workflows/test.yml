@@ -238,6 +238,15 @@ jobs:
         run: python scripts/check_encoding_hygiene.py --self-test
       - name: Encoding hygiene (explicit encoding= on text I/O, newline= on writes)
         run: python scripts/check_encoding_hygiene.py
+      # The separator gate runs on BOTH lanes because check_lane_coverage.py said
+      # so the moment it landed Windows-only: "a gate that cannot fail on a
+      # platform is not watching that platform." It is static analysis and gives
+      # the same answer here, which is the point — the answer must be the same,
+      # and only running it both places proves that it is.
+      - name: Self-test the path-separator gate
+        run: python scripts/check_path_separator_keys.py --self-test
+      - name: Path separators (a stringified Path used as a key or match target)
+        run: python scripts/check_path_separator_keys.py
 
   # THE WINDOWS LANE. Added 2026-07-28, the day this project's gates ran on
   # Windows for the first time: 11 of 24 invocations failed and NOT ONE failure
@@ -353,6 +362,22 @@ jobs:
         run: |
           python scripts/check_encoding_hygiene.py --self-test
           python scripts/check_encoding_hygiene.py
+
+      # SEPARATORS, the third member of this lane's family after encoding and
+      # newline — and the one that had no gate at all until now. Three sites in
+      # scripts/ were each repaired with a comment explaining the hazard, and
+      # nothing policed the class, so a fourth sighting would have landed green.
+      # (Stubb's letter 14: "Three sites, three comments, no gate.")
+      #
+      # It is static analysis, so it would give the same answer on ubuntu. It is
+      # HERE because this is the lane a maintainer reads when a path comparison
+      # misbehaves on Windows, and because the two fixtures in its self-test are
+      # real lines from this repo's history that only failed on this platform.
+      - name: Path separators — a stringified Path used as a key or match target
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_path_separator_keys.py --self-test
+          python scripts/check_path_separator_keys.py
 
       # SCRUBGUARD on the lane that matters most: every commit that has ever
       # carried the forbidden trailer was authored on this platform. A gate
