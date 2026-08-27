@@ -616,7 +616,10 @@ def self_test() -> int:
         doc = os.path.join(repo, "docs", "R.md")
 
         def write(text):
-            with open(doc, "w", encoding="utf-8") as fh:
+            # newline="" is not lint-appeasement: without it this arm writes
+            # CRLF on the Windows lane, and an arm whose BYTES depend on the
+            # platform is not driving the same fixture everywhere.
+            with open(doc, "w", encoding="utf-8", newline="") as fh:
                 fh.write("preface\n" + text + "\ntrailer\n")
 
         write(keep)
