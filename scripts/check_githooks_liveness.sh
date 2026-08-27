@@ -173,16 +173,23 @@ sys.exit(0)
   git -C "$tmp/bad-sheb" update-index --chmod=+x .githooks/scrub.py
   git -C "$tmp/bad-sheb" commit -qm "executable python3-shebang module"
 
-  # a hooks dir with a module only and no entry point at all
-  mkfixture vacuous "$good" +x
-  git -C "$tmp/vacuous" rm -q .githooks/commit-msg
-  # `git rm` of the last file takes the directory with it, and a missing dir here
-  # would make this arm pass for the WRONG reason — "no entry point" is what it
-  # must test, not "no hooks dir at all". Recreate it before writing the module.
-  mkdir -p "$tmp/vacuous/.githooks"
-  printf '%s' "$good" > "$tmp/vacuous/.githooks/helper.sh"
-  git -C "$tmp/vacuous" add .githooks/helper.sh
-  git -C "$tmp/vacuous" commit -qm "module only, no entry point"
+  # A hooks dir with a module only and NO entry point at all.
+  #
+  # Built directly rather than by adding an entry point and removing it. That
+  # shortcut was platform-dependent and CI caught it: `update-index --chmod=+x`
+  # changes the INDEX mode while the worktree file stays 644, so on Linux `git rm`
+  # sees "local modifications" and refuses — leaving the entry point in place and
+  # the arm passing for the wrong reason. Windows never noticed, because
+  # core.filemode is false there and the mode difference does not exist.
+  d="$tmp/vacuous"
+  mkdir -p "$d/.githooks"
+  git -C "$d" init -q
+  git -C "$d" config user.email fixture@example.com
+  git -C "$d" config user.name fixture
+  git -C "$d" config core.autocrlf false
+  printf '%s' "$good" > "$d/.githooks/helper.sh"
+  git -C "$d" add .githooks/helper.sh
+  git -C "$d" commit -qm "module only, no entry point"
 
   fail=0
   arm() {
