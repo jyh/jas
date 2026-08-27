@@ -675,9 +675,18 @@ mod tests {
 
     /// Masks must REFUSE, not draw something plausible. A backend that quietly
     /// ignored a mask would render the unmasked artwork and look almost right.
+    ///
+    /// ⛔ AND THIS TEST NOW PINS THE LEDGER NAME (A6 item ④). It used to expect
+    /// "element-bracket ruling"; the site cited "option C, 2026-07-30" while the
+    /// summons cited "option (a)" — one object under two labels. The reconciled
+    /// name is A6, and this expectation is what keeps a third label from
+    /// appearing here: change the refusal's name and this test reds.
+    ///
+    /// Renamed with the message: the bracket is no longer "pending" — it is
+    /// ratified (2026-08-27). What is pending is this backend's IMPLEMENTATION.
     #[test]
-    #[should_panic(expected = "element-bracket ruling")]
-    fn masks_refuse_loudly_pending_the_element_bracket() {
+    #[should_panic(expected = "pending the A6 implementation")]
+    fn masks_refuse_loudly_pending_the_a6_implementation() {
         let t = HeadlessTarget::new(2, 2).unwrap();
         let mut p = Direct2DPainter::new(t.target());
         p.push_mask_layer(Mask::AlphaClipOut);
