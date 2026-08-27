@@ -166,3 +166,50 @@ jobs:
           fi
           echo "scanning $RANGE"
           python scripts/check_private_paths.py --range "$RANGE"
+
+  commit-msg-proof:
+    name: the commit-msg proof holds where `python` does not exist
+    runs-on: ubuntu-latest
+    # ⛔ WHY THIS JOB MASKS AN INTERPRETER INSTEAD OF JUST RUNNING THE PROOF.
+    # `prove_commit_msg_scrub.sh` was never run by CI at all, and on 08/26 it had
+    # rotted: it invoked the gate as `python` BY NAME, and PHASE 1 -- the RED
+    # CONTROL -- reported `ok` WITHOUT THE GATE EVER RUNNING wherever `python`
+    # was absent. The live control and the vacuous one print the SAME LINE, so no
+    # reading of the log separates them.
+    #
+    # ⛔⛔ AND A PLAIN CI ARM WOULD NOT HAVE CAUGHT IT. This runner has `python`
+    # (setup-python provides it), so the elif would have executed and PHASE 1
+    # would have passed for the RIGHT reason -- green either way. The defect was
+    # environment-dependent: it appeared only where `python` does not exist, which
+    # is a bare macOS shell, and NOT the repo that ships a .venv where it was
+    # authored. The inverse of works-on-my-machine.
+    # ⇒ THE ARM IS ONLY DISCRIMINATING IF `python` IS MISSING. Measured before
+    #   wiring: with `python` masked, the repaired prover exits 0 and the
+    #   pre-repair one exits 1. That difference is what this job buys; running the
+    #   proof in a normal environment buys none of it.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: mask `python`, leaving only python3
+        run: |
+          mkdir -p "$RUNNER_TEMP/mask"
+          printf '#!/bin/sh\necho "python: not found" >&2\nexit 127\n' > "$RUNNER_TEMP/mask/python"
+          chmod +x "$RUNNER_TEMP/mask/python"
+      # THE MASK IS ASSERTED BEFORE IT IS TRUSTED. A mask that silently failed to
+      # apply would make the arm below pass vacuously -- the exact shape this job
+      # exists to catch, one level up.
+      - name: the mask must actually mask, and python3 must survive it
+        run: |
+          if PATH="$RUNNER_TEMP/mask:$PATH" python -c "" 2>/dev/null; then
+            echo "MASK FAILED: \`python\` still runs -- the arm below would be vacuous."; exit 1
+          fi
+          PATH="$RUNNER_TEMP/mask:$PATH" python3 -c "" || { echo "python3 must still work"; exit 1; }
+          echo "mask OK: python refuses, python3 runs"
+      - name: the proof must hold with `python` masked
+        run: PATH="$RUNNER_TEMP/mask:$PATH" sh .githooks/prove_commit_msg_scrub.sh
+      # ...and in an ordinary environment too, so the mask cannot become the only
+      # configuration the proof is ever exercised in.
+      - name: and in an ordinary environment
+        run: sh .githooks/prove_commit_msg_scrub.sh
