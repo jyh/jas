@@ -1,0 +1,18 @@
+# THROWAWAY PROBE — measures how GitHub reports a FAILING job that carries
+# `continue-on-error: true`. The two frozen-port canary lanes both carry it, and
+# a canary whose death is indistinguishable from its health is not a canary.
+# Delete this file and its branch once the answer is recorded.
+name: probe-coe
+on: [push]
+jobs:
+  fails_with_coe:
+    name: PROBE fails WITH continue-on-error
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - run: echo "about to fail"; exit 1
+  passes_control:
+    name: PROBE control that passes
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
