@@ -199,6 +199,17 @@ EXEMPT_PREFIXES = (
 )
 
 
+def scan_is_vacuous(scanned: int, tracked_total: int) -> bool:
+    """True when the scan classified NOTHING out of a non-empty index.
+
+    Extracted so the self-test drives the SAME predicate main() uses -- a floor
+    checked beside the gate proves nothing about the gate. Derived, never pinned:
+    the question is "did the classifier produce nothing from files that exist",
+    which cannot rot as the tree grows, unlike a hard count.
+    """
+    return scanned == 0 and tracked_total > 0
+
+
 def tracked_files(root: pathlib.Path) -> list[str]:
     out = subprocess.run(
         ["git", "ls-files", "-z"],
@@ -413,6 +424,14 @@ def self_test() -> int:
         for f in failures:
             print(f"  {f}")
         return 1
+    # THE VACUITY FLOOR, driven on the same predicate main() calls.
+    for scanned_n, tracked_n, want in ((0, 1, True), (0, 5, True),
+                                       (0, 0, False), (1, 1, False), (7, 9, False)):
+        if scan_is_vacuous(scanned_n, tracked_n) != want:
+            print(f"SELF-TEST FAIL: scan_is_vacuous({scanned_n},{tracked_n}) "
+                  f"must be {want}")
+            return 1
+
     print(f"naming-rule SELF-TEST: OK (22 cases, {scanned} scanned, {len(got)} caught, "
           f"{len(exempted)} line-exempt, {len(skipped_binary)} binary)")
     return 0
@@ -436,6 +455,26 @@ def main() -> int:
         print("\n".join(hits))
         print("\nIf a line genuinely must name a product, see the exemption classes in")
         print(f"{pathlib.Path(__file__).name}'s docstring -- do not widen one without a reason.")
+        return 1
+
+    # ⛔ A COUNT IN THE VERDICT LINE THAT THE VERDICT IGNORES. This gate printed
+    # "OK (0 tracked text files scanned)" and exited 0 -- the number was right
+    # there and nothing read it. Measured 2026-08-26 on a tree whose only tracked
+    # file was a PNG: green, having examined nothing, in the gate whose own header
+    # records the naming rule going silently broken on public main until a chance
+    # grep found 18 occurrences.
+    #
+    # THE FLOOR IS DERIVED, NOT PINNED. A hard number (1582 today) rots the moment
+    # the tree changes and teaches its reader to raise it. The non-rotting question
+    # is whether the CLASSIFIER produced nothing from a non-empty index: files are
+    # tracked, none was classified as text, so either the repo is genuinely all
+    # binary or this gate's scope derivation broke. Both deserve a refusal.
+    tracked_total = len(tracked_files(root))
+    if scan_is_vacuous(scanned, tracked_total):
+        print(f"FAIL: 0 tracked text files scanned, but {tracked_total} file(s) are "
+              f"tracked. A gate that examined nothing must not report success --")
+        print("      either every tracked file is binary, or the scope derivation")
+        print("      broke. Neither is a clean scan.")
         return 1
 
     print(f"naming-rule gate: OK ({scanned} tracked text files scanned)")
