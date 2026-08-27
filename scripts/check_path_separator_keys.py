@@ -272,7 +272,11 @@ def self_test() -> int:
         root = pathlib.Path(td)
         for name, (src, must_fail) in FIXTURES.items():
             f = root / (f"fx_{abs(hash(name)) % 10**8}.py")
-            f.write_text(src, encoding="utf-8")
+            # newline="" per this repo's encoding-hygiene rule -- which caught
+            # this very line in CI. The separator gate's own fixtures were written
+            # with a platform-dependent newline: the sibling gate for the sibling
+            # class found it before a human did.
+            f.write_text(src, encoding="utf-8", newline="")
             _, hits = scan([f], root)
             fired = bool(hits)
             ok = fired == must_fail
