@@ -19,8 +19,23 @@ GATE="$ROOT/scripts/check_commit_trailers.py"
 # script chooses it -- and for the mirror-image reason. That hook picks by
 # execution because Windows ships an App-execution-alias stub named `python3`
 # that answers `command -v` and then refuses to run. THIS script named `python`
-# outright, and macOS has no `python` at all: measured 08/26 -- python3 3.14.4
-# present, `python` and `py` both ABSENT.
+# outright.
+#
+# ⛔ AND THE CAUSE IS NOT "macOS HAS NO python" -- THAT WAS MY FIRST WRITE-UP AND
+# IT IS TOO ABSOLUTE. This repo SHIPS a .venv that carries `python`, `python3`
+# and `python3.12`; salt and saltworks carry none. So `python` EXISTS inside an
+# activated jas venv and is ABSENT in a bare shell, and WHICH INTERPRETER RAN --
+# indeed WHETHER ANY PHASE RAN AT ALL -- depended on what the caller happened to
+# have activated. Measured on the unfixed prover, same file, same machine, same
+# commit:
+#
+#     bare shell            9/10, exit 1
+#     jas .venv on PATH    10/10, exit 0
+#
+# ⇒ THE INVERSE OF works-on-my-machine: the prover was authored in the one repo
+#   that HAS a venv, so it passed for its author and rotted for everyone else.
+#   An environment-dependent verdict is worse than a broken one, because it is
+#   INTERMITTENT -- it green-lights the author and reds the reviewer.
 #
 # ⛔⛔ AND THE COST WAS NOT A FAILING PHASE, IT WAS A VACUOUS CONTROL. PHASE 1 IS
 # THE RED ARM -- the one whose entire job is to prove the gate CAN fail before
@@ -32,6 +47,13 @@ GATE="$ROOT/scripts/check_commit_trailers.py"
 # run and MISATTRIBUTED it -- "gate still reds with the hook installed", when
 # the gate had not run at all -- so the loud red pointed at the wrong object
 # while the silent green hollowed out the proof.
+#
+# ⛔⛔ AND THE TWO PHASE-1s ARE BYTE-IDENTICAL. Run with a venv, PHASE 1 prints
+#     ok  : PHASE 1 (RED): no hook -> trailer survives, gate reds
+# because the gate RAN and RED. Run bare, it prints THE SAME LINE because the
+# interpreter was missing. THE LIVE CONTROL AND THE VACUOUS CONTROL ARE
+# INDISTINGUISHABLE IN THE OUTPUT -- there is no reading of the log that
+# separates them, which is why this had to be found by driving it.
 #
 # ⇒ THE CURE IS NOT `python` -> `python3`. That merely swaps the macOS hole for
 #   the Windows Store-stub hole this repo's own hook already measured. Resolve
