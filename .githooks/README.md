@@ -73,3 +73,28 @@ This is also why `commit_msg_scrub.py` is `100644`. It carries a
 commit_msg_scrub.py`. Keeping the executable bit off means nobody can run it
 directly and meet that shebang on a machine where `python3` is the stub — and the
 liveness gate fails any executable file whose shebang names `python3`.
+
+## ⛔ ONE TRAP THE STEP INTRODUCES — `core.hooksPath` IS GLOBAL, `.githooks/` IS NOT
+
+`core.hooksPath` lives in `.git/config`, which is **repo-global**. `.githooks/` is a
+**tracked directory**, which is **branch-local**. Point the first at the second and then
+check out any branch that predates this port — a branch off an older `main`, a bisect, a
+`git worktree` on an old tag — and the directory simply **is not there**.
+
+**Git does not warn. No hook runs. The commit-msg scrub does not run.** The state looks
+exactly like a repository with no hooks configured, which is the same silence this whole
+directory exists to end.
+
+Found by walking into it: this port's own author branched off `main` to build an
+unrelated gate, and the session trailer would have entered that commit unscrubbed. It was
+caught before the commit, by checking rather than by noticing.
+
+**While working on a branch without `.githooks/`:**
+
+```sh
+git config --unset core.hooksPath     # restores .git/hooks/, if you still have it
+```
+
+and set it again when you return. `scripts/check_githooks_liveness.sh --clone` reports
+the state either way. ⇒ **The step is per-clone AND per-branch-shape.** It is not a thing
+you do once and forget, until every live branch carries `.githooks/`.
