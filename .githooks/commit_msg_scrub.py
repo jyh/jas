@@ -27,7 +27,7 @@ import sys
 
 def _repo_root() -> str:
     out = subprocess.run(["git", "rev-parse", "--show-toplevel"],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, encoding="utf-8")
     if out.returncode != 0:
         return ""
     return out.stdout.strip()
@@ -69,8 +69,15 @@ def _load_gate(root: str):
             return mod, GATE_PATH
 
     for ref in FALLBACK_REFS:
+        # ⛔ encoding="utf-8" IS LOAD-BEARING HERE, not lint. This reads the
+        # GATE'S OWN SOURCE out of a git ref and execs it, and that file is full
+        # of non-ASCII (⛔, em-dashes). `text=True` alone decodes with the LOCALE
+        # codec — cp1252 on Windows, which is the platform this hook was written
+        # for — so the read raises UnicodeDecodeError, the hook dies, and every
+        # commit on that box is refused. Fail-closed, and still broken.
         out = subprocess.run(["git", "show", f"{ref}:{GATE_PATH}"],
-                             capture_output=True, text=True, cwd=root)
+                             capture_output=True, text=True, encoding="utf-8",
+                             cwd=root)
         if out.returncode == 0 and out.stdout:
             mod = _exec_source(out.stdout, f"{ref}:{GATE_PATH}")
             if mod is not None:
