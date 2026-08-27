@@ -59,6 +59,29 @@ jobs:
       - run: python scripts/check_commit_trailers.py
       - run: python scripts/check_scrub_trigger.py
 
+  githooks-liveness:
+    name: the tracked hooks are live, not merely present
+    runs-on: ubuntu-latest
+    # This job belongs beside the trailer gate rather than in `test.yml`, for the
+    # same reason that gate does: it guards the hook that removes the trailer at
+    # the one moment removal is still free, and a guard nobody triggers is not a
+    # guard. It is seconds of ubuntu and needs no toolchain.
+    #
+    # WHY A SHAPE CHECK AND NOT A "DO THE HOOKS RUN" CHECK: `core.hooksPath` is
+    # local, untracked configuration, so CI's own clone never has it and never
+    # can. What CI *can* assert is that a clone which DID run the fresh-clone
+    # step would get live hooks — entry points present and executable, and no
+    # `python3` that resolves on Windows and then refuses to run. The developer
+    # half is `--clone`, which is deliberately NOT run here: it would fail on
+    # every CI run and teach everyone to ignore this job.
+    steps:
+      - uses: actions/checkout@v4
+      # The gate proves itself before it is believed — the same pairing the
+      # commit-trailers job above uses, including a vacuity arm, because a check
+      # that inspects nothing must never report success.
+      - run: sh scripts/check_githooks_liveness.sh --self-test
+      - run: sh scripts/check_githooks_liveness.sh
+
   private-paths:
     name: no NEW path into the private record enters a public repo
     runs-on: ubuntu-latest

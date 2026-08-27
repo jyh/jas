@@ -1,0 +1,20 @@
+#!/bin/sh
+# commit-msg: strip the session trailer before it can enter history.
+# See commit_msg_scrub.py for why this exists.
+#
+# The interpreter is chosen by EXECUTION, not by `command -v`. On Windows the
+# Microsoft Store ships an App-execution-alias stub named `python3` that is on
+# PATH and answers `command -v` successfully, then fails when run. A hook that
+# trusted the lookup would silently not run -- which is the failure mode that
+# matters most here, since a hook that does nothing looks exactly like a hook
+# that worked.
+PY=
+for c in python3 python py; do
+  if "$c" -c "" >/dev/null 2>&1; then PY="$c"; break; fi
+done
+if [ -z "$PY" ]; then
+  echo "REFUSED: commit-msg scrub found no working python interpreter." >&2
+  echo "         Refusing rather than letting the commit through unscrubbed." >&2
+  exit 1
+fi
+exec "$PY" "$(dirname "$0")/commit_msg_scrub.py" "$@"
