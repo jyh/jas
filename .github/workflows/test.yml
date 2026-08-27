@@ -238,6 +238,18 @@ jobs:
         run: python scripts/check_encoding_hygiene.py --self-test
       - name: Encoding hygiene (explicit encoding= on text I/O, newline= on writes)
         run: python scripts/check_encoding_hygiene.py
+      # A virtualenv in PUBLIC history cannot be removed without a history purge,
+      # and this repo came within one `git add -A` of that on 08/26: .gitignore
+      # said `.venv`, which matched one directory, while `.venv.old` sat beside
+      # it unignored at 1.2 GB / 7,215 files. The ignore rule was widened to the
+      # class the same hour — and a widened rule is REMEMBERING. This catches the
+      # OUTCOME, which is the only half CI can see: a developer's untracked debris
+      # never exists in CI's checkout, but the index does. Self-test first, same
+      # as the two gates above: trusted for its RED.
+      - name: Self-test the vendored-env gate
+        run: python scripts/check_no_vendored_env.py --self-test
+      - name: No virtualenv is tracked in this public repo
+        run: python scripts/check_no_vendored_env.py
 
   # THE WINDOWS LANE. Added 2026-07-28, the day this project's gates ran on
   # Windows for the first time: 11 of 24 invocations failed and NOT ONE failure
