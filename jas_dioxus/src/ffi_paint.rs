@@ -53,6 +53,17 @@ pub const JAS_PAINT_OK: i32 = 0;
 pub const JAS_PAINT_NULL_SURFACE: i32 = 1;
 /// The pointer was not a usable `IDXGISurface`. Positive, same reason.
 pub const JAS_PAINT_NOT_A_SURFACE: i32 = 2;
+/// The two surfaces disagree on size or format, so the copy would be DROPPED.
+/// Positive, same reason.
+///
+/// EXISTS BECAUSE THE FAILURE IT NAMES IS OTHERWISE SILENT. `CopyResource`
+/// returns `void`; D3D11 drops a mismatched copy rather than faulting; and the
+/// debug layer that would report the drop is unavailable on this box (Graphics
+/// Tools is not installed). Without this code the seam returns `JAS_PAINT_OK`
+/// and the host presents a stale frame -- a status truthful about the wrong
+/// thing. See `d3d11_silently_drops_a_size_mismatched_copy_...` for the
+/// measurement, driven rather than cited.
+pub const JAS_PAINT_SIZE_MISMATCH: i32 = 3;
 
 // ANY OTHER NON-ZERO RETURN IS THE RAW HRESULT, and that is a repair rather than
 // a design. The first version collapsed every COM failure into a single -3, so
@@ -174,13 +185,6 @@ pub unsafe extern "C" fn jas_paint_probe_offscreen(
         return JAS_PAINT_NULL_SURFACE;
     }
 
-    // Paint the offscreen surface with the ordinary path first. If that fails
-    // there is nothing worth copying, and its status code is already meaningful.
-    let rc = unsafe { jas_paint_probe_surface(offscreen, width, height) };
-    if rc != JAS_PAINT_OK {
-        return rc;
-    }
-
     let back_s: &IDXGISurface = match unsafe { IDXGISurface::from_raw_borrowed(&back) } {
         Some(s) => s,
         None => return JAS_PAINT_NOT_A_SURFACE,
@@ -189,6 +193,53 @@ pub unsafe extern "C" fn jas_paint_probe_offscreen(
         Some(s) => s,
         None => return JAS_PAINT_NOT_A_SURFACE,
     };
+
+    // THE AGREEMENT CHECK, AND IT HAS TO BE HERE RATHER THAN AT THE COPY.
+    //
+    // `CopyResource` returns `void` and D3D11 DROPS a mismatched copy instead of
+    // faulting, so downstream there is nothing left to detect: the call cannot
+    // report its own refusal. The one instrument that would -- the D3D11 debug
+    // layer -- is unavailable on this box, Graphics Tools being uninstalled. So
+    // the choice is to check the descriptors up front or to ship a seam that
+    // returns OK while the host presents a stale frame.
+    //
+    // WHEN THIS FIRES IN PRACTICE: the host resizes its swapchain and the
+    // offscreen target keeps the size it was created with. Today that cannot
+    // happen -- `SwapChainHost` creates the texture exactly once and the
+    // `_started` latch drops every later `SizeChanged` -- which is precisely why
+    // no S-B run has ever exhibited it. This guard is what makes the resize path
+    // testable rather than something that fails quietly once it is built.
+    //
+    // Sample count is compared too: `CopyResource` requires it to match, and a
+    // guard that checked only width and height would pass a pair the platform
+    // still drops. One dimension is not the class.
+    unsafe {
+        let back_desc = match back_s.GetDesc() {
+            Ok(d) => d,
+            Err(e) => return e.code().0,
+        };
+        let off_desc = match off_s.GetDesc() {
+            Ok(d) => d,
+            Err(e) => return e.code().0,
+        };
+        if back_desc.Width != off_desc.Width
+            || back_desc.Height != off_desc.Height
+            || back_desc.Format != off_desc.Format
+            || back_desc.SampleDesc.Count != off_desc.SampleDesc.Count
+        {
+            return JAS_PAINT_SIZE_MISMATCH;
+        }
+    }
+
+    // Paint the offscreen surface with the ordinary path. If that fails there is
+    // nothing worth copying, and its status code is already meaningful.
+    //
+    // AFTER the agreement check, not before: painting a surface that is then
+    // refused burns a frame's work to reach the same answer.
+    let rc = unsafe { jas_paint_probe_surface(offscreen, width, height) };
+    if rc != JAS_PAINT_OK {
+        return rc;
+    }
 
     unsafe {
         // The device again comes FROM the surface, so no D3D11CreateDevice.
@@ -231,7 +282,9 @@ mod tests {
         D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC,
         D3D11_USAGE_DEFAULT, D3D11_USAGE_STAGING,
     };
-    use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
+    use windows::Win32::Graphics::Dxgi::Common::{
+        DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SAMPLE_DESC,
+    };
 
     const W: u32 = 90;
     const H: u32 = 60;
@@ -257,9 +310,20 @@ mod tests {
     }
 
     fn tex(dev: &ID3D11Device, staging: bool) -> ID3D11Texture2D {
+        tex_wh(dev, staging, W, H)
+    }
+
+    /// `tex` at an arbitrary size.
+    ///
+    /// Split out for the resize tests, which need two textures that DISAGREE --
+    /// and a fixed-size helper structurally cannot express that pair. That is
+    /// not an incidental limitation: it is why every S-B run to date was
+    /// size-matched, and therefore why none of them could exhibit the defect
+    /// below.
+    fn tex_wh(dev: &ID3D11Device, staging: bool, w: u32, h: u32) -> ID3D11Texture2D {
         let desc = D3D11_TEXTURE2D_DESC {
-            Width: W,
-            Height: H,
+            Width: w,
+            Height: h,
             MipLevels: 1,
             ArraySize: 1,
             Format: DXGI_FORMAT_B8G8R8A8_UNORM,
@@ -271,6 +335,26 @@ mod tests {
         };
         let mut t = None;
         unsafe { dev.CreateTexture2D(&desc, None, Some(&mut t)).expect("tex") };
+        t.unwrap()
+    }
+
+    /// A render-target texture at `W`x`H` in a CHOSEN format, for the format
+    /// arm of the guard.
+    fn tex_fmt(dev: &ID3D11Device, w: u32, h: u32, fmt: DXGI_FORMAT) -> ID3D11Texture2D {
+        let desc = D3D11_TEXTURE2D_DESC {
+            Width: w,
+            Height: h,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: fmt,
+            SampleDesc: DXGI_SAMPLE_DESC { Count: 1, Quality: 0 },
+            Usage: D3D11_USAGE_DEFAULT,
+            BindFlags: D3D11_BIND_RENDER_TARGET.0 as u32,
+            CPUAccessFlags: 0,
+            MiscFlags: 0,
+        };
+        let mut t = None;
+        unsafe { dev.CreateTexture2D(&desc, None, Some(&mut t)).expect("tex_fmt") };
         t.unwrap()
     }
 
@@ -358,6 +442,127 @@ mod tests {
     fn a_null_surface_is_a_status_not_a_crash() {
         let rc = unsafe { jas_paint_probe_surface(std::ptr::null_mut(), 10.0, 10.0) };
         assert_eq!(rc, JAS_PAINT_NULL_SURFACE);
+    }
+
+    /// THE RESIZE ASSERTION, and its ABSENCE is the finding of 2026-08-27.
+    ///
+    /// A window resize makes the host's back buffer bigger while the offscreen
+    /// texture keeps the size it was created with -- `SwapChainHost` creates it
+    /// exactly once, and `MainWindow`'s `_started` latch drops every
+    /// `SizeChanged` after the first. Four properties then compose:
+    ///
+    /// 1. `CopyResource` returns `void`, so there is no status to propagate;
+    /// 2. D3D11 DROPS a size-mismatched copy instead of faulting;
+    /// 3. after a resize every copy is a mismatch;
+    /// 4. the debug layer that would report the drop is unavailable here.
+    ///
+    /// Result: the seam returns `JAS_PAINT_OK` and the host presents a STALE
+    /// frame. Paint really did succeed -- into a surface nobody will see again.
+    ///
+    /// This is breadcrumb 5b's TRAP 6, the inverse family: an instrument that
+    /// cannot report failure reads as success no matter what is true. And note
+    /// WHY it survived this long -- EVERY S-B RUN EVER PERFORMED WAS FIXED-SIZE,
+    /// so no run this spike has made could have exhibited it. Same shape as a
+    /// `38;5` fixture that can never emit the `38;2` byte.
+    #[test]
+    fn a_size_mismatched_offscreen_copy_is_refused_not_reported_ok() {
+        let (dev, _ctx) = warp();
+        // The back buffer as it stands AFTER a resize...
+        let dst = tex_wh(&dev, false, W * 2, H * 2);
+        // ...and the offscreen target, still the size it was created with.
+        let src = tex_wh(&dev, false, W, H);
+        let dst_s: IDXGISurface = dst.cast().expect("dst surface");
+        let src_s: IDXGISurface = src.cast().expect("src surface");
+
+        let rc = unsafe {
+            jas_paint_probe_offscreen(dst_s.as_raw(), src_s.as_raw(), W as f32, H as f32)
+        };
+
+        assert_ne!(
+            rc, JAS_PAINT_OK,
+            "a copy between surfaces of different sizes must NOT report success"
+        );
+        assert_eq!(rc, JAS_PAINT_SIZE_MISMATCH, "and it must say why");
+    }
+
+    /// A FORMAT disagreement must be refused on the same footing as a size one.
+    ///
+    /// Written because the guard is cheap to under-build: comparing width and
+    /// height alone would pass a pair that `CopyResource` still drops. The DIP
+    /// defect (issue #16) is a *different* size-agreement failure on this same
+    /// route, which is the standing reminder that one dimension check is not the
+    /// class.
+    #[test]
+    fn a_format_mismatched_offscreen_copy_is_refused_too() {
+        let (dev, _ctx) = warp();
+        let dst = tex_fmt(&dev, W, H, DXGI_FORMAT_R8G8B8A8_UNORM);
+        let src = tex_wh(&dev, false, W, H);
+        let dst_s: IDXGISurface = dst.cast().expect("dst surface");
+        let src_s: IDXGISurface = src.cast().expect("src surface");
+
+        let rc = unsafe {
+            jas_paint_probe_offscreen(dst_s.as_raw(), src_s.as_raw(), W as f32, H as f32)
+        };
+        assert_eq!(rc, JAS_PAINT_SIZE_MISMATCH, "format disagreement is a mismatch too");
+    }
+
+    /// THE PLATFORM CONTRACT THE GUARD EXISTS FOR, DRIVEN RATHER THAN CITED.
+    ///
+    /// The 08/27 finding rested on ONE link I had read and not run: that D3D11
+    /// silently DROPS a size-mismatched `CopyResource` rather than faulting.
+    /// This drives it at the raw D3D11 call, BELOW our seam, so the claim stops
+    /// being documentation and becomes a measurement.
+    ///
+    /// METHOD, and it has to be indirect: `CopyResource` is `void`, so there is
+    /// no return value to consult -- which is the very property that makes the
+    /// guard necessary. So paint the DESTINATION with the probe, then copy a
+    /// DIFFERENTLY SIZED source over it. If the copy were honoured the
+    /// destination would change; if it is dropped the probe survives untouched.
+    ///
+    /// A POSITIVE CONTROL RIDES ALONG: the same copy with MATCHING sizes must
+    /// actually overwrite. Without it this test would pass just as happily if
+    /// `CopyResource` were a no-op in every case, or if the probe colours were
+    /// being read from the wrong texture -- proving the drop while the machinery
+    /// was dead.
+    #[test]
+    fn d3d11_silently_drops_a_size_mismatched_copy_which_is_why_the_guard_exists() {
+        let (dev, ctx) = warp();
+
+        // --- the control: a MATCHED copy must overwrite ----------------------
+        let seeded = tex_wh(&dev, false, W, H);
+        let seeded_s: IDXGISurface = seeded.cast().expect("seeded surface");
+        assert_eq!(
+            unsafe { jas_paint_probe_surface(seeded_s.as_raw(), W as f32, H as f32) },
+            JAS_PAINT_OK,
+            "seed paint"
+        );
+        let blank = tex_wh(&dev, false, W, H);
+        unsafe { ctx.CopyResource(&seeded, &blank) };
+        let after_matched = read(&dev, &ctx, &seeded);
+        assert_ne!(
+            rgb_at(&after_matched, W / 2, H / 2),
+            PROBE_FG,
+            "CONTROL: a matched copy must really overwrite -- if this fails the              test below proves nothing, because the copy machinery is dead"
+        );
+
+        // --- the subject: a MISMATCHED copy must be dropped ------------------
+        let dst = tex_wh(&dev, false, W, H);
+        let dst_s: IDXGISurface = dst.cast().expect("dst surface");
+        assert_eq!(
+            unsafe { jas_paint_probe_surface(dst_s.as_raw(), W as f32, H as f32) },
+            JAS_PAINT_OK,
+            "seed paint"
+        );
+        let bigger = tex_wh(&dev, false, W * 2, H * 2);
+        unsafe { ctx.CopyResource(&dst, &bigger) };
+
+        let after = read(&dev, &ctx, &dst);
+        assert_eq!(
+            rgb_at(&after, W / 2, H / 2),
+            PROBE_FG,
+            "the mismatched copy was DROPPED: the destination still carries the probe"
+        );
+        assert_eq!(rgb_at(&after, 2, 2), PROBE_BG, "and its background survives too");
     }
 
     /// The two probe colours must stay distinguishable from each other and from

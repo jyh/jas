@@ -112,6 +112,22 @@
 #define JAS_PAINT_NOT_A_SURFACE 2
 #endif
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * The two surfaces disagree on size or format, so the copy would be DROPPED.
+ * Positive, same reason.
+ *
+ * EXISTS BECAUSE THE FAILURE IT NAMES IS OTHERWISE SILENT. `CopyResource`
+ * returns `void`; D3D11 drops a mismatched copy rather than faulting; and the
+ * debug layer that would report the drop is unavailable on this box (Graphics
+ * Tools is not installed). Without this code the seam returns `JAS_PAINT_OK`
+ * and the host presents a stale frame -- a status truthful about the wrong
+ * thing. See `d3d11_silently_drops_a_size_mismatched_copy_...` for the
+ * measurement, driven rather than cited.
+ */
+#define JAS_PAINT_SIZE_MISMATCH 3
+#endif
+
 /**
  * How many draws one collision-free id gets before the mint is reported
  * failed. 100 — the value every open-coded copy of this loop used before
