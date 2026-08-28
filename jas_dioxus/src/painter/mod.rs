@@ -260,6 +260,28 @@ pub enum Mask {
     AlphaRevealOutsideBbox { bbox: Rect },
 }
 
+/// THE (clip, invert) TRUTH TABLE — ONE COPY, and it lives here because it
+/// produces a seam type. A6 §4 puts the lowering at BUILD time: the document's
+/// two booleans become one of the three frozen laws before anything crosses the
+/// seam, so a backend never sees `clip`/`invert` and the enum stays complete.
+///
+/// ⛔ `(clip:false, invert:true)` COLLAPSES ONTO `(true, true)` — both yield
+/// `E · (1 − M)` once the mask's outside-region alpha is 0, so an alpha-based
+/// mask cannot distinguish them. That collapse is exactly why the "fourth mask
+/// law" was ruled transcript overreach: it is not a fourth behaviour, it is a
+/// third spelling of the second one.
+///
+/// `bbox` is consumed only by the reveal law and arrives precomputed — a
+/// backend never computes bounds (§3.3).
+pub fn mask_from_flags(clip: bool, invert: bool, bbox: Rect) -> Mask {
+    match (clip, invert) {
+        (true, false) => Mask::LuminanceClipIn,
+        (true, true) => Mask::AlphaClipOut,
+        (false, true) => Mask::AlphaClipOut,
+        (false, false) => Mask::AlphaRevealOutsideBbox { bbox },
+    }
+}
+
 /// A single placed glyph (PlacedGlyphs mode). `glyph_id` is resolved at BUILD
 /// time by a shaping stage (skrifa cmap — NET-NEW work named for PH3); vello
 /// never receives raw text.

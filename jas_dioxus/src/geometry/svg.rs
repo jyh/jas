@@ -3123,6 +3123,10 @@ mod tests {
         assert_eq!(p.width_points[1].width_left, 2.0);
     }
 
+    /// ⛔ ALSO UNREGISTERED — no `#[test]`, so SVG rect round-tripping has never
+    /// been exercised by this suite. Second of two found by the same sweep on
+    /// 2026-08-27; see `mask_plan_clip_not_inverted_is_clip_in` in canvas/render.rs.
+    #[test]
     fn roundtrip_rect() {
         let doc = make_doc(vec![make_rect(10.0, 20.0, 30.0, 40.0)]);
         let svg = document_to_svg(&doc);

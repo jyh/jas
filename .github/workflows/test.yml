@@ -250,6 +250,15 @@ jobs:
         run: python scripts/check_no_vendored_env.py --self-test
       - name: No virtualenv is tracked in this public repo
         run: python scripts/check_no_vendored_env.py
+      # A test without #[test] has never run. Found 2026-08-27 by mutating a
+      # lowering table and watching NOTHING go red: canvas/render.rs carried a
+      # mask-plan test with no attribute, so the STANDARD opacity mask had no
+      # coverage. rustc warned the whole time, inside 52 warnings — which is why
+      # this exists as a gate and not as a habit of reading build output.
+      - name: Self-test the unregistered-test gate
+        run: python scripts/check_unregistered_tests.py --self-test
+      - name: Every test function carries #[test]
+        run: python scripts/check_unregistered_tests.py
 
   # THE WINDOWS LANE. Added 2026-07-28, the day this project's gates ran on
   # Windows for the first time: 11 of 24 invocations failed and NOT ONE failure
@@ -378,6 +387,12 @@ jobs:
         run: |
           python scripts/check_no_vendored_env.py --self-test
           python scripts/check_no_vendored_env.py
+
+      - name: Every test function carries #[test] — self-test, then the gate
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_unregistered_tests.py --self-test
+          python scripts/check_unregistered_tests.py
 
       # SCRUBGUARD on the lane that matters most: every commit that has ever
       # carried the forbidden trailer was authored on this platform. A gate
