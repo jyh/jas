@@ -124,6 +124,13 @@ def scan(sources):
     return gaps
 
 
+def population_is_empty(sources) -> bool:
+    """True when the gate has NO subject. Extracted so the self-test drives the
+    same predicate main() uses; "every gate satisfies X" is vacuously true over
+    an empty population and reads identically to a real pass."""
+    return not sources
+
+
 def load_sources():
     out = {}
     for p in sorted(SCRIPTS.glob("check_*.py")):
@@ -173,6 +180,11 @@ def self_test():
           f"flagged; all {len(SHIPPING_SPELLINGS)} shipping spellings satisfy "
           f"it; an empty ledger and a gate with no ledger are correctly out of "
           f"scope; every shipping gate asks the question.")
+    # THE EMPTY-POPULATION FLOOR, driven on main()'s own predicate.
+    for pop, want in (({}, True), ({"a.py": "x"}, False)):
+        if population_is_empty(pop) != want:
+            print(f"SELF-TEST FAIL: population_is_empty({pop!r}) must be {want}")
+            return 1
     return 0
 
 
@@ -180,7 +192,26 @@ def main():
     if "--self-test" in sys.argv:
         return self_test()
 
-    gaps = scan(load_sources())
+    sources = load_sources()
+    # ⛔ THE POPULATION MUST NOT BE EMPTY. `load_sources()` globs check_*.py from a
+    # path derived at import time; if that derivation ever returns nothing -- a
+    # moved scripts/ dir, a renamed prefix, a run from an unexpected cwd -- then
+    # `scan({})` finds no gaps and this gate prints its success sentence over a
+    # population of ZERO. Measured 2026-08-26 on a tree with no gates: green.
+    # "Every gate satisfies X" is VACUOUSLY TRUE when there are no gates, and the
+    # sentence reads identically either way.
+    #
+    # Derived, not pinned: the floor is "did the derivation find ANY gate", not a
+    # count that rots as gates are added and removed. Its sibling
+    # check_lane_coverage.py already carries a floor of this kind; this gate did
+    # not, which is the same fix-landed-in-one-of-two-copies shape this repo keeps
+    # finding.
+    if population_is_empty(sources):
+        print("FAIL: load_sources() found NO gate scripts to inspect. This gate's "
+              "success sentence is vacuously true over an empty population;")
+        print("      refusing rather than reporting it.")
+        return 1
+    gaps = scan(sources)
     if not gaps:
         print("gate consistency: every gate with a non-empty exemption ledger "
               "also asks whether each row is still needed.")

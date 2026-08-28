@@ -17,6 +17,29 @@ implementations with matching tests, and the maintainer coordinates that
 process. Unsolicited PRs may sit unmerged for a while — an issue
 conversation first saves everyone time.
 
+## After you clone — one step, and nothing can run it for you
+
+```sh
+git config core.hooksPath .githooks
+```
+
+The repository's hooks are tracked in `.githooks/`, but the setting that
+activates them is *local* config and cannot be committed. A clone that
+skips this step has **no hooks and no warning**, which is exactly how the
+commit-msg scrub was silently lost by re-cloning before the hooks were
+tracked. Verify your clone with:
+
+```sh
+sh scripts/check_githooks_liveness.sh --clone
+```
+
+CI asserts the hooks' shape on every push; only you can assert that your
+clone actually ran the step. See `.githooks/README.md` — in particular
+the two platform rules there, which are not style: hook entry points must
+be committed `100755`, and a hook must never name `python3` and stop
+there (on Windows it is a Store alias stub that resolves on `PATH` and
+then refuses to run, which makes `git commit` fail outright).
+
 ## Contribution terms
 
 By submitting a contribution (pull request, patch, or otherwise), you

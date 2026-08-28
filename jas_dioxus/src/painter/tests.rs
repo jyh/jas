@@ -9,7 +9,10 @@
 //!    equivalent build orders below.
 
 use super::recording::RecordingPainter;
-use super::scene::{build_proof_scene, build_synthetic_scene};
+use super::scene::{
+    build_a6_alpha_law_scene, build_a6_blend_scene, build_a6_law_variants_scene,
+    build_a6_nested_layers_scene, build_proof_scene, build_synthetic_scene,
+};
 use super::sink::NoOpPainter;
 
 const GOLDEN: &str = include_str!("testdata/scene_golden.json");
@@ -162,4 +165,108 @@ fn the_proof_scene_carries_an_arc_and_the_display_list_keeps_it() {
          certifies a vocabulary the artist's files actually use and this \
          corpus never sees"
     );
+}
+
+// ---------------------------------------------------------------------------
+// AMENDMENT A6 GOLDENS (design block §6, ratified 2026-08-27).
+//
+// ⛔ AUTHORED FROM THE CONTRACT, NOT CAPTURED FROM HEAD. The PH4 conversion does
+// not exist yet; these pin the stream it must LEARN to emit. A golden captured
+// from today's renderer would enshrine defect D-α and then pass forever by
+// describing the bug — which is how the mask-shaped vacuity survived 14 scenes.
+// ---------------------------------------------------------------------------
+
+const A6_LAW_VARIANTS: &str = include_str!("testdata/a6_law_variants.json");
+const A6_ALPHA_LAW: &str = include_str!("testdata/a6_alpha_law.json");
+const A6_NESTED_LAYERS: &str = include_str!("testdata/a6_nested_layers.json");
+const A6_BLEND: &str = include_str!("testdata/a6_blend.json");
+
+fn record(build: fn(&mut RecordingPainter)) -> String {
+    let mut rec = RecordingPainter::new();
+    build(&mut rec);
+    rec.to_canonical_json()
+}
+
+#[test]
+#[ignore = "regeneration tool, not a gate"]
+fn regenerate_a6_goldens() {
+    let base = concat!(env!("CARGO_MANIFEST_DIR"), "/src/painter/testdata/");
+    for (name, build) in [
+        ("a6_law_variants.json", build_a6_law_variants_scene as fn(&mut RecordingPainter)),
+        ("a6_alpha_law.json", build_a6_alpha_law_scene as fn(&mut RecordingPainter)),
+        ("a6_nested_layers.json", build_a6_nested_layers_scene as fn(&mut RecordingPainter)),
+        ("a6_blend.json", build_a6_blend_scene as fn(&mut RecordingPainter)),
+    ] {
+        let mut json = record(build);
+        json.push('\n');
+        std::fs::write(format!("{base}{name}"), json).expect("write A6 golden");
+    }
+}
+
+/// §6.1 — one scene per law variant, and the bracket grammar around each.
+#[test]
+fn a6_law_variants_match_golden() {
+    assert_eq!(record(build_a6_law_variants_scene).trim(), A6_LAW_VARIANTS.trim());
+}
+
+/// §6.2 — the D-α pin. See the scene builder for why the numbers matter.
+#[test]
+fn a6_alpha_law_matches_golden() {
+    assert_eq!(record(build_a6_alpha_law_scene).trim(), A6_ALPHA_LAW.trim());
+}
+
+/// §6.3 — layer-in-layer, against D-β's self-clobbering static scratch.
+#[test]
+fn a6_nested_layers_match_golden() {
+    assert_eq!(record(build_a6_nested_layers_scene).trim(), A6_NESTED_LAYERS.trim());
+}
+
+/// §6.4 — the first golden here to see a blend cross the seam operatively.
+#[test]
+fn a6_blend_matches_golden() {
+    assert_eq!(record(build_a6_blend_scene).trim(), A6_BLEND.trim());
+}
+
+/// ⛔ THE GRAMMAR ITSELF, not just the bytes. A golden compares a string; it
+/// cannot say WHY the string is right. These assert A6 §3.2 structurally, so a
+/// regenerated golden that silently changed shape still reds.
+#[test]
+fn a6_scenes_obey_the_bracket_grammar() {
+    use super::recording::Command;
+    for (name, build) in [
+        ("law_variants", build_a6_law_variants_scene as fn(&mut RecordingPainter)),
+        ("alpha_law", build_a6_alpha_law_scene as fn(&mut RecordingPainter)),
+        ("nested_layers", build_a6_nested_layers_scene as fn(&mut RecordingPainter)),
+        ("blend", build_a6_blend_scene as fn(&mut RecordingPainter)),
+    ] {
+        let mut rec = RecordingPainter::new();
+        build(&mut rec);
+        let (mut layer, mut mask, mut saw_mask) = (0i32, 0i32, false);
+        for c in rec.commands() {
+            match c {
+                Command::PushIsolatedLayer { .. } => layer += 1,
+                Command::PopIsolatedLayer => {
+                    layer -= 1;
+                    assert!(layer >= 0, "{name}: pop_isolated_layer without a push");
+                }
+                Command::PushMaskLayer { .. } => {
+                    assert!(layer > 0, "{name}: push_mask_layer OUTSIDE an isolated layer (A6 §3.2)");
+                    mask += 1;
+                    assert!(mask <= 1, "{name}: more than one open mask bracket");
+                    saw_mask = true;
+                }
+                Command::PopMaskLayer => mask -= 1,
+                // §3.2: nothing paints between pop_mask_layer and pop_isolated_layer.
+                _ => assert!(
+                    !(saw_mask && mask == 0 && layer > 0),
+                    "{name}: painted after pop_mask_layer inside the layer (A6 §3.2)"
+                ),
+            }
+            if matches!(c, Command::PopIsolatedLayer) {
+                saw_mask = false;
+            }
+        }
+        assert_eq!(layer, 0, "{name}: unbalanced isolated-layer bracket");
+        assert_eq!(mask, 0, "{name}: unbalanced mask bracket");
+    }
 }

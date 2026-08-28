@@ -329,15 +329,36 @@ impl<'a> Painter for Direct2DPainter<'a> {
     }
 
     fn push_mask_layer(&mut self, _mask: Mask) {
+        // ⛔ LEDGER RECONCILIATION (A6 item ④, 2026-08-27). This site cited
+        // "option C, 2026-07-30" while the summons cited "option (a)". ONE
+        // OBJECT, TWO LABELS — both were pre-ratification working names for the
+        // element-bracket ruling, and they never disagreed on direction. The
+        // ledger now carries ONE name: **AMENDMENT A6**, ratified 2026-08-27.
+        // "option C (2026-07-30)" and "option (a)" are recorded here as its
+        // prior labels so neither trail goes cold; neither is used again.
         unimplemented!(
-            "masks are BLOCKED on the element-bracket ruling (JYH ruled option C, \
-             2026-07-30). Mask carries only the law and no frozen op opens the isolated \
-             element-body buffer it must eat into; B1 also established D2D1_LAYER_PARAMETERS1 \
-             serves none of the three variants. Do not wire a PushLayer here."
+            "masks are BLOCKED pending the A6 implementation (contract ratified \
+             2026-08-27; prior labels: 'option C 2026-07-30' and 'option (a)'). A6 \
+             adds push_isolated_layer/pop_isolated_layer, which opens the isolated \
+             element-body buffer the law must eat into — the gap that blocked this \
+             site is closed IN THE CONTRACT, not yet in this backend. B1 also \
+             established D2D1_LAYER_PARAMETERS1 serves none of the three variants. \
+             Do not wire a PushLayer here."
         )
     }
     fn pop_mask_layer(&mut self) {
         unimplemented!("see push_mask_layer")
+    }
+
+    fn push_isolated_layer(&mut self, _alpha: f64, _blend: BlendMode) {
+        // A6 ratified the bracket; this backend does not yet implement it. B1's
+        // finding stands: D2D1_LAYER_PARAMETERS1 serves none of the three mask
+        // variants, so the layer target is a render-target swap, not a PushLayer.
+        unimplemented!("A6 isolated layers are not yet implemented in the D2D backend")
+    }
+
+    fn pop_isolated_layer(&mut self) {
+        unimplemented!("A6 isolated layers are not yet implemented in the D2D backend")
     }
 }
 
@@ -654,9 +675,18 @@ mod tests {
 
     /// Masks must REFUSE, not draw something plausible. A backend that quietly
     /// ignored a mask would render the unmasked artwork and look almost right.
+    ///
+    /// ⛔ AND THIS TEST NOW PINS THE LEDGER NAME (A6 item ④). It used to expect
+    /// "element-bracket ruling"; the site cited "option C, 2026-07-30" while the
+    /// summons cited "option (a)" — one object under two labels. The reconciled
+    /// name is A6, and this expectation is what keeps a third label from
+    /// appearing here: change the refusal's name and this test reds.
+    ///
+    /// Renamed with the message: the bracket is no longer "pending" — it is
+    /// ratified (2026-08-27). What is pending is this backend's IMPLEMENTATION.
     #[test]
-    #[should_panic(expected = "element-bracket ruling")]
-    fn masks_refuse_loudly_pending_the_element_bracket() {
+    #[should_panic(expected = "pending the A6 implementation")]
+    fn masks_refuse_loudly_pending_the_a6_implementation() {
         let t = HeadlessTarget::new(2, 2).unwrap();
         let mut p = Direct2DPainter::new(t.target());
         p.push_mask_layer(Mask::AlphaClipOut);

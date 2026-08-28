@@ -238,6 +238,27 @@ jobs:
         run: python scripts/check_encoding_hygiene.py --self-test
       - name: Encoding hygiene (explicit encoding= on text I/O, newline= on writes)
         run: python scripts/check_encoding_hygiene.py
+      # A virtualenv in PUBLIC history cannot be removed without a history purge,
+      # and this repo came within one `git add -A` of that on 08/26: .gitignore
+      # said `.venv`, which matched one directory, while `.venv.old` sat beside
+      # it unignored at 1.2 GB / 7,215 files. The ignore rule was widened to the
+      # class the same hour — and a widened rule is REMEMBERING. This catches the
+      # OUTCOME, which is the only half CI can see: a developer's untracked debris
+      # never exists in CI's checkout, but the index does. Self-test first, same
+      # as the two gates above: trusted for its RED.
+      - name: Self-test the vendored-env gate
+        run: python scripts/check_no_vendored_env.py --self-test
+      - name: No virtualenv is tracked in this public repo
+        run: python scripts/check_no_vendored_env.py
+      # A test without #[test] has never run. Found 2026-08-27 by mutating a
+      # lowering table and watching NOTHING go red: canvas/render.rs carried a
+      # mask-plan test with no attribute, so the STANDARD opacity mask had no
+      # coverage. rustc warned the whole time, inside 52 warnings — which is why
+      # this exists as a gate and not as a habit of reading build output.
+      - name: Self-test the unregistered-test gate
+        run: python scripts/check_unregistered_tests.py --self-test
+      - name: Every test function carries #[test]
+        run: python scripts/check_unregistered_tests.py
 
   # THE WINDOWS LANE. Added 2026-07-28, the day this project's gates ran on
   # Windows for the first time: 11 of 24 invocations failed and NOT ONE failure
@@ -354,6 +375,25 @@ jobs:
           python scripts/check_encoding_hygiene.py --self-test
           python scripts/check_encoding_hygiene.py
 
+      # ⛔ ON THIS LANE BECAUSE ITS MARKERS ARE PATH-SHAPED, not because a rule
+      # says every gate runs everywhere. `(^|/)(bin|Scripts)/activate…` and
+      # `site-packages/` are separator-sensitive patterns, and `Scripts/` is the
+      # Windows venv layout specifically — so this is the platform whose venvs it
+      # most needs to recognise. The oracle is `git ls-files`, which emits
+      # forward slashes on every platform; running here proves that rather than
+      # assuming it.
+      - name: No virtualenv is tracked — self-test, then the gate
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_no_vendored_env.py --self-test
+          python scripts/check_no_vendored_env.py
+
+      - name: Every test function carries #[test] — self-test, then the gate
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_unregistered_tests.py --self-test
+          python scripts/check_unregistered_tests.py
+
       # SCRUBGUARD on the lane that matters most: every commit that has ever
       # carried the forbidden trailer was authored on this platform. A gate
       # watching only ubuntu would have watched the one place the violation
@@ -365,6 +405,60 @@ jobs:
           python scripts/check_commit_trailers.py
           python scripts/check_scrub_trigger.py --self-test
           python scripts/check_scrub_trigger.py
+
+      # check_private_paths.py ALSO BELONGS ON THIS LANE, and the lane-coverage
+      # gate is what said so: it landed wired to ubuntu only, and main went red
+      # with "a gate that cannot fail on a platform is not watching that
+      # platform" — the blind spot check_swift_copy_sites.py sat in for its whole
+      # life while CI stayed green.
+      #
+      # ⛔ WHAT THIS LANE DOES *NOT* DO, corrected here because the first version
+      # of this comment claimed it and a reader would have believed it: RUNNING
+      # THIS GATE ON WINDOWS DOES NOT MAKE IT SEE A BACKSLASH. Measured by the
+      # gate's author, not reasoned: both arms read git OBJECT bytes, diff path
+      # headers are forward-slash on every platform, and core.autocrlf rewrites
+      # the WORKING TREE, which this gate never reads. The same regex over the
+      # same objects returns the same verdict wherever it executes.
+      #   ⇒ A LANE CHANGES WHERE A GATE RUNS; ONLY THE PATTERN CHANGES WHAT IT
+      #     CAN MATCH. Separator blindness is a PATTERN fix and is tracked as one.
+      #
+      # So why keep the lane? Because the verdict's platform-invariance is a
+      # property of TODAY's implementation, not a guarantee of the gate's
+      # contract — this is the lane whose non-UTF-8 default encoding is asserted
+      # above, and the first pattern or decoding change that becomes
+      # platform-sensitive is watched here BY CONSTRUCTION instead of by someone
+      # remembering to add a lane at the same time.
+      #
+      # Range logic mirrors scrub.yml deliberately rather than being shared: a
+      # full-history scan is permanently red here (five pre-ruling commits carry
+      # a commons path, measured before that gate shipped), so both lanes scan
+      # "no NEW path enters" and both must fall back the same way.
+      - name: No NEW path into the private record (Windows lane)
+        if: ${{ !cancelled() }}
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python scripts/check_private_paths.py --self-test
+          sh scripts/pick_scan_range.sh --self-test
+          # ⛔ THE HEAD~100 FALLBACK WAS A GUARANTEED RED, NOT A COVERAGE LIMIT.
+          # On a new branch or a pull_request, github.event.before is empty, so
+          # the old fallback scanned 100 commits back -- reaching PRE-RULING
+          # history, where five commits legitimately carry a commons path. It
+          # fired on the first branch pushed after this gate landed and found 3
+          # of them. That is the red-sweep-gets-abandoned failure this gate's own
+          # header names as the reason it scans a delta at all, re-created by its
+          # fallback.
+          #
+          # The delta a branch push actually introduces is measured against main,
+          # not against a commit count. merge-base, so a stale branch scans what
+          # IT added rather than what main did meanwhile.
+          # ⛔ THIS LANE'S COPY WAS THE STALE ONE -- no reachability arm, no
+          # merge-base degeneracy arm; the 08/25 hardening never reached it, so
+          # it would still die with git exit 128 on a rewritten before-sha. One
+          # copy now, self-tested, shared with scrub.yml.
+          RANGE="$(scripts/pick_scan_range.sh)" || exit 1
+          echo "scanning $RANGE"
+          python scripts/check_private_paths.py --range "$RANGE"
 
       - name: Untracked files are invisible to index-reading gates
         if: ${{ !cancelled() }}
