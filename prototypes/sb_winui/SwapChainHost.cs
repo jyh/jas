@@ -332,6 +332,32 @@ internal sealed unsafe class SwapChainHost : IDisposable
         _offscreenRes = null;
         _offscreen = null;
 
+        // MEASURED, NOT ANTICIPATED: without the two lines below, ResizeBuffers
+        // threw DXGI_ERROR_INVALID_CALL (0x887A0001) on BOTH routes, every time.
+        //
+        // RenderFrame calls GetBuffer<IDXGISurface>, which hands back a managed
+        // RCW. The raw interface pointer taken from it IS released each frame,
+        // but the RCW itself is only released when the GC finalizes it -- which
+        // is non-deterministic and had not happened by the time Resize ran. DXGI
+        // refuses ResizeBuffers while ANY back-buffer reference is outstanding,
+        // so the resize failed on a reference nothing in the frame path looked
+        // like it was holding.
+        //
+        // The file's own comment predicted this in the abstract -- "skipping the
+        // release leaks a buffer reference per frame, which manifests as a resize
+        // that silently stops working" -- written when no resize existed. It does
+        // not manifest silently; it throws. The comment was right about the cause
+        // and wrong about the symptom, which is worth more than either alone.
+        //
+        // AND THE FIX IS DELIBERATELY HERE AND NOT IN THE FRAME PATH. The README
+        // records Marshal.ReleaseComObject in the per-frame path corrupting the
+        // heap over sixty frames (0xC0000374 in ntdll), and FinalReleaseComObject
+        // crashing outright by over-release. A collection at RESIZE time runs
+        // once per user gesture, releases the outstanding RCWs deterministically,
+        // and never touches the hot path that was corrupting.
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+
         // ⚠️ `ResizeBuffers` IS PROJECTED AS `void`, NOT AS AN HRESULT, unlike
         // `Present` a few lines below which returns one and is checked with
         // `hr.Failed`. CsWin32 generates it PreserveSig(false), so failure

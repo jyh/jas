@@ -45,7 +45,18 @@ $tools = "$env:LOCALAPPDATA\jas-tools"
 # ⇒ THE FAILURE POINTED AT THE WRONG COMPONENT, which is the expensive kind. A
 # path that cannot work must be refused HERE, with the reason, rather than
 # reappearing as a missing artifact two layers away.
-$Exe = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Exe))
+# AND ONLY JOIN WHEN IT IS ACTUALLY RELATIVE. The first version of this fix
+# joined unconditionally, which turns an ALREADY-ABSOLUTE path into a
+# doubled one and GetFullPath throws 'The given path format is not
+# supported.' I shipped that, because I tested the new REFUSAL branch (a bad
+# relative path, correctly refused by name) and never re-tested the ordinary
+# success branch it sits in front of. A guard needs a positive control as
+# much as any other instrument: assert that a GOOD input still passes, not
+# only that a bad one is caught.
+if (-not [System.IO.Path]::IsPathRooted($Exe)) {
+    $Exe = Join-Path (Get-Location) $Exe
+}
+$Exe = [System.IO.Path]::GetFullPath($Exe)
 if (-not (Test-Path $Exe)) {
     Write-Output "  FAIL: -Exe does not exist: $Exe"
     Write-Output "VERIFY: FAIL"

@@ -1,0 +1,5 @@
+System.EntryPointNotFoundException: Unable to find an entry point named 'jas_instr_reset' in DLL 'jas_dioxus'.
+   at ScPanel.JasCore.jas_instr_reset()
+   at ScPanel.MainWindow.MeasureC1() in C:\Users\jyh\projects\claude\jas\prototypes\sc_panel\MainWindow.xaml.cs:line 179
+   at ScPanel.MainWindow.Run() in C:\Users\jyh\projects\claude\jas\prototypes\sc_panel\MainWindow.xaml.cs:line 70
+   at ScPanel.MainWindow..ctor() in C:\Users\jyh\projects\claude\jas\prototypes\sc_panel\MainWindow.xaml.cs:line 54
