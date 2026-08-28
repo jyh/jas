@@ -419,7 +419,7 @@ fn css_color(c: &Color) -> String {
 /// Map a BlendMode to the Canvas2D `globalCompositeOperation` string.
 /// Canvas2D natively supports all 16 separable / non-separable blend modes
 /// used by the Opacity panel; Normal maps to the default `source-over`.
-fn blend_mode_css(mode: BlendMode) -> &'static str {
+pub(crate) fn blend_mode_css(mode: BlendMode) -> &'static str {
     match mode {
         BlendMode::Normal      => "source-over",
         BlendMode::Darken      => "darken",
