@@ -28,7 +28,18 @@ import subprocess
 import sys
 
 FN = re.compile(r'^\s*(?:async\s+)?fn\s+(\w+)\s*\(')
-ATTR = re.compile(r'#\[\s*(test|bench|ignore|rstest|tokio::test)')
+# ⛔ THE ALTERNATION IS ANCHORED AT `#[`, so an attribute whose name merely
+# CONTAINS `test` does not match — `#[wasm_bindgen_test]` was flagged as
+# unregistered the first time the wasm harness landed, by this gate, on its
+# author. A registration attribute is whatever the harness calls it, and a
+# gate that only knows `#[test]` will red every alternative harness a repo
+# ever adds. Listed explicitly rather than loosened to a substring: `test`
+# anywhere in an attribute would also swallow `#[cfg(test)]` on a plain fn.
+ATTR = re.compile(r'#\[\s*(test|bench|ignore|rstest|tokio::test|wasm_bindgen_test)\b')
+# braces inside line comments and string literals are not structure; counting
+# them is what made the module extent drift on a 4000-line file.
+STRIP = re.compile(r'//.*$|"(?:\\.|[^"\\])*"')
+CFG_TEST = re.compile(r'#\[\s*cfg\s*\((?:[^)]*\b)?test\b')
 ASSERTION = re.compile(r'\b(assert(_eq|_ne)?|panic|unreachable|todo)\s*!\s*\(')
 
 
@@ -37,11 +48,19 @@ def scan_source(src: str) -> list[tuple[int, str]]:
     lines = src.split("\n")
     out, in_test, depth, td = [], False, 0, None
     for i, ln in enumerate(lines):
-        if "#[cfg(test)]" in ln:
+        # ⛔ ANY test-cfg FORM OPENS A TEST MODULE, not just the bare one.
+        # `#[cfg(all(test, target_arch = "wasm32"))]` is how a wasm harness is
+        # gated, and a literal "#[cfg(test)]" match misses it — which made this
+        # scanner RIGHT BY ACCIDENT on render.rs: it caught the wasm tests only
+        # because brace-counting had not closed the PRECEDING module. A fixture
+        # with the same shape returned nothing. Two bugs cancelling is not a
+        # working gate, so both are fixed.
+        if CFG_TEST.search(ln):
             in_test, td = True, None
         if in_test and td is None and re.search(r"\bmod\s+\w+\s*\{", ln):
             td = depth
-        depth += ln.count("{") - ln.count("}")
+        code = STRIP.sub("", ln)
+        depth += code.count("{") - code.count("}")
         if in_test and td is not None and depth <= td:
             in_test, td = False, None
         m = FN.match(ln)
@@ -139,6 +158,45 @@ mod tests {
     if scan_source(dead_helper):
         failures.append("an uncalled helper with NO asserts is dead code, not an "
                         "unregistered test — this gate must not claim it")
+    # ⛔ A NON-BARE cfg FORM MUST STILL OPEN A TEST MODULE, and production code
+    # AFTER a closed test module must not be swept in. Both were wrong at once
+    # and cancelled on the real file; this fixture holds them apart.
+    two_mods = """#[cfg(test)]
+mod tests { #[test] fn a() { assert!(true); } }
+
+fn production_helper() { assert!(true); }
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod canvas_tests {
+    fn unregistered() { assert!(true); }
+}"""
+    # ⛔ A STRAY BRACE IN A STRING OR COMMENT MUST NOT MOVE THE MODULE EXTENT.
+    # This is what actually drifted on render.rs: a 4000-line file has plenty of
+    # `{` inside format strings, and an unbalanced one leaks the test module over
+    # everything that follows.
+    drift = """#[cfg(test)]
+mod tests {
+    #[test]
+    fn a() { let s = "an unbalanced brace { in a literal"; assert!(!s.is_empty()); }
+}
+
+fn production_after_a_drifting_module() { assert!(true); }"""
+    got_drift = [n for _, n in scan_source(drift)]
+    if got_drift:
+        failures.append(f"a brace in a string/comment moved the module extent: "
+                        f"flagged {got_drift} outside the test module")
+
+    got = [n for _, n in scan_source(two_mods)]
+    if got != ["unregistered"]:
+        failures.append(f"cfg-form/module-extent: want ['unregistered'], got {got}")
+    wasm = """#[cfg(all(test, target_arch = "wasm32"))]
+mod canvas_tests {
+    #[wasm_bindgen_test]
+    fn browser_test() { assert!(true); }
+}"""
+    if scan_source(wasm):
+        failures.append("#[wasm_bindgen_test] is a registration attribute — a gate "
+                        "that knows only #[test] reds every alternative harness")
     outside = """fn helper_outside_tests() { assert!(true); }"""
     if scan_source(outside):
         failures.append("a function OUTSIDE a test module is not this gate's business")
