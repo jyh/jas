@@ -80,7 +80,7 @@ fn stroke_profile_attrs(
 
 /// FLOATSPELL — the one spelling of a FULL-PRECISION f64 both ports must write.
 ///
-/// RULED 2026-08-05 (`fleet/RULING-four-decimal-floor-2026-08-05.md`): the
+/// RULED 2026-08-05 (council; the ruling's substance is inlined below): the
 /// transform matrix carries full precision while positions and radii stay at
 /// 4 dp. "Full precision" has no single spelling, and the two ports do not
 /// agree on one — Rust's `Display` writes `1e-7` as `0.0000001` where Swift
@@ -3123,6 +3123,10 @@ mod tests {
         assert_eq!(p.width_points[1].width_left, 2.0);
     }
 
+    /// ⛔ ALSO UNREGISTERED — no `#[test]`, so SVG rect round-tripping has never
+    /// been exercised by this suite. Second of two found by the same sweep on
+    /// 2026-08-27; see `mask_plan_clip_not_inverted_is_clip_in` in canvas/render.rs.
+    #[test]
     fn roundtrip_rect() {
         let doc = make_doc(vec![make_rect(10.0, 20.0, 30.0, 40.0)]);
         let svg = document_to_svg(&doc);

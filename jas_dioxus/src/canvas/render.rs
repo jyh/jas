@@ -813,15 +813,19 @@ fn mask_plan(mask: &Mask) -> Option<MaskPlan> {
     if mask.disabled {
         return None;
     }
-    Some(match (mask.clip, mask.invert) {
-        (true, false) => MaskPlan::ClipIn,
-        (true, true) => MaskPlan::ClipOut,
-        // Alpha-based masks can't distinguish `clip: false,
-        // invert: true` from `clip: true, invert: true` (both yield
-        // `E * (1 - M)` when the mask's outside-region alpha is 0),
-        // so route them through the same composite.
-        (false, true) => MaskPlan::ClipOut,
-        (false, false) => MaskPlan::RevealOutsideBbox,
+    // ⛔ ONE TRUTH TABLE, AND IT IS NOT THIS ONE. The (clip, invert) lowering
+    // moved to `painter::mask_from_flags` because it produces a SEAM type and
+    // A6 §4 puts it at build time. This site now DERIVES its plan from that
+    // single source instead of restating the table -- two copies of a truth
+    // table is the shape this repo has already been bitten by twice (the CI
+    // range guard, and the 08/25 force-push hardening that landed in one of two
+    // files). The bbox is irrelevant to the choice, so a zero rect is passed
+    // and discarded; only the VARIANT is read.
+    let zero = crate::painter::Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 };
+    Some(match crate::painter::mask_from_flags(mask.clip, mask.invert, zero) {
+        crate::painter::Mask::LuminanceClipIn => MaskPlan::ClipIn,
+        crate::painter::Mask::AlphaClipOut => MaskPlan::ClipOut,
+        crate::painter::Mask::AlphaRevealOutsideBbox { .. } => MaskPlan::RevealOutsideBbox,
     })
 }
 
@@ -3539,6 +3543,13 @@ mod tests {
         assert_eq!(net(0.5, 0.5), 0.25); // the design block's example
     }
 
+    /// ⛔ THIS TEST HAD NO `#[test]` ATTRIBUTE AND HAD NEVER RUN. Its three
+    /// neighbours carry one; this one was written, committed, and silently
+    /// excluded — so the case it covers, `(clip: true, invert: false)`, THE
+    /// STANDARD OPACITY MASK, had no coverage at all. rustc said so the whole
+    /// time ("function is never used"), inside 52 warnings.
+    /// Found 2026-08-27 by mutating the lowering and watching NOTHING go red.
+    #[test]
     fn mask_plan_clip_not_inverted_is_clip_in() {
         let m = test_mask(true, false, false);
         assert_eq!(mask_plan(&m), Some(MaskPlan::ClipIn));

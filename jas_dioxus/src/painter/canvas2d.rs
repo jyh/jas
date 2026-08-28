@@ -242,6 +242,15 @@ impl Painter for Canvas2dPainter<'_> {
         unimplemented!("mask layers are PH4; masked elements must stay on the legacy path");
     }
 
+    fn push_isolated_layer(&mut self, _alpha: f64, _blend: BlendMode) {
+        // A6: the bracket exists in the contract; the offscreen pipeline is PH4.
+        unimplemented!("isolated layers are PH4; masked elements stay on the legacy path");
+    }
+
+    fn pop_isolated_layer(&mut self) {
+        unimplemented!("isolated layers are PH4; masked elements stay on the legacy path");
+    }
+
     fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64) {
         self.set_fill_brush(brush);
         self.apply_alpha(paint_alpha);

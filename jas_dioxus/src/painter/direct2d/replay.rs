@@ -240,8 +240,14 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
                     _ => r.unsupported.push((cmd.into(), "PlacedGlyphs mode not built")),
                 }
             }
+            // A6 is RATIFIED (2026-08-27); what is pending is this backend's
+            // implementation, not a ruling. Both brackets are DECLARED gaps so
+            // they land in the report instead of the "unknown command" arm --
+            // an unimplemented op and an unrecognised one are different facts.
             "push_mask_layer" | "pop_mask_layer" =>
-                r.unsupported.push((cmd.into(), "masks blocked on the element-bracket ruling")),
+                r.unsupported.push((cmd.into(), "masks pending the A6 implementation in this backend")),
+            "push_isolated_layer" | "pop_isolated_layer" =>
+                r.unsupported.push((cmd.into(), "A6 isolated layers pending in this backend")),
             _ => r.unsupported.push((cmd.into(), "unknown command")),
         }
     }
@@ -293,18 +299,55 @@ mod tests {
     #[test]
     fn every_recorded_scene_replays_and_reports_its_gap() {
         let (r, n) = replay_all();
-        assert_eq!(n, 14, "the corpus is 14 scenes");
+
+        // ⛔ THE STATED LIMIT THIS TEST CARRIED IS NOW GONE, AND THAT IS THE
+        // POINT OF A6's CORPUS. It used to read: "masks and non-Normal blend
+        // remain unimplemented by design -- THE CORPUS SIMPLY CONTAINS NONE,
+        // which is itself a stated limit of this measurement rather than
+        // evidence they work." B1 measured exactly that: 14 scenes, ZERO mask
+        // ops. A backend could refuse every mask in existence and this test
+        // would have gone green, because nothing asked.
+        //
+        // The four A6 goldens (design block §6) put masks, nested layers and a
+        // non-Normal blend into the corpus. So the assertion inverts: the gap
+        // must now be REPORTED, and it must be EXACTLY the declared one.
+        assert_eq!(n, 18, "14 pre-A6 scenes + the 4 A6 goldens");
+        for want in ["a6_law_variants.json", "a6_alpha_law.json",
+                     "a6_nested_layers.json", "a6_blend.json"] {
+            assert!(scenes().iter().any(|(name, _)| name == want),
+                    "A6 scene {want} vanished from the corpus");
+        }
         assert!(r.total() >= 56, "all recorded ops accounted for, got {}", r.total());
 
-        // EVERY recorded command now draws. Nothing in the corpus is refused.
-        // Masks and non-Normal blend remain unimplemented by design -- the
-        // corpus simply contains none, which is itself a stated limit of this
-        // measurement rather than evidence they work.
-        assert!(
-            r.is_complete(),
-            "every recorded op should draw, outstanding: {:?}", r.unsupported
-        );
-        assert_eq!(r.drawn, r.total());
+        // ⛔ EVERY OP ACCOUNTED FOR — AGAINST THE SCENES, NOT AGAINST ITSELF.
+        // My first cut here asserted `r.drawn + r.unsupported.len() == r.total()`,
+        // which is a TAUTOLOGY: total() is DEFINED as that sum, so it can never
+        // fail. The question worth asking is whether the report accounts for
+        // every record the corpus actually holds — a command silently skipped
+        // without being reported makes the report SMALLER than the corpus, and
+        // only the corpus can say so.
+        let recorded: usize = scenes()
+            .iter()
+            .map(|(_, v)| v.as_array().map(|a| a.len()).unwrap_or(0))
+            .sum();
+        assert_eq!(r.total(), recorded,
+                   "replay accounted for {} ops but the corpus holds {recorded}", r.total());
+
+        // ⛔ AND EVERY GAP MUST BE A DECLARED ONE. This is the arm that keeps the
+        // test honest now that it can no longer be complete: a NEW gap, or an op
+        // falling through to "unknown command", still reds.
+        const DECLARED: [&str; 3] = [
+            "masks pending the A6 implementation in this backend",
+            "A6 isolated layers pending in this backend",
+            "non-Normal blend needs an effect graph",
+        ];
+        for (cmd, why) in &r.unsupported {
+            assert!(DECLARED.contains(why),
+                    "UNDECLARED gap: {cmd} -> {why}");
+        }
+        assert!(!r.unsupported.is_empty(),
+                "the A6 scenes contain masks and a non-Normal blend; a report with \
+                 NO gaps means the corpus stopped containing them");
     }
 
     /// The harness must NOT report success on a command it silently dropped.

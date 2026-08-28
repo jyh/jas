@@ -1,4 +1,13 @@
+# ⛔ THE CLASS, NOT ONE NAME. This line was exactly `.venv` -- which matches one
+# directory and nothing else. Measured 08/26: `.venv.old` sat beside it,
+# UNIGNORED, 1.2 GB across 7,215 files, and `git add -A` in this PUBLIC repo
+# would have staged every one of them. A rule naming a single instance READS as
+# covering the class, and the sibling it does not cover is invisible in review
+# because .gitignore is the file nobody re-derives.
+# Verified before broadening: 0 tracked files match `.venv*`, so this ignores
+# nothing that is currently in the index.
 .venv
+.venv*/
 *.lock
 bazel*
 [xyz]
