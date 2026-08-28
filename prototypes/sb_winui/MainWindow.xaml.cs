@@ -68,11 +68,21 @@ public sealed partial class MainWindow : Window
                 Report($"RUSTFAIL {_host.LastStatus}");
                 return;
             }
+            // ⛔ CARRY ResizeCost EXPLICITLY. RenderFrame overwrites LastStatus,
+            // so the resize's own three-part timing -- the whole point of driving
+            // a resize -- was computed and then thrown away before anything read
+            // it. Found by running the paired sweep and seeing eight arms report
+            // no resize number at all. An instrument that overwrites its own
+            // result is the same class this branch keeps finding, arriving in the
+            // code I added to measure with.
+            var cost = _host.ResizeCost;
             var ok = _host.RenderFrame();
             StatusLine.Text = ok
                 ? $"rust repainted after resize — {_host.LastStatus}"
                 : $"FAILED after resize — {_host.LastStatus}";
-            Report(ok ? $"RUSTOK {_host.LastStatus}" : $"RUSTFAIL {_host.LastStatus}");
+            Report(ok
+                ? $"RUSTOK RESIZE[{cost}] {_host.LastStatus}"
+                : $"RUSTFAIL RESIZE[{cost}] {_host.LastStatus}");
         };
     }
 

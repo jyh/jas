@@ -136,6 +136,8 @@ internal sealed unsafe class SwapChainHost : IDisposable
     public string Adapter { get; private set; } = "unknown";
     public string BareStatus { get; private set; } = "not tried";
     public string PaintNote { get; private set; } = "not run";
+    /// <summary>The last resize, split into its three parts. "not resized" until one happens.</summary>
+    public string ResizeCost { get; private set; } = "not resized";
     public string DebugLayer { get; private set; } = "off";
 
     /// <summary>
@@ -355,8 +357,10 @@ internal sealed unsafe class SwapChainHost : IDisposable
         // crashing outright by over-release. A collection at RESIZE time runs
         // once per user gesture, releases the outstanding RCWs deterministically,
         // and never touches the hot path that was corrupting.
+        var swGc = System.Diagnostics.Stopwatch.StartNew();
         GC.Collect();
         GC.WaitForPendingFinalizers();
+        swGc.Stop();
 
         // ⚠️ `ResizeBuffers` IS PROJECTED AS `void`, NOT AS AN HRESULT, unlike
         // `Present` a few lines below which returns one and is checked with
@@ -368,9 +372,12 @@ internal sealed unsafe class SwapChainHost : IDisposable
         //
         // 0 buffers / UNKNOWN format = "keep the count and format you had", so a
         // throw here is a real failure and not a description mismatch.
+        var swBuf = new System.Diagnostics.Stopwatch();
         try
         {
+            swBuf.Start();
             _swapChain.ResizeBuffers(0, w, h, DXGI_FORMAT.DXGI_FORMAT_UNKNOWN, 0);
+            swBuf.Stop();
         }
         catch (Exception ex)
         {
@@ -383,8 +390,22 @@ internal sealed unsafe class SwapChainHost : IDisposable
 
         _width = w;
         _height = h;
+        var swTgt = System.Diagnostics.Stopwatch.StartNew();
         CreateOffscreenTarget();
-        LastStatus = $"resized to {SurfaceLabel()}";
+        swTgt.Stop();
+
+        // THE THREE PARTS ARE REPORTED SEPARATELY, and the GC one especially.
+        //
+        // The collect is MY addition (it is what makes ResizeBuffers legal at
+        // all here), so folding it into one "resize cost" would price my repair
+        // as if it were the platform's. Whoever optimises this needs to see which
+        // third is which -- and the OFFSCREEN route is the only one that pays the
+        // target-recreation third, which is precisely the per-route difference
+        // the coupling argument is about.
+        ResizeCost = $"rcw-release={swGc.Elapsed.TotalMilliseconds:F2}ms "
+                   + $"resizebuffers={swBuf.Elapsed.TotalMilliseconds:F2}ms "
+                   + $"target-recreate={swTgt.Elapsed.TotalMilliseconds:F2}ms";
+        LastStatus = $"resized to {SurfaceLabel()} :: {ResizeCost}";
         return true;
     }
 
