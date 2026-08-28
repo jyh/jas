@@ -207,6 +207,39 @@ jobs:
       - run: pip install PyYAML
       - run: bash scripts/check_concept_constraints_corpus.sh
 
+  wasm-canvas:
+    name: Canvas path (wasm — the half no suite could run)
+    runs-on: ubuntu-latest
+    # ⛔ NO `needs:`. This lane reports its own verdict or it reports nothing —
+    # the property check_gate_cannot_skip.py exists to protect.
+    #
+    # WHY IT EXISTS: until 2026-08-28 this repo had NO wasm harness at all, so
+    # every claim about the canvas renderer was compile-verified only. Defect
+    # D-β (the mask scratch singleton, PR #45) lived precisely there and had to
+    # be found by reading. Its first test is that defect.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4
+      # Chrome is preinstalled on ubuntu-latest images; headless needs no display.
+      - name: Canvas-path tests in a real browser
+        run: wasm-pack test --headless --chrome jas_dioxus
+      # ⛔ ANTI-VACUITY. `wasm-pack test` exits 0 when it runs ZERO tests, which
+      # is exactly how a harness rots into decoration: a cfg that stops matching,
+      # a renamed module, and the lane stays green having executed nothing.
+      - name: The lane must have RUN tests, not merely passed
+        run: |
+          out=$(wasm-pack test --headless --chrome jas_dioxus 2>&1 | tee /dev/stderr)
+          n=$(printf '%s' "$out" | grep -oE '[0-9]+ passed' | head -1 | grep -oE '[0-9]+')
+          if [ -z "$n" ] || [ "$n" -lt 4 ]; then
+            echo "FAIL: expected at least 4 canvas tests to RUN, saw '${n:-none}'." >&2
+            echo "      A green lane that executed nothing is the shape this lane exists to end." >&2
+            exit 1
+          fi
+          echo "canvas lane ran $n test(s)"
+
   genericity:
     name: Genericity policy
     runs-on: ubuntu-latest
