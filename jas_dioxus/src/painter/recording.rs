@@ -56,6 +56,8 @@ pub enum Command {
     PopGroup,
     PushMaskLayer { mask: Mask },
     PopMaskLayer,
+    PushIsolatedLayer { alpha: f64, blend: BlendMode },
+    PopIsolatedLayer,
     DrawTextRun { run: TextRun, brush: Brush, paint_alpha: f64 },
 }
 
@@ -134,6 +136,14 @@ impl Painter for RecordingPainter {
     }
     fn pop_mask_layer(&mut self) {
         self.commands.push(Command::PopMaskLayer);
+    }
+
+    fn push_isolated_layer(&mut self, alpha: f64, blend: BlendMode) {
+        self.commands.push(Command::PushIsolatedLayer { alpha, blend });
+    }
+
+    fn pop_isolated_layer(&mut self) {
+        self.commands.push(Command::PopIsolatedLayer);
     }
     fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64) {
         self.commands.push(Command::DrawTextRun { run: run.clone(), brush: brush.clone(), paint_alpha });
@@ -421,6 +431,13 @@ fn command_to_json(cmd: &Command) -> J {
             ("cmd", J::Str("push_group".into())), ("alpha", J::F(*alpha)), ("blend", J::Str(blend_str(*blend).into())),
         ]),
         Command::PopGroup => J::Obj(vec![("cmd", J::Str("pop_group".into()))]),
+        // A6 (2026-08-27). The isolated-layer bracket serialises like the group
+        // bracket: alpha and blend ride the PUSH and are consumed once at the
+        // closing composite, so the pop carries no payload.
+        Command::PushIsolatedLayer { alpha, blend } => J::Obj(vec![
+            ("cmd", J::Str("push_isolated_layer".into())), ("alpha", J::F(*alpha)), ("blend", J::Str(blend_str(*blend).into())),
+        ]),
+        Command::PopIsolatedLayer => J::Obj(vec![("cmd", J::Str("pop_isolated_layer".into()))]),
         Command::PushMaskLayer { mask } => J::Obj(vec![
             ("cmd", J::Str("push_mask_layer".into())), ("mask", mask_json(mask)),
         ]),
@@ -524,5 +541,54 @@ mod float_law {
     fn negative_zero_normalized() {
         assert_eq!(canonical_f64(-0.0), "0.0000");
         assert_eq!(canonical_f64(0.0), "0.0000");
+    }
+}
+
+#[cfg(test)]
+mod a6_tests {
+    use super::*;
+    use crate::painter::{BlendMode, Painter};
+
+    /// AMENDMENT A6 (ratified 2026-08-27): the isolated-layer bracket is part of
+    /// the seam vocabulary and must record in order, like every other bracket.
+    #[test]
+    fn isolated_layer_bracket_records_in_order() {
+        let mut r = RecordingPainter::new();
+        r.push_isolated_layer(0.5, BlendMode::Normal);
+        r.push_mask_layer(Mask::AlphaClipOut);
+        r.pop_mask_layer();
+        r.pop_isolated_layer();
+        let got: Vec<&str> = r
+            .commands
+            .iter()
+            .map(|c| match c {
+                Command::PushIsolatedLayer { .. } => "push_isolated",
+                Command::PushMaskLayer { .. } => "push_mask",
+                Command::PopMaskLayer => "pop_mask",
+                Command::PopIsolatedLayer => "pop_isolated",
+                _ => "other",
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec!["push_isolated", "push_mask", "pop_mask", "pop_isolated"],
+            "A6 §3.2 grammar: the mask bracket nests INSIDE the isolated layer"
+        );
+    }
+
+    /// A6 §3.1: `alpha` and `blend` are carried on the PUSH and consumed once at
+    /// the closing composite — so the recorder must preserve both verbatim.
+    #[test]
+    fn isolated_layer_carries_alpha_and_blend() {
+        let mut r = RecordingPainter::new();
+        r.push_isolated_layer(0.25, BlendMode::Multiply);
+        r.pop_isolated_layer();
+        match &r.commands[0] {
+            Command::PushIsolatedLayer { alpha, blend } => {
+                assert_eq!(*alpha, 0.25);
+                assert_eq!(*blend, BlendMode::Multiply);
+            }
+            other => panic!("expected PushIsolatedLayer, got {other:?}"),
+        }
     }
 }

@@ -205,7 +205,7 @@ func booleanOperandLeaves(_ e: Element) -> [Element] {
 
 /// THE OPACITY A BOOLEAN PRODUCT WEARS for one operand: the product of every
 /// opacity between the operand and the leaf it SPEAKS WITH, inclusive.
-/// RULED 2026-07-31 (`RULING-boolean-container-paint-2026-07-31.md`).
+/// RULED 2026-07-31 (council).
 /// Twin: Rust's `resolved_opacity`, and BOOLEAN.md §Container operands.
 ///
 /// `booleanPaintSource` above settled `fill` and `stroke`, and it had no choice

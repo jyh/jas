@@ -66,6 +66,43 @@
 //!   blend — matching today, where a Group's own mode is overridden by its
 //!   children. We do NOT activate dead group-level blend behavior.
 //!
+//! ## AMENDMENT A6 — THE ELEMENT BRACKET (ratified 2026-08-27, Captain)
+//!
+//! Two ops added (14 → 16). `push_mask_layer` / `pop_mask_layer` keep their
+//! FROZEN SIGNATURES and gain their missing meaning: legal only INSIDE an
+//! isolated layer, bracketing the MASK ARTWORK.
+//!
+//! ```text
+//! push_isolated_layer(alpha, blend)
+//!     <body ops>                    — full vocabulary, arbitrary nesting
+//!     [ push_mask_layer(mask)
+//!         <mask artwork ops>        — full vocabulary, arbitrary nesting
+//!       pop_mask_layer() ]
+//! pop_isolated_layer()
+//! ```
+//!
+//! - At most ONE mask bracket per isolated layer, at the layer's own nesting
+//!   level, and NOTHING may be drawn between `pop_mask_layer` and
+//!   `pop_isolated_layer` — the law stays a suffix operation. Relaxing this
+//!   later is additive; tightening it later would not be.
+//! - `push_mask_layer` OUTSIDE an isolated layer is a contract violation. It was
+//!   semantically vacant before this amendment; now it is stated. Impls may
+//!   panic; the recorder may still record it, for goldens OF the violation.
+//! - All brackets strictly nest; each bracketed span is internally balanced.
+//!
+//! `pop_mask_layer` derives the mask map `M(x)` from the artwork rendered inside
+//! the mask bracket (itself isolated: fresh transparent surface, alpha context
+//! 1.0) and updates the layer surface `S` in place — `LuminanceClipIn`:
+//! `α_S ← α_S · M` with `M = A·(0.299R+0.587G+0.114B)/255` (BT.601, normative);
+//! `AlphaClipOut`: `α_S ← α_S · (1−M)` with raw `A`; `AlphaRevealOutsideBbox`:
+//! `α_S ← α_S · M` inside `bbox`, unchanged outside, `bbox` arriving precomputed
+//! (a backend never computes bounds).
+//!
+//! ⛔ THE MASK ENUM IS COMPLETE — no fourth variant. `(clip:false, invert:true)`
+//! is pointwise equal to `(clip:true, invert:true)` by OPACITY.md's own table
+//! and lowers at BUILD time to `Mask::AlphaClipOut`. A fourth law was transcript
+//! overreach; ratified as such, zero further contract change.
+//!
 //! See `SPIKE_FINDINGS.md` in this directory for the ergonomics verdict, the
 //! R7 float-law decision, the R10 first number, and the "PH1 status" note
 //! recording the now-ratified amendments A1-A5 (A1: FastRun carries a baseline
@@ -223,6 +260,28 @@ pub enum Mask {
     AlphaRevealOutsideBbox { bbox: Rect },
 }
 
+/// THE (clip, invert) TRUTH TABLE — ONE COPY, and it lives here because it
+/// produces a seam type. A6 §4 puts the lowering at BUILD time: the document's
+/// two booleans become one of the three frozen laws before anything crosses the
+/// seam, so a backend never sees `clip`/`invert` and the enum stays complete.
+///
+/// ⛔ `(clip:false, invert:true)` COLLAPSES ONTO `(true, true)` — both yield
+/// `E · (1 − M)` once the mask's outside-region alpha is 0, so an alpha-based
+/// mask cannot distinguish them. That collapse is exactly why the "fourth mask
+/// law" was ruled transcript overreach: it is not a fourth behaviour, it is a
+/// third spelling of the second one.
+///
+/// `bbox` is consumed only by the reveal law and arrives precomputed — a
+/// backend never computes bounds (§3.3).
+pub fn mask_from_flags(clip: bool, invert: bool, bbox: Rect) -> Mask {
+    match (clip, invert) {
+        (true, false) => Mask::LuminanceClipIn,
+        (true, true) => Mask::AlphaClipOut,
+        (false, true) => Mask::AlphaClipOut,
+        (false, false) => Mask::AlphaRevealOutsideBbox { bbox },
+    }
+}
+
 /// A single placed glyph (PlacedGlyphs mode). `glyph_id` is resolved at BUILD
 /// time by a shaping stage (skrifa cmap — NET-NEW work named for PH3); vello
 /// never receives raw text.
@@ -348,6 +407,35 @@ pub trait Painter {
     /// Close the mask layer opened by the matching
     /// [`push_mask_layer`](Painter::push_mask_layer).
     fn pop_mask_layer(&mut self);
+
+    /// AMENDMENT A6 (ratified 2026-08-27). Open an ISOLATED layer: a fresh,
+    /// transparent intermediate surface in the parent's coordinate frame and
+    /// rasterization scale. Drawing inside the layer composites against the
+    /// LAYER's content only — the parent backdrop is invisible (the opposite
+    /// pole of `push_group`, which stays non-isolated). The open-group alpha
+    /// product RESTARTS at 1.0 inside the layer; `alpha` and `blend` are
+    /// consumed once, at the closing composite.
+    ///
+    /// The name says nothing about masks or elements on purpose: the seam
+    /// speaks geometry, not document vocabulary (R3), and the bracket is
+    /// useful maskless.
+    fn push_isolated_layer(&mut self, alpha: f64, blend: BlendMode);
+
+    /// Close the layer: flatten it and composite into the parent surface as ONE
+    /// primitive, at effective alpha = (product of open group alphas at the
+    /// push site) × `alpha`, under `blend`.
+    ///
+    /// ⛔ THE ALPHA APPLIES ONCE. Defect D-α (design block §2.1) is HEAD's
+    /// double-apply: the masked path multiplied `elem.opacity()` into every body
+    /// primitive AND again at the blit, and REPLACED the inherited ancestor
+    /// product instead of multiplying into it — so a 0.5-opacity element in a
+    /// 0.5-alpha group rendered at 0.25 from the element alone while the group's
+    /// 0.5 never applied. The contract pins the MULTIPLICATIVE law, matching this
+    /// module's global rule above and the unmasked path. Ratified 2026-08-27 with
+    /// the reserved question answered: no shipped document depends on the HEAD
+    /// rendering, so documents with masked elements at opacity < 1 WILL render
+    /// differently after the repair, and that is accepted.
+    fn pop_isolated_layer(&mut self);
 
     /// Draw a text run (see [`TextRun`]). Interleaves in z-order with the other
     /// primitives — text is a PH1 op, not a separate pass.

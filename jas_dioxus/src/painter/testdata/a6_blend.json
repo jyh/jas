@@ -1,0 +1,79 @@
+[
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 0.0000,
+      "y": 0.0000,
+      "w": 40.0000,
+      "h": 40.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 0.2000,
+        "g": 0.2000,
+        "b": 0.9000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "push_isolated_layer",
+    "alpha": 1.0000,
+    "blend": "multiply"
+  },
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 10.0000,
+      "y": 10.0000,
+      "w": 20.0000,
+      "h": 20.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 0.9000,
+        "g": 0.9000,
+        "b": 0.2000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "push_mask_layer",
+    "mask": {
+      "kind": "alpha_clip_out"
+    }
+  },
+{
+    "cmd": "fill_rect",
+    "rect": {
+      "x": 14.0000,
+      "y": 14.0000,
+      "w": 8.0000,
+      "h": 8.0000
+    },
+    "brush": {
+      "kind": "solid",
+      "color": {
+        "space": "rgb",
+        "r": 0.0000,
+        "g": 0.0000,
+        "b": 0.0000,
+        "a": 1.0000
+      }
+    },
+    "alpha": 1.0000
+  },
+{
+    "cmd": "pop_mask_layer"
+  },
+{
+    "cmd": "pop_isolated_layer"
+  }
+]
