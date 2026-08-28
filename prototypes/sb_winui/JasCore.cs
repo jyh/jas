@@ -29,6 +29,16 @@ internal static class JasCore
     /// error, sending the next reader to look for a COM fault that never happened.
     /// </summary>
     internal const int PaintSizeMismatch = 3;
+    /// <summary>
+    /// The two surfaces belong to DIFFERENT D3D11 devices.
+    ///
+    /// The device-lost analogue of the size mismatch, and the platform treats the
+    /// two oppositely: a size mismatch is dropped silently, a cross-device copy
+    /// REMOVES the destination's device (0x887A0020, DRIVER_INTERNAL_ERROR).
+    /// Reaching this code means the host recreated its device after a removal and
+    /// kept an offscreen target belonging to the old one.
+    /// </summary>
+    internal const int PaintDeviceMismatch = 4;
 
     /// <summary>
     /// Render a paint status for a human.
@@ -43,6 +53,7 @@ internal static class JasCore
         PaintNullSurface => "null surface",
         PaintNotASurface => "not an IDXGISurface",
         PaintSizeMismatch => "SIZE/FORMAT MISMATCH -- back buffer and offscreen target disagree; the host resized one and not the other",
+        PaintDeviceMismatch => "DEVICE MISMATCH -- back buffer and offscreen target are on different D3D11 devices; the host recreated one after a device loss and kept the other",
         _ => $"HRESULT 0x{rc:X8}",
     };
 

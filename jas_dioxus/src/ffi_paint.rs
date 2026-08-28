@@ -64,6 +64,19 @@ pub const JAS_PAINT_NOT_A_SURFACE: i32 = 2;
 /// thing. See `d3d11_silently_drops_a_size_mismatched_copy_...` for the
 /// measurement, driven rather than cited.
 pub const JAS_PAINT_SIZE_MISMATCH: i32 = 3;
+/// The two surfaces belong to DIFFERENT D3D11 devices. Positive, same reason.
+///
+/// THIS ONE IS NOT ABOUT SILENCE - IT IS ABOUT ATTRIBUTION. Unlike a size
+/// mismatch, which D3D11 drops quietly, a cross-device `CopyResource` REMOVES the
+/// destination's device: measured on WARP, `GetDeviceRemovedReason` goes to
+/// `0x887A0020` (`DXGI_ERROR_DRIVER_INTERNAL_ERROR`) while the source's device
+/// stays healthy. Everything created on the dead device fails afterwards, several
+/// calls away from the cause.
+///
+/// `DRIVER_INTERNAL_ERROR` is exactly the error that gets blamed on hardware or a
+/// driver. Refusing here is the difference between a bug report about the GPU and
+/// one about a half-finished device-lost recovery.
+pub const JAS_PAINT_DEVICE_MISMATCH: i32 = 4;
 
 // ANY OTHER NON-ZERO RETURN IS THE RAW HRESULT, and that is a repair rather than
 // a design. The first version collapsed every COM failure into a single -3, so
@@ -193,6 +206,35 @@ pub unsafe extern "C" fn jas_paint_probe_offscreen(
         Some(s) => s,
         None => return JAS_PAINT_NOT_A_SURFACE,
     };
+
+    // THE DEVICE CHECK RUNS FIRST, because its failure is the expensive one.
+    //
+    // A cross-device copy does not merely fail: it REMOVES the destination's
+    // device (measured -- 0x887A0020, DXGI_ERROR_DRIVER_INTERNAL_ERROR), and
+    // every later call on that device fails somewhere else entirely. Size and
+    // format are then compared on surfaces already established to share a
+    // device, which is also the only order in which comparing them means
+    // anything.
+    unsafe {
+        let (Ok(back_dev), Ok(off_dev)) = (
+            back_s.GetDevice::<IDXGIDevice>(),
+            off_s.GetDevice::<IDXGIDevice>(),
+        ) else {
+            return JAS_PAINT_NOT_A_SURFACE;
+        };
+        // COM identity is IUnknown identity: two interface pointers on the same
+        // object differ, so comparing IDXGIDevice pointers directly would be a
+        // coin flip. Cast both and compare what the rule actually names.
+        let (Ok(a), Ok(b)) = (
+            back_dev.cast::<windows::core::IUnknown>(),
+            off_dev.cast::<windows::core::IUnknown>(),
+        ) else {
+            return JAS_PAINT_NOT_A_SURFACE;
+        };
+        if a.as_raw() != b.as_raw() {
+            return JAS_PAINT_DEVICE_MISMATCH;
+        }
+    }
 
     // THE AGREEMENT CHECK, AND IT HAS TO BE HERE RATHER THAN AT THE COPY.
     //
@@ -657,6 +699,105 @@ mod tests {
             PROBE_FG,
             "phase 3: the pattern must be in the RESIZED back buffer, not merely allowed"
         );
+    }
+
+    /// THE DEVICE-LOST SHAPE - MEASURED, and it is the INVERSE of the resize one.
+    ///
+    /// Device-lost is the second event the ruling's surviving leg names. Its
+    /// half-done state is not a size disagreement but a DEVICE disagreement: the
+    /// host recreates its device and swapchain after a removal and reuses an
+    /// offscreen target belonging to the OLD device. Both surfaces are valid and
+    /// agree on size and format; they belong to different D3D11 devices.
+    ///
+    /// THE PLATFORM DOES NOT DROP THIS ONE QUIETLY - IT KILLS THE DEVICE.
+    /// Measured on WARP, walked one step at a time because the first attempt died
+    /// in a later call and the stack line alone would have blamed the wrong step:
+    ///
+    /// ```text
+    ///   two WARP devices coexist ......... both reasons 0x00000000, textures ok
+    ///   cross-device CopyResource ........ device A reason -> 0x887A0020
+    ///                                      device B reason -> 0x00000000
+    /// ```
+    ///
+    /// `0x887A0020` is `DXGI_ERROR_DRIVER_INTERNAL_ERROR`. Only the DESTINATION's
+    /// device dies. Everything created on it afterwards fails - which is how the
+    /// first version of this test died, in a staging-texture creation three calls
+    /// later.
+    ///
+    /// THE TWO HALVES OF THE COUPLING ARGUMENT FAIL IN OPPOSITE DIRECTIONS:
+    ///
+    /// | half-done state | what the platform does |
+    /// |---|---|
+    /// | resize - sizes disagree | silent drop, seam returns OK, stale frame |
+    /// | device-lost - devices disagree | device removal, loud, catastrophic |
+    ///
+    /// The guard still earns its place on the loud one, for a different reason
+    /// than on the quiet one: `DRIVER_INTERNAL_ERROR` is precisely the error that
+    /// gets blamed on hardware or a driver. Turning it into a named refusal is
+    /// the difference between a bug report about the GPU and one about a
+    /// half-finished device-lost recovery.
+    #[test]
+    fn a_cross_device_copy_removes_the_device_rather_than_dropping_silently() {
+        fn removed_reason(d: &ID3D11Device) -> i32 {
+            // Projected as Result<(), Error>; Ok(()) IS healthy. Reading it as a
+            // raw code and testing `== 0` would work here by accident.
+            match unsafe { d.GetDeviceRemovedReason() } {
+                Ok(()) => 0,
+                Err(e) => e.code().0,
+            }
+        }
+        let (dev_a, ctx_a) = warp();
+        let (dev_b, _ctx_b) = warp();
+
+        // CONTROL: two devices coexisting is not itself a removal. Without this
+        // the test could credit the copy for a death caused by the second
+        // device's creation - which is exactly what I first suspected.
+        assert_eq!(removed_reason(&dev_a), 0, "CONTROL: A healthy with B created");
+        assert_eq!(removed_reason(&dev_b), 0, "CONTROL: B healthy with A created");
+
+        let dst = tex_wh(&dev_a, false, W, H);
+        let foreign = tex_wh(&dev_b, false, W, H);
+        unsafe { ctx_a.CopyResource(&dst, &foreign) };
+        unsafe { ctx_a.Flush() };
+
+        assert_ne!(
+            removed_reason(&dev_a),
+            0,
+            "MEASURED: the cross-device copy must remove the DESTINATION's device"
+        );
+        assert_eq!(
+            removed_reason(&dev_b),
+            0,
+            "and it must leave the SOURCE's device alone - the asymmetry is the              evidence that the copy did it, not mere coexistence"
+        );
+    }
+
+    /// THE DEVICE GUARD, whose absence lets the seam kill the process's device.
+    ///
+    /// Red before the guard existed: the seam took the pair, painted, copied, and
+    /// the caller's device was gone by the time it returned `JAS_PAINT_OK`.
+    #[test]
+    fn a_cross_device_offscreen_copy_is_refused_before_it_kills_the_device() {
+        let (dev_a, _ctx_a) = warp();
+        let (dev_b, _ctx_b) = warp();
+        let back = tex_wh(&dev_a, false, W, H);
+        let off = tex_wh(&dev_b, false, W, H);
+        let back_s: IDXGISurface = back.cast().expect("back");
+        let off_s: IDXGISurface = off.cast().expect("off");
+
+        let rc = unsafe {
+            jas_paint_probe_offscreen(back_s.as_raw(), off_s.as_raw(), W as f32, H as f32)
+        };
+        assert_eq!(
+            rc, JAS_PAINT_DEVICE_MISMATCH,
+            "surfaces from different devices must be refused by name"
+        );
+
+        // AND THE DEVICE MUST STILL BE ALIVE. Returning the right code while
+        // having already performed the copy would satisfy the assertion above and
+        // lose the device anyway - the status correct, the damage done.
+        let alive = matches!(unsafe { dev_a.GetDeviceRemovedReason() }, Ok(()));
+        assert!(alive, "the guard must refuse BEFORE the copy, not report after it");
     }
 
     /// The two probe colours must stay distinguishable from each other and from

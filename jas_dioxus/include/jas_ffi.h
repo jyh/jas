@@ -128,6 +128,24 @@
 #define JAS_PAINT_SIZE_MISMATCH 3
 #endif
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * The two surfaces belong to DIFFERENT D3D11 devices. Positive, same reason.
+ *
+ * THIS ONE IS NOT ABOUT SILENCE - IT IS ABOUT ATTRIBUTION. Unlike a size
+ * mismatch, which D3D11 drops quietly, a cross-device `CopyResource` REMOVES the
+ * destination's device: measured on WARP, `GetDeviceRemovedReason` goes to
+ * `0x887A0020` (`DXGI_ERROR_DRIVER_INTERNAL_ERROR`) while the source's device
+ * stays healthy. Everything created on the dead device fails afterwards, several
+ * calls away from the cause.
+ *
+ * `DRIVER_INTERNAL_ERROR` is exactly the error that gets blamed on hardware or a
+ * driver. Refusing here is the difference between a bug report about the GPU and
+ * one about a half-finished device-lost recovery.
+ */
+#define JAS_PAINT_DEVICE_MISMATCH 4
+#endif
+
 /**
  * How many draws one collision-free id gets before the mint is reported
  * failed. 100 — the value every open-coded copy of this loop used before
