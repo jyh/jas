@@ -27,6 +27,30 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $tools = "$env:LOCALAPPDATA\jas-tools"
+
+# ⛔ RESOLVE -Exe TO AN ABSOLUTE PATH, AND REFUSE IF IT DOES NOT EXIST.
+#
+# A RELATIVE -Exe MAKES THIS ENTIRE SCRIPT A SILENT NO-OP. The launcher and the
+# capture both run as SCHEDULED TASKS in session 1, whose working directory is
+# NOT the caller's -- so `& 'prototypes\sb_winuiin\...\SbWinUi.exe'` resolves
+# against C:\Windows\system32, finds nothing, and the app never starts. $scratch
+# (derived from the same path) then points somewhere else again, so the PNG and
+# its sidecar are looked for where nothing was ever written.
+#
+# Measured 2026-08-27: a relative -Exe produced "no capture sidecar / no PNG
+# produced / VERIFY: FAIL" -- which reads as THE ORACLE FAILING, and sent me to
+# probe the interactive-task mechanism with a control before the real cause was
+# visible. The mechanism was fine the whole time.
+#
+# ⇒ THE FAILURE POINTED AT THE WRONG COMPONENT, which is the expensive kind. A
+# path that cannot work must be refused HERE, with the reason, rather than
+# reappearing as a missing artifact two layers away.
+$Exe = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $Exe))
+if (-not (Test-Path $Exe)) {
+    Write-Output "  FAIL: -Exe does not exist: $Exe"
+    Write-Output "VERIFY: FAIL"
+    exit 1
+}
 $scratch = Split-Path $Exe -Parent
 $png = Join-Path $scratch "sb-verify.png"
 $launchTask = "jas-sb-app"
@@ -51,21 +75,35 @@ Remove-Item $png, "$png.json", "$png.error.txt" -ErrorAction SilentlyContinue
 # built against net10 dies with "You must install or update .NET" without it.
 $principal = New-ScheduledTaskPrincipal -UserId $uid -LogonType Interactive -RunLevel Limited
 $extraEnv = ''
-if ($env:SB_SKIP_PAINT -eq '1') { $extraEnv += '$env:SB_SKIP_PAINT=''1''; ' }
-if ($env:SB_MODE) { $extraEnv += '$env:SB_MODE=''' + $env:SB_MODE + '''; ' }
-# SB_FRAMES was silently NOT forwarded: a run asked for 120 frames and quietly
-# measured 60. The app's own default filled the gap, so nothing looked wrong --
-# a setting that is ignored rather than rejected is how a measurement ends up
-# describing a different experiment than the one that was requested.
-if ($env:SB_FRAMES) { $extraEnv += '$env:SB_FRAMES=''' + $env:SB_FRAMES + '''; ' }
-# SB_FULLSCREEN forwarded HERE, in the same edit that introduced it. The comment
-# above records SB_FRAMES being silently dropped; the trap is that the fix was
-# applied to SB_FRAMES and the NEXT variable added needs it again -- a correction
-# arrives attached to its own instance and gives no signal that a neighbour
-# exists. An unforwarded SB_FULLSCREEN would fail the identical way: the app
-# falls back to its default window size, every timing looks reasonable, and the
-# run is labelled 4K while measuring 1904x941.
-if ($env:SB_FULLSCREEN) { $extraEnv += '$env:SB_FULLSCREEN=''' + $env:SB_FULLSCREEN + '''; ' }
+# ⛔ FORWARD EVERY SB_* VARIABLE, GENERICALLY. This used to be one `if` per
+# variable and the file's own comment recorded the consequence twice: SB_FRAMES
+# was silently not forwarded, so a run that asked for 120 frames quietly measured
+# 60; the fix was applied to SB_FRAMES, and the comment then warned in as many
+# words that "the NEXT variable added needs it again -- a correction arrives
+# attached to its own instance and gives no signal that a neighbour exists."
+#
+# SB_RESIZE is that next variable, and rather than prove the prediction right a
+# third time this enumerates the environment instead of naming members of it. An
+# unforwarded setting is the worst kind of defect this harness can have: the app
+# falls back to a default, every number looks reasonable, and the run is LABELLED
+# as one experiment while MEASURING another.
+#
+# The receipt below is the other half -- the launcher prints what it forwarded, so
+# a run's own output says which variables reached the app rather than which ones
+# the operator believed they set.
+$forwarded = @()
+foreach ($v in (Get-ChildItem env: | Where-Object { $_.Name -like 'SB_*' } | Sort-Object Name)) {
+    # Single quotes are the delimiter in the generated command, so a value
+    # containing one would break out of the string. Refuse rather than mangle.
+    if ($v.Value -match "'") {
+        Write-Error "verify_window: $($v.Name) contains a single quote; refusing to forward it."
+        exit 2
+    }
+    $extraEnv += '$env:' + $v.Name + '=''' + $v.Value + '''; '
+    $forwarded += "$($v.Name)=$($v.Value)"
+}
+if ($forwarded.Count -gt 0) { Write-Host "forwarding: $($forwarded -join ' ')" }
+else { Write-Host "forwarding: (no SB_* variables set)" }
 $launchArg = '-NoProfile -ExecutionPolicy Bypass -Command ' +
     '"$env:DOTNET_ROOT=''' + "$env:LOCALAPPDATA\Microsoft\dotnet" + '''; ' + $extraEnv + '& ''' + $Exe + '''"'
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $launchArg

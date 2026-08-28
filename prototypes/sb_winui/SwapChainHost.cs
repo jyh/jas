@@ -201,28 +201,7 @@ internal sealed unsafe class SwapChainHost : IDisposable
         factory.CreateSwapChainForComposition(_device, in desc, null, out var swapChain);
         _swapChain = swapChain;
 
-        // The offscreen target: same size and format as the back buffer, bindable
-        // as a render target so Direct2D can draw into it, and copyable to the
-        // back buffer with a single CopyResource.
-        var texDesc = new D3D11_TEXTURE2D_DESC
-        {
-            Width = _width,
-            Height = _height,
-            MipLevels = 1,
-            ArraySize = 1,
-            Format = DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc = new DXGI_SAMPLE_DESC { Count = 1, Quality = 0 },
-            Usage = D3D11_USAGE.D3D11_USAGE_DEFAULT,
-            BindFlags = D3D11_BIND_FLAG.D3D11_BIND_RENDER_TARGET,
-            CPUAccessFlags = 0,
-            MiscFlags = 0,
-        };
-        _device.CreateTexture2D(in texDesc, null, out var off);
-        _offscreen = off;
-        // Resolve the base interface ONCE, here, where a failure is legible and
-        // happens before any frame. Doing it at the call site made the marshaller
-        // convert on every copy and it threw from InterfaceMarshaler.
-        _offscreenRes = (ID3D11Resource)off;
+        CreateOffscreenTarget();
 
         // Must happen on the UI thread; so must every later Present.
         var native = panel.As<ISwapChainPanelNative>();
@@ -238,6 +217,103 @@ internal sealed unsafe class SwapChainHost : IDisposable
             // release was never the cause -- it is kept because it is correct.)
             Marshal.Release(unk);
         }
+    }
+
+    /// <summary>
+    /// (Re)create the offscreen target at the CURRENT `_width`/`_height`.
+    ///
+    /// SPLIT OUT OF `Attach` FOR THE RESIZE PATH, and the split is the fix rather
+    /// than tidying: while this lived inline it ran exactly once, so the target
+    /// kept its initial size for the life of the window. The comment above it
+    /// said "same size and format as the back buffer" -- true when it ran, and
+    /// assumed forever after.
+    /// </summary>
+    private void CreateOffscreenTarget()
+    {
+        // Same size and format as the back buffer AT THIS MOMENT, bindable as a
+        // render target so Direct2D can draw into it, and copyable to the back
+        // buffer with a single CopyResource.
+        var texDesc = new D3D11_TEXTURE2D_DESC
+        {
+            Width = _width,
+            Height = _height,
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = DXGI_FORMAT.DXGI_FORMAT_B8G8R8A8_UNORM,
+            SampleDesc = new DXGI_SAMPLE_DESC { Count = 1, Quality = 0 },
+            Usage = D3D11_USAGE.D3D11_USAGE_DEFAULT,
+            BindFlags = D3D11_BIND_FLAG.D3D11_BIND_RENDER_TARGET,
+            CPUAccessFlags = 0,
+            MiscFlags = 0,
+        };
+        _device!.CreateTexture2D(in texDesc, null, out var off);
+        _offscreen = off;
+        // Resolve the base interface ONCE, here, where a failure is legible and
+        // happens before any frame. Doing it at the call site made the marshaller
+        // convert on every copy and it threw from InterfaceMarshaler.
+        _offscreenRes = (ID3D11Resource)off;
+    }
+
+    /// <summary>
+    /// Resize the swapchain AND the offscreen target. Both, or neither.
+    ///
+    /// ⛔ THE PAIRING IS THE WHOLE POINT. `ResizeBuffers` alone leaves the back
+    /// buffer bigger than the target, and `CopyResource` is `void` -- D3D11 DROPS
+    /// a mismatched copy instead of faulting, and the debug layer that would
+    /// report the drop is an optional Windows feature that is not installed on
+    /// this box. Before the Rust-side guard existed, that combination returned
+    /// OK and presented a STALE FRAME. So this method exists as one unit, and
+    /// `jas_paint_probe_offscreen` refuses if it is ever half-done.
+    ///
+    /// THE OLD BUFFER REFERENCES MUST BE GONE FIRST. `ResizeBuffers` fails with
+    /// DXGI_ERROR_INVALID_CALL while any back-buffer reference is outstanding.
+    /// `RenderFrame` releases the surface it borrows every frame -- see the note
+    /// there, which says a leak here "manifests as a resize that silently stops
+    /// working". That sentence described a resize that did not exist when it was
+    /// written; it describes this one.
+    ///
+    /// Called on the UI thread, like every other swapchain operation (BL2).
+    /// </summary>
+    public bool Resize(uint width, uint height)
+    {
+        if (_swapChain is null || _device is null) { LastStatus = "resize: not started"; return false; }
+        var w = Math.Max(width, 1);
+        var h = Math.Max(height, 1);
+        if (w == _width && h == _height) return true;
+
+        // Drop our reference to the old target BEFORE resizing, so the only
+        // outstanding references are the swapchain's own.
+        _offscreenRes = null;
+        _offscreen = null;
+
+        // ⚠️ `ResizeBuffers` IS PROJECTED AS `void`, NOT AS AN HRESULT, unlike
+        // `Present` a few lines below which returns one and is checked with
+        // `hr.Failed`. CsWin32 generates it PreserveSig(false), so failure
+        // arrives as a thrown COMException and an `if` on the return value does
+        // not compile. Two neighbouring calls on the SAME interface with two
+        // different error conventions is exactly the kind of thing that gets
+        // "tidied" into a silent hole later, so it is named here.
+        //
+        // 0 buffers / UNKNOWN format = "keep the count and format you had", so a
+        // throw here is a real failure and not a description mismatch.
+        try
+        {
+            _swapChain.ResizeBuffers(0, w, h, DXGI_FORMAT.DXGI_FORMAT_UNKNOWN, 0);
+        }
+        catch (Exception ex)
+        {
+            LastStatus = $"resize {w}x{h}: ResizeBuffers threw {ex.GetType().Name}: {ex.Message}";
+            // The target is gone and the swapchain is in an unknown state; say so
+            // rather than limping on with a null target and a misleading size.
+            _width = 0; _height = 0;
+            return false;
+        }
+
+        _width = w;
+        _height = h;
+        CreateOffscreenTarget();
+        LastStatus = $"resized to {_width}x{_height}";
+        return true;
     }
 
     /// <summary>

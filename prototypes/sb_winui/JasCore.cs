@@ -20,6 +20,15 @@ internal static class JasCore
     internal const int PaintOk = 0;
     internal const int PaintNullSurface = 1;
     internal const int PaintNotASurface = 2;
+    /// <summary>
+    /// The two surfaces disagree on size or format, so the copy would be DROPPED.
+    ///
+    /// ADDED WITH THE RESIZE PATH, and the `Explain` arm below matters as much as
+    /// the constant: without it a 3 falls through to the HRESULT formatter and is
+    /// reported as "HRESULT 0x00000003" -- a positive sentinel dressed up as a COM
+    /// error, sending the next reader to look for a COM fault that never happened.
+    /// </summary>
+    internal const int PaintSizeMismatch = 3;
 
     /// <summary>
     /// Render a paint status for a human.
@@ -33,6 +42,7 @@ internal static class JasCore
         PaintOk => "ok",
         PaintNullSurface => "null surface",
         PaintNotASurface => "not an IDXGISurface",
+        PaintSizeMismatch => "SIZE/FORMAT MISMATCH -- back buffer and offscreen target disagree; the host resized one and not the other",
         _ => $"HRESULT 0x{rc:X8}",
     };
 

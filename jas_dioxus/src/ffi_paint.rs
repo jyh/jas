@@ -359,17 +359,30 @@ mod tests {
     }
 
     fn read(dev: &ID3D11Device, ctx: &ID3D11DeviceContext, src: &ID3D11Texture2D) -> Vec<u8> {
-        let staging = tex(dev, true);
-        let mut out = vec![0u8; (W * H * 4) as usize];
+        read_wh(dev, ctx, src, W, H)
+    }
+
+    /// `read` at an arbitrary size -- the resize test reads a bigger back buffer
+    /// than `W`x`H`, and a fixed-size reader would either truncate it or index
+    /// past the staging texture.
+    fn read_wh(
+        dev: &ID3D11Device,
+        ctx: &ID3D11DeviceContext,
+        src: &ID3D11Texture2D,
+        w: u32,
+        h: u32,
+    ) -> Vec<u8> {
+        let staging = tex_wh(dev, true, w, h);
+        let mut out = vec![0u8; (w * h * 4) as usize];
         unsafe {
             ctx.CopyResource(&staging, src);
             let mut m = D3D11_MAPPED_SUBRESOURCE::default();
             ctx.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut m)).expect("map");
-            for y in 0..H as usize {
+            for y in 0..h as usize {
                 std::ptr::copy_nonoverlapping(
                     (m.pData as *const u8).add(y * m.RowPitch as usize),
-                    out.as_mut_ptr().add(y * W as usize * 4),
-                    W as usize * 4,
+                    out.as_mut_ptr().add(y * w as usize * 4),
+                    w as usize * 4,
                 );
             }
             ctx.Unmap(&staging, 0);
@@ -378,7 +391,12 @@ mod tests {
     }
 
     fn rgb_at(buf: &[u8], x: u32, y: u32) -> (u8, u8, u8) {
-        let i = ((y * W + x) * 4) as usize;
+        rgb_at_w(buf, x, y, W)
+    }
+
+    /// `rgb_at` against a buffer of a stated row width.
+    fn rgb_at_w(buf: &[u8], x: u32, y: u32, w: u32) -> (u8, u8, u8) {
+        let i = ((y * w + x) * 4) as usize;
         (buf[i + 2], buf[i + 1], buf[i])
     }
 
@@ -563,6 +581,82 @@ mod tests {
             "the mismatched copy was DROPPED: the destination still carries the probe"
         );
         assert_eq!(rgb_at(&after, 2, 2), PROBE_BG, "and its background survives too");
+    }
+
+    /// THE RESIZE PROTOCOL THE HOST MUST FOLLOW, pinned before the host follows it.
+    ///
+    /// This is the contract `SwapChainHost` has to satisfy once the `_started`
+    /// latch comes off, written as an executable statement rather than as prose
+    /// in a doc comment -- which is exactly how the CURRENT resize claim was
+    /// recorded, and it turned out to describe code that did not exist.
+    ///
+    /// Three phases, in the order a real window produces them:
+    ///
+    ///   1. steady state at the original size -- the copy lands;
+    ///   2. the back buffer grows (`ResizeBuffers`) and the offscreen target is
+    ///      NOT recreated -- the seam must REFUSE, loudly;
+    ///   3. the host recreates the offscreen target at the new size -- the copy
+    ///      lands again, and the pixels are really there.
+    ///
+    /// Phase 3 is what stops this being a test of the guard alone: a guard that
+    /// refused EVERYTHING would pass phases 1 and 2 and fail here. It is the
+    /// positive control for the recovery, sitting inside the same test as the
+    /// refusal so neither can be read without the other.
+    #[test]
+    fn the_resize_protocol_the_host_must_follow() {
+        let (dev, ctx) = warp();
+
+        // --- phase 1: steady state ------------------------------------------
+        let back = tex_wh(&dev, false, W, H);
+        let off = tex_wh(&dev, false, W, H);
+        let back_s: IDXGISurface = back.cast().expect("back");
+        let off_s: IDXGISurface = off.cast().expect("off");
+        assert_eq!(
+            unsafe { jas_paint_probe_offscreen(back_s.as_raw(), off_s.as_raw(), W as f32, H as f32) },
+            JAS_PAINT_OK,
+            "phase 1: the steady-state copy must land"
+        );
+        assert_eq!(
+            rgb_at(&read(&dev, &ctx, &back), W / 2, H / 2),
+            PROBE_FG,
+            "phase 1: and the pixels must really be in the back buffer"
+        );
+
+        // --- phase 2: the back buffer grew, the target did not ---------------
+        // This is a window resize with the host doing HALF the job -- exactly the
+        // state today's code is permanently in, since it never resizes at all.
+        let grown = tex_wh(&dev, false, W * 2, H * 2);
+        let grown_s: IDXGISurface = grown.cast().expect("grown");
+        assert_eq!(
+            unsafe { jas_paint_probe_offscreen(grown_s.as_raw(), off_s.as_raw(), W as f32, H as f32) },
+            JAS_PAINT_SIZE_MISMATCH,
+            "phase 2: a half-done resize must be REFUSED, not silently dropped"
+        );
+
+        // --- phase 3: the host finishes the job ------------------------------
+        let regrown = tex_wh(&dev, false, W * 2, H * 2);
+        let regrown_s: IDXGISurface = regrown.cast().expect("regrown");
+        assert_eq!(
+            unsafe {
+                jas_paint_probe_offscreen(
+                    grown_s.as_raw(),
+                    regrown_s.as_raw(),
+                    (W * 2) as f32,
+                    (H * 2) as f32,
+                )
+            },
+            JAS_PAINT_OK,
+            "phase 3: recreating the target at the new size must restore the route"
+        );
+        // POSITIVE CONTROL FOR THE RECOVERY: a guard that refused everything would
+        // reach here having passed phases 1 and 2. Read the grown back buffer and
+        // require the pattern in it.
+        let after = read_wh(&dev, &ctx, &grown, W * 2, H * 2);
+        assert_eq!(
+            rgb_at_w(&after, W, H, W * 2),
+            PROBE_FG,
+            "phase 3: the pattern must be in the RESIZED back buffer, not merely allowed"
+        );
     }
 
     /// The two probe colours must stay distinguishable from each other and from

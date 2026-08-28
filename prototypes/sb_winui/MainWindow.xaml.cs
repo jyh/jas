@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using Windows.Graphics;
 
 namespace SbWinUi;
 
@@ -44,10 +45,34 @@ public sealed partial class MainWindow : Window
         // way that reads as a device fault.
         Canvas.SizeChanged += (_, e) =>
         {
-            if (_started) return;
             var w = (uint)Math.Max(1, e.NewSize.Width);
             var h = (uint)Math.Max(1, e.NewSize.Height);
-            Start(w, h);
+            if (!_started) { Start(w, h); return; }
+
+            // ⛔ THE LATCH USED TO RETURN HERE, and that was the defect.
+            //
+            // `if (_started) return;` meant the first laid-out size was the only
+            // size the swapchain ever had. Right for a fixed-size MEASUREMENT
+            // harness -- it is what keeps a run's label honest -- and wrong the
+            // moment this route is the product, because the back buffer then
+            // outgrows an offscreen target that is never recreated and the copy
+            // is silently dropped.
+            //
+            // A LATER RESIZE IS REPORTED AS LOUDLY AS THE FIRST PAINT. A resize
+            // that fails must not leave the title still showing the last good
+            // frame's status, which would read to the session-1 oracle as a
+            // healthy window.
+            if (!_host.Resize(w, h))
+            {
+                StatusLine.Text = $"FAILED — {_host.LastStatus}";
+                Report($"RUSTFAIL {_host.LastStatus}");
+                return;
+            }
+            var ok = _host.RenderFrame();
+            StatusLine.Text = ok
+                ? $"rust repainted after resize — {_host.LastStatus}"
+                : $"FAILED after resize — {_host.LastStatus}";
+            Report(ok ? $"RUSTOK {_host.LastStatus}" : $"RUSTFAIL {_host.LastStatus}");
         };
     }
 
@@ -70,6 +95,54 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void Report(string status) => Title = $"{VerifyTitle} | {status}";
 
+    /// <summary>
+    /// SB_RESIZE=WxH -- resize the window ONCE, after the first run, so the
+    /// resize path is exercised by a REAL SizeChanged rather than by calling
+    /// <c>Resize</c> directly.
+    ///
+    /// THE DISTINCTION IS THE POINT. Calling <c>SwapChainHost.Resize</c> from a
+    /// test would prove the method works while leaving untested the thing that
+    /// actually broke: the WIRING -- a latch that swallowed the event before the
+    /// method was ever reached. An experiment that bypasses the defective link
+    /// cannot fail on it.
+    ///
+    /// Posted through the dispatcher rather than called inline: the first
+    /// SizeChanged is still on the stack, and resizing from inside a layout pass
+    /// is how a reentrancy fault gets blamed on the graphics code.
+    ///
+    /// A malformed value REFUSES LOUDLY instead of falling back to no resize --
+    /// a run labelled "resize" that quietly did not resize is exactly the
+    /// vacuity this harness exists to refuse.
+    /// </summary>
+    private void MaybeDriveResize()
+    {
+        var spec = Environment.GetEnvironmentVariable("SB_RESIZE");
+        if (string.IsNullOrWhiteSpace(spec)) return;
+
+        var parts = spec.Split('x', 'X');
+        if (parts.Length != 2
+            || !int.TryParse(parts[0], out var rw) || !int.TryParse(parts[1], out var rh)
+            || rw < 1 || rh < 1)
+        {
+            StatusLine.Text = $"FAILED — SB_RESIZE malformed: '{spec}' (want WxH)";
+            Report($"RUSTFAIL SB_RESIZE malformed: '{spec}'");
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                AppWindow.Resize(new SizeInt32(rw, rh));
+            }
+            catch (Exception ex)
+            {
+                StatusLine.Text = $"FAILED — resize request threw {ex.GetType().Name}";
+                Report($"RUSTFAIL resize request {ex.GetType().Name}: {ex.Message}");
+            }
+        });
+    }
+
     private void Start(uint w, uint h)
     {
         _started = true;
@@ -85,6 +158,7 @@ public sealed partial class MainWindow : Window
                 ? $"rust painted via swapchain — {_host.LastStatus}"
                 : $"FAILED — {_host.LastStatus}";
             Report(ok ? $"RUSTOK {_host.LastStatus}" : $"RUSTFAIL {_host.LastStatus}");
+            if (ok) MaybeDriveResize();
         }
         catch (Exception ex)
         {
