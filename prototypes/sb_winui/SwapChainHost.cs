@@ -58,6 +58,23 @@ internal sealed unsafe class SwapChainHost : IDisposable
     /// </summary>
     private const uint SdkVersion = 7;
 
+    /// <summary>
+    /// <c>DXGI_STATUS_OCCLUDED</c>, as a literal, for the same reason
+    /// <c>SdkVersion</c> is one: it is not in the generated metadata here, and a
+    /// bare hex number in a comparison is what a later reader cannot check.
+    ///
+    /// FROM THE SDK ON THIS BOX -- winerror.h (10.0.22621.0, line 58184), under
+    /// the heading "DXGI status (success) codes":
+    ///
+    ///   MessageText: The Present operation was invisible to the user.
+    ///   #define DXGI_STATUS_OCCLUDED  _HRESULT_TYPEDEF_(0x087A0001L)
+    ///
+    /// A code whose documented meaning is "nobody saw this frame", filed by the
+    /// platform as a SUCCESS. Its sign bit is clear, so <c>hr.Failed</c> is false
+    /// and it must be tested for BY NAME or not at all.
+    /// </summary>
+    private const int StatusOccluded = unchecked((int)0x087A0001);
+
     private ID3D11Device? _device;
     private ID3D11DeviceContext? _immediate;
     private ID3D11Texture2D? _offscreen;
@@ -344,6 +361,7 @@ internal sealed unsafe class SwapChainHost : IDisposable
         var present = new List<double>();
         var sw = new System.Diagnostics.Stopwatch();
         string? failure = null;
+        var occluded = 0;
 
         for (var i = 0; i < frames && failure is null; i++)
         {
@@ -416,6 +434,38 @@ internal sealed unsafe class SwapChainHost : IDisposable
             sw.Stop();
             present.Add(sw.Elapsed.TotalMilliseconds);
             if (hr.Failed) { failure = $"Present 0x{hr.Value:X8}"; break; }
+
+            // ⛔ OCCLUSION IS A SUCCESS CODE, AND THIS LINE USED NOT TO EXIST.
+            //
+            // `hr.Failed` above tests the sign bit. DXGI_STATUS_OCCLUDED has it
+            // clear, so an occluded present passed straight through and was
+            // counted as an ordinary frame -- while its documented meaning is
+            // that THE PRESENT WAS INVISIBLE TO THE USER.
+            //
+            // For this harness that is not a cosmetic gap. Every timing it
+            // reports is a per-frame cost, and a run whose frames nobody saw
+            // produces numbers that describe a different experiment than the one
+            // requested -- the same failure mode as the unforwarded SB_FRAMES,
+            // reached through the graphics stack instead of the launcher. The
+            // runs happen on a busy desktop (the verifier's own capture lists
+            // Chrome, Settings, a terminal and explorer), so occlusion is a live
+            // possibility and not a theoretical one.
+            //
+            // Counted rather than broken out of: which frames were invisible is
+            // the diagnostic, and breaking on the first would throw it away.
+            if (hr.Value == StatusOccluded) { occluded++; }
+        }
+
+        // ⛔ AN OCCLUDED RUN IS RED, NOT A SLOW ONE. Reporting timings from
+        // frames nobody saw would be reporting a measurement that did not
+        // happen -- and it would look entirely plausible, which is what makes it
+        // worth failing on. The count and the denominator both travel, because
+        // "3 of 300" and "300 of 300" are different diagnoses.
+        if (failure is null && occluded > 0)
+        {
+            failure = $"OCCLUDED {occluded}/{present.Count} presents were INVISIBLE TO THE USER "
+                    + "(DXGI_STATUS_OCCLUDED, a success code) -- these timings do not describe "
+                    + "frames anyone saw; re-run with the window unobscured";
         }
 
         static string Stat(string name, List<double> xs)

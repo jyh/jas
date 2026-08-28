@@ -800,6 +800,58 @@ mod tests {
         assert!(alive, "the guard must refuse BEFORE the copy, not report after it");
     }
 
+    /// PINNED: `DXGI_STATUS_OCCLUDED` IS A **SUCCESS** CODE, SO `Failed` MISSES IT.
+    ///
+    /// The third event the ruling's surviving leg names is occlusion, and it is
+    /// the nastiest of the three for a MEASUREMENT harness. Measured from the
+    /// Windows SDK on this box rather than recalled -- `winerror.h`
+    /// (10.0.22621.0:58184), under a heading that says it outright:
+    ///
+    /// ```text
+    ///   // DXGI status (success) codes
+    ///   // MessageId: DXGI_STATUS_OCCLUDED
+    ///   // MessageText:
+    ///   // The Present operation was invisible to the user.
+    ///   #define DXGI_STATUS_OCCLUDED  _HRESULT_TYPEDEF_(0x087A0001L)
+    /// ```
+    ///
+    /// ⇒ **A code whose documented meaning is "nobody saw this frame" is filed by
+    /// the platform as SUCCESS.** The HRESULT contract makes failure the sign
+    /// bit, `0x087A0001` has it clear, and so every `hr.Failed` / `is_err()` test
+    /// in every language answers **false**.
+    ///
+    /// THIS TEST EXISTS TO STOP A SIMPLIFICATION. `SwapChainHost.RenderFrame`
+    /// checked only `hr.Failed` and therefore counted an invisible present as an
+    /// ordinary frame; it now classifies this code by name. Anyone who later
+    /// "tidies" that back to a bare success test will fail here and read why.
+    ///
+    /// It is a CHARACTERIZATION of the platform, green from the start -- the same
+    /// kind as the silent-drop test, and stated as such rather than dressed up as
+    /// a regression that once failed.
+    #[test]
+    fn dxgi_status_occluded_is_a_success_code_which_is_why_failed_cannot_be_the_test() {
+        // The value as the SDK defines it, written as the SDK writes it.
+        const DXGI_STATUS_OCCLUDED: i32 = 0x087A0001u32 as i32;
+
+        let hr = windows::core::HRESULT(DXGI_STATUS_OCCLUDED);
+        assert!(
+            hr.is_ok(),
+            "the platform classifies an INVISIBLE present as success; a harness              that tests only for failure cannot see occlusion at all"
+        );
+        assert!(
+            DXGI_STATUS_OCCLUDED > 0,
+            "sign bit clear -- this is why every Failed/is_err test answers false"
+        );
+
+        // The positive control: a code that IS a failure must classify as one, so
+        // this test cannot pass on an HRESULT type that calls everything ok.
+        const DXGI_ERROR_DEVICE_REMOVED: i32 = 0x887A0005u32 as i32;
+        assert!(
+            windows::core::HRESULT(DXGI_ERROR_DEVICE_REMOVED).is_err(),
+            "CONTROL: a real DXGI failure must still read as a failure"
+        );
+    }
+
     /// The two probe colours must stay distinguishable from each other and from
     /// black and white, because the desktop verifier counts them in a
     /// screenshot. If someone "tidies" them to nearby values this fails here
