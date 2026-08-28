@@ -108,6 +108,30 @@ internal sealed unsafe class SwapChainHost : IDisposable
     private uint _width;
     private uint _height;
 
+    /// <summary>
+    /// The panel's composition scale at the last (re)size, recorded so the run
+    /// can SAY what it rendered.
+    ///
+    /// ⛔ THIS DOES NOT FIX THE DIP DEFECT (jyh/jas#16) -- IT STOPS THE RUN LYING
+    /// ABOUT IT. `Canvas.SizeChanged` reports DIPs, and that value goes straight
+    /// into swapchain creation while `CompositionScaleX/Y` is read nowhere, so
+    /// under 150% scaling the core renders 3.60 Mpx and the compositor upscales
+    /// to 8.29. That is a fidelity defect and it is deliberately still booked:
+    /// fixing it properly means sizing the buffer in physical pixels AND applying
+    /// the inverse transform (IDXGISwapChain2::SetMatrixTransform), and I cannot
+    /// see the result -- Smart App Control blocks this app from opening a window
+    /// on this box. **A fidelity change made blind is not a fix, it is a guess.**
+    ///
+    /// What IS fixable without a window is the LABEL. `LastStatus` printed
+    /// `{_width}x{_height}` with no unit, which reads as the surface and is the
+    /// DIP size. Same class as every other defect this branch has found: a value
+    /// that describes something other than what it claims. The run now states
+    /// DIP size, scale, and the physical pixels the compositor actually fills,
+    /// so nobody can quote a surface size this harness never rendered.
+    /// </summary>
+    private float _scaleX = 1f;
+    private float _scaleY = 1f;
+
     public string LastStatus { get; private set; } = "not started";
     public string Adapter { get; private set; } = "unknown";
     public string BareStatus { get; private set; } = "not tried";
@@ -153,6 +177,11 @@ internal sealed unsafe class SwapChainHost : IDisposable
     {
         _width = Math.Max(width, 1);
         _height = Math.Max(height, 1);
+        // Recorded, not applied -- see the field comment. A scale of 1 means the
+        // DIP size and the physical size coincide and the label collapses to one
+        // number; anything else means the compositor is upscaling.
+        _scaleX = panel.CompositionScaleX <= 0 ? 1f : panel.CompositionScaleX;
+        _scaleY = panel.CompositionScaleY <= 0 ? 1f : panel.CompositionScaleY;
 
         // BGRA_SUPPORT is REQUIRED for Direct2D interop, and omitting it fails
         // later and elsewhere: the device creates fine and D2D refuses the
@@ -329,7 +358,7 @@ internal sealed unsafe class SwapChainHost : IDisposable
         _width = w;
         _height = h;
         CreateOffscreenTarget();
-        LastStatus = $"resized to {_width}x{_height}";
+        LastStatus = $"resized to {SurfaceLabel()}";
         return true;
     }
 
@@ -492,9 +521,31 @@ internal sealed unsafe class SwapChainHost : IDisposable
             return false;
         }
 
-        LastStatus = $"{route} {_width}x{_height} on {Adapter} :: " +
+        LastStatus = $"{route} {SurfaceLabel()} on {Adapter} :: " +
                      $"{Stat("paint", paint)} | {Stat("paint+copy", copy)} | {Stat("present", present)}";
         return true;
+    }
+
+    /// <summary>
+    /// The surface, stated so it cannot be misread.
+    ///
+    /// Under no scaling this is one number and reads as it always did. Under
+    /// scaling it names BOTH sizes and the factor between them, because the
+    /// buffer is the DIP one and the screen is the physical one -- and a reader
+    /// quoting "the surface" from this line would otherwise quote a resolution
+    /// that was never rendered. The unit is spelled out for the same reason the
+    /// measurement doctrine puts the unit beside the number.
+    /// </summary>
+    private string SurfaceLabel()
+    {
+        if (Math.Abs(_scaleX - 1f) < 0.001f && Math.Abs(_scaleY - 1f) < 0.001f)
+        {
+            return $"{_width}x{_height}px";
+        }
+        var pw = (uint)Math.Round(_width * _scaleX);
+        var ph = (uint)Math.Round(_height * _scaleY);
+        return $"{_width}x{_height}DIP buffer @scale {_scaleX:0.##}x{_scaleY:0.##} "
+             + $"-> {pw}x{ph}px on screen (COMPOSITOR UPSCALES; jyh/jas#16)";
     }
 
     public void Dispose()
