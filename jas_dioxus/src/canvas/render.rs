@@ -4137,3 +4137,86 @@ mod tests {
         assert_eq!(selection_outline_scale(&doc, &[0, 0]), 4.0);
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE CANVAS-PATH HARNESS (2026-08-28).
+//
+// ⛔ WHY THIS FILE ENDS WITH A SECOND TEST MODULE. Everything above runs on the
+// host, where `HtmlCanvasElement` does not exist — so the mask pipeline's actual
+// plumbing was, until now, COMPILE-VERIFIED ONLY. Defect D-β lived exactly
+// there: a shared scratch canvas handed to a nested caller. The repair's
+// bookkeeping (`ScratchDepth`) is driven natively above; THESE tests drive the
+// part that needed a browser.
+//
+// This is the first cut of the harness the D-β write-up named as missing. It is
+// deliberately small: one test that would have CAUGHT D-β, plus the control that
+// makes it readable. A harness whose first test is the defect it was built for
+// is worth more than a broad one whose arms have never failed.
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(all(test, target_arch = "wasm32"))]
+mod canvas_tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    /// CONTROL. Without a reachable window/document the scratch cannot be built,
+    /// and every assertion below would be vacuously true. If this fails, nothing
+    /// else in this module is readable.
+    #[wasm_bindgen_test]
+    fn a_scratch_canvas_can_be_created_at_all() {
+        let got = get_mask_scratch(0, 64, 64);
+        assert!(got.is_some(), "no scratch canvas — the rest of this module is vacuous");
+        let (c, _) = got.unwrap();
+        assert_eq!((c.width(), c.height()), (64, 64));
+    }
+
+    /// ⛔ D-β ITSELF, IN THE BROWSER. Before the repair both acquisitions
+    /// returned the SAME element, so the inner call's clear_rect wiped the
+    /// outer's half-drawn buffer. This is the test that would have caught it.
+    #[wasm_bindgen_test]
+    fn nested_scratch_acquisitions_are_distinct_canvases() {
+        let (outer, _) = get_mask_scratch(0, 64, 64).expect("outer scratch");
+        let (inner, _) = get_mask_scratch(1, 64, 64).expect("inner scratch");
+        assert!(
+            !outer.is_same_node(Some(inner.as_ref())),
+            "D-β: a nested acquisition received the OUTER's canvas — the inner \
+             clear_rect would wipe a buffer still being drawn into"
+        );
+    }
+
+    /// ...and the repair must not have become "allocate always": a sequential
+    /// (non-nested) acquisition at the same depth REUSES the buffer, which is
+    /// the frame cost the original singleton existed to avoid.
+    #[wasm_bindgen_test]
+    fn sequential_acquisitions_at_one_depth_reuse_the_canvas() {
+        let (a, _) = get_mask_scratch(0, 64, 64).expect("first");
+        let (b, _) = get_mask_scratch(0, 64, 64).expect("second");
+        assert!(
+            a.is_same_node(Some(b.as_ref())),
+            "same depth must reuse the same canvas, not allocate a new one"
+        );
+    }
+
+    /// THE CLOBBER, OBSERVED IN PIXELS rather than by element identity — the
+    /// closest this harness gets to the user-visible defect. Draw into the
+    /// depth-0 buffer, take a nested one and clear it, and the depth-0 pixel
+    /// must survive.
+    #[wasm_bindgen_test]
+    fn a_nested_clear_does_not_wipe_the_outer_buffer() {
+        let (_oc, octx) = get_mask_scratch(0, 8, 8).expect("outer");
+        octx.set_fill_style_str("#ff0000");
+        octx.fill_rect(0.0, 0.0, 8.0, 8.0);
+
+        let (_ic, ictx) = get_mask_scratch(1, 8, 8).expect("inner");
+        ictx.clear_rect(0.0, 0.0, 8.0, 8.0); // what the inner call does first
+
+        let data = octx.get_image_data(0.0, 0.0, 1.0, 1.0).expect("readback");
+        let px = data.data();
+        assert_eq!(
+            (px[0], px[3]),
+            (255, 255),
+            "D-β: the outer buffer was cleared by the nested acquisition"
+        );
+    }
+}
