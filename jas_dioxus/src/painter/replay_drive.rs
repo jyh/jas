@@ -21,7 +21,7 @@
 
 use serde_json::Value;
 
-use super::capability::{capability_of, Capability};
+use super::capability::{capabilities_of, Capability, Caps};
 use super::replay_decode as d;
 use super::{Painter, TextRun};
 
@@ -130,34 +130,48 @@ pub(crate) fn assert_answers_match_the_corpus(
         scenes.len()
     );
 
+    let supported = Capability::ALL
+        .into_iter()
+        .fold(Caps::NONE, |acc, c| if supports(c) { acc.with(c) } else { acc });
+
+    // What this backend CANNOT deliver for an op: the requirements it denies.
+    // ⛔ SET DIFFERENCE, NOT "the op's capability". An op may need TWO things
+    // (a blended isolated layer needs the layer AND the blend); asking about
+    // one of them lets the other ride in unexamined, which is the fold that
+    // condition (i) forbids and that `capabilities_of` was reshaped to prevent.
+    let denied = |op: &Value| -> Vec<Capability> {
+        Capability::ALL
+            .into_iter()
+            .filter(|c| capabilities_of(op).has(*c) && !supported.has(*c))
+            .collect()
+    };
+
     let mut needed_and_refused = 0usize;
     for (name, ops, refused) in scenes {
         for (i, cmd) in refused {
-            match capability_of(&ops[*i]) {
-                None => panic!(
-                    "{name}: op {i} ({cmd}) was REFUSED but needs no capability -- \
-                     an undeclared gap, which is the shape a silent skip takes \
-                     once someone starts counting"
-                ),
-                Some(c) => assert!(
-                    !supports(c),
-                    "{name}: op {i} ({cmd}) was REFUSED, but this backend answers \
-                     YES to {c:?} -- the stated answer is a claim the fixtures \
-                     contradict"
-                ),
-            }
+            let d = denied(&ops[*i]);
+            assert!(
+                !d.is_empty(),
+                "{name}: op {i} ({cmd}) was REFUSED but this backend answers YES \
+                 to everything it needs ({:?}) -- either an undeclared gap, which \
+                 is the shape a silent skip takes once someone starts counting, \
+                 or a stated answer the fixtures contradict",
+                capabilities_of(&ops[*i])
+            );
         }
         for (i, op) in ops.iter().enumerate() {
-            if let Some(c) = capability_of(op) {
-                if !supports(c) {
-                    assert!(
-                        refused.iter().any(|(j, _)| j == &i),
-                        "{name}: op {i} needs {c:?}, this backend answers NO to it, \
-                         and yet it EXECUTED -- a false no routes work to legacy \
-                         for a reason that is not real"
-                    );
-                    needed_and_refused += 1;
-                }
+            let d = denied(op);
+            if !d.is_empty() {
+                assert!(
+                    refused.iter().any(|(j, _)| j == &i),
+                    "{name}: op {i} needs {d:?}, this backend answers NO to that, \
+                     and yet it EXECUTED. Two ways to be here and both matter: a \
+                     FALSE NO routes work to legacy for a reason that is not real, \
+                     and an op that runs while a requirement it carries is denied \
+                     is a SILENT DISCARD -- the parameter reached no point of use \
+                     and nothing said so."
+                );
+                needed_and_refused += 1;
             }
         }
     }
@@ -263,7 +277,7 @@ mod tests {
                 let refused = ops
                     .iter()
                     .enumerate()
-                    .filter(|(_, o)| capability_of(o) == Some(Capability::IsolatedLayers))
+                    .filter(|(_, o)| capabilities_of(o).has(Capability::IsolatedLayers))
                     .map(|(i, o)| (i, o["cmd"].as_str().unwrap().to_string()))
                     .collect();
                 (*n, ops.clone(), refused)
@@ -282,7 +296,7 @@ mod tests {
                 let refused = ops
                     .iter()
                     .enumerate()
-                    .find(|(_, o)| capability_of(o).is_none())
+                    .find(|(_, o)| capabilities_of(o) == Caps::NONE)
                     .map(|(i, o)| vec![(i, o["cmd"].as_str().unwrap().to_string())])
                     .unwrap_or_default();
                 (*n, ops.clone(), refused)
