@@ -28,6 +28,9 @@ use web_sys::{CanvasRenderingContext2d, CanvasWindingRule};
 /// One open isolated layer (A6). The surface is a real offscreen canvas; the
 /// alpha and blend were consumed at `push_isolated_layer` and are spent ONCE at
 /// the closing composite.
+#[allow(dead_code)] // Not-yet-wired: constructed only by `open_layer`, which is dead in a
+// production wasm build because this painter is not yet wired into `canvas/render.rs`.
+// The browser tests construct both variants.
 enum LayerKind {
     /// A6 §3.1 — an isolated layer. `alpha`/`blend` are spent ONCE at the
     /// closing composite.
