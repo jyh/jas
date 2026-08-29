@@ -1162,3 +1162,4 @@ jobs:
           # compilation out of the timed window entirely.
           (cd jas_dioxus && cargo build --bins)
           python scripts/cross_language_workspace.py --lang rust,swift --require-comparisons
+
