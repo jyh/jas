@@ -3,8 +3,21 @@ name: Tests
 on:
   push:
     branches: [main]
+  # ⛔ NO `branches:` FILTER ON pull_request, AND THAT IS THE FIX. For
+  # `pull_request`, `branches:` filters on the BASE branch — so a PR STACKED ON
+  # ANOTHER BRANCH never matched `[main]` and this entire workflow silently did
+  # not run. Its checks still showed GREEN, because the Scrub workflow (which has
+  # no such filter) ran its hook gates and nothing said the suite was absent.
+  #
+  # Measured by flask 2026-08-28 on PRs #20 and #44: 4/4 checks green, all four
+  # of them hook gates, ZERO test jobs. ⇒ A STACKED PR WAS INDISTINGUISHABLE FROM
+  # A TESTED ONE, and this repo uses stacked PRs routinely — #32 and #34 were
+  # both stacked, and both read as fully green.
+  #
+  # ⚠️ The `push` filter STAYS. Removing it would run the whole matrix on every
+  # push to every branch; PRs are where the review decision is made, and that is
+  # the gap that mattered.
   pull_request:
-    branches: [main]
 
 jobs:
   # SCRUBGUARD MOVED, 2026-08-20, and the move is the repair.
@@ -206,6 +219,49 @@ jobs:
           python-version: "3.12"
       - run: pip install PyYAML
       - run: bash scripts/check_concept_constraints_corpus.sh
+
+  wasm-canvas:
+    name: Canvas path (wasm — the half no suite could run)
+    runs-on: ubuntu-latest
+    # ⛔ NO `needs:`. This lane reports its own verdict or it reports nothing —
+    # the property check_gate_cannot_skip.py exists to protect.
+    #
+    # WHY IT EXISTS: until 2026-08-28 this repo had NO wasm harness at all, so
+    # every claim about the canvas renderer was compile-verified only. Defect
+    # D-β (the mask scratch singleton, PR #45) lived precisely there and had to
+    # be found by reading. Its first test is that defect.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      # ⛔ INSTALLED BY cargo, NOT BY A THIRD-PARTY ACTION. The first cut used
+      # `jetli/wasm-pack-action@v0.4` and the lane died in 3s with "unable to
+      # resolve action ... unable to find version v0.4" -- never reaching a test.
+      # A pinned marketplace tag is a dependency that rots outside this repo;
+      # `cargo install --locked` is slower and resolves from the same lockfile
+      # discipline everything else here uses.
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+      # Chrome is preinstalled on ubuntu-latest images; headless needs no display.
+      #
+      # ⛔ ONE RUN, AND THE COUNT IS READ BACK FROM IT. `wasm-pack test` exits 0
+      # having run ZERO tests -- a cfg that stops matching, a renamed module, and
+      # the lane stays green having executed nothing. The first cut ran the suite
+      # TWICE to check that, which doubled the lane and let the two runs disagree;
+      # `tee` under `pipefail` keeps the real exit status of the single run.
+      - name: Canvas-path tests in a real browser, and the count read back
+        shell: bash
+        run: |
+          set -o pipefail
+          wasm-pack test --headless --chrome jas_dioxus 2>&1 | tee /tmp/wasm.log
+          n=$(grep -oE '[0-9]+ passed' /tmp/wasm.log | head -1 | grep -oE '[0-9]+' || true)
+          if [ -z "$n" ] || [ "$n" -lt 4 ]; then
+            echo "FAIL: expected at least 4 canvas tests to RUN, saw '${n:-none}'." >&2
+            echo "      A green lane that executed nothing is the shape this lane exists to end." >&2
+            exit 1
+          fi
+          echo "canvas lane ran $n test(s)"
 
   genericity:
     name: Genericity policy

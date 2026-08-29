@@ -3068,7 +3068,6 @@ mod tests {
         }
     }
 
-    #[test]
     /// BRUSHSAVE: SVG *is* the save format (menu_bar's `"save"` arm calls
     /// `document_to_svg` and downloads it), so anything the writer omits is
     /// artwork the artist loses on save. The reader already accepts
