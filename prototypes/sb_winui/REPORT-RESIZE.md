@@ -88,10 +88,21 @@ careful reading did not find this; one run did.**
 `FinalReleaseComObject` crashing by over-release. A collect per gesture is ~1.2 ms and never
 touches the hot path.
 
-⚠️ **A better fix exists and I am naming it rather than claiming this one is final:** hold no
-RCW at all — take the raw pointer from `GetBuffer` and release it, so nothing needs collecting.
-That removes both the 1.2 ms and the GC tail in §1. Not done here because it edits the frame
-path this spike has already corrupted once, and that deserves its own change with its own run.
+⚠️ ~~**A better fix exists:** hold no RCW at all — take the raw pointer from `GetBuffer` and
+release it.~~ ⛔ **TRIED 17:4x AND IT IS NOT AVAILABLE. This sentence did not survive contact.**
+
+CsWin32 generates exactly one overload —
+`GetBuffer(uint Buffer, Guid* riid, out object ppSurface)` — **`out object`. There is no
+raw-pointer form to call**; the projection always materialises an RCW and you cannot ask it
+not to. The remaining routes are `Marshal.ReleaseComObject` in the frame path (**the
+documented heap-corruption path**, `0xC0000374` over sixty frames) or hand-rolled vtable
+P/Invoke (**the wrong-interface-pointer class that caused both of this spike's original
+defects**). Neither is worth ~1.2 ms of a once-per-gesture cost.
+
+⇒ **The collect at resize time is not a placeholder; on this projection it is the answer.**
+Attempt and revert recorded in
+`seat/fleet/FINDING-flask-rcw-row-negative-and-the-sac-mechanism-2026-08-28.md`; **the numbers
+above are unaffected and were re-verified after the revert.**
 
 ## 4 · WHAT THIS DOES NOT SAY
 
