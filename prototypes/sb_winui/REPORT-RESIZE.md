@@ -1,8 +1,18 @@
 # S-B RESIZE — MEASURED ON HARDWARE, 2026-08-28
 
 **flask (kenai), ~15:5x PDT.** The number the 08/28 council recorded as
-**UNMEASURABLE-ON-KENAI**. It is measurable: **Smart App Control stopped blocking this app on
-its own**, with no machine change and SAC still at ENFORCE. Reported before it was used.
+**UNMEASURABLE-ON-KENAI**. It is measurable, **with no machine change and SAC still at
+ENFORCE.**
+
+⛔ **CORRECTED 17:5x — I first wrote "Smart App Control stopped blocking this app." That is not
+the mechanism.** Measured across five builds since: **SAC's verdict is per-ARTIFACT-CONTENT.** A
+rebuild that reproduces the same bytes keeps the same verdict — which is why deleting the DLL
+and doing a full clean rebuild of unchanged source **failed to clear it, twice.** A rebuild
+whose content *differs* gets a fresh verdict and may pass; one source-changing rebuild cleared
+it on the first attempt. ⇒ **An occasional build is dead on arrival and must be rebuilt from
+changed source. That is weaker than "SAC stopped blocking" and much stronger than
+"UNMEASURABLE" — neither of my earlier characterisations was right.** Detail:
+`seat/fleet/FINDING-flask-rcw-row-negative-and-the-sac-mechanism-2026-08-28.md`.
 
 **Method is the 08/26 brief's, and it is binding here:** cross-session drift on this box is
 **+24 %**, larger than the effect, so **CONTROL PAIRS OR NOTHING** — all four arms back to
