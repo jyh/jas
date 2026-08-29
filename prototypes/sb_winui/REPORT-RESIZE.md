@@ -12,7 +12,7 @@ whose content *differs* gets a fresh verdict and may pass; one source-changing r
 it on the first attempt. ⇒ **An occasional build is dead on arrival and must be rebuilt from
 changed source. That is weaker than "SAC stopped blocking" and much stronger than
 "UNMEASURABLE" — neither of my earlier characterisations was right.** Detail:
-`seat/fleet/FINDING-flask-rcw-row-negative-and-the-sac-mechanism-2026-08-28.md`.
+the private record's 08-28 RCW/SAC finding (role reference; the path is not written in a public tree, per the 2026-08-25 firewall-at-paths ruling).
 
 **Method is the 08/26 brief's, and it is binding here:** cross-session drift on this box is
 **+24 %**, larger than the effect, so **CONTROL PAIRS OR NOTHING** — all four arms back to
@@ -129,7 +129,7 @@ defects**). Neither is worth ~1.2 ms of a once-per-gesture cost.
 
 ⇒ **The collect at resize time is not a placeholder; on this projection it is the answer.**
 Attempt and revert recorded in
-`seat/fleet/FINDING-flask-rcw-row-negative-and-the-sac-mechanism-2026-08-28.md`; **the numbers
+the private record's 08-28 RCW/SAC finding (role reference; the path is not written in a public tree, per the 2026-08-25 firewall-at-paths ruling); **the numbers
 above are unaffected and were re-verified after the revert.**
 
 ## 4 · WHAT THIS DOES NOT SAY
