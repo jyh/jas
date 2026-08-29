@@ -1008,6 +1008,54 @@ mod tests {
                  divided by the emit width");
     }
 
+    /// ⭐ THE A6 ALPHA LAW, IN PIXELS — defect D-alpha's ratified repair.
+    ///
+    /// This is the property the "F3/layer-only pixel-equal to Canvas2D" arm
+    /// exists to catch, asserted where it CAN be asserted. `canvas2d` is
+    /// `#[cfg(feature = "web")]` over `web_sys`, so it cannot be instantiated in
+    /// this process at all and the two backends cannot meet in one binary --
+    /// see the finding filed with the council. Until a golden bridge exists, the
+    /// LAW is checkable even when the cross-backend PIXELS are not.
+    ///
+    /// A 0.5 group around a 0.5 layer around an opaque red fill must land at
+    /// **0.25**, i.e. alpha ~= 64/255. Three ways to be wrong and the number
+    /// separates all of them:
+    ///
+    /// * **0.5 (~128)** -- the layer alpha REPLACED the inherited product
+    ///   instead of multiplying into it. That was HEAD's behaviour.
+    /// * **0.125 (~32)** -- the layer alpha applied TWICE, once into the body
+    ///   and again at the blit. That was the other half of D-alpha.
+    /// * **1.0 (~255)** -- no alpha applied at all.
+    ///
+    /// ⛔ A SINGLE-VALUE ASSERT WOULD BE WEAKER THAN IT LOOKS: 0.25 is what you
+    /// get from the correct law AND from any implementation that happens to
+    /// multiply two halves somewhere. The nesting is what makes it diagnostic --
+    /// the group and the layer carry the SAME 0.5, so a replace-bug and a
+    /// multiply-bug land on visibly different numbers rather than colliding.
+    #[test]
+    fn the_layer_alpha_multiplies_into_the_group_product_exactly_once() {
+        let t = HeadlessTarget::new(8, 8).unwrap();
+        unsafe { t.target().BeginDraw() };
+        unsafe {
+            t.target().Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        }
+        {
+            let mut p = Direct2DPainter::new(t.target());
+            p.push_group(0.5, BlendMode::Normal);
+            p.push_isolated_layer(0.5, BlendMode::Normal);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 }, &red(), 1.0);
+            p.pop_isolated_layer();
+            p.pop_group();
+        }
+        unsafe { t.target().EndDraw(None, None).unwrap() };
+
+        let a = px(&t.read_bgra().expect("readback"), 8, 4, 4)[3] as i32;
+        assert!(
+            (a - 64).abs() <= 3,
+            "A6 alpha law: 0.5 group x 0.5 layer x opaque fill must be ~64/255, got {a}.              ~128 = the layer alpha replaced the product (HEAD's D-alpha);              ~32 = it applied twice; ~255 = it did not apply."
+        );
+    }
+
     /// ⭐ SUPERSEDES `masks_refuse_loudly_pending_the_a6_implementation`.
     ///
     /// That test asserted the refusal MESSAGE, and it was right to: while the
