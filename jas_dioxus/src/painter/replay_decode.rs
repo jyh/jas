@@ -4,15 +4,21 @@
 //! more than one backend can be driven by THE SAME ARTIFACT without each one
 //! growing its own reader of the same schema.
 //!
-//! ⚠️ KNOWN DUPLICATION, NAMED RATHER THAN HIDDEN. `direct2d/replay.rs` still
-//! carries its own private copies of these functions. They are not unified yet
+//! ⚠️ KNOWN DUPLICATION, NAMED RATHER THAN HIDDEN — AND NOW HALF CLOSED. The
+//! Canvas2D lane and the native recorder lane share ONE dispatch
+//! ([`replay_drive`](super::replay_drive)) over these decoders, which is the
+//! collapse the note below asked for. `direct2d/replay.rs` still carries its own
+//! private copies of these functions. They are not unified yet
 //! for one honest reason: that module is Windows- and `d2d`-gated and CANNOT BE
 //! COMPILED on this machine, so folding it onto these would be an unverifiable
 //! edit to a lane whose only instrument is CI — and it would have collided with
 //! an in-flight PR touching the same file. The two copies decode one fixed
 //! schema, and any drift surfaces as a replay mismatch rather than silently.
-//! ⇒ COLLAPSE THEM when someone can build that lane, or when the routing
-//!   question settles and the dispatch itself unifies.
+//! ⇒ COLLAPSE THE LAST COPY when someone can build that lane. The routing
+//!   question HAS settled (option (b), 08/29) and the dispatch HAS unified for
+//!   the two lanes that can be built here; the D2D copy outlives it for the one
+//!   reason that was always the real one — nobody on this machine can compile
+//!   the edit, and CI is a detector, not a compiler you can iterate against.
 
 use serde_json::Value;
 

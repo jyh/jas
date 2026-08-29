@@ -10,11 +10,25 @@
 //! PH1 begins converting `canvas/render.rs` to emit through this seam. The
 //! conversion is a mechanical 1:1 rewrite of today's `ctx.*` call sequences
 //! (R4 display-list-equivalence discipline), routed BY CAPABILITY: an element
-//! that needs a PH3/PH4 feature — an opacity mask, placed-glyph/type-on-path
-//! text, or a freeform gradient — stays on the legacy raw-ctx path unchanged
-//! until its phase lands. `Canvas2dPainter`'s mask/PlacedGlyphs bodies remain
-//! `unimplemented!()` and must never be reached in production (the legacy
-//! route guards them).
+//! that needs a feature the route in front of it cannot deliver stays on the
+//! legacy raw-ctx path.
+//!
+//! ⚖️ AND "THE ROUTE IN FRONT OF IT" MEANS A BACKEND, SINCE 08/29 (council row
+//! (e) = option (b)). The router asks [`Painter::supports`], because the two
+//! backends differ: `Canvas2dPainter` executes isolated layers (#47) and mask
+//! layers (#55); `Direct2DPainter` executes neither and answers NO, so masked
+//! elements stay legacy-routed THERE while converting on Canvas2D. The
+//! vocabulary it asks in is derived from the conformance corpus — see
+//! [`capability`].
+//!
+//! ⛔ THE SENTENCE THIS REPLACES SAID "`Canvas2dPainter`'s mask/PlacedGlyphs
+//! bodies remain `unimplemented!()` and must never be reached in production".
+//! Half of it went false when #55 landed the mask bodies and nobody struck it —
+//! a stale claim in the most-read header of this module, in the exact clause a
+//! reader takes on trust. PlacedGlyphs IS still `unimplemented!()` and is still
+//! kept off the seam by the router (text is PH3, and there is deliberately no
+//! capability for it: no backend answer unlocks shaping work that does not
+//! exist).
 //!
 //! # What the trait is
 //!
@@ -113,6 +127,10 @@
 pub mod capability;
 pub mod corpus;
 pub mod element_render;
+// Test-gated with the driver it feeds. #56 landed it ungated and it has never
+// had a non-test consumer, which cost 12 dead-code warnings on every build; now
+// that `replay_drive` is its only caller, the gate follows the fact.
+#[cfg(test)]
 pub(crate) mod replay_decode;
 // The shared corpus DISPATCH and the capability cross-check. Test-gated: it is
 // an instrument, not a production path, and `capability_of` (which it consumes)
