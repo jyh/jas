@@ -11,7 +11,7 @@
 use super::recording::RecordingPainter;
 use super::scene::{
     build_a6_alpha_law_scene, build_a6_blend_scene, build_a6_law_variants_scene,
-    build_group_blend_scene,
+    build_a6_layer_without_mask_scene, build_group_blend_scene,
     build_a6_nested_layers_scene, build_proof_scene, build_synthetic_scene,
 };
 use super::sink::NoOpPainter;
@@ -182,6 +182,7 @@ const A6_ALPHA_LAW: &str = include_str!("testdata/a6_alpha_law.json");
 const A6_NESTED_LAYERS: &str = include_str!("testdata/a6_nested_layers.json");
 const A6_BLEND: &str = include_str!("testdata/a6_blend.json");
 const GROUP_BLEND: &str = include_str!("testdata/group_blend.json");
+const A6_LAYER_NO_MASK: &str = include_str!("testdata/a6_layer_no_mask.json");
 
 fn record(build: fn(&mut RecordingPainter)) -> String {
     let mut rec = RecordingPainter::new();
@@ -199,6 +200,7 @@ fn regenerate_a6_goldens() {
         ("a6_nested_layers.json", build_a6_nested_layers_scene as fn(&mut RecordingPainter)),
         ("a6_blend.json", build_a6_blend_scene as fn(&mut RecordingPainter)),
         ("group_blend.json", build_group_blend_scene as fn(&mut RecordingPainter)),
+        ("a6_layer_no_mask.json", build_a6_layer_without_mask_scene as fn(&mut RecordingPainter)),
     ] {
         let mut json = record(build);
         json.push('\n');
@@ -216,6 +218,13 @@ fn a6_law_variants_match_golden() {
 #[test]
 fn a6_alpha_law_matches_golden() {
     assert_eq!(record(build_a6_alpha_law_scene).trim(), A6_ALPHA_LAW.trim());
+}
+
+/// An isolated layer with NO mask — the capability the corpus could not separate
+/// until 2026-08-29, and the state Canvas2D actually held for a day (#47→#55).
+#[test]
+fn a6_layer_without_mask_matches_golden() {
+    assert_eq!(record(build_a6_layer_without_mask_scene).trim(), A6_LAYER_NO_MASK.trim());
 }
 
 /// The non-Normal GROUP blend, which no scene carried until 2026-08-29 — see the
@@ -248,6 +257,9 @@ fn a6_scenes_obey_the_bracket_grammar() {
         ("alpha_law", build_a6_alpha_law_scene as fn(&mut RecordingPainter)),
         ("nested_layers", build_a6_nested_layers_scene as fn(&mut RecordingPainter)),
         ("blend", build_a6_blend_scene as fn(&mut RecordingPainter)),
+        // The first scene here with NO mask bracket: it drives the grammar
+        // checker's zero-mask path, which four mask-carrying scenes never could.
+        ("layer_no_mask", build_a6_layer_without_mask_scene as fn(&mut RecordingPainter)),
     ] {
         let mut rec = RecordingPainter::new();
         build(&mut rec);

@@ -244,6 +244,43 @@ pub fn build_group_blend_scene(p: &mut impl Painter) {
     p.pop_group();
 }
 
+/// ⛔ AN ISOLATED LAYER WITH **NO MASK** — the state the corpus could not express.
+///
+/// Measured 2026-08-29: across the whole corpus `push_isolated_layer` and
+/// `push_mask_layer` both totalled 7. **Every isolated layer was paired with a
+/// mask**, so no fixture anywhere separated the two capabilities. That blindness
+/// is not hypothetical — it hid a state this codebase actually held:
+///
+///   * `Canvas2dPainter` from #47 until #55: isolated layers EXECUTED, mask ops
+///     still `unimplemented!()`. A full day in a state the corpus cannot describe.
+///   * and the state `direct2d` will pass through if it implements layers first,
+///     which is the natural order — the layer target IS the surface a mask eats
+///     into, so it must exist before the law that consumes it.
+///
+/// A corpus that can only say "the A6 bracket" as one unit forces every consumer
+/// to be equally coarse. This scene splits it.
+///
+/// THE BODY OVERLAPS ITSELF DELIBERATELY. Isolation's whole observable content
+/// is that the overlap does NOT compound — the layer's alpha is spent once at
+/// the composite, not per primitive. A single-rect body would pin the bracket
+/// while saying nothing about what isolation MEANS.
+pub fn build_a6_layer_without_mask_scene(p: &mut impl Painter) {
+    p.push_isolated_layer(0.6, BlendMode::Normal);
+    p.fill_rect(
+        Rect { x: 0.0, y: 0.0, w: 20.0, h: 20.0 },
+        &Brush::Solid(Color::rgb(0.2, 0.7, 0.4)),
+        1.0,
+    );
+    // Overlapping the first: inside the layer these compound at alpha 1.0, and
+    // the layer's 0.6 applies ONCE to the composited result.
+    p.fill_rect(
+        Rect { x: 10.0, y: 10.0, w: 20.0, h: 20.0 },
+        &Brush::Solid(Color::rgb(0.8, 0.2, 0.6)),
+        1.0,
+    );
+    p.pop_isolated_layer();
+}
+
 /// §6.1 — one scene per law variant. Kills the mask-shaped half of the vacuity
 /// B1 measured: ZERO mask ops across all 14 recorded scenes.
 pub fn build_a6_law_variants_scene(p: &mut impl Painter) {

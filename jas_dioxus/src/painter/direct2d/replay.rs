@@ -311,7 +311,7 @@ mod tests {
         // The four A6 goldens (design block §6) put masks, nested layers and a
         // non-Normal blend into the corpus. So the assertion inverts: the gap
         // must now be REPORTED, and it must be EXACTLY the declared one.
-        assert_eq!(n, 19, "14 pre-A6 scenes + the 4 A6 goldens + group_blend");
+        assert_eq!(n, 20, "14 pre-A6 + 4 A6 goldens + group_blend + a6_layer_no_mask");
         for want in ["a6_law_variants.json", "a6_alpha_law.json",
                      "a6_nested_layers.json", "a6_blend.json"] {
             assert!(scenes().iter().any(|(name, _)| name == want),
