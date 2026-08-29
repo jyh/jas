@@ -236,8 +236,12 @@ impl Painter for Canvas2dPainter<'_> {
     ///
     /// * `IsolatedLayers` — the layer-target stack landed in #47;
     /// * `MaskLayers` — push/pop_mask_layer EXECUTE since #55;
-    /// * `NonNormalGroupBlend` — `push_group` sets the CSS composite operation
-    ///   (`blend_css`), so a non-Normal group blend is executed, not refused.
+    /// * `NonNormalBlend` — and this answer is now LOAD-BEARING, so it is stated
+    ///   with where to check it: `push_group` sets the CSS composite operation
+    ///   (`blend_css`), AND `pop_isolated_layer` reads the layer's own blend back
+    ///   out of `LayerKind::Isolated` and composites under it before restoring
+    ///   `source-over`. Both carriers are honoured — the blend reaches a point of
+    ///   USE here, not merely a point of storage.
     ///
     /// The corpus driver below
     /// ([`tests::every_recorded_scene_replays_through_canvas2d`]) drives all 20
@@ -553,7 +557,7 @@ fn blend_css(mode: BlendMode) -> &'static str {
 mod a6_layer_tests {
     use super::*;
     use crate::geometry::element::Color;
-    use crate::painter::capability::Capability;
+    use crate::painter::capability::{Capability, Caps};
     use wasm_bindgen_test::*;
 
     wasm_bindgen_test_configure!(run_in_browser);
@@ -881,22 +885,16 @@ mod a6_layer_tests {
         assert!(total >= 124, "corpus op count fell to {total}");
         assert_eq!(executed, total);
 
+        // ⛔ ASKED THROUGH `Caps::of`, NOT A HAND-WRITTEN MATCH. The first cut
+        // listed the variants here and paid for it within the day: widening the
+        // blend capability broke THIS browser-only line, which no native run
+        // compiles. `Caps::of` walks `Capability::ALL`, so a vocabulary change
+        // needs no edit in a lane that cannot tell you it is broken.
         let probe = {
             let (_c, ctx) = surface(1, 1);
             let p = Canvas2dPainter::new(&ctx);
-            [
-                p.supports(Capability::IsolatedLayers),
-                p.supports(Capability::MaskLayers),
-                p.supports(Capability::NonNormalGroupBlend),
-            ]
+            Caps::of(&p)
         };
-        assert_answers_match_the_corpus(
-            &|c: Capability| match c {
-                Capability::IsolatedLayers => probe[0],
-                Capability::MaskLayers => probe[1],
-                Capability::NonNormalGroupBlend => probe[2],
-            },
-            &per_scene,
-        );
+        assert_answers_match_the_corpus(&|c: Capability| probe.has(c), &per_scene);
     }
 }

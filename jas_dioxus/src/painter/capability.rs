@@ -22,7 +22,9 @@
 //! |---|---|---|
 //! | the set of capabilities is exactly what the corpus exercises | all 20 scenes | [`tests::the_capability_set_is_exactly_what_the_corpus_exercises`] |
 //! | isolated layers are SEPARABLE from masks | `a6_layer_no_mask.json` | [`tests::layers_and_masks_are_separable_by_a_fixture`] |
-//! | non-Normal GROUP blend is its own thing | `group_blend.json` | [`tests::the_capability_set_is_exactly_what_the_corpus_exercises`] |
+//! | non-Normal blend is its own thing | `group_blend.json` | [`tests::the_capability_set_is_exactly_what_the_corpus_exercises`] |
+//! | …and it RIDES TWO DIFFERENT OPS, so it cannot be a group-only name | `group_blend.json` + `a6_blend.json` | [`tests::a_non_normal_blend_rides_two_different_ops`] |
+//! | an op may need TWO capabilities, and neither may absorb the other | `a6_blend.json` | [`tests::a_blended_layer_requires_the_layer_AND_the_blend`] |
 //! | a mask never appears outside a layer | all 20 scenes | [`tests::no_scene_carries_a_mask_outside_an_isolated_layer`] |
 //!
 //! The separability row is the load-bearing one and it is NEW. Until
@@ -62,8 +64,11 @@ pub enum Capability {
     /// `push_mask_layer` / `pop_mask_layer` — the mask bracket, legal only
     /// INSIDE an isolated layer (A6 §3.2).
     MaskLayers,
-    /// `push_group` carrying a blend other than Normal.
-    NonNormalGroupBlend,
+    /// A blend other than Normal, WHEREVER IT RIDES — `push_group`'s mode or
+    /// `push_isolated_layer`'s. One capability because it is one missing thing:
+    /// the effect graph. It was `NonNormalGroupBlend` until 08/29 and the name
+    /// was the bug — see the module note on FOLDING.
+    NonNormalBlend,
 }
 
 impl Capability {
@@ -76,7 +81,7 @@ impl Capability {
     pub const ALL: [Capability; 3] = [
         Capability::IsolatedLayers,
         Capability::MaskLayers,
-        Capability::NonNormalGroupBlend,
+        Capability::NonNormalBlend,
     ];
 
     /// Bit position in [`Caps`]. The match is exhaustive on purpose: a new
@@ -86,7 +91,7 @@ impl Capability {
         match self {
             Capability::IsolatedLayers => 0,
             Capability::MaskLayers => 1,
-            Capability::NonNormalGroupBlend => 2,
+            Capability::NonNormalBlend => 2,
         }
     }
 }
@@ -126,6 +131,16 @@ impl Caps {
         self.bits & (1 << c.index()) != 0
     }
 
+    /// Does this backend supply EVERY capability in `required`?
+    ///
+    /// The router asks in this shape on purpose: a requirement set is compared
+    /// whole, so a caller cannot check one requirement and let a second ride in
+    /// unexamined. That is the fold condition (i) forbids, removed by typing
+    /// rather than by remembering.
+    pub fn supplies(self, required: Caps) -> bool {
+        required.bits & !self.bits == 0
+    }
+
     /// The same set plus `c` — for tests describing a HYPOTHETICAL backend
     /// (notably the layers-without-masks state, which is a real state both
     /// backends pass through and which no live impl holds today).
@@ -135,26 +150,37 @@ impl Caps {
     }
 }
 
-/// Which capability a RECORDED COMMAND needs, or `None` when the baseline seam
-/// is enough.
+/// WHICH CAPABILITIES A RECORDED COMMAND NEEDS — a SET, and the set is the fix.
 ///
-/// This is the instrument half — the function that reads the corpus and says
-/// what each op demands. It is the bridge between the fixtures and the
-/// vocabulary, and it is what makes "derived" checkable rather than asserted:
-/// the D2D lane cross-checks its OWN independently-authored gap reasons against
-/// it (`direct2d/replay.rs`), and the Canvas2D lane cross-checks its refusals.
+/// ⛔ IT RETURNED ONE CAPABILITY UNTIL 08/29, AND THAT SHAPE WAS THE DEFECT.
+/// `a6_blend.json[1]` is `push_isolated_layer` with `blend: multiply` — it needs
+/// the LAYER *and* the BLEND. A function returning one answer had to pick, it
+/// picked `IsolatedLayers`, and the blend requirement vanished into the layer
+/// requirement. So a backend answering "yes, I do isolated layers" was silently
+/// also claiming "…and I honour non-Normal blends on them", which is exactly the
+/// FOLDING the helm's condition (i) forbids. A one-answer function cannot state
+/// a two-requirement op, and no amount of care at the call sites fixes that.
+///
+/// ⇒ The repair has the same shape as the defect: return the set, so nothing
+/// can fold. `Caps::NONE` means the baseline seam is enough.
 #[cfg(test)]
-pub(crate) fn capability_of(op: &serde_json::Value) -> Option<Capability> {
-    match op.get("cmd").and_then(serde_json::Value::as_str)? {
-        "push_isolated_layer" | "pop_isolated_layer" => Some(Capability::IsolatedLayers),
-        "push_mask_layer" | "pop_mask_layer" => Some(Capability::MaskLayers),
-        // Only a NON-Normal group blend needs anything: a Normal one is the
-        // baseline seam. An absent `blend` records as Normal.
-        "push_group" => match op.get("blend").and_then(serde_json::Value::as_str) {
-            Some("normal") | None => None,
-            Some(_) => Some(Capability::NonNormalGroupBlend),
-        },
-        _ => None,
+pub(crate) fn capabilities_of(op: &serde_json::Value) -> Caps {
+    let non_normal = !matches!(
+        op.get("blend").and_then(serde_json::Value::as_str),
+        Some("normal") | None
+    );
+    match op.get("cmd").and_then(serde_json::Value::as_str) {
+        Some("push_isolated_layer") | Some("pop_isolated_layer") => {
+            let c = Caps::NONE.with(Capability::IsolatedLayers);
+            // Only the PUSH carries a blend; the pop has none to read.
+            if non_normal { c.with(Capability::NonNormalBlend) } else { c }
+        }
+        Some("push_mask_layer") | Some("pop_mask_layer") => {
+            Caps::NONE.with(Capability::MaskLayers)
+        }
+        // A Normal group is the baseline seam; an absent `blend` records Normal.
+        Some("push_group") if non_normal => Caps::NONE.with(Capability::NonNormalBlend),
+        _ => Caps::NONE,
     }
 }
 
@@ -193,8 +219,13 @@ mod tests {
     ///    the set comparison reds.
     #[test]
     fn the_capability_set_is_exactly_what_the_corpus_exercises() {
-        let observed: BTreeSet<Capability> =
-            corpus_ops().iter().filter_map(super::capability_of).collect();
+        let observed: BTreeSet<Capability> = corpus_ops()
+            .iter()
+            .flat_map(|op| {
+                let need = super::capabilities_of(op);
+                Capability::ALL.into_iter().filter(move |c| need.has(*c))
+            })
+            .collect();
         let declared: BTreeSet<Capability> = Capability::ALL.into_iter().collect();
         assert_eq!(
             names(&observed),
@@ -219,7 +250,10 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .filter_map(super::capability_of)
+                .flat_map(|op| {
+                    let need = super::capabilities_of(op);
+                    Capability::ALL.into_iter().filter(move |c| need.has(*c))
+                })
                 .collect();
             if caps.contains(&Capability::IsolatedLayers) && !caps.contains(&Capability::MaskLayers)
             {
@@ -269,7 +303,7 @@ mod tests {
         let ops = corpus_ops();
         let baseline = ops
             .iter()
-            .filter(|o| super::capability_of(o).is_none())
+            .filter(|o| super::capabilities_of(o) == Caps::NONE)
             .count();
         assert!(
             baseline >= 93,
@@ -279,22 +313,102 @@ mod tests {
         );
         for cmd in ["fill_rect", "stroke_path", "push_state", "clip", "draw_text_run"] {
             let op = serde_json::json!({ "cmd": cmd });
-            assert_eq!(super::capability_of(&op), None, "{cmd} is baseline");
+            assert_eq!(super::capabilities_of(&op), Caps::NONE, "{cmd} is baseline");
         }
         // ...and a Normal group is baseline while a non-Normal one is not --
         // the one arm where the CLASSIFIER reads more than the command name.
         assert_eq!(
-            super::capability_of(&serde_json::json!({ "cmd": "push_group", "blend": "normal" })),
-            None
+            super::capabilities_of(&serde_json::json!({ "cmd": "push_group", "blend": "normal" })),
+            Caps::NONE
         );
         assert_eq!(
-            super::capability_of(&serde_json::json!({ "cmd": "push_group" })),
-            None,
+            super::capabilities_of(&serde_json::json!({ "cmd": "push_group" })),
+            Caps::NONE,
             "an absent blend records as Normal"
         );
         assert_eq!(
-            super::capability_of(&serde_json::json!({ "cmd": "push_group", "blend": "multiply" })),
-            Some(Capability::NonNormalGroupBlend)
+            super::capabilities_of(&serde_json::json!({ "cmd": "push_group", "blend": "multiply" })),
+            Caps::NONE.with(Capability::NonNormalBlend)
+        );
+    }
+
+    /// ⛔ CONDITION (i), MADE MECHANICAL — a blended layer requires the LAYER
+    /// **AND** THE BLEND, and neither absorbs the other.
+    ///
+    /// This is the gate that would have stopped the 08/29 flip from being
+    /// wrong. `a6_blend.json[1]` is `push_isolated_layer` with `multiply`. While
+    /// the classifier returned ONE capability it had to choose, it chose
+    /// `IsolatedLayers`, and the blend requirement DISAPPEARED INTO the layer
+    /// requirement — so a backend answering "I do isolated layers" was silently
+    /// also claiming "…and I honour non-Normal blends on them". That is the
+    /// FOLDING the helm's condition (i) forbids, and no care at a call site can
+    /// undo it: a one-answer function cannot state a two-requirement op.
+    ///
+    /// The set makes it impossible to express the folded form, which is why the
+    /// repair is a type change and not a rule.
+    #[test]
+    #[allow(non_snake_case)]
+    fn a_blended_layer_requires_the_layer_AND_the_blend() {
+        let blended = corpus_ops()
+            .into_iter()
+            .find(|o| {
+                o["cmd"] == "push_isolated_layer"
+                    && o.get("blend").and_then(serde_json::Value::as_str)
+                        .is_some_and(|b| b != "normal")
+            })
+            .expect(
+                "the corpus must carry a BLENDED isolated layer -- without it \
+                 nothing can distinguish a backend that opens layers from one \
+                 that also honours their blend, and the folding is unprovable",
+            );
+        let need = super::capabilities_of(&blended);
+        assert!(need.has(Capability::IsolatedLayers), "it is still a layer");
+        assert!(
+            need.has(Capability::NonNormalBlend),
+            "the blend requirement was absorbed by the layer requirement -- this \
+             is the fold, and it is exactly what a backend that stores `blend` \
+             and never reads it would be excused by"
+        );
+
+        // ...and the UNBLENDED layer must NOT drag the blend in, or the two
+        // capabilities are welded the other way and every layer would be
+        // refused by a backend with no effect graph.
+        let plain = corpus_ops()
+            .into_iter()
+            .find(|o| {
+                o["cmd"] == "push_isolated_layer"
+                    && o.get("blend").and_then(serde_json::Value::as_str)
+                        .is_none_or(|b| b == "normal")
+            })
+            .expect("the corpus must also carry a plain isolated layer");
+        let need = super::capabilities_of(&plain);
+        assert!(need.has(Capability::IsolatedLayers));
+        assert!(!need.has(Capability::NonNormalBlend),
+                "a Normal layer needs no effect graph; welding these would make \
+                 every layer unroutable on a backend that lacks one");
+    }
+
+    /// ⛔ AND THE NAME HAD TO CHANGE, BECAUSE THE FIXTURES SAY IT RIDES TWO OPS.
+    /// It was `NonNormalGroupBlend` until 08/29. The corpus puts a non-Normal
+    /// blend on `push_group` (`group_blend.json`) AND on `push_isolated_layer`
+    /// (`a6_blend.json`) — one missing thing (the effect graph), two carriers. A
+    /// group-only name describes one of them and silently excuses the other,
+    /// which is how the layer site became a SILENT gap the moment a backend
+    /// implemented layers.
+    #[test]
+    fn a_non_normal_blend_rides_two_different_ops() {
+        let mut carriers: BTreeSet<String> = BTreeSet::new();
+        for op in corpus_ops() {
+            if super::capabilities_of(&op).has(Capability::NonNormalBlend) {
+                carriers.insert(op["cmd"].as_str().unwrap().to_string());
+            }
+        }
+        assert_eq!(
+            carriers.iter().cloned().collect::<Vec<_>>(),
+            vec!["push_group".to_string(), "push_isolated_layer".to_string()],
+            "the blend capability must be OBSERVED on both carriers; if the \
+             corpus ever holds only one, a name naming that one stops being \
+             wrong and the fold becomes invisible again"
         );
     }
 

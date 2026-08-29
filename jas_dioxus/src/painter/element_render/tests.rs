@@ -1451,3 +1451,55 @@ fn a_legacy_only_child_paints_nothing_even_though_the_loop_no_longer_filters() {
     assert_eq!(fills[0]["rect"]["x"].as_f64(), Some(50.0),
                "…and it is the SIBLING that survived, not the freeform child");
 }
+
+/// ⭐ THE ROUTING END OF CONDITION (i), AND IT DESCRIBES A REAL BACKEND.
+///
+/// `Caps` with layers + masks but NOT the blend is exactly what Direct2D
+/// answers once its A6 ops land: it opens isolated layers and mask brackets,
+/// and it has no effect graph for the 15 non-Normal modes. A masked element
+/// carrying `multiply` must therefore STAY LEGACY there — because
+/// `emit_masked_element` puts the element's own mode on the layer, and a
+/// backend that opens the layer without reading its blend would DISCARD the
+/// multiply with nothing reporting it.
+///
+/// ⛔ The point is that the two capabilities do not absorb each other. The SAME
+/// element converts the moment the blend answer arrives, and a Normal-mode
+/// sibling converts without it — one variable each way, so this cannot pass by
+/// refusing everything.
+#[test]
+fn a_masked_element_with_a_non_normal_blend_needs_the_effect_graph_too() {
+    use crate::geometry::element::Mask;
+    use crate::painter::BlendMode;
+
+    let masked = |mode: BlendMode| {
+        let mut r = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+        if let Element::Rect(e) = &mut r {
+            e.common.mode = mode;
+            e.common.mask = Some(Box::new(Mask {
+                subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
+                clip: true, invert: false, disabled: false, linked: true, unlink_transform: None,
+            }));
+        }
+        r
+    };
+
+    // Direct2D's answer once (a) lands: the bracket, but no effect graph.
+    let bracket_no_blend = Caps::NONE
+        .with(Capability::IsolatedLayers)
+        .with(Capability::MaskLayers);
+
+    assert!(
+        element_needs_legacy(&masked(BlendMode::Multiply), bracket_no_blend),
+        "a multiply-blended masked element must NOT be routed at a backend with \
+         no effect graph -- the layer would open and the multiply would vanish"
+    );
+    assert!(
+        !element_needs_legacy(&masked(BlendMode::Normal), bracket_no_blend),
+        "…while a Normal-mode masked element converts there, or the blend \
+         requirement has welded itself to the bracket and every mask is legacy"
+    );
+    assert!(
+        !element_needs_legacy(&masked(BlendMode::Multiply), all_caps()),
+        "…and the SAME multiply element converts once the blend answer arrives"
+    );
+}

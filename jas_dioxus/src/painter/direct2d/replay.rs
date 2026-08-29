@@ -257,7 +257,7 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::painter::capability::{capability_of, Capability};
+    use crate::painter::capability::{capabilities_of, Capability, Caps};
     use crate::painter::direct2d::device::HeadlessTarget;
     use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
@@ -388,23 +388,43 @@ mod tests {
         // instrument agreeing with itself.
         let t = HeadlessTarget::new(8, 8).expect("target");
         let probe = Direct2DPainter::new(t.target());
-        for c in Capability::ALL {
-            assert!(!probe.supports(c),
-                    "this backend answers YES to {c:?} while its own body for it \
-                     is `unimplemented!()` -- flip the ANSWER only when (a) lands");
-        }
-        let needing: usize = scenes()
+        // ⛔ NO BLANKET "answers NO to everything" ANY MORE. That assertion was
+        // true when written and would have had to be DELETED at the first flip —
+        // and a gate deleted to let a change through has stopped being a gate.
+        // What must hold at every stage is the AGREEMENT below: whatever this
+        // backend answers, its report must match it, op for op.
+        assert!(!probe.supports(Capability::NonNormalBlend),
+                "the effect graph is not built (B1: a backdrop snapshot plus a \
+                 CLSID_D2D1Blend graph per blended primitive), and it is a \
+                 DECLARED gap. It rides `push_group` AND `push_isolated_layer`; \
+                 answering yes here would excuse a `blend` that reaches no point \
+                 of use.");
+        // ⛔ COMPUTED FROM THE ANSWERS, NOT PINNED TO A NUMBER. This asserted
+        // `== 31` in effect, by counting every op that needs ANY capability —
+        // correct only while this backend denied all of them. The moment one
+        // answer flips, a pinned count is a test that must be rewritten by hand
+        // to stay true, which is a test that will be rewritten to stay GREEN.
+        // Counting the ops whose requirements this backend DENIES tracks the
+        // answers automatically, so the next flip needs no edit here.
+        let supported = Capability::ALL
+            .into_iter()
+            .fold(Caps::NONE, |acc, c| if probe.supports(c) { acc.with(c) } else { acc });
+        let denied_ops: usize = scenes()
             .iter()
-            .map(|(_, v)| v.as_array()
-                 .map(|a| a.iter().filter(|o| capability_of(o).is_some()).count())
+            .map(|(_, v)| v.as_array().map(|a| a.iter()
+                    .filter(|o| !supported.supplies(capabilities_of(o))).count())
                  .unwrap_or(0))
             .sum();
-        assert!(needing > 0, "no recorded op needs a capability; the corpus stopped \
-                              being able to distinguish the backends");
-        assert_eq!(r.unsupported.len(), needing,
-                   "this backend refused {} ops but {needing} recorded ops need a \
-                    capability it answers NO to -- the stated answers and the \
-                    measured report disagree", r.unsupported.len());
+        assert!(denied_ops > 0, "no recorded op needs a capability this backend \
+                                 denies; the corpus stopped being able to \
+                                 distinguish the backends");
+        assert_eq!(r.unsupported.len(), denied_ops,
+                   "this backend refused {} ops but {denied_ops} recorded ops carry \
+                    a requirement it answers NO to -- the stated answers and the \
+                    measured report disagree. Under-refusing is the dangerous \
+                    direction: an op that RUNS while a requirement it carries is \
+                    denied has had that requirement silently discarded.",
+                   r.unsupported.len());
     }
 
     /// The harness must NOT report success on a command it silently dropped.

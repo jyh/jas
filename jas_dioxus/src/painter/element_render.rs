@@ -96,10 +96,29 @@ pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
     // masked element under an alpha ancestor renders DIFFERENTLY once it takes
     // the bracket. See `emit_masked_element` for the law and defect D-α for
     // what HEAD does instead.
-    if active_mask(elem).is_some()
-        && !(caps.has(Capability::IsolatedLayers) && caps.has(Capability::MaskLayers))
-    {
-        return true;
+    if let Some(_mask) = active_mask(elem) {
+        // WHAT THE BRACKET WILL ASK OF THE BACKEND, built as a SET and compared
+        // whole. `emit_masked_element` emits
+        // `push_isolated_layer(elem.opacity(), elem.common().mode)` — the ONLY
+        // place a blend crosses this seam (groups fold their alpha and emit no
+        // `push_group`, per D3). So an element whose own mode is non-Normal
+        // needs the effect graph as well as the layer and the mask.
+        //
+        // ⛔ THE BLEND CLAUSE IS NOT DECORATION — it is condition (i) at the
+        // routing end. Without it, a masked element carrying `multiply` routes
+        // to any backend that answers yes to layers+masks, and a backend that
+        // opens the layer while never reading its `blend` DISCARDS the multiply
+        // with nothing reporting it. Refusing to route is the only protection
+        // the router can give against a silent discard.
+        let mut required = Caps::NONE
+            .with(Capability::IsolatedLayers)
+            .with(Capability::MaskLayers);
+        if elem.common().mode != crate::painter::BlendMode::Normal {
+            required = required.with(Capability::NonNormalBlend);
+        }
+        if !caps.supplies(required) {
+            return true;
+        }
     }
     // Freeform gradient on fill or stroke (never crosses the seam).
     if elem
