@@ -11,6 +11,7 @@
 use super::recording::RecordingPainter;
 use super::scene::{
     build_a6_alpha_law_scene, build_a6_blend_scene, build_a6_law_variants_scene,
+    build_group_blend_scene,
     build_a6_nested_layers_scene, build_proof_scene, build_synthetic_scene,
 };
 use super::sink::NoOpPainter;
@@ -180,6 +181,7 @@ const A6_LAW_VARIANTS: &str = include_str!("testdata/a6_law_variants.json");
 const A6_ALPHA_LAW: &str = include_str!("testdata/a6_alpha_law.json");
 const A6_NESTED_LAYERS: &str = include_str!("testdata/a6_nested_layers.json");
 const A6_BLEND: &str = include_str!("testdata/a6_blend.json");
+const GROUP_BLEND: &str = include_str!("testdata/group_blend.json");
 
 fn record(build: fn(&mut RecordingPainter)) -> String {
     let mut rec = RecordingPainter::new();
@@ -196,6 +198,7 @@ fn regenerate_a6_goldens() {
         ("a6_alpha_law.json", build_a6_alpha_law_scene as fn(&mut RecordingPainter)),
         ("a6_nested_layers.json", build_a6_nested_layers_scene as fn(&mut RecordingPainter)),
         ("a6_blend.json", build_a6_blend_scene as fn(&mut RecordingPainter)),
+        ("group_blend.json", build_group_blend_scene as fn(&mut RecordingPainter)),
     ] {
         let mut json = record(build);
         json.push('\n');
@@ -213,6 +216,13 @@ fn a6_law_variants_match_golden() {
 #[test]
 fn a6_alpha_law_matches_golden() {
     assert_eq!(record(build_a6_alpha_law_scene).trim(), A6_ALPHA_LAW.trim());
+}
+
+/// The non-Normal GROUP blend, which no scene carried until 2026-08-29 — see the
+/// builder for why a declared gap with no fixture is the defect here.
+#[test]
+fn group_blend_matches_golden() {
+    assert_eq!(record(build_group_blend_scene).trim(), GROUP_BLEND.trim());
 }
 
 /// §6.3 — layer-in-layer, against D-β's self-clobbering static scratch.

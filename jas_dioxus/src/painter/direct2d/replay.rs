@@ -311,7 +311,7 @@ mod tests {
         // The four A6 goldens (design block §6) put masks, nested layers and a
         // non-Normal blend into the corpus. So the assertion inverts: the gap
         // must now be REPORTED, and it must be EXACTLY the declared one.
-        assert_eq!(n, 18, "14 pre-A6 scenes + the 4 A6 goldens");
+        assert_eq!(n, 19, "14 pre-A6 scenes + the 4 A6 goldens + group_blend");
         for want in ["a6_law_variants.json", "a6_alpha_law.json",
                      "a6_nested_layers.json", "a6_blend.json"] {
             assert!(scenes().iter().any(|(name, _)| name == want),
@@ -348,6 +348,29 @@ mod tests {
         assert!(!r.unsupported.is_empty(),
                 "the A6 scenes contain masks and a non-Normal blend; a report with \
                  NO gaps means the corpus stopped containing them");
+
+        // ⛔ EVERY DECLARED GAP MUST ACTUALLY FIRE, NOT MERELY BE PERMITTED.
+        // Measured 2026-08-29: DECLARED[2] — the non-Normal blend gap — fired on
+        // NO scene in this corpus. It reads only a `push_group`'s mode, both
+        // `push_group` ops here were `normal`, and the corpus's single
+        // non-Normal blend rode `push_isolated_layer` and landed in the
+        // isolated-layer gap instead. So the arm was unreachable and this test
+        // could not tell that from a backend that handles group blend fine.
+        //
+        // That is the SAME defect this test's own comment celebrates removing
+        // for masks ("the corpus simply contains none, which is itself a stated
+        // limit of this measurement rather than evidence they work") — repaired
+        // for the mask half and left standing for the group-blend half in the
+        // same breath. `group_blend.json` closes it.
+        //
+        // ⇒ THE ASSERTION IS THAT EACH DECLARED REASON IS *OBSERVED*. A declared
+        // gap nothing drives is indistinguishable from one that cannot fire, and
+        // the DECLARED list is where a stale entry would hide longest.
+        for want in DECLARED {
+            assert!(r.unsupported.iter().any(|(_, why)| *why == want),
+                    "DECLARED gap never fired on any scene: {want:?} -- either \
+                     the corpus stopped exercising it or the gap is stale");
+        }
     }
 
     /// The harness must NOT report success on a command it silently dropped.
