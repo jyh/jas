@@ -13,6 +13,29 @@ parse_deps = false
 [export]
 include = ["JasBytes", "JasStatus", "JasEngine"]
 prefix = ""
+# ⛔ `include` IS NOT A WHITELIST, AND THE HEADER PROVES IT. Every `pub` type
+# reachable from a `pub mod` lands in the generated C header whether or not it
+# is named above -- `PolyFillRule` and `Transform` are each in there today as
+# ORPHAN opaque typedefs, referenced by no function, usable by no C caller.
+# So the three names above state the INTENDED S-A boundary (src/ffi.rs, laws
+# BL1-BL6) while the actual surface is "whatever is pub".
+#
+# `Capability` and `Caps` are the Painter seam's routing vocabulary (added
+# 08/29 for council row (e)); they are Rust-internal by nature, cross no FFI
+# boundary, and are `pub` only because a `pub trait` method takes one. Adding
+# them to a PUBLISHED C header is an act, not a consequence, and this is where
+# it is declined.
+#
+# 📌 THE CLASS IS NAMED, NOT JUST THIS INSTANCE. The two orphans already there
+# are the same defect and are deliberately NOT removed here: adding a symbol to
+# a published header is mine to decline, REMOVING one is a breaking change to
+# whatever compiles against it, and that is a decision with an owner rather
+# than a side effect of a routing PR.
+#
+# ⚠️ Exclusion is BY NAME and global. A future FFI type called `Caps` would be
+# silently dropped. Driven both ways when it landed: with these lines the
+# freshness gate passes; without them it FAILS naming exactly these two.
+exclude = ["Capability", "Caps"]
 
 [enum]
 prefix_with_name = true

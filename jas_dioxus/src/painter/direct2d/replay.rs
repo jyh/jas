@@ -257,6 +257,7 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::painter::capability::{capability_of, Capability};
     use crate::painter::direct2d::device::HeadlessTarget;
     use windows::Win32::Graphics::Direct2D::Common::D2D1_COLOR_F;
 
@@ -371,6 +372,39 @@ mod tests {
                     "DECLARED gap never fired on any scene: {want:?} -- either \
                      the corpus stopped exercising it or the gap is stale");
         }
+
+        // ⚖️ THE CAPABILITY QUERY, HELD AGAINST THIS REPORT (council 08/29,
+        // row (e) = (b)). `Direct2DPainter::supports` answers NO to all three
+        // capabilities; this is the arm that makes that an answer rather than a
+        // comment, and it is deliberately computed FROM THE CORPUS.
+        //
+        // ⇒ Direct2D must refuse EXACTLY the recorded ops that need a
+        // capability -- no fewer (it cannot be quietly executing something it
+        // says it cannot do), and no more (a refusal with no capability behind
+        // it is an undeclared gap). The count comes from
+        // `capability::capability_of`, which is authored against the FIXTURES
+        // and knows nothing about this backend, so this is two independently
+        // written instruments agreeing on one object rather than one
+        // instrument agreeing with itself.
+        let t = HeadlessTarget::new(8, 8).expect("target");
+        let probe = Direct2DPainter::new(t.target());
+        for c in Capability::ALL {
+            assert!(!probe.supports(c),
+                    "this backend answers YES to {c:?} while its own body for it \
+                     is `unimplemented!()` -- flip the ANSWER only when (a) lands");
+        }
+        let needing: usize = scenes()
+            .iter()
+            .map(|(_, v)| v.as_array()
+                 .map(|a| a.iter().filter(|o| capability_of(o).is_some()).count())
+                 .unwrap_or(0))
+            .sum();
+        assert!(needing > 0, "no recorded op needs a capability; the corpus stopped \
+                              being able to distinguish the backends");
+        assert_eq!(r.unsupported.len(), needing,
+                   "this backend refused {} ops but {needing} recorded ops need a \
+                    capability it answers NO to -- the stated answers and the \
+                    measured report disagree", r.unsupported.len());
     }
 
     /// The harness must NOT report success on a command it silently dropped.

@@ -27,6 +27,14 @@ impl NoOpPainter {
 }
 
 impl Painter for NoOpPainter {
+    /// A sink refuses nothing: every op is counted and none can fall into an
+    /// unimplemented arm, so the narrow question `supports` asks — "does this
+    /// EXECUTE here?" — is yes for all of them. It draws nothing either, which
+    /// is why this impl is a bench instrument and not a routing target.
+    fn supports(&self, _cap: crate::painter::capability::Capability) -> bool {
+        true
+    }
+
     fn fill_path(&mut self, _path: &[PathCommand], _winding: FillRule, _brush: &Brush, _paint_alpha: f64) {
         self.calls += 1;
     }
