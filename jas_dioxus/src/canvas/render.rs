@@ -3602,7 +3602,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn mask_blit_alpha_carries_the_inherited_ancestor_product() {
         // D-alpha, half 1: set_global_alpha REPLACES, so the blit must carry
         // the ancestors or their alpha is silently dropped.

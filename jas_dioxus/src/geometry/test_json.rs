@@ -2351,7 +2351,6 @@ mod tests {
         assert!(!json.contains("\"id\""), "id-less element must not emit id key: {json}");
     }
 
-    #[test]
     /// R3 (JYH, 2026-08-01): the canonical-JSON oracle prints SIX decimals.
     ///
     /// The oracle must be strictly finer than every writer it adjudicates, and
