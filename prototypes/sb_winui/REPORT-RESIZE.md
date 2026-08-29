@@ -58,10 +58,28 @@ times**:
 1.19  1.42  1.10  1.24  1.20  1.12   ms
 ```
 
-⇒ **One outlier in ~15 observations, not reproduced in six targeted repeats.** It is a **GC
-pause**, it is **mine** (the collect is my repair, §3), and it is **not a property of the
-route**. Recorded because a 23 ms hitch on a user gesture is visible if it recurs, and because
-deleting the one datum that disagrees is how a tail claim gets published wrong.
+⇒ ~~One outlier in ~15 observations, not reproduced in six targeted repeats.~~
+
+⛔ **CORRECTED 08/29 05:3x — IT RECURRED, AND MY "NOT REPRODUCED" WAS THE WEAKER READING OF MY
+OWN DATA.** A later run threw **18.20 ms** on the same field. That is **two outliers
+(22.97, 18.20) in roughly twenty-odd observations — on the order of one in ten**, not one in
+fifteen-and-never-again.
+
+**What I got wrong was not the measurement but the inference.** Six clean repeats after one
+outlier is *consistent with* a ~10 % tail — the probability of missing it six times running is
+about a half. **I read "did not reproduce in six" as evidence of absence when it was barely
+evidence at all**, which is the same error as quoting a max from 2 of 2, pointed the other way.
+
+**What it changes and what it does not:**
+* **The route decision: nothing.** The tail is in *my repair*, not in either route, and both
+  routes pay the same collect.
+* **How the repair must be described: everything.** Not *"~1.2 ms"* but ***"~1.2 ms typical
+  with an 18–23 ms hitch at roughly one resize in ten."*** That is a user-visible stutter on a
+  window drag.
+* ⇒ And it makes §3's negative result **cost more than it looked like it did.** The collect is
+  still the only repair available through this projection — but it is now a repair with a
+  known, recurring tail, and that should be read as **a standing charge against the
+  `out object` projection**, not as a solved problem.
 
 ## 2 · STEADY STATE — the copy is fixed-cost, confirmed at a THIRD scale
 
