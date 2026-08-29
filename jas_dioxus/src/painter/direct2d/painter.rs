@@ -144,10 +144,11 @@ impl<'a> Direct2DPainter<'a> {
     /// ⚠️ LUMINANCE IS THE EFFECT'S, NOT MINE. `CLSID_D2D1LuminanceToAlpha` uses
     /// its own coefficients; the seam doc names BT.601 (browser) against BT.709
     /// (vello) as the R8 ratification point. This backend therefore agrees with
-    /// whichever D2D uses, and a pixel-equality check against Canvas2D on a
-    /// non-grey mask is the thing that would expose a disagreement. **Not
-    /// silently reconciled here** -- if the goldens disagree, that is the R8
-    /// question arriving with evidence, not a bug in this function.
+    /// whichever D2D uses, and that choice is RECORDED rather than reconciled:
+    /// if R8 later rules a coefficient set, this is the site that changes.
+    ///
+    /// ⚠️ No cross-backend comparison is claimed or implied. Establishing one
+    /// would be its own row with its own harness, priced first (helm, 08/29).
     fn apply_mask(&self, body: &ID2D1Bitmap, mask: &ID2D1Bitmap, law: Mask) -> Option<ID2D1Bitmap> {
         let (brt, rt) = self.open_surface()?;
         // The composite runs in DEVICE space: both bitmaps are already in the
@@ -1010,12 +1011,19 @@ mod tests {
 
     /// ⭐ THE A6 ALPHA LAW, IN PIXELS — defect D-alpha's ratified repair.
     ///
-    /// This is the property the "F3/layer-only pixel-equal to Canvas2D" arm
-    /// exists to catch, asserted where it CAN be asserted. `canvas2d` is
-    /// `#[cfg(feature = "web")]` over `web_sys`, so it cannot be instantiated in
-    /// this process at all and the two backends cannot meet in one binary --
-    /// see the finding filed with the council. Until a golden bridge exists, the
-    /// LAW is checkable even when the cross-backend PIXELS are not.
+    /// ⛔ THE CROSS-BACKEND FRAMING THAT USED TO BE HERE IS REMOVED, and its
+    /// removal is the point rather than tidying. This doc cited a
+    /// "pixel-equal to Canvas2D" acceptance that the helm WITHDREW on 08/29:
+    /// it named a canvas-lane fixture and a comparison no path in this repo can
+    /// execute. A criterion must be written in the terms of the seat that must
+    /// execute it — and a retired criterion left quoted in a live comment is a
+    /// criterion the next reader inherits as current. (Citation ageing, banked
+    /// 08/28: a cited claim becomes the citing document's own the moment it is
+    /// written down.)
+    ///
+    /// What this test asserts stands entirely on its own: **this backend obeys
+    /// the ratified A6 alpha law.** It says nothing about any other backend and
+    /// never did.
     ///
     /// A 0.5 group around a 0.5 layer around an opaque red fill must land at
     /// **0.25**, i.e. alpha ~= 64/255. Three ways to be wrong and the number
