@@ -110,7 +110,9 @@
 //! winding; A4: paint-time alpha is an explicit per-paint parameter; A5: clip
 //! stays path-only and the seam carries no freeform-gradient policy).
 
+pub mod corpus;
 pub mod element_render;
+pub(crate) mod replay_decode;
 pub mod recording;
 pub mod scene;
 pub mod sink;

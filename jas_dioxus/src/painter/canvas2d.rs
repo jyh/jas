@@ -793,4 +793,117 @@ mod a6_layer_tests {
                    "the OUTER layer's body must survive — a shared scratch \
                     surface would have clipped it too (D-β's shape)");
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // F2 — THE CANVAS2D CORPUS-REPLAY DRIVER.
+    //
+    // ⛔ WHY IT EXISTS. `direct2d/replay.rs` drives EVERY recorded scene through
+    // its backend and reports, per command, what it could not do. Canvas2D had
+    // no such lane: it consumed the same JSON only as EXPECTED OUTPUT (a
+    // RecordingPainter's text compared against the golden) and its browser
+    // coverage was bespoke unit tests. So one backend's report was derived from
+    // the fixtures and the other's did not exist — and anything built on that
+    // asymmetry would be half-derived, which looks finished and is not.
+    //
+    // This drives the SAME ARTIFACT (painter::corpus::SCENES) through the SAME
+    // trait, in a real browser.
+    //
+    // ⚠️ IT ASSERTS COVERAGE, NOT PIXELS. What a scene should LOOK like is the
+    // goldens' job; what this says is that every recorded command EXECUTES here
+    // — which is the fact a capability report would have to rest on, and the
+    // fact nobody could state for this backend before.
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// Drive one decoded scene, returning how many commands actually executed.
+    /// An unrecognised command is NOT executed and NOT skipped quietly — the
+    /// count falls short and the caller's assertion names the scene.
+    fn drive(p: &mut Canvas2dPainter, ops: &[serde_json::Value]) -> usize {
+        use crate::painter::replay_decode as d;
+        let mut n = 0usize;
+        for op in ops {
+            let Some(cmd) = op.get("cmd").and_then(serde_json::Value::as_str) else { continue };
+            let a = op.get("alpha").and_then(serde_json::Value::as_f64).unwrap_or(1.0);
+            let br = op.get("brush").and_then(d::brush);
+            let ok = match cmd {
+                "fill_rect" => br.map(|b| p.fill_rect(d::rect(op.get("rect").unwrap()), &b, a)).is_some(),
+                "stroke_rect" => br.map(|b| p.stroke_rect(
+                    d::rect(op.get("rect").unwrap()), &b,
+                    &d::stroke(op.get("stroke").unwrap()), a)).is_some(),
+                "fill_path" => br.map(|b| p.fill_path(
+                    &d::path(op.get("path").unwrap()), d::winding(op), &b, a)).is_some(),
+                "stroke_path" => br.map(|b| p.stroke_path(
+                    &d::path(op.get("path").unwrap()), &b,
+                    &d::stroke(op.get("stroke").unwrap()), a)).is_some(),
+                "fill_ellipse_arc" => br.map(|b| p.fill_ellipse_arc(
+                    &d::arc(op.get("arc").unwrap()), d::winding(op), &b, a)).is_some(),
+                "stroke_ellipse_arc" => br.map(|b| p.stroke_ellipse_arc(
+                    &d::arc(op.get("arc").unwrap()), &b,
+                    &d::stroke(op.get("stroke").unwrap()), a)).is_some(),
+                "clip" => { p.clip(&d::path(op.get("path").unwrap()), d::winding(op)); true }
+                "push_state" => { p.push_state(d::transform(op.get("transform").unwrap())); true }
+                "pop_state" => { p.pop_state(); true }
+                "push_group" => d::blend(op).map(|b| p.push_group(a, b)).is_some(),
+                "pop_group" => { p.pop_group(); true }
+                "push_isolated_layer" => d::blend(op).map(|b| p.push_isolated_layer(a, b)).is_some(),
+                "pop_isolated_layer" => { p.pop_isolated_layer(); true }
+                "push_mask_layer" => d::mask(op).map(|m| p.push_mask_layer(m)).is_some(),
+                "pop_mask_layer" => { p.pop_mask_layer(); true }
+                "draw_text_run" => {
+                    let r = op.get("run").unwrap_or(&serde_json::Value::Null);
+                    match r.get("mode").and_then(serde_json::Value::as_str) {
+                        Some("fast_run") => {
+                            let run = TextRun::FastRun {
+                                font: r.get("font").and_then(serde_json::Value::as_str)
+                                    .unwrap_or("sans-serif").to_string(),
+                                size: crate::painter::replay_decode::f(r, "size"),
+                                text: r.get("text").and_then(serde_json::Value::as_str)
+                                    .unwrap_or("").to_string(),
+                                letter_spacing: crate::painter::replay_decode::f(r, "letter_spacing"),
+                                x: crate::painter::replay_decode::f(r, "x"),
+                                y: crate::painter::replay_decode::f(r, "y"),
+                            };
+                            if let Some(b) = br { p.draw_text_run(&run, &b, a); true } else { false }
+                        }
+                        // PlacedGlyphs is PH3 and would panic; the corpus holds
+                        // none, and this arm says so rather than pretending.
+                        _ => false,
+                    }
+                }
+                _ => false,
+            };
+            if ok { n += 1; }
+        }
+        n
+    }
+
+    /// ⛔ EVERY RECORDED COMMAND IN THE WHOLE CORPUS EXECUTES ON THIS BACKEND.
+    /// Not "the suite is green" — the count is read back and compared against
+    /// what the corpus actually holds, so a command silently skipped makes the
+    /// total fall short and names its scene.
+    #[wasm_bindgen_test]
+    fn every_recorded_scene_replays_through_canvas2d() {
+        let mut total = 0usize;
+        let mut executed = 0usize;
+        for (name, text) in crate::painter::corpus::SCENES {
+            let scene: serde_json::Value =
+                serde_json::from_str(text).expect("corpus scene must parse");
+            let ops = scene.as_array().expect("a scene is an array");
+            // A fresh surface per scene: leftover context state from a previous
+            // scene would make this measure the ORDER as well as the ops.
+            let (_c, ctx) = surface(64, 64);
+            let mut p = Canvas2dPainter::new(&ctx);
+            let n = drive(&mut p, ops);
+            assert_eq!(n, ops.len(),
+                       "{name}: {} of {} commands executed -- a command this \
+                        backend cannot replay is a GAP, and it must be named, \
+                        not absorbed", n, ops.len());
+            total += ops.len();
+            executed += n;
+        }
+        // ANTI-VACUITY: an empty corpus would satisfy every assertion above.
+        assert!(crate::painter::corpus::SCENES.len() >= 20,
+                "the corpus shrank; this lane replays whatever it is given");
+        assert!(total >= 116, "corpus op count fell to {total}");
+        assert_eq!(executed, total);
+    }
 }
