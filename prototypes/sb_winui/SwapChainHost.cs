@@ -249,7 +249,8 @@ internal sealed unsafe class SwapChainHost : IDisposable
         factory.CreateSwapChainForComposition(_device, in desc, null, out var swapChain);
         _swapChain = swapChain;
 
-        CreateOffscreenTarget();
+        // Same rule as Resize: the direct route never touches this surface.
+        if (OffscreenMode) { CreateOffscreenTarget(); }
 
         // Must happen on the UI thread; so must every later Present.
         var native = panel.As<ISwapChainPanelNative>();
@@ -391,7 +392,17 @@ internal sealed unsafe class SwapChainHost : IDisposable
         _width = w;
         _height = h;
         var swTgt = System.Diagnostics.Stopwatch.StartNew();
-        CreateOffscreenTarget();
+        // ONLY THE ROUTE THAT USES IT PAYS FOR IT. Measured 08/28: this ran
+        // unconditionally, so the DIRECT route allocated an offscreen target it
+        // never touches -- on every resize, and in Attach before that. Reported
+        // in REPORT-RESIZE rather than fixed mid-sweep, because changing the
+        // instrument between arms is the one thing the control-pair method
+        // exists to prevent. Fixed now that the sweep is banked.
+        //
+        // It does not move the published number: target-recreate was 0.11ms on
+        // BOTH routes, so removing it from direct changes direct's total by that
+        // and leaves the OFFSCREEN-MINUS-DIRECT comparison exactly where it was.
+        if (OffscreenMode) { CreateOffscreenTarget(); }
         swTgt.Stop();
 
         // THE THREE PARTS ARE REPORTED SEPARATELY, and the GC one especially.
