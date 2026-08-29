@@ -29,6 +29,7 @@ use serde_json::Value;
 use super::painter::Direct2DPainter;
 use crate::geometry::element::Color;
 use crate::painter::{
+    Mask,
     BlendMode, Brush, ColorStop, EllipseArc, FillRule, LinearGradient, LineCap, LineJoin,
     Painter, PathCommand, RadialGradient, Rect, StrokeStyle, TextRun, Transform,
 };
@@ -244,8 +245,32 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
             // implementation, not a ruling. Both brackets are DECLARED gaps so
             // they land in the report instead of the "unknown command" arm --
             // an unimplemented op and an unrecognised one are different facts.
-            "push_mask_layer" | "pop_mask_layer" =>
-                r.unsupported.push((cmd.into(), "masks pending the A6 implementation in this backend")),
+            // A6 MASKS ARE IMPLEMENTED IN THIS BACKEND NOW. An UNRECOGNISED law
+            // still reports rather than defaulting to one: silently substituting
+            // a law would render a plausible wrong picture, which is the whole
+            // failure class this corpus exists to catch.
+            "push_mask_layer" => {
+                let m = op.get("mask");
+                let kind = m.and_then(|v| v.get("kind")).and_then(Value::as_str);
+                let law = match kind {
+                    Some("luminance_clip_in") => Some(Mask::LuminanceClipIn),
+                    Some("alpha_clip_out") => Some(Mask::AlphaClipOut),
+                    Some("alpha_reveal_outside_bbox") => {
+                        m.and_then(|v| v.get("bbox")).map(|b| Mask::AlphaRevealOutsideBbox {
+                            bbox: Rect {
+                                x: f(b, "x"), y: f(b, "y"),
+                                w: f(b, "w"), h: f(b, "h"),
+                            },
+                        })
+                    }
+                    _ => None,
+                };
+                match law {
+                    Some(l) => { p.push_mask_layer(l); r.drawn += 1; }
+                    None => r.unsupported.push((cmd.into(), "mask law not understood")),
+                }
+            }
+            "pop_mask_layer" => { p.pop_mask_layer(); r.drawn += 1; }
             // A6 IS IMPLEMENTED IN THIS BACKEND NOW (render-target swap; see
             // painter::push_isolated_layer). The blend arm mirrors push_group's
             // exactly: Normal composites with DrawBitmap, and the other fifteen
@@ -352,8 +377,12 @@ mod tests {
         // Retired from the list rather than left in it: a DECLARED entry nothing
         // emits is a gap the fleet still believes it has, and this list is read
         // as the backend's own statement of what it cannot do.
-        const DECLARED: [&str; 2] = [
-            "masks pending the A6 implementation in this backend",
+        // ⭐ SECOND ENTRY RETIRED, 2026-08-29: the three A6 mask laws are
+        // implemented (LuminanceToAlpha + SOURCE_IN; DESTINATION_OUT; and the
+        // same with a bbox clip). What remains is the BLEND gap, which
+        // push_group already declared before A6 existed and which is not a mask
+        // or layer gap at all.
+        const DECLARED: [&str; 1] = [
             "non-Normal blend needs an effect graph",
         ];
         for (cmd, why) in &r.unsupported {

@@ -23,7 +23,12 @@
 
 use windows::core::{Interface, Result};
 use windows::Win32::Graphics::Direct2D::{
-    ID2D1BitmapRenderTarget, ID2D1DeviceContext, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+    ID2D1Bitmap, ID2D1BitmapRenderTarget, ID2D1DeviceContext, CLSID_D2D1LuminanceToAlpha,
+    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1_INTERPOLATION_MODE_LINEAR,
+};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D1_COMPOSITE_MODE_DESTINATION_OUT, D2D1_COMPOSITE_MODE_SOURCE_IN,
+    D2D1_COMPOSITE_MODE_SOURCE_OVER,
 };
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_COLOR_F, D2D1_GRADIENT_STOP, D2D_RECT_F,
@@ -73,6 +78,21 @@ struct LayerTarget {
     /// A6 §3.2: the open-group product RESTARTS at 1.0 inside the layer, so the
     /// parent's is set aside here and restored by the pop.
     saved_group_alphas: Vec<f64>,
+    /// The mask this layer's body must be eaten into at composite time, if any.
+    ///
+    /// ⭐ THE LAW IS APPLIED AT THE BLIT, NOT AT `pop_mask_layer`, and that is
+    /// the design rather than a convenience. A6 puts the isolated layer there
+    /// precisely so the law has a finished body buffer to eat into; applying it
+    /// earlier would mean masking a surface that is still open for drawing, and
+    /// D2D has no way to re-run a composite over a target mid-`BeginDraw`.
+    mask: Option<(ID2D1Bitmap, Mask)>,
+}
+
+/// One open mask bracket: its own surface, and the law to apply on close.
+struct MaskTarget {
+    brt: ID2D1BitmapRenderTarget,
+    rt: ID2D1RenderTarget,
+    law: Mask,
 }
 
 pub struct Direct2DPainter<'a> {
@@ -83,6 +103,9 @@ pub struct Direct2DPainter<'a> {
     /// Open isolated layers, innermost last. Empty is the common case and
     /// costs one `is_empty` per draw.
     layers: Vec<LayerTarget>,
+    /// Open mask brackets. While one is open every draw is MASK CONTENT and
+    /// goes to the mask surface, never to the body.
+    masks: Vec<MaskTarget>,
     /// ⛔ A FAILED OPEN MUST NOT SILENTLY DRAW ON THE PARENT. If the layer
     /// surface cannot be made, the body would composite against the very
     /// backdrop it was supposed to be isolated from -- visibly wrong, and
@@ -98,8 +121,86 @@ impl<'a> Direct2DPainter<'a> {
             frames: Vec::new(),
             group_alphas: Vec::new(),
             layers: Vec::new(),
+            masks: Vec::new(),
             failed_layers: 0,
         }
+    }
+
+    /// Re-composite `body` through `mask` under `law`, onto a fresh surface.
+    ///
+    /// THE THREE A6 LAWS, LOWERED ONTO D2D COMPOSITE MODES:
+    ///
+    /// | law | graph |
+    /// |---|---|
+    /// | `LuminanceClipIn` | mask -> LuminanceToAlpha, then body SOURCE_IN |
+    /// | `AlphaClipOut` | body, then mask DESTINATION_OUT |
+    /// | `AlphaRevealOutsideBbox` | body, then mask DESTINATION_OUT **clipped to the bbox** |
+    ///
+    /// ⭐ The third is the second with a clip, and that is the enum's own
+    /// collapse showing through: outside the bbox nothing is cut, so the body is
+    /// revealed there. Writing it as a third graph would have hidden that they
+    /// share a law.
+    ///
+    /// ⚠️ LUMINANCE IS THE EFFECT'S, NOT MINE. `CLSID_D2D1LuminanceToAlpha` uses
+    /// its own coefficients; the seam doc names BT.601 (browser) against BT.709
+    /// (vello) as the R8 ratification point. This backend therefore agrees with
+    /// whichever D2D uses, and a pixel-equality check against Canvas2D on a
+    /// non-grey mask is the thing that would expose a disagreement. **Not
+    /// silently reconciled here** -- if the goldens disagree, that is the R8
+    /// question arriving with evidence, not a bug in this function.
+    fn apply_mask(&self, body: &ID2D1Bitmap, mask: &ID2D1Bitmap, law: Mask) -> Option<ID2D1Bitmap> {
+        let (brt, rt) = self.open_surface()?;
+        // The composite runs in DEVICE space: both bitmaps are already in the
+        // parent's frame, so a transform here would apply it twice.
+        unsafe { rt.SetTransform(&Matrix3x2::identity()) };
+        let dc: ID2D1DeviceContext = rt.cast().ok()?;
+
+        let ok = (|| -> Option<()> {
+            match law {
+                Mask::LuminanceClipIn => {
+                    let eff = unsafe { dc.CreateEffect(&CLSID_D2D1LuminanceToAlpha) }.ok()?;
+                    unsafe { eff.SetInput(0, mask, true) };
+                    let out = unsafe { eff.GetOutput() }.ok()?;
+                    unsafe {
+                        dc.DrawImage(&out, None, None,
+                            D2D1_INTERPOLATION_MODE_LINEAR,
+                            D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                        dc.DrawImage(body, None, None,
+                            D2D1_INTERPOLATION_MODE_LINEAR,
+                            D2D1_COMPOSITE_MODE_SOURCE_IN);
+                    }
+                }
+                Mask::AlphaClipOut => unsafe {
+                    dc.DrawImage(body, None, None,
+                        D2D1_INTERPOLATION_MODE_LINEAR,
+                        D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                    dc.DrawImage(mask, None, None,
+                        D2D1_INTERPOLATION_MODE_LINEAR,
+                        D2D1_COMPOSITE_MODE_DESTINATION_OUT);
+                },
+                Mask::AlphaRevealOutsideBbox { bbox } => unsafe {
+                    dc.DrawImage(body, None, None,
+                        D2D1_INTERPOLATION_MODE_LINEAR,
+                        D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                    let r = D2D_RECT_F {
+                        left: bbox.x as f32,
+                        top: bbox.y as f32,
+                        right: (bbox.x + bbox.w) as f32,
+                        bottom: (bbox.y + bbox.h) as f32,
+                    };
+                    dc.PushAxisAlignedClip(&r, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+                    dc.DrawImage(mask, None, None,
+                        D2D1_INTERPOLATION_MODE_LINEAR,
+                        D2D1_COMPOSITE_MODE_DESTINATION_OUT);
+                    dc.PopAxisAlignedClip();
+                },
+            }
+            Some(())
+        })();
+
+        unsafe { let _ = rt.EndDraw(None, None); }
+        ok?;
+        unsafe { brt.GetBitmap() }.ok()
     }
 
     /// THE TARGET EVERY DRAW GOES TO: the innermost open isolated layer, or the
@@ -110,10 +211,35 @@ impl<'a> Direct2DPainter<'a> {
     /// the workarounds are worse than one AddRef: a COM clone is a refcount
     /// bump, and it keeps every call site reading as it did before.
     fn rt(&self) -> ID2D1RenderTarget {
+        // ORDER MATTERS: a mask bracket is INSIDE whatever layer is open, so an
+        // open mask wins. Getting this backwards would draw the mask content
+        // into the body it is supposed to be masking -- and the body would look
+        // plausible, which is the worst way to be wrong.
+        if let Some(m) = self.masks.last() {
+            return m.rt.clone();
+        }
         match self.layers.last() {
             Some(l) => l.rt.clone(),
             None => self.base_rt.clone(),
         }
+    }
+
+    /// Make a fresh transparent surface in the CURRENT target's frame.
+    /// Shared by the isolated-layer and mask-bracket opens: both need exactly
+    /// this, and two copies would drift.
+    fn open_surface(&self) -> Option<(ID2D1BitmapRenderTarget, ID2D1RenderTarget)> {
+        let parent = self.rt();
+        let dc: ID2D1DeviceContext = parent.cast().ok()?;
+        let brt = unsafe {
+            dc.CreateCompatibleRenderTarget(None, None, None, Default::default())
+        }.ok()?;
+        let rt: ID2D1RenderTarget = brt.cast().ok()?;
+        let mut t = Matrix3x2::identity();
+        unsafe { parent.GetTransform(&mut t) };
+        unsafe { rt.SetTransform(&t) };
+        unsafe { rt.BeginDraw() };
+        unsafe { rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 })) };
+        Some((brt, rt))
     }
 
     /// `product(open group alphas) * paint_alpha`, clamped. This is the whole
@@ -375,26 +501,43 @@ impl<'a> Painter for Direct2DPainter<'a> {
         }
     }
 
-    fn push_mask_layer(&mut self, _mask: Mask) {
-        // ⛔ LEDGER RECONCILIATION (A6 item ④, 2026-08-27). This site cited
-        // "option C, 2026-07-30" while the summons cited "option (a)". ONE
-        // OBJECT, TWO LABELS — both were pre-ratification working names for the
-        // element-bracket ruling, and they never disagreed on direction. The
-        // ledger now carries ONE name: **AMENDMENT A6**, ratified 2026-08-27.
-        // "option C (2026-07-30)" and "option (a)" are recorded here as its
-        // prior labels so neither trail goes cold; neither is used again.
-        unimplemented!(
-            "masks are BLOCKED pending the A6 implementation (contract ratified \
-             2026-08-27; prior labels: 'option C 2026-07-30' and 'option (a)'). A6 \
-             adds push_isolated_layer/pop_isolated_layer, which opens the isolated \
-             element-body buffer the law must eat into — the gap that blocked this \
-             site is closed IN THE CONTRACT, not yet in this backend. B1 also \
-             established D2D1_LAYER_PARAMETERS1 serves none of the three variants. \
-             Do not wire a PushLayer here."
-        )
+    /// A6: open the MASK bracket. Everything drawn until the matching pop is
+    /// mask content and lands on its own surface, never on the body.
+    ///
+    /// ⛔ THE LEDGER LINE THAT USED TO LIVE HERE IS KEPT, because a trail that
+    /// goes cold costs more than a comment: this site once cited "option C,
+    /// 2026-07-30" while the summons cited "option (a)". ONE OBJECT, TWO LABELS
+    /// -- both pre-ratification working names for the element-bracket ruling,
+    /// never in disagreement. The ledger carries ONE name now: AMENDMENT A6,
+    /// ratified 2026-08-27. Neither prior label is used again.
+    fn push_mask_layer(&mut self, mask: Mask) {
+        match self.open_surface() {
+            Some((brt, rt)) => self.masks.push(MaskTarget { brt, rt, law: mask }),
+            // Same law as a failed layer open: a mask surface that could not be
+            // made must NOT leave its content drawing onto the body, where it
+            // would render as an extra shape rather than as a mask.
+            None => self.failed_layers += 1,
+        }
     }
+
+    /// Close the mask bracket and HAND THE LAW TO THE ENCLOSING LAYER, which
+    /// applies it when it composites.
+    ///
+    /// ⚠️ IF NO LAYER IS OPEN THE MASK IS DROPPED, and that is A6's own shape
+    /// rather than a shortcut: the law is defined as eating into an isolated
+    /// body buffer, so a mask with no layer around it has nothing to eat. The
+    /// corpus never does this; `a_mask_outside_a_layer_is_not_silently_applied`
+    /// is what keeps that true.
     fn pop_mask_layer(&mut self) {
-        unimplemented!("see push_mask_layer")
+        let Some(m) = self.masks.pop() else {
+            if self.failed_layers > 0 { self.failed_layers -= 1; }
+            return;
+        };
+        unsafe { let _ = m.rt.EndDraw(None, None); }
+        let Ok(bmp) = (unsafe { m.brt.GetBitmap() }) else { return };
+        if let Some(layer) = self.layers.last_mut() {
+            layer.mask = Some((bmp, m.law));
+        }
     }
 
     /// A6: open a fresh transparent surface in the parent's coordinate frame.
@@ -406,34 +549,15 @@ impl<'a> Painter for Direct2DPainter<'a> {
     /// `the_wic_target_upgrades_to_a_device_context_...`, which runs first for
     /// exactly that reason.
     fn push_isolated_layer(&mut self, alpha: f64, blend: BlendMode) {
-        let parent = self.rt();
-        let opened = (|| -> Option<LayerTarget> {
-            let dc: ID2D1DeviceContext = parent.cast().ok()?;
-            let brt = unsafe {
-                dc.CreateCompatibleRenderTarget(None, None, None, Default::default())
-            }.ok()?;
-            let rt: ID2D1RenderTarget = brt.cast().ok()?;
-            // §3.1: the layer opens in the PARENT'S frame. The compatible target
-            // starts at identity, so the parent's transform is copied in rather
-            // than replayed from a stack -- one read, and it cannot drift from
-            // whatever the parent actually has.
-            let mut t = Matrix3x2::identity();
-            unsafe { parent.GetTransform(&mut t) };
-            unsafe { rt.SetTransform(&t) };
-            unsafe { rt.BeginDraw() };
-            unsafe {
-                rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        match self.open_surface() {
+            Some((brt, rt)) => {
+                let saved = std::mem::take(&mut self.group_alphas);
+                self.layers.push(LayerTarget {
+                    brt, rt, alpha, blend,
+                    saved_group_alphas: saved,
+                    mask: None,
+                });
             }
-            Some(LayerTarget {
-                brt,
-                rt,
-                alpha,
-                blend,
-                saved_group_alphas: std::mem::take(&mut self.group_alphas),
-            })
-        })();
-        match opened {
-            Some(l) => self.layers.push(l),
             None => self.failed_layers += 1,
         }
     }
@@ -453,7 +577,22 @@ impl<'a> Painter for Direct2DPainter<'a> {
         // the product that counts is the one at the push site.
         self.group_alphas = layer.saved_group_alphas;
         unsafe { let _ = layer.rt.EndDraw(None, None); }
-        let Ok(bmp) = (unsafe { layer.brt.GetBitmap() }) else { return };
+        let Ok(body) = (unsafe { layer.brt.GetBitmap() }) else { return };
+
+        // THE LAW EATS INTO THE FINISHED BODY HERE. If the layer carried a mask
+        // bracket, the body is re-composited through it onto a scratch surface
+        // first; the blit below then treats the result as any other layer.
+        let bmp = match &layer.mask {
+            None => body,
+            Some((mask, law)) => match self.apply_mask(&body, mask, *law) {
+                Some(masked) => masked,
+                // ⛔ A MASK THAT CANNOT BE APPLIED MUST NOT COMPOSITE THE
+                // UNMASKED BODY. That would draw the element at full extent --
+                // exactly what the mask existed to prevent, and it would look
+                // like a correct render of a different document.
+                None => return,
+            },
+        };
 
         let parent = self.rt();
         let eff = self.effective_alpha(layer.alpha) as f32;
@@ -526,6 +665,42 @@ mod tests {
         // to composite. Assert the accessor, not merely the creation.
         let _bmp = unsafe { compat.GetBitmap() }
             .expect("the layer's bitmap is what pop_isolated_layer composites");
+    }
+
+    /// ⭐ THE SECOND PRECONDITION — CAN THIS TARGET RUN AN EFFECT GRAPH AT ALL?
+    ///
+    /// The three A6 mask laws lower onto effects: luminance_clip_in needs
+    /// `CLSID_D2D1LuminanceToAlpha` then a SOURCE_IN composite; alpha_clip_out
+    /// needs DESTINATION_OUT; alpha_reveal_outside_bbox needs an invert or its
+    /// equivalent. All three constants exist in windows-rs -- I checked -- and
+    /// **that is not the same as them working HERE.**
+    ///
+    /// ⛔ D2D EFFECTS NORMALLY WANT A D3D-BACKED DEVICE. This backend's target is
+    /// a SOFTWARE WIC bitmap: it QIs to `ID2D1DeviceContext` (proven by the
+    /// sibling test) but a QI is not a capability. If `CreateEffect` refuses on a
+    /// WIC-backed context, the luminance law has no effect route here and the
+    /// mask work needs a different pipeline -- which is a finding for the
+    /// council, and one worth having BEFORE the pipeline is written, not after.
+    ///
+    /// Same reasoning as the device-context probe: a constant that exists is a
+    /// lookup that succeeded, and a lookup that succeeds is not the thing found.
+    #[test]
+    fn the_wic_device_context_can_build_the_mask_effect_graph() {
+        use windows::core::Interface;
+        use windows::Win32::Graphics::Direct2D::{
+            ID2D1DeviceContext, CLSID_D2D1LuminanceToAlpha,
+        };
+
+        let t = HeadlessTarget::new(32, 32).expect("target");
+        let dc: ID2D1DeviceContext = t.target().cast().expect("device context");
+
+        let effect = unsafe { dc.CreateEffect(&CLSID_D2D1LuminanceToAlpha) };
+        match effect {
+            Ok(_) => { /* the luminance law has its route */ }
+            Err(e) => panic!(
+                "CreateEffect(LuminanceToAlpha) refused on the WIC-backed device                  context: {e:?}. The luminance mask law has no effect route on                  this target -- report it, do not work around it silently."
+            ),
+        }
     }
 
     fn red() -> Brush {
@@ -833,22 +1008,44 @@ mod tests {
                  divided by the emit width");
     }
 
-    /// Masks must REFUSE, not draw something plausible. A backend that quietly
-    /// ignored a mask would render the unmasked artwork and look almost right.
+    /// ⭐ SUPERSEDES `masks_refuse_loudly_pending_the_a6_implementation`.
     ///
-    /// ⛔ AND THIS TEST NOW PINS THE LEDGER NAME (A6 item ④). It used to expect
-    /// "element-bracket ruling"; the site cited "option C, 2026-07-30" while the
-    /// summons cited "option (a)" — one object under two labels. The reconciled
-    /// name is A6, and this expectation is what keeps a third label from
-    /// appearing here: change the refusal's name and this test reds.
+    /// That test asserted the refusal MESSAGE, and it was right to: while the
+    /// backend could not do masks, the message was the contract, and pinning it
+    /// kept a third ledger label from appearing. **The contract has changed --
+    /// masks are implemented -- so the test is replaced rather than deleted, and
+    /// its replacement asserts the opposite fact against the same op.**
     ///
-    /// Renamed with the message: the bracket is no longer "pending" — it is
-    /// ratified (2026-08-27). What is pending is this backend's IMPLEMENTATION.
+    /// ⛔ AND IT ASSERTS PIXELS, NOT ABSENCE OF A PANIC. A mask bracket that
+    /// opened and did nothing would also not panic. So: a red body, a mask that
+    /// covers only the left half, `AlphaClipOut` -- the covered half must be
+    /// GONE and the uncovered half must REMAIN. Either alone passes on a broken
+    /// implementation: "all gone" is a mask that ate everything, "all there" is
+    /// a mask that did nothing.
     #[test]
-    #[should_panic(expected = "pending the A6 implementation")]
-    fn masks_refuse_loudly_pending_the_a6_implementation() {
-        let t = HeadlessTarget::new(2, 2).unwrap();
-        let mut p = Direct2DPainter::new(t.target());
-        p.push_mask_layer(Mask::AlphaClipOut);
+    fn a_clip_out_mask_removes_the_covered_half_and_keeps_the_rest() {
+        let t = HeadlessTarget::new(16, 16).unwrap();
+        unsafe { t.target().BeginDraw() };
+        unsafe {
+            t.target().Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        }
+        {
+            let mut p = Direct2DPainter::new(t.target());
+            p.push_isolated_layer(1.0, BlendMode::Normal);
+            // body: red over the whole surface
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 }, &red(), 1.0);
+            // mask: opaque over the LEFT half only
+            p.push_mask_layer(Mask::AlphaClipOut);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 16.0 }, &red(), 1.0);
+            p.pop_mask_layer();
+            p.pop_isolated_layer();
+        }
+        unsafe { t.target().EndDraw(None, None).unwrap() };
+
+        let buf = t.read_bgra().expect("readback");
+        let left = px(&buf, 16, 4, 8);
+        let right = px(&buf, 16, 12, 8);
+        assert_eq!(left[3], 0, "clip_out must REMOVE the masked half, got alpha {}", left[3]);
+        assert!(right[3] > 200, "and must KEEP the unmasked half, got alpha {}", right[3]);
     }
 }
