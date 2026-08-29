@@ -28,11 +28,23 @@ use web_sys::{CanvasRenderingContext2d, CanvasWindingRule};
 /// One open isolated layer (A6). The surface is a real offscreen canvas; the
 /// alpha and blend were consumed at `push_isolated_layer` and are spent ONCE at
 /// the closing composite.
+#[allow(dead_code)] // Not-yet-wired: constructed only by `open_layer`, which is dead in a
+// production wasm build because this painter is not yet wired into `canvas/render.rs`.
+// The browser tests construct both variants.
+enum LayerKind {
+    /// A6 §3.1 — an isolated layer. `alpha`/`blend` are spent ONCE at the
+    /// closing composite.
+    Isolated { alpha: f64, blend: BlendMode },
+    /// A6 §3.2 — the MASK ARTWORK surface of the enclosing isolated layer. It
+    /// composites by UPDATING THE PARENT'S ALPHA CHANNEL under `law`, never by
+    /// drawing the artwork's colour into the parent.
+    Mask { law: Mask },
+}
+
 struct LayerTarget {
     canvas: web_sys::HtmlCanvasElement,
     ctx: CanvasRenderingContext2d,
-    alpha: f64,
-    blend: BlendMode,
+    kind: LayerKind,
     /// ⛔ THE OPEN-GROUP PRODUCT RESTARTS AT 1.0 INSIDE A LAYER (A6 §3.1), so
     /// the parent's stack is SET ASIDE here and restored at the pop. Without
     /// this the ancestor alpha would apply twice — once to the body inside the
@@ -79,7 +91,7 @@ impl<'a> Canvas2dPainter<'a> {
 
     /// A6 §3.1: open an isolated layer. A fresh transparent surface the size of
     /// the current target, in the same coordinate frame.
-    fn open_layer(&mut self, alpha: f64, blend: BlendMode) -> Option<()> {
+    fn open_layer(&mut self, kind: LayerKind) -> Option<()> {
         let cur = self.target();
         let base_canvas = cur.canvas()?;
         let (w, h) = (base_canvas.width(), base_canvas.height());
@@ -101,8 +113,7 @@ impl<'a> Canvas2dPainter<'a> {
         self.layers.push(LayerTarget {
             canvas,
             ctx,
-            alpha,
-            blend,
+            kind,
             // the open-group product restarts at 1.0 inside the layer
             saved_group_alphas: std::mem::take(&mut self.group_alpha_stack),
         });
@@ -302,17 +313,106 @@ impl Painter for Canvas2dPainter<'_> {
         self.target().restore();
     }
 
-    fn push_mask_layer(&mut self, _mask: Mask) {
-        // DEFERRED — PH4 owns the scratch-offscreen pipeline. UNREACHABLE in
-        // production by construction: `element_render::element_needs_legacy`
-        // routes every masked element to the legacy raw-ctx path, and the PH1
-        // conversion emits only stroke_path (never a mask op). The panic is the
-        // loud guard if that invariant is ever violated.
-        unimplemented!("mask layers are PH4; masked elements must stay on the legacy path");
+    fn push_mask_layer(&mut self, mask: Mask) {
+        // ⛔ LEGAL ONLY INSIDE AN ISOLATED LAYER (A6 §3.2). Outside one there is
+        // no surface whose alpha this could update, and the op was semantically
+        // vacant before the amendment. The contract permits an impl to panic;
+        // this one does, loudly, rather than painting something plausible.
+        //
+        // A FAILED enclosing open counts as "no layer": `failed_layers` means
+        // the body is drawing straight onto the parent, and clipping the parent
+        // by this mask would erase artwork the layer was supposed to isolate.
+        // The mask is dropped and BALANCED instead -- the same choice
+        // push_isolated_layer already makes for its own failed opens.
+        if self.failed_layers > 0 || !matches!(
+            self.layers.last().map(|l| &l.kind), Some(LayerKind::Isolated { .. })
+        ) {
+            if self.layers.is_empty() && self.failed_layers == 0 {
+                panic!("push_mask_layer outside an isolated layer -- A6 §3.2 \
+                        forbids it; the mask has no surface to clip");
+            }
+            self.failed_layers += 1;
+            return;
+        }
+        if self.open_layer(LayerKind::Mask { law: mask }).is_none() {
+            self.failed_layers += 1;
+        }
     }
 
     fn pop_mask_layer(&mut self) {
-        unimplemented!("mask layers are PH4; masked elements must stay on the legacy path");
+        if self.failed_layers > 0 {
+            self.failed_layers -= 1;
+            return;
+        }
+        let Some(layer) = self.layers.pop() else { return };
+        let LayerKind::Mask { law } = layer.kind else {
+            panic!("pop_mask_layer with an ISOLATED layer open -- brackets must nest (A6 §3.2)");
+        };
+        self.group_alpha_stack = layer.saved_group_alphas;
+
+        // ⛔ THE MASK UPDATES THE PARENT'S ALPHA IN PLACE -- it never draws its
+        // own colour into the parent. Every law below is a composite operation
+        // chosen so the artwork contributes ONLY through the destination's
+        // alpha channel:
+        //
+        //   LuminanceClipIn        α_S ← α_S · M, M = A·(0.299R+0.587G+0.114B)/255
+        //   AlphaClipOut           α_S ← α_S · (1 − M), raw A
+        //   AlphaRevealOutsideBbox α_S ← α_S · M inside bbox, unchanged outside
+        //
+        // BT.601 is normative for the luminance law (§A6), and the promotion is
+        // `canvas::render`'s -- the SAME function the legacy path uses, not a
+        // second implementation that could drift from it.
+        let (w, h) = (layer.canvas.width(), layer.canvas.height());
+        if w == 0 || h == 0 {
+            return;
+        }
+        if matches!(law, Mask::LuminanceClipIn) {
+            // Promote on the MASK surface, in device space, before the blit.
+            // get_image_data ignores the ctx transform, which is what we want:
+            // this is a per-pixel channel rewrite, not a drawing operation.
+            if crate::canvas::render::promote_mask_to_luminance(&layer.ctx, 0, 0, w, h).is_none() {
+                // ⚠️ FAIL SOFT, LIKE LEGACY. If ImageData is unavailable the
+                // legacy path falls back to the raw-alpha composite rather than
+                // dropping the mask; an unmasked element is a worse lie than a
+                // slightly wrong mask. The fallthrough below does exactly that.
+            }
+        }
+
+        let parent = self.target();
+        let prev_alpha = parent.global_alpha();
+        // The mask application is not an alpha-weighted blit: it is a channel
+        // update, so it runs at 1.0 whatever the open groups carry.
+        parent.set_global_alpha(1.0);
+        let _ = parent.save();
+        match law {
+            Mask::LuminanceClipIn | Mask::AlphaClipOut => {
+                let op = if matches!(law, Mask::AlphaClipOut) {
+                    "destination-out"
+                } else {
+                    "destination-in"
+                };
+                let _ = parent.set_global_composite_operation(op);
+                let _ = parent.reset_transform();
+                let _ = parent.draw_image_with_html_canvas_element(&layer.canvas, 0.0, 0.0);
+            }
+            Mask::AlphaRevealOutsideBbox { bbox } => {
+                // The bbox is in DOCUMENT space and arrives precomputed (§3.3).
+                // Clip UNDER the current transform so the rect lands where the
+                // document says, then reset for the device-space blit -- a clip
+                // is rasterised into device space when it is set, so it still
+                // holds after the reset. Outside the clip the parent's alpha is
+                // untouched, which is the whole point of this law.
+                let _ = parent.begin_path();
+                parent.rect(bbox.x, bbox.y, bbox.w, bbox.h);
+                parent.clip();
+                let _ = parent.set_global_composite_operation("destination-in");
+                let _ = parent.reset_transform();
+                let _ = parent.draw_image_with_html_canvas_element(&layer.canvas, 0.0, 0.0);
+            }
+        }
+        let _ = parent.restore();
+        let _ = parent.set_global_composite_operation("source-over");
+        parent.set_global_alpha(prev_alpha);
     }
 
     fn push_isolated_layer(&mut self, alpha: f64, blend: BlendMode) {
@@ -322,7 +422,7 @@ impl Painter for Canvas2dPainter<'_> {
         // display-list golden. Push a layer whose ctx IS the parent only when we
         // succeeded; otherwise record the failure so the matching pop is still
         // balanced and simply composites nothing.
-        if self.open_layer(alpha, blend).is_none() {
+        if self.open_layer(LayerKind::Isolated { alpha, blend }).is_none() {
             self.failed_layers += 1;
         }
     }
@@ -333,15 +433,21 @@ impl Painter for Canvas2dPainter<'_> {
             return;
         }
         let Some(layer) = self.layers.pop() else { return };
+        // ⛔ THE BRACKETS STRICTLY NEST (§3.2). Closing an isolated layer while a
+        // mask bracket is still open would composite the ARTWORK as if it were
+        // the layer — silently, and invisibly to a display-list golden.
+        let LayerKind::Isolated { alpha: layer_alpha, blend: layer_blend } = layer.kind else {
+            panic!("pop_isolated_layer with a MASK layer open -- brackets must nest (A6 §3.2)");
+        };
         // restore the parent's open-group product before computing the composite
         self.group_alpha_stack = layer.saved_group_alphas;
         let parent = self.target();
         // A6 §3.3: effective alpha = open-group product AT THE PUSH SITE × the
         // layer's own alpha, applied ONCE, under the layer's blend.
         let prev_alpha = parent.global_alpha();
-        parent.set_global_alpha(self.group_alpha() * layer.alpha);
+        parent.set_global_alpha(self.group_alpha() * layer_alpha);
         let _ = parent.set_global_composite_operation(
-            crate::canvas::render::blend_mode_css(layer.blend),
+            crate::canvas::render::blend_mode_css(layer_blend),
         );
         // the layer already carries the world transform; blit in device space
         let _ = parent.save();
@@ -450,6 +556,37 @@ mod a6_layer_tests {
         ctx.get_image_data(x, y, 1.0, 1.0).unwrap().data()[3]
     }
 
+    fn rgba_at(ctx: &CanvasRenderingContext2d, x: f64, y: f64) -> (u8, u8, u8, u8) {
+        let d = ctx.get_image_data(x, y, 1.0, 1.0).unwrap().data();
+        (d[0], d[1], d[2], d[3])
+    }
+
+    /// A masked body: red over the whole surface, then a mask bracket whose
+    /// artwork is `paint` — run through the REAL bracket, so every assertion
+    /// below is about the shipped code path and not a fixture of the test's.
+    fn masked(law: Mask, paint: impl Fn(&mut Canvas2dPainter))
+        -> (web_sys::HtmlCanvasElement, CanvasRenderingContext2d) {
+        let (c, ctx) = surface(8, 8);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.push_isolated_layer(1.0, BlendMode::Normal);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 },
+                        &Brush::Solid(Color::rgb(1.0, 0.0, 0.0)), 1.0);
+            p.push_mask_layer(law);
+            paint(&mut p);
+            p.pop_mask_layer();
+            p.pop_isolated_layer();
+        }
+        (c, ctx)
+    }
+
+    fn white(p: &mut Canvas2dPainter, x: f64, w: f64) {
+        p.fill_rect(Rect { x, y: 0.0, w, h: 8.0 }, &Brush::Solid(Color::WHITE), 1.0);
+    }
+    fn black(p: &mut Canvas2dPainter, x: f64, w: f64) {
+        p.fill_rect(Rect { x, y: 0.0, w, h: 8.0 }, &Brush::Solid(Color::BLACK), 1.0);
+    }
+
     /// CONTROL: an ordinary fill with no layer open lands on the base surface at
     /// full alpha. Without this, every "the pixel is what I expect" below could
     /// be true for the wrong reason.
@@ -522,5 +659,138 @@ mod a6_layer_tests {
         p.pop_isolated_layer();
         assert_eq!(alpha_at(&ctx, 1.0, 1.0), 255,
                    "D-β at the painter: the nested layer clobbered the outer surface");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // PH4 — THE MASK HALF OF THE BACKEND. Until this landed,
+    // `push_mask_layer` was `unimplemented!()` and A6's bracket could not
+    // execute: #47 gave the layer stack, and the plan of record mistook that
+    // for "the backend". These are the first mask pixels this repo has ever
+    // produced through the seam.
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// CONTROL, FIRST. A fully-opaque WHITE mask keeps everything — M = 1
+    /// everywhere. If this fails, every cut below could be "the pipeline erases
+    /// unconditionally" rather than the law doing its job.
+    #[wasm_bindgen_test]
+    fn a_full_white_luminance_mask_keeps_the_element() {
+        let (_c, ctx) = masked(Mask::LuminanceClipIn, |p| white(p, 0.0, 8.0));
+        assert_eq!(alpha_at(&ctx, 4.0, 4.0), 255,
+                   "control: an opaque white luminance mask must keep the element");
+    }
+
+    /// ⛔ THE jas ASYMMETRY, AND IT IS THE WHOLE REASON THE ENUM HAS THREE
+    /// VARIANTS: `LuminanceClipIn` reads LUMINANCE, the others read RAW ALPHA.
+    /// A BLACK, FULLY OPAQUE mask is the discriminating fixture — raw alpha says
+    /// "keep everything" (A = 255), luminance says "keep nothing" (Y = 0). A
+    /// backend that quietly used alpha here would pass every white-mask test.
+    #[wasm_bindgen_test]
+    fn luminance_reads_luminance_not_alpha() {
+        let (_c, ctx) = masked(Mask::LuminanceClipIn, |p| black(p, 0.0, 8.0));
+        assert_eq!(alpha_at(&ctx, 4.0, 4.0), 0,
+                   "an opaque BLACK luminance mask must cut the element to nothing; \
+                    255 here means the backend read alpha instead of luminance");
+    }
+
+    /// The mask's own COLOUR must never reach the parent — the bracket updates
+    /// the destination's ALPHA and nothing else. A white artwork over a red body
+    /// must leave the surviving pixel RED.
+    #[wasm_bindgen_test]
+    fn the_mask_updates_alpha_and_never_tints_the_body() {
+        let (_c, ctx) = masked(Mask::LuminanceClipIn, |p| white(p, 0.0, 8.0));
+        let (r, g, b, a) = rgba_at(&ctx, 4.0, 4.0);
+        assert_eq!((r, g, b, a), (255, 0, 0, 255),
+                   "the body must stay red; a white pixel means the artwork was \
+                    drawn INTO the parent instead of clipping it");
+    }
+
+    /// Partial coverage: where the artwork is absent the element is cut.
+    #[wasm_bindgen_test]
+    fn luminance_clip_in_cuts_where_the_artwork_is_absent() {
+        let (_c, ctx) = masked(Mask::LuminanceClipIn, |p| white(p, 0.0, 4.0));
+        assert_eq!(alpha_at(&ctx, 1.0, 4.0), 255, "kept under the artwork");
+        assert_eq!(alpha_at(&ctx, 6.0, 4.0), 0, "cut where there is no artwork");
+    }
+
+    /// ⛔ AND THE TWO LAWS MUST DISAGREE ON THE SAME FIXTURE, or one of them is
+    /// decoration. Same black artwork over the left half:
+    ///   ClipIn  — luminance 0 under it, nothing beside it  → BOTH halves cut
+    ///   ClipOut — raw alpha erases under it, leaves beside → LEFT cut, RIGHT kept
+    /// The right half is the discriminator.
+    #[wasm_bindgen_test]
+    fn clip_out_and_clip_in_differ_on_the_same_artwork() {
+        let (_c, ci) = masked(Mask::LuminanceClipIn, |p| black(p, 0.0, 4.0));
+        let (_c2, co) = masked(Mask::AlphaClipOut, |p| black(p, 0.0, 4.0));
+        assert_eq!(alpha_at(&ci, 1.0, 4.0), 0, "ClipIn: black luminance cuts under the artwork");
+        assert_eq!(alpha_at(&co, 1.0, 4.0), 0, "ClipOut: opaque alpha erases under the artwork");
+        assert_eq!(alpha_at(&ci, 6.0, 4.0), 0, "ClipIn: no artwork beside it, so cut");
+        assert_eq!(alpha_at(&co, 6.0, 4.0), 255, "ClipOut: untouched beside the artwork");
+    }
+
+    /// The reveal law has THREE regions, and only a fixture with all three can
+    /// tell it from `LuminanceClipIn`: inside the bbox it clips; OUTSIDE the
+    /// bbox the element is untouched even where no artwork exists.
+    #[wasm_bindgen_test]
+    fn reveal_outside_bbox_leaves_the_outside_untouched() {
+        let bbox = Rect { x: 0.0, y: 0.0, w: 4.0, h: 8.0 };
+        let (_c, ctx) = masked(Mask::AlphaRevealOutsideBbox { bbox },
+                               |p| white(p, 0.0, 2.0));
+        assert_eq!(alpha_at(&ctx, 1.0, 4.0), 255, "inside bbox, under artwork: kept");
+        assert_eq!(alpha_at(&ctx, 3.0, 4.0), 0, "inside bbox, no artwork: cut");
+        assert_eq!(alpha_at(&ctx, 6.0, 4.0), 255,
+                   "OUTSIDE the bbox: untouched — this is the region that \
+                    distinguishes the reveal law from a plain clip-in");
+    }
+
+    /// The mask composite must not disturb the layer's own alpha law: the D-α
+    /// product still applies ONCE at the layer's pop, with a mask in between.
+    #[wasm_bindgen_test]
+    fn the_layer_alpha_law_survives_a_mask_bracket() {
+        let (_c, ctx) = surface(8, 8);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.push_group(0.5, BlendMode::Normal);
+            p.push_isolated_layer(0.5, BlendMode::Normal);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 },
+                        &Brush::Solid(Color::rgb(1.0, 0.0, 0.0)), 1.0);
+            p.push_mask_layer(Mask::LuminanceClipIn);
+            white(&mut p, 0.0, 8.0);
+            p.pop_mask_layer();
+            p.pop_isolated_layer();
+            p.pop_group();
+        }
+        // 0.5 × 0.5 = 0.25 → 64, each factor exactly once, mask fully opaque.
+        let a = alpha_at(&ctx, 4.0, 4.0);
+        assert!((a as i32 - 64).abs() <= 1,
+                "group 0.5 × layer 0.5 with a full mask must be ~64, got {a}");
+    }
+
+    /// ⛔ NESTING (§3.5 / D-β): a mask bracket inside a layer inside a layer.
+    /// The inner mask must clip the INNER layer only — if the surfaces were
+    /// shared, the outer layer's body would be clipped too and the right half
+    /// would come back empty.
+    #[wasm_bindgen_test]
+    fn an_inner_masks_bracket_does_not_clip_the_outer_layer() {
+        let (_c, ctx) = surface(8, 8);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.push_isolated_layer(1.0, BlendMode::Normal);
+            // outer body: the RIGHT half
+            p.fill_rect(Rect { x: 4.0, y: 0.0, w: 4.0, h: 8.0 },
+                        &Brush::Solid(Color::rgb(0.0, 1.0, 0.0)), 1.0);
+            p.push_isolated_layer(1.0, BlendMode::Normal);
+            // inner body: the LEFT half, fully masked away
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 8.0 },
+                        &Brush::Solid(Color::rgb(0.0, 0.0, 1.0)), 1.0);
+            p.push_mask_layer(Mask::LuminanceClipIn);
+            black(&mut p, 0.0, 8.0);   // luminance 0 → cut everything
+            p.pop_mask_layer();
+            p.pop_isolated_layer();
+            p.pop_isolated_layer();
+        }
+        assert_eq!(alpha_at(&ctx, 1.0, 4.0), 0, "the inner layer was masked away");
+        assert_eq!(alpha_at(&ctx, 6.0, 4.0), 255,
+                   "the OUTER layer's body must survive — a shared scratch \
+                    surface would have clipped it too (D-β's shape)");
     }
 }

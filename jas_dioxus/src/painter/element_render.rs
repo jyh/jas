@@ -474,6 +474,8 @@ pub fn path_painter_inputs(e: &PathElem, bbox: (f64, f64, f64, f64)) -> Option<S
 /// The element's ACTIVE mask, or `None`. A `disabled` mask is not active —
 /// the element renders as if none were attached, which is what the legacy
 /// `mask_plan` says too (it returns `None` for a disabled mask).
+#[allow(dead_code)] // Not-yet-wired: reachable only when `element_needs_legacy` stops routing
+// masked elements to legacy. Exercised by the A6 producer tests today.
 fn active_mask(elem: &Element) -> Option<&crate::geometry::element::Mask> {
     elem.common().mask.as_deref().filter(|m| !m.disabled)
 }
@@ -518,6 +520,8 @@ fn active_mask(elem: &Element) -> Option<&crate::geometry::element::Mask> {
 /// element under an alpha ancestor CHANGES what is drawn — to the ratified law.
 /// It is stated here because a reader of a diff would otherwise have to
 /// rediscover it.
+#[allow(dead_code)] // Not-yet-wired: same reason as `active_mask` — the router flip is a
+// separate, ratified behaviour change. The tests drive this path directly.
 fn emit_masked_element(
     p: &mut dyn Painter,
     elem: &Element,
