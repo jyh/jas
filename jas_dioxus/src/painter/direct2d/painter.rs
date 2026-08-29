@@ -364,27 +364,60 @@ fn d2d_rect(r: Rect) -> D2D_RECT_F {
 }
 
 impl<'a> Painter for Direct2DPainter<'a> {
-    /// ⚖️ THIS BACKEND ANSWERS NO — TO ALL THREE, AND THE FOUR
-    /// `unimplemented!()` BODIES BELOW ARE WHY.
+    /// ⚖️ THE FLIP (council 08/29, row e closes with it). AMENDMENT A6 §6.2 —
+    /// A RATIFIED BEHAVIOUR CHANGE, AND IT IS ANNOUNCED, NOT QUIET.
     ///
-    /// * `IsolatedLayers` — `push_isolated_layer`/`pop_isolated_layer` panic;
-    /// * `MaskLayers` — `push_mask_layer`/`pop_mask_layer` panic;
-    /// * `NonNormalGroupBlend` — `push_group` takes a `BlendMode` and this
-    ///   backend has no effect graph for the 15 non-Normal modes (B1: a
-    ///   backdrop snapshot plus a `CLSID_D2D1Blend` graph per primitive, not
-    ///   built). The replay harness has always reported this as a declared gap.
+    /// This backend answered NO to everything because its A6 bodies were four
+    /// `unimplemented!()`. They are implemented now (row e(a)), so the answer
+    /// changes — **the ROUTER does not**. That was the whole point of putting
+    /// the query at the trait: a backend gaining a capability edits one method.
     ///
-    /// ⇒ A masked or layered element STAYS LEGACY-ROUTED on Direct2D. That is
-    /// the whole point of the query: the router can now be flipped for the
-    /// backend that can do the work WITHOUT flipping it for the one that
-    /// cannot, and neither answer is a comment — `replay.rs`'s corpus lane
-    /// cross-checks this against what the backend actually refuses.
+    /// | capability | answer | why, in this backend's own terms |
+    /// |---|---|---|
+    /// | `IsolatedLayers` | **yes** | `push_isolated_layer` opens a real surface (a render-target swap, B1's finding: `D2D1_LAYER_PARAMETERS1` serves none of the three mask laws) and `pop_isolated_layer` composites it once at `(group product at the push site) × alpha` |
+    /// | `MaskLayers` | **yes** | the mask bracket renders to its own surface and hands its law to the enclosing layer |
+    /// | `NonNormalBlend` | **NO — and it STAYS a declared gap** | the 15 non-Normal modes need a backdrop snapshot plus a `CLSID_D2D1Blend` graph per blended primitive. Not built. |
     ///
-    /// This answer flips to `true` when (a) lands — D2D's mask + layer ops,
-    /// flask's row, on B1's schedule. The ROUTER does not change then; this
-    /// method does.
-    fn supports(&self, _cap: crate::painter::capability::Capability) -> bool {
-        false
+    /// ⛔ THE THIRD ROW IS NOT A LEFTOVER, IT IS THE CONDITION. The blend gap
+    /// must not be folded into the mask/layer answer, and until 08/29 the
+    /// vocabulary could not keep them apart: `a6_blend.json` puts a `multiply`
+    /// on `push_isolated_layer`, so a single `IsolatedLayers → yes` would have
+    /// carried a blend claim this backend cannot honour. `LayerTarget.blend` is
+    /// stored and read by nothing — its own `#[allow(dead_code)]` says so.
+    ///
+    /// 📌 AND TWO INSTRUMENTS DISAGREED ABOUT WHETHER THAT MATTERED, WHICH IS
+    /// THE PART WORTH KEEPING. The replay harness ALREADY refuses a blended
+    /// layer with the blend reason — this backend's own author separated the two
+    /// gaps there and wrote why ("it is a blend gap, not a layer gap, and
+    /// collapsing the two would hide which is missing"). So the harness would
+    /// have caught a folded answer. The ROUTER would NOT have: it had no blend
+    /// clause, so a masked element carrying `multiply` would have been routed
+    /// here, the layer would have opened, and the multiply would have gone to a
+    /// field nothing reads — silently, in the path that SHIPS. One instrument
+    /// saw it and one did not, and the blind one is the one in production.
+    ///
+    /// ⇒ So `NonNormalBlend` is denied here, the router keeps a non-Normal-mode
+    /// masked element on legacy for this backend, and the replay lane asserts
+    /// that this answer and this backend's actual report agree op for op.
+    ///
+    /// ⚠️ WHAT CHANGES ON SCREEN, said out loud: a masked element under an alpha
+    /// ancestor now renders through the A6 bracket here. HEAD's legacy path gave
+    /// `own²` with the ancestors DISCARDED; the bracket applies each factor
+    /// ONCE. R4 otherwise converts only what preserves behaviour — §6.2 is the
+    /// ratified exception.
+    ///
+    /// 📌 No claim is made or implied about any OTHER backend's output. The
+    /// "pixel-equal to Canvas2D" acceptance was withdrawn on 08/29 as
+    /// unexecutable, and nothing here rests on it.
+    fn supports(&self, cap: crate::painter::capability::Capability) -> bool {
+        use crate::painter::capability::Capability as C;
+        // Exhaustive on purpose: a new capability must be ANSWERED here, not
+        // inherit a default. That is the same reason the trait method has no
+        // default body.
+        match cap {
+            C::IsolatedLayers | C::MaskLayers => true,
+            C::NonNormalBlend => false,
+        }
     }
 
     fn fill_rect(&mut self, rect: Rect, brush: &Brush, paint_alpha: f64) {
