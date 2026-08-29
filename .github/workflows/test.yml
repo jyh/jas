@@ -3,8 +3,21 @@ name: Tests
 on:
   push:
     branches: [main]
+  # ⛔ NO `branches:` FILTER ON pull_request, AND THAT IS THE FIX. For
+  # `pull_request`, `branches:` filters on the BASE branch — so a PR STACKED ON
+  # ANOTHER BRANCH never matched `[main]` and this entire workflow silently did
+  # not run. Its checks still showed GREEN, because the Scrub workflow (which has
+  # no such filter) ran its hook gates and nothing said the suite was absent.
+  #
+  # Measured by flask 2026-08-28 on PRs #20 and #44: 4/4 checks green, all four
+  # of them hook gates, ZERO test jobs. ⇒ A STACKED PR WAS INDISTINGUISHABLE FROM
+  # A TESTED ONE, and this repo uses stacked PRs routinely — #32 and #34 were
+  # both stacked, and both read as fully green.
+  #
+  # ⚠️ The `push` filter STAYS. Removing it would run the whole matrix on every
+  # push to every branch; PRs are where the review decision is made, and that is
+  # the gap that mattered.
   pull_request:
-    branches: [main]
 
 jobs:
   # SCRUBGUARD MOVED, 2026-08-20, and the move is the repair.
