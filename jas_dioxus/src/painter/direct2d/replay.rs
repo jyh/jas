@@ -246,8 +246,19 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
             // an unimplemented op and an unrecognised one are different facts.
             "push_mask_layer" | "pop_mask_layer" =>
                 r.unsupported.push((cmd.into(), "masks pending the A6 implementation in this backend")),
-            "push_isolated_layer" | "pop_isolated_layer" =>
-                r.unsupported.push((cmd.into(), "A6 isolated layers pending in this backend")),
+            // A6 IS IMPLEMENTED IN THIS BACKEND NOW (render-target swap; see
+            // painter::push_isolated_layer). The blend arm mirrors push_group's
+            // exactly: Normal composites with DrawBitmap, and the other fifteen
+            // still need the CLSID_D2D1Blend graph B1 priced. That gap is the
+            // SAME one push_group already declares -- it is a blend gap, not a
+            // layer gap, and collapsing the two would hide which is missing.
+            "push_isolated_layer" => {
+                match op.get("blend").and_then(Value::as_str) {
+                    Some("normal") | None => { p.push_isolated_layer(a, BlendMode::Normal); r.drawn += 1; }
+                    Some(_) => r.unsupported.push((cmd.into(), "non-Normal blend needs an effect graph")),
+                }
+            }
+            "pop_isolated_layer" => { p.pop_isolated_layer(); r.drawn += 1; }
             _ => r.unsupported.push((cmd.into(), "unknown command")),
         }
     }
@@ -336,9 +347,13 @@ mod tests {
         // ⛔ AND EVERY GAP MUST BE A DECLARED ONE. This is the arm that keeps the
         // test honest now that it can no longer be complete: a NEW gap, or an op
         // falling through to "unknown command", still reds.
-        const DECLARED: [&str; 3] = [
+        // ⭐ ONE ENTRY RETIRED, 2026-08-29: "A6 isolated layers pending in this
+        // backend" is GONE because the ops are implemented (render-target swap).
+        // Retired from the list rather than left in it: a DECLARED entry nothing
+        // emits is a gap the fleet still believes it has, and this list is read
+        // as the backend's own statement of what it cannot do.
+        const DECLARED: [&str; 2] = [
             "masks pending the A6 implementation in this backend",
-            "A6 isolated layers pending in this backend",
             "non-Normal blend needs an effect graph",
         ];
         for (cmd, why) in &r.unsupported {
@@ -348,6 +363,35 @@ mod tests {
         assert!(!r.unsupported.is_empty(),
                 "the A6 scenes contain masks and a non-Normal blend; a report with \
                  NO gaps means the corpus stopped containing them");
+    }
+
+    /// ACCEPTANCE FOR THE ISOLATED-LAYER HALF OF THE ROUTED ROW, made executable.
+    ///
+    /// The routed acceptance is "the declared gaps -> 0". A gap closes when the
+    /// backend stops REPORTING it, so this asserts the absence directly against
+    /// the corpus rather than leaving it to be inferred from a shrinking list.
+    ///
+    /// ⛔ AND IT ASSERTS THE POSITIVE HALF TOO. A backend that refused every
+    /// isolated layer would also emit no isolated-layer gap -- absence of a
+    /// complaint is not evidence of work. So the layer ops must also be COUNTED
+    /// as drawn, which only a call that reached the painter can produce.
+    #[test]
+    fn no_isolated_layer_op_is_reported_as_a_gap_any_more() {
+        let (r, _n) = replay_all();
+        for (cmd, why) in &r.unsupported {
+            assert!(
+                !cmd.contains("isolated_layer") || why.contains("blend"),
+                "isolated-layer op still gapped: {cmd} -> {why}"
+            );
+        }
+        // The corpus holds 8 isolated-layer records (4 push + 4 pop across the
+        // A6 goldens), of which the one non-Normal push stays gapped on BLEND.
+        // Seven must have reached the painter.
+        let layer_gaps = r.unsupported.iter()
+            .filter(|(c, _)| c.contains("isolated_layer")).count();
+        assert!(layer_gaps <= 1,
+                "at most the one non-Normal push may remain gapped, got {layer_gaps}");
+        assert!(r.drawn >= 7, "the layer ops must be DRAWN, not merely un-gapped");
     }
 
     /// The harness must NOT report success on a command it silently dropped.

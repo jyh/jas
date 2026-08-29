@@ -21,7 +21,10 @@
 //! is one flat multiply. A `PushLayer` here would isolate and stop overlaps
 //! compounding, i.e. would be WRONG. There is a test for that below.
 
-use windows::core::Result;
+use windows::core::{Interface, Result};
+use windows::Win32::Graphics::Direct2D::{
+    ID2D1BitmapRenderTarget, ID2D1DeviceContext, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_COLOR_F, D2D1_GRADIENT_STOP, D2D_RECT_F,
 };
@@ -57,16 +60,60 @@ struct Frame {
     opened: Vec<Pop>,
 }
 
+/// One open isolated layer (A6): its own surface in the parent's frame, plus
+/// the alpha and blend consumed once at the closing composite.
+struct LayerTarget {
+    /// Kept because `GetBitmap` is how the composite reads the layer back.
+    brt: ID2D1BitmapRenderTarget,
+    /// The same object as `brt`, pre-cast, so the hot accessor never casts.
+    rt: ID2D1RenderTarget,
+    alpha: f64,
+    #[allow(dead_code)] // consumed at the composite once non-Normal blends land
+    blend: BlendMode,
+    /// A6 §3.2: the open-group product RESTARTS at 1.0 inside the layer, so the
+    /// parent's is set aside here and restored by the pop.
+    saved_group_alphas: Vec<f64>,
+}
+
 pub struct Direct2DPainter<'a> {
-    rt: &'a ID2D1RenderTarget,
+    base_rt: &'a ID2D1RenderTarget,
     frames: Vec<Frame>,
     /// The owned multiply stack. See the module note: NOT a layer.
     group_alphas: Vec<f64>,
+    /// Open isolated layers, innermost last. Empty is the common case and
+    /// costs one `is_empty` per draw.
+    layers: Vec<LayerTarget>,
+    /// ⛔ A FAILED OPEN MUST NOT SILENTLY DRAW ON THE PARENT. If the layer
+    /// surface cannot be made, the body would composite against the very
+    /// backdrop it was supposed to be isolated from -- visibly wrong, and
+    /// invisible to a display-list golden. Counting the failure keeps the
+    /// matching pop balanced and composites nothing. Same law as canvas2d.
+    failed_layers: usize,
 }
 
 impl<'a> Direct2DPainter<'a> {
     pub fn new(rt: &'a ID2D1RenderTarget) -> Self {
-        Self { rt, frames: Vec::new(), group_alphas: Vec::new() }
+        Self {
+            base_rt: rt,
+            frames: Vec::new(),
+            group_alphas: Vec::new(),
+            layers: Vec::new(),
+            failed_layers: 0,
+        }
+    }
+
+    /// THE TARGET EVERY DRAW GOES TO: the innermost open isolated layer, or the
+    /// base render target when none is open.
+    ///
+    /// Returns an OWNED clone rather than a borrow, deliberately. A borrow tied
+    /// to `&self` cannot coexist with the `&mut self` the draw methods hold, and
+    /// the workarounds are worse than one AddRef: a COM clone is a refcount
+    /// bump, and it keeps every call site reading as it did before.
+    fn rt(&self) -> ID2D1RenderTarget {
+        match self.layers.last() {
+            Some(l) => l.rt.clone(),
+            None => self.base_rt.clone(),
+        }
     }
 
     /// `product(open group alphas) * paint_alpha`, clamped. This is the whole
@@ -89,7 +136,7 @@ impl<'a> Direct2DPainter<'a> {
             // alpha MULTIPLIES it rather than replacing it.
             a: (a * alpha) as f32,
         };
-        unsafe { self.rt.CreateSolidColorBrush(&col, None) }
+        unsafe { self.rt().CreateSolidColorBrush(&col, None) }
     }
 
     /// GAMMA_2_2, NOT GAMMA_1_0 -- a divergence pin, not a default.
@@ -108,7 +155,7 @@ impl<'a> Direct2DPainter<'a> {
                 color: D2D1_COLOR_F { r: r as f32, g: g as f32, b: b as f32, a: (a * alpha) as f32 },
             }
         }).collect();
-        unsafe { self.rt.CreateGradientStopCollection(&v, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) }.ok()
+        unsafe { self.rt().CreateGradientStopCollection(&v, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) }.ok()
     }
 
     fn brush(&self, b: &Brush, alpha: f64) -> Option<ID2D1Brush> {
@@ -120,7 +167,7 @@ impl<'a> Direct2DPainter<'a> {
                     startPoint: windows_numerics::Vector2 { X: g.x0 as f32, Y: g.y0 as f32 },
                     endPoint: windows_numerics::Vector2 { X: g.x1 as f32, Y: g.y1 as f32 },
                 };
-                unsafe { self.rt.CreateLinearGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
+                unsafe { self.rt().CreateLinearGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
             }
             Brush::Radial(g) => {
                 // D2D radial is ONE circle plus an origin offset; the contract
@@ -140,7 +187,7 @@ impl<'a> Direct2DPainter<'a> {
                     radiusX: g.r1 as f32,
                     radiusY: g.r1 as f32,
                 };
-                unsafe { self.rt.CreateRadialGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
+                unsafe { self.rt().CreateRadialGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
             }
         }
     }
@@ -148,7 +195,7 @@ impl<'a> Direct2DPainter<'a> {
     fn stroke_style(&self, s: &StrokeStyle, emit_width: f64) -> Option<ID2D1StrokeStyle> {
         let props = convert::stroke_properties(s);
         let dashes = convert::dash_multiples(&s.dash, emit_width);
-        let factory = unsafe { self.rt.GetFactory() }.ok()?;
+        let factory = unsafe { self.rt().GetFactory() }.ok()?;
         unsafe {
             factory
                 .CreateStrokeStyle(&props, if dashes.is_empty() { None } else { Some(&dashes) })
@@ -193,7 +240,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
     fn fill_rect(&mut self, rect: Rect, brush: &Brush, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
         if let Some(b) = self.brush(brush, a) {
-            unsafe { self.rt.FillRectangle(&d2d_rect(rect), &b) };
+            unsafe { self.rt().FillRectangle(&d2d_rect(rect), &b) };
         }
     }
 
@@ -202,7 +249,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
         if let Some(b) = self.brush(brush, a) {
             let ss = self.stroke_style(stroke, stroke.width);
             unsafe {
-                self.rt.DrawRectangle(&d2d_rect(rect), &b, stroke.width as f32, ss.as_ref())
+                self.rt().DrawRectangle(&d2d_rect(rect), &b, stroke.width as f32, ss.as_ref())
             };
         }
     }
@@ -214,9 +261,9 @@ impl<'a> Painter for Direct2DPainter<'a> {
             M31: transform.e as f32, M32: transform.f as f32,
         };
         let mut prev = Matrix3x2::identity();
-        unsafe { self.rt.GetTransform(&mut prev) };
+        unsafe { self.rt().GetTransform(&mut prev) };
         self.frames.push(Frame { transform: prev, opened: Vec::new() });
-        unsafe { self.rt.SetTransform(&(cur * prev)) };
+        unsafe { self.rt().SetTransform(&(cur * prev)) };
     }
 
     fn pop_state(&mut self) {
@@ -226,12 +273,12 @@ impl<'a> Painter for Direct2DPainter<'a> {
             for p in f.opened.iter().rev() {
                 unsafe {
                     match p {
-                        Pop::Layer => self.rt.PopLayer(),
-                        Pop::AxisAlignedClip => self.rt.PopAxisAlignedClip(),
+                        Pop::Layer => self.rt().PopLayer(),
+                        Pop::AxisAlignedClip => self.rt().PopAxisAlignedClip(),
                     }
                 }
             }
-            unsafe { self.rt.SetTransform(&f.transform) };
+            unsafe { self.rt().SetTransform(&f.transform) };
         }
     }
 
@@ -251,21 +298,21 @@ impl<'a> Painter for Direct2DPainter<'a> {
     fn fill_path(&mut self, path: &[PathCommand], winding: FillRule, brush: &Brush, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
         let Some(b) = self.brush(brush, a) else { return };
-        let Ok(f) = (unsafe { self.rt.GetFactory() }) else { return };
+        let Ok(f) = (unsafe { self.rt().GetFactory() }) else { return };
         if let Ok(Some(g)) = geometry::build(&f, path, winding) {
-            unsafe { self.rt.FillGeometry(&g, &b, None) };
+            unsafe { self.rt().FillGeometry(&g, &b, None) };
         }
     }
 
     fn stroke_path(&mut self, path: &[PathCommand], brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
         let Some(b) = self.brush(brush, a) else { return };
-        let Ok(f) = (unsafe { self.rt.GetFactory() }) else { return };
+        let Ok(f) = (unsafe { self.rt().GetFactory() }) else { return };
         // A stroked path carries no fill rule; NonZero is the contract default
         // and the rule is irrelevant to stroking.
         if let Ok(Some(g)) = geometry::build(&f, path, FillRule::NonZero) {
             let ss = self.stroke_style(stroke, stroke.width);
-            unsafe { self.rt.DrawGeometry(&g, &b, stroke.width as f32, ss.as_ref()) };
+            unsafe { self.rt().DrawGeometry(&g, &b, stroke.width as f32, ss.as_ref()) };
         }
     }
 
@@ -273,7 +320,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let a = self.effective_alpha(paint_alpha);
         let Some(b) = self.brush(brush, a) else { return };
         let Some(e) = full_ellipse(arc) else { return };
-        unsafe { self.rt.FillEllipse(&e, &b) };
+        unsafe { self.rt().FillEllipse(&e, &b) };
     }
 
     fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
@@ -281,7 +328,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let Some(b) = self.brush(brush, a) else { return };
         let Some(e) = full_ellipse(arc) else { return };
         let ss = self.stroke_style(stroke, stroke.width);
-        unsafe { self.rt.DrawEllipse(&e, &b, stroke.width as f32, ss.as_ref()) };
+        unsafe { self.rt().DrawEllipse(&e, &b, stroke.width as f32, ss.as_ref()) };
     }
 
     /// NESTED, ARBITRARY-PATH CLIP. D2D has no cheap form: `PushAxisAlignedClip`
@@ -292,7 +339,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
     /// The contract has no `unclip`: a clip is undone by the enclosing
     /// `pop_state`, which is why the pop is recorded on the current frame.
     fn clip(&mut self, path: &[PathCommand], winding: FillRule) {
-        let Ok(f) = (unsafe { self.rt.GetFactory() }) else { return };
+        let Ok(f) = (unsafe { self.rt().GetFactory() }) else { return };
         let Ok(Some(g)) = geometry::build(&f, path, winding) else { return };
         // D2D1_LAYER_PARAMETERS, not ...1: the v1 struct is what
         // ID2D1RenderTarget::PushLayer takes. The `1` variant belongs to
@@ -307,7 +354,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
             opacityBrush: std::mem::ManuallyDrop::new(None),
             layerOptions: D2D1_LAYER_OPTIONS_NONE,
         };
-        unsafe { self.rt.PushLayer(&params, None) };
+        unsafe { self.rt().PushLayer(&params, None) };
         // If no frame is open the clip lasts to EndDraw, which is the contract's
         // own shape -- record it only when there is a frame to unwind it.
         if let Some(fr) = self.frames.last_mut() {
@@ -322,7 +369,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let Some(b) = self.brush(brush, a) else { return };
         match run {
             TextRun::FastRun { font, size, text: t, letter_spacing, x, y } => {
-                text::draw_fast_run(self.rt, &b, font, *size, t, *letter_spacing, *x, *y);
+                text::draw_fast_run(&self.rt(), &b, font, *size, t, *letter_spacing, *x, *y);
             }
             _ => {}
         }
@@ -350,15 +397,83 @@ impl<'a> Painter for Direct2DPainter<'a> {
         unimplemented!("see push_mask_layer")
     }
 
-    fn push_isolated_layer(&mut self, _alpha: f64, _blend: BlendMode) {
-        // A6 ratified the bracket; this backend does not yet implement it. B1's
-        // finding stands: D2D1_LAYER_PARAMETERS1 serves none of the three mask
-        // variants, so the layer target is a render-target swap, not a PushLayer.
-        unimplemented!("A6 isolated layers are not yet implemented in the D2D backend")
+    /// A6: open a fresh transparent surface in the parent's coordinate frame.
+    ///
+    /// A RENDER-TARGET SWAP, NOT A `PushLayer`, and that is B1's finding kept
+    /// rather than revisited: `D2D1_LAYER_PARAMETERS1` serves none of the three
+    /// mask laws, so the layer had to be a real surface anyway. The device
+    /// context makes it -- the QI that this rests on is driven by
+    /// `the_wic_target_upgrades_to_a_device_context_...`, which runs first for
+    /// exactly that reason.
+    fn push_isolated_layer(&mut self, alpha: f64, blend: BlendMode) {
+        let parent = self.rt();
+        let opened = (|| -> Option<LayerTarget> {
+            let dc: ID2D1DeviceContext = parent.cast().ok()?;
+            let brt = unsafe {
+                dc.CreateCompatibleRenderTarget(None, None, None, Default::default())
+            }.ok()?;
+            let rt: ID2D1RenderTarget = brt.cast().ok()?;
+            // §3.1: the layer opens in the PARENT'S frame. The compatible target
+            // starts at identity, so the parent's transform is copied in rather
+            // than replayed from a stack -- one read, and it cannot drift from
+            // whatever the parent actually has.
+            let mut t = Matrix3x2::identity();
+            unsafe { parent.GetTransform(&mut t) };
+            unsafe { rt.SetTransform(&t) };
+            unsafe { rt.BeginDraw() };
+            unsafe {
+                rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+            }
+            Some(LayerTarget {
+                brt,
+                rt,
+                alpha,
+                blend,
+                saved_group_alphas: std::mem::take(&mut self.group_alphas),
+            })
+        })();
+        match opened {
+            Some(l) => self.layers.push(l),
+            None => self.failed_layers += 1,
+        }
     }
 
+    /// A6 §3.3: flatten the layer and composite it as ONE primitive at
+    /// effective alpha = (open-group product AT THE PUSH SITE) x the layer's own
+    /// alpha -- applied ONCE. That is defect D-alpha's repair: the alpha must
+    /// multiply into the inherited product, never replace it and never apply
+    /// twice.
     fn pop_isolated_layer(&mut self) {
-        unimplemented!("A6 isolated layers are not yet implemented in the D2D backend")
+        if self.failed_layers > 0 {
+            self.failed_layers -= 1;
+            return;
+        }
+        let Some(layer) = self.layers.pop() else { return };
+        // Restore the parent's product BEFORE computing the composite alpha --
+        // the product that counts is the one at the push site.
+        self.group_alphas = layer.saved_group_alphas;
+        unsafe { let _ = layer.rt.EndDraw(None, None); }
+        let Ok(bmp) = (unsafe { layer.brt.GetBitmap() }) else { return };
+
+        let parent = self.rt();
+        let eff = self.effective_alpha(layer.alpha) as f32;
+        // ⛔ THE BLIT RUNS AT IDENTITY. The layer's contents were already drawn
+        // under the parent's transform, so compositing under it again would
+        // apply the transform twice -- the same double-apply shape as D-alpha,
+        // in geometry instead of opacity.
+        let mut saved = Matrix3x2::identity();
+        unsafe { parent.GetTransform(&mut saved) };
+        unsafe { parent.SetTransform(&Matrix3x2::identity()) };
+        unsafe {
+            parent.DrawBitmap(
+                &bmp,
+                None,
+                eff,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                None,
+            );
+        }
+        unsafe { parent.SetTransform(&saved) };
     }
 }
 
@@ -367,6 +482,51 @@ mod tests {
     use super::*;
     use crate::painter::direct2d::device::HeadlessTarget;
     use crate::geometry::element::{LineCap, LineJoin};
+
+    /// ⭐ THE PRECONDITION FOR A6 IN THIS BACKEND, DRIVEN BEFORE ANYTHING IS
+    /// BUILT ON IT.
+    ///
+    /// `clip()`'s own comment says the `D2D1_LAYER_PARAMETERS1` variant "belongs
+    /// to ID2D1DeviceContext, which the WIC target can be QueryInterface'd to
+    /// (B1 route (a)) -- needed for masks later". **Later is now**, and the whole
+    /// A6 design for this backend rests on that QI succeeding: the device context
+    /// is what supplies `PushLayer` with an `opacityBrush`, `DrawImage`, and the
+    /// effect graph (luminance-to-alpha, invert, blend) that the three mask laws
+    /// and the `multiply` composite need.
+    ///
+    /// ⛔ IT IS A COMMENT, NOT A MEASUREMENT, UNTIL IT IS RUN. If this QI fails
+    /// on the headless WIC target then the routed acceptance is unreachable by
+    /// this route and that is a finding for the council, not something to
+    /// discover halfway through an implementation. So it is a test, and it runs
+    /// first.
+    ///
+    /// The second assertion is the one that matters for the mask work:
+    /// `CreateCompatibleRenderTarget` is how an isolated layer gets its own
+    /// surface in the parent's frame, and a device context that cannot make one
+    /// would push the layer design back to a full second WIC target.
+    #[test]
+    fn the_wic_target_upgrades_to_a_device_context_and_can_make_a_compatible_target() {
+        use windows::core::Interface;
+        use windows::Win32::Graphics::Direct2D::ID2D1DeviceContext;
+
+        let t = HeadlessTarget::new(64, 64).expect("target");
+
+        let dc: ID2D1DeviceContext = t
+            .target()
+            .cast()
+            .expect("B1 route (a): the WIC render target must QI to ID2D1DeviceContext --                      the A6 mask laws and the multiply composite have no other route here");
+
+        // The isolated-layer surface. Same size and DPI as the parent by
+        // default, which is exactly A6's "parent's coordinate frame and
+        // rasterization scale".
+        let compat = unsafe { dc.CreateCompatibleRenderTarget(None, None, None, Default::default()) }
+            .expect("an isolated layer needs its own surface in the parent's frame");
+
+        // A compatible target is only useful if its bitmap can be read back out
+        // to composite. Assert the accessor, not merely the creation.
+        let _bmp = unsafe { compat.GetBitmap() }
+            .expect("the layer's bitmap is what pop_isolated_layer composites");
+    }
 
     fn red() -> Brush {
         Brush::Solid(Color::new(1.0, 0.0, 0.0, 1.0))
