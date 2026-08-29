@@ -1039,7 +1039,7 @@ fn scratch_from_cell(
 /// unavailable) the caller falls back to alpha-based masking so
 /// the user's mask still has *some* effect, just not the
 /// luminance-weighted one.
-fn promote_mask_to_luminance(
+pub(crate) fn promote_mask_to_luminance(
     ctx: &CanvasRenderingContext2d,
     dx: i32, dy: i32, dw: u32, dh: u32,
 ) -> Option<()> {
