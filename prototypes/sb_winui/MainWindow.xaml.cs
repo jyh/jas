@@ -47,21 +47,77 @@ public sealed partial class MainWindow : Window
         {
             var w = (uint)Math.Max(1, e.NewSize.Width);
             var h = (uint)Math.Max(1, e.NewSize.Height);
-            if (!_started) { Start(w, h); return; }
+            // ── FIRST LAYOUT ────────────────────────────────────────────────
+            if (!_started)
+            {
+                // SB_SIZE=WxH -- A MEASUREMENT INPUT, AND DELIBERATELY NOT THE FIX.
+                // (from the base branch; kept verbatim in intent.)
+                //
+                // `e.NewSize` is in DIPs. At 150% scaling a 3840x2160 display
+                // reports 2560x1440, so every surface this harness measured was
+                // 3.60 Mpx -- 43% of the display -- and the true physical-4K copy
+                // cost had never been measured. The FIX for that is to read
+                // CompositionScaleX/Y and set the swapchain's inverse matrix
+                // transform; it is BOOKED WORK (jyh/jas#16) and is not smuggled
+                // in here. This is the narrower thing: an explicit size input
+                // that sizes the SWAPCHAIN in physical pixels so the copy can be
+                // priced at a real 4K surface.
+                var forced = Environment.GetEnvironmentVariable("SB_SIZE");
+                if (!string.IsNullOrWhiteSpace(forced))
+                {
+                    var parts = forced.Split('x', 'X');
+                    if (parts.Length == 2
+                        && uint.TryParse(parts[0], out var fw) && fw > 0
+                        && uint.TryParse(parts[1], out var fh) && fh > 0)
+                    {
+                        w = fw; h = fh;
+                    }
+                    else
+                    {
+                        // REFUSE LOUDLY. A malformed SB_SIZE that silently fell
+                        // back to the DIP size would produce a run labelled 4K
+                        // and measured at 3.6 Mpx -- the exact confusion this
+                        // input exists to end, wearing the label of its own cure.
+                        Report($"SBFAIL bad SB_SIZE '{forced}' (want WxH)");
+                        StatusLine.Text = $"FAILED - bad SB_SIZE '{forced}'";
+                        _started = true;
+                        return;
+                    }
+                }
 
+                Start(w, h);
+                return;
+            }
+
+            // ── EVERY LATER RESIZE ──────────────────────────────────────────
+            //
             // ⛔ THE LATCH USED TO RETURN HERE, and that was the defect.
-            //
             // `if (_started) return;` meant the first laid-out size was the only
-            // size the swapchain ever had. Right for a fixed-size MEASUREMENT
-            // harness -- it is what keeps a run's label honest -- and wrong the
-            // moment this route is the product, because the back buffer then
-            // outgrows an offscreen target that is never recreated and the copy
-            // is silently dropped.
+            // size the swapchain ever had -- right for a fixed-size MEASUREMENT
+            // harness, wrong the moment this route is the product, because the
+            // back buffer then outgrows an offscreen target that is never
+            // recreated and the copy is SILENTLY DROPPED.
             //
+            // ⚠️ SB_SIZE AND A RESIZE ARE MUTUALLY EXCLUSIVE, and this is the one
+            // decision the merge had to make rather than inherit. SB_SIZE exists
+            // to pin the swapchain at a stated physical size so a number can be
+            // attributed to it; a later resize moves the surface out from under
+            // that pin. Honouring both would produce a run LABELLED with the
+            // forced size and MEASURED at another -- precisely the confusion
+            // SB_SIZE's own comment says it exists to end. So the pin wins and
+            // the resize is REFUSED BY NAME rather than silently ignored.
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_SIZE")))
+            {
+                Report($"RUSTFAIL SB_SIZE pins the surface; a resize to {w}x{h} would "
+                     + "measure a size the run is not labelled with. Use one or the other.");
+                StatusLine.Text = "FAILED - SB_SIZE and SB_RESIZE are mutually exclusive";
+                return;
+            }
+
             // A LATER RESIZE IS REPORTED AS LOUDLY AS THE FIRST PAINT. A resize
-            // that fails must not leave the title still showing the last good
-            // frame's status, which would read to the session-1 oracle as a
-            // healthy window.
+            // that fails must not leave the title showing the last good frame's
+            // status, which would read to the session-1 oracle as a healthy
+            // window.
             if (!_host.Resize(w, h))
             {
                 StatusLine.Text = $"FAILED — {_host.LastStatus}";
@@ -71,10 +127,9 @@ public sealed partial class MainWindow : Window
             // ⛔ CARRY ResizeCost EXPLICITLY. RenderFrame overwrites LastStatus,
             // so the resize's own three-part timing -- the whole point of driving
             // a resize -- was computed and then thrown away before anything read
-            // it. Found by running the paired sweep and seeing eight arms report
-            // no resize number at all. An instrument that overwrites its own
-            // result is the same class this branch keeps finding, arriving in the
-            // code I added to measure with.
+            // it. An instrument that overwrites its own result is the same class
+            // this branch keeps finding, arriving in the code I added to measure
+            // with.
             var cost = _host.ResizeCost;
             var ok = _host.RenderFrame();
             StatusLine.Text = ok
@@ -103,7 +158,38 @@ public sealed partial class MainWindow : Window
     /// paint attempt can produce. It makes the ambiguity decidable instead of
     /// leaving the verifier to guess.
     /// </summary>
-    private void Report(string status) => Title = $"{VerifyTitle} | {status}";
+    private void Report(string status)
+    {
+        Title = $"{VerifyTitle} | {status}";
+
+        // AND WRITE IT TO A FILE, because the title alone cannot carry a
+        // measurement back to the agent shell.
+        //
+        // The title was the right channel for the question S-B first asked --
+        // "is there a window at all" -- and a session-1 observer can read it.
+        // It is the WRONG channel for "give me four numbers": session 0 cannot
+        // see session 1's titles, so a sweep driven from the agent shell would
+        // have to screenshot and OCR its own results.
+        //
+        // The two sessions share a filesystem and nothing else. This is the same
+        // shape the S-C.1 harness settled on for the same reason, and the receipt
+        // is APPENDED so a multi-arm sweep accumulates rather than overwriting --
+        // an overwriting receipt cannot tell four arms from the last one, which
+        // is the defect my own statusline marker had this morning.
+        try
+        {
+            var path = System.IO.Path.Combine(AppContext.BaseDirectory, "sb-runs.log");
+            var mode = Environment.GetEnvironmentVariable("SB_MODE") ?? "(default:offscreen)";
+            var size = Environment.GetEnvironmentVariable("SB_SIZE") ?? "(window)";
+            var frames = Environment.GetEnvironmentVariable("SB_FRAMES") ?? "(default:60)";
+            System.IO.File.AppendAllText(path,
+                $"{DateTime.Now:HH:mm:ss}\tSB_MODE={mode}\tSB_SIZE={size}\tSB_FRAMES={frames}\t{status}\n");
+        }
+        catch
+        {
+            // Diagnostics must never become the failure.
+        }
+    }
 
     /// <summary>
     /// SB_RESIZE=WxH -- resize the window ONCE, after the first run, so the
