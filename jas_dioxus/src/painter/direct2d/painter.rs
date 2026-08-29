@@ -190,6 +190,29 @@ fn d2d_rect(r: Rect) -> D2D_RECT_F {
 }
 
 impl<'a> Painter for Direct2DPainter<'a> {
+    /// ⚖️ THIS BACKEND ANSWERS NO — TO ALL THREE, AND THE FOUR
+    /// `unimplemented!()` BODIES BELOW ARE WHY.
+    ///
+    /// * `IsolatedLayers` — `push_isolated_layer`/`pop_isolated_layer` panic;
+    /// * `MaskLayers` — `push_mask_layer`/`pop_mask_layer` panic;
+    /// * `NonNormalGroupBlend` — `push_group` takes a `BlendMode` and this
+    ///   backend has no effect graph for the 15 non-Normal modes (B1: a
+    ///   backdrop snapshot plus a `CLSID_D2D1Blend` graph per primitive, not
+    ///   built). The replay harness has always reported this as a declared gap.
+    ///
+    /// ⇒ A masked or layered element STAYS LEGACY-ROUTED on Direct2D. That is
+    /// the whole point of the query: the router can now be flipped for the
+    /// backend that can do the work WITHOUT flipping it for the one that
+    /// cannot, and neither answer is a comment — `replay.rs`'s corpus lane
+    /// cross-checks this against what the backend actually refuses.
+    ///
+    /// This answer flips to `true` when (a) lands — D2D's mask + layer ops,
+    /// flask's row, on B1's schedule. The ROUTER does not change then; this
+    /// method does.
+    fn supports(&self, _cap: crate::painter::capability::Capability) -> bool {
+        false
+    }
+
     fn fill_rect(&mut self, rect: Rect, brush: &Brush, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
         if let Some(b) = self.brush(brush, a) {
