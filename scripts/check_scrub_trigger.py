@@ -134,6 +134,103 @@ def push_is_unfiltered(on: object) -> bool:
     return "**" in branches
 
 
+PR_EVENTS = ("pull_request", "pull_request_target")
+
+
+def pr_triggers(on: object) -> dict[str, object]:
+    """{event: its value} for every PR event in `on`, in any spelling.
+
+    Returns {} when nothing here judges a pull request.
+    """
+    if isinstance(on, str):
+        return {on: None} if on in PR_EVENTS else {}
+    if isinstance(on, list):
+        return {e: None for e in on if e in PR_EVENTS}
+    if not isinstance(on, dict):
+        raise Unresolvable(f"unrecognised `on:` shape: {type(on).__name__}")
+    return {e: on[e] for e in PR_EVENTS if e in on}
+
+
+def pr_base_filter(event: str, value: object) -> str | None:
+    """The reason this PR trigger is base-filtered, or None if it is not.
+
+    ⛔ THE ASYMMETRY IS THE WHOLE POINT. For `push`, `branches:` filters the ref
+    being pushed. For `pull_request` IT FILTERS THE **BASE** BRANCH -- so
+    `branches: [main]` does not mean "PRs whose changes are on main", it means
+    "PRs INTO main", and a PR stacked on any other branch never matches. The
+    workflow then does not run AT ALL, contributes no checks, and the PR shows
+    green from whatever sibling workflow has no such filter. Nothing anywhere
+    says the suite was absent.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise Unresolvable(f"unrecognised `on.{event}` shape: {type(value).__name__}")
+    if "branches-ignore" in value:
+        # An ignore-list is a base filter by another name, and deciding whether
+        # it excludes a base anyone will stack on is exactly the guess this
+        # refuses. Same doctrine as the push rule.
+        raise Unresolvable(f"`on.{event}.branches-ignore` cannot be decided here")
+    branches = value.get("branches")
+    if branches is None:
+        return None
+    if not isinstance(branches, list):
+        raise Unresolvable(f"unrecognised `on.{event}.branches` shape: {branches!r}")
+    if "**" in branches:
+        return None
+    return (f"`on.{event}.branches` is {branches!r} -- that filters the BASE "
+            f"branch, so a PR stacked on any other base never runs this "
+            f"workflow and its absence is invisible on the PR")
+
+
+def scan_pr_filters(docs: dict[str, dict]) -> list[str]:
+    """Findings for the rule: no workflow that judges a PR may base-filter it.
+
+    ⛔ NOT REACHABILITY THIS TIME -- EVERY PR WORKFLOW IS HELD TO IT. The push
+    rule above asks whether SOME path reaches the trailer gate, because one
+    reaching path is enough to close that hole. This rule is the opposite
+    shape: the workflow that goes dark is the one nobody misses, and a clean
+    sibling is precisely what hides it. Absorbing a filtered workflow into a
+    sibling's green would reproduce the defect inside the gate written to
+    prevent it.
+    """
+    findings: list[str] = []
+    refusals: list[str] = []
+    judging: list[str] = []
+
+    for name, doc in sorted(docs.items()):
+        if not isinstance(doc, dict):
+            refusals.append(f"{name}: not a mapping")
+            continue
+        # YAML 1.1 resolves an unquoted `on:` to the boolean True; read both.
+        on = doc.get("on", doc.get(True))
+        try:
+            events = pr_triggers(on)
+        except Unresolvable as exc:
+            refusals.append(f"{name}: REFUSING to guess -- {exc}")
+            continue
+        for event, value in sorted(events.items()):
+            judging.append(f"{name}:{event}")
+            try:
+                why = pr_base_filter(event, value)
+            except Unresolvable as exc:
+                refusals.append(f"{name}: REFUSING to guess -- {exc}")
+                continue
+            if why:
+                findings.append(f"{name}: {why}")
+
+    # ANTI-VACUITY, and it is not ceremony. This rule's natural output on a
+    # tree it has no opinion about is [], which is byte-identical to the output
+    # on a tree it has approved. A repo where NOTHING triggers on a pull
+    # request is not a repo with no PR problem -- it is the same hole in its
+    # limiting case: a PR that no workflow judges, showing whatever checks the
+    # push lane happens to leave behind.
+    if not judging and not refusals:
+        return ["NO workflow triggers on a pull request -- nothing judges a PR, "
+                "which is the condition this rule exists to make loud"]
+    return refusals + findings
+
+
 def scan(docs: dict[str, dict]) -> list[str]:
     """Findings for a mapping of workflow-name -> parsed YAML.
 
@@ -288,6 +385,85 @@ def self_test() -> int:
     if scan(yamlish):
         failures.append(f"the YAML-1.1 `on:`->True key must be read, got {scan(yamlish)}")
 
+    # ------------------------------------------------------------------
+    # (h) ⛔ THE SECOND RULE: NO WORKFLOW THAT JUDGES A PR MAY CARRY A BASE
+    #     FILTER. For `pull_request`, `branches:` matches the BASE branch, so a
+    #     PR STACKED ON ANOTHER BRANCH never matches `[main]` and the workflow
+    #     silently does not run -- while the PR still shows GREEN from whatever
+    #     sibling workflow has no such filter. Measured here 2026-08-28 on two
+    #     stacked PRs: 4/4 checks green, all four of them hook gates, ZERO test
+    #     jobs. A STACKED PR WAS INDISTINGUISHABLE FROM A TESTED ONE.
+    #     Fixed in the workflow by #48; this is the gate that holds it down,
+    #     because a fix with no gate is remembering.
+    # ------------------------------------------------------------------
+
+    # (h1) THE EMPTY SET FIRST, again. A rule that examines nothing returns an
+    #      empty finding list, which is indistinguishable from a clean tree.
+    if not scan_pr_filters({}):
+        failures.append("a tree where NOTHING judges a PR must be FATAL, not green")
+
+    # (h2) THE HISTORICAL DEFECT, planted verbatim -- test.yml as it stood.
+    dark = {"test.yml": {"on": {"push": {"branches": ["main"]},
+                                "pull_request": {"branches": ["main"]}},
+                         "jobs": {"j": good_job}}}
+    found = scan_pr_filters(dark)
+    if not found or not any("base" in f for f in found):
+        failures.append(f"`pull_request: branches: [main]` must be caught, got {found}")
+
+    # (h3) The repaired shape must pass, in every spelling Actions accepts --
+    #      and the `push` filter must survive, since removing it would run the
+    #      whole matrix on every push to every branch.
+    for label, on in [
+        ("pull_request: null", {"push": {"branches": ["main"]}, "pull_request": None}),
+        ("branches: ['**']", {"pull_request": {"branches": ["**"]}}),
+        ("list form", ["push", "pull_request"]),
+        ("types only", {"pull_request": {"types": ["opened", "synchronize"]}}),
+    ]:
+        ok = {"w.yml": {"on": on, "jobs": {"j": good_job}}}
+        if scan_pr_filters(ok):
+            failures.append(f"the repaired shape ({label}) must pass, got {scan_pr_filters(ok)}")
+
+    # (h4) `pull_request_target` carries the same trap and more privilege.
+    tgt = {"w.yml": {"on": {"pull_request_target": {"branches": ["main"]}},
+                     "jobs": {"j": good_job}}}
+    if not scan_pr_filters(tgt):
+        failures.append("`pull_request_target` must be held to the same rule")
+
+    # (h5) A workflow with NO pull_request trigger is not judged by this rule --
+    #      but it also cannot satisfy it, which (h1) is what makes fatal.
+    push_only = {"w.yml": {"on": {"push": None}, "jobs": {"j": good_job}}}
+    if not scan_pr_filters(push_only):
+        failures.append("a tree with no PR-judging workflow at all must be caught")
+
+    # (h6) ...and one clean PR workflow makes the tree sound even beside a
+    #      push-only sibling. Reachability, not exclusivity -- same doctrine as
+    #      the rule above.
+    mixed_pr = dict(push_only)
+    mixed_pr["test.yml"] = {"on": {"pull_request": None}, "jobs": {"j": good_job}}
+    if scan_pr_filters(mixed_pr):
+        failures.append(f"a push-only sibling must not fail a judged tree, got {scan_pr_filters(mixed_pr)}")
+
+    # (h7) ...but a FILTERED PR workflow is NOT absorbed by a clean sibling.
+    #      This is the arm that matters: the dark workflow is the one whose
+    #      absence nobody could see, and a sibling's green is exactly what hid
+    #      it. If this passed, the rule would be decorative.
+    both = {"test.yml": {"on": {"pull_request": {"branches": ["main"]}}, "jobs": {"j": good_job}},
+            "scrub.yml": {"on": {"pull_request": None}, "jobs": {"j": good_job}}}
+    if not scan_pr_filters(both):
+        failures.append("a filtered PR workflow must NOT be absorbed by a clean sibling")
+
+    # (h8) An undecidable filter REFUSES rather than guessing.
+    murky_pr = {"w.yml": {"on": {"pull_request": {"branches-ignore": ["x"]}},
+                          "jobs": {"j": good_job}}}
+    if not any("REFUSING" in f for f in scan_pr_filters(murky_pr)):
+        failures.append(f"an undecidable PR filter must refuse, got {scan_pr_filters(murky_pr)}")
+
+    # (h9) YAML 1.1 `on:` -> True, here too.
+    yamlish_pr = {"w.yml": {True: {"pull_request": {"branches": ["main"]}},
+                            "jobs": {"j": good_job}}}
+    if not scan_pr_filters(yamlish_pr):
+        failures.append("the YAML-1.1 `on:`->True key must be read by the PR rule")
+
     for f in failures:
         print(f"SELF-TEST FAIL: {f}")
     if failures:
@@ -296,7 +472,10 @@ def self_test() -> int:
         "check_scrub_trigger SELF-TEST: OK (empty scan fatal proven FIRST, "
         "the historical `branches: [main]` shape caught, four repaired "
         "spellings accepted, shallow checkout caught, undecidable trigger "
-        "refused, YAML-1.1 `on:` key read)"
+        "refused, YAML-1.1 `on:` key read; PR base-filter rule: empty set "
+        "fatal, the historical `pull_request: branches: [main]` caught, "
+        "`pull_request_target` held to it, four repaired spellings accepted, "
+        "not absorbed by a clean sibling, undecidable filter refused)"
     )
     return 0
 
@@ -306,6 +485,7 @@ def main() -> int:
         return self_test()
 
     docs = _load()
+    rc = 0
     findings = scan(docs)
     if findings:
         print(f"FAIL: the {GUARDED} gate is not reached on every pushed branch.")
@@ -314,9 +494,29 @@ def main() -> int:
         print()
         print("A gate that does not run is not a guard. Give the workflow that "
               "invokes it an unfiltered `on.push`.")
-        return 1
+        rc = 1
+
+    # The two rules are REPORTED SEPARATELY AND BOTH ALWAYS RUN. Returning on
+    # the first failure would let one hole hide the other, and these two are
+    # the same defect wearing different clothes: a gate nothing invokes, and a
+    # suite no PR triggers.
+    pr_findings = scan_pr_filters(docs)
+    if pr_findings:
+        print("FAIL: a workflow that judges a pull request carries a BASE filter.")
+        for f in pr_findings:
+            print(f"  {f}")
+        print()
+        print("For `pull_request`, `branches:` matches the BASE branch. A PR "
+              "stacked on another branch never matches it, the workflow does "
+              "not run, and the PR still shows green from its siblings -- a "
+              "stacked PR indistinguishable from a tested one. Drop the "
+              "filter (or use `**`); keep the one on `push` if you need it.")
+        rc = 1
+    if rc:
+        return rc
     print(f"check_scrub_trigger: OK ({len(docs)} workflow file(s) scanned; "
-          f"{GUARDED} runs on every pushed branch with full history)")
+          f"{GUARDED} runs on every pushed branch with full history; "
+          f"no PR-judging workflow carries a base filter)")
     return 0
 
 

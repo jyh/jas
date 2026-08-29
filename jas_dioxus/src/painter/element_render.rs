@@ -60,7 +60,20 @@ use super::{
 ///   production `render.rs` text pipeline (tspans, `letterSpacing` via Reflect,
 ///   per-glyph rotate, baseline shift) is not mechanically 1:1 yet.
 pub fn element_needs_legacy(elem: &Element) -> bool {
-    // Active opacity mask (PH4).
+    // ⛔ ACTIVE OPACITY MASK — STILL LEGACY, AND THE PRODUCER EXISTING DOES NOT
+    // CHANGE THAT. `emit_element` now emits the full A6 element bracket for a
+    // masked element (see `emit_masked_element`), so §6.2's law finally has a
+    // producer and is asserted through one. Routing production at it is a
+    // SEPARATE step and is BLOCKED IN THE BACKEND:
+    //
+    //   `Canvas2dPainter::push_mask_layer` / `pop_mask_layer` are still
+    //   `unimplemented!()`. #47 landed the LAYER-TARGET half of the backend —
+    //   `push_isolated_layer` / `pop_isolated_layer` execute — but the MASK
+    //   half is PH4's scratch/luminance pipeline and does not exist.
+    //
+    // Flipping this clause today would route every masked element into that
+    // panic. So the clause stays, deliberately, and this comment is the reason
+    // rather than a TODO: backend, THEN the router.
     if elem
         .common()
         .mask
@@ -458,11 +471,113 @@ pub fn path_painter_inputs(e: &PathElem, bbox: (f64, f64, f64, f64)) -> Option<S
 /// mirroring `render.rs`'s `base_alpha * fill_op` / `* stroke_op`.
 ///
 /// Assumes `!element_needs_legacy(elem)`; a legacy-only element paints nothing.
+/// The element's ACTIVE mask, or `None`. A `disabled` mask is not active —
+/// the element renders as if none were attached, which is what the legacy
+/// `mask_plan` says too (it returns `None` for a disabled mask).
+fn active_mask(elem: &Element) -> Option<&crate::geometry::element::Mask> {
+    elem.common().mask.as_deref().filter(|m| !m.disabled)
+}
+
+/// AMENDMENT A6 — emit one masked element as THE ELEMENT BRACKET.
+///
+/// ```text
+/// push_isolated_layer(own opacity, own blend)
+///     <body ops>                     — under the element's own transform
+///     push_mask_layer(law)
+///         <mask artwork ops>         — under the mask's EFFECTIVE transform
+///     pop_mask_layer()
+/// pop_isolated_layer()
+/// ```
+///
+/// WHERE EACH PIECE COMES FROM, because none of it is invented here:
+///
+/// - **The law** is [`mask_from_flags`](crate::painter::mask_from_flags), the
+///   ONE copy of the `(clip, invert)` truth table (A6 §4 puts the lowering at
+///   BUILD time). `bbox` is the mask subtree's bounds, computed HERE and passed
+///   in — a backend never computes bounds (§3.3), and it is the same
+///   `mask.subtree.bounds()` the legacy `RevealOutsideBbox` arm reads.
+/// - **The body's alpha is `incoming_alpha`, NOT `incoming_alpha *
+///   elem.opacity()`.** The element's own opacity rides the LAYER and is spent
+///   once at `pop_isolated_layer`; multiplying it into the body as well is
+///   defect D-α's first half, and §6.2's golden exists to pin exactly that.
+/// - **The mask artwork's alpha is 1.0.** The mask bracket is itself isolated —
+///   fresh transparent surface, alpha context 1.0 (§3.2). Legacy agrees: it
+///   resets the scratch context's alpha to 1.0 before drawing the subtree.
+/// - **The mask transform** is `elem.transform()` when the mask is linked and
+///   `unlink_transform` when it is not — `render.rs::effective_mask_transform`,
+///   ported rather than re-derived. It is pushed AFTER the body's own transform
+///   has popped, because legacy applies it from the ancestor coordinate system,
+///   not on top of the element's.
+///
+/// ⛔ THIS IS NOT BEHAVIOR-PRESERVING, AND THAT IS RATIFIED, NOT OVERLOOKED.
+/// Contract R4 converts only what is behavior-preserving; A6 §6.2 deliberately
+/// pins a law HEAD violates. HEAD renders a masked element inside an alpha
+/// group at `own²`, because `set_global_alpha` REPLACES rather than multiplies,
+/// so the ancestors' contribution is discarded and the element's own opacity is
+/// applied twice. The bracket applies each factor ONCE. ⇒ Converting a masked
+/// element under an alpha ancestor CHANGES what is drawn — to the ratified law.
+/// It is stated here because a reader of a diff would otherwise have to
+/// rediscover it.
+fn emit_masked_element(
+    p: &mut dyn Painter,
+    elem: &Element,
+    mask: &crate::geometry::element::Mask,
+    incoming_alpha: f64,
+) {
+    let (bx, by, bw, bh) = mask.subtree.bounds();
+    let law = crate::painter::mask_from_flags(
+        mask.clip,
+        mask.invert,
+        Rect { x: bx, y: by, w: bw, h: bh },
+    );
+
+    p.push_isolated_layer(elem.opacity(), elem.common().mode);
+    // The body: ancestors ride the paint alpha (this producer FOLDS group
+    // alpha rather than emitting `push_group`), the element's own opacity
+    // rides the layer above.
+    emit_element_body(p, elem, incoming_alpha);
+
+    p.push_mask_layer(law);
+    let mask_xf = if mask.linked {
+        elem.transform()
+    } else {
+        mask.unlink_transform.as_ref()
+    };
+    let pushed = mask_xf.is_some();
+    if let Some(t) = mask_xf {
+        p.push_state(*t);
+    }
+    emit_element(p, &mask.subtree, 1.0);
+    if pushed {
+        p.pop_state();
+    }
+    p.pop_mask_layer();
+    // Nothing paints between pop_mask_layer and pop_isolated_layer (§3.2).
+    p.pop_isolated_layer();
+}
+
 pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
     if elem.visibility() == Visibility::Invisible {
         return;
     }
-    let eff = incoming_alpha * elem.opacity();
+    // AMENDMENT A6 — an element with an ACTIVE mask is emitted as the element
+    // bracket, not as a bare body. See `emit_masked_element` for the derivation.
+    if let Some(mask) = active_mask(elem) {
+        emit_masked_element(p, elem, mask, incoming_alpha);
+        return;
+    }
+    emit_element_body(p, elem, incoming_alpha * elem.opacity());
+}
+
+/// The element's own paint ops at a GIVEN effective alpha, under its own
+/// transform. Split out of [`emit_element`] so the A6 bracket can emit the same
+/// body at a DIFFERENT alpha: inside an isolated layer the element's own
+/// opacity rides the layer and must not also multiply into the body primitives.
+///
+/// `eff` is the final paint-alpha base — already multiplied by whatever opacity
+/// applies. The split is otherwise behavior-neutral: the unmasked call passes
+/// `incoming_alpha * elem.opacity()`, which is exactly what this computed before.
+fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64) {
     let pushed = elem.transform().is_some();
     if let Some(t) = elem.transform() {
         p.push_state(*t);

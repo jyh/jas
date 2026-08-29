@@ -349,6 +349,183 @@ fn reference_docs_are_deterministic() {
 // Capability router + the byte-identical Line helper
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// AMENDMENT A6 — the element bracket, produced from a DOCUMENT
+// ---------------------------------------------------------------------------
+
+/// A masked rect: own opacity 0.5, standard opacity mask (clip, not inverted),
+/// mask artwork a white rect. Built here rather than in a shared fixture so the
+/// numbers the assertions below name are visible beside them.
+fn masked_rect(clip: bool, invert: bool) -> Element {
+    use crate::geometry::element::Mask;
+    let mut r = rect(10.0, 10.0, 40.0, 40.0, fill(Color::rgb(0.9, 0.2, 0.2)), None);
+    if let Element::Rect(e) = &mut r {
+        e.common.opacity = 0.5;
+        e.common.mask = Some(Box::new(Mask {
+            subtree: Box::new(rect(20.0, 20.0, 20.0, 20.0, fill(Color::WHITE), None)),
+            clip,
+            invert,
+            disabled: false,
+            linked: true,
+            unlink_transform: None,
+        }));
+    }
+    r
+}
+
+fn ops(elem: &Element, incoming: f64) -> Vec<Command> {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, elem, incoming);
+    rec.commands().to_vec()
+}
+
+/// ⛔ THE BRACKET, ASSERTED FROM THE CONTRACT — not captured from HEAD.
+///
+/// A6 §3.2 fixes the shape; §6.2 fixes the alpha law. Both are asserted here on
+/// an op list produced by a real document element, which is what §6.2's
+/// scene-level golden could not have: a PRODUCER.
+#[test]
+fn a6_masked_element_emits_the_bracket() {
+    use crate::painter::Mask as PMask;
+    let got = ops(&masked_rect(true, false), 1.0);
+
+    // 1. THE GRAMMAR. Exactly one isolated layer, exactly one mask bracket
+    //    inside it, and NOTHING between pop_mask_layer and pop_isolated_layer.
+    assert!(matches!(got.first(), Some(Command::PushIsolatedLayer { .. })),
+            "the bracket must OPEN the emission, got {:?}", got.first());
+    assert!(matches!(got.last(), Some(Command::PopIsolatedLayer)),
+            "the bracket must CLOSE the emission, got {:?}", got.last());
+    let n = got.len();
+    assert!(matches!(got[n - 2], Command::PopMaskLayer),
+            "nothing may paint between pop_mask_layer and pop_isolated_layer (§3.2)");
+
+    // 2. THE ALPHA LAW (§6.2, defect D-α). The element's own opacity rides the
+    //    LAYER and is spent ONCE; the body must NOT carry it as well.
+    match &got[0] {
+        Command::PushIsolatedLayer { alpha, .. } =>
+            assert_eq!(*alpha, 0.5, "the layer carries the element's OWN opacity"),
+        c => panic!("expected PushIsolatedLayer, got {c:?}"),
+    }
+    let body: Vec<_> = got.iter()
+        .filter(|c| matches!(c, Command::FillRect { .. }))
+        .collect();
+    assert_eq!(body.len(), 2, "one body fill + one mask-artwork fill");
+    match body[0] {
+        Command::FillRect { paint_alpha, .. } => assert_eq!(
+            *paint_alpha, 1.0,
+            "D-α: the body paints at the INCOMING alpha (1.0 here). 0.25 would \
+             be the squared defect; 0.5 would be own-opacity applied twice."),
+        c => panic!("expected FillRect, got {c:?}"),
+    }
+    // 3. The mask artwork is itself isolated at alpha context 1.0 (§3.2).
+    match body[1] {
+        Command::FillRect { paint_alpha, .. } =>
+            assert_eq!(*paint_alpha, 1.0, "the mask bracket is isolated at 1.0"),
+        c => panic!("expected FillRect, got {c:?}"),
+    }
+    // 4. THE LAW, from the ONE truth table: (clip, !invert) -> LuminanceClipIn.
+    let law = got.iter().find_map(|c| match c {
+        Command::PushMaskLayer { mask } => Some(*mask),
+        _ => None,
+    });
+    assert_eq!(law, Some(PMask::LuminanceClipIn));
+}
+
+/// ⛔ THE INCOMING ALPHA IS DISCRIMINATING, and 0.5/0.5 is NOT — the squared
+/// defect and the correct law both give 0.25 there, which is the same trap
+/// `render.rs`'s own D-α test documents. So this drives 1.0 × 0.5 and 0.25 × 0.5.
+#[test]
+fn a6_masked_body_carries_ancestors_and_the_layer_carries_own_opacity() {
+    for incoming in [1.0_f64, 0.25, 0.8] {
+        let got = ops(&masked_rect(true, false), incoming);
+        let layer = got.iter().find_map(|c| match c {
+            Command::PushIsolatedLayer { alpha, .. } => Some(*alpha),
+            _ => None,
+        }).expect("a layer");
+        let first_fill = got.iter().find_map(|c| match c {
+            Command::FillRect { paint_alpha, .. } => Some(*paint_alpha),
+            _ => None,
+        }).expect("a body fill");
+        assert_eq!(layer, 0.5, "own opacity, never the ancestors");
+        assert_eq!(first_fill, incoming, "ancestors, never the own opacity");
+        // The net the artist sees: each factor exactly ONCE.
+        assert_eq!(layer * first_fill, 0.5 * incoming);
+
+        // ⛔ AND THE MASK ARTWORK STAYS AT 1.0 **AT A NON-UNIT INCOMING**. The
+        // first version of this suite asserted the artwork's alpha only at
+        // incoming = 1.0, where "1.0" and "incoming" are the same number — so a
+        // mutant that fed the ancestors into the mask bracket SURVIVED. The
+        // mask bracket is isolated (§3.2); ancestor alpha must not reach it, and
+        // that is only visible where the two values differ.
+        let artwork = got.iter().filter_map(|c| match c {
+            Command::FillRect { paint_alpha, .. } => Some(*paint_alpha),
+            _ => None,
+        }).nth(1).expect("the mask artwork fill");
+        assert_eq!(artwork, 1.0,
+                   "the mask bracket is isolated at alpha 1.0, whatever the \
+                    ancestors carry (incoming={incoming})");
+    }
+}
+
+/// The reveal law needs a bbox, and a backend never computes bounds (§3.3) —
+/// so the producer must pass the MASK SUBTREE's bounds. The artwork here is a
+/// 20×20 rect at (20, 20).
+#[test]
+fn a6_reveal_law_carries_the_mask_subtree_bbox() {
+    use crate::painter::Mask as PMask;
+    let got = ops(&masked_rect(false, false), 1.0);
+    let law = got.iter().find_map(|c| match c {
+        Command::PushMaskLayer { mask } => Some(*mask),
+        _ => None,
+    }).expect("a mask layer");
+    match law {
+        PMask::AlphaRevealOutsideBbox { bbox } => {
+            assert_eq!((bbox.x, bbox.y, bbox.w, bbox.h), (20.0, 20.0, 20.0, 20.0),
+                       "the bbox is the MASK SUBTREE's bounds, computed here");
+        }
+        other => panic!("(clip:false, invert:false) lowers to reveal, got {other:?}"),
+    }
+}
+
+/// `(clip:false, invert:true)` COLLAPSES onto `(true, true)` — A6 §4 says so and
+/// the truth table implements it. Pinned through the PRODUCER, not just the table.
+#[test]
+fn a6_invert_collapses_through_the_producer() {
+    use crate::painter::Mask as PMask;
+    for clip in [true, false] {
+        let got = ops(&masked_rect(clip, true), 1.0);
+        let law = got.iter().find_map(|c| match c {
+            Command::PushMaskLayer { mask } => Some(*mask),
+            _ => None,
+        });
+        assert_eq!(law, Some(PMask::AlphaClipOut),
+                   "invert lowers to AlphaClipOut whatever `clip` says (clip={clip})");
+    }
+}
+
+/// A DISABLED mask is not a mask: the element renders as if none were attached,
+/// and no bracket is emitted at all. Legacy agrees (`mask_plan` returns None).
+#[test]
+fn a6_disabled_mask_emits_no_bracket() {
+    let mut e = masked_rect(true, false);
+    if let Element::Rect(r) = &mut e {
+        r.common.mask.as_mut().unwrap().disabled = true;
+    }
+    let got = ops(&e, 1.0);
+    assert!(!got.iter().any(|c| matches!(c, Command::PushIsolatedLayer { .. })),
+            "a disabled mask must not open a layer, got {got:?}");
+    // ...and the body then carries its OWN opacity again, the ordinary fold.
+    match got.first() {
+        Some(Command::FillRect { paint_alpha, .. }) => assert_eq!(*paint_alpha, 0.5),
+        c => panic!("expected a bare body fill, got {c:?}"),
+    }
+}
+
+/// ⛔ AND IT STILL DOES, WITH A PRODUCER SITTING RIGHT THERE. The bracket tests
+/// above prove `emit_element` emits A6's element bracket for this same shape —
+/// but `Canvas2dPainter::push_mask_layer` is `unimplemented!()`, so routing
+/// production at it would panic. The producer and the routing are two steps and
+/// this is the pin that keeps them apart until the PH4 backend lands.
 #[test]
 fn masked_element_needs_legacy() {
     use crate::geometry::element::Mask;

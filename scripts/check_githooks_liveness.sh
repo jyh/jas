@@ -210,8 +210,90 @@ sys.exit(0)
   arm bad-sheb 1
   arm vacuous  1
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # ⛔ RULE A's PREMISE, DRIVEN — the half kenai could not measure.
+  #
+  # Every arm above tests THE GATE: it asserts that a 100644 entry point is
+  # FLAGGED. None of them tests WHY that rule exists — that a 100644 hook is
+  # actually INERT on this platform. flask wrote the rule from git's documented
+  # contract and said so plainly: "I cannot measure the Mac half from here --
+  # that half is DOCUMENTED, NOT MEASURED." A rule whose premise is documented
+  # rather than driven is exactly the shape this repo keeps finding.
+  #
+  # ⚠️ THE POSITIVE CONTROL COMES FIRST. "the 644 hook did not fire" is worthless
+  # on its own — it is equally consistent with hooks not running at all. The
+  # 100755 fixture must FIRE before the 100644 result means anything.
+  #
+  # ⚠️ AND THE EXPECTED ANSWER IS PLATFORM-DEPENDENT, WHICH IS THE POINT. On
+  # macOS/Linux git honours the mode and a 644 hook is inert. On Windows git
+  # runs it regardless — flask MEASURED that on kenai — and core.filemode=false
+  # means a chmod there never reaches the index. So this arm reports what THIS
+  # platform does; the rule is justified by the strictest one.
+  premise() {
+    d="$tmp/premise-$1"
+    mkdir -p "$d/.githooks"
+    git -C "$d" init -q
+    git -C "$d" config user.email fixture@example.com
+    git -C "$d" config user.name fixture
+    git -C "$d" config commit.gpgsign false
+    git -C "$d" config core.autocrlf false
+    printf '#!/bin/sh\ntouch "$(git rev-parse --show-toplevel)/FIRED"\n' > "$d/.githooks/commit-msg"
+    git -C "$d" add .githooks/commit-msg
+    git -C "$d" update-index --chmod="$2" .githooks/commit-msg
+    git -C "$d" commit -qm seed >/dev/null 2>&1
+
+    # ⛔ THE PROBE RUNS IN A CLONE, AND THAT IS NOT TIDINESS. `update-index
+    # --chmod` sets the INDEX mode; git executes the hook FROM DISK, where the
+    # permission came from the umask that created the file. The index mode only
+    # reaches disk through a CHECKOUT — so a fixture that commits and then
+    # commits again in the SAME tree measures the umask, not the mode. My first
+    # cut did exactly that, and the POSITIVE CONTROL caught it: a 100755 entry
+    # sat 644 on disk and did not fire.
+    # Cloning is also the REAL path — the defect this rule guards is a hook
+    # committed 100644 on one machine and CHECKED OUT inert on another.
+    c="$tmp/premise-$1-clone"
+    git clone -q "$d" "$c" 2>/dev/null || { echo "clone failed" >&2; return 2; }
+    git -C "$c" config user.email fixture@example.com
+    git -C "$c" config user.name fixture
+    git -C "$c" config commit.gpgsign false
+    git -C "$c" config core.hooksPath .githooks
+    echo probe > "$c/probe.txt"
+    git -C "$c" add probe.txt
+    git -C "$c" commit -qm probe >/dev/null 2>&1
+    # ⛔ the commit must have LANDED, or "no marker" reports a refused commit
+    # rather than an inert hook — two different facts that print the same.
+    if [ "$(git -C "$c" rev-list --count HEAD)" -lt 2 ]; then
+      echo "premise($2): the probe commit did not land; arm is unreadable" >&2
+      return 2
+    fi
+    [ -e "$c/FIRED" ] && echo fired || echo inert
+  }
+
+  exec_fires=$(premise exec +x)
+  nonexec=$(premise nonexec -x)
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) plat=windows ;;
+    *)                    plat=posix ;;
+  esac
+
+  if [ "$exec_fires" != "fired" ]; then
+    echo "self-test FAIL: the 100755 POSITIVE CONTROL did not fire ($exec_fires) --" >&2
+    echo "  nothing below it is readable." >&2
+    fail=$((fail + 1))
+  elif [ "$plat" = posix ] && [ "$nonexec" != "inert" ]; then
+    echo "self-test FAIL: a 100644 hook FIRED on a posix host ($nonexec) -- rule A's" >&2
+    echo "  premise does not hold here and the 100755 assertion is unjustified." >&2
+    fail=$((fail + 1))
+  else
+    echo "rule A premise, driven on $plat: 100755 -> $exec_fires, 100644 -> $nonexec"
+    if [ "$plat" = windows ] && [ "$nonexec" = fired ]; then
+      echo "  (windows runs it regardless -- flask's kenai measurement, reproduced."
+      echo "   the 100755 rule is justified by the POSIX host, not by this one.)"
+    fi
+  fi
+
   if [ "$fail" -eq 0 ]; then
-    echo "self-test: PASS — a clean hooks dir passes; four distinct holes each fail"
+    echo "self-test: PASS — a clean hooks dir passes; four distinct holes each\n            fail; and rule A's premise is DRIVEN on this platform, not assumed"
     return 0
   fi
   echo "self-test: FAILED"
