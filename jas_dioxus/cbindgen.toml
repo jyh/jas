@@ -39,3 +39,17 @@ exclude = ["Capability", "Caps"]
 
 [enum]
 prefix_with_name = true
+
+# THE SPIKE SEAM MUST NOT LOOK UNCONDITIONAL. cbindgen does not evaluate
+# `#[cfg]`; without a mapping here it emits a d2d-gated declaration as though it
+# were always present, and a consumer building without `d2d` would compile
+# against a symbol that is not in the library. check_cbindgen_freshness.py
+# caught exactly that within minutes of the seam being added.
+#
+# Scoped to the NEW axes only (d2d and windows). `ffi` and `web` are deliberately
+# left alone: every item in this header is already behind `feature = "ffi"`, so
+# guarding it would wrap the whole file in one #ifdef and change 325 committed
+# lines for no gain in truth.
+[defines]
+"feature = d2d" = "JAS_WITH_D2D"
+"windows" = "_WIN32"

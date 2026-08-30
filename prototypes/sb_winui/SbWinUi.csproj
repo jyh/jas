@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    S-B CHECKPOINT 1: the C#/WinUI-3 materializer shell, smallest useful form.
+
+    UNPACKAGED (WindowsPackageType=None) on purpose. MSIX packaging would add a
+    second, unrelated way for this spike to fail, and D1 rules this a SHELL over
+    the Rust core rather than a shipping app. The Windows App SDK runtimes are
+    already installed on this box (1.5, 1.8, 2.x as Appx packages), which is what
+    makes the unpackaged route viable with no Visual Studio present; vswhere
+    reports no VS instances here.
+
+    BUILD WITH THE LOCALAPPDATA dotnet, NOT THE ONE ON PATH:
+      %LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe build
+    The dotnet on PATH is a runtime-only install (Program Files, 8.0.13) and says
+    "No .NET SDKs were found", which is the identical message a machine with no
+    SDK at all would print. The real SDK is 10.0.302 in LOCALAPPDATA.
+
+    Note for anyone editing the comments in this file: XML forbids a double
+    hyphen inside a comment, and this repo's prose uses one as an em dash. The
+    first version of this file would not parse for exactly that reason.
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>SbWinUi</RootNamespace>
+    <AssemblyName>SbWinUi</AssemblyName>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <EnableMsixTooling>false</EnableMsixTooling>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Floating 1.8.* rather than a pinned build. The installed runtime here is
+      Microsoft.WindowsAppRuntime.1.8 (8000.946.1701.0), and an unpackaged app
+      must match the runtime MAJOR.MINOR actually present. Pinning an exact patch
+      would be guessing at a number I have not read.
+    -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.*" />
+    <!--
+      Build-time only (PrivateAssets=all): CsWin32 generates the D3D11/DXGI
+      interop from Win32 metadata, so nothing ships with the app and no
+      vtable slot is transcribed by hand. See NativeMethods.txt.
+    -->
+    <PackageReference Include="Microsoft.Windows.CsWin32" Version="0.3.*">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>
