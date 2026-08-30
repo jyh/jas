@@ -650,9 +650,10 @@ def tree_mode(write: bool) -> int:
     found = tree_findings()
     keys = {(f, line_sha(line)) for f, _, line in found}
     if write:
-        # newline="" because this file is READ BACK and compared by line sha:
-        # a text write on Windows emits CRLF, every sha changes, and the ratchet
-        # would report the whole baseline as new residue on that platform alone.
+        # newline="" so a write on Windows does not emit CRLF into a byte-compared file
+        # (jas's encoding-hygiene gate caught this when the ratchet was ported there: a file that
+        # ships byte-identical to three repos must satisfy the STRICTEST repo's gates, not the
+        # source's -- a port inherits the destination's rules, measured 08/29).
         with open(BASELINE, "w", encoding="utf-8", newline="") as fh:
             fh.write("# private_paths_baseline.tsv -- ACCEPTED residue for the tree ratchet "
                      "(check_private_paths.py --tree).\n# file<TAB>line-sha16<TAB>what. "
