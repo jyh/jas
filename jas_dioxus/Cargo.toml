@@ -37,6 +37,17 @@ name = "corpus_replay"
 path = "src/bin/corpus_replay.rs"
 required-features = ["web"]
 
+# S-C boundary-counter wiring tests. Its own binary ON PURPOSE: the counters are
+# process-global, so any other test that crosses the boundary pollutes the
+# reading. In the lib binary that guarantee would depend on every one of ~2,100
+# tests remembering to take a lock -- and it already failed that way once, under
+# `widget_tree_matches_the_corpus_driver_exactly`. A separate target is immune by
+# construction rather than by discipline.
+[[test]]
+name = "ffi_boundary_counter"
+path = "tests/ffi_boundary_counter.rs"
+required-features = ["ffi"]
+
 # R10 de-risking-spike bench: native scene-BUILD cost through the no-op Painter
 # sink. Custom harness (no criterion dependency) so `cargo test` stays lean;
 # run with `cargo bench --bench painter_build`.

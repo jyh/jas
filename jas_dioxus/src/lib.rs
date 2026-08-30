@@ -13,6 +13,12 @@ pub mod text_measure;
 // so the default web build and the wasm target never see it.
 #[cfg(feature = "ffi")]
 pub mod ffi;
+// Boundary instrumentation for S-C's chatter measurement. Behind the same gate
+// as the surface it counts: a counter that could be compiled without the
+// boundary would be a counter with nothing to count.
+#[cfg(feature = "ffi")]
+pub mod ffi_instr;
+
 
 // S-B SPIKE SEAM, not ratified ABI. Needs BOTH features: the paint entry
 // point is meaningless without the Direct2D backend, and it is kept out of

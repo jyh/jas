@@ -22,6 +22,11 @@
 
 use std::cell::RefCell;
 
+// S-C boundary instrumentation. Every extern below records its own crossing;
+// the counter is the receipt for the chatter measurement, and a static count of
+// call sites would pass on a shell that never ran.
+use crate::ffi_instr::{self, Crossing};
+
 use crate::document::model::Model;
 use crate::document::op_apply::{op_apply, OpError};
 
@@ -131,6 +136,49 @@ fn json_str(s: &str) -> String {
 pub struct JasEngine {
     model: RefCell<Model>,
     last_error: RefCell<Option<String>>,
+    /// The panel state a materialized panel binds to (S-C.1).
+    ///
+    /// `Model` holds the DOCUMENT — and its own comment says the panel `state`
+    /// namespace is "not in AppState"'s absence here deliberate. The colour
+    /// panel binds 87 times into `state.*` and ~45 into `panel.*`, none of which
+    /// `Model` carries, so wiring `bind_values` against the model alone would
+    /// resolve every one of those to null and materialize 71 controls holding
+    /// document-derived values but not the colour — on a COLOUR panel, where the
+    /// state IS the content. That is a subtler empty shell than an unrendered
+    /// one and would measure just as vacuously.
+    panel: RefCell<PanelState>,
+}
+
+/// The minimum a materialized colour panel needs. **Deliberately not a general
+/// state store**: this is the spike's slice, not an app-state design.
+///
+/// ⛔ **The CHANNELS ARE NOT HERE.** `r/g/bl/h/s/b/c/m/y/k/hex` are DERIVED at
+/// assembly time by `interpreter::color_util::panel_channels`, which the
+/// cross-language corpus pins with 16 vectors. Storing them would create a
+/// second source of truth for values that already have one, and the copy would
+/// be the one that drifts.
+#[derive(Debug, Clone)]
+struct PanelState {
+    /// Float RGB, 0..1. Seeded to a NON-DEGENERATE colour on purpose: at white
+    /// every derivation agrees, so a white seed would let a wrong one pass. This
+    /// is the corpus's own `panel_exact_eighth_bit_values` vector.
+    fill: (f64, f64, f64),
+    stroke: (f64, f64, f64),
+    fill_on_top: bool,
+    mode: String,
+    recent: Vec<String>,
+}
+
+impl Default for PanelState {
+    fn default() -> Self {
+        PanelState {
+            fill: (0.4, 0.25, 0.25),
+            stroke: (0.0, 0.0, 0.0),
+            fill_on_top: true,
+            mode: "hsb".to_string(),
+            recent: vec![],
+        }
+    }
 }
 
 impl JasEngine {
@@ -138,6 +186,7 @@ impl JasEngine {
         JasEngine {
             model: RefCell::new(Model::default()),
             last_error: RefCell::new(None),
+            panel: RefCell::new(PanelState::default()),
         }
     }
 }
@@ -172,6 +221,7 @@ unsafe fn utf8(ptr: *const u8, len: usize) -> Result<&'static str, JasStatus> {
 /// **BL2**: every subsequent call for this engine must be on this thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn jas_engine_new() -> *mut JasEngine {
+    ffi_instr::record(Crossing::EngineNew, 0, 0);
     Box::into_raw(Box::new(JasEngine::new()))
 }
 
@@ -181,6 +231,7 @@ pub extern "C" fn jas_engine_new() -> *mut JasEngine {
 /// `e` must be a pointer from [`jas_engine_new`] that has not already been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_engine_free(e: *mut JasEngine) {
+    ffi_instr::record(Crossing::EngineFree, 0, 0);
     if !e.is_null() {
         drop(unsafe { Box::from_raw(e) });
     }
@@ -192,6 +243,10 @@ pub unsafe extern "C" fn jas_engine_free(e: *mut JasEngine) {
 /// `b` must be a value returned by this ABI and not already freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_free(b: JasBytes) {
+    // bytes_in is 0 DELIBERATELY: this span's bytes were already counted as
+    // bytes_out when they crossed outward. Counting them again on release would
+    // double every payload and inflate the chatter figure by exactly 2x.
+    ffi_instr::record(Crossing::Free, 0, 0);
     if b.ptr.is_null() || b.len == 0 {
         return;
     }
@@ -204,10 +259,12 @@ pub unsafe extern "C" fn jas_free(b: JasBytes) {
 /// talking to the library it thinks it is.
 #[unsafe(no_mangle)]
 pub extern "C" fn jas_version() -> JasBytes {
-    JasBytes::from_string(format!(
+    let out = JasBytes::from_string(format!(
         r#"{{"crate":"jas_dioxus","version":"{}","abi":1}}"#,
         env!("CARGO_PKG_VERSION")
-    ))
+    ));
+    ffi_instr::record(Crossing::Version, 0, out.len);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -227,13 +284,119 @@ pub extern "C" fn jas_version() -> JasBytes {
 /// `e` must be a live engine pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_document_json(e: *mut JasEngine) -> JasBytes {
+    ffi_instr::record(Crossing::DocumentJson, 0, 0);
     let Some(engine) = (unsafe { e.as_ref() }) else {
         return JasBytes::empty();
     };
     let model = engine.model.borrow();
-    JasBytes::from_string(crate::geometry::test_json::document_to_test_json(
+    let out = JasBytes::from_string(crate::geometry::test_json::document_to_test_json(
         model.document(),
-    ))
+    ));
+    ffi_instr::record_out(Crossing::DocumentJson, out.len);
+    out
+}
+
+/// Assemble the panel data scope INSIDE the engine.
+///
+/// **BL1, and it is why the extern takes only a panel id.** Exposing the pure
+/// `bind_values(panel_node, ctx)` would have forced the shell to build this map,
+/// which puts app state in C# — the third interpreter's state half arriving
+/// through a parameter list rather than through a rewrite.
+///
+/// Shape follows the cross-language byte-gate's own ctx
+/// (`cross_language_test.rs`): `state.fill_color` carries the `#`, `panel.hex`
+/// does not.
+fn panel_ctx(engine: &JasEngine) -> serde_json::Value {
+    use crate::interpreter::color_util::panel_channels;
+    let p = engine.panel.borrow();
+    let ch = panel_channels(p.fill.0, p.fill.1, p.fill.2);
+    let st = panel_channels(p.stroke.0, p.stroke.1, p.stroke.2);
+    serde_json::json!({
+        "state": {
+            "fill_color": format!("#{}", ch.hex),
+            "stroke_color": format!("#{}", st.hex),
+            "fill_on_top": p.fill_on_top,
+        },
+        "panel": {
+            "mode": p.mode,
+            "hex": ch.hex,
+            "r": ch.r, "g": ch.g, "bl": ch.bl,
+            "h": ch.h, "s": ch.s, "b": ch.b,
+            "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
+            "recent_colors": p.recent,
+        },
+    })
+}
+
+/// The panel's resolved bind VALUES — the ninth materializer function.
+///
+/// `jas_widget_tree` is **value-blind by design**: it records the sorted KEY
+/// NAMES of `bind`/`style`, which is what makes it stable across ports. So a
+/// shell built on the surface without this one materializes native controls with
+/// nothing in them. This returns the third pass — `interpreter::bind_values` —
+/// against a scope the ENGINE assembles.
+///
+/// # Safety
+/// `panel_id` must be NULL or valid for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_bind_values(
+    e: *mut JasEngine,
+    panel_id: *const u8,
+    len: usize,
+) -> JasBytes {
+    ffi_instr::record(Crossing::BindValues, len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    let Ok(id) = (unsafe { utf8(panel_id, len) }) else {
+        return JasBytes::empty();
+    };
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let Some(spec) = ws.panel(id) else {
+        return JasBytes::empty();
+    };
+    let ctx = panel_ctx(engine);
+    let rows = crate::interpreter::bind_values::bind_values(spec, &ctx);
+    let out = JasBytes::from_string(serde_json::to_string(&rows).unwrap_or_default());
+    ffi_instr::record_out(Crossing::BindValues, out.len);
+    out
+}
+
+// ---------------------------------------------------------------------------
+// S-C INSTRUMENTATION -- THE APPARATUS, NOT THE SURFACE
+//
+// These two are how the shell drives the chatter measurement: reset at the
+// start of a named interaction, dump at the end. They live here because
+// `JasBytes` does, and because every `extern "C"` in this crate should be in
+// one file where it can be counted.
+//
+// ***THEY ARE NOT PART OF THE MATERIALIZER SURFACE.*** The surface S-C prices
+// is the 8 functions a panel actually uses; these exist only to measure it, and
+// `Crossing` deliberately has no variant for either, so they cannot appear in
+// their own reading. Any count of "the surface" that includes them is wrong,
+// and the distinction is exactly the population error this campaign has already
+// paid for once.
+// ---------------------------------------------------------------------------
+
+/// Zero every boundary counter. Call at the START of a named interaction so the
+/// dump that follows describes that interaction alone.
+#[unsafe(no_mangle)]
+pub extern "C" fn jas_instr_reset() {
+    ffi_instr::reset();
+}
+
+/// The counter dump as JSON: per-function rows plus totals, naming the surface
+/// it was measured against.
+///
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+/// Releasing it does call `jas_free`, which IS a counted crossing -- so dump
+/// LAST in an interaction, or reset after freeing, or the free will appear in
+/// the next reading.
+#[unsafe(no_mangle)]
+pub extern "C" fn jas_instr_counters_json() -> JasBytes {
+    JasBytes::from_string(ffi_instr::snapshot_json())
 }
 
 // ---------------------------------------------------------------------------
@@ -255,6 +418,8 @@ pub unsafe extern "C" fn jas_dispatch_event(
     op_json: *const u8,
     len: usize,
 ) -> JasStatus {
+    // Recorded BEFORE the null check: a refused call still crossed.
+    ffi_instr::record(Crossing::DispatchEvent, len, 0);
     let Some(engine) = (unsafe { e.as_ref() }) else {
         return JasStatus::NullHandle;
     };
@@ -286,13 +451,16 @@ pub unsafe extern "C" fn jas_dispatch_event(
 /// `e` must be a live engine pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_last_error_json(e: *mut JasEngine) -> JasBytes {
+    ffi_instr::record(Crossing::LastErrorJson, 0, 0);
     let Some(engine) = (unsafe { e.as_ref() }) else {
         return JasBytes::empty();
     };
-    match engine.last_error.borrow().as_ref() {
+    let out = match engine.last_error.borrow().as_ref() {
         Some(s) => JasBytes::from_string(s.clone()),
         None => JasBytes::empty(),
-    }
+    };
+    ffi_instr::record_out(Crossing::LastErrorJson, out.len);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +485,10 @@ pub unsafe extern "C" fn jas_widget_tree(
     ctx_json: *const u8,
     ctx_len: usize,
 ) -> JasBytes {
+    // Both inbound spans counted: the panel id AND the context JSON crossed,
+    // and a chatter figure that counted only the "real" payload would understate
+    // a shell that re-sends context on every tick.
+    ffi_instr::record(Crossing::WidgetTree, panel_len + ctx_len, 0);
     if e.is_null() {
         return JasBytes::empty();
     }
@@ -338,7 +510,9 @@ pub unsafe extern "C" fn jas_widget_tree(
         return JasBytes::empty();
     };
     let tree = crate::interpreter::widget_tree::widget_tree(spec, &ctx);
-    JasBytes::from_string(serde_json::to_string(&tree).unwrap_or_default())
+    let out = JasBytes::from_string(serde_json::to_string(&tree).unwrap_or_default());
+    ffi_instr::record_out(Crossing::WidgetTree, out.len);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -385,6 +559,7 @@ mod tests {
         assert_eq!(st, JasStatus::NullHandle);
         assert!(st as i32 >= 100, "transport faults must not collide with 1-5");
     }
+
 
     #[test]
     fn bad_utf8_and_bad_json_are_transport_not_core() {

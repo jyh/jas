@@ -341,6 +341,37 @@ struct JasBytes jas_version(void);
 struct JasBytes jas_document_json(struct JasEngine *e);
 
 /**
+ * The panel's resolved bind VALUES — the ninth materializer function.
+ *
+ * `jas_widget_tree` is **value-blind by design**: it records the sorted KEY
+ * NAMES of `bind`/`style`, which is what makes it stable across ports. So a
+ * shell built on the surface without this one materializes native controls with
+ * nothing in them. This returns the third pass — `interpreter::bind_values` —
+ * against a scope the ENGINE assembles.
+ *
+ * # Safety
+ * `panel_id` must be NULL or valid for `len` bytes.
+ */
+struct JasBytes jas_bind_values(struct JasEngine *e, const uint8_t *panel_id, uintptr_t len);
+
+/**
+ * Zero every boundary counter. Call at the START of a named interaction so the
+ * dump that follows describes that interaction alone.
+ */
+void jas_instr_reset(void);
+
+/**
+ * The counter dump as JSON: per-function rows plus totals, naming the surface
+ * it was measured against.
+ *
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ * Releasing it does call `jas_free`, which IS a counted crossing -- so dump
+ * LAST in an interaction, or reset after freeing, or the free will appear in
+ * the next reading.
+ */
+struct JasBytes jas_instr_counters_json(void);
+
+/**
  * Apply one op envelope (BL1: the shell sends events, never state; BL6: the
  * journal's resolved-literal vocabulary, which was built for replay and is
  * therefore already an IPC vocabulary).
