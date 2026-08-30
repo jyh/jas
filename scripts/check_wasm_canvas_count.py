@@ -47,9 +47,22 @@ is actually true of this crate is: a binary either links the wasm test modules
 and runs all of them, or links none and runs zero.
 
 A DISAGREEMENT IN EITHER DIRECTION IS A REFUSAL. If OBSERVED exceeds EXPECTED,
-this script's derivation is the thing that is wrong (a macro-generated test,
-say) -- and a gate that quietly tolerates being wrong about its own subject is
-worth nothing. Loud and wrong is repairable; silent and wrong is not.
+this script's derivation is the thing that is wrong -- and a gate that quietly
+tolerates being wrong about its own subject is worth nothing. Loud and wrong is
+repairable; silent and wrong is not.
+
+THE LIKELIEST WAY THAT HAPPENS, named here so its red is legible rather than
+mysterious: a `#[wasm_bindgen_test]` added under `jas_dioxus/tests/` instead of
+`src/`. The deriver reads `src/` ONLY, deliberately. An integration-test binary
+does not link the crate's `#[cfg(test)]` modules, so it runs its own tests and
+not the crate's -- which breaks the "all of them or none" invariant this gate
+compares against, rather than merely adding to a total. Counting `tests/` here
+would make EXPECTED a number no single binary is supposed to reach.
+
+  ⇒ If that red appears, the repair is NOT to widen this glob. It is to decide
+    what the lane now means: two populations are being executed, and they need
+    two expectations, one per binary. This gate deliberately refuses to guess
+    which, because guessing is how the floor it replaced came to be wrong.
 
 USAGE
     check_wasm_canvas_count.py --log /tmp/wasm.log [--crate jas_dioxus]
