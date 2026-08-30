@@ -828,6 +828,50 @@ fn subtree_would_be_counter_scaled(elem: &Element, acc: f64) -> bool {
     false
 }
 
+/// Does this subtree combine `RevealOutsideBbox` with a non-identity mask
+/// transform — the one shape whose bbox the two paths clip in DIFFERENT FRAMES?
+///
+/// Legacy sets the clip rect while the mask's effective transform is on the
+/// context, so the rect is in the MASK-TRANSFORMED frame. The bracket hands the
+/// same untransformed `mask.subtree.bounds()` across the seam and
+/// `pop_mask_layer` clips it in the LAYER's frame, the mask transform already
+/// popped. The two agree exactly when that transform is the identity and are
+/// off by exactly it otherwise — MEASURED in Chrome 2026-08-30:
+/// `....##....##` legacy against `....##..####` converted.
+///
+/// ⚖️ REFUSED HERE RATHER THAN GUESSED AT THE PRODUCER. Passing
+/// `mask_xf · bounds` would be exact for a translate or a scale and WRONG for a
+/// rotation, where legacy clips a ROTATED rect that no axis-aligned `Rect` can
+/// express. Which of the two A6 §3.3's "bbox arriving precomputed" intends is a
+/// contract question; a call site answering it quietly is how an unratified
+/// behaviour change ships inside a ratified one.
+fn subtree_has_a_reframed_reveal_bbox(elem: &Element) -> bool {
+    if let Some(m) = elem.common().mask.as_deref().filter(|m| !m.disabled) {
+        if matches!(mask_plan(m), Some(MaskPlan::RevealOutsideBbox)) {
+            if let Some(t) = effective_mask_transform(m, elem) {
+                let identity = (t.a - 1.0).abs() < 1e-9
+                    && t.b.abs() < 1e-9
+                    && t.c.abs() < 1e-9
+                    && (t.d - 1.0).abs() < 1e-9
+                    && t.e.abs() < 1e-9
+                    && t.f.abs() < 1e-9;
+                if !identity {
+                    return true;
+                }
+            }
+        }
+        if subtree_has_a_reframed_reveal_bbox(&m.subtree) {
+            return true;
+        }
+    }
+    if let Some(children) = elem.children() {
+        if children.iter().any(|c| subtree_has_a_reframed_reveal_bbox(c)) {
+            return true;
+        }
+    }
+    false
+}
+
 /// PH4 — render `elem` through the ratified A6 element bracket on the `Painter`
 /// seam. Returns `false` having painted NOTHING when any condition fails, so
 /// the caller falls back to the unchanged legacy composite.
@@ -863,7 +907,10 @@ fn subtree_would_be_counter_scaled(elem: &Element, acc: f64) -> bool {
 ///    descendant is DROPPED by `emit_element`, and legacy-only mask artwork
 ///    gives `M = 0`, which deletes the element.
 /// 3. **Nothing in the subtree may be counter-scaled**
-///    ([`subtree_would_be_counter_scaled`]).
+///    ([`subtree_would_be_counter_scaled`]), and no reveal-outside-bbox mask may
+///    carry a transform ([`subtree_has_a_reframed_reveal_bbox`]). Two different
+///    divergences, both between the seam and this file rather than between
+///    backends — which is why neither is a capability.
 /// 4. **The context's world transform must be readable.** A fresh layer surface
 ///    starts at identity; without the frame it opens at the wrong origin. The
 ///    read is this file's existing `read_ctx_transform`, the same one the legacy
@@ -887,6 +934,9 @@ fn draw_masked_element_through_the_seam(
         return false;
     }
     if subtree_would_be_counter_scaled(elem, element_scale) {
+        return false;
+    }
+    if subtree_has_a_reframed_reveal_bbox(elem) {
         return false;
     }
     let Some((a, b, c, d, e, f)) = read_ctx_transform(ctx) else {
@@ -1316,6 +1366,72 @@ fn apply_clip_in_luminance(
     true
 }
 
+/// Apply the mask subtree to `off_ctx`'s ALPHA CHANNEL under `op`, by way of an
+/// isolated artwork surface. Returns `false` when the surface cannot be built,
+/// so the caller can fail soft exactly as the luminance path does.
+///
+/// ⛔⛔ IT EXISTS BECAUSE `AlphaClipOut` — the INVERTED opacity mask — DID
+/// NOTHING AT ALL IN THE SHIPPED RENDERER. That arm set `destination-out` on
+/// the scratch and then called `draw_element`, and `draw_element_body` sets
+/// `globalCompositeOperation` from the element's OWN blend mode as one of its
+/// first acts. MEASURED in Chrome 2026-08-30: an inverted mask over half an
+/// opaque body rendered `########..` where OPACITY.md's table says
+/// `....####..`. The feature was inert, and had been.
+///
+/// 🔑 IT SURVIVED BECAUSE EVERY EXISTING EXERCISE USED COVERING ARTWORK. For
+/// artwork that covers what it masks, an inert mask and a working one leave the
+/// same alpha on an opaque body. It takes artwork covering only PART of the
+/// body to see anything at all — which is also why the fixture that finally
+/// caught it had to be written on purpose.
+///
+/// ⛔ `AlphaRevealOutsideBbox` HAD IT TOO, and the same fixture shape catches
+/// it: artwork with a GAP must punch that gap, and pre-repair the gap was not
+/// punched (`########..` where the law says `##....##..`). Both non-luminance
+/// arms route through here now. Only `LuminanceClipIn`'s primary path was ever
+/// correct, because it ALREADY used this shape — it rendered the artwork onto a
+/// separate surface to promote its luminance, and got the isolation as a
+/// side effect of needing the pixels.
+///
+/// The shape is the one `apply_clip_in_luminance` already had and
+/// `Canvas2dPainter::pop_mask_layer` has: render the artwork ISOLATED, where its
+/// own blend modes are none of the mask's business, then apply the finished
+/// surface in one composite the artwork cannot touch.
+fn apply_mask_artwork(
+    // The CALLER'S depth — same argument as `apply_clip_in_luminance`: this runs
+    // inside `draw_element_with_mask`'s lease, at the same nesting level.
+    scratch_idx: usize,
+    off_ctx: &CanvasRenderingContext2d,
+    w: u32,
+    h: u32,
+    mask: &Mask,
+    ancestor_vis: Visibility,
+    precision: f64,
+    op: &str,
+) -> bool {
+    let (art_canvas, art_ctx) = match get_mask_luma_scratch(scratch_idx, w, h) {
+        Some(p) => p,
+        None => return false,
+    };
+    art_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+    art_ctx.set_global_composite_operation("source-over").ok();
+    art_ctx.set_global_alpha(1.0);
+    art_ctx.clear_rect(0.0, 0.0, w as f64, h as f64);
+    // The artwork renders in the frame the CALLER has established, which by
+    // this point carries the mask's effective transform.
+    if let Some((a, b, c, d, e, f)) = read_ctx_transform(off_ctx) {
+        art_ctx.set_transform(a, b, c, d, e, f).ok();
+    }
+    draw_element(&art_ctx, &mask.subtree, ancestor_vis, precision);
+    // Guarded so the identity transform and the composite op pop on exit. Any
+    // clip the caller set survives the reset: a clip is rasterised into device
+    // space when it is set.
+    let _ctx_guard = CtxSaveGuard::new(off_ctx);
+    off_ctx.set_global_composite_operation(op).ok();
+    off_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+    let _ = off_ctx.draw_image_with_html_canvas_element(&art_canvas, 0.0, 0.0);
+    true
+}
+
 /// Render ``elem`` on the main ``ctx`` with its opacity mask
 /// composited in. The element body is drawn to a scratch
 /// offscreen canvas at the same world transform as the main ctx;
@@ -1411,15 +1527,29 @@ fn draw_element_with_mask(
                     &off_ctx, w, h, mask, ancestor_vis, precision,
                 );
                 if fell_back {
-                    off_ctx.set_global_composite_operation("destination-in").ok();
-                    draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+                    // ⚠️ CHANGED BY INSPECTION, NOT BY MEASUREMENT, and said so
+                    // rather than left to look covered. This branch runs only
+                    // when `getImageData` is unavailable, which no test here can
+                    // provoke — so nothing kills a mutation of this line. It
+                    // carries the ClipOut repair because it is literally
+                    // ClipOut's idiom on the same object, and a fail-soft path
+                    // that fails soft into an INERT mask is the worse of the two
+                    // wrongs it is choosing between.
+                    apply_mask_artwork(
+                        scratch_idx, &off_ctx, w, h, mask, ancestor_vis, precision,
+                        "destination-in",
+                    );
                 }
             }
             MaskPlan::ClipOut => {
                 // `destination-out` over the whole canvas — the mask
-                // shape erases the element.
-                off_ctx.set_global_composite_operation("destination-out").ok();
-                draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
+                // shape erases the element. Through an isolated artwork
+                // surface, because the artwork's own blend modes would
+                // otherwise clobber the operation; see `apply_mask_artwork`.
+                apply_mask_artwork(
+                    scratch_idx, &off_ctx, w, h, mask, ancestor_vis, precision,
+                    "destination-out",
+                );
             }
             MaskPlan::RevealOutsideBbox => {
                 // `clip: false, invert: false`: the element keeps full
@@ -1436,9 +1566,13 @@ fn draw_element_with_mask(
                     off_ctx.begin_path();
                     off_ctx.rect(bx, by, bw, bh);
                     off_ctx.clip();
-                    off_ctx.set_global_composite_operation("destination-in").ok();
-                    draw_element(&off_ctx, &mask.subtree, ancestor_vis, precision);
-                    off_ctx.set_global_composite_operation("source-over").ok();
+                    // The clip is set HERE, in the mask-transformed frame, and
+                    // survives the identity reset inside the helper because a
+                    // clip is rasterised into device space when it is set.
+                    apply_mask_artwork(
+                        scratch_idx, &off_ctx, w, h, mask, ancestor_vis, precision,
+                        "destination-in",
+                    );
                 }
                 // Empty-bbox mask: no clip region; the element
                 // body passes through unmodified (mask has nothing to
@@ -3387,6 +3521,52 @@ mod tests {
         elem
     }
 
+    fn masked_with(body: Element, artwork: Element, clip: bool, invert: bool) -> Element {
+        use crate::geometry::element::Mask;
+        let mut b = body;
+        b.common_mut().mask = Some(Box::new(Mask {
+            subtree: Box::new(artwork),
+            clip, invert, disabled: false, linked: true, unlink_transform: None,
+        }));
+        b
+    }
+
+    fn translate4() -> Transform { Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 4.0, f: 0.0 } }
+
+    /// The reveal-bbox frame clause fires on ONE combination and refuses
+    /// nothing else. Each control is a law or a transform the clause must not
+    /// swallow — a clause that refused the whole reveal law, or every
+    /// transformed mask, would pass its positive arm and convert nothing.
+    #[test]
+    fn the_reveal_bbox_frame_clause_fires_on_one_combination() {
+        let art = || filled_rect(None);
+        // reveal (clip:false, invert:false) + a mask transform => refuse.
+        let mut body = filled_rect(Some(translate4()));
+        body = masked_with(body, art(), false, false);
+        assert!(subtree_has_a_reframed_reveal_bbox(&body));
+
+        // CONTROL 1: the same law with NO transform converts.
+        assert!(!subtree_has_a_reframed_reveal_bbox(
+            &masked_with(filled_rect(None), art(), false, false)));
+
+        // CONTROL 2: the OTHER two laws under the same transform convert --
+        // they blit in device space and never clip a bbox.
+        for (clip, invert) in [(true, false), (true, true)] {
+            assert!(!subtree_has_a_reframed_reveal_bbox(
+                        &masked_with(filled_rect(Some(translate4())), art(), clip, invert)),
+                    "clip={clip} invert={invert} does not clip a bbox and must convert");
+        }
+
+        // CONTROL 3: a DISABLED mask is never drawn.
+        let mut d = masked_with(filled_rect(Some(translate4())), art(), false, false);
+        d.common_mut().mask.as_mut().unwrap().disabled = true;
+        assert!(!subtree_has_a_reframed_reveal_bbox(&d));
+
+        // …and it reaches a DESCENDANT, like the other production guards.
+        let inner = masked_with(filled_rect(Some(translate4())), art(), false, false);
+        assert!(subtree_has_a_reframed_reveal_bbox(&group_of(vec![inner], None)));
+    }
+
     /// The guard fires exactly where `counter_scaled_element` would DO
     /// something — a stroke (or a rounded corner) under a non-unit accumulated
     /// element scale — and nowhere else.
@@ -4694,6 +4874,170 @@ mod ph4_conversion_tests {
         assert_eq!(alpha_at(&ctx, 2.0, 4.0), 0,
                    "…and not at the identity origin, which is where an unframed \
                     layer surface puts it");
+    }
+
+    /// Render `elem` and return a one-character-per-column occupancy scan of row
+    /// `y = 4`: `#` where the composited alpha is over half, `.` where it is not.
+    /// A scan reads as a picture, so a wrong mask is legible in the failure
+    /// message rather than being one integer that differs from another.
+    fn scan(elem: &Element, width: u32, before: bool) -> String {
+        let (_c, ctx) = surface(width, 8);
+        if before {
+            let m = elem.common().mask.as_deref().unwrap();
+            let plan = mask_plan(m).unwrap();
+            draw_element_with_mask(&ctx, elem, m, plan, Visibility::Preview, 1.0, 1.0);
+        } else {
+            draw_element_scaled(&ctx, elem, Visibility::Preview, 1.0, 1.0);
+        }
+        (0..width)
+            .map(|x| if alpha_at(&ctx, x as f64 + 0.5, 4.0) > 127 { '#' } else { '.' })
+            .collect()
+    }
+
+    fn masked(body: Element, artwork: Element, clip: bool, invert: bool) -> Element {
+        let mut b = body;
+        b.common_mut().mask = Some(Box::new(Mask {
+            subtree: Box::new(artwork),
+            clip, invert, disabled: false, linked: true, unlink_transform: None,
+        }));
+        b
+    }
+
+    /// ⛔⛔ AN INVERTED OPACITY MASK DID NOTHING AT ALL IN THE SHIPPED RENDERER.
+    ///
+    /// `AlphaClipOut` is `α_S ← α_S · (1 − M)` (OPACITY.md §Rendering). The
+    /// legacy composite set `destination-out` on the scratch and then called
+    /// `draw_element` — whose `draw_element_body` sets
+    /// `globalCompositeOperation` from the element's OWN blend mode as one of
+    /// its first acts. **The operation was clobbered before a single pixel
+    /// landed**, so the artwork painted itself normally instead of erasing, and
+    /// on an opaque body that is indistinguishable from no mask.
+    ///
+    /// MEASURED before the repair: `########..` where the law says
+    /// `....####..`.
+    ///
+    /// 🔑 Why it survived: the mask arms were only ever exercised with artwork
+    /// that COVERS what it masks, and for full-coverage opaque artwork
+    /// `destination-in` and `source-over` leave the same alpha. The bug needed
+    /// artwork that covers only PART of the body to be visible at all.
+    #[wasm_bindgen_test]
+    fn an_inverted_mask_erases_where_the_artwork_is() {
+        let doc = masked(
+            opaque_rect(0.0, 0.0, 8.0, 8.0, Color::BLACK),
+            opaque_rect(0.0, 0.0, 4.0, 8.0, Color::WHITE),
+            true, true,
+        );
+        assert_eq!(scan(&doc, 10, true), "....####..",
+                   "legacy AlphaClipOut must erase where the artwork is");
+        assert_eq!(scan(&doc, 10, false), "....####..",
+                   "…and the converted path must agree with it");
+    }
+
+    /// The same defect on the third law. `AlphaRevealOutsideBbox` keeps the
+    /// element outside the artwork's bbox and applies the mask inside it, so
+    /// artwork with a GAP must punch that gap and leave the rest. Pre-repair the
+    /// gap was not punched: `########..` where the law says `##....##..`.
+    ///
+    /// ⛔ THIS ARM ALSO SURVIVED A MUTATION PASS THAT WAS MEASURING NOTHING, and
+    /// the failure is worth naming because it reports success. The mutation was
+    /// applied by a first-occurrence string replace, and the reveal arm's call
+    /// is BYTE-IDENTICAL to the `ClipIn` fallback's a few lines above it — so
+    /// the edit landed on the fallback, which no test can reach, and the suite
+    /// stayed green. I read that green as "the repair is unkillable, revert it",
+    /// wrote the revert AND a confident comment explaining why the arm had never
+    /// been broken, and this test refused it. 🔑 **An ambiguous anchor does not
+    /// fail — it mutates a different line and reports the wrong survivor.**
+    #[wasm_bindgen_test]
+    fn reveal_outside_bbox_punches_the_gap_in_its_artwork() {
+        let artwork = Element::Group(GroupElem {
+            children: vec![
+                Rc::new(opaque_rect(0.0, 0.0, 2.0, 8.0, Color::WHITE)),
+                Rc::new(opaque_rect(6.0, 0.0, 2.0, 8.0, Color::WHITE)),
+            ],
+            common: CommonProps::default(),
+            isolated_blending: false, knockout_group: false,
+        });
+        let doc = masked(
+            opaque_rect(0.0, 0.0, 8.0, 8.0, Color::BLACK),
+            artwork, false, false,
+        );
+        // bbox is 0..8, artwork covers 0..2 and 6..8 => the 2..6 gap is masked
+        // away and nothing lies outside the bbox to be revealed.
+        assert_eq!(scan(&doc, 10, true), "##....##..",
+                   "legacy RevealOutsideBbox must apply the mask inside the bbox");
+        assert_eq!(scan(&doc, 10, false), "##....##..",
+                   "…and the converted path must agree with it");
+    }
+
+    /// ⛔ THE ARTWORK SURFACE MUST ADOPT THE CALLER'S FRAME, and this arm is
+    /// here because a mutation pass found nothing else covering it.
+    ///
+    /// `apply_mask_artwork` renders the artwork on its own surface and must seed
+    /// that surface with the frame `off_ctx` is in — the world transform plus
+    /// the mask's effective transform. Deleting the seed leaves every other test
+    /// in this repo green, because they all mask at the identity: the same
+    /// blind spot that let `currentTransform` return `None` unnoticed for
+    /// months, one function further in. So this one pans the view.
+    #[wasm_bindgen_test]
+    fn an_inverted_masks_artwork_lands_under_the_view_transform() {
+        let (_c, ctx) = surface(20, 8);
+        let _ = ctx.translate(8.0, 0.0);
+        // Body 0..8, artwork 0..4, inverted => 0..4 erased, 4..8 kept, all
+        // shifted +8 by the view: device 12..16 kept, 8..12 erased.
+        let doc = masked(
+            opaque_rect(0.0, 0.0, 8.0, 8.0, Color::BLACK),
+            opaque_rect(0.0, 0.0, 4.0, 8.0, Color::WHITE),
+            true, true,
+        );
+        let m = doc.common().mask.as_deref().unwrap();
+        let plan = mask_plan(m).unwrap();
+        draw_element_with_mask(&ctx, &doc, m, plan, Visibility::Preview, 1.0, 1.0);
+        let ink: String = (0..20)
+            .map(|x| if alpha_at(&ctx, x as f64 + 0.5, 4.0) > 127 { '#' } else { '.' })
+            .collect();
+        assert_eq!(ink, "............####....",
+                   "the artwork must erase where the VIEW puts it; an \
+                    identity-framed artwork surface would erase device 0..4");
+    }
+
+    /// ⛔ THE BBOX IS IN A DIFFERENT FRAME ON THE TWO PATHS, so a masked
+    /// element combining `RevealOutsideBbox` with a mask transform must NOT
+    /// convert.
+    ///
+    /// Legacy clips `mask.subtree.bounds()` in the MASK-TRANSFORMED frame (the
+    /// rect is set while the mask's effective transform is on the context). The
+    /// bracket hands the same untransformed rect across the seam, and
+    /// `pop_mask_layer` clips it in the LAYER's frame — the element's parent
+    /// frame, with the mask transform already popped. Identical whenever that
+    /// transform is the identity, and off by exactly it otherwise.
+    ///
+    /// ⚖️ THE ROUTER REFUSES RATHER THAN THE PRODUCER GUESSING. Passing
+    /// `mask_xf · bounds` would be exact for translate/scale and WRONG for a
+    /// rotation — legacy clips a ROTATED rect, which no axis-aligned `Rect` can
+    /// express. Which one A6 §3.3's "bbox arriving precomputed" means is a
+    /// contract question, not a call site's; until it is answered these
+    /// documents keep the path they have.
+    #[wasm_bindgen_test]
+    fn reveal_outside_bbox_under_a_mask_transform_stays_on_legacy() {
+        use crate::geometry::element::Transform;
+        let artwork = Element::Group(GroupElem {
+            children: vec![
+                Rc::new(opaque_rect(0.0, 0.0, 2.0, 8.0, Color::WHITE)),
+                Rc::new(opaque_rect(6.0, 0.0, 2.0, 8.0, Color::WHITE)),
+            ],
+            common: CommonProps::default(),
+            isolated_blending: false, knockout_group: false,
+        });
+        let mut body = opaque_rect(0.0, 0.0, 8.0, 8.0, Color::BLACK);
+        // A linked mask on a translated element: the mask's effective transform
+        // is the element's, and it is not the identity.
+        body.common_mut().transform =
+            Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 4.0, f: 0.0 });
+        let doc = masked(body, artwork, false, false);
+        assert_eq!(scan(&doc, 20, false), scan(&doc, 20, true),
+                   "this shape must render EXACTLY as it does today -- the two \
+                    paths clip the bbox in different frames, so the router has \
+                    to keep it on legacy");
     }
 
     /// ⛔ THE FALLBACK IS SILENT BY DESIGN, SO IT IS ASSERTED HERE.

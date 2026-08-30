@@ -13,6 +13,37 @@ take it.
 
 ---
 
+## 2026-08-30 — two of the three opacity-mask laws did nothing at all (browser)
+
+**Affects:** every document using an **inverted** opacity mask (`invert: true`)
+or a **reveal-outside-bbox** mask (`clip: false, invert: false`), rendered in the
+browser. The ordinary clipping mask (`clip: true, invert: false`) was correct
+and is unchanged.
+
+**What changed.** Both of those laws apply the mask by compositing the mask
+artwork onto the element with a `destination-out` / `destination-in` operation.
+The renderer set that operation and then drew the artwork through the normal
+element path — which sets the compositing operation from the element's own blend
+mode as one of its first acts. **The operation was overwritten before anything
+was drawn**, so the artwork painted itself normally instead of masking, and the
+mask had no effect whatsoever. Both laws now render the artwork on its own
+surface first, then apply it in one step the artwork cannot disturb.
+
+**In numbers**, measured in Chrome — `#` is ink, `.` is transparent:
+
+| | before | after (and the spec) |
+|---|---|---|
+| inverted mask over the left half of a shape | `########..` | `....####..` |
+| reveal-outside-bbox, artwork with a gap | `########..` | `##....##..` |
+
+**Why it went unnoticed:** for mask artwork that *covers* what it masks — which
+is what every existing example used — an inert mask and a working one leave the
+same picture. It takes artwork covering only part of the element to see any
+difference at all.
+
+**Pinned by:** `canvas::render::ph4_conversion_tests::an_inverted_mask_erases_where_the_artwork_is`
+and `…::reveal_outside_bbox_punches_the_gap_in_its_artwork`.
+
 ## 2026-08-30 — masked elements composite as an isolated layer (browser)
 
 **Affects:** documents containing an element with an active opacity mask,
