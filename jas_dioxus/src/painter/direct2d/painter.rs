@@ -21,7 +21,15 @@
 //! is one flat multiply. A `PushLayer` here would isolate and stop overlaps
 //! compounding, i.e. would be WRONG. There is a test for that below.
 
-use windows::core::Result;
+use windows::core::{Interface, Result};
+use windows::Win32::Graphics::Direct2D::{
+    ID2D1Bitmap, ID2D1BitmapRenderTarget, ID2D1DeviceContext, CLSID_D2D1LuminanceToAlpha,
+    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1_INTERPOLATION_MODE_LINEAR,
+};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D1_COMPOSITE_MODE_DESTINATION_OUT, D2D1_COMPOSITE_MODE_SOURCE_IN,
+    D2D1_COMPOSITE_MODE_SOURCE_OVER,
+};
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_COLOR_F, D2D1_GRADIENT_STOP, D2D_RECT_F,
 };
@@ -57,16 +65,182 @@ struct Frame {
     opened: Vec<Pop>,
 }
 
+/// One open isolated layer (A6): its own surface in the parent's frame, plus
+/// the alpha and blend consumed once at the closing composite.
+struct LayerTarget {
+    /// Kept because `GetBitmap` is how the composite reads the layer back.
+    brt: ID2D1BitmapRenderTarget,
+    /// The same object as `brt`, pre-cast, so the hot accessor never casts.
+    rt: ID2D1RenderTarget,
+    alpha: f64,
+    #[allow(dead_code)] // consumed at the composite once non-Normal blends land
+    blend: BlendMode,
+    /// A6 §3.2: the open-group product RESTARTS at 1.0 inside the layer, so the
+    /// parent's is set aside here and restored by the pop.
+    saved_group_alphas: Vec<f64>,
+    /// The mask this layer's body must be eaten into at composite time, if any.
+    ///
+    /// ⭐ THE LAW IS APPLIED AT THE BLIT, NOT AT `pop_mask_layer`, and that is
+    /// the design rather than a convenience. A6 puts the isolated layer there
+    /// precisely so the law has a finished body buffer to eat into; applying it
+    /// earlier would mean masking a surface that is still open for drawing, and
+    /// D2D has no way to re-run a composite over a target mid-`BeginDraw`.
+    mask: Option<(ID2D1Bitmap, Mask)>,
+}
+
+/// One open mask bracket: its own surface, and the law to apply on close.
+struct MaskTarget {
+    brt: ID2D1BitmapRenderTarget,
+    rt: ID2D1RenderTarget,
+    law: Mask,
+}
+
 pub struct Direct2DPainter<'a> {
-    rt: &'a ID2D1RenderTarget,
+    base_rt: &'a ID2D1RenderTarget,
     frames: Vec<Frame>,
     /// The owned multiply stack. See the module note: NOT a layer.
     group_alphas: Vec<f64>,
+    /// Open isolated layers, innermost last. Empty is the common case and
+    /// costs one `is_empty` per draw.
+    layers: Vec<LayerTarget>,
+    /// Open mask brackets. While one is open every draw is MASK CONTENT and
+    /// goes to the mask surface, never to the body.
+    masks: Vec<MaskTarget>,
+    /// ⛔ A FAILED OPEN MUST NOT SILENTLY DRAW ON THE PARENT. If the layer
+    /// surface cannot be made, the body would composite against the very
+    /// backdrop it was supposed to be isolated from -- visibly wrong, and
+    /// invisible to a display-list golden. Counting the failure keeps the
+    /// matching pop balanced and composites nothing. Same law as canvas2d.
+    failed_layers: usize,
 }
 
 impl<'a> Direct2DPainter<'a> {
     pub fn new(rt: &'a ID2D1RenderTarget) -> Self {
-        Self { rt, frames: Vec::new(), group_alphas: Vec::new() }
+        Self {
+            base_rt: rt,
+            frames: Vec::new(),
+            group_alphas: Vec::new(),
+            layers: Vec::new(),
+            masks: Vec::new(),
+            failed_layers: 0,
+        }
+    }
+
+    /// Re-composite `body` through `mask` under `law`, onto a fresh surface.
+    ///
+    /// THE THREE A6 LAWS, LOWERED ONTO D2D COMPOSITE MODES:
+    ///
+    /// | law | graph |
+    /// |---|---|
+    /// | `LuminanceClipIn` | mask -> LuminanceToAlpha, then body SOURCE_IN |
+    /// | `AlphaClipOut` | body, then mask DESTINATION_OUT |
+    /// | `AlphaRevealOutsideBbox` | body, then mask DESTINATION_OUT **clipped to the bbox** |
+    ///
+    /// ⭐ The third is the second with a clip, and that is the enum's own
+    /// collapse showing through: outside the bbox nothing is cut, so the body is
+    /// revealed there. Writing it as a third graph would have hidden that they
+    /// share a law.
+    ///
+    /// ⚠️ LUMINANCE IS THE EFFECT'S, NOT MINE. `CLSID_D2D1LuminanceToAlpha` uses
+    /// its own coefficients; the seam doc names BT.601 (browser) against BT.709
+    /// (vello) as the R8 ratification point. This backend therefore agrees with
+    /// whichever D2D uses, and that choice is RECORDED rather than reconciled:
+    /// if R8 later rules a coefficient set, this is the site that changes.
+    ///
+    /// ⚠️ No cross-backend comparison is claimed or implied. Establishing one
+    /// would be its own row with its own harness, priced first (helm, 08/29).
+    fn apply_mask(&self, body: &ID2D1Bitmap, mask: &ID2D1Bitmap, law: Mask) -> Option<ID2D1Bitmap> {
+        let (brt, rt) = self.open_surface()?;
+        // The composite runs in DEVICE space: both bitmaps are already in the
+        // parent's frame, so a transform here would apply it twice.
+        unsafe { rt.SetTransform(&Matrix3x2::identity()) };
+        let dc: ID2D1DeviceContext = rt.cast().ok()?;
+
+        let ok = (|| -> Option<()> {
+            match law {
+                Mask::LuminanceClipIn => {
+                    let eff = unsafe { dc.CreateEffect(&CLSID_D2D1LuminanceToAlpha) }.ok()?;
+                    unsafe { eff.SetInput(0, mask, true) };
+                    let out = unsafe { eff.GetOutput() }.ok()?;
+                    unsafe {
+                        dc.DrawImage(&out, None, None,
+                            D2D1_INTERPOLATION_MODE_LINEAR,
+                            D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                        dc.DrawImage(body, None, None,
+                            D2D1_INTERPOLATION_MODE_LINEAR,
+                            D2D1_COMPOSITE_MODE_SOURCE_IN);
+                    }
+                }
+                Mask::AlphaClipOut => unsafe {
+                    dc.DrawImage(body, None, None,
+                        D2D1_INTERPOLATION_MODE_LINEAR,
+                        D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                    dc.DrawImage(mask, None, None,
+                        D2D1_INTERPOLATION_MODE_LINEAR,
+                        D2D1_COMPOSITE_MODE_DESTINATION_OUT);
+                },
+                Mask::AlphaRevealOutsideBbox { bbox } => unsafe {
+                    dc.DrawImage(body, None, None,
+                        D2D1_INTERPOLATION_MODE_LINEAR,
+                        D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                    let r = D2D_RECT_F {
+                        left: bbox.x as f32,
+                        top: bbox.y as f32,
+                        right: (bbox.x + bbox.w) as f32,
+                        bottom: (bbox.y + bbox.h) as f32,
+                    };
+                    dc.PushAxisAlignedClip(&r, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+                    dc.DrawImage(mask, None, None,
+                        D2D1_INTERPOLATION_MODE_LINEAR,
+                        D2D1_COMPOSITE_MODE_DESTINATION_OUT);
+                    dc.PopAxisAlignedClip();
+                },
+            }
+            Some(())
+        })();
+
+        unsafe { let _ = rt.EndDraw(None, None); }
+        ok?;
+        unsafe { brt.GetBitmap() }.ok()
+    }
+
+    /// THE TARGET EVERY DRAW GOES TO: the innermost open isolated layer, or the
+    /// base render target when none is open.
+    ///
+    /// Returns an OWNED clone rather than a borrow, deliberately. A borrow tied
+    /// to `&self` cannot coexist with the `&mut self` the draw methods hold, and
+    /// the workarounds are worse than one AddRef: a COM clone is a refcount
+    /// bump, and it keeps every call site reading as it did before.
+    fn rt(&self) -> ID2D1RenderTarget {
+        // ORDER MATTERS: a mask bracket is INSIDE whatever layer is open, so an
+        // open mask wins. Getting this backwards would draw the mask content
+        // into the body it is supposed to be masking -- and the body would look
+        // plausible, which is the worst way to be wrong.
+        if let Some(m) = self.masks.last() {
+            return m.rt.clone();
+        }
+        match self.layers.last() {
+            Some(l) => l.rt.clone(),
+            None => self.base_rt.clone(),
+        }
+    }
+
+    /// Make a fresh transparent surface in the CURRENT target's frame.
+    /// Shared by the isolated-layer and mask-bracket opens: both need exactly
+    /// this, and two copies would drift.
+    fn open_surface(&self) -> Option<(ID2D1BitmapRenderTarget, ID2D1RenderTarget)> {
+        let parent = self.rt();
+        let dc: ID2D1DeviceContext = parent.cast().ok()?;
+        let brt = unsafe {
+            dc.CreateCompatibleRenderTarget(None, None, None, Default::default())
+        }.ok()?;
+        let rt: ID2D1RenderTarget = brt.cast().ok()?;
+        let mut t = Matrix3x2::identity();
+        unsafe { parent.GetTransform(&mut t) };
+        unsafe { rt.SetTransform(&t) };
+        unsafe { rt.BeginDraw() };
+        unsafe { rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 })) };
+        Some((brt, rt))
     }
 
     /// `product(open group alphas) * paint_alpha`, clamped. This is the whole
@@ -89,7 +263,7 @@ impl<'a> Direct2DPainter<'a> {
             // alpha MULTIPLIES it rather than replacing it.
             a: (a * alpha) as f32,
         };
-        unsafe { self.rt.CreateSolidColorBrush(&col, None) }
+        unsafe { self.rt().CreateSolidColorBrush(&col, None) }
     }
 
     /// GAMMA_2_2, NOT GAMMA_1_0 -- a divergence pin, not a default.
@@ -108,7 +282,7 @@ impl<'a> Direct2DPainter<'a> {
                 color: D2D1_COLOR_F { r: r as f32, g: g as f32, b: b as f32, a: (a * alpha) as f32 },
             }
         }).collect();
-        unsafe { self.rt.CreateGradientStopCollection(&v, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) }.ok()
+        unsafe { self.rt().CreateGradientStopCollection(&v, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) }.ok()
     }
 
     fn brush(&self, b: &Brush, alpha: f64) -> Option<ID2D1Brush> {
@@ -120,7 +294,7 @@ impl<'a> Direct2DPainter<'a> {
                     startPoint: windows_numerics::Vector2 { X: g.x0 as f32, Y: g.y0 as f32 },
                     endPoint: windows_numerics::Vector2 { X: g.x1 as f32, Y: g.y1 as f32 },
                 };
-                unsafe { self.rt.CreateLinearGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
+                unsafe { self.rt().CreateLinearGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
             }
             Brush::Radial(g) => {
                 // D2D radial is ONE circle plus an origin offset; the contract
@@ -140,7 +314,7 @@ impl<'a> Direct2DPainter<'a> {
                     radiusX: g.r1 as f32,
                     radiusY: g.r1 as f32,
                 };
-                unsafe { self.rt.CreateRadialGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
+                unsafe { self.rt().CreateRadialGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
             }
         }
     }
@@ -148,7 +322,7 @@ impl<'a> Direct2DPainter<'a> {
     fn stroke_style(&self, s: &StrokeStyle, emit_width: f64) -> Option<ID2D1StrokeStyle> {
         let props = convert::stroke_properties(s);
         let dashes = convert::dash_multiples(&s.dash, emit_width);
-        let factory = unsafe { self.rt.GetFactory() }.ok()?;
+        let factory = unsafe { self.rt().GetFactory() }.ok()?;
         unsafe {
             factory
                 .CreateStrokeStyle(&props, if dashes.is_empty() { None } else { Some(&dashes) })
@@ -190,33 +364,66 @@ fn d2d_rect(r: Rect) -> D2D_RECT_F {
 }
 
 impl<'a> Painter for Direct2DPainter<'a> {
-    /// ⚖️ THIS BACKEND ANSWERS NO — TO ALL THREE, AND THE FOUR
-    /// `unimplemented!()` BODIES BELOW ARE WHY.
+    /// ⚖️ THE FLIP (council 08/29, row e closes with it). AMENDMENT A6 §6.2 —
+    /// A RATIFIED BEHAVIOUR CHANGE, AND IT IS ANNOUNCED, NOT QUIET.
     ///
-    /// * `IsolatedLayers` — `push_isolated_layer`/`pop_isolated_layer` panic;
-    /// * `MaskLayers` — `push_mask_layer`/`pop_mask_layer` panic;
-    /// * `NonNormalGroupBlend` — `push_group` takes a `BlendMode` and this
-    ///   backend has no effect graph for the 15 non-Normal modes (B1: a
-    ///   backdrop snapshot plus a `CLSID_D2D1Blend` graph per primitive, not
-    ///   built). The replay harness has always reported this as a declared gap.
+    /// This backend answered NO to everything because its A6 bodies were four
+    /// `unimplemented!()`. They are implemented now (row e(a)), so the answer
+    /// changes — **the ROUTER does not**. That was the whole point of putting
+    /// the query at the trait: a backend gaining a capability edits one method.
     ///
-    /// ⇒ A masked or layered element STAYS LEGACY-ROUTED on Direct2D. That is
-    /// the whole point of the query: the router can now be flipped for the
-    /// backend that can do the work WITHOUT flipping it for the one that
-    /// cannot, and neither answer is a comment — `replay.rs`'s corpus lane
-    /// cross-checks this against what the backend actually refuses.
+    /// | capability | answer | why, in this backend's own terms |
+    /// |---|---|---|
+    /// | `IsolatedLayers` | **yes** | `push_isolated_layer` opens a real surface (a render-target swap, B1's finding: `D2D1_LAYER_PARAMETERS1` serves none of the three mask laws) and `pop_isolated_layer` composites it once at `(group product at the push site) × alpha` |
+    /// | `MaskLayers` | **yes** | the mask bracket renders to its own surface and hands its law to the enclosing layer |
+    /// | `NonNormalBlend` | **NO — and it STAYS a declared gap** | the 15 non-Normal modes need a backdrop snapshot plus a `CLSID_D2D1Blend` graph per blended primitive. Not built. |
     ///
-    /// This answer flips to `true` when (a) lands — D2D's mask + layer ops,
-    /// flask's row, on B1's schedule. The ROUTER does not change then; this
-    /// method does.
-    fn supports(&self, _cap: crate::painter::capability::Capability) -> bool {
-        false
+    /// ⛔ THE THIRD ROW IS NOT A LEFTOVER, IT IS THE CONDITION. The blend gap
+    /// must not be folded into the mask/layer answer, and until 08/29 the
+    /// vocabulary could not keep them apart: `a6_blend.json` puts a `multiply`
+    /// on `push_isolated_layer`, so a single `IsolatedLayers → yes` would have
+    /// carried a blend claim this backend cannot honour. `LayerTarget.blend` is
+    /// stored and read by nothing — its own `#[allow(dead_code)]` says so.
+    ///
+    /// 📌 AND TWO INSTRUMENTS DISAGREED ABOUT WHETHER THAT MATTERED, WHICH IS
+    /// THE PART WORTH KEEPING. The replay harness ALREADY refuses a blended
+    /// layer with the blend reason — this backend's own author separated the two
+    /// gaps there and wrote why ("it is a blend gap, not a layer gap, and
+    /// collapsing the two would hide which is missing"). So the harness would
+    /// have caught a folded answer. The ROUTER would NOT have: it had no blend
+    /// clause, so a masked element carrying `multiply` would have been routed
+    /// here, the layer would have opened, and the multiply would have gone to a
+    /// field nothing reads — silently, in the path that SHIPS. One instrument
+    /// saw it and one did not, and the blind one is the one in production.
+    ///
+    /// ⇒ So `NonNormalBlend` is denied here, the router keeps a non-Normal-mode
+    /// masked element on legacy for this backend, and the replay lane asserts
+    /// that this answer and this backend's actual report agree op for op.
+    ///
+    /// ⚠️ WHAT CHANGES ON SCREEN, said out loud: a masked element under an alpha
+    /// ancestor now renders through the A6 bracket here. HEAD's legacy path gave
+    /// `own²` with the ancestors DISCARDED; the bracket applies each factor
+    /// ONCE. R4 otherwise converts only what preserves behaviour — §6.2 is the
+    /// ratified exception.
+    ///
+    /// 📌 No claim is made or implied about any OTHER backend's output. The
+    /// "pixel-equal to Canvas2D" acceptance was withdrawn on 08/29 as
+    /// unexecutable, and nothing here rests on it.
+    fn supports(&self, cap: crate::painter::capability::Capability) -> bool {
+        use crate::painter::capability::Capability as C;
+        // Exhaustive on purpose: a new capability must be ANSWERED here, not
+        // inherit a default. That is the same reason the trait method has no
+        // default body.
+        match cap {
+            C::IsolatedLayers | C::MaskLayers => true,
+            C::NonNormalBlend => false,
+        }
     }
 
     fn fill_rect(&mut self, rect: Rect, brush: &Brush, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
         if let Some(b) = self.brush(brush, a) {
-            unsafe { self.rt.FillRectangle(&d2d_rect(rect), &b) };
+            unsafe { self.rt().FillRectangle(&d2d_rect(rect), &b) };
         }
     }
 
@@ -225,7 +432,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
         if let Some(b) = self.brush(brush, a) {
             let ss = self.stroke_style(stroke, stroke.width);
             unsafe {
-                self.rt.DrawRectangle(&d2d_rect(rect), &b, stroke.width as f32, ss.as_ref())
+                self.rt().DrawRectangle(&d2d_rect(rect), &b, stroke.width as f32, ss.as_ref())
             };
         }
     }
@@ -237,9 +444,9 @@ impl<'a> Painter for Direct2DPainter<'a> {
             M31: transform.e as f32, M32: transform.f as f32,
         };
         let mut prev = Matrix3x2::identity();
-        unsafe { self.rt.GetTransform(&mut prev) };
+        unsafe { self.rt().GetTransform(&mut prev) };
         self.frames.push(Frame { transform: prev, opened: Vec::new() });
-        unsafe { self.rt.SetTransform(&(cur * prev)) };
+        unsafe { self.rt().SetTransform(&(cur * prev)) };
     }
 
     fn pop_state(&mut self) {
@@ -249,12 +456,12 @@ impl<'a> Painter for Direct2DPainter<'a> {
             for p in f.opened.iter().rev() {
                 unsafe {
                     match p {
-                        Pop::Layer => self.rt.PopLayer(),
-                        Pop::AxisAlignedClip => self.rt.PopAxisAlignedClip(),
+                        Pop::Layer => self.rt().PopLayer(),
+                        Pop::AxisAlignedClip => self.rt().PopAxisAlignedClip(),
                     }
                 }
             }
-            unsafe { self.rt.SetTransform(&f.transform) };
+            unsafe { self.rt().SetTransform(&f.transform) };
         }
     }
 
@@ -274,21 +481,21 @@ impl<'a> Painter for Direct2DPainter<'a> {
     fn fill_path(&mut self, path: &[PathCommand], winding: FillRule, brush: &Brush, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
         let Some(b) = self.brush(brush, a) else { return };
-        let Ok(f) = (unsafe { self.rt.GetFactory() }) else { return };
+        let Ok(f) = (unsafe { self.rt().GetFactory() }) else { return };
         if let Ok(Some(g)) = geometry::build(&f, path, winding) {
-            unsafe { self.rt.FillGeometry(&g, &b, None) };
+            unsafe { self.rt().FillGeometry(&g, &b, None) };
         }
     }
 
     fn stroke_path(&mut self, path: &[PathCommand], brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
         let Some(b) = self.brush(brush, a) else { return };
-        let Ok(f) = (unsafe { self.rt.GetFactory() }) else { return };
+        let Ok(f) = (unsafe { self.rt().GetFactory() }) else { return };
         // A stroked path carries no fill rule; NonZero is the contract default
         // and the rule is irrelevant to stroking.
         if let Ok(Some(g)) = geometry::build(&f, path, FillRule::NonZero) {
             let ss = self.stroke_style(stroke, stroke.width);
-            unsafe { self.rt.DrawGeometry(&g, &b, stroke.width as f32, ss.as_ref()) };
+            unsafe { self.rt().DrawGeometry(&g, &b, stroke.width as f32, ss.as_ref()) };
         }
     }
 
@@ -296,7 +503,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let a = self.effective_alpha(paint_alpha);
         let Some(b) = self.brush(brush, a) else { return };
         let Some(e) = full_ellipse(arc) else { return };
-        unsafe { self.rt.FillEllipse(&e, &b) };
+        unsafe { self.rt().FillEllipse(&e, &b) };
     }
 
     fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
@@ -304,7 +511,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let Some(b) = self.brush(brush, a) else { return };
         let Some(e) = full_ellipse(arc) else { return };
         let ss = self.stroke_style(stroke, stroke.width);
-        unsafe { self.rt.DrawEllipse(&e, &b, stroke.width as f32, ss.as_ref()) };
+        unsafe { self.rt().DrawEllipse(&e, &b, stroke.width as f32, ss.as_ref()) };
     }
 
     /// NESTED, ARBITRARY-PATH CLIP. D2D has no cheap form: `PushAxisAlignedClip`
@@ -315,7 +522,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
     /// The contract has no `unclip`: a clip is undone by the enclosing
     /// `pop_state`, which is why the pop is recorded on the current frame.
     fn clip(&mut self, path: &[PathCommand], winding: FillRule) {
-        let Ok(f) = (unsafe { self.rt.GetFactory() }) else { return };
+        let Ok(f) = (unsafe { self.rt().GetFactory() }) else { return };
         let Ok(Some(g)) = geometry::build(&f, path, winding) else { return };
         // D2D1_LAYER_PARAMETERS, not ...1: the v1 struct is what
         // ID2D1RenderTarget::PushLayer takes. The `1` variant belongs to
@@ -330,7 +537,7 @@ impl<'a> Painter for Direct2DPainter<'a> {
             opacityBrush: std::mem::ManuallyDrop::new(None),
             layerOptions: D2D1_LAYER_OPTIONS_NONE,
         };
-        unsafe { self.rt.PushLayer(&params, None) };
+        unsafe { self.rt().PushLayer(&params, None) };
         // If no frame is open the clip lasts to EndDraw, which is the contract's
         // own shape -- record it only when there is a frame to unwind it.
         if let Some(fr) = self.frames.last_mut() {
@@ -345,43 +552,124 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let Some(b) = self.brush(brush, a) else { return };
         match run {
             TextRun::FastRun { font, size, text: t, letter_spacing, x, y } => {
-                text::draw_fast_run(self.rt, &b, font, *size, t, *letter_spacing, *x, *y);
+                text::draw_fast_run(&self.rt(), &b, font, *size, t, *letter_spacing, *x, *y);
             }
             _ => {}
         }
     }
 
-    fn push_mask_layer(&mut self, _mask: Mask) {
-        // ⛔ LEDGER RECONCILIATION (A6 item ④, 2026-08-27). This site cited
-        // "option C, 2026-07-30" while the summons cited "option (a)". ONE
-        // OBJECT, TWO LABELS — both were pre-ratification working names for the
-        // element-bracket ruling, and they never disagreed on direction. The
-        // ledger now carries ONE name: **AMENDMENT A6**, ratified 2026-08-27.
-        // "option C (2026-07-30)" and "option (a)" are recorded here as its
-        // prior labels so neither trail goes cold; neither is used again.
-        unimplemented!(
-            "masks are BLOCKED pending the A6 implementation (contract ratified \
-             2026-08-27; prior labels: 'option C 2026-07-30' and 'option (a)'). A6 \
-             adds push_isolated_layer/pop_isolated_layer, which opens the isolated \
-             element-body buffer the law must eat into — the gap that blocked this \
-             site is closed IN THE CONTRACT, not yet in this backend. B1 also \
-             established D2D1_LAYER_PARAMETERS1 serves none of the three variants. \
-             Do not wire a PushLayer here."
-        )
+    /// A6: open the MASK bracket. Everything drawn until the matching pop is
+    /// mask content and lands on its own surface, never on the body.
+    ///
+    /// ⛔ THE LEDGER LINE THAT USED TO LIVE HERE IS KEPT, because a trail that
+    /// goes cold costs more than a comment: this site once cited "option C,
+    /// 2026-07-30" while the summons cited "option (a)". ONE OBJECT, TWO LABELS
+    /// -- both pre-ratification working names for the element-bracket ruling,
+    /// never in disagreement. The ledger carries ONE name now: AMENDMENT A6,
+    /// ratified 2026-08-27. Neither prior label is used again.
+    fn push_mask_layer(&mut self, mask: Mask) {
+        match self.open_surface() {
+            Some((brt, rt)) => self.masks.push(MaskTarget { brt, rt, law: mask }),
+            // Same law as a failed layer open: a mask surface that could not be
+            // made must NOT leave its content drawing onto the body, where it
+            // would render as an extra shape rather than as a mask.
+            None => self.failed_layers += 1,
+        }
     }
+
+    /// Close the mask bracket and HAND THE LAW TO THE ENCLOSING LAYER, which
+    /// applies it when it composites.
+    ///
+    /// ⚠️ IF NO LAYER IS OPEN THE MASK IS DROPPED, and that is A6's own shape
+    /// rather than a shortcut: the law is defined as eating into an isolated
+    /// body buffer, so a mask with no layer around it has nothing to eat. The
+    /// corpus never does this; `a_mask_outside_a_layer_is_not_silently_applied`
+    /// is what keeps that true.
     fn pop_mask_layer(&mut self) {
-        unimplemented!("see push_mask_layer")
+        let Some(m) = self.masks.pop() else {
+            if self.failed_layers > 0 { self.failed_layers -= 1; }
+            return;
+        };
+        unsafe { let _ = m.rt.EndDraw(None, None); }
+        let Ok(bmp) = (unsafe { m.brt.GetBitmap() }) else { return };
+        if let Some(layer) = self.layers.last_mut() {
+            layer.mask = Some((bmp, m.law));
+        }
     }
 
-    fn push_isolated_layer(&mut self, _alpha: f64, _blend: BlendMode) {
-        // A6 ratified the bracket; this backend does not yet implement it. B1's
-        // finding stands: D2D1_LAYER_PARAMETERS1 serves none of the three mask
-        // variants, so the layer target is a render-target swap, not a PushLayer.
-        unimplemented!("A6 isolated layers are not yet implemented in the D2D backend")
+    /// A6: open a fresh transparent surface in the parent's coordinate frame.
+    ///
+    /// A RENDER-TARGET SWAP, NOT A `PushLayer`, and that is B1's finding kept
+    /// rather than revisited: `D2D1_LAYER_PARAMETERS1` serves none of the three
+    /// mask laws, so the layer had to be a real surface anyway. The device
+    /// context makes it -- the QI that this rests on is driven by
+    /// `the_wic_target_upgrades_to_a_device_context_...`, which runs first for
+    /// exactly that reason.
+    fn push_isolated_layer(&mut self, alpha: f64, blend: BlendMode) {
+        match self.open_surface() {
+            Some((brt, rt)) => {
+                let saved = std::mem::take(&mut self.group_alphas);
+                self.layers.push(LayerTarget {
+                    brt, rt, alpha, blend,
+                    saved_group_alphas: saved,
+                    mask: None,
+                });
+            }
+            None => self.failed_layers += 1,
+        }
     }
 
+    /// A6 §3.3: flatten the layer and composite it as ONE primitive at
+    /// effective alpha = (open-group product AT THE PUSH SITE) x the layer's own
+    /// alpha -- applied ONCE. That is defect D-alpha's repair: the alpha must
+    /// multiply into the inherited product, never replace it and never apply
+    /// twice.
     fn pop_isolated_layer(&mut self) {
-        unimplemented!("A6 isolated layers are not yet implemented in the D2D backend")
+        if self.failed_layers > 0 {
+            self.failed_layers -= 1;
+            return;
+        }
+        let Some(layer) = self.layers.pop() else { return };
+        // Restore the parent's product BEFORE computing the composite alpha --
+        // the product that counts is the one at the push site.
+        self.group_alphas = layer.saved_group_alphas;
+        unsafe { let _ = layer.rt.EndDraw(None, None); }
+        let Ok(body) = (unsafe { layer.brt.GetBitmap() }) else { return };
+
+        // THE LAW EATS INTO THE FINISHED BODY HERE. If the layer carried a mask
+        // bracket, the body is re-composited through it onto a scratch surface
+        // first; the blit below then treats the result as any other layer.
+        let bmp = match &layer.mask {
+            None => body,
+            Some((mask, law)) => match self.apply_mask(&body, mask, *law) {
+                Some(masked) => masked,
+                // ⛔ A MASK THAT CANNOT BE APPLIED MUST NOT COMPOSITE THE
+                // UNMASKED BODY. That would draw the element at full extent --
+                // exactly what the mask existed to prevent, and it would look
+                // like a correct render of a different document.
+                None => return,
+            },
+        };
+
+        let parent = self.rt();
+        let eff = self.effective_alpha(layer.alpha) as f32;
+        // ⛔ THE BLIT RUNS AT IDENTITY. The layer's contents were already drawn
+        // under the parent's transform, so compositing under it again would
+        // apply the transform twice -- the same double-apply shape as D-alpha,
+        // in geometry instead of opacity.
+        let mut saved = Matrix3x2::identity();
+        unsafe { parent.GetTransform(&mut saved) };
+        unsafe { parent.SetTransform(&Matrix3x2::identity()) };
+        unsafe {
+            parent.DrawBitmap(
+                &bmp,
+                None,
+                eff,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                None,
+            );
+        }
+        unsafe { parent.SetTransform(&saved) };
     }
 }
 
@@ -390,6 +678,87 @@ mod tests {
     use super::*;
     use crate::painter::direct2d::device::HeadlessTarget;
     use crate::geometry::element::{LineCap, LineJoin};
+
+    /// ⭐ THE PRECONDITION FOR A6 IN THIS BACKEND, DRIVEN BEFORE ANYTHING IS
+    /// BUILT ON IT.
+    ///
+    /// `clip()`'s own comment says the `D2D1_LAYER_PARAMETERS1` variant "belongs
+    /// to ID2D1DeviceContext, which the WIC target can be QueryInterface'd to
+    /// (B1 route (a)) -- needed for masks later". **Later is now**, and the whole
+    /// A6 design for this backend rests on that QI succeeding: the device context
+    /// is what supplies `PushLayer` with an `opacityBrush`, `DrawImage`, and the
+    /// effect graph (luminance-to-alpha, invert, blend) that the three mask laws
+    /// and the `multiply` composite need.
+    ///
+    /// ⛔ IT IS A COMMENT, NOT A MEASUREMENT, UNTIL IT IS RUN. If this QI fails
+    /// on the headless WIC target then the routed acceptance is unreachable by
+    /// this route and that is a finding for the council, not something to
+    /// discover halfway through an implementation. So it is a test, and it runs
+    /// first.
+    ///
+    /// The second assertion is the one that matters for the mask work:
+    /// `CreateCompatibleRenderTarget` is how an isolated layer gets its own
+    /// surface in the parent's frame, and a device context that cannot make one
+    /// would push the layer design back to a full second WIC target.
+    #[test]
+    fn the_wic_target_upgrades_to_a_device_context_and_can_make_a_compatible_target() {
+        use windows::core::Interface;
+        use windows::Win32::Graphics::Direct2D::ID2D1DeviceContext;
+
+        let t = HeadlessTarget::new(64, 64).expect("target");
+
+        let dc: ID2D1DeviceContext = t
+            .target()
+            .cast()
+            .expect("B1 route (a): the WIC render target must QI to ID2D1DeviceContext --                      the A6 mask laws and the multiply composite have no other route here");
+
+        // The isolated-layer surface. Same size and DPI as the parent by
+        // default, which is exactly A6's "parent's coordinate frame and
+        // rasterization scale".
+        let compat = unsafe { dc.CreateCompatibleRenderTarget(None, None, None, Default::default()) }
+            .expect("an isolated layer needs its own surface in the parent's frame");
+
+        // A compatible target is only useful if its bitmap can be read back out
+        // to composite. Assert the accessor, not merely the creation.
+        let _bmp = unsafe { compat.GetBitmap() }
+            .expect("the layer's bitmap is what pop_isolated_layer composites");
+    }
+
+    /// ⭐ THE SECOND PRECONDITION — CAN THIS TARGET RUN AN EFFECT GRAPH AT ALL?
+    ///
+    /// The three A6 mask laws lower onto effects: luminance_clip_in needs
+    /// `CLSID_D2D1LuminanceToAlpha` then a SOURCE_IN composite; alpha_clip_out
+    /// needs DESTINATION_OUT; alpha_reveal_outside_bbox needs an invert or its
+    /// equivalent. All three constants exist in windows-rs -- I checked -- and
+    /// **that is not the same as them working HERE.**
+    ///
+    /// ⛔ D2D EFFECTS NORMALLY WANT A D3D-BACKED DEVICE. This backend's target is
+    /// a SOFTWARE WIC bitmap: it QIs to `ID2D1DeviceContext` (proven by the
+    /// sibling test) but a QI is not a capability. If `CreateEffect` refuses on a
+    /// WIC-backed context, the luminance law has no effect route here and the
+    /// mask work needs a different pipeline -- which is a finding for the
+    /// council, and one worth having BEFORE the pipeline is written, not after.
+    ///
+    /// Same reasoning as the device-context probe: a constant that exists is a
+    /// lookup that succeeded, and a lookup that succeeds is not the thing found.
+    #[test]
+    fn the_wic_device_context_can_build_the_mask_effect_graph() {
+        use windows::core::Interface;
+        use windows::Win32::Graphics::Direct2D::{
+            ID2D1DeviceContext, CLSID_D2D1LuminanceToAlpha,
+        };
+
+        let t = HeadlessTarget::new(32, 32).expect("target");
+        let dc: ID2D1DeviceContext = t.target().cast().expect("device context");
+
+        let effect = unsafe { dc.CreateEffect(&CLSID_D2D1LuminanceToAlpha) };
+        match effect {
+            Ok(_) => { /* the luminance law has its route */ }
+            Err(e) => panic!(
+                "CreateEffect(LuminanceToAlpha) refused on the WIC-backed device                  context: {e:?}. The luminance mask law has no effect route on                  this target -- report it, do not work around it silently."
+            ),
+        }
+    }
 
     fn red() -> Brush {
         Brush::Solid(Color::new(1.0, 0.0, 0.0, 1.0))
@@ -696,22 +1065,99 @@ mod tests {
                  divided by the emit width");
     }
 
-    /// Masks must REFUSE, not draw something plausible. A backend that quietly
-    /// ignored a mask would render the unmasked artwork and look almost right.
+    /// ⭐ THE A6 ALPHA LAW, IN PIXELS — defect D-alpha's ratified repair.
     ///
-    /// ⛔ AND THIS TEST NOW PINS THE LEDGER NAME (A6 item ④). It used to expect
-    /// "element-bracket ruling"; the site cited "option C, 2026-07-30" while the
-    /// summons cited "option (a)" — one object under two labels. The reconciled
-    /// name is A6, and this expectation is what keeps a third label from
-    /// appearing here: change the refusal's name and this test reds.
+    /// ⛔ THE CROSS-BACKEND FRAMING THAT USED TO BE HERE IS REMOVED, and its
+    /// removal is the point rather than tidying. This doc cited a
+    /// "pixel-equal to Canvas2D" acceptance that the helm WITHDREW on 08/29:
+    /// it named a canvas-lane fixture and a comparison no path in this repo can
+    /// execute. A criterion must be written in the terms of the seat that must
+    /// execute it — and a retired criterion left quoted in a live comment is a
+    /// criterion the next reader inherits as current. (Citation ageing, banked
+    /// 08/28: a cited claim becomes the citing document's own the moment it is
+    /// written down.)
     ///
-    /// Renamed with the message: the bracket is no longer "pending" — it is
-    /// ratified (2026-08-27). What is pending is this backend's IMPLEMENTATION.
+    /// What this test asserts stands entirely on its own: **this backend obeys
+    /// the ratified A6 alpha law.** It says nothing about any other backend and
+    /// never did.
+    ///
+    /// A 0.5 group around a 0.5 layer around an opaque red fill must land at
+    /// **0.25**, i.e. alpha ~= 64/255. Three ways to be wrong and the number
+    /// separates all of them:
+    ///
+    /// * **0.5 (~128)** -- the layer alpha REPLACED the inherited product
+    ///   instead of multiplying into it. That was HEAD's behaviour.
+    /// * **0.125 (~32)** -- the layer alpha applied TWICE, once into the body
+    ///   and again at the blit. That was the other half of D-alpha.
+    /// * **1.0 (~255)** -- no alpha applied at all.
+    ///
+    /// ⛔ A SINGLE-VALUE ASSERT WOULD BE WEAKER THAN IT LOOKS: 0.25 is what you
+    /// get from the correct law AND from any implementation that happens to
+    /// multiply two halves somewhere. The nesting is what makes it diagnostic --
+    /// the group and the layer carry the SAME 0.5, so a replace-bug and a
+    /// multiply-bug land on visibly different numbers rather than colliding.
     #[test]
-    #[should_panic(expected = "pending the A6 implementation")]
-    fn masks_refuse_loudly_pending_the_a6_implementation() {
-        let t = HeadlessTarget::new(2, 2).unwrap();
-        let mut p = Direct2DPainter::new(t.target());
-        p.push_mask_layer(Mask::AlphaClipOut);
+    fn the_layer_alpha_multiplies_into_the_group_product_exactly_once() {
+        let t = HeadlessTarget::new(8, 8).unwrap();
+        unsafe { t.target().BeginDraw() };
+        unsafe {
+            t.target().Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        }
+        {
+            let mut p = Direct2DPainter::new(t.target());
+            p.push_group(0.5, BlendMode::Normal);
+            p.push_isolated_layer(0.5, BlendMode::Normal);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 }, &red(), 1.0);
+            p.pop_isolated_layer();
+            p.pop_group();
+        }
+        unsafe { t.target().EndDraw(None, None).unwrap() };
+
+        let a = px(&t.read_bgra().expect("readback"), 8, 4, 4)[3] as i32;
+        assert!(
+            (a - 64).abs() <= 3,
+            "A6 alpha law: 0.5 group x 0.5 layer x opaque fill must be ~64/255, got {a}.              ~128 = the layer alpha replaced the product (HEAD's D-alpha);              ~32 = it applied twice; ~255 = it did not apply."
+        );
+    }
+
+    /// ⭐ SUPERSEDES `masks_refuse_loudly_pending_the_a6_implementation`.
+    ///
+    /// That test asserted the refusal MESSAGE, and it was right to: while the
+    /// backend could not do masks, the message was the contract, and pinning it
+    /// kept a third ledger label from appearing. **The contract has changed --
+    /// masks are implemented -- so the test is replaced rather than deleted, and
+    /// its replacement asserts the opposite fact against the same op.**
+    ///
+    /// ⛔ AND IT ASSERTS PIXELS, NOT ABSENCE OF A PANIC. A mask bracket that
+    /// opened and did nothing would also not panic. So: a red body, a mask that
+    /// covers only the left half, `AlphaClipOut` -- the covered half must be
+    /// GONE and the uncovered half must REMAIN. Either alone passes on a broken
+    /// implementation: "all gone" is a mask that ate everything, "all there" is
+    /// a mask that did nothing.
+    #[test]
+    fn a_clip_out_mask_removes_the_covered_half_and_keeps_the_rest() {
+        let t = HeadlessTarget::new(16, 16).unwrap();
+        unsafe { t.target().BeginDraw() };
+        unsafe {
+            t.target().Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        }
+        {
+            let mut p = Direct2DPainter::new(t.target());
+            p.push_isolated_layer(1.0, BlendMode::Normal);
+            // body: red over the whole surface
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 }, &red(), 1.0);
+            // mask: opaque over the LEFT half only
+            p.push_mask_layer(Mask::AlphaClipOut);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 16.0 }, &red(), 1.0);
+            p.pop_mask_layer();
+            p.pop_isolated_layer();
+        }
+        unsafe { t.target().EndDraw(None, None).unwrap() };
+
+        let buf = t.read_bgra().expect("readback");
+        let left = px(&buf, 16, 4, 8);
+        let right = px(&buf, 16, 12, 8);
+        assert_eq!(left[3], 0, "clip_out must REMOVE the masked half, got alpha {}", left[3]);
+        assert!(right[3] > 200, "and must KEEP the unmasked half, got alpha {}", right[3]);
     }
 }
