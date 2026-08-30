@@ -1,9 +1,9 @@
 # S-C.1 — C1 MEASURED, and what it does and does not license
 
-**flask (jas/windows, kenai), 2026-08-25.** Written to the sequencer's ruling (b):
-S-C.1 is complete at the **read half**; the write path is booked as S-C.2 and was
-not started. Sequencing ruling: `seat/fleet/SEQUENCE-sc-spike-2026-08-24.md`,
-amended through Amendment 5.
+**Windows/kenai, 2026-08-25.** S-C.1 is complete at the **read half**; the write
+path is booked as S-C.2 and was not started. Written against the S-C sequencing
+ruling as amended through Amendment 5, which is held in the project's private
+working record and is not reproduced here.
 
 ---
 
