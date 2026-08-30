@@ -772,12 +772,151 @@ fn draw_element_scaled(
     // use. OPACITY.md §Rendering.
     if let Some(mask) = elem.common().mask.as_deref() {
         if let Some(plan) = mask_plan(mask) {
+            // PH4 — THE PRODUCTION CONVERSION. A masked element whose whole
+            // subtree is expressible on the seam takes the ratified A6 element
+            // bracket; everything else keeps the legacy composite below,
+            // unchanged. See [draw_masked_element_through_the_seam] for the
+            // four conditions and for what changes on screen when it fires.
+            if draw_masked_element_through_the_seam(ctx, elem, ancestor_vis, element_scale) {
+                return;
+            }
             draw_element_with_mask(ctx, elem, mask, plan, ancestor_vis, precision, element_scale);
             return;
         }
     }
     draw_element_body(ctx, elem, ancestor_vis, precision, element_scale);
 }
+
+/// Would production's `counter_scaled_element` change anything the seam would
+/// not? `acc` is the accumulated element-transform scale arriving at `elem`.
+///
+/// ⛔ THIS IS A DIVERGENCE GUARD, NOT A CAPABILITY QUESTION, which is why it
+/// lives here and not in the router. Production counter-scales a stroke width
+/// (and a rounded rect's corner radii) by the accumulated ELEMENT-transform
+/// scale at every level, so a stroke renders at its nominal width under a
+/// scaling transform. The `Painter` seam carries no such notion: it paints the
+/// width it is handed. The leaf routes production already takes are safe
+/// because they convert a leaf paint AFTER `counter_scaled_element` has rebound
+/// the element; the A6 bracket enters BEFORE that and swallows a whole subtree,
+/// so it must ask.
+///
+/// The scale test matches [counter_scaled_element]'s own condition exactly,
+/// rather than approximating it — two spellings of one threshold is how the
+/// guard and the thing it guards drift apart.
+fn subtree_would_be_counter_scaled(elem: &Element, acc: f64) -> bool {
+    let s = acc * transform_scale_factor(elem.transform());
+    let scaled = s > 1e-6 && (s - 1.0).abs() > 1e-9;
+    if scaled
+        && (elem.stroke().is_some()
+            || matches!(elem, Element::Rect(r) if r.rx != 0.0 || r.ry != 0.0))
+    {
+        return true;
+    }
+    // The mask artwork restarts the accumulation at 1.0 — `draw_element_with_mask`
+    // renders the subtree through `draw_element`, whose public entry seeds the
+    // scale at the identity. Ported, not re-derived.
+    if let Some(m) = elem.common().mask.as_deref().filter(|m| !m.disabled) {
+        if subtree_would_be_counter_scaled(&m.subtree, 1.0) {
+            return true;
+        }
+    }
+    if let Some(children) = elem.children() {
+        if children.iter().any(|c| subtree_would_be_counter_scaled(c, s)) {
+            return true;
+        }
+    }
+    false
+}
+
+/// PH4 — render `elem` through the ratified A6 element bracket on the `Painter`
+/// seam. Returns `false` having painted NOTHING when any condition fails, so
+/// the caller falls back to the unchanged legacy composite.
+///
+/// # ⚠️ WHAT CHANGES ON SCREEN WHEN THIS FIRES — the announcement, in the code
+///
+/// This is A6 §6.2, and it is a ratified behaviour change for shipped documents
+/// (Captain, 2026-08-30) rather than a refactor. It is NOT the `own²` defect —
+/// that was D-α, repaired in this file on 2026-08-24 (`mask_blit_alpha`), and a
+/// masked element already renders at `ancestors × own` here. What changes is
+/// WHICH FACTOR IS ISOLATED:
+///
+/// | | legacy composite | A6 bracket |
+/// |---|---|---|
+/// | the element's OWN opacity | multiplied into every body primitive — overlaps inside the element COMPOUND | spent ONCE at the layer composite |
+/// | the ANCESTOR group product | applied once, to the finished scratch | multiplied into every body primitive |
+///
+/// Production has these exactly the wrong way round. The contract pins group
+/// alpha as NON-isolated (`painter/mod.rs`: each open group's alpha multiplies
+/// into all descendants per-primitive) and A6 makes the masked element an
+/// ISOLATED layer carrying its own opacity. For a single-primitive body the two
+/// agree at `ancestors × own`, which is why this went unseen; they diverge, in
+/// both directions, as soon as the masked element's body overlaps itself.
+///
+/// # The four conditions, each a different kind of refusal
+///
+/// 1. **`ancestor_vis` must be `Preview`.** The seam has no outline lowering and
+///    no invisible cap; both are inherited state this function cannot see from
+///    the element alone. (An element's OWN outline mode is the router's job —
+///    see `element_needs_legacy`.)
+/// 2. **The whole subtree must convert on this backend**
+///    ([`subtree_needs_legacy`]) — body AND mask artwork. A legacy-only
+///    descendant is DROPPED by `emit_element`, and legacy-only mask artwork
+///    gives `M = 0`, which deletes the element.
+/// 3. **Nothing in the subtree may be counter-scaled**
+///    ([`subtree_would_be_counter_scaled`]).
+/// 4. **The context's world transform must be readable.** A fresh layer surface
+///    starts at identity; without the frame it opens at the wrong origin. The
+///    read is this file's existing `read_ctx_transform`, the same one the legacy
+///    composite uses, and it crosses to the painter as an explicit parameter.
+///
+/// ⛔ NO `cfg(feature = "web")` HERE, DELIBERATELY. The first cut carried one,
+/// plus a `cfg(not(web))` stub returning `false` — a whole second arm that
+/// cannot be reached, because `canvas` is itself `#[cfg(feature = "web")]` at
+/// `lib.rs`. An unreachable arm wearing the signature of a live one is worse
+/// than none: it reads as a supported configuration nobody has ever run.
+fn draw_masked_element_through_the_seam(
+    ctx: &CanvasRenderingContext2d,
+    elem: &Element,
+    ancestor_vis: Visibility,
+    element_scale: f64,
+) -> bool {
+    use crate::painter::capability::Caps;
+    use crate::painter::Painter as _;
+
+    if ancestor_vis != Visibility::Preview {
+        return false;
+    }
+    if subtree_would_be_counter_scaled(elem, element_scale) {
+        return false;
+    }
+    let Some((a, b, c, d, e, f)) = read_ctx_transform(ctx) else {
+        return false;
+    };
+    // Constructing a painter allocates nothing — a layer surface is created at
+    // the first `push_isolated_layer` — so it is safe to build one just to ask
+    // it what it can do, and every DECLINE below still leaves the context
+    // untouched. That ordering is deliberate: the guard is taken only once the
+    // answer is yes, so a masked element that stays legacy costs no save/restore
+    // per frame.
+    let mut painter = crate::painter::canvas2d::Canvas2dPainter::at_frame(
+        ctx,
+        Transform { a, b, c, d, e, f },
+    );
+    if crate::painter::element_render::subtree_needs_legacy(elem, Caps::of(&painter)) {
+        return false;
+    }
+    // The ancestor alpha product, read the same way every other path here reads
+    // it — off the context, before anything touches it.
+    let incoming_alpha = ctx.global_alpha();
+    // ⛔ GUARDED. The painter leaves the base context's alpha and composite
+    // operation at values of its own choosing after a layer composite; the
+    // guard puts the caller's state back on every exit, so a converted element
+    // cannot change what its SIBLINGS render as.
+    let _ctx_guard = CtxSaveGuard::new(ctx);
+    crate::painter::element_render::emit_element(&mut painter, elem, incoming_alpha);
+    true
+}
+
 
 // ---------------------------------------------------------------------------
 // Opacity-mask compositing (OPACITY.md §Rendering)
@@ -885,15 +1024,31 @@ thread_local! {
     static MASK_LUMA_CANVAS: RefCell<Vec<HtmlCanvasElement>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Read the six-component current transform from a Canvas2D
-/// context via JS reflection on ``currentTransform``. Returns
-/// ``None`` when the property isn't present or its fields aren't
-/// numeric (which means we fall back to identity on the caller's
-/// offscreen ctx — a reasonable degradation).
+/// Read the six-component current transform from a Canvas2D context.
+///
+/// ⛔⛔ `currentTransform` DOES NOT EXIST IN CHROME, AND THAT IS NOT A
+/// HYPOTHETICAL — measured 2026-08-30 in headless Chrome 151 by
+/// `ph4_conversion_tests::currentTransform`-family probes: the property reads
+/// `undefined`, this function returned `None`, and the masked composite below
+/// therefore left its scratch at the IDENTITY while the main context carried
+/// the view transform. A masked element under a `+8` view translate landed at
+/// device `x = 2` instead of `x = 10`. **Every masked element in the shipped
+/// browser app was drawn at the wrong place whenever the view was panned or
+/// zoomed**, silently, because the caller's `if let Some(..)` simply did not
+/// fire and this docstring called that "a reasonable degradation".
+///
+/// ⇒ `getTransform()` IS ASKED FIRST — the standard method Chrome implements,
+/// returning a `DOMMatrix` with the same `a`..`f` fields. `currentTransform` is
+/// kept as the fallback because it is what Firefox exposes and what this
+/// function was written against. Both are reached by reflection for the same
+/// reason as before: web-sys 0.3 binds neither under the features enabled here.
+///
+/// Returns `None` only when NEITHER is available, which now really does mean
+/// "no transform information exists" rather than "you asked the wrong browser".
 fn read_ctx_transform(
     ctx: &CanvasRenderingContext2d,
 ) -> Option<(f64, f64, f64, f64, f64, f64)> {
-    let t = js_sys::Reflect::get(ctx, &wasm_bindgen::JsValue::from_str("currentTransform")).ok()?;
+    let t = get_transform_object(ctx)?;
     let a = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("a")).ok()?.as_f64()?;
     let b = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("b")).ok()?.as_f64()?;
     let c = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("c")).ok()?.as_f64()?;
@@ -901,6 +1056,30 @@ fn read_ctx_transform(
     let e = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("e")).ok()?.as_f64()?;
     let f = js_sys::Reflect::get(&t, &wasm_bindgen::JsValue::from_str("f")).ok()?.as_f64()?;
     Some((a, b, c, d, e, f))
+}
+
+/// The matrix-like object carrying the context's current transform, from
+/// whichever of the two surfaces this browser has. See [read_ctx_transform] for
+/// why the order matters.
+fn get_transform_object(ctx: &CanvasRenderingContext2d) -> Option<wasm_bindgen::JsValue> {
+    let key = wasm_bindgen::JsValue::from_str("getTransform");
+    if let Ok(m) = js_sys::Reflect::get(ctx, &key) {
+        if let Ok(func) = m.dyn_into::<js_sys::Function>() {
+            if let Ok(v) = func.call0(ctx) {
+                if !v.is_undefined() && !v.is_null() {
+                    return Some(v);
+                }
+            }
+        }
+    }
+    let v = js_sys::Reflect::get(
+        ctx,
+        &wasm_bindgen::JsValue::from_str("currentTransform"),
+    ).ok()?;
+    if v.is_undefined() || v.is_null() {
+        return None;
+    }
+    Some(v)
 }
 
 /// Obtain (or lazily create) the scratch mask canvas, resized to
@@ -3170,6 +3349,113 @@ mod tests {
         })
     }
 
+    // -----------------------------------------------------------------
+    // PH4 — the counter-scale divergence guard
+    // -----------------------------------------------------------------
+
+    fn scale2() -> Transform { Transform { a: 2.0, b: 0.0, c: 0.0, d: 2.0, e: 0.0, f: 0.0 } }
+
+    fn filled_rect(transform: Option<Transform>) -> Element {
+        use crate::geometry::element::{CommonProps, Fill, RectElem};
+        let mut common = CommonProps::default();
+        common.transform = transform;
+        Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::new(0.0, 0.0, 0.0, 1.0), opacity: 1.0 }),
+            stroke: None, common, fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
+    fn group_of(children: Vec<Element>, transform: Option<Transform>) -> Element {
+        use crate::geometry::element::{CommonProps, GroupElem};
+        use std::rc::Rc;
+        let mut common = CommonProps::default();
+        common.transform = transform;
+        Element::Group(GroupElem {
+            children: children.into_iter().map(Rc::new).collect(),
+            common, isolated_blending: false, knockout_group: false,
+        })
+    }
+
+    fn with_mask(mut elem: Element, artwork: Element) -> Element {
+        use crate::geometry::element::Mask;
+        elem.common_mut().mask = Some(Box::new(Mask {
+            subtree: Box::new(artwork),
+            clip: true, invert: false, disabled: false,
+            linked: true, unlink_transform: None,
+        }));
+        elem
+    }
+
+    /// The guard fires exactly where `counter_scaled_element` would DO
+    /// something — a stroke (or a rounded corner) under a non-unit accumulated
+    /// element scale — and nowhere else.
+    #[test]
+    fn counter_scale_guard_fires_on_a_scaled_stroke_only() {
+        // A stroke at unit scale: nothing to counter-scale.
+        assert!(!subtree_would_be_counter_scaled(&stroked_rect(4.0, None), 1.0));
+        // The same stroke under a 2x transform: production would halve the width.
+        assert!(subtree_would_be_counter_scaled(&stroked_rect(4.0, Some(scale2())), 1.0));
+        // …and the scale can arrive from the ANCESTOR chain instead.
+        assert!(subtree_would_be_counter_scaled(&stroked_rect(4.0, None), 2.0));
+        // A FILL under the same 2x transform is untouched by counter-scaling.
+        assert!(!subtree_would_be_counter_scaled(&filled_rect(Some(scale2())), 1.0),
+                "counter-scaling only rewrites stroke width and corner radii; \
+                 refusing a plain fill would convert nothing under any zoom");
+    }
+
+    /// A rounded rect's radii are counter-scaled too, so it is the second
+    /// carrier — and it has its own arm because a guard reading only `stroke()`
+    /// passes every assertion above.
+    #[test]
+    fn counter_scale_guard_fires_on_a_scaled_rounded_rect() {
+        let mut r = filled_rect(Some(scale2()));
+        if let Element::Rect(e) = &mut r { e.rx = 3.0; e.ry = 3.0; }
+        assert!(subtree_would_be_counter_scaled(&r, 1.0));
+        // CONTROL: the same corner at unit scale converts.
+        let mut r = filled_rect(None);
+        if let Element::Rect(e) = &mut r { e.rx = 3.0; e.ry = 3.0; }
+        assert!(!subtree_would_be_counter_scaled(&r, 1.0));
+    }
+
+    /// It reaches DESCENDANTS, accumulating the scale on the way down — which
+    /// is the arm that matters, because the A6 bracket swallows a subtree.
+    #[test]
+    fn counter_scale_guard_accumulates_down_the_children() {
+        // The scale is on the GROUP; the stroke is on the child.
+        let g = group_of(vec![stroked_rect(4.0, None)], Some(scale2()));
+        assert!(subtree_would_be_counter_scaled(&g, 1.0));
+        // CONTROL: the same tree with no transform anywhere converts.
+        let g = group_of(vec![stroked_rect(4.0, None)], None);
+        assert!(!subtree_would_be_counter_scaled(&g, 1.0));
+    }
+
+    /// ⛔ AND THE MASK ARTWORK RESTARTS AT THE IDENTITY, because
+    /// `draw_element_with_mask` renders the subtree through `draw_element`,
+    /// whose public entry seeds the element scale at 1.0. A guard that threaded
+    /// the element's scale into the artwork would refuse documents production
+    /// renders identically — the wrong direction for a divergence guard, since
+    /// it converts less while claiming to protect more.
+    #[test]
+    fn counter_scale_guard_restarts_the_accumulation_inside_the_mask() {
+        // Element scaled 2x, mask artwork stroked and UNTRANSFORMED: the artwork
+        // is drawn at scale 1.0 by legacy, so there is nothing to diverge on…
+        let e = with_mask(filled_rect(Some(scale2())), stroked_rect(4.0, None));
+        assert!(!subtree_would_be_counter_scaled(&e, 1.0),
+                "the mask artwork does not inherit the element's scale");
+        // …while artwork carrying its OWN scale does fire.
+        let e = with_mask(filled_rect(None), stroked_rect(4.0, Some(scale2())));
+        assert!(subtree_would_be_counter_scaled(&e, 1.0));
+    }
+
+    /// A DISABLED mask is never drawn, so its artwork cannot diverge.
+    #[test]
+    fn counter_scale_guard_ignores_a_disabled_masks_artwork() {
+        let mut e = with_mask(filled_rect(None), stroked_rect(4.0, Some(scale2())));
+        e.common_mut().mask.as_mut().unwrap().disabled = true;
+        assert!(!subtree_would_be_counter_scaled(&e, 1.0));
+    }
+
     #[test]
     fn counter_scaled_element_divides_stroke() {
         // A stroked rect (width 4) with its own 2x transform: combined scale is
@@ -4217,5 +4503,340 @@ mod canvas_tests {
             (255, 255),
             "D-β: the outer buffer was cleared by the nested acquisition"
         );
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PH4 — THE PRODUCTION CONVERSION, MEASURED IN A REAL BROWSER (2026-08-30).
+//
+// ⛔ THE BEFORE/AFTER IS A TEST, NOT A SCREENSHOT, and that is deliberate: a
+// screenshot of a behaviour change is read once and believed; a test with both
+// arms in it re-states the claim on every run and REDS if either arm moves.
+// The Captain's condition was that this change land announced and legible —
+// this module is where "what changes on screen" stops being prose.
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(all(test, target_arch = "wasm32"))]
+mod ph4_conversion_tests {
+    use super::*;
+    use crate::geometry::element::{CommonProps, Fill, GroupElem, Mask, RectElem};
+    use std::rc::Rc;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn surface(w: u32, h: u32) -> (HtmlCanvasElement, CanvasRenderingContext2d) {
+        let doc = web_sys::window().unwrap().document().unwrap();
+        let c: HtmlCanvasElement = doc.create_element("canvas").unwrap().unchecked_into();
+        c.set_width(w);
+        c.set_height(h);
+        let ctx: CanvasRenderingContext2d =
+            c.get_context("2d").unwrap().unwrap().unchecked_into();
+        (c, ctx)
+    }
+
+    fn alpha_at(ctx: &CanvasRenderingContext2d, x: f64, y: f64) -> u8 {
+        ctx.get_image_data(x, y, 1.0, 1.0).unwrap().data()[3]
+    }
+
+    fn opaque_rect(x: f64, y: f64, w: f64, h: f64, color: Color) -> Element {
+        Element::Rect(RectElem {
+            x, y, width: w, height: h, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color, opacity: 1.0 }),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        })
+    }
+
+    /// THE DISCRIMINATING DOCUMENT, and it has to be this shape.
+    ///
+    /// A masked group at opacity `own`, whose BODY IS TWO OVERLAPPING opaque
+    /// rects, under a full-surface white mask (`LuminanceClipIn` with M = 1
+    /// everywhere, so the mask contributes nothing and the alpha arithmetic is
+    /// the only thing under test).
+    ///
+    /// ⛔ THE OVERLAP IS THE WHOLE INSTRUMENT. For a single-primitive body the
+    /// legacy composite and the A6 bracket agree exactly, at `ancestors × own`
+    /// — which is why this divergence survived the D-α repair and every golden
+    /// since. They differ only where the element's own body overlaps itself.
+    fn masked_overlapping_group(own: f64) -> Element {
+        Element::Group(GroupElem {
+            children: vec![
+                Rc::new(opaque_rect(0.0, 0.0, 6.0, 8.0, Color::BLACK)),
+                Rc::new(opaque_rect(2.0, 0.0, 6.0, 8.0, Color::BLACK)),
+            ],
+            common: CommonProps {
+                opacity: own,
+                mask: Some(Box::new(Mask {
+                    subtree: Box::new(opaque_rect(0.0, 0.0, 8.0, 8.0, Color::WHITE)),
+                    clip: true,
+                    invert: false,
+                    disabled: false,
+                    linked: true,
+                    unlink_transform: None,
+                })),
+                ..CommonProps::default()
+            },
+            isolated_blending: false,
+            knockout_group: false,
+        })
+    }
+
+    /// Render `elem` under an ancestor alpha of `parent`, either through the
+    /// LEGACY composite (`before = true`) or through whatever
+    /// [`draw_element_scaled`] routes to today. Returns
+    /// `(alpha in the overlap, alpha outside it)`.
+    fn render(elem: &Element, parent: f64, before: bool) -> (u8, u8) {
+        let (_c, ctx) = surface(8, 8);
+        ctx.set_global_alpha(parent);
+        if before {
+            let mask = elem.common().mask.as_deref().unwrap();
+            let plan = mask_plan(mask).unwrap();
+            draw_element_with_mask(&ctx, elem, mask, plan, Visibility::Preview, 1.0, 1.0);
+        } else {
+            draw_element_scaled(&ctx, elem, Visibility::Preview, 1.0, 1.0);
+        }
+        // x=3 is inside BOTH body rects; x=1 is inside only the first.
+        (alpha_at(&ctx, 3.0, 4.0), alpha_at(&ctx, 1.0, 4.0))
+    }
+
+    fn close(got: u8, want: u8) -> bool {
+        (got as i32 - want as i32).abs() <= 2
+    }
+
+    /// ⚠️⚠️ **THE RATIFIED A6 §6.2 BEHAVIOUR CHANGE, BEFORE AND AFTER, IN
+    /// PIXELS.** This is the announcement.
+    ///
+    /// ⛔ AND IT IS NOT THE `own²` DEFECT. That was D-α; it was repaired in this
+    /// file on 2026-08-24 (`mask_blit_alpha`) and a masked element has rendered
+    /// at `ancestors × own` here ever since. The change this conversion lands is
+    /// a different one, and it had to be measured to be named: **which factor
+    /// is isolated.**
+    ///
+    /// ```text
+    ///                          own opacity            ancestor product
+    ///   legacy composite   per-primitive (compounds)  once, on the scratch
+    ///   A6 bracket         once, at the composite     per-primitive (compounds)
+    /// ```
+    ///
+    /// The contract pins group alpha as NON-isolated and A6 makes the masked
+    /// element an ISOLATED layer carrying its own opacity. Production had both
+    /// the wrong way round, so the two arms below SWAP their numbers when the
+    /// same total alpha is moved from the ancestor to the element:
+    ///
+    /// ```text
+    ///   parent 1.0 · own 0.5   overlap  191 (before)  ->  128 (after)
+    ///   parent 0.5 · own 1.0   overlap  128 (before)  ->  191 (after)
+    /// ```
+    #[wasm_bindgen_test]
+    fn a6_bracket_changes_what_a_masked_overlapping_body_renders() {
+        // ARM 1 — the element carries the alpha.
+        let doc = masked_overlapping_group(0.5);
+        let (before_overlap, before_plain) = render(&doc, 1.0, true);
+        let (after_overlap, after_plain) = render(&doc, 1.0, false);
+        assert!(close(before_overlap, 191),
+                "BEFORE: own 0.5 applied per-primitive compounds in the overlap \
+                 to 1-(1-0.5)^2 = 0.75; got {before_overlap}");
+        assert!(close(after_overlap, 128),
+                "AFTER: own 0.5 rides the isolated layer and is spent once; \
+                 got {after_overlap} (191 means the bracket did not fire)");
+
+        // ⛔ THE UNCHANGED HALF, ASSERTED. Outside the overlap nothing moves —
+        // so the difference above is the ISOLATION, not a global alpha shift.
+        assert!(close(before_plain, 128) && close(after_plain, 128),
+                "outside the overlap both paths give ancestors x own = 0.5; \
+                 got before {before_plain}, after {after_plain}");
+
+        // ARM 2 — THE SAME TOTAL ALPHA, MOVED TO THE ANCESTOR. The numbers swap,
+        // which is what proves the two paths differ by WHICH factor is isolated
+        // rather than by one of them being uniformly darker.
+        let doc = masked_overlapping_group(1.0);
+        let (before_overlap, _) = render(&doc, 0.5, true);
+        let (after_overlap, _) = render(&doc, 0.5, false);
+        assert!(close(before_overlap, 128),
+                "BEFORE: the ancestor's 0.5 is applied ONCE to the finished \
+                 scratch, so the overlap does not compound; got {before_overlap}");
+        assert!(close(after_overlap, 191),
+                "AFTER: the ancestor product is non-isolated and multiplies into \
+                 every primitive, so the overlap compounds; got {after_overlap}");
+    }
+
+    /// ⛔ THE CONVERTED PATH UNDER A VIEW TRANSFORM — the arm that keeps the
+    /// frame seed at the CALL SITE honest.
+    ///
+    /// `Canvas2dPainter::at_frame` is driven directly in `canvas2d.rs`, but
+    /// that proves the constructor works, not that PRODUCTION uses it: swapping
+    /// this call site back to `Canvas2dPainter::new` passes every other test in
+    /// this repo, native and browser alike, because they all render at the
+    /// identity. A control that does not run through the instrument checks
+    /// nothing, so this one pans the view first.
+    #[wasm_bindgen_test]
+    fn a_converted_masked_element_lands_under_the_view_transform() {
+        let (_c, ctx) = surface(16, 8);
+        let _ = ctx.translate(8.0, 0.0);
+        let doc = Element::Group(GroupElem {
+            children: vec![Rc::new(opaque_rect(0.0, 0.0, 4.0, 8.0, Color::BLACK))],
+            common: CommonProps {
+                mask: Some(Box::new(Mask {
+                    subtree: Box::new(opaque_rect(0.0, 0.0, 4.0, 8.0, Color::WHITE)),
+                    clip: true, invert: false, disabled: false,
+                    linked: true, unlink_transform: None,
+                })),
+                ..CommonProps::default()
+            },
+            isolated_blending: false,
+            knockout_group: false,
+        });
+        draw_element_scaled(&ctx, &doc, Visibility::Preview, 1.0, 1.0);
+        assert_eq!(alpha_at(&ctx, 10.0, 4.0), 255,
+                   "the bracket must open in the frame the context is already in");
+        assert_eq!(alpha_at(&ctx, 2.0, 4.0), 0,
+                   "…and not at the identity origin, which is where an unframed \
+                    layer surface puts it");
+    }
+
+    /// ⛔ THE FALLBACK IS SILENT BY DESIGN, SO IT IS ASSERTED HERE.
+    ///
+    /// A document the seam cannot express must render EXACTLY as it does today.
+    /// The instrument is the same one above: the legacy arm and the live arm
+    /// must AGREE, where the test above required them to differ. Without this,
+    /// a fallback that had quietly stopped working would be invisible — every
+    /// other test in this module would still pass.
+    #[wasm_bindgen_test]
+    fn a_document_the_seam_cannot_express_still_renders_the_legacy_way() {
+        // A freeform gradient never crosses the seam (contract A5), so the whole
+        // masked group must stay legacy.
+        let mut legacy_child = RectElem {
+            x: 2.0, y: 0.0, width: 6.0, height: 8.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::BLACK, opacity: 1.0 }),
+            stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        };
+        legacy_child.fill_gradient = Some(Box::new(crate::geometry::element::Gradient {
+            gtype: crate::geometry::element::GradientType::Freeform,
+            ..crate::geometry::element::Gradient::default()
+        }));
+        let doc = Element::Group(GroupElem {
+            children: vec![
+                Rc::new(opaque_rect(0.0, 0.0, 6.0, 8.0, Color::BLACK)),
+                Rc::new(Element::Rect(legacy_child)),
+            ],
+            common: CommonProps {
+                opacity: 0.5,
+                mask: Some(Box::new(Mask {
+                    subtree: Box::new(opaque_rect(0.0, 0.0, 8.0, 8.0, Color::WHITE)),
+                    clip: true, invert: false, disabled: false,
+                    linked: true, unlink_transform: None,
+                })),
+                ..CommonProps::default()
+            },
+            isolated_blending: false,
+            knockout_group: false,
+        });
+        let legacy = render(&doc, 1.0, true);
+        let live = render(&doc, 1.0, false);
+        assert_eq!(legacy, live,
+                   "a masked group with a freeform-gradient child must render \
+                    identically to today -- the bracket would have DROPPED that \
+                    child, which is why the router refuses it");
+        // …and a control: the pixels are not simply both empty.
+        assert!(legacy.1 > 0, "control: the legacy arm painted nothing, so the \
+                               agreement above is vacuous");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE MASKED PATH'S COORDINATE FRAME — a shipped defect, found by PH4's
+// instrument and fixed here (2026-08-30).
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(all(test, target_arch = "wasm32"))]
+mod ctx_transform_tests {
+    use super::*;
+    use crate::geometry::element::{CommonProps, Fill, Mask, RectElem};
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn ctx_of(w: u32, h: u32) -> (HtmlCanvasElement, CanvasRenderingContext2d) {
+        let doc = web_sys::window().unwrap().document().unwrap();
+        let c: HtmlCanvasElement = doc.create_element("canvas").unwrap().unchecked_into();
+        c.set_width(w);
+        c.set_height(h);
+        let ctx: CanvasRenderingContext2d =
+            c.get_context("2d").unwrap().unwrap().unchecked_into();
+        (c, ctx)
+    }
+
+    /// ⛔ THE PROPERTY THIS FILE READ FOR MONTHS IS ABSENT IN CHROME.
+    ///
+    /// Asserted rather than described, because it is the premise of the fix: if
+    /// a future Chrome ships `currentTransform` this test reds and the next
+    /// reader learns that the fallback below stopped being a fallback. Either
+    /// direction is information; silence is not.
+    #[wasm_bindgen_test]
+    fn current_transform_is_absent_here_and_get_transform_is_not() {
+        let (_c, ctx) = ctx_of(8, 8);
+        let legacy = js_sys::Reflect::get(
+            &ctx, &wasm_bindgen::JsValue::from_str("currentTransform"));
+        assert!(legacy.map(|v| v.is_undefined()).unwrap_or(true),
+                "currentTransform is now present -- read_ctx_transform's ordering \
+                 comment is stale, not wrong");
+        assert!(get_transform_object(&ctx).is_some(),
+                "getTransform() is missing too: read_ctx_transform can only \
+                 return None, and every masked element composites at identity");
+    }
+
+    /// The read itself, against a transform this test applied.
+    #[wasm_bindgen_test]
+    fn read_ctx_transform_returns_the_transform_that_was_applied() {
+        let (_c, ctx) = ctx_of(8, 8);
+        assert_eq!(read_ctx_transform(&ctx), Some((1.0, 0.0, 0.0, 1.0, 0.0, 0.0)),
+                   "control: a fresh context must read as the identity");
+        let _ = ctx.translate(3.0, 0.0);
+        let _ = ctx.scale(2.0, 2.0);
+        assert_eq!(read_ctx_transform(&ctx), Some((2.0, 0.0, 0.0, 2.0, 3.0, 0.0)));
+    }
+
+    /// ⛔⛔ THE SHIPPED DEFECT, IN PIXELS, ON THE PATH THAT SHIPS.
+    ///
+    /// `draw_element_with_mask` copies the main context's world transform onto
+    /// its scratch with `if let Some(..) = read_ctx_transform(ctx)`. In Chrome
+    /// that read returned `None`, the `if let` did not fire, and the scratch
+    /// stayed at the IDENTITY while the main context carried the view
+    /// transform — so a masked element was composited at the wrong place
+    /// whenever the view was panned or zoomed. MEASURED before the repair: this
+    /// document rendered at device x = 2 instead of x = 10.
+    ///
+    /// The failure is silent by construction: the fallback is a successful
+    /// no-op, and this file's own docstring called it "a reasonable
+    /// degradation". A degradation that moves the artwork is not one.
+    #[wasm_bindgen_test]
+    fn a_masked_element_composites_under_the_view_transform() {
+        let (_c, ctx) = ctx_of(16, 8);
+        // The view transform, exactly as the app applies one before drawing.
+        let _ = ctx.translate(8.0, 0.0);
+        let mk = |w: f64, col: Color| Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: w, height: 8.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: col, opacity: 1.0 }), stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        });
+        let mut elem = mk(4.0, Color::BLACK);
+        elem.common_mut().mask = Some(Box::new(Mask {
+            subtree: Box::new(mk(4.0, Color::WHITE)),
+            clip: true, invert: false, disabled: false,
+            linked: true, unlink_transform: None,
+        }));
+        let mask = elem.common().mask.as_deref().unwrap().clone();
+        let plan = mask_plan(&mask).unwrap();
+        draw_element_with_mask(&ctx, &elem, &mask, plan, Visibility::Preview, 1.0, 1.0);
+
+        let alpha = |x: f64| ctx.get_image_data(x, 4.0, 1.0, 1.0).unwrap().data()[3];
+        assert_eq!(alpha(10.0), 255,
+                   "the masked element must land where the VIEW puts it (x=0..4 \
+                    in document space, +8 translate => device x=8..12)");
+        assert_eq!(alpha(2.0), 0,
+                   "…and nothing at the identity origin, which is where the \
+                    identity-framed scratch used to put it");
     }
 }

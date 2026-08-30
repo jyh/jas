@@ -203,6 +203,37 @@ still use raw alpha across all branches — luminance promotion requires
 per-pixel readback support equivalent to Canvas2D's `getImageData`, which
 each app would add separately.
 
+#### The masked element is an ISOLATED layer (A6 §6.2, 2026-08-30)
+
+⚠️ **This changed what shipped documents render.** A masked element's *own*
+opacity is applied **once**, to the finished composite, and the *ancestor*
+group product multiplies into **each body primitive**:
+
+```
+  effective alpha = own_opacity  ·  compositeOf( body primitives, each at ∏ ancestor alphas )
+```
+
+The mask artwork is itself isolated: it renders on a fresh transparent
+surface at alpha context 1.0, so nothing outside the element modulates it.
+
+**What this replaced.** The browser renderer previously had the two factors
+the other way round — the element's own opacity multiplied into every body
+primitive (so overlapping parts of the element compounded), and the ancestor
+product was applied once, to the finished scratch. For a masked element whose
+body is a single shape the two are identical, at `ancestors × own`. They
+differ, in both directions, when the masked element's body **overlaps
+itself**: a half-opacity masked group of two overlapping opaque shapes used to
+render its overlap at `0.75` alpha and now renders it at `0.50`, while the
+same total alpha carried by an ancestor group instead moves from `0.50` to
+`0.75`.
+
+⛔ **Not to be confused with the `own²` defect (D-α).** That was a separate
+bug — the element's own opacity applied twice while ancestors were discarded —
+repaired on 2026-08-24. It had already been fixed when this change landed.
+
+Non-browser renderers still composite the legacy way; this is the first port
+to converge on the specified law.
+
 Every group element additionally carries:
 
 | Field                     | Type    | Default |
