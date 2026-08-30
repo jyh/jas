@@ -916,6 +916,22 @@ fn subtree_has_a_reframed_reveal_bbox(elem: &Element) -> bool {
 ///    read is this file's existing `read_ctx_transform`, the same one the legacy
 ///    composite uses, and it crosses to the painter as an explicit parameter.
 ///
+/// # 📌 THE COST, NAMED RATHER THAN ASSUMED AWAY
+///
+/// Conditions 2 and 3 are THREE separate walks of the masked element's subtree
+/// ([`subtree_needs_legacy`], [`subtree_would_be_counter_scaled`],
+/// [`subtree_has_a_reframed_reveal_bbox`]), run per masked element per frame and
+/// each short-circuiting on its first hit. They are kept separate because they
+/// answer three unrelated questions, one of which lives in another module, and
+/// each is independently testable — folding them into one traversal would trade
+/// that for a constant factor.
+///
+/// ⚠️ NOT BENCHMARKED. The argument for the cost being acceptable is that each
+/// walk is `O(subtree)` and the render that follows is also `O(subtree)`, so
+/// this is a constant factor rather than a change of order, and it is paid only
+/// on masked elements. That is an argument, not a measurement, and a document
+/// with many deep masked subtrees is where it would first be wrong.
+///
 /// ⛔ NO `cfg(feature = "web")` HERE, DELIBERATELY. The first cut carried one,
 /// plus a `cfg(not(web))` stub returning `false` — a whole second arm that
 /// cannot be reached, because `canvas` is itself `#[cfg(feature = "web")]` at
