@@ -80,9 +80,10 @@ uniform darkening.
 **Why.** This is the law the Painter contract specifies (amendment A6 §6.2,
 ratified 2026-08-27): group alpha is non-isolated and compounds
 per-primitive, while a masked element is an isolated layer carrying its own
-opacity. The Swift port's masked composite already applied the element's own
-opacity once at a transparency layer; this brings the browser renderer onto
-the specified law.
+opacity. The Swift port's masked composite already spends the element's own
+opacity once, at a transparency layer, so this brings the browser renderer into
+agreement with it **on that half**. Only that half: how each port applies the
+*ancestor* product is a separate question, and this note does not claim it.
 
 ⛔ **This is not the `own²` bug.** That was a separate defect — the
 element's own opacity applied twice while the ancestor groups were discarded
