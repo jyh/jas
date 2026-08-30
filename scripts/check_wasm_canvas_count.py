@@ -205,10 +205,11 @@ def self_test() -> int:
             "    #[wasm_bindgen_test]\n    fn one() {}\n"
             "    #[wasm_bindgen_test]\n    fn two() {}\n"
             "}\n",
-            encoding="utf-8",
+            encoding="utf-8", newline="",
         )
         (root / "sub" / "b.rs").write_text(
-            "    #[wasm_bindgen_test(async)]\n    async fn three() {}\n", encoding="utf-8"
+            "    #[wasm_bindgen_test(async)]\n    async fn three() {}\n",
+            encoding="utf-8", newline="",
         )
         # A decoy: the attribute NAMED in a comment and in a string is not a
         # declaration. Counting mentions instead of declarations is the
@@ -216,7 +217,7 @@ def self_test() -> int:
         (root / "sub" / "c.rs").write_text(
             "// #[wasm_bindgen_test] in a comment does not declare a test\n"
             "const S: &str = \"#[wasm_bindgen_test]\";\n",
-            encoding="utf-8",
+            encoding="utf-8", newline="",
         )
         check("derivation over a known tree", expected_from_source(root), 3)
 
