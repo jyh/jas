@@ -231,8 +231,11 @@ same total alpha carried by an ancestor group instead moves from `0.50` to
 bug — the element's own opacity applied twice while ancestors were discarded —
 repaired on 2026-08-24. It had already been fixed when this change landed.
 
-Non-browser renderers still composite the legacy way; this is the first port
-to converge on the specified law.
+The Swift port's masked composite already spends the element's own opacity
+once, at a transparency layer — read in `CanvasSubwindow.swift`, not executed —
+so this brings the browser renderer into agreement with it on that half. ⚠️ It is
+only that half: how each port applies the *ancestor* product is a separate
+question and is not claimed here.
 
 Every group element additionally carries:
 
