@@ -4985,6 +4985,27 @@ mod ph4_conversion_tests {
                    "…and the converted path must agree with it");
     }
 
+    /// ⛔ THE THIRD LAW, ON THE SAME DISCRIMINATING SHAPE — because "the
+    /// luminance path was correct throughout" is a claim I was about to publish
+    /// on the strength of COVERING artwork, which is the exact example that
+    /// cannot separate a working mask from an inert one.
+    ///
+    /// `LuminanceClipIn` is `α_S ← α_S · M`. Artwork covering only the left half
+    /// of the body must therefore erase the right half. If this arm were inert
+    /// like its two siblings were, the whole body would survive.
+    #[wasm_bindgen_test]
+    fn a_luminance_mask_erases_where_the_artwork_is_absent() {
+        let doc = masked(
+            opaque_rect(0.0, 0.0, 8.0, 8.0, Color::BLACK),
+            opaque_rect(0.0, 0.0, 4.0, 8.0, Color::WHITE),
+            true, false,
+        );
+        assert_eq!(scan(&doc, 10, true), "####......",
+                   "legacy LuminanceClipIn must keep only where the artwork is");
+        assert_eq!(scan(&doc, 10, false), "####......",
+                   "…and the converted path must agree with it");
+    }
+
     /// ⛔ THE ARTWORK SURFACE MUST ADOPT THE CALLER'S FRAME, and this arm is
     /// here because a mutation pass found nothing else covering it.
     ///
