@@ -190,6 +190,68 @@ pub fn panel_channels(rf: f64, gf: f64, bf: f64) -> PanelChannels {
     }
 }
 
+/// The Color panel's WRITE path: one channel edited, the colour recomputed.
+///
+/// The inverse of [`panel_channels`], and it lives beside it for the reason
+/// that docstring gives: the two halves must be held to the same order by every
+/// port rather than each rewriting the arithmetic. `panel_channels` derives the
+/// eleven channels from a colour; this takes that same map with **one field
+/// replaced by what the user just dragged** and returns the colour it names.
+///
+/// ⚠️ **The unedited channels MUST come from [`panel_channels`]**, which is what
+/// `panel` carries in both callers. A caller that instead asked the float colour
+/// for its own hue / saturation / brightness would reach a different committed
+/// colour — that is COLORTIERS (2026-07-26) exactly, and the reason this
+/// function takes the derived map rather than a colour.
+///
+/// Returns float RGB in 0..1, or `None` for a mode this panel does not declare.
+/// Floats rather than a `Color` so this module keeps no dependency on
+/// `geometry::element` — the arithmetic is shared, the colour type is not.
+///
+/// # Provenance
+/// Extracted verbatim from `interpreter::renderer::compute_color_from_panel`,
+/// which was `feature = "web"`-gated and therefore unreachable from the native
+/// FFI shell. `super::widget_commit` is the same move for the same reason (the
+/// commit rules live outside the web module "so the corpus can run them
+/// natively"); this follows that precedent rather than inventing one.
+pub fn color_from_panel_edit(
+    field: &str,
+    new_val: f64,
+    panel: &serde_json::Value,
+) -> Option<(f64, f64, f64)> {
+    // The edited field reads the DRAGGED value; every other channel reads the
+    // panel's derived map. An absent channel reads 0.0, matching the web path.
+    let pf = |name: &str| -> f64 {
+        if name == field {
+            return new_val;
+        }
+        panel.get(name).and_then(|v| v.as_f64()).unwrap_or(0.0)
+    };
+
+    let mode = panel.get("mode").and_then(|v| v.as_str()).unwrap_or("hsb");
+
+    let rgb = match mode {
+        "hsb" => {
+            let (r, g, b) = hsb_to_rgb(pf("h"), pf("s"), pf("b"));
+            (r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0)
+        }
+        "rgb" | "web_safe_rgb" => (pf("r") / 255.0, pf("g") / 255.0, pf("bl") / 255.0),
+        "grayscale" => {
+            let v = 1.0 - pf("k") / 100.0;
+            (v, v, v)
+        }
+        "cmyk" => {
+            let c = pf("c") / 100.0;
+            let m = pf("m") / 100.0;
+            let y = pf("y") / 100.0;
+            let k = pf("k") / 100.0;
+            ((1.0 - c) * (1.0 - k), (1.0 - m) * (1.0 - k), (1.0 - y) * (1.0 - k))
+        }
+        _ => return None,
+    };
+    Some(rgb)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -234,5 +296,104 @@ mod tests {
         assert!((r as i32 - 128).abs() <= 1);
         assert!((g as i32 - 64).abs() <= 1);
         assert!((b2 as i32 - 192).abs() <= 1);
+    }
+
+    // -- color_from_panel_edit: the panel's WRITE half ---------------------
+
+    /// The derived map for a colour, in the shape both callers pass.
+    fn panel_map(mode: &str, rf: f64, gf: f64, bf: f64) -> serde_json::Value {
+        let ch = panel_channels(rf, gf, bf);
+        serde_json::json!({
+            "mode": mode,
+            "r": ch.r, "g": ch.g, "bl": ch.bl,
+            "h": ch.h, "s": ch.s, "b": ch.b,
+            "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
+            "hex": ch.hex,
+        })
+    }
+
+    fn as_8bit(rgb: (f64, f64, f64)) -> (u8, u8, u8) {
+        (quantise8(rgb.0), quantise8(rgb.1), quantise8(rgb.2))
+    }
+
+    /// ⭐ The COLORTIERS property, stated as a test: **a drag that lands on the
+    /// channel's own current value must not move the colour.**
+    ///
+    /// This is the one that fails if the unedited channels are ever taken from
+    /// the float colour instead of [`panel_channels`] — the map would disagree
+    /// with the colour by up to a whole unit, and a no-op drag would commit a
+    /// different colour than the one already shown.
+    #[test]
+    fn a_no_op_drag_does_not_move_the_colour() {
+        // The C1 seed: deliberately non-degenerate, because at white every
+        // derivation agrees and a wrong one would pass.
+        let (rf, gf, bf) = (0.4, 0.25, 0.25);
+        let start = (quantise8(rf), quantise8(gf), quantise8(bf));
+        assert_eq!(start, (102, 64, 64), "the seed, pinned");
+
+        let mut checked = 0;
+        for (mode, fields) in [
+            ("hsb", &["h", "s", "b"][..]),
+            ("rgb", &["r", "g", "bl"][..]),
+            ("cmyk", &["c", "m", "y", "k"][..]),
+        ] {
+            let map = panel_map(mode, rf, gf, bf);
+            for f in fields {
+                let current = map.get(*f).and_then(|v| v.as_f64()).unwrap();
+                let got = as_8bit(color_from_panel_edit(f, current, &map).unwrap());
+                // ±1: `hsb_to_rgb`/`rgb_to_hsb` are an inverse pair only to the
+                // 8-bit grid's rounding, which `test_roundtrip` above already
+                // pins. The claim here is that a no-op drag stays PUT, not that
+                // the pair is exact.
+                assert!(
+                    (got.0 as i32 - start.0 as i32).abs() <= 1
+                        && (got.1 as i32 - start.1 as i32).abs() <= 1
+                        && (got.2 as i32 - start.2 as i32).abs() <= 1,
+                    "{mode}/{f}: no-op drag moved {start:?} to {got:?}"
+                );
+                checked += 1;
+            }
+        }
+        // A loop that iterated nothing passes every assertion inside it.
+        assert_eq!(checked, 10, "three modes, ten channels");
+    }
+
+    /// The edited field wins over the map; the others are read from it.
+    #[test]
+    fn the_dragged_channel_is_the_one_that_moves() {
+        let map = panel_map("rgb", 0.4, 0.25, 0.25);
+        let got = as_8bit(color_from_panel_edit("r", 200.0, &map).unwrap());
+        assert_eq!(got, (200, 64, 64), "only r moved");
+    }
+
+    #[test]
+    fn grayscale_reads_k_alone_and_web_safe_shares_the_rgb_arm() {
+        let gray = panel_map("grayscale", 0.4, 0.25, 0.25);
+        assert_eq!(as_8bit(color_from_panel_edit("k", 0.0, &gray).unwrap()), (255, 255, 255));
+        assert_eq!(as_8bit(color_from_panel_edit("k", 100.0, &gray).unwrap()), (0, 0, 0));
+
+        let ws = panel_map("web_safe_rgb", 0.4, 0.25, 0.25);
+        let rgb = panel_map("rgb", 0.4, 0.25, 0.25);
+        assert_eq!(
+            color_from_panel_edit("g", 128.0, &ws),
+            color_from_panel_edit("g", 128.0, &rgb),
+            "web_safe_rgb shares the rgb arm"
+        );
+    }
+
+    /// ⛔ THE NEGATIVE CONTROL, in the executable rather than in a comment.
+    /// Without an arm that MUST return `None`, "every mode resolves" is
+    /// indistinguishable from a function that cannot return anything else.
+    #[test]
+    fn an_undeclared_mode_returns_none() {
+        let map = panel_map("lab", 0.4, 0.25, 0.25);
+        assert_eq!(color_from_panel_edit("h", 10.0, &map), None);
+        // And the absent-mode default is hsb, not None — a different arm.
+        let no_mode = serde_json::json!({ "h": 0, "s": 100, "b": 100 });
+        assert_eq!(
+            as_8bit(color_from_panel_edit("h", 0.0, &no_mode).unwrap()),
+            (255, 0, 0),
+            "an absent mode defaults to hsb"
+        );
     }
 }

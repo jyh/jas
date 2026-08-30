@@ -3,10 +3,21 @@
     x:Class="ScPanel.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+      Two panel hosts, side by side, because S-C.2's gate 2 needs a SECOND panel
+      open while the colour tick runs. The artboards panel is the data-driven
+      one: its rows are a real `foreach` over active_document.artboards, so it
+      grows with the document while the colour panel is 106 widgets always.
+    -->
     <Grid RowDefinitions="*,Auto">
-        <ScrollViewer Grid.Row="0">
-            <StackPanel x:Name="PanelHost" Padding="8" Spacing="2" />
-        </ScrollViewer>
+        <Grid Grid.Row="0" ColumnDefinitions="*,*">
+            <ScrollViewer Grid.Column="0">
+                <StackPanel x:Name="PanelHost" Padding="8" Spacing="2" />
+            </ScrollViewer>
+            <ScrollViewer Grid.Column="1">
+                <StackPanel x:Name="SecondPanelHost" Padding="8" Spacing="2" />
+            </ScrollViewer>
+        </Grid>
         <TextBlock x:Name="StatusLine" Grid.Row="1" Padding="8" FontSize="11" TextWrapping="Wrap" />
     </Grid>
 </Window>

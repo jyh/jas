@@ -48,6 +48,35 @@ name = "ffi_boundary_counter"
 path = "tests/ffi_boundary_counter.rs"
 required-features = ["ffi"]
 
+# S-C.2 gate-② premise probe: does the ruled SECOND panel actually grow with the
+# document on the surface the gate is measured against? `required-features`
+# because it calls the ABI directly; without the line, a default `cargo test`
+# tries to compile it and fails on absent symbols -- the same omission that cost
+# `workspace_roundtrip` ten E0433s from one cause.
+[[test]]
+name = "sc2_second_panel_growth"
+path = "tests/sc2_second_panel_growth.rs"
+required-features = ["ffi"]
+
+# C2 through the boundary, and C1 re-measured because the scope grew. Its own
+# binary for the same reason `ffi_boundary_counter` has one: the counters are
+# process-global, so anything else crossing the boundary in this process is in
+# the reading. Immune by construction rather than by every other test's
+# discipline.
+[[test]]
+name = "sc2_tick_protocol"
+path = "tests/sc2_tick_protocol.rs"
+required-features = ["ffi"]
+
+# The C3 recon probe: is the COMMIT interaction performable on the surface that
+# exists? Its own binary for the counters, and its own file because its answer is
+# a refusal with controls rather than a number — a different kind of result from
+# the file above, and mixing them would bury it.
+[[test]]
+name = "sc3_commit_probe"
+path = "tests/sc3_commit_probe.rs"
+required-features = ["ffi"]
+
 # R10 de-risking-spike bench: native scene-BUILD cost through the no-op Painter
 # sink. Custom harness (no criterion dependency) so `cargo test` stays lean;
 # run with `cargo bench --bench painter_build`.

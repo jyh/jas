@@ -349,10 +349,64 @@ struct JasBytes jas_document_json(struct JasEngine *e);
  * nothing in them. This returns the third pass — `interpreter::bind_values` —
  * against a scope the ENGINE assembles.
  *
+ * **It also ENROLS the panel** (S-C.2): reading a panel's values is what tells
+ * the engine the shell has it open, so subsequent ticks know to keep it in
+ * sync. Enrolment is a side effect of a call the shell already had to make —
+ * an explicit `jas_panel_open` would have spent a boundary function to say
+ * something the engine can already see.
+ *
  * # Safety
  * `panel_id` must be NULL or valid for `len` bytes.
  */
 struct JasBytes jas_bind_values(struct JasEngine *e, const uint8_t *panel_id, uintptr_t len);
+
+/**
+ * **The colour tick.** One control's new value in; every bind row that MOVED,
+ * across every open panel, out.
+ *
+ * # The protocol, and what it is for
+ *
+ * This is the S-C.2 sync protocol, and the whole of C2 is measured on it. Its
+ * shape is three decisions, each of which the gate can see the consequence of:
+ *
+ * 1. **The reply carries the delta**, so a tick is ONE crossing plus its
+ *    `jas_free` — **two**, where a dispatch-then-fetch protocol is three (a
+ *    fetch is two crossings under Rust-owns-it, BL4). The gate's derived floor
+ *    assumed the two were separate calls; folding them is why this comes in
+ *    under it.
+ * 2. **Only rows that CHANGED are sent.** The trivial alternative is to re-read
+ *    the panel whole, which is 7,038 bytes on the colour panel and is where
+ *    gate ③'s ceiling comes from.
+ * 3. ⭐ **Every OPEN panel is re-resolved, not just the edited one.** Refreshing
+ *    only the edited panel is cheaper and is WRONG in general — a colour change
+ *    with a selection moves what other panels display. The cost of being right
+ *    lands on the ENGINE, not the boundary: crossings and bytes stay flat while
+ *    `engine.rows_evaluated` grows with the document. That number is in the
+ *    counter dump because gate ⑤ requires it and because nothing else would
+ *    show it.
+ *
+ * # The event, and why it names a WIDGET
+ *
+ * `{"widget":"cp_h","key":"bind.value","value":210}` — the shell reports what
+ * the user did to a CONTROL. The engine reads that widget's `bind.value` out of
+ * the panel spec (`"panel.h"`) and applies it. **So the shell knows nothing
+ * about colour**: no channel names, no conversion, no mode. A shell that sent
+ * `{"h":210}` would be naming the engine's model, and one that sent a hex
+ * would be doing the arithmetic. `key` defaults to `bind.value`.
+ *
+ * Returns the changed rows, each tagged with its `panel`. An empty array is a
+ * well-formed answer meaning *nothing moved* — and is exactly what gate ④
+ * exists to stop being read as a cheap tick, so [`jas_last_error_json`] carries
+ * the outcome class when the array is empty.
+ *
+ * # Safety
+ * Both spans must be NULL or valid for their stated lengths.
+ */
+struct JasBytes jas_panel_event(struct JasEngine *e,
+                                const uint8_t *panel_id,
+                                uintptr_t panel_len,
+                                const uint8_t *event_json,
+                                uintptr_t event_len);
 
 /**
  * Zero every boundary counter. Call at the START of a named interaction so the
@@ -402,6 +456,25 @@ struct JasBytes jas_last_error_json(struct JasEngine *e);
  * which is what lets S-A gate (ii) be a byte-identical round-trip against
  * `test_fixtures/algorithms/panel_widget_tree.json` rather than a
  * self-consistency check.
+ *
+ * # ⚠️ A NULL ctx means "engine, assemble it"; an EMPTY ctx means "empty"
+ *
+ * The two are different on purpose, and the distinction is load-bearing:
+ *
+ * * **`ctx_len == 0`** — the production call. The engine assembles the scope
+ *   itself, exactly as [`jas_bind_values`] does. **BL1**: a shell that had to
+ *   supply `active_document.artboards` to see a data-driven panel's rows would
+ *   be holding app state in C#.
+ * * **`"{}"`, two bytes** — an explicit empty scope. This is what the corpus
+ *   driver passes for panels whose fixtures declare no ctx, and it is why
+ *   S-A gate (ii) is unaffected by the paragraph above: **no fixture passes
+ *   NULL.**
+ *
+ * Before S-C.2 a NULL ctx meant an empty scope, and a data-driven panel
+ * therefore reported its STATIC size at every document size — the second arm of
+ * gate ② would have been identical to the first, measured with the widget count
+ * held constant. The `bind_values` half was fixed by route (a); this is the
+ * same fix on the half that reports the structure.
  *
  * # Safety
  * Both spans must be NULL or valid for their stated lengths.

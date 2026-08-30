@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -45,17 +47,36 @@ internal static class Materializer
 
     internal sealed class Result
     {
+        public string PanelId = "";
         public FrameworkElement Root = new Grid();
         public int Materialized;
         public int Placeholders;
         public int ValuesApplied;
         public int Nodes;
+
+        /// <summary>
+        /// The controls this panel put on screen, by widget id — the other half
+        /// of the tick. A protocol that delivers a delta the shell cannot APPLY
+        /// has measured half an interaction: the pinned tick runs "from the
+        /// shell receiving the input to every dependent control showing the new
+        /// value", and without this map the second clause never happens.
+        /// </summary>
+        public readonly Dictionary<string, FrameworkElement> Controls = new(StringComparer.Ordinal);
+
+        /// <summary>What each widget currently displays. The shell's own map.</summary>
+        public readonly Dictionary<string, string> Values = new(StringComparer.Ordinal);
     }
 
     /// <summary>
     /// C1: build the panel from cold. Two reads and two frees — four crossings
     /// before a single control exists.
     /// </summary>
+    /// <remarks>
+    /// The ctx span is NULL, which is the production call: the engine assembles
+    /// the panel's data scope. A shell that supplied one would be holding app
+    /// state in C# (BL1), and for a data-driven panel it would also be deciding
+    /// how many rows the panel has.
+    /// </remarks>
     internal static Result Build(IntPtr engine, string panelId)
     {
         var idBytes = JasCore.Utf8(panelId);
@@ -64,7 +85,7 @@ internal static class Materializer
         var valuesJson = JasCore.Take(
             JasCore.jas_bind_values(engine, idBytes, (nuint)idBytes.Length));
 
-        var result = new Result();
+        var result = new Result { PanelId = panelId };
         if (string.IsNullOrEmpty(treeJson))
         {
             return result;
@@ -72,6 +93,10 @@ internal static class Materializer
 
         var nodes = JsonDocument.Parse(treeJson).RootElement;
         var values = BuildValueMap(valuesJson, result);
+        foreach (var kv in values)
+        {
+            result.Values[kv.Key] = kv.Value;
+        }
 
         var panel = new StackPanel { Orientation = Orientation.Vertical, Spacing = 2 };
         foreach (var node in nodes.EnumerateArray())
@@ -93,6 +118,16 @@ internal static class Materializer
             if (element is not null)
             {
                 panel.Children.Add(element);
+                // LAST ONE WINS, deliberately: a compiled panel can carry the
+                // same id twice (the H slider and its number box are cp_h and
+                // cp_h_val, but a template that repeats one really would), and
+                // both bind the same expression by construction, so either is a
+                // correct target. Stated rather than left to a reader who finds
+                // one control updating and assumes the other is broken.
+                if (id.Length > 0)
+                {
+                    result.Controls[id] = element;
+                }
             }
         }
 
@@ -101,26 +136,140 @@ internal static class Materializer
     }
 
     /// <summary>
-    /// C2: one colour-drag tick. Dispatch the change, then re-read.
-    ///
-    /// ⚠️ THE RE-READ IS WHOLE-PANEL, AND THAT IS THE CHATTER FINDING RATHER
-    /// THAN A SHORTCUT TAKEN HERE. The surface offers no per-widget and no
-    /// per-binding read: <c>jas_bind_values</c> takes a PANEL identifier and
-    /// returns every row the panel has. So a tick that moves one channel must
-    /// re-fetch all of them. This was NOT engineered around, on the sequencer's
-    /// explicit instruction — if a tick forces a whole-panel re-fetch, that is
-    /// the finding and it gets reported as one.
+    /// Where every changed row went. **The breakdown is the point, not the
+    /// total**: "22 rows changed, 11 controls updated" invites a reader to
+    /// conclude half the delta was lost, and the truth is that the other half
+    /// is rows this stage does not consume plus widgets this stage does not
+    /// build. A number without its denominator is this campaign's most
+    /// expensive habit.
     /// </summary>
-    internal static int Tick(IntPtr engine, string panelId, string opJson, Result into)
+    internal sealed class TickResult
     {
-        var op = JasCore.Utf8(opJson);
-        var status = JasCore.jas_dispatch_event(engine, op, (nuint)op.Length);
+        /// Rows in the reply.
+        public int RowsChanged;
+        public int ReplyBytes;
 
+        /// Of those, rows carrying `bind.value` — the only key a control's
+        /// displayed value comes from. The rest are `bind.color`,
+        /// `bind.disabled`, `bind.visible` and friends, which drive appearance
+        /// this stage does not materialize.
+        public int RowsValueKeyed;
+
+        /// `bind.value` rows whose widget is a REAL typed control, and which
+        /// were therefore shown. This is the tick's second clause.
+        public int ControlsUpdated;
+
+        /// `bind.value` rows whose widget is a labelled PLACEHOLDER — the
+        /// sliders among them. Not a lost row: a widget the hard-widget stage
+        /// has not built, and that stage is unfunded.
+        public int RowsToPlaceholder;
+
+        /// `bind.value` rows naming a widget this panel never put on screen
+        /// (statically hidden, or in a panel the shell does not hold). ⚠️ THIS
+        /// IS THE ONE THAT WOULD BE A DEFECT if it were large: a row the engine
+        /// says moved and the shell has nowhere to put.
+        public int RowsUnplaced;
+    }
+
+    /// <summary>
+    /// C2: ONE COLOUR-DRAG TICK. The whole interaction, end to end.
+    ///
+    /// The pinned definition is "one pointer-move during a colour drag that
+    /// CHANGES THE ACTIVE COLOUR, from the shell receiving the input to every
+    /// dependent control showing the new value." Both clauses are here: the
+    /// crossing, and the application of what came back to the controls.
+    ///
+    /// ⚠️ THE SHELL NAMES A WIDGET, NOT A CHANNEL. <c>cp_h</c> and the number
+    /// the slider produced — nothing about hue, colour or mode crosses from this
+    /// side. The engine resolves the widget to its binding and decides what the
+    /// number means, which is the whole difference between a materializer and a
+    /// third interpreter.
+    ///
+    /// ⭐ ONE CROSSING, NOT TWO. The reply carries the changed rows, so this is
+    /// <c>jas_panel_event</c> plus the <c>jas_free</c> inside <c>Take</c>. The
+    /// S-C.1 version of this method dispatched and then re-read the whole panel,
+    /// which is three crossings and 7,038 bytes; the difference is the protocol
+    /// S-C.2 exists to build, and both numbers are in the report.
+    /// </summary>
+    internal static TickResult Tick(
+        IntPtr engine, string panelId, string widgetId, double value, IEnumerable<Result> open)
+    {
+        var ev = $"{{\"widget\":\"{widgetId}\",\"key\":\"bind.value\",\"value\":{value.ToString(CultureInfo.InvariantCulture)}}}";
+        var evBytes = JasCore.Utf8(ev);
         var idBytes = JasCore.Utf8(panelId);
-        var valuesJson = JasCore.Take(
-            JasCore.jas_bind_values(engine, idBytes, (nuint)idBytes.Length));
-        BuildValueMap(valuesJson, into);
-        return status;
+        var reply = JasCore.Take(JasCore.jas_panel_event(
+            engine, idBytes, (nuint)idBytes.Length, evBytes, (nuint)evBytes.Length));
+
+        var result = new TickResult { ReplyBytes = Encoding.UTF8.GetByteCount(reply) };
+        if (string.IsNullOrEmpty(reply))
+        {
+            return result;
+        }
+
+        var byPanel = new Dictionary<string, Result>(StringComparer.Ordinal);
+        foreach (var p in open)
+        {
+            byPanel[p.PanelId] = p;
+        }
+
+        foreach (var row in JsonDocument.Parse(reply).RootElement.EnumerateArray())
+        {
+            result.RowsChanged++;
+            var panel = row.TryGetProperty("panel", out var pn) ? pn.GetString() ?? "" : "";
+            var id = row.TryGetProperty("id", out var i) ? i.GetString() ?? "" : "";
+            var key = row.TryGetProperty("key", out var k) ? k.GetString() ?? "" : "";
+            var val = row.TryGetProperty("value", out var v) ? v.GetString() ?? "" : "";
+            if (key != "bind.value" || id.Length == 0 || !byPanel.TryGetValue(panel, out var target))
+            {
+                continue;
+            }
+            result.RowsValueKeyed++;
+            target.Values[id] = val;
+            if (!target.Controls.TryGetValue(id, out var control))
+            {
+                result.RowsUnplaced++;
+            }
+            else if (ApplyValue(control, val))
+            {
+                result.ControlsUpdated++;
+            }
+            else
+            {
+                // A control that exists and cannot take a value is a
+                // placeholder: the hard-widget stage's, not a lost row.
+                result.RowsToPlaceholder++;
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Show a resolved value in a native control. Returns whether anything was
+    /// shown — a `false` here is a control the delta reached and could not
+    /// update, which is a stale display and NOT a cheap tick.
+    ///
+    /// ⛔ Still no interpretation: the value arrives already resolved and this
+    /// only chooses which property of which control type carries it.
+    /// </summary>
+    private static bool ApplyValue(FrameworkElement control, string value)
+    {
+        switch (control)
+        {
+            case TextBlock t: t.Text = value; return true;
+            case TextBox tb: tb.Text = value; return true;
+            case NumberBox nb:
+                nb.Value = double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var d)
+                    ? d : nb.Value;
+                return true;
+            case CheckBox cb: cb.IsChecked = value == "true"; return true;
+            case ComboBox combo:
+                combo.Items.Clear();
+                combo.Items.Add(value);
+                combo.SelectedIndex = 0;
+                return true;
+            case Button b: b.Content = value; return true;
+            default: return false;
+        }
     }
 
     /// <summary>

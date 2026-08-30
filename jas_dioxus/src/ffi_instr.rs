@@ -3,10 +3,9 @@
 //! # Why this exists, and why a grep would not do
 //!
 //! S-C prices the materializer by **boundary chatter**: `extern "C"` invocations
-//! AND bytes crossed, per named user interaction. The sequencing ruling
-//! (`SEQUENCE-sc-spike-2026-08-24.md` §3.3) makes one instruction the most
-//! important in the document, and it is this seat's own vacuous-lane law turned
-//! on a counting deliverable:
+//! AND bytes crossed, per named user interaction. The sequencing ruling's §3.3
+//! makes one instruction the most important in that document, and it is this
+//! machine's own vacuous-lane law turned on a counting deliverable:
 //!
 //! > **A static count of call sites in the C# source passes identically on a
 //! > shell that was never run.** The source is on disk whether or not anything
@@ -21,9 +20,10 @@
 //!
 //! # Population, stated rather than implied
 //!
-//! [`Crossing`] enumerates the **9 functions of the materializer surface**: the
-//! 8 that stood on `main` at `22e5e30e` plus `jas_bind_values`, added for S-C.1
-//! because `widget_tree` is value-blind by design (all in `ffi.rs`). It deliberately does NOT
+//! [`Crossing`] enumerates the **10 functions of the materializer surface**: the
+//! 8 that stood on `main` at `22e5e30e`, plus `jas_bind_values` (S-C.1, because
+//! `widget_tree` is value-blind by design) and `jas_panel_event` (S-C.2, the
+//! write path a tick needs) — all in `ffi.rs`. It deliberately does NOT
 //! include the two S-B paint probes, which exist only on the S-B branch and are
 //! not part of a panel's surface — a distinction that cost a round of correction
 //! to establish, because "half-unbuilt" is a ratio whose denominator IS the tree
@@ -63,6 +63,9 @@ pub enum Crossing {
     LastErrorJson = 6,
     WidgetTree = 7,
     BindValues = 8,
+    /// The S-C.2 write path: one control's new value in, the changed bind rows
+    /// out. Counted like any other crossing -- a tick's cost is what it is.
+    PanelEvent = 9,
 }
 
 impl Crossing {
@@ -78,6 +81,7 @@ impl Crossing {
         "jas_last_error_json",
         "jas_widget_tree",
         "jas_bind_values",
+        "jas_panel_event",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -87,7 +91,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 9;
+    pub(crate) const COUNT: usize = 10;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -104,6 +108,7 @@ impl Crossing {
         Crossing::LastErrorJson,
         Crossing::WidgetTree,
         Crossing::BindValues,
+        Crossing::PanelEvent,
     ];
 
     pub fn name(self) -> &'static str {
@@ -131,6 +136,47 @@ impl Counters {
 
 static COUNTERS: Counters = Counters::new();
 
+/// ⭐ **What the boundary CANNOT see, counted anyway.**
+///
+/// Gate ⑤ requires engine-side cost reported beside the crossings, because a
+/// protocol can be cheap at the boundary precisely by being expensive behind it
+/// — and the crossing count would call that a win. The delta protocol is exactly
+/// that shape: it stays flat in crossings and in bytes by re-evaluating every
+/// open panel's bindings on every tick, so the number that grows with the
+/// document lives here and nowhere else.
+///
+/// ⛔ **These are APPARATUS, not surface.** They are reported in their own
+/// `engine` object in the dump, never in `per_fn` and never in `crossings`;
+/// [`Crossing`] has no variant for them, exactly as it has none for the two
+/// `jas_instr_*` externs.
+struct Engine {
+    rows_evaluated: AtomicU64,
+    panels_evaluated: AtomicU64,
+    ticks: AtomicU64,
+}
+
+static ENGINE: Engine = Engine {
+    rows_evaluated: AtomicU64::new(0),
+    panels_evaluated: AtomicU64::new(0),
+    ticks: AtomicU64::new(0),
+};
+
+/// Record one tick's engine-side work: bind rows re-evaluated and panels walked.
+pub fn record_engine(rows_evaluated: usize, panels_evaluated: usize) {
+    ENGINE.rows_evaluated.fetch_add(rows_evaluated as u64, Ordering::Relaxed);
+    ENGINE.panels_evaluated.fetch_add(panels_evaluated as u64, Ordering::Relaxed);
+    ENGINE.ticks.fetch_add(1, Ordering::Relaxed);
+}
+
+/// `(rows_evaluated, panels_evaluated, ticks)`.
+pub fn read_engine() -> (u64, u64, u64) {
+    (
+        ENGINE.rows_evaluated.load(Ordering::Relaxed),
+        ENGINE.panels_evaluated.load(Ordering::Relaxed),
+        ENGINE.ticks.load(Ordering::Relaxed),
+    )
+}
+
 /// Record one crossing. `bytes_in` counts payload handed to Rust, `bytes_out`
 /// counts payload handed back.
 ///
@@ -152,6 +198,12 @@ pub fn reset() {
         COUNTERS.bytes_in[i].store(0, Ordering::Relaxed);
         COUNTERS.bytes_out[i].store(0, Ordering::Relaxed);
     }
+    // The engine counters reset WITH the crossings. They describe the same named
+    // interaction, and a reset that cleared one and not the other would report
+    // this tick's crossings beside every tick's engine work.
+    ENGINE.rows_evaluated.store(0, Ordering::Relaxed);
+    ENGINE.panels_evaluated.store(0, Ordering::Relaxed);
+    ENGINE.ticks.store(0, Ordering::Relaxed);
 }
 
 /// Add an outbound payload size to a crossing ALREADY recorded by [`record`].
@@ -197,14 +249,18 @@ pub fn snapshot_json() -> String {
             bout
         ));
     }
+    let (rows_eval, panels_eval, ticks) = read_engine();
     format!(
-        "{{\"surface\":\"main@22e5e30e+jas_bind_values\",\"functions\":{},\"crossings\":{},\"bytes_in\":{},\"bytes_out\":{},\"bytes_total\":{},\"per_fn\":[{}]}}",
+        "{{\"surface\":\"main@22e5e30e+jas_bind_values+jas_panel_event\",\"functions\":{},\"crossings\":{},\"bytes_in\":{},\"bytes_out\":{},\"bytes_total\":{},\"per_fn\":[{}],\"engine\":{{\"rows_evaluated\":{},\"panels_evaluated\":{},\"ticks\":{}}}}}",
         Crossing::COUNT,
         tc,
         ti,
         to,
         ti + to,
-        rows.join(",")
+        rows.join(","),
+        rows_eval,
+        panels_eval,
+        ticks
     )
 }
 
@@ -289,7 +345,38 @@ mod tests {
         assert!(js.contains("\"crossings\":2"), "{js}");
         assert!(js.contains("\"bytes_in\":3,\"bytes_out\":18"), "{js}");
         assert!(js.contains("\"bytes_total\":21"), "{js}");
-        assert!(js.contains("\"surface\":\"main@22e5e30e+jas_bind_values\""), "{js}");
+        assert!(
+            js.contains("\"surface\":\"main@22e5e30e+jas_bind_values+jas_panel_event\""),
+            "{js}"
+        );
+
+        // ⛔ The engine counters are reported and are NOT in the surface. Both
+        // halves asserted: present, and excluded from `crossings`. A dump that
+        // folded them in would let apparatus inflate the figure it measures.
+        assert!(js.contains("\"engine\":{\"rows_evaluated\":0"), "{js}");
+        assert!(js.contains("\"crossings\":2"), "engine work is not a crossing: {js}");
+        assert!(!js.contains("\"fn\":\"rows_evaluated\""), "{js}");
+    }
+
+    /// The engine counters count, reset with the crossings, and are readable —
+    /// the same three claims the per-function counters carry, because gate ⑤
+    /// leans on this number and an untested counter is a number nobody checked.
+    #[test]
+    fn engine_counters_record_reset_and_stay_out_of_the_surface() {
+        let _g = serial();
+        reset();
+        assert_eq!(read_engine(), (0, 0, 0));
+        record_engine(120, 2);
+        record_engine(120, 2);
+        assert_eq!(read_engine(), (240, 4, 2), "two ticks accumulate");
+
+        // A NEGATIVE arm: recording engine work must not move any crossing.
+        let js = snapshot_json();
+        assert!(js.contains("\"crossings\":0"), "{js}");
+        assert!(js.contains("\"rows_evaluated\":240,\"panels_evaluated\":4,\"ticks\":2"), "{js}");
+
+        reset();
+        assert_eq!(read_engine(), (0, 0, 0), "reset clears them WITH the crossings");
     }
 
     #[test]

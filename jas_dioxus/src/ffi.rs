@@ -29,6 +29,7 @@ use crate::ffi_instr::{self, Crossing};
 
 use crate::document::model::Model;
 use crate::document::op_apply::{op_apply, OpError};
+use crate::panel_scope::{EditOutcome, PanelRegistry, PanelState};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -146,39 +147,15 @@ pub struct JasEngine {
     /// document-derived values but not the colour — on a COLOUR panel, where the
     /// state IS the content. That is a subtler empty shell than an unrendered
     /// one and would measure just as vacuously.
+    ///
+    /// The type and the scope it assembles MOVED to `crate::panel_scope` at
+    /// S-C.2, so the write path that moves it can be tested without an ABI in
+    /// the way. This file is a boundary file.
     panel: RefCell<PanelState>,
-}
-
-/// The minimum a materialized colour panel needs. **Deliberately not a general
-/// state store**: this is the spike's slice, not an app-state design.
-///
-/// ⛔ **The CHANNELS ARE NOT HERE.** `r/g/bl/h/s/b/c/m/y/k/hex` are DERIVED at
-/// assembly time by `interpreter::color_util::panel_channels`, which the
-/// cross-language corpus pins with 16 vectors. Storing them would create a
-/// second source of truth for values that already have one, and the copy would
-/// be the one that drifts.
-#[derive(Debug, Clone)]
-struct PanelState {
-    /// Float RGB, 0..1. Seeded to a NON-DEGENERATE colour on purpose: at white
-    /// every derivation agrees, so a white seed would let a wrong one pass. This
-    /// is the corpus's own `panel_exact_eighth_bit_values` vector.
-    fill: (f64, f64, f64),
-    stroke: (f64, f64, f64),
-    fill_on_top: bool,
-    mode: String,
-    recent: Vec<String>,
-}
-
-impl Default for PanelState {
-    fn default() -> Self {
-        PanelState {
-            fill: (0.4, 0.25, 0.25),
-            stroke: (0.0, 0.0, 0.0),
-            fill_on_top: true,
-            mode: "hsb".to_string(),
-            recent: vec![],
-        }
-    }
+    /// Which panels the shell has materialized, and the rows each was last
+    /// served — the state a DELTA needs. Enrolled by [`jas_bind_values`]:
+    /// reading a panel's values is what tells the engine it is open.
+    registry: RefCell<PanelRegistry>,
 }
 
 impl JasEngine {
@@ -187,6 +164,7 @@ impl JasEngine {
             model: RefCell::new(Model::default()),
             last_error: RefCell::new(None),
             panel: RefCell::new(PanelState::default()),
+            registry: RefCell::new(PanelRegistry::default()),
         }
     }
 }
@@ -300,32 +278,14 @@ pub unsafe extern "C" fn jas_document_json(e: *mut JasEngine) -> JasBytes {
 ///
 /// **BL1, and it is why the extern takes only a panel id.** Exposing the pure
 /// `bind_values(panel_node, ctx)` would have forced the shell to build this map,
-/// which puts app state in C# — the third interpreter's state half arriving
+/// which puts app state in C# -- the third interpreter's state half arriving
 /// through a parameter list rather than through a rewrite.
 ///
-/// Shape follows the cross-language byte-gate's own ctx
-/// (`cross_language_test.rs`): `state.fill_color` carries the `#`, `panel.hex`
-/// does not.
+/// The assembly itself lives in `panel_scope`, which also owns the write that
+/// moves it. This is the one-line adapter that pairs the panel slice with the
+/// document, because only the engine holds both.
 fn panel_ctx(engine: &JasEngine) -> serde_json::Value {
-    use crate::interpreter::color_util::panel_channels;
-    let p = engine.panel.borrow();
-    let ch = panel_channels(p.fill.0, p.fill.1, p.fill.2);
-    let st = panel_channels(p.stroke.0, p.stroke.1, p.stroke.2);
-    serde_json::json!({
-        "state": {
-            "fill_color": format!("#{}", ch.hex),
-            "stroke_color": format!("#{}", st.hex),
-            "fill_on_top": p.fill_on_top,
-        },
-        "panel": {
-            "mode": p.mode,
-            "hex": ch.hex,
-            "r": ch.r, "g": ch.g, "bl": ch.bl,
-            "h": ch.h, "s": ch.s, "b": ch.b,
-            "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
-            "recent_colors": p.recent,
-        },
-    })
+    engine.panel.borrow().scope(engine.model.borrow().document())
 }
 
 /// The panel's resolved bind VALUES — the ninth materializer function.
@@ -335,6 +295,12 @@ fn panel_ctx(engine: &JasEngine) -> serde_json::Value {
 /// shell built on the surface without this one materializes native controls with
 /// nothing in them. This returns the third pass — `interpreter::bind_values` —
 /// against a scope the ENGINE assembles.
+///
+/// **It also ENROLS the panel** (S-C.2): reading a panel's values is what tells
+/// the engine the shell has it open, so subsequent ticks know to keep it in
+/// sync. Enrolment is a side effect of a call the shell already had to make —
+/// an explicit `jas_panel_open` would have spent a boundary function to say
+/// something the engine can already see.
 ///
 /// # Safety
 /// `panel_id` must be NULL or valid for `len` bytes.
@@ -359,9 +325,131 @@ pub unsafe extern "C" fn jas_bind_values(
     };
     let ctx = panel_ctx(engine);
     let rows = crate::interpreter::bind_values::bind_values(spec, &ctx);
+    engine.registry.borrow_mut().record(id, &rows);
     let out = JasBytes::from_string(serde_json::to_string(&rows).unwrap_or_default());
     ffi_instr::record_out(Crossing::BindValues, out.len);
     out
+}
+
+/// **The colour tick.** One control's new value in; every bind row that MOVED,
+/// across every open panel, out.
+///
+/// # The protocol, and what it is for
+///
+/// This is the S-C.2 sync protocol, and the whole of C2 is measured on it. Its
+/// shape is three decisions, each of which the gate can see the consequence of:
+///
+/// 1. **The reply carries the delta**, so a tick is ONE crossing plus its
+///    `jas_free` — **two**, where a dispatch-then-fetch protocol is three (a
+///    fetch is two crossings under Rust-owns-it, BL4). The gate's derived floor
+///    assumed the two were separate calls; folding them is why this comes in
+///    under it.
+/// 2. **Only rows that CHANGED are sent.** The trivial alternative is to re-read
+///    the panel whole, which is 7,038 bytes on the colour panel and is where
+///    gate ③'s ceiling comes from.
+/// 3. ⭐ **Every OPEN panel is re-resolved, not just the edited one.** Refreshing
+///    only the edited panel is cheaper and is WRONG in general — a colour change
+///    with a selection moves what other panels display. The cost of being right
+///    lands on the ENGINE, not the boundary: crossings and bytes stay flat while
+///    `engine.rows_evaluated` grows with the document. That number is in the
+///    counter dump because gate ⑤ requires it and because nothing else would
+///    show it.
+///
+/// # The event, and why it names a WIDGET
+///
+/// `{"widget":"cp_h","key":"bind.value","value":210}` — the shell reports what
+/// the user did to a CONTROL. The engine reads that widget's `bind.value` out of
+/// the panel spec (`"panel.h"`) and applies it. **So the shell knows nothing
+/// about colour**: no channel names, no conversion, no mode. A shell that sent
+/// `{"h":210}` would be naming the engine's model, and one that sent a hex
+/// would be doing the arithmetic. `key` defaults to `bind.value`.
+///
+/// Returns the changed rows, each tagged with its `panel`. An empty array is a
+/// well-formed answer meaning *nothing moved* — and is exactly what gate ④
+/// exists to stop being read as a cheap tick, so [`jas_last_error_json`] carries
+/// the outcome class when the array is empty.
+///
+/// # Safety
+/// Both spans must be NULL or valid for their stated lengths.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_panel_event(
+    e: *mut JasEngine,
+    panel_id: *const u8,
+    panel_len: usize,
+    event_json: *const u8,
+    event_len: usize,
+) -> JasBytes {
+    ffi_instr::record(Crossing::PanelEvent, panel_len + event_len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    let (Ok(id), Ok(raw)) = (
+        unsafe { utf8(panel_id, panel_len) },
+        unsafe { utf8(event_json, event_len) },
+    ) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasBytes::empty();
+    };
+    let Ok(ev) = serde_json::from_str::<serde_json::Value>(raw) else {
+        set_panel_event_error(engine, "BadJson", "");
+        return JasBytes::empty();
+    };
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let Some(spec) = ws.panel(id) else {
+        set_panel_event_error(engine, "MissingTarget", id);
+        return JasBytes::empty();
+    };
+
+    let widget = ev.get("widget").and_then(|v| v.as_str()).unwrap_or("");
+    let key = ev.get("key").and_then(|v| v.as_str()).unwrap_or("bind.value");
+    let value = ev.get("value").cloned().unwrap_or(serde_json::Value::Null);
+
+    // The engine resolves widget -> binding expression. The shell never sees it.
+    let Some(target) = crate::panel_scope::binding_of(spec, widget, key) else {
+        set_panel_event_error(engine, "MissingTarget", widget);
+        return JasBytes::empty();
+    };
+
+    let outcome = engine.panel.borrow_mut().apply_edit(&target, &value);
+    if outcome == EditOutcome::NoSuchTarget {
+        set_panel_event_error(engine, "BadParamType", &target);
+        return JasBytes::empty();
+    }
+
+    let scope = panel_ctx(engine);
+    let sync = engine.registry.borrow_mut().sync(&ws, &scope);
+    ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
+
+    // An UNCHANGED tick reports itself. Gate ④'s vacuity guard needs the shell
+    // to be able to tell "nothing moved" from "the protocol is cheap", and an
+    // empty array alone cannot say which.
+    if outcome == EditOutcome::Unchanged {
+        set_panel_event_error(engine, "Unchanged", &target);
+    } else {
+        *engine.last_error.borrow_mut() = None;
+    }
+
+    let out = JasBytes::from_string(serde_json::to_string(&sync.changed).unwrap_or_default());
+    ffi_instr::record_out(Crossing::PanelEvent, out.len);
+    out
+}
+
+/// The panel-event channel's diagnostic, in the same shape
+/// [`jas_last_error_json`] already serves.
+///
+/// ⚠️ These classes are **NOT** the five frozen `OpError` names, even where a
+/// word coincides: nothing here reached `op_apply`. The field is `panel_event`
+/// rather than `class` so a shell-side assertion can never compare one to the
+/// other by accident — the disjoint-range discipline `JasStatus` uses for
+/// transport faults, applied to a channel that returns bytes instead of a code.
+fn set_panel_event_error(engine: &JasEngine, class: &str, detail: &str) {
+    *engine.last_error.borrow_mut() = Some(format!(
+        r#"{{"panel_event":{},"detail":{}}}"#,
+        json_str(class),
+        json_str(detail)
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -475,6 +563,25 @@ pub unsafe extern "C" fn jas_last_error_json(e: *mut JasEngine) -> JasBytes {
 /// `test_fixtures/algorithms/panel_widget_tree.json` rather than a
 /// self-consistency check.
 ///
+/// # ⚠️ A NULL ctx means "engine, assemble it"; an EMPTY ctx means "empty"
+///
+/// The two are different on purpose, and the distinction is load-bearing:
+///
+/// * **`ctx_len == 0`** — the production call. The engine assembles the scope
+///   itself, exactly as [`jas_bind_values`] does. **BL1**: a shell that had to
+///   supply `active_document.artboards` to see a data-driven panel's rows would
+///   be holding app state in C#.
+/// * **`"{}"`, two bytes** — an explicit empty scope. This is what the corpus
+///   driver passes for panels whose fixtures declare no ctx, and it is why
+///   S-A gate (ii) is unaffected by the paragraph above: **no fixture passes
+///   NULL.**
+///
+/// Before S-C.2 a NULL ctx meant an empty scope, and a data-driven panel
+/// therefore reported its STATIC size at every document size — the second arm of
+/// gate ② would have been identical to the first, measured with the widget count
+/// held constant. The `bind_values` half was fixed by route (a); this is the
+/// same fix on the half that reports the structure.
+///
 /// # Safety
 /// Both spans must be NULL or valid for their stated lengths.
 #[unsafe(no_mangle)]
@@ -496,7 +603,11 @@ pub unsafe extern "C" fn jas_widget_tree(
         return JasBytes::empty();
     };
     let ctx: serde_json::Value = if ctx_len == 0 {
-        serde_json::json!({})
+        // NULL, not empty: the engine assembles it. See the note above.
+        let Some(engine) = (unsafe { e.as_ref() }) else {
+            return JasBytes::empty();
+        };
+        panel_ctx(engine)
     } else {
         match unsafe { utf8(ctx_json, ctx_len) }.ok().and_then(|t| serde_json::from_str(t).ok()) {
             Some(v) => v,
