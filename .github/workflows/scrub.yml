@@ -167,6 +167,17 @@ jobs:
           # asks the other question: is the TREE clean, against scripts/private_paths_baseline.tsv
           # (absent here on purpose -- main carries zero residue, so ANY finding reds).
           python scripts/check_private_paths.py --tree
+      - name: message ratchet -- a violating message must not launder into the next scan's base
+        run: |
+          # The delta arm charges the push that carries a violating MESSAGE; it cannot
+          # charge history for keeping one, so a fired-and-unrepaired message falls
+          # into the next scan's BASE and every later push is green over it (the
+          # flagship repo measured exactly that on a merge push). Ruled 2026-08-30
+          # (council row u), ported here in the same act. Scans EVERY message
+          # reachable from HEAD against scripts/private_paths_message_baseline.tsv
+          # (sha + shape only -- never the line, which would trip the tree ratchet).
+          # Anything NEW reds.
+          python scripts/check_private_paths.py --messages
 
   commit-msg-proof:
     name: the commit-msg proof holds where `python` does not exist
