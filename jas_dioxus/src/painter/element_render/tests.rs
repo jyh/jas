@@ -16,6 +16,7 @@ use super::{
     emit_shape_paint, line_painter_inputs, path_painter_inputs, polygon_painter_inputs,
     polyline_painter_inputs, rect_painter_inputs, ConvGeom, ShapePaint,
 };
+use crate::painter::capability::{Capability, Caps};
 use crate::painter::recording::Command;
 use crate::geometry::element::{
     Arrowhead, Color, CommonProps, Element, EllipseElem, Fill, FillRule, Gradient,
@@ -255,8 +256,10 @@ fn render_doc(elems: &[Element]) -> String {
     // The driver owns the view transform and pushes it as ONE matrix (D2).
     rec.push_state(Transform { a: 1.5, b: 0.0, c: 0.0, d: 1.5, e: 20.0, f: 10.0 });
     for e in elems {
-        // The capability router keeps legacy-only elements off the seam.
-        if !element_needs_legacy(e) {
+        // The capability router keeps legacy-only elements off the seam. The
+        // recorder answers YES to every capability (it materialises every call),
+        // which is what keeps these goldens stable across the router flip.
+        if !element_needs_legacy(e, Caps::of(&rec)) {
             emit_element(&mut rec, e, 1.0);
         }
     }
@@ -349,11 +352,188 @@ fn reference_docs_are_deterministic() {
 // Capability router + the byte-identical Line helper
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// AMENDMENT A6 — the element bracket, produced from a DOCUMENT
+// ---------------------------------------------------------------------------
+
+/// A masked rect: own opacity 0.5, standard opacity mask (clip, not inverted),
+/// mask artwork a white rect. Built here rather than in a shared fixture so the
+/// numbers the assertions below name are visible beside them.
+fn masked_rect(clip: bool, invert: bool) -> Element {
+    use crate::geometry::element::Mask;
+    let mut r = rect(10.0, 10.0, 40.0, 40.0, fill(Color::rgb(0.9, 0.2, 0.2)), None);
+    if let Element::Rect(e) = &mut r {
+        e.common.opacity = 0.5;
+        e.common.mask = Some(Box::new(Mask {
+            subtree: Box::new(rect(20.0, 20.0, 20.0, 20.0, fill(Color::WHITE), None)),
+            clip,
+            invert,
+            disabled: false,
+            linked: true,
+            unlink_transform: None,
+        }));
+    }
+    r
+}
+
+fn ops(elem: &Element, incoming: f64) -> Vec<Command> {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, elem, incoming);
+    rec.commands().to_vec()
+}
+
+/// ⛔ THE BRACKET, ASSERTED FROM THE CONTRACT — not captured from HEAD.
+///
+/// A6 §3.2 fixes the shape; §6.2 fixes the alpha law. Both are asserted here on
+/// an op list produced by a real document element, which is what §6.2's
+/// scene-level golden could not have: a PRODUCER.
+#[test]
+fn a6_masked_element_emits_the_bracket() {
+    use crate::painter::Mask as PMask;
+    let got = ops(&masked_rect(true, false), 1.0);
+
+    // 1. THE GRAMMAR. Exactly one isolated layer, exactly one mask bracket
+    //    inside it, and NOTHING between pop_mask_layer and pop_isolated_layer.
+    assert!(matches!(got.first(), Some(Command::PushIsolatedLayer { .. })),
+            "the bracket must OPEN the emission, got {:?}", got.first());
+    assert!(matches!(got.last(), Some(Command::PopIsolatedLayer)),
+            "the bracket must CLOSE the emission, got {:?}", got.last());
+    let n = got.len();
+    assert!(matches!(got[n - 2], Command::PopMaskLayer),
+            "nothing may paint between pop_mask_layer and pop_isolated_layer (§3.2)");
+
+    // 2. THE ALPHA LAW (§6.2, defect D-α). The element's own opacity rides the
+    //    LAYER and is spent ONCE; the body must NOT carry it as well.
+    match &got[0] {
+        Command::PushIsolatedLayer { alpha, .. } =>
+            assert_eq!(*alpha, 0.5, "the layer carries the element's OWN opacity"),
+        c => panic!("expected PushIsolatedLayer, got {c:?}"),
+    }
+    let body: Vec<_> = got.iter()
+        .filter(|c| matches!(c, Command::FillRect { .. }))
+        .collect();
+    assert_eq!(body.len(), 2, "one body fill + one mask-artwork fill");
+    match body[0] {
+        Command::FillRect { paint_alpha, .. } => assert_eq!(
+            *paint_alpha, 1.0,
+            "D-α: the body paints at the INCOMING alpha (1.0 here). 0.25 would \
+             be the squared defect; 0.5 would be own-opacity applied twice."),
+        c => panic!("expected FillRect, got {c:?}"),
+    }
+    // 3. The mask artwork is itself isolated at alpha context 1.0 (§3.2).
+    match body[1] {
+        Command::FillRect { paint_alpha, .. } =>
+            assert_eq!(*paint_alpha, 1.0, "the mask bracket is isolated at 1.0"),
+        c => panic!("expected FillRect, got {c:?}"),
+    }
+    // 4. THE LAW, from the ONE truth table: (clip, !invert) -> LuminanceClipIn.
+    let law = got.iter().find_map(|c| match c {
+        Command::PushMaskLayer { mask } => Some(*mask),
+        _ => None,
+    });
+    assert_eq!(law, Some(PMask::LuminanceClipIn));
+}
+
+/// ⛔ THE INCOMING ALPHA IS DISCRIMINATING, and 0.5/0.5 is NOT — the squared
+/// defect and the correct law both give 0.25 there, which is the same trap
+/// `render.rs`'s own D-α test documents. So this drives 1.0 × 0.5 and 0.25 × 0.5.
+#[test]
+fn a6_masked_body_carries_ancestors_and_the_layer_carries_own_opacity() {
+    for incoming in [1.0_f64, 0.25, 0.8] {
+        let got = ops(&masked_rect(true, false), incoming);
+        let layer = got.iter().find_map(|c| match c {
+            Command::PushIsolatedLayer { alpha, .. } => Some(*alpha),
+            _ => None,
+        }).expect("a layer");
+        let first_fill = got.iter().find_map(|c| match c {
+            Command::FillRect { paint_alpha, .. } => Some(*paint_alpha),
+            _ => None,
+        }).expect("a body fill");
+        assert_eq!(layer, 0.5, "own opacity, never the ancestors");
+        assert_eq!(first_fill, incoming, "ancestors, never the own opacity");
+        // The net the artist sees: each factor exactly ONCE.
+        assert_eq!(layer * first_fill, 0.5 * incoming);
+
+        // ⛔ AND THE MASK ARTWORK STAYS AT 1.0 **AT A NON-UNIT INCOMING**. The
+        // first version of this suite asserted the artwork's alpha only at
+        // incoming = 1.0, where "1.0" and "incoming" are the same number — so a
+        // mutant that fed the ancestors into the mask bracket SURVIVED. The
+        // mask bracket is isolated (§3.2); ancestor alpha must not reach it, and
+        // that is only visible where the two values differ.
+        let artwork = got.iter().filter_map(|c| match c {
+            Command::FillRect { paint_alpha, .. } => Some(*paint_alpha),
+            _ => None,
+        }).nth(1).expect("the mask artwork fill");
+        assert_eq!(artwork, 1.0,
+                   "the mask bracket is isolated at alpha 1.0, whatever the \
+                    ancestors carry (incoming={incoming})");
+    }
+}
+
+/// The reveal law needs a bbox, and a backend never computes bounds (§3.3) —
+/// so the producer must pass the MASK SUBTREE's bounds. The artwork here is a
+/// 20×20 rect at (20, 20).
+#[test]
+fn a6_reveal_law_carries_the_mask_subtree_bbox() {
+    use crate::painter::Mask as PMask;
+    let got = ops(&masked_rect(false, false), 1.0);
+    let law = got.iter().find_map(|c| match c {
+        Command::PushMaskLayer { mask } => Some(*mask),
+        _ => None,
+    }).expect("a mask layer");
+    match law {
+        PMask::AlphaRevealOutsideBbox { bbox } => {
+            assert_eq!((bbox.x, bbox.y, bbox.w, bbox.h), (20.0, 20.0, 20.0, 20.0),
+                       "the bbox is the MASK SUBTREE's bounds, computed here");
+        }
+        other => panic!("(clip:false, invert:false) lowers to reveal, got {other:?}"),
+    }
+}
+
+/// `(clip:false, invert:true)` COLLAPSES onto `(true, true)` — A6 §4 says so and
+/// the truth table implements it. Pinned through the PRODUCER, not just the table.
+#[test]
+fn a6_invert_collapses_through_the_producer() {
+    use crate::painter::Mask as PMask;
+    for clip in [true, false] {
+        let got = ops(&masked_rect(clip, true), 1.0);
+        let law = got.iter().find_map(|c| match c {
+            Command::PushMaskLayer { mask } => Some(*mask),
+            _ => None,
+        });
+        assert_eq!(law, Some(PMask::AlphaClipOut),
+                   "invert lowers to AlphaClipOut whatever `clip` says (clip={clip})");
+    }
+}
+
+/// A DISABLED mask is not a mask: the element renders as if none were attached,
+/// and no bracket is emitted at all. Legacy agrees (`mask_plan` returns None).
+#[test]
+fn a6_disabled_mask_emits_no_bracket() {
+    let mut e = masked_rect(true, false);
+    if let Element::Rect(r) = &mut e {
+        r.common.mask.as_mut().unwrap().disabled = true;
+    }
+    let got = ops(&e, 1.0);
+    assert!(!got.iter().any(|c| matches!(c, Command::PushIsolatedLayer { .. })),
+            "a disabled mask must not open a layer, got {got:?}");
+    // ...and the body then carries its OWN opacity again, the ordinary fold.
+    match got.first() {
+        Some(Command::FillRect { paint_alpha, .. }) => assert_eq!(*paint_alpha, 0.5),
+        c => panic!("expected a bare body fill, got {c:?}"),
+    }
+}
+
+/// ⛔ AND IT STILL DOES, WITH A PRODUCER SITTING RIGHT THERE. The bracket tests
+/// above prove `emit_element` emits A6's element bracket for this same shape —
+/// but `Canvas2dPainter::push_mask_layer` is `unimplemented!()`, so routing
+/// production at it would panic. The producer and the routing are two steps and
+/// this is the pin that keeps them apart until the PH4 backend lands.
 #[test]
 fn masked_element_needs_legacy() {
     use crate::geometry::element::Mask;
     let mut r = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
-    assert!(!element_needs_legacy(&r), "plain rect converts");
+    assert!(!element_needs_legacy(&r, Caps::NONE), "plain rect converts on any backend");
     if let Element::Rect(e) = &mut r {
         e.common.mask = Some(Box::new(Mask {
             subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
@@ -364,7 +544,83 @@ fn masked_element_needs_legacy() {
             unlink_transform: None,
         }));
     }
-    assert!(element_needs_legacy(&r), "an active mask forces the legacy path");
+    assert!(
+        element_needs_legacy(&r, Caps::NONE),
+        "a masked element stays legacy on a backend that can do neither half -- \
+         Direct2D's answer today"
+    );
+    assert!(
+        !element_needs_legacy(&r, Caps::NONE
+            .with(Capability::IsolatedLayers)
+            .with(Capability::MaskLayers)),
+        "a masked element CONVERTS on a backend that executes both halves -- \
+         Canvas2D's answer since #55"
+    );
+}
+
+/// ⭐ THE ARM #56 BOUGHT, AND IT COULD NOT HAVE BEEN WRITTEN BEFORE IT.
+///
+/// LAYERS BUT NO MASKS is a real backend state, not a hypothetical: it is
+/// exactly what `Canvas2dPainter` held from #47 until #55, and it is the state
+/// `Direct2DPainter` will pass through if it implements layers before masks —
+/// the natural order, since the layer target is the surface a mask eats into.
+///
+/// Such a backend must stay LEGACY for a masked element: the element bracket
+/// needs both halves, and A6 §3.2 makes a mask bracket legal only inside an
+/// isolated layer. Until `a6_layer_no_mask.json` landed, no fixture separated
+/// the two capabilities, so this state was not expressible in any query derived
+/// from the corpus — the query would have said "the A6 bracket" as one unit and
+/// this test would have been a lie dressed as a pin.
+#[test]
+fn a_backend_with_layers_but_no_masks_keeps_a_masked_element_on_legacy() {
+    use crate::geometry::element::Mask;
+    let mut r = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    if let Element::Rect(e) = &mut r {
+        e.common.mask = Some(Box::new(Mask {
+            subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
+            clip: false, invert: false, disabled: false, linked: true, unlink_transform: None,
+        }));
+    }
+    let layers_only = Caps::NONE.with(Capability::IsolatedLayers);
+    assert!(
+        element_needs_legacy(&r, layers_only),
+        "half the bracket is not the bracket -- routing here would open a layer \
+         and then panic in push_mask_layer"
+    );
+    // ...and the converse, so this is not just "everything is legacy": the SAME
+    // element converts the moment the other half arrives. One variable.
+    assert!(!element_needs_legacy(&r, layers_only.with(Capability::MaskLayers)));
+
+    // 📌 THE OTHER HALF OF THE CONJUNCTION, AND ITS STATUS SAID PLAINLY. Masks
+    // WITHOUT layers is a legal `Caps` value and the router must handle it, but
+    // NO fixture can reach it and no backend can hold it: A6 §3.2 makes a mask
+    // bracket legal only inside an isolated layer, which
+    // `capability::tests::no_scene_carries_a_mask_outside_an_isolated_layer`
+    // asserts over the whole corpus. So this arm is DEFENSIVE, not observed —
+    // it is here so the `&&` is driven from both sides rather than half-tested,
+    // and it is labelled rather than counted as evidence.
+    assert!(
+        element_needs_legacy(&r, Caps::NONE.with(Capability::MaskLayers)),
+        "masks without layers is not the bracket either"
+    );
+}
+
+/// A DISABLED mask is not an active one, on ANY backend: the element renders as
+/// if none were attached, which is what the legacy `mask_plan` says too.
+/// Capability-independent, and asserted at both poles so a future "caps unlock
+/// everything" reading cannot take hold.
+#[test]
+fn a_disabled_mask_is_not_a_capability_question() {
+    use crate::geometry::element::Mask;
+    let mut r = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    if let Element::Rect(e) = &mut r {
+        e.common.mask = Some(Box::new(Mask {
+            subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
+            clip: false, invert: false, disabled: true, linked: true, unlink_transform: None,
+        }));
+    }
+    assert!(!element_needs_legacy(&r, Caps::NONE));
+    assert!(!element_needs_legacy(&r, all_caps()));
 }
 
 #[test]
@@ -375,7 +631,14 @@ fn freeform_gradient_needs_legacy() {
         common: common(), fill_gradient: None, stroke_gradient: None,
     };
     e.fill_gradient = Some(Box::new(Gradient { gtype: GradientType::Freeform, ..Gradient::default() }));
-    assert!(element_needs_legacy(&Element::Rect(e)), "freeform gradient stays legacy");
+    let e = Element::Rect(e);
+    assert!(element_needs_legacy(&e, Caps::NONE), "freeform gradient stays legacy");
+    // ⛔ AND IT STAYS LEGACY ON A BACKEND THAT CAN DO EVERYTHING. A freeform
+    // gradient is a BUILD-TIME lowering concern that never crosses the seam
+    // (contract A5) -- there is no capability for it and there must not be one,
+    // or the router would start asking backends about a question they cannot
+    // answer. The two clauses of this router are different KINDS of "no".
+    assert!(element_needs_legacy(&e, all_caps()), "freeform gradient is not a backend question");
 }
 
 #[test]
@@ -383,7 +646,8 @@ fn groups_and_shapes_do_not_need_legacy() {
     // Sanity: nested groups and plain shapes route through the seam.
     for (_name, doc) in reference_docs() {
         for e in &doc {
-            assert!(!element_needs_legacy(e), "reference-doc element should convert");
+            assert!(!element_needs_legacy(e, Caps::NONE),
+                    "reference-doc element should convert on ANY backend");
         }
     }
 }
@@ -948,4 +1212,294 @@ fn path_freeform_gradient_not_convertible() {
     let mut e = plain_path_elem();
     e.fill_gradient = Some(freeform_grad());
     assert!(path_painter_inputs(&e, elem_bounds_path(&e)).is_none());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚖️ THE ROUTER FLIP (council 08/29, row (e) = option (b)) — and the
+// BEHAVIOUR CHANGE it carries, stated here rather than slipped past a reader.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Every capability answered YES — the shape of a backend that can do the whole
+/// A6 bracket. Written from `Capability::ALL`, so a capability added later is
+/// included here without anyone remembering to.
+fn all_caps() -> Caps {
+    Capability::ALL.into_iter().fold(Caps::NONE, Caps::with)
+}
+
+/// A backend that executes everything EXCEPT what the A6 bracket needs.
+///
+/// ⛔ IT IS A DELEGATING WRAPPER, NOT A STUB, AND THAT IS THE POINT. It records
+/// through a real `RecordingPainter`, so "nothing was emitted" is a measurement
+/// of the emit path rather than of a painter that drops calls. Only `supports`
+/// differs — ONE VARIABLE against the same test run through the recorder
+/// itself, which is what makes the difference attributable to the answer.
+struct MaskBlind(RecordingPainter);
+
+impl crate::painter::Painter for MaskBlind {
+    fn supports(&self, _c: Capability) -> bool { false }
+    fn fill_path(&mut self, p: &[PathCommand], w: FillRule, b: &crate::painter::Brush, a: f64) {
+        self.0.fill_path(p, w, b, a)
+    }
+    fn stroke_path(&mut self, p: &[PathCommand], b: &crate::painter::Brush,
+                   s: &crate::painter::StrokeStyle, a: f64) {
+        self.0.stroke_path(p, b, s, a)
+    }
+    fn fill_rect(&mut self, r: crate::painter::Rect, b: &crate::painter::Brush, a: f64) {
+        self.0.fill_rect(r, b, a)
+    }
+    fn stroke_rect(&mut self, r: crate::painter::Rect, b: &crate::painter::Brush,
+                   s: &crate::painter::StrokeStyle, a: f64) {
+        self.0.stroke_rect(r, b, s, a)
+    }
+    fn fill_ellipse_arc(&mut self, e: &crate::painter::EllipseArc, w: FillRule,
+                        b: &crate::painter::Brush, a: f64) {
+        self.0.fill_ellipse_arc(e, w, b, a)
+    }
+    fn stroke_ellipse_arc(&mut self, e: &crate::painter::EllipseArc, b: &crate::painter::Brush,
+                          s: &crate::painter::StrokeStyle, a: f64) {
+        self.0.stroke_ellipse_arc(e, b, s, a)
+    }
+    fn clip(&mut self, p: &[PathCommand], w: FillRule) { self.0.clip(p, w) }
+    fn push_state(&mut self, t: Transform) { self.0.push_state(t) }
+    fn pop_state(&mut self) { self.0.pop_state() }
+    fn push_group(&mut self, a: f64, b: crate::painter::BlendMode) { self.0.push_group(a, b) }
+    fn pop_group(&mut self) { self.0.pop_group() }
+    fn push_mask_layer(&mut self, m: crate::painter::Mask) { self.0.push_mask_layer(m) }
+    fn pop_mask_layer(&mut self) { self.0.pop_mask_layer() }
+    fn push_isolated_layer(&mut self, a: f64, b: crate::painter::BlendMode) {
+        self.0.push_isolated_layer(a, b)
+    }
+    fn pop_isolated_layer(&mut self) { self.0.pop_isolated_layer() }
+    fn draw_text_run(&mut self, r: &crate::painter::TextRun, b: &crate::painter::Brush, a: f64) {
+        self.0.draw_text_run(r, b, a)
+    }
+}
+
+/// A 0.5-alpha group holding a 0.5-opacity MASKED rect — A6 §6.2's shape, the
+/// one where HEAD and the contract disagree.
+fn group_with_a_masked_child() -> Element {
+    use crate::geometry::element::Mask;
+    let mut child = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    if let Element::Rect(e) = &mut child {
+        e.common.opacity = 0.5;
+        e.common.mask = Some(Box::new(Mask {
+            subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
+            clip: true, invert: false, disabled: false, linked: true, unlink_transform: None,
+        }));
+    }
+    Element::Group(GroupElem {
+        children: vec![Rc::new(child)],
+        common: common_alpha(0.5),
+        isolated_blending: false,
+        knockout_group: false,
+    })
+}
+
+/// ⛔ THE FLIP ITSELF, AND IT IS A RATIFIED BEHAVIOUR CHANGE — A6 §6.2.
+///
+/// Before this commit the router asked only about the ELEMENT, so a masked
+/// child of a group was skipped by every backend, forever, including the one
+/// that has executed both halves since #55. It now asks the BACKEND, and a
+/// mask-capable backend emits the element bracket.
+///
+/// ⚠️ WHAT CHANGES ON SCREEN, said out loud: a masked element under an alpha
+/// ancestor renders DIFFERENTLY. HEAD's legacy path gives `own²` with the
+/// ancestors DISCARDED — `set_global_alpha` REPLACES rather than multiplies —
+/// so a 0.5-opacity element in a 0.5-alpha group came out at 0.25 from the
+/// element alone while the group's 0.5 never applied at all. The bracket
+/// applies each factor ONCE: the body paints at the ancestor product, the
+/// element's own opacity rides the layer and is spent at the composite.
+/// Contract R4 otherwise converts only what preserves behaviour; §6.2 is the
+/// ratified exception, and this test is where it becomes observable.
+#[test]
+fn a_mask_capable_backend_now_emits_the_bracket_for_a_masked_group_child() {
+    let g = group_with_a_masked_child();
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &g, 1.0);
+    let json = rec.to_canonical_json();
+    assert!(json.contains("push_isolated_layer"),
+            "the mask-capable backend must now receive the A6 bracket:\n{json}");
+    assert!(json.contains("push_mask_layer"), "…including the mask half:\n{json}");
+
+    // ⛔ AND THE ALPHA LAW IS VISIBLE IN IT, because "the bracket was emitted"
+    // is not the same claim as "each factor applied once". The layer carries the
+    // element's own 0.5; the body paints at the ANCESTOR product (0.5), not at
+    // 0.25. HEAD's `own²` would have put 0.25 on the body and nothing on the
+    // ancestors.
+    let ops: serde_json::Value = serde_json::from_str(&json).expect("canonical JSON");
+    let ops = ops.as_array().expect("an array of commands");
+    let alpha_of = |cmd: &str| -> f64 {
+        ops.iter()
+            .find(|o| o["cmd"] == cmd)
+            .unwrap_or_else(|| panic!("no {cmd} in:\n{json}"))["alpha"]
+            .as_f64()
+            .unwrap_or_else(|| panic!("{cmd} carries no alpha"))
+    };
+    // The LAYER carries the element's own 0.5, spent once at the composite.
+    assert_eq!(alpha_of("push_isolated_layer"), 0.5, "the layer carries own opacity");
+    // The BODY paints at the ANCESTOR product (the group's 0.5) — NOT at
+    // own × ancestors, and NOT at own². HEAD gives 0.25 here and discards the
+    // group entirely; that difference IS the ratified §6.2 behaviour change.
+    assert_eq!(alpha_of("fill_rect"), 0.5,
+               "the body paints at the ancestor product; 0.25 would be HEAD's \
+                own-squared, the law this bracket replaces:\n{json}");
+    // The mask artwork is itself isolated: fresh surface, alpha context 1.0.
+    let mask_art = ops.iter().skip_while(|o| o["cmd"] != "push_mask_layer")
+        .find(|o| o["cmd"] == "fill_rect")
+        .expect("mask artwork");
+    assert_eq!(mask_art["alpha"].as_f64(), Some(1.0),
+               "the mask bracket is isolated at alpha 1.0 (A6 §3.2)");
+}
+
+/// ...and the SAME document through a backend that answers NO emits NOTHING for
+/// that child — it stays legacy, exactly as Direct2D will.
+///
+/// ONE VARIABLE. The two arms differ only in the `supports` answer: same
+/// element, same emit path, same recorder underneath. Differing outputs prove
+/// an arm CAN fire; holding everything else fixed is what makes the difference
+/// attributable to the query rather than to the two arms being two programs.
+#[test]
+fn a_backend_that_answers_no_still_gets_nothing_for_a_masked_child() {
+    let g = group_with_a_masked_child();
+    let mut blind = MaskBlind(RecordingPainter::new());
+    emit_element(&mut blind, &g, 1.0);
+    let json = blind.0.to_canonical_json();
+    assert!(!json.contains("push_mask_layer"),
+            "a backend without masks must not be handed a mask bracket -- \
+             push_mask_layer is `unimplemented!()` there:\n{json}");
+    assert!(!json.contains("push_isolated_layer"),
+            "…nor half of one:\n{json}");
+    assert!(!json.contains("fill_rect"),
+            "the masked child paints nothing on a legacy-routed backend, as it \
+             did before this commit:\n{json}");
+}
+
+/// ⛔ AND THE PRECONDITION IS ENFORCED ONE FRAME IN, NOT ONLY AT THE GROUP LOOP.
+///
+/// The test above enters through a GROUP, so what protects the backend there is
+/// the child-loop's router call. A caller reaching `emit_element` DIRECTLY with
+/// a masked element used to be told "assumes `!element_needs_legacy`" in a doc
+/// comment — a duty dischargeable only while the answer was constant. It is not
+/// constant any more, so the check moved into the function. Without this arm the
+/// enforcement inside `emit_element` would be uncovered, and an uncovered guard
+/// is indistinguishable from an absent one.
+#[test]
+fn emit_element_refuses_to_hand_the_bracket_to_a_backend_that_answers_no() {
+    use crate::geometry::element::Mask;
+    let mut child = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    if let Element::Rect(e) = &mut child {
+        e.common.mask = Some(Box::new(Mask {
+            subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
+            clip: true, invert: false, disabled: false, linked: true, unlink_transform: None,
+        }));
+    }
+    let mut blind = MaskBlind(RecordingPainter::new());
+    emit_element(&mut blind, &child, 1.0);
+    let emitted: serde_json::Value =
+        serde_json::from_str(&blind.0.to_canonical_json()).expect("canonical JSON");
+    assert_eq!(emitted.as_array().map(Vec::len), Some(0),
+               "a direct call must emit NOTHING rather than a bracket the \
+                backend cannot execute, got {emitted}");
+
+    // One variable: the same element, the same call, a backend that says yes.
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &child, 1.0);
+    assert!(rec.to_canonical_json().contains("push_mask_layer"),
+            "…and the arm must be able to differ, or it proves nothing");
+}
+
+/// ⛔ THE RESPONSIBILITY THAT MOVED MUST STILL BE DISCHARGED, AND BY THE NEW
+/// OWNER. The group-children loop used to filter legacy-only children itself;
+/// that filter is gone, because `emit_element` now asks the router for every
+/// element. This is the arm that proves the filtering did not go with it — a
+/// CAPABILITY-INDEPENDENT legacy child (freeform gradient: contract A5, it never
+/// crosses the seam on any backend) inside a group must still paint nothing,
+/// while its plain sibling paints.
+///
+/// Without this, moving the check would have been verified only for masks, and
+/// the other clauses of the router would have been silently unguarded inside
+/// groups — the half of a change that nobody looks at.
+#[test]
+fn a_legacy_only_child_paints_nothing_even_though_the_loop_no_longer_filters() {
+    let mut freeform = RectElem {
+        x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+        fill: fill(Color::WHITE), stroke: None,
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    };
+    freeform.fill_gradient =
+        Some(Box::new(Gradient { gtype: GradientType::Freeform, ..Gradient::default() }));
+    let g = Element::Group(GroupElem {
+        children: vec![
+            Rc::new(Element::Rect(freeform)),
+            Rc::new(rect(50.0, 50.0, 4.0, 4.0, fill(Color::BLACK), None)),
+        ],
+        common: common(),
+        isolated_blending: false,
+        knockout_group: false,
+    });
+
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &g, 1.0);
+    let json = rec.to_canonical_json();
+    let ops: serde_json::Value = serde_json::from_str(&json).expect("canonical JSON");
+    let fills: Vec<_> = ops.as_array().unwrap().iter()
+        .filter(|o| o["cmd"] == "fill_rect").collect();
+    assert_eq!(fills.len(), 1,
+               "exactly the non-legacy sibling paints -- the freeform-gradient \
+                child must be routed away by `emit_element` now that the loop \
+                does not:\n{json}");
+    assert_eq!(fills[0]["rect"]["x"].as_f64(), Some(50.0),
+               "…and it is the SIBLING that survived, not the freeform child");
+}
+
+/// ⭐ THE ROUTING END OF CONDITION (i), AND IT DESCRIBES A REAL BACKEND.
+///
+/// `Caps` with layers + masks but NOT the blend is exactly what Direct2D
+/// answers once its A6 ops land: it opens isolated layers and mask brackets,
+/// and it has no effect graph for the 15 non-Normal modes. A masked element
+/// carrying `multiply` must therefore STAY LEGACY there — because
+/// `emit_masked_element` puts the element's own mode on the layer, and a
+/// backend that opens the layer without reading its blend would DISCARD the
+/// multiply with nothing reporting it.
+///
+/// ⛔ The point is that the two capabilities do not absorb each other. The SAME
+/// element converts the moment the blend answer arrives, and a Normal-mode
+/// sibling converts without it — one variable each way, so this cannot pass by
+/// refusing everything.
+#[test]
+fn a_masked_element_with_a_non_normal_blend_needs_the_effect_graph_too() {
+    use crate::geometry::element::Mask;
+    use crate::painter::BlendMode;
+
+    let masked = |mode: BlendMode| {
+        let mut r = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+        if let Element::Rect(e) = &mut r {
+            e.common.mode = mode;
+            e.common.mask = Some(Box::new(Mask {
+                subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
+                clip: true, invert: false, disabled: false, linked: true, unlink_transform: None,
+            }));
+        }
+        r
+    };
+
+    // Direct2D's answer once (a) lands: the bracket, but no effect graph.
+    let bracket_no_blend = Caps::NONE
+        .with(Capability::IsolatedLayers)
+        .with(Capability::MaskLayers);
+
+    assert!(
+        element_needs_legacy(&masked(BlendMode::Multiply), bracket_no_blend),
+        "a multiply-blended masked element must NOT be routed at a backend with \
+         no effect graph -- the layer would open and the multiply would vanish"
+    );
+    assert!(
+        !element_needs_legacy(&masked(BlendMode::Normal), bracket_no_blend),
+        "…while a Normal-mode masked element converts there, or the blend \
+         requirement has welded itself to the bracket and every mask is legacy"
+    );
+    assert!(
+        !element_needs_legacy(&masked(BlendMode::Multiply), all_caps()),
+        "…and the SAME multiply element converts once the blend answer arrives"
+    );
 }

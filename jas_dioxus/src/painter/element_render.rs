@@ -16,7 +16,8 @@
 //!    the way `render.rs` does (a folded multiply, D3: the `globalAlpha`
 //!    getter dies), so a future PH2 driver can adopt it wholesale.
 //!
-//! 2. **The capability router** [`element_needs_legacy`] and the byte-identical
+//! 2. **The capability router** [`element_needs_legacy`] — which takes the
+//!    BACKEND's answers, not only the element — and the byte-identical
 //!    leaf-paint helper [`line_painter_inputs`] — the PH3 production slice.
 //!    `render.rs` routes an element that needs a PH3/PH4 feature (opacity mask,
 //!    type-on-path / placed-glyph text, freeform gradient) to the legacy
@@ -26,9 +27,17 @@
 //!    [`Canvas2dPainter`](super::canvas2d::Canvas2dPainter). See
 //!    `line_painter_inputs` for the exact equivalence argument.
 //!
-//! DELIBERATELY EXCLUDED from PH1 (their phases own them): opacity masks (PH4),
-//! type-on-path / placed-glyph text (PH3), freeform gradients (a build-time
-//! lowering concern the seam never carries — contract A5).
+//! EXCLUDED, AND FOR THREE DIFFERENT REASONS — the distinction matters because
+//! only one of them can ever change by itself:
+//! - **opacity masks** — NO LONGER EXCLUDED CATEGORICALLY (council 08/29, row
+//!   (e) = option (b)). A masked element takes the A6 element bracket on a
+//!   backend that answers yes to both halves, and stays legacy on one that does
+//!   not. That is a BACKEND question now, asked through
+//!   [`Painter::supports`](super::Painter::supports).
+//! - **type-on-path / placed-glyph text** (PH3) — net-new shaping work that
+//!   exists in no backend, so there is deliberately no capability for it.
+//! - **freeform gradients** — a build-time lowering concern the seam never
+//!   carries (contract A5); no backend answer unlocks it either.
 
 use crate::geometry::element::{
     Arrowhead, Color, Element, EllipseElem, Fill, FillRule, Gradient, GradientType,
@@ -36,6 +45,7 @@ use crate::geometry::element::{
     Visibility,
 };
 
+use super::capability::{Capability, Caps};
 use super::{
     Brush, ColorStop, EllipseArc, LinearGradient, Painter, RadialGradient, Rect, StrokeStyle,
     TextRun,
@@ -45,30 +55,70 @@ use super::{
 // Capability router (PH3 production slice)
 // ---------------------------------------------------------------------------
 
-/// Does this element need a capability the PH1 `Painter` surface cannot
-/// express? Such elements STAY on the legacy raw-`ctx` path in the production
-/// conversion (contract R4: convert only what is behavior-preserving).
+/// Does this element need something the route in front of it cannot deliver?
+/// Such elements STAY on the legacy raw-`ctx` path (contract R4: convert only
+/// what is behavior-preserving).
 ///
-/// PH1 keeps on legacy:
-/// - **opacity masks** (an active [`Mask`](crate::geometry::element::Mask)) —
-///   PH4 owns the scratch/luminance pipeline;
-/// - **freeform gradients** on fill or stroke — a build-time lowering concern
-///   the seam never carries (contract A5); today they render unpainted;
-/// - **text** ([`Text`](Element::Text)/[`TextPath`](Element::TextPath)) and
-///   **live** elements — placed-glyph/type-on-path shaping is PH3 net-new work;
-///   the FastRun fast path is proven in the reference renderer but the
-///   production `render.rs` text pipeline (tspans, `letterSpacing` via Reflect,
-///   per-glyph rotate, baseline shift) is not mechanically 1:1 yet.
-pub fn element_needs_legacy(elem: &Element) -> bool {
-    // Active opacity mask (PH4).
-    if elem
-        .common()
-        .mask
-        .as_ref()
-        .map(|m| !m.disabled)
-        .unwrap_or(false)
-    {
-        return true;
+/// ⚖️ IT TAKES `caps` BECAUSE THE ANSWER IS NOT A PROPERTY OF THE ELEMENT ALONE
+/// (council 08/29, row (e) = option (b)). This router routes THE SEAM, and the
+/// seam has two backends: `Canvas2dPainter` executes isolated layers (#47) and
+/// mask layers (#55); `Direct2DPainter` executes neither. Asking only about the
+/// element forces one answer onto both — pinning Canvas2D to legacy forever, or
+/// routing Direct2D into an `unimplemented!()`. So the caller passes what the
+/// backend it is about to paint through actually answers ([`Caps::of`]).
+///
+/// THE TWO CLAUSES ARE DIFFERENT KINDS OF "NO", and the distinction is
+/// load-bearing:
+///
+/// - **backend questions** — an active [`Mask`](crate::geometry::element::Mask)
+///   needs the A6 element bracket, which needs BOTH
+///   [`Capability::IsolatedLayers`] and [`Capability::MaskLayers`]. Half the
+///   bracket is not the bracket: A6 §3.2 makes a mask legal only inside an
+///   isolated layer, so a backend with layers and no masks — Canvas2D from #47
+///   to #55, and the state Direct2D will pass through — must stay legacy. The
+///   corpus can express that state only because `a6_layer_no_mask.json` exists;
+///   see [`capability`](crate::painter::capability).
+/// - **not backend questions, and there is no capability for them** — a
+///   freeform gradient is a build-time lowering concern that never crosses the
+///   seam (contract A5); text/type-on-path is PH3 net-new shaping work; the
+///   `*_painter_inputs` mirrors below are properties of the two-paint seam
+///   itself. No backend answer unlocks any of these, and inventing a capability
+///   for them would ask backends a question they cannot answer.
+pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
+    // ⛔ AN ACTIVE OPACITY MASK IS NOW A QUESTION ABOUT THE BACKEND, AND THIS IS
+    // THE FLIP. It used to be an unconditional `return true` — correct while
+    // `Canvas2dPainter::push_mask_layer` was `unimplemented!()`, and stale from
+    // the moment #55 landed, because nothing about the ELEMENT had ever been
+    // the reason. #47 gave the layer half, #55 the mask half; what was missing
+    // was a way to ask, and asking is what option (b) added.
+    //
+    // ⚠️ THE FLIP IS A RATIFIED BEHAVIOUR CHANGE (A6 §6.2), NOT A REFACTOR: a
+    // masked element under an alpha ancestor renders DIFFERENTLY once it takes
+    // the bracket. See `emit_masked_element` for the law and defect D-α for
+    // what HEAD does instead.
+    if let Some(_mask) = active_mask(elem) {
+        // WHAT THE BRACKET WILL ASK OF THE BACKEND, built as a SET and compared
+        // whole. `emit_masked_element` emits
+        // `push_isolated_layer(elem.opacity(), elem.common().mode)` — the ONLY
+        // place a blend crosses this seam (groups fold their alpha and emit no
+        // `push_group`, per D3). So an element whose own mode is non-Normal
+        // needs the effect graph as well as the layer and the mask.
+        //
+        // ⛔ THE BLEND CLAUSE IS NOT DECORATION — it is condition (i) at the
+        // routing end. Without it, a masked element carrying `multiply` routes
+        // to any backend that answers yes to layers+masks, and a backend that
+        // opens the layer while never reading its `blend` DISCARDS the multiply
+        // with nothing reporting it. Refusing to route is the only protection
+        // the router can give against a silent discard.
+        let mut required = Caps::NONE
+            .with(Capability::IsolatedLayers)
+            .with(Capability::MaskLayers);
+        if elem.common().mode != crate::painter::BlendMode::Normal {
+            required = required.with(Capability::NonNormalBlend);
+        }
+        if !caps.supplies(required) {
+            return true;
+        }
     }
     // Freeform gradient on fill or stroke (never crosses the seam).
     if elem
@@ -458,11 +508,125 @@ pub fn path_painter_inputs(e: &PathElem, bbox: (f64, f64, f64, f64)) -> Option<S
 /// mirroring `render.rs`'s `base_alpha * fill_op` / `* stroke_op`.
 ///
 /// Assumes `!element_needs_legacy(elem)`; a legacy-only element paints nothing.
+/// The element's ACTIVE mask, or `None`. A `disabled` mask is not active —
+/// the element renders as if none were attached, which is what the legacy
+/// `mask_plan` says too (it returns `None` for a disabled mask).
+fn active_mask(elem: &Element) -> Option<&crate::geometry::element::Mask> {
+    elem.common().mask.as_deref().filter(|m| !m.disabled)
+}
+
+/// AMENDMENT A6 — emit one masked element as THE ELEMENT BRACKET.
+///
+/// ```text
+/// push_isolated_layer(own opacity, own blend)
+///     <body ops>                     — under the element's own transform
+///     push_mask_layer(law)
+///         <mask artwork ops>         — under the mask's EFFECTIVE transform
+///     pop_mask_layer()
+/// pop_isolated_layer()
+/// ```
+///
+/// WHERE EACH PIECE COMES FROM, because none of it is invented here:
+///
+/// - **The law** is [`mask_from_flags`](crate::painter::mask_from_flags), the
+///   ONE copy of the `(clip, invert)` truth table (A6 §4 puts the lowering at
+///   BUILD time). `bbox` is the mask subtree's bounds, computed HERE and passed
+///   in — a backend never computes bounds (§3.3), and it is the same
+///   `mask.subtree.bounds()` the legacy `RevealOutsideBbox` arm reads.
+/// - **The body's alpha is `incoming_alpha`, NOT `incoming_alpha *
+///   elem.opacity()`.** The element's own opacity rides the LAYER and is spent
+///   once at `pop_isolated_layer`; multiplying it into the body as well is
+///   defect D-α's first half, and §6.2's golden exists to pin exactly that.
+/// - **The mask artwork's alpha is 1.0.** The mask bracket is itself isolated —
+///   fresh transparent surface, alpha context 1.0 (§3.2). Legacy agrees: it
+///   resets the scratch context's alpha to 1.0 before drawing the subtree.
+/// - **The mask transform** is `elem.transform()` when the mask is linked and
+///   `unlink_transform` when it is not — `render.rs::effective_mask_transform`,
+///   ported rather than re-derived. It is pushed AFTER the body's own transform
+///   has popped, because legacy applies it from the ancestor coordinate system,
+///   not on top of the element's.
+///
+/// ⛔ THIS IS NOT BEHAVIOR-PRESERVING, AND THAT IS RATIFIED, NOT OVERLOOKED.
+/// Contract R4 converts only what is behavior-preserving; A6 §6.2 deliberately
+/// pins a law HEAD violates. HEAD renders a masked element inside an alpha
+/// group at `own²`, because `set_global_alpha` REPLACES rather than multiplies,
+/// so the ancestors' contribution is discarded and the element's own opacity is
+/// applied twice. The bracket applies each factor ONCE. ⇒ Converting a masked
+/// element under an alpha ancestor CHANGES what is drawn — to the ratified law.
+/// It is stated here because a reader of a diff would otherwise have to
+/// rediscover it.
+#[allow(dead_code)] // Not-yet-wired: same reason as `active_mask` — the router flip is a
+// separate, ratified behaviour change. The tests drive this path directly.
+fn emit_masked_element(
+    p: &mut dyn Painter,
+    elem: &Element,
+    mask: &crate::geometry::element::Mask,
+    incoming_alpha: f64,
+) {
+    let (bx, by, bw, bh) = mask.subtree.bounds();
+    let law = crate::painter::mask_from_flags(
+        mask.clip,
+        mask.invert,
+        Rect { x: bx, y: by, w: bw, h: bh },
+    );
+
+    p.push_isolated_layer(elem.opacity(), elem.common().mode);
+    // The body: ancestors ride the paint alpha (this producer FOLDS group
+    // alpha rather than emitting `push_group`), the element's own opacity
+    // rides the layer above.
+    emit_element_body(p, elem, incoming_alpha);
+
+    p.push_mask_layer(law);
+    let mask_xf = if mask.linked {
+        elem.transform()
+    } else {
+        mask.unlink_transform.as_ref()
+    };
+    let pushed = mask_xf.is_some();
+    if let Some(t) = mask_xf {
+        p.push_state(*t);
+    }
+    emit_element(p, &mask.subtree, 1.0);
+    if pushed {
+        p.pop_state();
+    }
+    p.pop_mask_layer();
+    // Nothing paints between pop_mask_layer and pop_isolated_layer (§3.2).
+    p.pop_isolated_layer();
+}
+
 pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
     if elem.visibility() == Visibility::Invisible {
         return;
     }
-    let eff = incoming_alpha * elem.opacity();
+    // ⛔ THE PRECONDITION IS ENFORCED, NOT ASSUMED, AND THIS IS THE ONE PLACE.
+    // This function's contract has always read "assumes `!element_needs_legacy`;
+    // a legacy-only element paints nothing" — a caller's duty, dischargeable
+    // only while the answer was a constant. It is a question about the BACKEND
+    // now, so the function that has the backend in its hand is the one that asks.
+    // Every caller, including the group-children loop below, is covered by this
+    // single check rather than by a copy of it.
+    if element_needs_legacy(elem, Caps::of(&*p)) {
+        return;
+    }
+    // AMENDMENT A6 — an element with an ACTIVE mask is emitted as the element
+    // bracket, not as a bare body. See `emit_masked_element` for the derivation.
+    if let Some(mask) = active_mask(elem) {
+        emit_masked_element(p, elem, mask, incoming_alpha);
+        return;
+    }
+    emit_element_body(p, elem, incoming_alpha * elem.opacity());
+}
+
+/// The element's own paint ops at a GIVEN effective alpha, under its own
+/// transform. Split out of [`emit_element`] so the A6 bracket can emit the same
+/// body at a DIFFERENT alpha: inside an isolated layer the element's own
+/// opacity rides the layer and must not also multiply into the body primitives.
+///
+/// `eff` is the final paint-alpha base — already multiplied by whatever opacity
+/// applies. The split is otherwise behavior-neutral: the unmasked call passes
+/// `incoming_alpha * elem.opacity()`, which is exactly what this computed before.
+fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64) {
     let pushed = elem.transform().is_some();
     if let Some(t) = elem.transform() {
         p.push_state(*t);
@@ -471,10 +635,15 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
     match elem {
         Element::Group(_) | Element::Layer(_) => {
             if let Some(children) = elem.children() {
+                // The router is NOT consulted here: `emit_element` asks it, once,
+                // for every element including these children. Filtering here as
+                // well was redundant by construction — and a mutation pass proved
+                // it: replacing this site's capability read with a hardcoded
+                // all-yes changed no test, because the check one frame in caught
+                // every case. Two guards with the same predicate cannot both be
+                // driven, and the undriven one is the one that rots.
                 for child in children {
-                    if !element_needs_legacy(child) {
-                        emit_element(p, child, eff);
-                    }
+                    emit_element(p, child, eff);
                 }
             }
         }

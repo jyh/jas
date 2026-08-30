@@ -117,6 +117,15 @@ console_error_panic_hook = { version = "0.1", optional = true }
 [dev-dependencies]
 dioxus-sdk = "0.6"
 
+# ⛔ THE HARNESS THIS REPO HAD NONE OF. Until 2026-08-28 there was no
+# wasm-bindgen-test dependency and no wasm job, so NOTHING in the canvas path
+# was executable by any suite — which is half of why defect D-β (the mask
+# scratch singleton) survived to be found by reading rather than by a red test.
+# The other half was that B1 counted zero mask ops in the display-list corpus.
+# The defect sat where BOTH instruments were blind.
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+
 # B1 -- Direct2D / DirectWrite / WIC, behind feature = "d2d".
 # windows-numerics is a SEPARATE crate: there is no D2D_POINT_2F in windows
 # 0.62, every point is windows_numerics::Vector2.
@@ -129,5 +138,13 @@ windows = { version = "0.62", optional = true, features = [
     "Win32_Graphics_Imaging",
     "Win32_Graphics_Dxgi_Common",
     "Win32_System_Com",
+    # FOR THE TESTS, NOT FOR PRODUCTION -- and the distinction is worth the line.
+    # The swapchain route (surface.rs) receives a DXGI surface the HOST created
+    # and reaches its device via IDXGIDeviceSubObject::GetDevice, so shipping
+    # code never calls D3D11CreateDevice. The tests must FABRICATE a device to
+    # have a surface at all, and they use the WARP software adapter so they need
+    # no GPU and can run on a headless runner.
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
 ] }
 windows-numerics = { version = "0.3", optional = true }

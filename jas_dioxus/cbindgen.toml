@@ -13,6 +13,43 @@ parse_deps = false
 [export]
 include = ["JasBytes", "JasStatus", "JasEngine"]
 prefix = ""
+# ⛔ `include` IS NOT A WHITELIST, AND THE HEADER PROVES IT. Every `pub` type
+# reachable from a `pub mod` lands in the generated C header whether or not it
+# is named above -- `PolyFillRule` and `Transform` are each in there today as
+# ORPHAN opaque typedefs, referenced by no function, usable by no C caller.
+# So the three names above state the INTENDED S-A boundary (src/ffi.rs, laws
+# BL1-BL6) while the actual surface is "whatever is pub".
+#
+# `Capability` and `Caps` are the Painter seam's routing vocabulary (added
+# 08/29 for council row (e)); they are Rust-internal by nature, cross no FFI
+# boundary, and are `pub` only because a `pub trait` method takes one. Adding
+# them to a PUBLISHED C header is an act, not a consequence, and this is where
+# it is declined.
+#
+# 📌 THE CLASS IS NAMED, NOT JUST THIS INSTANCE. The two orphans already there
+# are the same defect and are deliberately NOT removed here: adding a symbol to
+# a published header is mine to decline, REMOVING one is a breaking change to
+# whatever compiles against it, and that is a decision with an owner rather
+# than a side effect of a routing PR.
+#
+# ⚠️ Exclusion is BY NAME and global. A future FFI type called `Caps` would be
+# silently dropped. Driven both ways when it landed: with these lines the
+# freshness gate passes; without them it FAILS naming exactly these two.
+exclude = ["Capability", "Caps"]
 
 [enum]
 prefix_with_name = true
+
+# THE SPIKE SEAM MUST NOT LOOK UNCONDITIONAL. cbindgen does not evaluate
+# `#[cfg]`; without a mapping here it emits a d2d-gated declaration as though it
+# were always present, and a consumer building without `d2d` would compile
+# against a symbol that is not in the library. check_cbindgen_freshness.py
+# caught exactly that within minutes of the seam being added.
+#
+# Scoped to the NEW axes only (d2d and windows). `ffi` and `web` are deliberately
+# left alone: every item in this header is already behind `feature = "ffi"`, so
+# guarding it would wrap the whole file in one #ifdef and change 325 committed
+# lines for no gain in truth.
+[defines]
+"feature = d2d" = "JAS_WITH_D2D"
+"windows" = "_WIN32"

@@ -89,6 +89,63 @@
  */
 #define SMOOTH_SIZE 100.0
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Status codes for the spike seam. Deliberately NOT `JasStatus`: that enum is
+ * the frozen five-class contract of the S-A surface, and widening a frozen
+ * vocabulary for a spike is how a spike becomes load-bearing by accident.
+ */
+#define JAS_PAINT_OK 0
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Caller passed NULL. POSITIVE so it cannot collide with an HRESULT.
+ */
+#define JAS_PAINT_NULL_SURFACE 1
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * The pointer was not a usable `IDXGISurface`. Positive, same reason.
+ */
+#define JAS_PAINT_NOT_A_SURFACE 2
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * The two surfaces disagree on size or format, so the copy would be DROPPED.
+ * Positive, same reason.
+ *
+ * EXISTS BECAUSE THE FAILURE IT NAMES IS OTHERWISE SILENT. `CopyResource`
+ * returns `void`; D3D11 drops a mismatched copy rather than faulting; and the
+ * debug layer that would report the drop is unavailable on this box (Graphics
+ * Tools is not installed). Without this code the seam returns `JAS_PAINT_OK`
+ * and the host presents a stale frame -- a status truthful about the wrong
+ * thing. See `d3d11_silently_drops_a_size_mismatched_copy_...` for the
+ * measurement, driven rather than cited.
+ */
+#define JAS_PAINT_SIZE_MISMATCH 3
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * The two surfaces belong to DIFFERENT D3D11 devices. Positive, same reason.
+ *
+ * THIS ONE IS NOT ABOUT SILENCE - IT IS ABOUT ATTRIBUTION. Unlike a size
+ * mismatch, which D3D11 drops quietly, a cross-device `CopyResource` REMOVES the
+ * destination's device: measured on WARP, `GetDeviceRemovedReason` goes to
+ * `0x887A0020` (`DXGI_ERROR_DRIVER_INTERNAL_ERROR`) while the source's device
+ * stays healthy. Everything created on the dead device fails afterwards, several
+ * calls away from the cause.
+ *
+ * `DRIVER_INTERNAL_ERROR` is exactly the error that gets blamed on hardware or a
+ * driver. Refusing here is the difference between a bug report about the GPU and
+ * one about a half-finished device-lost recovery.
+ */
+#define JAS_PAINT_DEVICE_MISMATCH 4
+#endif
+
 /**
  * How many draws one collision-free id gets before the mint is reported
  * failed. 100 — the value every open-coded copy of this loop used before
@@ -116,11 +173,13 @@
  */
 #define STAR_INNER_RATIO 0.4
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
 /**
  * The DPI every headless target is pinned to. See the module note: DIPs are
  * CSS pixels only here.
  */
 #define PINNED_DPI 96.0
+#endif
 
 /**
  * Cursor blink half-period in milliseconds (matches the macOS default).
@@ -230,6 +289,10 @@ typedef struct JasBytes {
   const uint8_t *ptr;
   uintptr_t len;
 } JasBytes;
+
+
+
+
 
 
 
@@ -348,6 +411,45 @@ struct JasBytes jas_widget_tree(struct JasEngine *e,
                                 uintptr_t panel_len,
                                 const uint8_t *ctx_json,
                                 uintptr_t ctx_len);
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Paint the S-B probe pattern into a caller-owned DXGI surface.
+ *
+ * Returns `JAS_PAINT_OK` (0), a positive sentinel for a bad pointer, or the
+ * raw HRESULT of whichever COM call failed. The host presents; this does not.
+ *
+ * # Safety
+ * `surface` must be NULL or a valid `IDXGISurface` COM pointer that stays
+ * alive for the duration of the call. Ownership is NOT transferred: the caller
+ * still releases it.
+ */
+int32_t jas_paint_probe_surface(void *surface, float width, float height);
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Paint an OFFSCREEN surface, then GPU-copy it into the host's back buffer.
+ *
+ * The route the direct path cannot currently take. `jas_paint_probe_surface`
+ * paints the back buffer itself and the host's subsequent `Present` fails with
+ * `E_NOINTERFACE`; here Direct2D never touches the back buffer at all, so if
+ * `Present` succeeds afterwards it confirms the mechanism by sidestepping it.
+ *
+ * THE COPY LIVES HERE RATHER THAN IN THE HOST, and not for tidiness. C#'s
+ * `ID3D11DeviceContext::CopyResource` threw `InvalidCastException` out of
+ * `InterfaceMarshaler.ConvertToNative` even with both arguments already typed
+ * as `ID3D11Resource` -- a CLR marshalling wrinkle around the generated
+ * interop. windows-rs calls COM directly with no marshaller in between.
+ *
+ * Ownership is unchanged: BOTH surfaces are the host's, borrowed for the call.
+ *
+ * # Safety
+ * Both pointers must be NULL or valid `IDXGISurface` COM pointers alive for the
+ * duration of the call. Neither is released here.
+ */
+int32_t jas_paint_probe_offscreen(void *back, void *offscreen, float width, float height);
+#endif
 
 #ifdef __cplusplus
 }  // extern "C"

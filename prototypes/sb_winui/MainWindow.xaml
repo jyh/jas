@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="SbWinUi.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Background="#FF101418">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!--
+          The canvas the Rust core draws into. Everything inside it is painted by
+          Direct2D through a back buffer this shell owns; XAML draws none of it.
+          That is the materializer claim made visible.
+        -->
+        <SwapChainPanel x:Name="Canvas" Grid.Row="0" />
+
+        <!--
+          Status is XAML, not painted content, so a blank canvas over a healthy
+          status line is a legible failure rather than an ambiguous one.
+        -->
+        <TextBlock
+            x:Name="StatusLine"
+            Grid.Row="1"
+            Margin="12,8"
+            FontSize="14"
+            Foreground="#CCFFFFFF"
+            Text="starting" />
+    </Grid>
+</Window>

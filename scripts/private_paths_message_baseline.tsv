@@ -1,0 +1,8 @@
+# private_paths_message_baseline.tsv -- ACCEPTED historical commits whose MESSAGES carry a private-record path (check_private_paths.py --messages).
+# sha<TAB>what. NEVER the line itself: an excerpt would put the path into the tree, where the tree ratchet reds on it.
+# A pushed message cannot be repaired without a force-push (ruled out 08/30), so this list does not shrink; a growth is a reviewed diff that should be nearly impossible to justify.
+32abb03e65d53c2d12feaec69cdadfbee0b62fd7	a path into a private-record repo
+6739312f29469153b7b2bee7ab8d93a68d455cca	a path into a private-record repo
+805f0ec203386a254bb0df7a1e644b9ec05f05a2	a path into a private-record repo
+94907d86d49b9d53b43924e8768d5942fd2582be	a path into a private-record repo
+d4171ac0759338e84df2bbb769cf3368e6e9d7dd	a path into a private-record repo

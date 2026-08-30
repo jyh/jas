@@ -18,6 +18,14 @@ pub mod ffi;
 // boundary would be a counter with nothing to count.
 #[cfg(feature = "ffi")]
 pub mod ffi_instr;
+
+
+// S-B SPIKE SEAM, not ratified ABI. Needs BOTH features: the paint entry
+// point is meaningless without the Direct2D backend, and it is kept out of
+// `ffi.rs` so it cannot reach the generated `jas_ffi.h`, where a consumer
+// building without `d2d` would compile against a symbol that is not there.
+#[cfg(all(feature = "ffi", feature = "d2d", windows))]
+pub mod ffi_paint;
 #[cfg(feature = "web")]
 pub mod canvas;
 #[cfg(test)]

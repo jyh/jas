@@ -26,6 +26,7 @@ Run: python3 scripts/check_bounds_resolver_ledger.py
 
 from __future__ import annotations
 
+import ast
 import pathlib
 import re
 import sys
@@ -46,6 +47,48 @@ ASSERTION = re.compile(r"^(debug_)?assert(_eq|_ne)?!\(")
 # file -> {call-site source text: verdict}. A verdict beginning with "REACHABLE"
 # means an instance can be the receiver AND the site has been converted or
 # consciously left; anything else states why an instance cannot arrive.
+def duplicate_ledger_keys(src: str) -> list[str]:
+    """Keys written TWICE in the LEDGER literal — outer file or inner call text.
+
+    ⛔ THIS FAILURE IS INVISIBLE TO EVERY RUNTIME CHECK, AND IT BIT FOR REAL.
+    A duplicate key in a dict literal does not error: the later entry SILENTLY
+    REPLACES the earlier one. Adding a second `"painter/element_render.rs"`
+    block (2026-08-29, while declaring the A6 mask site) discarded that file's
+    existing verdict, and the gate then reported an already-judged call as
+    UNDECLARED — which reads as a new defect rather than as a clobbered ledger.
+
+    By the time this module is imported the dict has already collapsed, so no
+    amount of inspecting LEDGER can find it. The only witness is the SOURCE, so
+    that is what this reads. A ledger that silently drops verdicts is worse than
+    no ledger: it converts a recorded judgement back into an open question
+    without anyone deciding to.
+    """
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            targets = [node.target.id]
+        elif isinstance(node, ast.Assign):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        if "LEDGER" not in targets or not isinstance(node.value, ast.Dict):
+            continue
+        dups = []
+        outer = [k.value for k in node.value.keys if isinstance(k, ast.Constant)]
+        dups += [f"LEDGER[{k!r}] appears {outer.count(k)} times"
+                 for k in dict.fromkeys(outer) if outer.count(k) > 1]
+        for kn, vn in zip(node.value.keys, node.value.values):
+            if not isinstance(vn, ast.Dict) or not isinstance(kn, ast.Constant):
+                continue
+            inner = [k.value for k in vn.keys if isinstance(k, ast.Constant)]
+            dups += [f"LEDGER[{kn.value!r}][{k!r}] appears {inner.count(k)} times"
+                     for k in dict.fromkeys(inner) if inner.count(k) > 1]
+        return dups
+    # ANTI-VACUITY: no LEDGER literal found means this check examined nothing,
+    # which must never read as "no duplicates".
+    return ["LEDGER literal not found in this file -- the duplicate-key check "
+            "examined NOTHING, which is not the same as finding nothing"]
+
+
 LEDGER: dict[str, dict[str, str]] = {
     "interpreter/renderer.rs": {
         "let local = e.geometric_bounds();":
@@ -94,6 +137,24 @@ LEDGER: dict[str, dict[str, str]] = {
             "NOT REACHABLE — `tuple_bounds`, called only from the "
             "`Element::Line` and `Element::Path` arms, where the receiver is "
             "that concrete kind.",
+        "let (bx, by, bw, bh) = mask.subtree.bounds();":
+            "REACHABLE, UNCONVERTED — and it is the SAME SITE as "
+            "`canvas/render.rs`'s, deliberately. A6's element bracket lowers "
+            "`(clip:false, invert:false)` to `AlphaRevealOutsideBbox { bbox }`, "
+            "and §3.3 says a backend never computes bounds — so the PRODUCER "
+            "must compute it, and it computes it the way the legacy arm does. "
+            "A mask built from an instance therefore yields a rect at the "
+            "origin on the seam too: the reveal law degenerates and the masked "
+            "element is hidden, exactly as legacy hides it. THE PORT CARRIES "
+            "THE LIMITATION RATHER THAN QUIETLY DIVERGING FROM IT — a seam that "
+            "silently did something ELSE here would be a second behaviour to "
+            "reconcile, not a fix. The open question is unchanged and belongs "
+            "to the same stone: MASKS.md does not say whether an instance may "
+            "BE a mask, and neither renderer should decide that by accident. "
+            "⚠️ NOT YET LIVE: `element_needs_legacy` still routes every masked "
+            "element to legacy (Canvas2dPainter's mask ops are unimplemented), "
+            "so this site is reachable in the REFERENCE renderer today and "
+            "becomes production-reachable only when PH4's backend lands.",
     },
     "tools/yaml_tool.rs": {
         "let (lx, ly, lw, lh) = elem.geometric_bounds(); // LOCAL geometry, no stroke":
@@ -163,6 +224,38 @@ def self_test() -> int:
     evidence that anything passed."""
     import tempfile
 
+    # ⛔ THE DUPLICATE-KEY ARM, driven BOTH ways on fixtures. Written after a
+    # real clobber (see `duplicate_ledger_keys`), so it is a repair with a
+    # witness rather than a precaution.
+    dup_src = """LEDGER: dict[str, dict[str, str]] = {
+    "a.rs": {"call()": "one"},
+    "b.rs": {"call()": "two"},
+    "a.rs": {"other()": "three"},
+}"""
+    if len(duplicate_ledger_keys(dup_src)) != 1:
+        print("SELF-TEST FAIL: a duplicated OUTER key must be caught")
+        return 1
+    dup_inner = """LEDGER: dict[str, dict[str, str]] = {
+    "a.rs": {"call()": "one", "call()": "two"},
+}"""
+    if len(duplicate_ledger_keys(dup_inner)) != 1:
+        print("SELF-TEST FAIL: a duplicated INNER key must be caught")
+        return 1
+    clean = """LEDGER: dict[str, dict[str, str]] = {
+    "a.rs": {"call()": "one"},
+    "b.rs": {"call()": "two"},
+}"""
+    if duplicate_ledger_keys(clean):
+        print("SELF-TEST FAIL: a clean ledger must not be flagged")
+        return 1
+    if not duplicate_ledger_keys("X = 1"):
+        print("SELF-TEST FAIL: a source with NO LEDGER must not read as clean")
+        return 1
+    # ...and THIS file, which is the object the production call reads.
+    if duplicate_ledger_keys(pathlib.Path(__file__).read_text(encoding="utf-8")):
+        print("SELF-TEST FAIL: this file's own LEDGER carries a duplicate key")
+        return 1
+
     cases = [
         ("let b = child.bounds();", True, "a bare call on an arbitrary receiver"),
         ("let b = Element::Path(pe.clone()).bounds();", False,
@@ -204,6 +297,11 @@ def main() -> int:
     found = scan(SRC)
 
     problems: list[str] = []
+    # The ledger's own integrity FIRST: a clobbered verdict makes every verdict
+    # below unreliable, and the symptom is a site reported undeclared that
+    # somebody already judged.
+    problems += [f"LEDGER INTEGRITY: {d}" for d in
+                 duplicate_ledger_keys(pathlib.Path(__file__).read_text(encoding="utf-8"))]
     declared = 0
     for rel, lines in sorted(found.items()):
         if rel in TEST_ONLY:

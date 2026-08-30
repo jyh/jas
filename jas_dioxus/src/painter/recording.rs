@@ -98,6 +98,18 @@ impl RecordingPainter {
 }
 
 impl Painter for RecordingPainter {
+    /// The recorder materialises EVERY call into a `Command`, including the
+    /// whole A6 bracket — that is what makes the goldens able to state the
+    /// bracket at all. So it refuses nothing.
+    ///
+    /// 📌 This is the answer that keeps the R4 goldens stable across the router
+    /// flip: the reference renderer emits through a recorder, the recorder
+    /// supports masks, so the golden output of a masked element is what it was
+    /// before the router learned to ask.
+    fn supports(&self, _cap: crate::painter::capability::Capability) -> bool {
+        true
+    }
+
     fn fill_path(&mut self, path: &[PathCommand], winding: FillRule, brush: &Brush, paint_alpha: f64) {
         self.commands.push(Command::FillPath { path: path.to_vec(), winding, brush: brush.clone(), paint_alpha });
     }

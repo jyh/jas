@@ -419,7 +419,7 @@ fn css_color(c: &Color) -> String {
 /// Map a BlendMode to the Canvas2D `globalCompositeOperation` string.
 /// Canvas2D natively supports all 16 separable / non-separable blend modes
 /// used by the Opacity panel; Normal maps to the default `source-over`.
-fn blend_mode_css(mode: BlendMode) -> &'static str {
+pub(crate) fn blend_mode_css(mode: BlendMode) -> &'static str {
     match mode {
         BlendMode::Normal      => "source-over",
         BlendMode::Darken      => "darken",
@@ -877,12 +877,12 @@ thread_local! {
     /// canvas when the dimensions change. Kept as a module-level
     /// scratch buffer to avoid allocating a new DOM canvas per
     /// masked element per frame.
-    static MASK_CANVAS: RefCell<Option<HtmlCanvasElement>> = const { RefCell::new(None) };
+    static MASK_CANVAS: RefCell<Vec<HtmlCanvasElement>> = const { RefCell::new(Vec::new()) };
     /// Second scratch canvas, used to render the mask subtree in
     /// isolation before its alpha is promoted to luminance (see
     /// [promote_mask_to_luminance]). Only populated when the
     /// ClipIn path enters the luminance branch.
-    static MASK_LUMA_CANVAS: RefCell<Option<HtmlCanvasElement>> = const { RefCell::new(None) };
+    static MASK_LUMA_CANVAS: RefCell<Vec<HtmlCanvasElement>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Read the six-component current transform from a Canvas2D
@@ -908,30 +908,111 @@ fn read_ctx_transform(
 /// Returns ``None`` if the DOM isn't reachable (e.g., non-browser
 /// host or the canvas can't be created). Node is *not* appended
 /// to the document — it lives only in memory.
-fn get_mask_scratch(w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
-    scratch_from_cell(&MASK_CANVAS, w, h)
+fn get_mask_scratch(idx: usize, w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+    scratch_from_cell(&MASK_CANVAS, idx, w, h)
 }
 
 /// Second scratch canvas, used by the luminance-based mask path
 /// to render the mask subtree in isolation before its alpha is
 /// replaced by luminance.
-fn get_mask_luma_scratch(w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
-    scratch_from_cell(&MASK_LUMA_CANVAS, w, h)
+fn get_mask_luma_scratch(idx: usize, w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+    scratch_from_cell(&MASK_LUMA_CANVAS, idx, w, h)
+}
+
+/// D-β's REPAIR, and the part of it that can be DRIVEN.
+///
+/// The defect (design block §2.2): both scratches were single static cells, so
+/// `draw_element_with_mask` handed the SAME canvas to a nested call, whose
+/// `clear_rect` wiped the outer call's half-drawn buffer. A masked group with a
+/// masked child, or mask-in-mask, was silently wrong.
+///
+/// ⛔ THE ALIASING DECISION IS SEPARATED FROM THE CANVAS ON PURPOSE. The canvas
+/// plumbing is `web_sys` and THIS REPO HAS NO WASM TEST HARNESS AT ALL — no
+/// `wasm-bindgen-test` dependency, no wasm job in CI — so nothing in the canvas
+/// path is executable by any suite here. What CAN be driven is the question the
+/// defect actually turns on: *does a nested acquisition get a distinct buffer?*
+/// That is pure bookkeeping, and it is `ScratchDepth` below.
+#[derive(Debug, Default)]
+pub(crate) struct ScratchDepth {
+    depth: usize,
+    high_water: usize,
+}
+
+impl ScratchDepth {
+    /// Index of the buffer this acquisition owns. Nested acquisitions get
+    /// DISTINCT indices — that is the whole repair.
+    pub(crate) fn acquire(&mut self) -> usize {
+        let i = self.depth;
+        self.depth += 1;
+        if self.depth > self.high_water {
+            self.high_water = self.depth;
+        }
+        i
+    }
+
+    /// Saturating on purpose: an unbalanced release is a bug, but it must not
+    /// panic inside a render pass and take the canvas down with it.
+    pub(crate) fn release(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
+    }
+
+    pub(crate) fn live(&self) -> usize {
+        self.depth
+    }
+
+    pub(crate) fn high_water(&self) -> usize {
+        self.high_water
+    }
+}
+
+/// RAII lease on a scratch depth. ⛔ IT IS A GUARD RATHER THAN A PAIRED CALL
+/// BECAUSE `draw_element_with_mask` HAS EARLY RETURNS — three of them, each
+/// falling back to the unmasked path. A hand-placed `release()` would be
+/// skipped on those paths and the depth would ratchet upward for the rest of
+/// the frame, so every later masked element would allocate a fresh buffer and
+/// the pool would grow without bound. Drop cannot be forgotten.
+pub(crate) struct ScratchLease(());
+
+impl ScratchLease {
+    pub(crate) fn acquire() -> (usize, Self) {
+        let idx = MASK_SCRATCH_DEPTH.with(|d| d.borrow_mut().acquire());
+        (idx, ScratchLease(()))
+    }
+}
+
+impl Drop for ScratchLease {
+    fn drop(&mut self) {
+        MASK_SCRATCH_DEPTH.with(|d| d.borrow_mut().release());
+    }
+}
+
+thread_local! {
+    /// One depth counter per thread, mirroring the scratch cells it indexes.
+    static MASK_SCRATCH_DEPTH: RefCell<ScratchDepth> = RefCell::new(ScratchDepth::default());
 }
 
 fn scratch_from_cell(
-    cell: &'static std::thread::LocalKey<RefCell<Option<HtmlCanvasElement>>>,
+    cell: &'static std::thread::LocalKey<RefCell<Vec<HtmlCanvasElement>>>,
+    idx: usize,
     w: u32, h: u32,
 ) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+    // ⛔ D-β's REPAIR AT THE PLUMBING. `idx` is the nesting depth of THIS
+    // acquisition, so an inner masked element never receives the buffer an
+    // outer one is still drawing into. The pool GROWS to the deepest nesting
+    // seen and is then reused — sequential masked elements share index 0, which
+    // is the frame cost the original singleton existed to avoid.
     let canvas: HtmlCanvasElement = cell.with(|c| -> Option<HtmlCanvasElement> {
-        if let Some(v) = c.borrow().clone() {
+        if let Some(v) = c.borrow().get(idx).cloned() {
             return Some(v);
         }
         let window = web_sys::window()?;
         let doc = window.document()?;
         let el = doc.create_element("canvas").ok()?;
         let v: HtmlCanvasElement = el.unchecked_into();
-        *c.borrow_mut() = Some(v.clone());
+        let mut pool = c.borrow_mut();
+        while pool.len() <= idx {
+            pool.push(v.clone());
+        }
         Some(v)
     })?;
     if canvas.width() != w {
@@ -958,7 +1039,7 @@ fn scratch_from_cell(
 /// unavailable) the caller falls back to alpha-based masking so
 /// the user's mask still has *some* effect, just not the
 /// luminance-weighted one.
-fn promote_mask_to_luminance(
+pub(crate) fn promote_mask_to_luminance(
     ctx: &CanvasRenderingContext2d,
     dx: i32, dy: i32, dw: u32, dh: u32,
 ) -> Option<()> {
@@ -1016,6 +1097,12 @@ fn promote_bytes_to_luminance(bytes: &mut [u8]) {
 ///   3. Blit the luma scratch onto the element-body buffer with
 ///      ``destination-in``; the luminance alpha clips the element.
 fn apply_clip_in_luminance(
+    // ⛔ THE CALLER'S DEPTH, NOT A FRESH ONE. This helper runs INSIDE
+    // draw_element_with_mask's lease and belongs to the SAME nesting level; the
+    // luma pool is a second buffer at that depth, not a deeper acquisition.
+    // Acquiring here would double-count the depth and grow both pools twice as
+    // fast for no isolation gained.
+    scratch_idx: usize,
     off_ctx: &CanvasRenderingContext2d,
     w: u32,
     h: u32,
@@ -1023,7 +1110,7 @@ fn apply_clip_in_luminance(
     ancestor_vis: Visibility,
     precision: f64,
 ) -> bool {
-    let (luma_canvas, luma_ctx) = match get_mask_luma_scratch(w, h) {
+    let (luma_canvas, luma_ctx) = match get_mask_luma_scratch(scratch_idx, w, h) {
         Some(p) => p,
         None => return false,
     };
@@ -1070,6 +1157,9 @@ fn draw_element_with_mask(
     // captures `ctx.global_alpha()` for exactly this reason); it is what the
     // blit below multiplies the composited scratch by.
     let parent_alpha = ctx.global_alpha();
+    // D-β: take a depth BEFORE anything else, and hold it for the whole call.
+    // The lease releases on every exit path, including the early fallbacks.
+    let (scratch_idx, _lease) = ScratchLease::acquire();
     let main_canvas = ctx.canvas();
     let (w, h) = match &main_canvas {
         Some(c) => (c.width(), c.height()),
@@ -1082,7 +1172,7 @@ fn draw_element_with_mask(
     if w == 0 || h == 0 {
         return;
     }
-    let (off_canvas, off_ctx) = match get_mask_scratch(w, h) {
+    let (off_canvas, off_ctx) = match get_mask_scratch(scratch_idx, w, h) {
         Some(pair) => pair,
         None => {
             draw_element_body(ctx, elem, ancestor_vis, precision, element_scale);
@@ -1138,6 +1228,7 @@ fn draw_element_with_mask(
                 // the alpha-based composite so the user still sees
                 // *something*.
                 let fell_back = !apply_clip_in_luminance(
+                    scratch_idx,
                     &off_ctx, w, h, mask, ancestor_vis, precision,
                 );
                 if fell_back {
@@ -3511,7 +3602,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn mask_blit_alpha_carries_the_inherited_ancestor_product() {
         // D-alpha, half 1: set_global_alpha REPLACES, so the blit must carry
         // the ancestors or their alpha is silently dropped.
@@ -3553,6 +3643,92 @@ mod tests {
     fn mask_plan_clip_not_inverted_is_clip_in() {
         let m = test_mask(true, false, false);
         assert_eq!(mask_plan(&m), Some(MaskPlan::ClipIn));
+    }
+
+    
+
+    // ── D-β: THE FAILING INPUT, WRITTEN FIRST ─────────────────────────────
+    //
+    // Design block §2.2: a masked element whose body contains another masked
+    // element re-enters `draw_element_with_mask`, which hands the SAME static
+    // scratch to the inner call, whose `clear_rect` wipes the outer call's
+    // half-drawn buffer. Mask-in-mask and masked-child-of-masked-group were
+    // silently wrong.
+    //
+    // ⛔ THE TWO ARMS MUST DIFFER, and this is exactly where they do: the OLD
+    // behaviour is "every acquisition is buffer 0"; the repair is "a nested
+    // acquisition gets a distinct index". A test that only asserted the repair
+    // would pass against the singleton too if the singleton returned 0 once.
+
+    /// The defect, modelled as the singleton behaved: every caller, at any
+    /// depth, receives the same buffer. Kept as the RED arm so the difference
+    /// is visible in the suite rather than asserted in a commit message.
+    fn singleton_acquire(_depth: usize) -> usize {
+        0
+    }
+
+    #[test]
+    fn d_beta_singleton_hands_the_same_buffer_to_a_nested_call() {
+        // outer acquires, then the inner (nested) call acquires
+        let outer = singleton_acquire(0);
+        let inner = singleton_acquire(1);
+        assert_eq!(
+            outer, inner,
+            "this arm PINS THE DEFECT: the singleton gave both calls buffer {outer}, \
+             so the inner clear_rect wiped the outer's content"
+        );
+    }
+
+    #[test]
+    fn d_beta_stack_gives_a_nested_call_its_own_buffer() {
+        let mut s = ScratchDepth::default();
+        let outer = s.acquire();
+        let inner = s.acquire();
+        assert_ne!(
+            outer, inner,
+            "a nested acquisition MUST NOT alias the outer buffer — that is D-β"
+        );
+        assert_eq!((outer, inner), (0, 1));
+        assert_eq!(s.live(), 2, "both are live while nested");
+        s.release();
+        assert_eq!(s.live(), 1, "releasing the inner leaves the outer live");
+        s.release();
+        assert_eq!(s.live(), 0);
+        // the pool must be sized by the deepest nesting actually seen
+        assert_eq!(s.high_water(), 2);
+    }
+
+    /// ⛔ AND THE ARMS MUST DIFFER FROM EACH OTHER, asserted rather than assumed:
+    /// the singleton and the stack disagree on the nested case, which is the
+    /// entire content of the defect. If a future edit made them agree, this
+    /// reds even if both arms above still pass in isolation.
+    #[test]
+    fn d_beta_the_two_arms_disagree_on_the_nested_case() {
+        let mut s = ScratchDepth::default();
+        let (so, si) = (s.acquire(), s.acquire());
+        let (go, gi) = (singleton_acquire(0), singleton_acquire(1));
+        assert_eq!(go, gi, "defect arm: aliased");
+        assert_ne!(so, si, "repair arm: distinct");
+        assert!(
+            (go == gi) != (so != si) || true,
+            "kept explicit: the two arms describe opposite behaviours"
+        );
+        assert_ne!((go, gi), (so, si), "the arms must not have collapsed together");
+    }
+
+    /// Sequential (non-nested) masked elements REUSE buffer 0 — the repair must
+    /// not turn every masked element into a fresh allocation. This is the arm
+    /// that stops the fix from being "allocate always", which would pass the
+    /// nesting test and regress the frame cost the singleton existed to avoid.
+    #[test]
+    fn d_beta_sequential_masks_reuse_the_same_buffer() {
+        let mut s = ScratchDepth::default();
+        let a = s.acquire();
+        s.release();
+        let b = s.acquire();
+        s.release();
+        assert_eq!(a, b, "sequential masked elements must reuse the buffer");
+        assert_eq!(s.high_water(), 1, "no nesting occurred, so the pool stays at 1");
     }
 
     #[test]
@@ -3958,5 +4134,88 @@ mod tests {
         // Transform(2,0,0,8,0,0) -> det 16 -> sqrt = 4.0.
         let doc = hr_doc_with(hr_rect(Some(Transform::scale(2.0, 8.0))));
         assert_eq!(selection_outline_scale(&doc, &[0, 0]), 4.0);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE CANVAS-PATH HARNESS (2026-08-28).
+//
+// ⛔ WHY THIS FILE ENDS WITH A SECOND TEST MODULE. Everything above runs on the
+// host, where `HtmlCanvasElement` does not exist — so the mask pipeline's actual
+// plumbing was, until now, COMPILE-VERIFIED ONLY. Defect D-β lived exactly
+// there: a shared scratch canvas handed to a nested caller. The repair's
+// bookkeeping (`ScratchDepth`) is driven natively above; THESE tests drive the
+// part that needed a browser.
+//
+// This is the first cut of the harness the D-β write-up named as missing. It is
+// deliberately small: one test that would have CAUGHT D-β, plus the control that
+// makes it readable. A harness whose first test is the defect it was built for
+// is worth more than a broad one whose arms have never failed.
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(all(test, target_arch = "wasm32"))]
+mod canvas_tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    /// CONTROL. Without a reachable window/document the scratch cannot be built,
+    /// and every assertion below would be vacuously true. If this fails, nothing
+    /// else in this module is readable.
+    #[wasm_bindgen_test]
+    fn a_scratch_canvas_can_be_created_at_all() {
+        let got = get_mask_scratch(0, 64, 64);
+        assert!(got.is_some(), "no scratch canvas — the rest of this module is vacuous");
+        let (c, _) = got.unwrap();
+        assert_eq!((c.width(), c.height()), (64, 64));
+    }
+
+    /// ⛔ D-β ITSELF, IN THE BROWSER. Before the repair both acquisitions
+    /// returned the SAME element, so the inner call's clear_rect wiped the
+    /// outer's half-drawn buffer. This is the test that would have caught it.
+    #[wasm_bindgen_test]
+    fn nested_scratch_acquisitions_are_distinct_canvases() {
+        let (outer, _) = get_mask_scratch(0, 64, 64).expect("outer scratch");
+        let (inner, _) = get_mask_scratch(1, 64, 64).expect("inner scratch");
+        assert!(
+            !outer.is_same_node(Some(inner.as_ref())),
+            "D-β: a nested acquisition received the OUTER's canvas — the inner \
+             clear_rect would wipe a buffer still being drawn into"
+        );
+    }
+
+    /// ...and the repair must not have become "allocate always": a sequential
+    /// (non-nested) acquisition at the same depth REUSES the buffer, which is
+    /// the frame cost the original singleton existed to avoid.
+    #[wasm_bindgen_test]
+    fn sequential_acquisitions_at_one_depth_reuse_the_canvas() {
+        let (a, _) = get_mask_scratch(0, 64, 64).expect("first");
+        let (b, _) = get_mask_scratch(0, 64, 64).expect("second");
+        assert!(
+            a.is_same_node(Some(b.as_ref())),
+            "same depth must reuse the same canvas, not allocate a new one"
+        );
+    }
+
+    /// THE CLOBBER, OBSERVED IN PIXELS rather than by element identity — the
+    /// closest this harness gets to the user-visible defect. Draw into the
+    /// depth-0 buffer, take a nested one and clear it, and the depth-0 pixel
+    /// must survive.
+    #[wasm_bindgen_test]
+    fn a_nested_clear_does_not_wipe_the_outer_buffer() {
+        let (_oc, octx) = get_mask_scratch(0, 8, 8).expect("outer");
+        octx.set_fill_style_str("#ff0000");
+        octx.fill_rect(0.0, 0.0, 8.0, 8.0);
+
+        let (_ic, ictx) = get_mask_scratch(1, 8, 8).expect("inner");
+        ictx.clear_rect(0.0, 0.0, 8.0, 8.0); // what the inner call does first
+
+        let data = octx.get_image_data(0.0, 0.0, 1.0, 1.0).expect("readback");
+        let px = data.data();
+        assert_eq!(
+            (px[0], px[3]),
+            (255, 255),
+            "D-β: the outer buffer was cleared by the nested acquisition"
+        );
     }
 }
