@@ -1,12 +1,18 @@
-//! [`Canvas2dPainter`] — the production-backend STUB. It proves the [`Painter`]
-//! trait maps 1:1 onto `web_sys::CanvasRenderingContext2d` call sequences.
+//! [`Canvas2dPainter`] — the production Canvas2D backend for the [`Painter`]
+//! seam. It maps 1:1 onto `web_sys::CanvasRenderingContext2d` call sequences.
 //!
-//! SPIKE STATUS: this is COMPILE-CHECKED, not run. web-sys bindings compile on
-//! any target (the native `cargo test`/`cargo build` type-checks these bodies),
-//! but the methods only do anything inside a real browser, and this painter is
-//! NOT wired into `canvas/render.rs` — the FLIP is unratified, so production
-//! conversion is forbidden. If the council ratifies, PH1 wires this in as the
-//! mechanical 1:1 rewrite of today's call sites (R4 diff discipline).
+//! STATUS: WIRED, and EXECUTED. `canvas/render.rs` routes convertible leaf
+//! paints through this painter (PH1/PH2) and, since PH4, a fully convertible
+//! masked element through the A6 element bracket. The bodies are exercised in a
+//! real browser by the `wasm-canvas` lane, not merely compile-checked.
+//!
+//! ⛔ THE PARAGRAPH THIS REPLACES SAID "SPIKE STATUS: COMPILE-CHECKED, not run
+//! … NOT wired into `canvas/render.rs` — the FLIP is unratified, so production
+//! conversion is forbidden." Every clause of that is now false: the wasm lane
+//! runs these bodies (#46, #55), the leaf routes wired in PH1, the council
+//! ratified the Painter-seam flip on 2026-08-29 and the Captain ruled the
+//! production conversion GO on 2026-08-30. It is struck rather than softened,
+//! because a stale prohibition in a module header is read as a live fence.
 //!
 //! What it demonstrates:
 //! - every trait method has an obvious, allocation-light `ctx.*` lowering;
@@ -28,9 +34,6 @@ use web_sys::{CanvasRenderingContext2d, CanvasWindingRule};
 /// One open isolated layer (A6). The surface is a real offscreen canvas; the
 /// alpha and blend were consumed at `push_isolated_layer` and are spent ONCE at
 /// the closing composite.
-#[allow(dead_code)] // Not-yet-wired: constructed only by `open_layer`, which is dead in a
-// production wasm build because this painter is not yet wired into `canvas/render.rs`.
-// The browser tests construct both variants.
 enum LayerKind {
     /// A6 §3.1 — an isolated layer. `alpha`/`blend` are spent ONCE at the
     /// closing composite.
@@ -73,11 +76,41 @@ pub struct Canvas2dPainter<'a> {
     /// `product(group_alpha_stack) * paint_alpha` — the non-isolated compound
     /// (contract pin). Tracked here, never read back off the context.
     group_alpha_stack: Vec<f64>,
+    /// ⛔ THE FRAME THE BASE CONTEXT WAS ALREADY IN WHEN THIS PAINTER WAS
+    /// HANDED IT — `None` for a painter that owns its context from identity.
+    ///
+    /// PH4 (the production conversion) is why this exists, and the failure it
+    /// prevents is total rather than subtle. `open_layer` builds a FRESH
+    /// offscreen canvas, which starts at IDENTITY, and reproduces the frame by
+    /// replaying [`Self::state_stack`]. That is exact for a painter that has
+    /// seen every transform — the corpus driver and the browser tests, which
+    /// start at identity. It is WRONG for production: `canvas/render.rs`
+    /// establishes the view transform (pan/zoom) and every ancestor element's
+    /// transform with raw `ctx.transform` calls this painter never saw, so the
+    /// replay reproduces only the suffix and an isolated layer opens at the
+    /// wrong origin and scale. The body would then be blitted back in device
+    /// space — drawn in the wrong place, at full fidelity, with nothing
+    /// reporting it.
+    ///
+    /// It is a CONSTRUCTOR PARAMETER, not a read-back, so this file's standing
+    /// rule survives: the one place that reads a transform off a context is
+    /// `canvas::render`, which already does exactly that for the legacy masked
+    /// path (`read_ctx_transform`). The value crosses the seam explicitly.
+    base_frame: Option<Transform>,
 }
 
 impl<'a> Canvas2dPainter<'a> {
     pub fn new(ctx: &'a CanvasRenderingContext2d) -> Self {
-        Self { base: ctx, layers: Vec::new(), state_stack: Vec::new(), failed_layers: 0, group_alpha_stack: Vec::new() }
+        Self { base: ctx, layers: Vec::new(), state_stack: Vec::new(), failed_layers: 0, group_alpha_stack: Vec::new(), base_frame: None }
+    }
+
+    /// As [`Self::new`], but told the world transform `ctx` is ALREADY in.
+    ///
+    /// Use this whenever the context was positioned by a caller outside this
+    /// painter and the painter may open a layer — that is, from production.
+    /// See [`Self::base_frame`] for what goes wrong without it.
+    pub fn at_frame(ctx: &'a CanvasRenderingContext2d, frame: Transform) -> Self {
+        Self { base_frame: Some(frame), ..Self::new(ctx) }
     }
 
     /// The context every drawing op must use: the innermost open layer, or the
@@ -107,6 +140,13 @@ impl<'a> Canvas2dPainter<'a> {
             .get_context("2d").ok()??.unchecked_into();
         // §3.1: the layer opens in the parent's coordinate frame. Replay the
         // open transforms in order; the canvas composes them.
+        // ⛔ SEEDED WITH THE FRAME THE BASE CONTEXT ARRIVED IN, when there is
+        // one. The replay below can only reproduce what THIS painter pushed; a
+        // production caller has already applied the view transform and every
+        // ancestor element transform with raw `ctx.*` calls. See `base_frame`.
+        if let Some(t) = self.base_frame {
+            let _ = ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
+        }
         for t in &self.state_stack {
             let _ = ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
         }
@@ -606,6 +646,53 @@ mod a6_layer_tests {
     }
     fn black(p: &mut Canvas2dPainter, x: f64, w: f64) {
         p.fill_rect(Rect { x, y: 0.0, w, h: 8.0 }, &Brush::Solid(Color::BLACK), 1.0);
+    }
+
+    /// ⛔⛔ THE LAYER MUST OPEN IN THE FRAME THE BASE CONTEXT ARRIVED IN.
+    ///
+    /// PH4's blocker, in pixels. `open_layer` builds a FRESH canvas — identity
+    /// transform — and reproduces the frame by replaying the transforms THIS
+    /// painter was told about. A production caller has already applied the view
+    /// transform and every ancestor element transform with raw `ctx.*` calls
+    /// the painter never saw, so the replay reproduces only the suffix: the
+    /// layer draws at the wrong origin and is then blitted back in DEVICE space,
+    /// putting the element somewhere else on the canvas at full fidelity.
+    ///
+    /// ⚖️ ONE VARIABLE. Both arms use the same pre-translated context, the same
+    /// single fill at the same coordinates, the same push/pop. Only the
+    /// CONSTRUCTOR differs. Differing outputs would prove an arm can fire; the
+    /// single variable is what makes the difference attributable to the frame.
+    #[wasm_bindgen_test]
+    fn an_isolated_layer_opens_in_the_frame_the_base_context_arrived_in() {
+        let frame = Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 4.0, f: 0.0 };
+        // The frame is on the CONTEXT before either painter is built — exactly
+        // production's situation.
+        let arm = |told: bool| -> (u8, u8) {
+            let (_c, ctx) = surface(8, 8);
+            let _ = ctx.translate(4.0, 0.0);
+            {
+                let mut p = if told {
+                    Canvas2dPainter::at_frame(&ctx, frame)
+                } else {
+                    Canvas2dPainter::new(&ctx)
+                };
+                p.push_isolated_layer(1.0, BlendMode::Normal);
+                p.fill_rect(Rect { x: 0.0, y: 0.0, w: 2.0, h: 8.0 },
+                            &Brush::Solid(Color::WHITE), 1.0);
+                p.pop_isolated_layer();
+            }
+            // (1,1) is where an IDENTITY-framed layer lands; (5,1) is where the
+            // translated frame puts it.
+            (alpha_at(&ctx, 1.0, 1.0), alpha_at(&ctx, 5.0, 1.0))
+        };
+
+        // CONTROL FIRST: an unframed painter really does land in the wrong
+        // place, so the arm below is not passing for want of a live surface.
+        assert_eq!(arm(false), (255, 0),
+                   "an unframed layer should land at the identity origin -- if it \
+                    does not, this test is measuring something else");
+        assert_eq!(arm(true), (0, 255),
+                   "a framed layer must land where the base context is pointing");
     }
 
     /// CONTROL: an ordinary fill with no layer open lands on the base surface at

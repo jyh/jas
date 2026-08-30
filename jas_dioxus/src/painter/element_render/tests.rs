@@ -12,7 +12,7 @@
 //! `cargo test -p jas_dioxus regenerate_reference_goldens -- --ignored`.
 
 use super::{
-    element_needs_legacy, ellipse_painter_inputs, emit_element,
+    element_needs_legacy, ellipse_painter_inputs, emit_element, subtree_needs_legacy,
     emit_shape_paint, line_painter_inputs, path_painter_inputs, polygon_painter_inputs,
     polyline_painter_inputs, rect_painter_inputs, ConvGeom, ShapePaint,
 };
@@ -1302,15 +1302,23 @@ fn group_with_a_masked_child() -> Element {
 /// that has executed both halves since #55. It now asks the BACKEND, and a
 /// mask-capable backend emits the element bracket.
 ///
-/// ⚠️ WHAT CHANGES ON SCREEN, said out loud: a masked element under an alpha
-/// ancestor renders DIFFERENTLY. HEAD's legacy path gives `own²` with the
-/// ancestors DISCARDED — `set_global_alpha` REPLACES rather than multiplies —
-/// so a 0.5-opacity element in a 0.5-alpha group came out at 0.25 from the
-/// element alone while the group's 0.5 never applied at all. The bracket
-/// applies each factor ONCE: the body paints at the ancestor product, the
-/// element's own opacity rides the layer and is spent at the composite.
-/// Contract R4 otherwise converts only what preserves behaviour; §6.2 is the
-/// ratified exception, and this test is where it becomes observable.
+/// ⚠️ WHAT THIS TEST OBSERVES is the SHAPE of the emission and the alpha each
+/// op carries — the layer takes the element's own opacity, the body paints at
+/// the ancestor product. That is the contract, and it is what belongs here.
+///
+/// ⛔ WHAT IT DOES NOT OBSERVE, corrected 2026-08-30. This comment used to end
+/// "HEAD's legacy path gives `own²` with the ancestors DISCARDED … so a
+/// 0.5-opacity element in a 0.5-alpha group came out at 0.25". That was D-α,
+/// and it had been repaired in `canvas/render.rs` five days before this test
+/// was written (`mask_blit_alpha`, `c59e5349`). Worse, the example it named
+/// gives 0.25 under the defect AND under the law — the commit that fixed D-α
+/// says so in as many words — so the witness could not have separated them.
+/// ⇒ **A DISPLAY-LIST TEST CANNOT SEE THE LEGACY PATH AT ALL**, and a claim
+/// about what the other path does had no business being asserted from here.
+/// The real difference is which factor is ISOLATED, it needs a body that
+/// overlaps itself to show up, and it is measured where it can be:
+/// `canvas::render::ph4_conversion_tests`, in a browser, both paths, both
+/// directions.
 #[test]
 fn a_mask_capable_backend_now_emits_the_bracket_for_a_masked_group_child() {
     let g = group_with_a_masked_child();
@@ -1502,4 +1510,189 @@ fn a_masked_element_with_a_non_normal_blend_needs_the_effect_graph_too() {
         !element_needs_legacy(&masked(BlendMode::Multiply), all_caps()),
         "…and the SAME multiply element converts once the blend answer arrives"
     );
+}
+
+// ---------------------------------------------------------------------------
+// PH4 PRODUCTION ROUTING — the router is SHALLOW, and production is where that
+// becomes content loss
+// ---------------------------------------------------------------------------
+
+/// A freeform-gradient rect: convertible by nothing, on any backend. The one
+/// legacy-only leaf these tests need, built once.
+fn freeform_rect() -> Element {
+    let mut e = RectElem {
+        x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+        fill: fill(Color::WHITE), stroke: None,
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    };
+    e.fill_gradient = Some(Box::new(Gradient {
+        gtype: GradientType::Freeform, ..Gradient::default()
+    }));
+    Element::Rect(e)
+}
+
+/// A masked GROUP whose body subtree holds one convertible child and one
+/// legacy-only child. The group itself carries nothing legacy — which is the
+/// whole point.
+fn masked_group_with_a_legacy_child() -> Element {
+    use crate::geometry::element::Mask;
+    let mut g = GroupElem {
+        children: vec![
+            Rc::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None)),
+            Rc::new(freeform_rect()),
+        ],
+        common: common(),
+        isolated_blending: false,
+        knockout_group: false,
+    };
+    g.common.mask = Some(Box::new(Mask {
+        subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
+        clip: true, invert: false, disabled: false, linked: true, unlink_transform: None,
+    }));
+    Element::Group(g)
+}
+
+/// A masked rect whose MASK ARTWORK is legacy-only. The body is ordinary.
+fn masked_rect_with_a_legacy_mask() -> Element {
+    use crate::geometry::element::Mask;
+    let mut r = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    if let Element::Rect(e) = &mut r {
+        e.common.mask = Some(Box::new(Mask {
+            subtree: Box::new(freeform_rect()),
+            clip: true, invert: false, disabled: false, linked: true, unlink_transform: None,
+        }));
+    }
+    r
+}
+
+/// ⛔ THE HAZARD, MEASURED RATHER THAN ASSERTED FROM READING.
+///
+/// [`element_needs_legacy`] answers about ONE NODE. That is correct for the
+/// reference renderer, whose corpora are PH1-expressible by construction, and
+/// it is the reason the guard below has to exist for production: a document is
+/// not a corpus. This test drives the bracket at a document the shallow router
+/// says yes to and counts what reaches the painter.
+///
+/// It asserts the LOSS deliberately. A guard whose hazard is only described in
+/// prose is indistinguishable from one guarding nothing; this is the arm that
+/// makes [`subtree_needs_legacy`]'s red legible if someone ever deletes it.
+#[test]
+fn the_shallow_router_says_yes_to_a_masked_group_that_would_lose_a_child() {
+    let g = masked_group_with_a_legacy_child();
+
+    // 1. The shallow router — the one the REFERENCE renderer asks — says convert.
+    assert!(!element_needs_legacy(&g, all_caps()),
+            "the node itself carries nothing legacy; that is why the shallow \
+             answer cannot be the production answer");
+
+    // 2. …and the emission drops the legacy child ENTIRELY. The GROUP has two
+    //    children; the BODY span (everything before `PushMaskLayer`) carries
+    //    exactly one paint. That gap of one IS the loss, and nothing in the op
+    //    stream marks it.
+    assert_eq!(g.children().map(<[_]>::len), Some(2), "the document has two body children");
+    let got = ops(&g, 1.0);
+    let body_paints = got
+        .iter()
+        .take_while(|c| !matches!(c, Command::PushMaskLayer { .. }))
+        .filter(|c| matches!(c, Command::FillRect { .. }))
+        .count();
+    assert_eq!(body_paints, 1,
+               "two body children, one paint: the freeform child is gone and \
+                the bracket closed over the hole:\n{got:#?}");
+}
+
+/// THE GUARD. Production must ask about the WHOLE subtree, both halves.
+#[test]
+fn production_routing_refuses_a_masked_element_whose_body_subtree_needs_legacy() {
+    let g = masked_group_with_a_legacy_child();
+    assert!(subtree_needs_legacy(&g, all_caps()),
+            "a masked element with a legacy-only DESCENDANT must stay legacy in \
+             production, or that descendant is silently dropped");
+}
+
+/// ⛔ THE WORSE ARM, AND IT IS A DIFFERENT FAILURE, NOT A BIGGER ONE.
+///
+/// A dropped body child loses that child. A dropped MASK ARTWORK loses the
+/// WHOLE ELEMENT: `LuminanceClipIn` is `α_S ← α_S · M`, and artwork that paints
+/// nothing gives `M = 0` everywhere. The element disappears rather than
+/// degrades — so the mask subtree needs the same check, and it needs its own
+/// arm because a guard that walked only the body would pass every assertion
+/// above.
+#[test]
+fn production_routing_refuses_a_masked_element_whose_mask_subtree_needs_legacy() {
+    let r = masked_rect_with_a_legacy_mask();
+    assert!(!element_needs_legacy(&r, all_caps()),
+            "the shallow router does not look inside the mask either");
+    assert!(subtree_needs_legacy(&r, all_caps()),
+            "legacy-only MASK ARTWORK must keep the element on legacy; \
+             empty artwork means M = 0 and the element vanishes");
+}
+
+/// THE POSITIVE CONTROL. A guard that only ever refuses converts nothing and
+/// cannot be told from a `return true`.
+#[test]
+fn production_routing_accepts_a_fully_convertible_masked_element() {
+    assert!(!subtree_needs_legacy(&masked_rect(true, false), all_caps()),
+            "a masked element whose body AND mask are PH1-expressible must \
+             convert, or the production router is a constant");
+    // …and the backend answer still governs, deep or not.
+    assert!(subtree_needs_legacy(&masked_rect(true, false), Caps::NONE),
+            "the capability question survives the deep walk");
+}
+
+/// The deep walk must not change the answer for anything WITHOUT a mask — it is
+/// the masked path's guard, not a second router.
+#[test]
+fn the_deep_walk_agrees_with_the_shallow_one_on_the_reference_docs() {
+    for (name, doc) in reference_docs() {
+        for e in &doc {
+            assert_eq!(subtree_needs_legacy(e, all_caps()), element_needs_legacy(e, all_caps()),
+                       "{name}: the deep walk must not reclassify an unmasked \
+                        reference element");
+        }
+    }
+}
+
+/// OUTLINE MODE STAYS LEGACY, and it is not a backend question.
+///
+/// Production replaces both paints with a 1px black stroke on a transparent
+/// fill (`render.rs::apply_outline_style`) and there is no such lowering on the
+/// seam — so a converted outline element would render its NORMAL paints, which
+/// is a wrong picture rather than a missing one. Production already guards this
+/// at every converted leaf; the router carries it so the A6 bracket, which has
+/// no leaf to guard at, inherits the rule instead of re-deriving it.
+#[test]
+fn outline_visibility_needs_legacy_on_every_backend() {
+    use crate::geometry::element::Visibility;
+    let mut r = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    r.common_mut().visibility = Visibility::Outline;
+    assert!(element_needs_legacy(&r, all_caps()),
+            "outline mode has no lowering on the seam; no backend answer changes that");
+    assert!(subtree_needs_legacy(&r, all_caps()));
+
+    // ⛔ AND IT REACHES A DESCENDANT, which is the arm the shallow router
+    // cannot give production: an outline child inside a masked group would be
+    // painted with its normal fill under the bracket.
+    let mut child = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    child.common_mut().visibility = Visibility::Outline;
+    let mut g = GroupElem {
+        children: vec![Rc::new(child)],
+        common: common(),
+        isolated_blending: false,
+        knockout_group: false,
+    };
+    g.common.mask = Some(Box::new(crate::geometry::element::Mask {
+        subtree: Box::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
+        clip: true, invert: false, disabled: false, linked: true, unlink_transform: None,
+    }));
+    let g = Element::Group(g);
+    assert!(!element_needs_legacy(&g, all_caps()), "the group itself is not outline");
+    assert!(subtree_needs_legacy(&g, all_caps()),
+            "an outline DESCENDANT must keep the masked group on legacy");
+
+    // THE CONTROL: the same shapes at normal visibility convert.
+    let mut plain = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
+    plain.common_mut().visibility = Visibility::Preview;
+    assert!(!element_needs_legacy(&plain, all_caps()),
+            "…or this arm refuses everything and measures nothing");
 }
