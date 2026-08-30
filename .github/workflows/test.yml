@@ -250,18 +250,23 @@ jobs:
       # the lane stays green having executed nothing. The first cut ran the suite
       # TWICE to check that, which doubled the lane and let the two runs disagree;
       # `tee` under `pipefail` keeps the real exit status of the single run.
+      #
+      # ⛔ THE COUNT IS JUDGED AGAINST THE CRATE'S OWN SOURCE, NOT A FLOOR.
+      # Until 2026-08-30 this step ended in `[ "$n" -lt 4 ]`, a floor written
+      # when the lane held four tests. The lane now holds SEVENTEEN, so thirteen
+      # could have stopped being compiled with the lane still reporting success
+      # -- and `head -1` read ONE of the three reporting binaries and called it
+      # the lane. Raising 4 to 17 would rot the same way and teach the next
+      # reader to bump it; check_wasm_canvas_count.py derives BOTH sides instead
+      # (see its header). Self-test first: a check that can only pass is not a
+      # check, and this one is trusted for its RED.
       - name: Canvas-path tests in a real browser, and the count read back
         shell: bash
         run: |
           set -o pipefail
+          python3 scripts/check_wasm_canvas_count.py --self-test
           wasm-pack test --headless --chrome jas_dioxus 2>&1 | tee /tmp/wasm.log
-          n=$(grep -oE '[0-9]+ passed' /tmp/wasm.log | head -1 | grep -oE '[0-9]+' || true)
-          if [ -z "$n" ] || [ "$n" -lt 4 ]; then
-            echo "FAIL: expected at least 4 canvas tests to RUN, saw '${n:-none}'." >&2
-            echo "      A green lane that executed nothing is the shape this lane exists to end." >&2
-            exit 1
-          fi
-          echo "canvas lane ran $n test(s)"
+          python3 scripts/check_wasm_canvas_count.py --log /tmp/wasm.log
 
   genericity:
     name: Genericity policy
@@ -533,6 +538,17 @@ jobs:
         run: |
           python scripts/check_spec_mutation_coverage.py --self-test
           python scripts/check_spec_mutation_coverage.py
+
+      # The wasm lane itself is ubuntu-only (Chrome + wasm-pack), but its COUNT
+      # GATE is a source/log parser -- it globs .rs files with pathlib and reads
+      # them as UTF-8, which is exactly the shape that broke check_swift_copy_
+      # sites.py on Windows and nowhere else. So the self-test runs here rather
+      # than the script being written into EXEMPT: an exemption would be a
+      # promise that the platform cannot matter, and for a path-walking gate
+      # that promise is the one this repo has already had falsified once.
+      - name: wasm-canvas count gate — self-test (the lane it guards is ubuntu-only)
+        if: ${{ !cancelled() }}
+        run: python scripts/check_wasm_canvas_count.py --self-test
 
       - name: Structural gates
         if: ${{ !cancelled() }}
