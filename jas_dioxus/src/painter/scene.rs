@@ -207,6 +207,80 @@ pub fn build_synthetic_scene(p: &mut impl Painter, n: usize) {
 // A6 ruled a defect — and would then "pass" forever by describing the bug.
 // ---------------------------------------------------------------------------
 
+/// ⛔ A NON-NORMAL **GROUP** BLEND — the fixture a DECLARED GAP had been missing.
+///
+/// `direct2d/replay.rs` declares three gaps, and one of them —
+/// *"non-Normal blend needs an effect graph"* — fires ONLY on a `push_group`
+/// carrying a non-Normal mode. Measured 2026-08-29: **both `push_group` ops in
+/// the whole corpus were `normal`**, and the single non-Normal blend rode
+/// `push_isolated_layer`, landing in the isolated-layer gap instead. So that arm
+/// never fired, and an arm nothing drives is indistinguishable from one that
+/// cannot.
+///
+/// That is the SAME defect this corpus already repaired once: the A6 goldens
+/// landed because B1 had measured ZERO mask ops across 14 scenes, and the replay
+/// test's own comment says a stated limit *"is itself a stated limit of this
+/// measurement rather than evidence they work."* The mask half was fixed and the
+/// group-blend half was left standing in the same breath.
+///
+/// ⚠️ THIS DOES NOT ACTIVATE GROUP-LEVEL BLEND, and must not be read as doing
+/// so. The contract is explicit that a group's blend is inert by construction —
+/// leaf primitives inherit the innermost group's mode and a nested `push_group`
+/// resets it. This scene pins the OP STREAM: that a non-Normal mode survives
+/// recording on a group, so every backend must say what it does about one.
+pub fn build_group_blend_scene(p: &mut impl Painter) {
+    // A backdrop, so the group op is recorded in context rather than alone.
+    p.fill_rect(
+        Rect { x: 0.0, y: 0.0, w: 30.0, h: 30.0 },
+        &Brush::Solid(Color::rgb(0.2, 0.4, 0.8)),
+        1.0,
+    );
+    p.push_group(1.0, BlendMode::Multiply);
+    p.fill_rect(
+        Rect { x: 5.0, y: 5.0, w: 20.0, h: 20.0 },
+        &Brush::Solid(Color::rgb(0.9, 0.7, 0.1)),
+        1.0,
+    );
+    p.pop_group();
+}
+
+/// ⛔ AN ISOLATED LAYER WITH **NO MASK** — the state the corpus could not express.
+///
+/// Measured 2026-08-29: across the whole corpus `push_isolated_layer` and
+/// `push_mask_layer` both totalled 7. **Every isolated layer was paired with a
+/// mask**, so no fixture anywhere separated the two capabilities. That blindness
+/// is not hypothetical — it hid a state this codebase actually held:
+///
+///   * `Canvas2dPainter` from #47 until #55: isolated layers EXECUTED, mask ops
+///     still `unimplemented!()`. A full day in a state the corpus cannot describe.
+///   * and the state `direct2d` will pass through if it implements layers first,
+///     which is the natural order — the layer target IS the surface a mask eats
+///     into, so it must exist before the law that consumes it.
+///
+/// A corpus that can only say "the A6 bracket" as one unit forces every consumer
+/// to be equally coarse. This scene splits it.
+///
+/// THE BODY OVERLAPS ITSELF DELIBERATELY. Isolation's whole observable content
+/// is that the overlap does NOT compound — the layer's alpha is spent once at
+/// the composite, not per primitive. A single-rect body would pin the bracket
+/// while saying nothing about what isolation MEANS.
+pub fn build_a6_layer_without_mask_scene(p: &mut impl Painter) {
+    p.push_isolated_layer(0.6, BlendMode::Normal);
+    p.fill_rect(
+        Rect { x: 0.0, y: 0.0, w: 20.0, h: 20.0 },
+        &Brush::Solid(Color::rgb(0.2, 0.7, 0.4)),
+        1.0,
+    );
+    // Overlapping the first: inside the layer these compound at alpha 1.0, and
+    // the layer's 0.6 applies ONCE to the composited result.
+    p.fill_rect(
+        Rect { x: 10.0, y: 10.0, w: 20.0, h: 20.0 },
+        &Brush::Solid(Color::rgb(0.8, 0.2, 0.6)),
+        1.0,
+    );
+    p.pop_isolated_layer();
+}
+
 /// §6.1 — one scene per law variant. Kills the mask-shaped half of the vacuity
 /// B1 measured: ZERO mask ops across all 14 recorded scenes.
 pub fn build_a6_law_variants_scene(p: &mut impl Painter) {

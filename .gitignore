@@ -64,3 +64,18 @@ checker-report.json
 # native-ffi). The lane guard reads them; nothing tracks them.
 native-lane.log
 ffi-lane.log
+
+# S-B spike build output (prototypes/sb_winui). The ffi_spike's bin/obj are
+# already in the tree; these are not, and a WinUI restore drags in ~200MB.
+prototypes/sb_winui/bin/
+prototypes/sb_winui/obj/
+# GENERALISED 2026-08-28. The two lines above named ONE prototype, so building a
+# SIBLING prototype (sc_panel, on the S-C branches) left its bin/ and obj/
+# untracked-but-unignored -- and untracked files survive a checkout, so they
+# followed me onto this branch and I swept 3,380 lines of NuGet asset json into a
+# commit. #19 had already had to untrack the same outputs once ("SCC1: untrack
+# the build outputs I swept in with the report"), which is the tell: a rule
+# written per-directory gets re-broken by the next directory. Glob the class.
+prototypes/*/bin/
+prototypes/*/obj/
+prototypes/sb_winui/sb-verify.png

@@ -10,11 +10,25 @@
 //! PH1 begins converting `canvas/render.rs` to emit through this seam. The
 //! conversion is a mechanical 1:1 rewrite of today's `ctx.*` call sequences
 //! (R4 display-list-equivalence discipline), routed BY CAPABILITY: an element
-//! that needs a PH3/PH4 feature — an opacity mask, placed-glyph/type-on-path
-//! text, or a freeform gradient — stays on the legacy raw-ctx path unchanged
-//! until its phase lands. `Canvas2dPainter`'s mask/PlacedGlyphs bodies remain
-//! `unimplemented!()` and must never be reached in production (the legacy
-//! route guards them).
+//! that needs a feature the route in front of it cannot deliver stays on the
+//! legacy raw-ctx path.
+//!
+//! ⚖️ AND "THE ROUTE IN FRONT OF IT" MEANS A BACKEND, SINCE 08/29 (council row
+//! (e) = option (b)). The router asks [`Painter::supports`], because the two
+//! backends differ: `Canvas2dPainter` executes isolated layers (#47) and mask
+//! layers (#55); `Direct2DPainter` executes neither and answers NO, so masked
+//! elements stay legacy-routed THERE while converting on Canvas2D. The
+//! vocabulary it asks in is derived from the conformance corpus — see
+//! [`capability`].
+//!
+//! ⛔ THE SENTENCE THIS REPLACES SAID "`Canvas2dPainter`'s mask/PlacedGlyphs
+//! bodies remain `unimplemented!()` and must never be reached in production".
+//! Half of it went false when #55 landed the mask bodies and nobody struck it —
+//! a stale claim in the most-read header of this module, in the exact clause a
+//! reader takes on trust. PlacedGlyphs IS still `unimplemented!()` and is still
+//! kept off the seam by the router (text is PH3, and there is deliberately no
+//! capability for it: no backend answer unlocks shaping work that does not
+//! exist).
 //!
 //! # What the trait is
 //!
@@ -110,7 +124,19 @@
 //! winding; A4: paint-time alpha is an explicit per-paint parameter; A5: clip
 //! stays path-only and the seam carries no freeform-gradient policy).
 
+pub mod capability;
+pub mod corpus;
 pub mod element_render;
+// Test-gated with the driver it feeds. #56 landed it ungated and it has never
+// had a non-test consumer, which cost 12 dead-code warnings on every build; now
+// that `replay_drive` is its only caller, the gate follows the fact.
+#[cfg(test)]
+pub(crate) mod replay_decode;
+// The shared corpus DISPATCH and the capability cross-check. Test-gated: it is
+// an instrument, not a production path, and `capability_of` (which it consumes)
+// is gated the same way for the same reason.
+#[cfg(test)]
+pub(crate) mod replay_drive;
 pub mod recording;
 pub mod scene;
 pub mod sink;
@@ -341,6 +367,44 @@ pub enum TextRun {
 pub mod direct2d;
 
 pub trait Painter {
+    /// ⚖️ THE CAPABILITY QUERY (council 08/29, row (e) = option (b)). Can this
+    /// backend EXECUTE `cap`, or must a caller needing it take another route?
+    ///
+    /// # Why the seam carries this at all
+    ///
+    /// The capability router
+    /// ([`element_needs_legacy`](element_render::element_needs_legacy)) used to
+    /// ask only about the ELEMENT — "does this element need a mask?" — and that
+    /// question has no answer that is right for both backends.
+    /// `Canvas2dPainter` executes isolated layers (#47) and mask layers (#55);
+    /// `Direct2DPainter` executes neither. One element-only answer therefore
+    /// either routes Canvas2D to legacy forever or routes Direct2D into an
+    /// `unimplemented!()`. The router has to ask the BACKEND, so the backend
+    /// has to be askable.
+    ///
+    /// # What a `true` means, precisely
+    ///
+    /// **The recorded command executes through this seam rather than falling
+    /// into an unimplemented or unsupported arm.** It is NOT a claim about
+    /// pixels — what a scene should look like is the goldens' job. That narrow
+    /// meaning is chosen because it is the one both backends already MEASURE
+    /// against the same corpus (D2D's `ReplayReport::unsupported`, the Canvas2D
+    /// corpus driver's refusal list), so every answer here is cross-checked by
+    /// a fixture rather than trusted.
+    ///
+    /// # ⛔ NO DEFAULT BODY, DELIBERATELY
+    ///
+    /// A default would be a claim made by OMISSION — the shape where a backend
+    /// that never considered the question still answers, and nobody's diff ever
+    /// shows the answer being given. `true` by default would route a new
+    /// backend into a panic; `false` by default would quietly route it to
+    /// legacy forever and look identical to a considered decision. Both are
+    /// invisible. Every impl states its own answer, and a new backend does not
+    /// compile until it does.
+    ///
+    /// See [`capability`] for how the vocabulary is derived from the fixtures.
+    fn supports(&self, cap: capability::Capability) -> bool;
+
     /// Fill a path. `winding` is `EvenOdd` for boolean-op output that carries
     /// holes (AMENDMENT A3, RATIFIED 2026-07-23: fills carry a winding, not
     /// only `clip`). `paint_alpha` is the pinned paint-time `globalAlpha`

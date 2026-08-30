@@ -16,19 +16,32 @@
 //!    the way `render.rs` does (a folded multiply, D3: the `globalAlpha`
 //!    getter dies), so a future PH2 driver can adopt it wholesale.
 //!
-//! 2. **The capability router** [`element_needs_legacy`] and the byte-identical
+//! 2. **The capability router** [`element_needs_legacy`] — which takes the
+//!    BACKEND's answers, not only the element — and the byte-identical
 //!    leaf-paint helper [`line_painter_inputs`] — the PH3 production slice.
-//!    `render.rs` routes an element that needs a PH3/PH4 feature (opacity mask,
-//!    type-on-path / placed-glyph text, freeform gradient) to the legacy
-//!    raw-`ctx` path unchanged; the one PH1 leaf paint that is proven
+//!    `render.rs` routes an element that needs a PH3 feature (type-on-path /
+//!    placed-glyph text, freeform gradient) to the legacy raw-`ctx` path
+//!    unchanged. ⚖️ AN OPACITY MASK IS NO LONGER IN THAT LIST: since PH4 a
+//!    masked element whose WHOLE SUBTREE converts takes the A6 bracket in
+//!    production too — see [`subtree_needs_legacy`], which is the router
+//!    production asks and which this shallow one is not a substitute for. The
+//!    one PH1 leaf paint that is proven
 //!    byte-identical to `render.rs` today — a plain center-aligned, solid,
 //!    arrowless [`Line`](Element::Line) — routes through a
 //!    [`Canvas2dPainter`](super::canvas2d::Canvas2dPainter). See
 //!    `line_painter_inputs` for the exact equivalence argument.
 //!
-//! DELIBERATELY EXCLUDED from PH1 (their phases own them): opacity masks (PH4),
-//! type-on-path / placed-glyph text (PH3), freeform gradients (a build-time
-//! lowering concern the seam never carries — contract A5).
+//! EXCLUDED, AND FOR THREE DIFFERENT REASONS — the distinction matters because
+//! only one of them can ever change by itself:
+//! - **opacity masks** — NO LONGER EXCLUDED CATEGORICALLY (council 08/29, row
+//!   (e) = option (b)). A masked element takes the A6 element bracket on a
+//!   backend that answers yes to both halves, and stays legacy on one that does
+//!   not. That is a BACKEND question now, asked through
+//!   [`Painter::supports`](super::Painter::supports).
+//! - **type-on-path / placed-glyph text** (PH3) — net-new shaping work that
+//!   exists in no backend, so there is deliberately no capability for it.
+//! - **freeform gradients** — a build-time lowering concern the seam never
+//!   carries (contract A5); no backend answer unlocks it either.
 
 use crate::geometry::element::{
     Arrowhead, Color, Element, EllipseElem, Fill, FillRule, Gradient, GradientType,
@@ -36,6 +49,7 @@ use crate::geometry::element::{
     Visibility,
 };
 
+use super::capability::{Capability, Caps};
 use super::{
     Brush, ColorStop, EllipseArc, LinearGradient, Painter, RadialGradient, Rect, StrokeStyle,
     TextRun,
@@ -45,43 +59,71 @@ use super::{
 // Capability router (PH3 production slice)
 // ---------------------------------------------------------------------------
 
-/// Does this element need a capability the PH1 `Painter` surface cannot
-/// express? Such elements STAY on the legacy raw-`ctx` path in the production
-/// conversion (contract R4: convert only what is behavior-preserving).
+/// Does this element need something the route in front of it cannot deliver?
+/// Such elements STAY on the legacy raw-`ctx` path (contract R4: convert only
+/// what is behavior-preserving).
 ///
-/// PH1 keeps on legacy:
-/// - **opacity masks** (an active [`Mask`](crate::geometry::element::Mask)) —
-///   PH4 owns the scratch/luminance pipeline;
-/// - **freeform gradients** on fill or stroke — a build-time lowering concern
-///   the seam never carries (contract A5); today they render unpainted;
-/// - **text** ([`Text`](Element::Text)/[`TextPath`](Element::TextPath)) and
-///   **live** elements — placed-glyph/type-on-path shaping is PH3 net-new work;
-///   the FastRun fast path is proven in the reference renderer but the
-///   production `render.rs` text pipeline (tspans, `letterSpacing` via Reflect,
-///   per-glyph rotate, baseline shift) is not mechanically 1:1 yet.
-pub fn element_needs_legacy(elem: &Element) -> bool {
-    // ⛔ ACTIVE OPACITY MASK — STILL LEGACY, AND THE PRODUCER EXISTING DOES NOT
-    // CHANGE THAT. `emit_element` now emits the full A6 element bracket for a
-    // masked element (see `emit_masked_element`), so §6.2's law finally has a
-    // producer and is asserted through one. Routing production at it is a
-    // SEPARATE step and is BLOCKED IN THE BACKEND:
+/// ⚖️ IT TAKES `caps` BECAUSE THE ANSWER IS NOT A PROPERTY OF THE ELEMENT ALONE
+/// (council 08/29, row (e) = option (b)). This router routes THE SEAM, and the
+/// seam has two backends: `Canvas2dPainter` executes isolated layers (#47) and
+/// mask layers (#55); `Direct2DPainter` executes neither. Asking only about the
+/// element forces one answer onto both — pinning Canvas2D to legacy forever, or
+/// routing Direct2D into an `unimplemented!()`. So the caller passes what the
+/// backend it is about to paint through actually answers ([`Caps::of`]).
+///
+/// THE TWO CLAUSES ARE DIFFERENT KINDS OF "NO", and the distinction is
+/// load-bearing:
+///
+/// - **backend questions** — an active [`Mask`](crate::geometry::element::Mask)
+///   needs the A6 element bracket, which needs BOTH
+///   [`Capability::IsolatedLayers`] and [`Capability::MaskLayers`]. Half the
+///   bracket is not the bracket: A6 §3.2 makes a mask legal only inside an
+///   isolated layer, so a backend with layers and no masks — Canvas2D from #47
+///   to #55, and the state Direct2D will pass through — must stay legacy. The
+///   corpus can express that state only because `a6_layer_no_mask.json` exists;
+///   see [`capability`](crate::painter::capability).
+/// - **not backend questions, and there is no capability for them** — a
+///   freeform gradient is a build-time lowering concern that never crosses the
+///   seam (contract A5); text/type-on-path is PH3 net-new shaping work; the
+///   `*_painter_inputs` mirrors below are properties of the two-paint seam
+///   itself. No backend answer unlocks any of these, and inventing a capability
+///   for them would ask backends a question they cannot answer.
+pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
+    // ⛔ AN ACTIVE OPACITY MASK IS NOW A QUESTION ABOUT THE BACKEND, AND THIS IS
+    // THE FLIP. It used to be an unconditional `return true` — correct while
+    // `Canvas2dPainter::push_mask_layer` was `unimplemented!()`, and stale from
+    // the moment #55 landed, because nothing about the ELEMENT had ever been
+    // the reason. #47 gave the layer half, #55 the mask half; what was missing
+    // was a way to ask, and asking is what option (b) added.
     //
-    //   `Canvas2dPainter::push_mask_layer` / `pop_mask_layer` are still
-    //   `unimplemented!()`. #47 landed the LAYER-TARGET half of the backend —
-    //   `push_isolated_layer` / `pop_isolated_layer` execute — but the MASK
-    //   half is PH4's scratch/luminance pipeline and does not exist.
-    //
-    // Flipping this clause today would route every masked element into that
-    // panic. So the clause stays, deliberately, and this comment is the reason
-    // rather than a TODO: backend, THEN the router.
-    if elem
-        .common()
-        .mask
-        .as_ref()
-        .map(|m| !m.disabled)
-        .unwrap_or(false)
-    {
-        return true;
+    // ⚠️ THE FLIP IS A RATIFIED BEHAVIOUR CHANGE (A6 §6.2), NOT A REFACTOR: a
+    // masked element whose body OVERLAPS ITSELF renders DIFFERENTLY once it
+    // takes the bracket. See `emit_masked_element` for the law — including the
+    // correction to what this comment used to blame it on (D-α, which was
+    // already repaired in production when the claim was written).
+    if let Some(_mask) = active_mask(elem) {
+        // WHAT THE BRACKET WILL ASK OF THE BACKEND, built as a SET and compared
+        // whole. `emit_masked_element` emits
+        // `push_isolated_layer(elem.opacity(), elem.common().mode)` — the ONLY
+        // place a blend crosses this seam (groups fold their alpha and emit no
+        // `push_group`, per D3). So an element whose own mode is non-Normal
+        // needs the effect graph as well as the layer and the mask.
+        //
+        // ⛔ THE BLEND CLAUSE IS NOT DECORATION — it is condition (i) at the
+        // routing end. Without it, a masked element carrying `multiply` routes
+        // to any backend that answers yes to layers+masks, and a backend that
+        // opens the layer while never reading its `blend` DISCARDS the multiply
+        // with nothing reporting it. Refusing to route is the only protection
+        // the router can give against a silent discard.
+        let mut required = Caps::NONE
+            .with(Capability::IsolatedLayers)
+            .with(Capability::MaskLayers);
+        if elem.common().mode != crate::painter::BlendMode::Normal {
+            required = required.with(Capability::NonNormalBlend);
+        }
+        if !caps.supplies(required) {
+            return true;
+        }
     }
     // Freeform gradient on fill or stroke (never crosses the seam).
     if elem
@@ -100,6 +142,18 @@ pub fn element_needs_legacy(elem: &Element) -> bool {
     }
     // Text / type-on-path / live geometry.
     if matches!(elem, Element::Text(_) | Element::TextPath(_) | Element::Live(_)) {
+        return true;
+    }
+    // OUTLINE MODE — a seam property, in the same family as the
+    // `*_painter_inputs` mirrors below rather than a backend question. There is
+    // no outline lowering on the Painter: `emit_element` paints fill/stroke
+    // from the element's own paints, and outline mode replaces BOTH with a
+    // 1px black stroke and a transparent fill (`render.rs::apply_outline_style`).
+    // Production already guards it at every converted leaf (`let converted = if
+    // outline { false } else ...`); stating it here puts the rule in the router
+    // instead of in five copies at the call sites, and keeps the reference
+    // goldens from modelling a route production never takes.
+    if elem.visibility() == Visibility::Outline {
         return true;
     }
     // PH2 production-routing mirror: an element whose `*_painter_inputs` would
@@ -124,6 +178,52 @@ pub fn element_needs_legacy(elem: &Element) -> bool {
         }
         _ => false,
     }
+}
+
+/// **The PRODUCTION router.** Does this element, ITS WHOLE SUBTREE, and (when
+/// it carries an active mask) THE MASK ARTWORK'S whole subtree, convert on
+/// `caps`?
+///
+/// ⛔ WHY A SECOND FUNCTION AND NOT A DEEPER [`element_needs_legacy`].
+/// The shallow answer is the RIGHT one for the reference renderer: its corpora
+/// are PH1-expressible by construction, and its goldens exist to pin one
+/// element's lowering. It is the WRONG one for production, and the difference
+/// is not a matter of degree — it is content loss:
+///
+/// - **A legacy-only DESCENDANT of a masked element is dropped.**
+///   [`emit_element`] returns without painting for an element that needs
+///   legacy, so a masked group holding a freeform-gradient child emits the
+///   bracket and simply omits the child. Nothing reports it.
+/// - **Legacy-only MASK ARTWORK deletes the ELEMENT.** `LuminanceClipIn` is
+///   `α_S ← α_S · M`; artwork that paints nothing gives `M = 0` everywhere, so
+///   the masked element vanishes rather than degrades. This is a DIFFERENT
+///   failure from the first, which is why it has its own arm in the tests.
+///
+/// Neither can happen on the leaf-paint routes production already takes: those
+/// convert ONE paint of ONE element and fall back in place. The A6 bracket is
+/// the first production route that swallows a subtree, so it is the first that
+/// needs to ask about one.
+///
+/// ⚠️ VISIBILITY IS NOT SPECIAL-CASED, DELIBERATELY. An `Invisible` descendant
+/// paints nothing on either path and could safely be skipped; it is walked
+/// anyway, because the only cost of walking it is that a document converts less
+/// often, and the only cost of skipping it wrongly is a silent divergence. The
+/// conservative direction here is the legacy one — it is what ships today.
+pub fn subtree_needs_legacy(elem: &Element, caps: Caps) -> bool {
+    if element_needs_legacy(elem, caps) {
+        return true;
+    }
+    if let Some(m) = active_mask(elem) {
+        if subtree_needs_legacy(&m.subtree, caps) {
+            return true;
+        }
+    }
+    if let Some(children) = elem.children() {
+        if children.iter().any(|c| subtree_needs_legacy(c, caps)) {
+            return true;
+        }
+    }
+    false
 }
 
 /// A stroke aligned inside/outside rather than centered (RP3 helper).
@@ -511,13 +611,32 @@ fn active_mask(elem: &Element) -> Option<&crate::geometry::element::Mask> {
 ///
 /// ⛔ THIS IS NOT BEHAVIOR-PRESERVING, AND THAT IS RATIFIED, NOT OVERLOOKED.
 /// Contract R4 converts only what is behavior-preserving; A6 §6.2 deliberately
-/// pins a law HEAD violates. HEAD renders a masked element inside an alpha
-/// group at `own²`, because `set_global_alpha` REPLACES rather than multiplies,
-/// so the ancestors' contribution is discarded and the element's own opacity is
-/// applied twice. The bracket applies each factor ONCE. ⇒ Converting a masked
-/// element under an alpha ancestor CHANGES what is drawn — to the ratified law.
-/// It is stated here because a reader of a diff would otherwise have to
-/// rediscover it.
+/// pins a law the legacy composite violates.
+///
+/// ⚠️ AND IT IS NOT THE `own²` DEFECT — THAT SENTENCE WAS STALE WHEN IT WAS
+/// WRITTEN, AND IS CORRECTED HERE. It read: "HEAD renders a masked element
+/// inside an alpha group at `own²` … the ancestors' contribution is discarded".
+/// That was D-α, and it was repaired in `canvas/render.rs` on 2026-08-24
+/// (`mask_blit_alpha`, commit `c59e5349`) — five days before this comment was
+/// authored. Production has rendered `ancestors × own` ever since. The example
+/// the claim travelled with (own 0.5 in a 0.5 group) yields 0.25 under BOTH the
+/// defect and the law, which is precisely why nobody re-derived it: **the
+/// witness offered for the change could not have distinguished it.**
+///
+/// WHAT ACTUALLY CHANGES, measured in headless Chrome on 2026-08-30
+/// (`canvas::render::ph4_conversion_tests`): **which factor is isolated.**
+///
+/// ```text
+///                        the element's own opacity     the ancestor product
+///   legacy composite     per-primitive (compounds)     once, on the scratch
+///   A6 bracket           once, at the composite        per-primitive (compounds)
+/// ```
+///
+/// The contract pins group alpha as NON-isolated and A6 makes the masked
+/// element an ISOLATED layer carrying its own opacity; the legacy composite has
+/// both the wrong way round. For a single-primitive body the two agree exactly
+/// at `ancestors × own` — they diverge, in BOTH directions, only where the
+/// masked element's body overlaps itself.
 fn emit_masked_element(
     p: &mut dyn Painter,
     elem: &Element,
@@ -560,6 +679,16 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
     if elem.visibility() == Visibility::Invisible {
         return;
     }
+    // ⛔ THE PRECONDITION IS ENFORCED, NOT ASSUMED, AND THIS IS THE ONE PLACE.
+    // This function's contract has always read "assumes `!element_needs_legacy`;
+    // a legacy-only element paints nothing" — a caller's duty, dischargeable
+    // only while the answer was a constant. It is a question about the BACKEND
+    // now, so the function that has the backend in its hand is the one that asks.
+    // Every caller, including the group-children loop below, is covered by this
+    // single check rather than by a copy of it.
+    if element_needs_legacy(elem, Caps::of(&*p)) {
+        return;
+    }
     // AMENDMENT A6 — an element with an ACTIVE mask is emitted as the element
     // bracket, not as a bare body. See `emit_masked_element` for the derivation.
     if let Some(mask) = active_mask(elem) {
@@ -586,10 +715,15 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64) {
     match elem {
         Element::Group(_) | Element::Layer(_) => {
             if let Some(children) = elem.children() {
+                // The router is NOT consulted here: `emit_element` asks it, once,
+                // for every element including these children. Filtering here as
+                // well was redundant by construction — and a mutation pass proved
+                // it: replacing this site's capability read with a hardcoded
+                // all-yes changed no test, because the check one frame in caught
+                // every case. Two guards with the same predicate cannot both be
+                // driven, and the undriven one is the one that rots.
                 for child in children {
-                    if !element_needs_legacy(child) {
-                        emit_element(p, child, eff);
-                    }
+                    emit_element(p, child, eff);
                 }
             }
         }

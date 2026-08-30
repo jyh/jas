@@ -167,5 +167,13 @@ windows = { version = "0.62", optional = true, features = [
     "Win32_Graphics_Imaging",
     "Win32_Graphics_Dxgi_Common",
     "Win32_System_Com",
+    # FOR THE TESTS, NOT FOR PRODUCTION -- and the distinction is worth the line.
+    # The swapchain route (surface.rs) receives a DXGI surface the HOST created
+    # and reaches its device via IDXGIDeviceSubObject::GetDevice, so shipping
+    # code never calls D3D11CreateDevice. The tests must FABRICATE a device to
+    # have a surface at all, and they use the WARP software adapter so they need
+    # no GPU and can run on a headless runner.
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
 ] }
 windows-numerics = { version = "0.3", optional = true }
