@@ -650,7 +650,10 @@ def tree_mode(write: bool) -> int:
     found = tree_findings()
     keys = {(f, line_sha(line)) for f, _, line in found}
     if write:
-        with open(BASELINE, "w", encoding="utf-8") as fh:
+        # newline="" because this file is READ BACK and compared by line sha:
+        # a text write on Windows emits CRLF, every sha changes, and the ratchet
+        # would report the whole baseline as new residue on that platform alone.
+        with open(BASELINE, "w", encoding="utf-8", newline="") as fh:
             fh.write("# private_paths_baseline.tsv -- ACCEPTED residue for the tree ratchet "
                      "(check_private_paths.py --tree).\n# file<TAB>line-sha16<TAB>what. "
                      "Shrink it after a repair with --tree --write-baseline; a growth is a "
