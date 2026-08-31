@@ -177,7 +177,13 @@ and disabling does not restore linkage.
 An opacity mask composites the element body against the mask subtree's
 rendered alpha channel. Writing `E(x, y)` for the element's alpha at a
 pixel, `M(x, y)` for the mask subtree's rendered alpha, and `B` for the
-mask subtree's bounding box:
+mask subtree's bounding box — like `M`, `B` is a fact about the mask AS
+RENDERED: the axis-aligned bounds of the subtree AFTER the mask's
+effective transform (linked: the element's own; unlinked: the captured
+`unlink_transform`), in the frame the element composites in. Never the
+untransformed bounds, and never the transformed rect as a region (a
+rotation makes that non-axis-aligned). Ruled 2026-08-31; renderers derive
+`B` with one shared corner-mapping helper per port:
 
 | `clip` | `invert` | Output alpha at `(x, y)`                                    |
 |--------|----------|-------------------------------------------------------------|

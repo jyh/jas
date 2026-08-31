@@ -1556,23 +1556,13 @@ fn parse_path_value(val: &serde_json::Value) -> Option<crate::document::document
 // Pure 2x3 transform math mirroring the Python reference (effects.py).
 
 /// AABB (x, y, w, h) of `local_bbox`'s four corners mapped through `m`.
+/// One copy: `geometry::element::aabb_through` (it also carries the A6 §3.3
+/// mask-bbox contract, so a drift here would split the panel from the seam).
 fn prop_aabb_through(
     local_bbox: (f64, f64, f64, f64),
     m: &crate::geometry::element::Transform,
 ) -> (f64, f64, f64, f64) {
-    let (bx, by, bw, bh) = local_bbox;
-    let mut min_x = f64::INFINITY;
-    let mut min_y = f64::INFINITY;
-    let mut max_x = f64::NEG_INFINITY;
-    let mut max_y = f64::NEG_INFINITY;
-    for (px, py) in [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)] {
-        let (x, y) = m.apply_point(px, py);
-        min_x = min_x.min(x);
-        min_y = min_y.min(y);
-        max_x = max_x.max(x);
-        max_y = max_y.max(y);
-    }
-    (min_x, min_y, max_x - min_x, max_y - min_y)
+    crate::geometry::element::aabb_through(local_bbox, m)
 }
 
 /// Scale the element's LOCAL axes by (rx, ry) (post-multiply, preserving

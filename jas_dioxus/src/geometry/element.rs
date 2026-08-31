@@ -1874,6 +1874,37 @@ fn path_bounds(d: &[PathCommand]) -> Bounds {
     (min_x, min_y, max_x - min_x, max_y - min_y)
 }
 
+/// Axis-aligned box of `b`'s four corners mapped through `t` — the repo's one
+/// meaning of "a bbox through a transform", shared with the Python reference's
+/// `_aabb_through` and the Properties-panel evaluated-bbox family.
+///
+/// ⚖️ This is what carries A6 §3.3's ruled contract (the helm's design word,
+/// 2026-08-31): the reveal law's precomputed bbox is the axis-aligned bounds
+/// OF the transformed mask subtree — `bounds(mask_xf · subtree)`, never the
+/// transform of its bounds as a region, which a rotation makes inexpressible
+/// in an axis-aligned `Rect`. Applied to the subtree's own bounds this is
+/// exact for every axis-preserving transform and for any subtree whose
+/// geometry reaches its bbox corners (every rect mask); for a rotated subtree
+/// that does not, it is the box of the transformed BOUNDS — a superset of the
+/// transformed geometry's box, the same over-approximation the evaluated-bbox
+/// family already makes. Both mask paths call this one function, so they
+/// cannot disagree with each other.
+pub fn aabb_through(b: Bounds, t: &Transform) -> Bounds {
+    let (bx, by, bw, bh) = b;
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for (px, py) in [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)] {
+        let (x, y) = t.apply_point(px, py);
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    }
+    (min_x, min_y, max_x - min_x, max_y - min_y)
+}
+
 fn children_bounds(children: &[Rc<Element>]) -> Bounds {
     if children.is_empty() {
         return (0.0, 0.0, 0.0, 0.0);
@@ -5491,6 +5522,31 @@ mod rect_promotion_preservation_tests {
     /// The corner runs are the machine-readable answer to "which emitted
     /// points belong to corner i" — the mapping `Controller::move_selection`
     /// needs to keep a multi-sample drag on the corner it started on.
+    /// `aabb_through` is the one carrier of "a bbox through a transform"
+    /// (Properties panel AND the A6 §3.3 mask bbox). The rotation arm is the
+    /// contract's discriminating case: the box of the transformed corners,
+    /// never the transformed box as a region.
+    #[test]
+    fn aabb_through_boxes_the_transformed_corners() {
+        let b = (4.0, 0.0, 8.0, 8.0);
+        let id = Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 0.0, f: 0.0 };
+        assert_eq!(aabb_through(b, &id), b);
+
+        let shift = Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 4.0, f: -1.0 };
+        assert_eq!(aabb_through(b, &shift), (8.0, -1.0, 8.0, 8.0));
+
+        // 45° about the box's own centre (8,4): the corners land 4√2 out along
+        // the axes, so the AABB is the diamond's box, centred where it was.
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let rot = Transform { a: s, b: s, c: -s, d: s, e: 8.0 - 4.0 * s, f: 4.0 - 12.0 * s };
+        let (x, y, w, h) = aabb_through(b, &rot);
+        let r = 8.0 * s; // 4√2
+        for (got, want) in [(x, 8.0 - r), (y, 4.0 - r), (w, 2.0 * r), (h, 2.0 * r)] {
+            assert!((got - want).abs() < 1e-9, "expected the diamond's box, got \
+                     ({x}, {y}, {w}, {h})");
+        }
+    }
+
     #[test]
     fn corner_runs_are_four_equal_runs_in_cp_order() {
         let square = rounded_rect_corner_runs(0.0, 0.0, 100.0, 60.0, 0.0, 0.0);

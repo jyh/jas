@@ -118,19 +118,11 @@ public func propertiesPanelLiveOverrides(model: Model) -> [String: Any] {
 
 // MARK: - Part B.2: editing (apply a field edit back to the selection)
 
-/// AABB of `local`'s four corners mapped through `m`.
+/// AABB of `local`'s four corners mapped through `m`. One copy:
+/// `Geometry.aabbThrough` (it also carries the A6 §3.3 mask-bbox contract,
+/// so a drift here would split the panel from the renderer).
 private func propAABB(_ local: BBox, _ m: Transform) -> BBox {
-    let x0 = local.x, y0 = local.y
-    let x1 = local.x + local.width, y1 = local.y + local.height
-    let pts: [(Double, Double)] = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
-    var minX = Double.infinity, minY = Double.infinity
-    var maxX = -Double.infinity, maxY = -Double.infinity
-    for (px, py) in pts {
-        let (x, y) = m.applyPoint(px, py)
-        minX = min(minX, x); minY = min(minY, y)
-        maxX = max(maxX, x); maxY = max(maxY, y)
-    }
-    return (minX, minY, maxX - minX, maxY - minY)
+    aabbThrough(local, m)
 }
 
 /// Scale local axes by (rx, ry) keeping the evaluated bbox top-left fixed.

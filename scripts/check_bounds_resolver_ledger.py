@@ -137,7 +137,7 @@ LEDGER: dict[str, dict[str, str]] = {
             "NOT REACHABLE — `tuple_bounds`, called only from the "
             "`Element::Line` and `Element::Path` arms, where the receiver is "
             "that concrete kind.",
-        "let (bx, by, bw, bh) = mask.subtree.bounds();":
+        "None => mask.subtree.bounds(),":
             "REACHABLE, UNCONVERTED — and it is the SAME SITE as "
             "`canvas/render.rs`'s, deliberately. A6's element bracket lowers "
             "`(clip:false, invert:false)` to `AlphaRevealOutsideBbox { bbox }`, "
@@ -151,10 +151,15 @@ LEDGER: dict[str, dict[str, str]] = {
             "reconcile, not a fix. The open question is unchanged and belongs "
             "to the same stone: MASKS.md does not say whether an instance may "
             "BE a mask, and neither renderer should decide that by accident. "
-            "⚠️ NOT YET LIVE: `element_needs_legacy` still routes every masked "
-            "element to legacy (Canvas2dPainter's mask ops are unimplemented), "
-            "so this site is reachable in the REFERENCE renderer today and "
-            "becomes production-reachable only when PH4's backend lands.",
+            "LIVE since PH4's production conversion (2026-08-30); this is the "
+            "untransformed-mask arm of the bbox computation.",
+        "Some(t) => crate::geometry::element::aabb_through(mask.subtree.bounds(), t),":
+            "REACHABLE, UNCONVERTED — the transformed-mask arm of the same "
+            "site (the ruled A6 §3.3 contract, 2026-08-31: bounds taken "
+            "through the mask's effective transform). Same verdict, same "
+            "stone: an instance-built mask still yields a zero box — here "
+            "mapped through the transform, still degenerate — and the "
+            "instance-as-mask question still belongs to MASKS.md.",
     },
     "tools/yaml_tool.rs": {
         "let (lx, ly, lw, lh) = elem.geometric_bounds(); // LOCAL geometry, no stroke":
@@ -169,12 +174,14 @@ LEDGER: dict[str, dict[str, str]] = {
     "workspace/app_state.rs": {},   # Align To key-object designation — resolved
     "document/document.rs": {},     # Document::bounds — resolved (FITPHANTOM)
     "canvas/render.rs": {
-        "let (bx, by, bw, bh) = mask.subtree.bounds();":
-            "REACHABLE, UNCONVERTED — the mask subtree's bbox clip. A mask "
-            "built from an instance clips to a rect at the origin, i.e. hides "
-            "the masked element entirely. Rare enough to want a repro before "
-            "a fix, and MASKS.md does not say whether an instance may BE a "
-            "mask at all.",
+        "let b = mask.subtree.bounds();":
+            "REACHABLE, UNCONVERTED — the mask subtree's bbox clip (since "
+            "2026-08-31 taken through the mask's effective transform per the "
+            "ruled A6 §3.3 contract, which changes nothing for this verdict). "
+            "A mask built from an instance clips to a rect at the origin, "
+            "i.e. hides the masked element entirely. Rare enough to want a "
+            "repro before a fix, and MASKS.md does not say whether an "
+            "instance may BE a mask at all.",
         "let b = elem.bounds();":
             "NOT REACHABLE — gradient bbox inside the `Element::Path` arm.",
         "crate::painter::element_render::path_painter_inputs(e, elem.bounds())":
