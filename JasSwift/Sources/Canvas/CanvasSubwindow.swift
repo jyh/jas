@@ -1171,6 +1171,27 @@ private func drawElementWithMask(
     // ``effectiveMaskTransform``), then composite the mask subtree
     // against the element body. Track C phase 3.
     ctx.saveGState()
+    // ⚖️ THE REVEAL LAW'S BBOX CLIP IS SET HERE, BEFORE THE MASK TRANSFORM
+    // GOES ON THE CONTEXT — the ruled A6 §3.3 contract (2026-08-31): the
+    // bbox is the axis-aligned bounds OF the transformed mask subtree,
+    // computed via ``aabbThrough`` (the same helper Rust's two mask paths
+    // use) and clipped in the frame the law applies in. Setting the rect
+    // AFTER the transform clipped `mask_xf · bounds` as a region — under a
+    // rotation, a ROTATED rect that made the reveal law a no-op for rect
+    // artwork filling its own bounds. Pinned pixel-side by
+    // RevealMaskBBoxFrameTests, the twin of jas_dioxus's rotation fixture.
+    let revealBBox: BBox? = plan == .revealOutsideBbox
+        ? {
+            let local = mask.subtreeElement.bounds
+            if let t = effectiveMaskTransform(mask, elem) {
+                return aabbThrough(local, t)
+            }
+            return local
+        }()
+        : nil
+    if let (bx, by, bw, bh) = revealBBox, bw > 0, bh > 0 {
+        ctx.clip(to: CGRect(x: bx, y: by, width: bw, height: bh))
+    }
     applyTransform(ctx, effectiveMaskTransform(mask, elem))
     switch plan {
     case .clipIn:
@@ -1181,16 +1202,29 @@ private func drawElementWithMask(
         drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
     case .revealOutsideBbox:
         // `clip: false, invert: false`: keep the element body at
-        // full alpha outside the mask subtree's bounding box; apply
-        // ``.destinationIn`` only inside the bbox via a second
-        // clipped transparency layer. OPACITY.md §Rendering.
-        let (bx, by, bw, bh) = mask.subtreeElement.bounds
-        if bw > 0 && bh > 0 {
-            ctx.saveGState()
-            ctx.clip(to: CGRect(x: bx, y: by, width: bw, height: bh))
+        // full alpha outside the mask subtree's bounding box; the bbox
+        // clip is already on the context (set above, BEFORE the mask
+        // transform), so only the ``.destinationIn`` composite runs
+        // here. OPACITY.md §Rendering.
+        //
+        // ⛔ THE SUBTREE RENDERS ON ITS OWN TRANSPARENCY LAYER, and the
+        // `.destinationIn` is set at BEGIN time, where it governs the
+        // layer's composite-back. Setting it on the context and then
+        // calling ``drawElement`` did NOTHING: ``drawElementBody`` sets
+        // the blend mode from the element's own mode as one of its
+        // first acts, so the operation was clobbered before a pixel
+        // landed and the artwork painted itself over the body instead
+        // of masking it — the same shipped defect jas_dioxus repaired
+        // on 2026-08-30 (`apply_mask_artwork`), and the mask bracket's
+        // isolation A6 §3.2 requires anyway (fresh transparent surface,
+        // alpha context 1.0).
+        if let (_, _, bw, bh) = revealBBox, bw > 0, bh > 0 {
             ctx.setBlendMode(.destinationIn)
+            ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+            ctx.setBlendMode(.normal)
+            ctx.setAlpha(1.0)
             drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
-            ctx.restoreGState()
+            ctx.endTransparencyLayer()
         }
         // Empty-bbox mask: no clip; element body passes through
         // unmodified (mask has nothing to composite against).

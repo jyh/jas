@@ -748,6 +748,29 @@ public enum PathCommand: Equatable {
 /// Bounding box as (x, y, width, height).
 public typealias BBox = (x: Double, y: Double, width: Double, height: Double)
 
+/// Axis-aligned box of `b`'s four corners mapped through `t` — the one
+/// meaning of "a bbox through a transform", shared with the Python
+/// reference's `_aabb_through` and Rust's `geometry::element::aabb_through`.
+///
+/// ⚖️ This carries A6 §3.3's ruled contract (2026-08-31): the reveal mask
+/// law's bbox is the axis-aligned bounds OF the transformed mask subtree —
+/// `bounds(mask_xf · subtree)`, never the transform of its bounds as a
+/// region, which a rotation makes inexpressible in an axis-aligned box.
+/// Exact for every axis-preserving transform and for any subtree whose
+/// geometry reaches its bbox corners; otherwise the box of the transformed
+/// BOUNDS, the same over-approximation the evaluated-bbox family makes.
+public func aabbThrough(_ b: BBox, _ t: Transform) -> BBox {
+    let x0 = b.x, y0 = b.y, x1 = b.x + b.width, y1 = b.y + b.height
+    var minX = Double.infinity, minY = Double.infinity
+    var maxX = -Double.infinity, maxY = -Double.infinity
+    for (px, py) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
+        let (x, y) = t.applyPoint(px, py)
+        minX = min(minX, x); minY = min(minY, y)
+        maxX = max(maxX, x); maxY = max(maxY, y)
+    }
+    return (minX, minY, maxX - minX, maxY - minY)
+}
+
 /// Expand bounding box (x, y, w, h) by the ink the stroke actually puts
 /// OUTSIDE the path, which depends on `stroke.align`.
 ///
