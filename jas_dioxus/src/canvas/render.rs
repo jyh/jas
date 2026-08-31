@@ -5037,25 +5037,68 @@ mod ph4_conversion_tests {
                     identity-framed artwork surface would erase device 0..4");
     }
 
-    /// ⛔ THE BBOX IS IN A DIFFERENT FRAME ON THE TWO PATHS, so a masked
-    /// element combining `RevealOutsideBbox` with a mask transform must NOT
-    /// convert.
+    /// ⚖️ THE FRAME QUESTION IS ANSWERED — the helm's design word, 2026-08-31
+    /// (the reveal-bbox contract ruling): A6 §3.3's precomputed bbox is the
+    /// axis-aligned box OF the transformed mask subtree, computed in the frame
+    /// where the clip is applied — `bounds(mask_xf · subtree)`, never
+    /// `mask_xf · bounds(subtree)`.
     ///
-    /// Legacy clips `mask.subtree.bounds()` in the MASK-TRANSFORMED frame (the
-    /// rect is set while the mask's effective transform is on the context). The
-    /// bracket hands the same untransformed rect across the seam, and
-    /// `pop_mask_layer` clips it in the LAYER's frame — the element's parent
-    /// frame, with the mask transform already popped. Identical whenever that
-    /// transform is the identity, and off by exactly it otherwise.
+    /// This is the input the old reading could not express: a 45°-rotated
+    /// reveal mask. Legacy used to set the bbox rect while the mask transform
+    /// was on the context, clipping a ROTATED rect no axis-aligned `Rect` can
+    /// carry across the seam — and for rect artwork that fills its own bounds
+    /// that made the reveal law a NO-OP (clip region == artwork support, every
+    /// pixel kept). Under the ruled contract both arms clip the transformed
+    /// subtree's BOX, so the AABB corners the rotated artwork does not reach
+    /// carry `M = 0` and are erased.
     ///
-    /// ⚖️ THE ROUTER REFUSES RATHER THAN THE PRODUCER GUESSING. Passing
-    /// `mask_xf · bounds` would be exact for translate/scale and WRONG for a
-    /// rotation — legacy clips a ROTATED rect, which no axis-aligned `Rect` can
-    /// express. Which one A6 §3.3's "bbox arriving precomputed" means is a
-    /// contract question, not a call site's; until it is answered these
-    /// documents keep the path they have.
+    /// The pattern, derived by hand before it was measured: body black 16×8;
+    /// artwork white rect (4,0,8,8) rotated 45° about (8,4) → the diamond
+    /// `|x−8| + |y−4| ≤ 4√2`, bbox x ∈ [2.34, 13.66]. Row 1 (pixel centers
+    /// y = 1.5): kept OUTSIDE the bbox (px 0–1, 14–15), erased inside it where
+    /// the diamond is absent (px 2–4, 11–13), kept on the diamond (px 5–10).
+    /// The pre-ruling code renders this row all-'#' on both arms.
     #[wasm_bindgen_test]
-    fn reveal_outside_bbox_under_a_mask_transform_stays_on_legacy() {
+    fn a_rotated_reveal_mask_clips_the_box_of_what_it_draws() {
+        use crate::geometry::element::Transform;
+        // Rotation by 45° about (8,4): e = 8 − 4s, f = 4 − 12s, s = √2/2.
+        let s = std::f64::consts::FRAC_1_SQRT_2;
+        let rot = Transform { a: s, b: s, c: -s, d: s, e: 8.0 - 4.0 * s, f: 4.0 - 12.0 * s };
+        let mut body = opaque_rect(0.0, 0.0, 16.0, 8.0, Color::BLACK);
+        // UNLINKED, so the rotation frames the MASK alone and the body stays
+        // axis-aligned — the divergence is then entirely the bbox's.
+        body.common_mut().mask = Some(Box::new(Mask {
+            subtree: Box::new(opaque_rect(4.0, 0.0, 8.0, 8.0, Color::WHITE)),
+            clip: false, invert: false, disabled: false,
+            linked: false, unlink_transform: Some(rot),
+        }));
+        let row = |before: bool| -> String {
+            let (_c, ctx) = surface(16, 8);
+            if before {
+                let m = body.common().mask.as_deref().unwrap();
+                let plan = mask_plan(m).unwrap();
+                draw_element_with_mask(&ctx, &body, m, plan, Visibility::Preview, 1.0, 1.0);
+            } else {
+                draw_element_scaled(&ctx, &body, Visibility::Preview, 1.0, 1.0);
+            }
+            (0..16)
+                .map(|x| if alpha_at(&ctx, x as f64 + 0.5, 1.5) > 127 { '#' } else { '.' })
+                .collect()
+        };
+        assert_eq!(row(true), "##...######...##",
+                   "legacy must clip the BOX of the transformed mask subtree \
+                    (the ruled A6 §3.3 contract), not the rotated rect");
+        assert_eq!(row(false), "##...######...##",
+                   "…and the converted path must agree with it");
+    }
+
+    /// The translate case of the same contract — the divergence PH4 measured on
+    /// 2026-08-30 (`....##....##` legacy against `....##..####` converted with
+    /// an untransformed bbox), now pinned at the ruled answer. The producer
+    /// passes `bounds(mask_xf · subtree)`, so a translated reveal mask CONVERTS
+    /// and the two arms agree at legacy's pixels.
+    #[wasm_bindgen_test]
+    fn a_translated_reveal_mask_converts_and_agrees_with_legacy() {
         use crate::geometry::element::Transform;
         let artwork = Element::Group(GroupElem {
             children: vec![
@@ -5071,10 +5114,11 @@ mod ph4_conversion_tests {
         body.common_mut().transform =
             Some(Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 4.0, f: 0.0 });
         let doc = masked(body, artwork, false, false);
-        assert_eq!(scan(&doc, 20, false), scan(&doc, 20, true),
-                   "this shape must render EXACTLY as it does today -- the two \
-                    paths clip the bbox in different frames, so the router has \
-                    to keep it on legacy");
+        assert_eq!(scan(&doc, 20, true), "....##....##........",
+                   "legacy: body and bbox ride the +4 translate; inside the \
+                    bbox only the artwork survives");
+        assert_eq!(scan(&doc, 20, false), "....##....##........",
+                   "…and the converted path must agree with it");
     }
 
     /// ⛔ THE FALLBACK IS SILENT BY DESIGN, SO IT IS ASSERTED HERE.
