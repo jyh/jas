@@ -521,6 +521,34 @@ jobs:
           echo "scanning $RANGE"
           python scripts/check_private_paths.py --range "$RANGE"
 
+      # The forge-prose gate on the Windows lane. check_lane_coverage.py said
+      # so the day it landed ubuntu-only (main 84c0ec70, run 33410966316) —
+      # same finding, same wording, as check_private_paths.py above. The same
+      # reasoning holds: its scan runs over API-returned strings, which no
+      # separator can touch, BUT its FAIL paths print arbitrary forge prose
+      # through this lane's asserted non-UTF-8 default stdout — an encoding
+      # surface today, not hypothetically. An EXEMPT row claiming "no platform
+      # surface" would be false, so the gate runs where that surface is watched.
+      #
+      # Both-arms, on this platform, in real CI: the middle command drives an
+      # unreadable forge (a repo path no forge resolves) and asserts the gate
+      # REDS — a lane where a gate cannot be seen to fail is the meta-gate's
+      # own definition of unwatched. gh is preinstalled on the hosted runner;
+      # the sweep reads the same forge database the scrub.yml job reads, from
+      # the platform family that authored every trailer violation this repo
+      # has ever scrubbed.
+      - name: PR titles/bodies gate (Windows lane) — self-test, driven FAIL, sweep
+        if: ${{ !cancelled() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/check_pr_descriptions.py --self-test
+          if python scripts/check_pr_descriptions.py --open --repo this/does/not/resolve; then
+            echo "the unreadable-forge arm must exit nonzero on this platform" >&2
+            exit 1
+          fi
+          python scripts/check_pr_descriptions.py --open
+
       - name: Untracked files are invisible to index-reading gates
         if: ${{ !cancelled() }}
         run: |
