@@ -13,6 +13,32 @@ take it.
 
 ---
 
+## 2026-08-31 — a transformed reveal mask clips the box of what it draws (browser)
+
+**Affects:** documents using a **reveal-outside-bbox** opacity mask
+(`clip: false, invert: false`) whose mask carries a transform — a linked mask
+on a transformed element, or an unlinked mask's captured transform. Untransformed
+reveal masks and the other two mask laws are unchanged.
+
+**What changed.** The reveal law limits the mask to the subtree's bounding box
+and leaves the element untouched outside it. The renderer used to set that box
+*while the mask's transform was on the context*, so the clip region was the
+transformed rectangle — under a rotation, a rotated rectangle. For mask artwork
+that fills its own bounds (a plain rect), clip region and artwork coincided and
+**the mask did nothing at all**. The ruled contract (2026-08-31) is that the box
+is the axis-aligned bounds **of the transformed subtree**, computed before the
+clip is set; the corners of that box the rotated artwork does not reach are now
+inside the box with zero mask alpha, and are masked out.
+
+**In numbers**, measured in Chrome — a 45°-rotated rect reveal mask over a
+full-width shape, one row: before `################`, after `##...######...##`
+(kept outside the box, masked to the diamond inside it). A translated reveal
+mask renders as before. Pinned by
+`ph4_conversion_tests::a_rotated_reveal_mask_clips_the_box_of_what_it_draws`
+and `…::a_translated_reveal_mask_converts_and_agrees_with_legacy`; the same
+change lets these masks take the A6 element bracket, where the box crosses the
+seam precomputed.
+
 ## 2026-08-30 — two of the three opacity-mask laws did nothing at all (browser)
 
 **Affects:** every document using an **inverted** opacity mask (`invert: true`)

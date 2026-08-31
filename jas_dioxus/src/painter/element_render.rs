@@ -593,9 +593,16 @@ fn active_mask(elem: &Element) -> Option<&crate::geometry::element::Mask> {
 ///
 /// - **The law** is [`mask_from_flags`](crate::painter::mask_from_flags), the
 ///   ONE copy of the `(clip, invert)` truth table (A6 §4 puts the lowering at
-///   BUILD time). `bbox` is the mask subtree's bounds, computed HERE and passed
-///   in — a backend never computes bounds (§3.3), and it is the same
-///   `mask.subtree.bounds()` the legacy `RevealOutsideBbox` arm reads.
+///   BUILD time). `bbox` is computed HERE and passed in — a backend never
+///   computes bounds (§3.3) — and per the ruled contract (the helm's design
+///   word, 2026-08-31) it is the axis-aligned bounds OF the transformed mask
+///   subtree: `mask.subtree.bounds()` taken through the mask's effective
+///   transform by [`aabb_through`](crate::geometry::element::aabb_through),
+///   in the frame where `pop_mask_layer` applies the clip (the element's
+///   parent frame). Never `mask_xf · bounds` as a region — a rotation makes
+///   that inexpressible in an axis-aligned `Rect`. The legacy
+///   `RevealOutsideBbox` arm computes the identical value with the identical
+///   helper, which is what keeps the two paths in pixel agreement.
 /// - **The body's alpha is `incoming_alpha`, NOT `incoming_alpha *
 ///   elem.opacity()`.** The element's own opacity rides the LAYER and is spent
 ///   once at `pop_isolated_layer`; multiplying it into the body as well is
@@ -643,7 +650,17 @@ fn emit_masked_element(
     mask: &crate::geometry::element::Mask,
     incoming_alpha: f64,
 ) {
-    let (bx, by, bw, bh) = mask.subtree.bounds();
+    let mask_xf = if mask.linked {
+        elem.transform()
+    } else {
+        mask.unlink_transform.as_ref()
+    };
+    // The ruled §3.3 contract: bounds AFTER the mask's effective transform,
+    // in the frame the clip is applied in. Same helper as legacy's arm.
+    let (bx, by, bw, bh) = match mask_xf {
+        Some(t) => crate::geometry::element::aabb_through(mask.subtree.bounds(), t),
+        None => mask.subtree.bounds(),
+    };
     let law = crate::painter::mask_from_flags(
         mask.clip,
         mask.invert,
@@ -657,11 +674,6 @@ fn emit_masked_element(
     emit_element_body(p, elem, incoming_alpha);
 
     p.push_mask_layer(law);
-    let mask_xf = if mask.linked {
-        elem.transform()
-    } else {
-        mask.unlink_transform.as_ref()
-    };
     let pushed = mask_xf.is_some();
     if let Some(t) = mask_xf {
         p.push_state(*t);

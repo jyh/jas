@@ -456,7 +456,10 @@ impl Painter for Canvas2dPainter<'_> {
                 let _ = parent.draw_image_with_html_canvas_element(&layer.canvas, 0.0, 0.0);
             }
             Mask::AlphaRevealOutsideBbox { bbox } => {
-                // The bbox is in DOCUMENT space and arrives precomputed (§3.3).
+                // The bbox arrives precomputed (§3.3) as the bounds OF the
+                // transformed mask subtree, already in THIS frame — the frame
+                // the layer was pushed in, where the clip is applied (the
+                // ruled contract, 2026-08-31).
                 // Clip UNDER the current transform so the rect lands where the
                 // document says, then reset for the device-space blit -- a clip
                 // is rasterised into device space when it is set, so it still

@@ -828,49 +828,18 @@ fn subtree_would_be_counter_scaled(elem: &Element, acc: f64) -> bool {
     false
 }
 
-/// Does this subtree combine `RevealOutsideBbox` with a non-identity mask
-/// transform — the one shape whose bbox the two paths clip in DIFFERENT FRAMES?
-///
-/// Legacy sets the clip rect while the mask's effective transform is on the
-/// context, so the rect is in the MASK-TRANSFORMED frame. The bracket hands the
-/// same untransformed `mask.subtree.bounds()` across the seam and
-/// `pop_mask_layer` clips it in the LAYER's frame, the mask transform already
-/// popped. The two agree exactly when that transform is the identity and are
-/// off by exactly it otherwise — MEASURED in Chrome 2026-08-30:
-/// `....##....##` legacy against `....##..####` converted.
-///
-/// ⚖️ REFUSED HERE RATHER THAN GUESSED AT THE PRODUCER. Passing
-/// `mask_xf · bounds` would be exact for a translate or a scale and WRONG for a
-/// rotation, where legacy clips a ROTATED rect that no axis-aligned `Rect` can
-/// express. Which of the two A6 §3.3's "bbox arriving precomputed" intends is a
-/// contract question; a call site answering it quietly is how an unratified
-/// behaviour change ships inside a ratified one.
-fn subtree_has_a_reframed_reveal_bbox(elem: &Element) -> bool {
-    if let Some(m) = elem.common().mask.as_deref().filter(|m| !m.disabled) {
-        if matches!(mask_plan(m), Some(MaskPlan::RevealOutsideBbox)) {
-            if let Some(t) = effective_mask_transform(m, elem) {
-                let identity = (t.a - 1.0).abs() < 1e-9
-                    && t.b.abs() < 1e-9
-                    && t.c.abs() < 1e-9
-                    && (t.d - 1.0).abs() < 1e-9
-                    && t.e.abs() < 1e-9
-                    && t.f.abs() < 1e-9;
-                if !identity {
-                    return true;
-                }
-            }
-        }
-        if subtree_has_a_reframed_reveal_bbox(&m.subtree) {
-            return true;
-        }
-    }
-    if let Some(children) = elem.children() {
-        if children.iter().any(|c| subtree_has_a_reframed_reveal_bbox(c)) {
-            return true;
-        }
-    }
-    false
-}
+// ⚖️ HISTORY, because a deleted refusal leaves no trace at the site that
+// refused: until 2026-08-31 a `subtree_has_a_reframed_reveal_bbox` walk stood
+// here, keeping any `RevealOutsideBbox` mask with a non-identity transform on
+// legacy — the two paths clipped the bbox in DIFFERENT frames (measured
+// 2026-08-30: `....##....##` legacy against `....##..####` converted), and
+// which frame A6 §3.3 intends was a contract question this file refused to
+// answer at a call site. The helm's design word answered it (the bbox is
+// `bounds(mask_xf · subtree)`, in the frame the clip is applied in), both
+// paths now derive the bbox through `geometry::element::aabb_through`, and
+// the refusal is retired — `a_rotated_reveal_mask_clips_the_box_of_what_it_draws`
+// and `a_translated_reveal_mask_converts_and_agrees_with_legacy` pin the
+// agreement on exactly the shapes it used to refuse.
 
 /// PH4 — render `elem` through the ratified A6 element bracket on the `Painter`
 /// seam. Returns `false` having painted NOTHING when any condition fails, so
@@ -907,10 +876,11 @@ fn subtree_has_a_reframed_reveal_bbox(elem: &Element) -> bool {
 ///    descendant is DROPPED by `emit_element`, and legacy-only mask artwork
 ///    gives `M = 0`, which deletes the element.
 /// 3. **Nothing in the subtree may be counter-scaled**
-///    ([`subtree_would_be_counter_scaled`]), and no reveal-outside-bbox mask may
-///    carry a transform ([`subtree_has_a_reframed_reveal_bbox`]). Two different
-///    divergences, both between the seam and this file rather than between
-///    backends — which is why neither is a capability.
+///    ([`subtree_would_be_counter_scaled`]) — a divergence between the seam
+///    and this file rather than between backends, which is why it is not a
+///    capability. (A second refusal of this kind, the reveal-bbox frame
+///    clause, stood here until the 2026-08-31 ruling answered the frame
+///    question; see the history note above `mask_plan`'s guards.)
 /// 4. **The context's world transform must be readable.** A fresh layer surface
 ///    starts at identity; without the frame it opens at the wrong origin. The
 ///    read is this file's existing `read_ctx_transform`, the same one the legacy
@@ -918,13 +888,13 @@ fn subtree_has_a_reframed_reveal_bbox(elem: &Element) -> bool {
 ///
 /// # 📌 THE COST, NAMED RATHER THAN ASSUMED AWAY
 ///
-/// Conditions 2 and 3 are THREE separate walks of the masked element's subtree
-/// ([`subtree_needs_legacy`], [`subtree_would_be_counter_scaled`],
-/// [`subtree_has_a_reframed_reveal_bbox`]), run per masked element per frame and
-/// each short-circuiting on its first hit. They are kept separate because they
-/// answer three unrelated questions, one of which lives in another module, and
-/// each is independently testable — folding them into one traversal would trade
-/// that for a constant factor.
+/// Conditions 2 and 3 are TWO separate walks of the masked element's subtree
+/// ([`subtree_needs_legacy`], [`subtree_would_be_counter_scaled`]; a third,
+/// the reveal-bbox frame clause, was retired by the 2026-08-31 ruling), run
+/// per masked element per frame and each short-circuiting on its first hit.
+/// They are kept separate because they answer unrelated questions, one of
+/// which lives in another module, and each is independently testable —
+/// folding them into one traversal would trade that for a constant factor.
 ///
 /// ⚠️ NOT BENCHMARKED. The argument for the cost being acceptable is that each
 /// walk is `O(subtree)` and the render that follows is also `O(subtree)`, so
@@ -950,9 +920,6 @@ fn draw_masked_element_through_the_seam(
         return false;
     }
     if subtree_would_be_counter_scaled(elem, element_scale) {
-        return false;
-    }
-    if subtree_has_a_reframed_reveal_bbox(elem) {
         return false;
     }
     let Some((a, b, c, d, e, f)) = read_ctx_transform(ctx) else {
@@ -1520,6 +1487,36 @@ fn draw_element_with_mask(
     // below must run in the popped state.
     {
         let _ctx_guard = CtxSaveGuard::new(&off_ctx);
+        // ⚖️ THE REVEAL LAW'S BBOX CLIP IS SET HERE, BEFORE THE MASK TRANSFORM
+        // GOES ON THE CONTEXT — the ruled A6 §3.3 contract (the helm's design
+        // word, 2026-08-31): the bbox is the axis-aligned bounds OF the
+        // transformed mask subtree, computed via `aabb_through` — the same
+        // helper the seam's producer uses — and clipped in the frame the law
+        // applies in (the element's parent frame, which the context carries at
+        // this point). Setting the rect AFTER the transform was the old
+        // behaviour: it clipped `mask_xf · bounds` as a region — exact for
+        // translate/scale, but under a rotation a ROTATED rect that no
+        // axis-aligned `Rect` can express, which for rect artwork filling its
+        // own bounds turned the reveal law into a no-op (clip region ==
+        // artwork support). A clip is rasterised into device space when it is
+        // set, so it survives both the transform below and the identity reset
+        // inside `apply_mask_artwork`.
+        let reveal_bbox = if plan == MaskPlan::RevealOutsideBbox {
+            let b = mask.subtree.bounds();
+            Some(match effective_mask_transform(mask, elem) {
+                Some(t) => crate::geometry::element::aabb_through(b, t),
+                None => b,
+            })
+        } else {
+            None
+        };
+        if let Some((bx, by, bw, bh)) = reveal_bbox {
+            if bw > 0.0 && bh > 0.0 {
+                off_ctx.begin_path();
+                off_ctx.rect(bx, by, bw, bh);
+                off_ctx.clip();
+            }
+        }
         if let Some(t) = effective_mask_transform(mask, elem) {
             off_ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f).ok();
         }
@@ -1570,21 +1567,12 @@ fn draw_element_with_mask(
             MaskPlan::RevealOutsideBbox => {
                 // `clip: false, invert: false`: the element keeps full
                 // alpha outside the mask subtree's bounding box, and is
-                // clipped to the mask shape only inside it. Implement
-                // by clipping the Canvas2D state to the bbox rectangle
-                // before applying `destination-in`; outside the clip,
+                // clipped to the mask shape only inside it. The bbox clip
+                // is already on the context — set above, BEFORE the mask
+                // transform, per the ruled §3.3 contract — so only the
+                // `destination-in` composite runs here; outside the clip,
                 // the element remains untouched.
-                let (bx, by, bw, bh) = mask.subtree.bounds();
-                if bw > 0.0 && bh > 0.0 {
-                    // Guarded: the bbox clip + destination-in pop at the
-                    // end of this branch (see CtxSaveGuard).
-                    let _ctx_guard = CtxSaveGuard::new(&off_ctx);
-                    off_ctx.begin_path();
-                    off_ctx.rect(bx, by, bw, bh);
-                    off_ctx.clip();
-                    // The clip is set HERE, in the mask-transformed frame, and
-                    // survives the identity reset inside the helper because a
-                    // clip is rasterised into device space when it is set.
+                if matches!(reveal_bbox, Some((_, _, bw, bh)) if bw > 0.0 && bh > 0.0) {
                     apply_mask_artwork(
                         scratch_idx, &off_ctx, w, h, mask, ancestor_vis, precision,
                         "destination-in",
@@ -3537,51 +3525,9 @@ mod tests {
         elem
     }
 
-    fn masked_with(body: Element, artwork: Element, clip: bool, invert: bool) -> Element {
-        use crate::geometry::element::Mask;
-        let mut b = body;
-        b.common_mut().mask = Some(Box::new(Mask {
-            subtree: Box::new(artwork),
-            clip, invert, disabled: false, linked: true, unlink_transform: None,
-        }));
-        b
-    }
-
-    fn translate4() -> Transform { Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 4.0, f: 0.0 } }
-
-    /// The reveal-bbox frame clause fires on ONE combination and refuses
-    /// nothing else. Each control is a law or a transform the clause must not
-    /// swallow — a clause that refused the whole reveal law, or every
-    /// transformed mask, would pass its positive arm and convert nothing.
-    #[test]
-    fn the_reveal_bbox_frame_clause_fires_on_one_combination() {
-        let art = || filled_rect(None);
-        // reveal (clip:false, invert:false) + a mask transform => refuse.
-        let mut body = filled_rect(Some(translate4()));
-        body = masked_with(body, art(), false, false);
-        assert!(subtree_has_a_reframed_reveal_bbox(&body));
-
-        // CONTROL 1: the same law with NO transform converts.
-        assert!(!subtree_has_a_reframed_reveal_bbox(
-            &masked_with(filled_rect(None), art(), false, false)));
-
-        // CONTROL 2: the OTHER two laws under the same transform convert --
-        // they blit in device space and never clip a bbox.
-        for (clip, invert) in [(true, false), (true, true)] {
-            assert!(!subtree_has_a_reframed_reveal_bbox(
-                        &masked_with(filled_rect(Some(translate4())), art(), clip, invert)),
-                    "clip={clip} invert={invert} does not clip a bbox and must convert");
-        }
-
-        // CONTROL 3: a DISABLED mask is never drawn.
-        let mut d = masked_with(filled_rect(Some(translate4())), art(), false, false);
-        d.common_mut().mask.as_mut().unwrap().disabled = true;
-        assert!(!subtree_has_a_reframed_reveal_bbox(&d));
-
-        // …and it reaches a DESCENDANT, like the other production guards.
-        let inner = masked_with(filled_rect(Some(translate4())), art(), false, false);
-        assert!(subtree_has_a_reframed_reveal_bbox(&group_of(vec![inner], None)));
-    }
+    // (The reveal-bbox frame clause and its firing test stood here until the
+    // 2026-08-31 ruling retired the refusal; the agreement it protected is now
+    // pinned pixel-side by the two reveal fixtures in `ph4_conversion_tests`.)
 
     /// The guard fires exactly where `counter_scaled_element` would DO
     /// something — a stroke (or a rounded corner) under a non-unit accumulated

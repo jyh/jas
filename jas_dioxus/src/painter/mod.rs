@@ -283,6 +283,13 @@ pub enum Mask {
     /// Cut out where the mask is opaque (raw alpha).
     AlphaClipOut,
     /// Reveal outside the mask's bounding box (raw alpha), `bbox` given.
+    /// ⚖️ THE FRAME IS RULED (the helm's design word, 2026-08-31): `bbox` is
+    /// the axis-aligned bounds OF the transformed mask subtree —
+    /// `bounds(mask_xf · subtree)`, never `mask_xf · bounds(subtree)` as a
+    /// region — computed by the producer in the frame the clip is applied in
+    /// (the masked element's parent frame). A rotation makes the other
+    /// reading inexpressible in this carrier type, which is one of the
+    /// ruling's three grounds.
     AlphaRevealOutsideBbox { bbox: Rect },
 }
 
@@ -298,7 +305,9 @@ pub enum Mask {
 /// third spelling of the second one.
 ///
 /// `bbox` is consumed only by the reveal law and arrives precomputed — a
-/// backend never computes bounds (§3.3).
+/// backend never computes bounds (§3.3), and per the ruled contract it is
+/// `bounds(mask_xf · subtree)` in the clip's own frame (see
+/// [`Mask::AlphaRevealOutsideBbox`]).
 pub fn mask_from_flags(clip: bool, invert: bool, bbox: Rect) -> Mask {
     match (clip, invert) {
         (true, false) => Mask::LuminanceClipIn,
