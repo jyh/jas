@@ -237,11 +237,28 @@ same total alpha carried by an ancestor group instead moves from `0.50` to
 bug — the element's own opacity applied twice while ancestors were discarded —
 repaired on 2026-08-24. It had already been fixed when this change landed.
 
-The Swift port's masked composite already spends the element's own opacity
-once, at a transparency layer — read in `CanvasSubwindow.swift`, not executed —
-so this brings the browser renderer into agreement with it on that half. ⚠️ It is
-only that half: how each port applies the *ancestor* product is a separate
-question and is not claimed here.
+⛔ **A CLAIM THAT STOOD HERE WAS FALSE, AND ITS OWN DISCLAIMER SAID SO.** This
+paragraph read: *"The Swift port's masked composite already spends the element's
+own opacity once, at a transparency layer — read in `CanvasSubwindow.swift`, not
+executed."* It was **executed on 2026-08-31 and it is wrong**. JasSwift set the
+transparency layer's composite-back alpha to the element's own opacity and then
+re-applied that same opacity inside the layer: a `0.5` element under a full white
+mask rendered at **0.25**, with the same element unmasked at `0.5` as the
+control. That is the `own²` shape of D-α, alive in the Swift port until the same
+day. On the same line it also **discarded the ancestor product**, which the
+paragraph's closing sentence had correctly declined to claim.
+
+Both are repaired (`NestedOpacityTests`, `MaskCompositeIsolationTests`): the
+ancestors' product composites the layer back, the element's own opacity is spent
+once inside it, and a container's opacity now multiplies into its children's
+rather than replacing it — `baseAlpha = ancestorAlpha × own`, threaded exactly as
+`ancestorVis` and `elementScale` already were, because CoreGraphics exposes no
+getter for the current alpha. The two ACTIVE ports now agree on both halves.
+
+🔑 **The row that hid both defects was the tidy one.** `own²` and a discarded
+ancestor cancel exactly when the two opacities are equal, so a half-opaque masked
+element inside a half-opaque group — the example anyone would reach for — read
+correct under both. It is kept as a regression arm for that reason.
 
 Every group element additionally carries:
 
