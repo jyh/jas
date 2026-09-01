@@ -320,6 +320,22 @@ jobs:
         run: python scripts/check_unregistered_tests.py --self-test
       - name: Every test function carries #[test]
         run: python scripts/check_unregistered_tests.py
+      # THE NODE-2 RATCHET. `canvas::render()` takes a
+      # `web_sys::CanvasRenderingContext2d` and `pub mod canvas` is
+      # `#[cfg(feature = "web")]`, so the production document walk is not
+      # compiled in the native build at all -- which is why no native surface
+      # can show a document. This gate does not perform that port; it keeps its
+      # cost honest while it happens, by requiring every `ctx.*` call in
+      # `canvas/` to declare the `Painter` expression it becomes.
+      #
+      # It is a source-level property, so it runs on BOTH families for the same
+      # reason `check_encoding_hygiene.py` does: it needs no platform to be
+      # true, and a gate watched on one family goes dark the day that runner is
+      # unavailable. Self-test first -- trusted for its RED.
+      - name: Self-test the canvas-portability ratchet
+        run: python scripts/check_canvas_portability.py --self-test
+      - name: Canvas portability (every ctx.* has a declared Painter mapping)
+        run: python scripts/check_canvas_portability.py
 
   # THE WINDOWS LANE. Added 2026-07-28, the day this project's gates ran on
   # Windows for the first time: 11 of 24 invocations failed and NOT ONE failure
@@ -566,6 +582,18 @@ jobs:
         run: |
           python scripts/check_spec_mutation_coverage.py --self-test
           python scripts/check_spec_mutation_coverage.py
+
+      # The second platform family for the node-2 ratchet. It walks paths with
+      # pathlib and reads sources as UTF-8 -- the shape that broke
+      # check_swift_copy_sites.py on Windows and nowhere else -- so it runs here
+      # rather than being written into EXEMPT. An exemption would be a promise
+      # that the platform cannot matter, and for a path-walking gate that
+      # promise is exactly the one this repo has seen broken.
+      - name: Canvas portability ratchet (Windows lane)
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_canvas_portability.py --self-test
+          python scripts/check_canvas_portability.py
 
       # The wasm lane itself is ubuntu-only (Chrome + wasm-pack), but its COUNT
       # GATE is a source/log parser -- it globs .rs files with pathlib and reads
