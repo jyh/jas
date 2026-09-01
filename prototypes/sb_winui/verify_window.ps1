@@ -115,7 +115,27 @@ foreach ($v in (Get-ChildItem env: | Where-Object { $_.Name -like 'SB_*' } | Sor
 }
 if ($forwarded.Count -gt 0) { Write-Host "forwarding: $($forwarded -join ' ')" }
 else { Write-Host "forwarding: (no SB_* variables set)" }
-$launchArg = '-NoProfile -ExecutionPolicy Bypass -Command ' +
+# ⛔ -WindowStyle Hidden, AND IT IS NOT COSMETIC: THE LAUNCHER WAS COVERING THE
+# THING IT LAUNCHED.
+#
+# This task starts the app THROUGH powershell.exe (it has to: DOTNET_ROOT and the
+# SB_* variables are set in that shell). That powershell gets a console window,
+# it appears on the interactive desktop, and it sits OVER the app's canvas at the
+# top-left -- which is exactly where a document's artwork lands, because a
+# recorded display list is authored in ABSOLUTE DOCUMENT COORDINATES starting
+# near the origin.
+#
+# ⭐ AND THE PROBE COULD NEVER HAVE REVEALED THIS. `jas_paint_probe_surface`
+# fills a CENTRED square, which lands well clear of a console parked at the
+# top-left. Every S-B run to date was probe-shaped, so the occlusion was
+# invisible for the whole life of this harness and appeared the first time the
+# payload was a DOCUMENT. Measured 2026-09-01: the DXGI capture shows the window
+# reporting `GOLDENS 18/20 painted` with the console covering the artwork and
+# the exposed part of the canvas blank.
+#
+# It is a defect in the INSTRUMENT, not in the app -- the same class as the GDI
+# eye above, reached from the other side.
+$launchArg = '-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command ' +
     '"$env:DOTNET_ROOT=''' + "$env:LOCALAPPDATA\Microsoft\dotnet" + '''; ' + $extraEnv + '& ''' + $Exe + '''"'
 $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $launchArg
 Register-ScheduledTask -TaskName $launchTask -Action $action -Principal $principal -Force -ErrorAction Stop | Out-Null
@@ -126,11 +146,79 @@ Start-ScheduledTask -TaskName $launchTask
 Start-Sleep -Seconds $Seconds
 
 # The capture runs in session 1 and records the session id it ACTUALLY ran in.
-$capArg = '-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $tools 'capture_desktop.ps1') + '" -Out "' + $png + '"'
+# ⛔ AND THE CAMERAS MUST HIDE THEIR OWN CONSOLES TOO -- THE INSTRUMENT WAS
+# PHOTOGRAPHING ITSELF. Hiding only the launcher (above) left the CAPTURE task's
+# powershell console on the desktop, and since it starts 8 seconds later it lands
+# ON TOP of the app -- so the screenshot contained a black rectangle over the
+# canvas that was put there BY the act of taking the screenshot. Measured
+# 2026-09-01: two consecutive runs, two different consoles, same blank canvas.
+$capArg = '-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $tools 'capture_desktop.ps1') + '" -Out "' + $png + '"'
 $capAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $capArg
 Register-ScheduledTask -TaskName $capTask -Action $capAction -Principal $principal -Force -ErrorAction Stop | Out-Null
 Start-ScheduledTask -TaskName $capTask
 Start-Sleep -Seconds 8
+
+# ⭐ THE SECOND EYE: DXGI DESKTOP DUPLICATION, and it exists because the first
+# one is BLIND TO THIS APP'S PIXELS.
+#
+# The GDI capture above (`CopyFromScreen`) reads the desktop's GDI surface. A
+# hardware-composed swapchain -- which is exactly what a SwapChainPanel gives
+# this app -- never lands there; the compositor takes it directly. Measured
+# 2026-09-01 on the goldens run: the window title reported `GOLDENS 18/20
+# painted` while the GDI capture found ZERO pixels of the colour those goldens
+# paint, and the colour arm below correctly reported INCONCLUSIVE.
+#
+# ⛔ AND "INCONCLUSIVE" WAS THE HONEST VERDICT, WHICH IS THE PROBLEM. It is
+# indistinguishable from a real rendering failure, so the arm can never convict
+# and can never acquit. Desktop Duplication reads the COMPOSED output -- what a
+# person actually sees -- so it can decide.
+#
+# BOTH ARE TAKEN, AND THAT IS DELIBERATE. The GDI capture stays as the CONTROL:
+# it carries the session id and the window list, and keeping it means a
+# disagreement between the two is visible AS a disagreement rather than as a
+# silent instrument swap. It is also the fallback when the tool is not built.
+#
+# It runs under the SAME interactive principal for the same reason: session 0
+# has its own window station, and duplicating that yields black.
+$dxgiPng = Join-Path $scratch "sb-verify-dxgi.png"
+$dxgiLog = "$dxgiPng.txt"
+Remove-Item $dxgiPng, $dxgiLog -ErrorAction SilentlyContinue
+$repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+$dupExe = Join-Path $repoRoot "jas_dioxus\target\debug\capture_desktop.exe"
+if (Test-Path $dupExe) {
+    $dupTask = "jas-sb-capture-dxgi"
+    Drop-Task $dupTask
+    # ⛔ A WRAPPER SCRIPT, NOT AN INLINE -Command, AND THIS IS NOT STYLE.
+    # The first version passed the exe, the PNG path and a `*>` redirect inside a
+    # single -Command string. Every one of those needs its own layer of escaped
+    # single quotes, and the result ran, wrote NOTHING, and reported NOTHING --
+    # no PNG, no log, and no error, because the redirect that would have carried
+    # the error was itself part of what was malformed. An instrument whose
+    # failure path is silent is the one failure this harness must not have.
+    # `-File` takes a path and typed parameters, so there is no quoting to get
+    # wrong.
+    $dupWrap = Join-Path $scratch "run-dxgi-capture.ps1"
+    @"
+`$ErrorActionPreference = 'Continue'
+try {
+    `$out = & '$dupExe' '$dxgiPng' 2>&1
+    `$rc = `$LASTEXITCODE
+    "exit=`$rc session=`$((Get-Process -Id `$PID).SessionId)`n`$out" |
+        Set-Content -Path '$dxgiLog' -Encoding utf8
+} catch {
+    `$_ | Out-String | Set-Content -Path '$dxgiLog' -Encoding utf8
+}
+"@ | Set-Content -Path $dupWrap -Encoding utf8
+    $dupAction = New-ScheduledTaskAction -Execute "powershell.exe" `
+        -Argument ('-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File "' + $dupWrap + '"')
+    Register-ScheduledTask -TaskName $dupTask -Action $dupAction -Principal $principal -Force -ErrorAction Stop | Out-Null
+    Start-ScheduledTask -TaskName $dupTask
+    Start-Sleep -Seconds 8
+    Drop-Task $dupTask
+} else {
+    Write-Host "note: $dupExe not built; the DXGI eye is unavailable this run"
+    Write-Host "      cargo build --no-default-features --features d2d,ffi --bin capture_desktop"
+}
 
 $verdicts = @()
 $ok = $true
@@ -198,9 +286,23 @@ if (Test-Path $png) {
 # distinguishable from this arm alone. It is reported as INCONCLUSIVE rather than
 # FAIL for exactly that reason -- calling it a failure would be asserting
 # something this instrument cannot see.
-if ($ExpectColor.Count -gt 0 -and (Test-Path $png)) {
+# WHICH EYE THE COLOUR ARM USES. The DXGI capture when it exists, because it is
+# the only one that can see this app's surface; the GDI one otherwise. The choice
+# is REPORTED, never silent -- an oracle that swaps instruments without saying so
+# turns a later disagreement into a mystery.
+$colorPng = $png
+$colorEye = "GDI (cannot see hardware-composed swapchains)"
+if (Test-Path $dxgiPng) {
+    $colorPng = $dxgiPng
+    $colorEye = "DXGI Desktop Duplication"
+} elseif (Test-Path $dxgiLog) {
+    $verdicts += "note: the DXGI eye ran and produced no PNG -- $(Get-Content $dxgiLog -Raw)"
+}
+
+if ($ExpectColor.Count -gt 0 -and (Test-Path $colorPng)) {
+    $verdicts += "ok  : colour arm reading $([IO.Path]::GetFileName($colorPng)) via $colorEye"
     Add-Type -AssemblyName System.Drawing
-    $bmp = [System.Drawing.Bitmap]::FromFile($png)
+    $bmp = [System.Drawing.Bitmap]::FromFile($colorPng)
     $want = @{}
     foreach ($c in $ExpectColor) { $want[$c] = 0 }
     for ($y = 0; $y -lt $bmp.Height; $y += 3) {
@@ -217,11 +319,24 @@ if ($ExpectColor.Count -gt 0 -and (Test-Path $png)) {
         else { $missing += "$c ($($want[$c]))"; }
     }
     if ($missing.Count -gt 0) {
-        $verdicts += "INCONCLUSIVE: probe colour(s) not found: $($missing -join ', ')"
-        $verdicts += "              either the core did not paint, OR a GDI screen copy"
-        $verdicts += "              cannot see hardware-composed swapchain content."
-        $verdicts += "              This arm cannot tell those apart; do not report either."
-        $inconclusive = $true
+        if ($colorPng -eq $dxgiPng) {
+            # ⛔ UNDER THE DXGI EYE THIS IS A FAILURE, NOT AN AMBIGUITY, and that
+            # is the whole reason the second eye was built. Desktop Duplication
+            # reads the composed desktop, so "the camera cannot see that surface"
+            # is no longer one of the two readings. Leaving it INCONCLUSIVE here
+            # would keep an arm that can never convict -- which is what left this
+            # question open for days.
+            $verdicts += "FAIL: colour(s) not found in the COMPOSED desktop: $($missing -join ', ')"
+            $verdicts += "      This eye sees hardware-composed swapchains, so this is a"
+            $verdicts += "      rendering result, not a capture limitation."
+            $ok = $false
+        } else {
+            $verdicts += "INCONCLUSIVE: probe colour(s) not found: $($missing -join ', ')"
+            $verdicts += "              either the core did not paint, OR a GDI screen copy"
+            $verdicts += "              cannot see hardware-composed swapchain content."
+            $verdicts += "              This arm cannot tell those apart; do not report either."
+            $inconclusive = $true
+        }
     }
 }
 

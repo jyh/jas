@@ -433,6 +433,93 @@ pub unsafe extern "C" fn jas_paint_scene(
     JAS_PAINT_OK
 }
 
+// ---------------------------------------------------------------------------
+// THE EMBEDDED CORPUS, HANDED ACROSS THE BOUNDARY (node 4)
+// ---------------------------------------------------------------------------
+//
+// ⭐ WHY THE SHELL IS NOT ALLOWED TO READ `testdata/` ITSELF. `painter/corpus.rs`
+// exists because "display-list equivalence" is a claim about ONE ARTIFACT, and a
+// backend that cannot touch a filesystem must be driven by that same artifact
+// rather than by a copy. A C# host walking the directory would become a SECOND
+// source of the corpus — the exact staleness `corpus::SCENES` was built to
+// prevent, and which its own anti-drift arm
+// (`corpus::tests::embedded_corpus_matches_the_directory`) polices for every
+// other consumer. So the shell gets the embedded artifact, through here.
+//
+// It also makes the app self-contained: a double-clicked `SbWinUi.exe` paints
+// the goldens with no repo checkout under it.
+//
+// ⛔ NOTHING HERE ALLOCATES, so nothing here is freed. Every pointer returned is
+// into `&'static str` data baked into the library by `include_str!`. That is a
+// deliberate departure from BL4 ("every crossing allocation Rust owns is
+// released by `jas_free`") and it is safe only because the antecedent is false:
+// there is no allocation to own. A future variant that formats or filters must
+// go back to the `jas_free` rule rather than extend this one.
+
+/// The one bounds-and-NULL check both corpus accessors share.
+///
+/// ⛔ WRITTEN ONCE ON PURPOSE. The two exports have identical refusal rules, and
+/// a second copy is a second thing to get wrong -- the failure being a wild
+/// write or a slice over NULL, neither of which announces itself. `pick` selects
+/// which half of the corpus entry is wanted.
+///
+/// # Safety
+/// `out_len` must be NULL or point to a writable `usize`.
+unsafe fn static_slice(
+    index: usize,
+    out_len: *mut usize,
+    pick: fn(&'static (&'static str, &'static str)) -> &'static str,
+) -> *const u8 {
+    // A NULL `out_len` is refused BEFORE the bounds check, because the refusal
+    // path below writes through it. Ordering these the other way round would
+    // make an out-of-range index on a NULL length a wild store -- the guard
+    // causing the fault it exists to prevent.
+    if out_len.is_null() {
+        return core::ptr::null();
+    }
+    let Some(entry) = crate::painter::corpus::SCENES.get(index) else {
+        // ZEROED, not left alone: the caller's `len` may hold anything, and a
+        // NULL pointer paired with a stale non-zero length is the exact shape
+        // that turns a bounds refusal into an out-of-bounds read one frame up.
+        unsafe { *out_len = 0 };
+        return core::ptr::null();
+    };
+    let s = pick(entry);
+    unsafe { *out_len = s.len() };
+    s.as_ptr()
+}
+
+/// How many recorded goldens the embedded corpus holds.
+#[unsafe(no_mangle)]
+pub extern "C" fn jas_corpus_len() -> usize {
+    crate::painter::corpus::SCENES.len()
+}
+
+/// The UTF-8 name of golden `index` (e.g. `ref_gradients.json`), and its length.
+///
+/// Returns NULL, writing `0` through `out_len`, when `index` is out of range or
+/// `out_len` is NULL. The bytes are `'static` and must not be freed.
+///
+/// # Safety
+/// `out_len` must be NULL or point to a writable `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_corpus_name(index: usize, out_len: *mut usize) -> *const u8 {
+    unsafe { static_slice(index, out_len, |(name, _)| name) }
+}
+
+/// The JSON bytes of golden `index` — the recorded display list, exactly as
+/// `jas_paint_scene` wants them — and its length.
+///
+/// Returns NULL, writing `0` through `out_len`, when `index` is out of range or
+/// `out_len` is NULL. The bytes are `'static` and must not be freed.
+///
+/// # Safety
+/// `out_len` must be NULL or point to a writable `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_corpus_scene(index: usize, out_len: *mut usize) -> *const u8 {
+    unsafe { static_slice(index, out_len, |(_, body)| body) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1171,5 +1258,215 @@ mod tests {
             jas_paint_scene(as_surface(&rt).as_raw(), std::ptr::null(), 16, W as f32, H as f32)
         };
         assert_eq!(rc, JAS_PAINT_BAD_SCENE);
+    }
+
+    // -----------------------------------------------------------------------
+    // NODE 4 — the corpus crossing, and the set of goldens the app can run
+    // -----------------------------------------------------------------------
+
+    use crate::painter::corpus::SCENES;
+
+    /// Read back what the export handed out, as a C consumer would.
+    ///
+    /// # Safety
+    /// Only called on pointers this module just produced.
+    unsafe fn borrow(ptr: *const u8, len: usize) -> &'static [u8] {
+        assert!(!ptr.is_null(), "a non-NULL pointer was expected");
+        unsafe { core::slice::from_raw_parts(ptr, len) }
+    }
+
+    #[test]
+    fn the_corpus_export_reports_the_embedded_count() {
+        assert_eq!(jas_corpus_len(), SCENES.len(),
+                   "the boundary must report the embedded corpus, not a copy of it");
+        assert!(jas_corpus_len() >= 20,
+                "the corpus shrank -- {} goldens", jas_corpus_len());
+    }
+
+    /// ⛔ THE ANTI-DRIFT ARM AT THE BOUNDARY. `corpus.rs` already proves the
+    /// embedded list matches `testdata/`; this proves the BOUNDARY hands out
+    /// that same list rather than a re-encoded, re-ordered or truncated view of
+    /// it. Without it, a marshalling bug could hand the shell 19 goldens and 20
+    /// would still be reported by the count arm above.
+    #[test]
+    fn every_exported_golden_is_byte_identical_to_the_embedded_artifact() {
+        for (i, (name, body)) in SCENES.iter().enumerate() {
+            let mut nlen = 0usize;
+            let np = unsafe { jas_corpus_name(i, &mut nlen) };
+            assert_eq!(unsafe { borrow(np, nlen) }, name.as_bytes(),
+                       "name of golden {i} disagrees with the embedded corpus");
+
+            let mut blen = 0usize;
+            let bp = unsafe { jas_corpus_scene(i, &mut blen) };
+            assert_eq!(unsafe { borrow(bp, blen) }, body.as_bytes(),
+                       "bytes of golden {i} ({name}) disagree with the embedded corpus");
+        }
+    }
+
+    /// An out-of-range index is a caller error and must be REFUSED, not read.
+    /// A silent NULL with a stale `out_len` would let the shell build a slice
+    /// over a null pointer, which is UB at any length.
+    #[test]
+    fn an_out_of_range_index_returns_null_and_zeroes_the_length() {
+        let n = jas_corpus_len();
+        for i in [n, n + 1, usize::MAX] {
+            // Pre-load a NON-ZERO length: the guard must OVERWRITE it, not
+            // merely leave it alone. A guard that only returns NULL passes a
+            // zero-initialised probe by accident.
+            let mut nlen = 999usize;
+            assert!(unsafe { jas_corpus_name(i, &mut nlen) }.is_null(), "name at {i}");
+            assert_eq!(nlen, 0, "name length at {i} must be zeroed, not left stale");
+
+            let mut blen = 999usize;
+            assert!(unsafe { jas_corpus_scene(i, &mut blen) }.is_null(), "scene at {i}");
+            assert_eq!(blen, 0, "scene length at {i} must be zeroed, not left stale");
+        }
+    }
+
+    /// A NULL `out_len` must not be written through. The caller gets NULL and
+    /// no store happens; the alternative is a wild write on a marshalling slip.
+    #[test]
+    fn a_null_out_len_is_refused_rather_than_written_through() {
+        assert!(unsafe { jas_corpus_name(0, core::ptr::null_mut()) }.is_null());
+        assert!(unsafe { jas_corpus_scene(0, core::ptr::null_mut()) }.is_null());
+    }
+
+    /// ⭐ THE NODE-4 ARM: every golden the shell will be handed, driven through
+    /// the REAL seam onto a REAL DXGI surface — the same call, on the same
+    /// pointers, that the C# host makes.
+    ///
+    /// ⛔ IT ASSERTS THE SET, NOT A COUNT. "18 of 20 painted" is satisfied by
+    /// any 18; naming them is what makes a change visible. The refusals are the
+    /// backend's ONE declared gap (non-Normal blend needs an effect graph) —
+    /// see `direct2d::replay`'s `DECLARED` list, which this must stay consistent
+    /// with. A golden moving in or out of this set is a real change to what a
+    /// Windows app can show and must be read, not absorbed.
+    #[test]
+    fn every_exported_golden_paints_through_the_real_seam() {
+        let (dev, _ctx) = warp();
+        let t = tex(&dev, false);
+        let surface: IDXGISurface = t.cast().expect("surface");
+
+        let mut refused: Vec<(String, i32)> = Vec::new();
+        let mut painted = 0usize;
+        for i in 0..jas_corpus_len() {
+            let mut nlen = 0usize;
+            let np = unsafe { jas_corpus_name(i, &mut nlen) };
+            let name = String::from_utf8(unsafe { borrow(np, nlen) }.to_vec()).expect("utf-8");
+
+            let mut blen = 0usize;
+            let bp = unsafe { jas_corpus_scene(i, &mut blen) };
+
+            let rc = unsafe {
+                jas_paint_scene(surface.as_raw(), bp, blen, W as f32, H as f32)
+            };
+            if rc == JAS_PAINT_OK {
+                painted += 1;
+            } else {
+                refused.push((name, rc));
+            }
+        }
+
+        // ⛔ NOT ONE REFUSAL MAY BE ANYTHING BUT THE DECLARED GAP. A decode
+        // error (5) or a surface fault would otherwise hide inside "some
+        // scenes refuse", which is exactly the reading this arm exists to
+        // prevent.
+        for (name, rc) in &refused {
+            assert_eq!(*rc, JAS_PAINT_SCENE_INCOMPLETE,
+                       "{name} refused with {rc}, which is not the declared gap");
+        }
+
+        let names: Vec<&str> = refused.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, vec!["a6_blend.json", "group_blend.json"],
+                   "the incomplete set changed -- a golden moved in or out of \
+                    what a Windows app can show; painted {painted}");
+        assert_eq!(painted, jas_corpus_len() - 2,
+                   "every other golden must paint, not merely not-refuse");
+        assert!(painted >= 18, "only {painted} goldens reach the surface");
+    }
+
+    /// ⛔ THE COLOUR THE DESKTOP VERIFIER LOOKS FOR, PINNED HERE.
+    ///
+    /// `verify_window.ps1 -ExpectColor` asserts that pixels only the Rust core
+    /// could have produced reached the screen. For the goldens run that colour
+    /// is `ref_shapes.json`'s large flat fill, and the script has it written
+    /// down as a literal.
+    ///
+    /// A LITERAL IN A POWERSHELL SCRIPT CANNOT NOTICE THAT A GOLDEN CHANGED.
+    /// Re-authoring `ref_shapes.json`, or a colour-handling change in the
+    /// backend, would leave the script hunting for a colour nothing paints any
+    /// more -- and its own honest design reports that as INCONCLUSIVE ("either
+    /// the core did not paint, or the camera cannot see this surface"), which is
+    /// exactly the reading that would hide the regression. So the two are pinned
+    /// together HERE, where a change reds a test instead of quietly weakening an
+    /// oracle.
+    ///
+    /// The area matters as much as the value: the script samples every third
+    /// pixel and needs >= 50 hits, so a colour present in a thin stroke would
+    /// pass this test and fail the screen. Measured 2026-09-01 on WARP:
+    /// 12,556 pixels at 400x300.
+    #[test]
+    fn the_verifier_colour_is_one_the_goldens_actually_paint() {
+        const VERIFY_COLOUR: (u8, u8, u8) = (51, 102, 204);
+        let (dev, ctx) = warp();
+        let (w, h) = (400u32, 300u32);
+        let t = tex_wh(&dev, false, w, h);
+        let surface: IDXGISurface = t.cast().expect("surface");
+
+        let (_, body) = SCENES
+            .iter()
+            .find(|(n, _)| *n == "ref_shapes.json")
+            .expect("ref_shapes.json is the goldens run's final frame");
+        let rc = unsafe {
+            jas_paint_scene(surface.as_raw(), body.as_ptr(), body.len(), w as f32, h as f32)
+        };
+        assert_eq!(rc, JAS_PAINT_OK, "the final frame must paint completely");
+
+        let buf = read_wh(&dev, &ctx, &t, w, h);
+        let hits = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .filter(|(x, y)| rgb_at_w(&buf, *x, *y, w) == VERIFY_COLOUR)
+            .count();
+        assert!(hits >= 2000,
+                "verify_window.ps1 looks for {VERIFY_COLOUR:?} and this golden \
+                 paints it {hits} time(s) -- the desktop oracle has gone stale");
+
+        // ⛔ AND IT MUST NOT BE A PROBE COLOUR. The whole point of asserting it
+        // on the desktop is that ONLY a golden can produce it; sharing a value
+        // with the probe would make the screenshot prove nothing about which
+        // path ran.
+        assert_ne!(VERIFY_COLOUR, PROBE_BG);
+        assert_ne!(VERIFY_COLOUR, PROBE_FG);
+
+        // ⭐⭐ AND IT MUST BE EXACTLY REPRESENTABLE, WHICH IS THE ARM THIS TEST
+        // EXISTS FOR AND THE ONE I LEARNED THE HARD WAY.
+        //
+        // The oracle compares bytes exactly. A scene colour is authored as a
+        // float, and `f * 255.0` lands on a .5 boundary for some values -- where
+        // the rounding is the RASTERISER's choice, not the format's. Measured
+        // 2026-09-01, the same goldens, WARP against this box's hardware:
+        //
+        //   0.2/0.4/0.8 -> 51,102,204 exactly       -> MATCHED on both
+        //   0.9         -> 229.5      -> WARP 230, hardware 229   -> MISSED
+        //   0.5         -> 127.5      -> WARP 128,  hardware 127   -> MISSED
+        //
+        // I picked a second colour off a WARP readback and the desktop arm
+        // reported it absent -- which, under the DXGI eye, reads as A RENDERING
+        // FAILURE. The rendering was perfect; the COLOUR was unassertable. An
+        // oracle that can be wrong for a reason unrelated to the thing it judges
+        // is worse than no oracle, so the constraint is enforced here rather
+        // than left as a note for whoever picks the next one.
+        //
+        // ⚠️ Alpha is the other half and cannot be checked from a constant: a
+        // partially transparent region composites over the WINDOW background on
+        // screen and over a TRANSPARENT clear in this readback, so its two
+        // values legitimately differ. Only a fully opaque region is assertable
+        // on the desktop. `ref_shapes`'s flat fill is opaque; its rounded rect
+        // is not, which is why only one colour travels to the verifier.
+        for ch in [VERIFY_COLOUR.0, VERIFY_COLOUR.1, VERIFY_COLOUR.2] {
+            let f = ch as f64 / 255.0;
+            assert!((f * 255.0 - ch as f64).abs() < 1e-9,
+                    "{ch} is not exactly representable as f*255, so its rounding                      is the rasteriser's choice and the desktop oracle would                      compare bytes that legitimately differ between backends");
+        }
     }
 }
