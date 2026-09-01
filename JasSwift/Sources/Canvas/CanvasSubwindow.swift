@@ -1205,19 +1205,36 @@ private func drawElementWithMask(
     _ mask: Mask,
     plan: MaskPlan,
     ancestorVis: Visibility,
-    elementScale: Double = 1.0
+    elementScale: Double = 1.0,
+    ancestorAlpha: Double = 1.0
 ) {
     ctx.saveGState()
-    // Alpha + blend apply at layer-composite time.
-    ctx.setAlpha(CGFloat(elementOpacity(elem)))
+    // ⚖️ THE ANCESTORS' PRODUCT COMPOSITES THE LAYER BACK; THE ELEMENT'S OWN
+    // OPACITY IS SPENT ONCE, INSIDE — the Swift spelling of jas_dioxus's
+    // `mask_blit_alpha(parent_alpha, own) = parent_alpha`, and A6 §6.2's
+    // choice of which factor is ISOLATED.
+    //
+    // ⛔ THIS LINE READ `setAlpha(elementOpacity(elem))`, WHICH SPENT `own`
+    // TWICE — once here at composite-back and again inside the layer, where
+    // `drawElementBody` applies it to the body. That is jas_dioxus's D-α
+    // defect (repaired there 2026-08-24), alive in JasSwift until 2026-08-31,
+    // and it DISCARDED the ancestor product on the same line.
+    // ⚠️ transcripts/OPACITY.md asserted the opposite — "the Swift port's
+    // masked composite already spends the element's own opacity once … read
+    // in CanvasSubwindow.swift, not executed". MEASURED: a 0.5 element under
+    // a full white mask rendered at 0.25, with the same element unmasked at
+    // 0.5 as the control. Pinned by NestedOpacityTests.
+    ctx.setAlpha(CGFloat(ancestorAlpha))
     ctx.setBlendMode(cgBlendMode(elem.blendMode))
     ctx.beginTransparencyLayer(auxiliaryInfo: nil)
     // Inside the layer start from an identity compositing state so
     // the element body / mask subtree don't double-apply the
-    // outer alpha / blend.
+    // outer alpha / blend. The body pass therefore runs at
+    // `ancestorAlpha: 1.0` — its own opacity, once.
     ctx.setAlpha(1.0)
     ctx.setBlendMode(.normal)
-    drawElementBody(ctx, elem, ancestorVis: ancestorVis, elementScale: elementScale)
+    drawElementBody(ctx, elem, ancestorVis: ancestorVis, elementScale: elementScale,
+                    ancestorAlpha: 1.0)
     // Apply the mask's effective transform (per
     // ``effectiveMaskTransform``), then composite the mask subtree
     // against the element body. Track C phase 3.
@@ -1277,7 +1294,7 @@ private func drawElementWithMask(
 /// live inside this function and CGContext state is the only place a winding
 /// rule is observable.
 func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .preview,
-                 elementScale: Double = 1.0) {
+                 elementScale: Double = 1.0, ancestorAlpha: Double = 1.0) {
     // Opacity mask: when an element carries an active mask,
     // redirect rendering through the mask composite path. The plan
     // encodes which of the three supported composite strategies to
@@ -1285,14 +1302,15 @@ func drawElement(_ ctx: CGContext, _ elem: Element, ancestorVis: Visibility = .p
     // plain path for now. OPACITY.md §Rendering.
     if let mask = elem.mask, let plan = maskPlan(mask) {
         drawElementWithMask(ctx, elem, mask, plan: plan, ancestorVis: ancestorVis,
-                            elementScale: elementScale)
+                            elementScale: elementScale, ancestorAlpha: ancestorAlpha)
         return
     }
-    drawElementBody(ctx, elem, ancestorVis: ancestorVis, elementScale: elementScale)
+    drawElementBody(ctx, elem, ancestorVis: ancestorVis, elementScale: elementScale,
+                    ancestorAlpha: ancestorAlpha)
 }
 
 private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: Visibility = .preview,
-                             elementScale: Double = 1.0) {
+                             elementScale: Double = 1.0, ancestorAlpha: Double = 1.0) {
     let effective = min(ancestorVis, inElem.visibility)
     if effective == .invisible { return }
     let outline = effective == .outline
@@ -1324,10 +1342,21 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         }
     }
     ctx.saveGState()
+    // ⚖️ ONE BASE ALPHA, COMPUTED ONCE, MULTIPLYING INTO THE ANCESTORS' PRODUCT
+    // — the Swift spelling of jas_dioxus's `base_alpha = parent_alpha *
+    // elem.opacity()`. ⛔ It is a THREADED PARAMETER and not a read of the
+    // context because CoreGraphics exposes no getter for the current alpha;
+    // that absence is why every arm here used to call `setAlpha(v.opacity)`,
+    // which REPLACES, so a container's opacity was overwritten by the first
+    // descendant that set its own. MEASURED before the repair: a 0.5 child of
+    // a 0.5 group rendered at 0.5 where jas_dioxus renders 0.25.
+    // `ancestorVis` and `elementScale` are threaded the same way for the same
+    // reason. Pinned by NestedOpacityTests.
+    let baseAlpha = ancestorAlpha * elementOpacity(elem)
+    ctx.setAlpha(CGFloat(baseAlpha))
     ctx.setBlendMode(cgBlendMode(elem.blendMode))
     switch elem {
     case .line(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
         applyTransform(ctx, v.transform)
         var strokeAlign = StrokeAlign.center
         if outline {
@@ -1335,7 +1364,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         } else {
             let (op, al) = setStroke(ctx, v.stroke)
             strokeAlign = al
-            ctx.setAlpha(CGFloat(v.opacity * op))
+            ctx.setAlpha(CGFloat(baseAlpha * op))
         }
         // Shorten line for arrowheads
         var lx1 = v.x1, ly1 = v.y1, lx2 = v.x2, ly2 = v.y2
@@ -1370,7 +1399,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         }
 
     case .rect(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
+        ctx.setAlpha(CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         let rect = CGRect(x: v.x, y: v.y, width: v.width, height: v.height)
         if !outline,
@@ -1415,14 +1444,14 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
 
 
     case .ellipse(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
+        ctx.setAlpha(CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         let rect = CGRect(x: v.cx - v.rx, y: v.cy - v.ry, width: v.rx * 2, height: v.ry * 2)
         ctx.addEllipse(in: rect)
         fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: rect, outline: outline)
 
     case .polyline(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
+        ctx.setAlpha(CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         guard !v.points.isEmpty else { break }
         ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
@@ -1433,7 +1462,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: pbbox, outline: outline)
 
     case .polygon(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
+        ctx.setAlpha(CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         guard !v.points.isEmpty else { break }
         ctx.move(to: CGPoint(x: v.points[0].0, y: v.points[0].1))
@@ -1445,7 +1474,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         fillStrokeOrOutline(ctx, v.fill, v.stroke, fillGradient: v.fillGradient, strokeGradient: v.strokeGradient, bbox: pbbox, outline: outline)
 
     case .path(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
+        ctx.setAlpha(CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         if outline {
             buildPath(ctx, v.d)
@@ -1543,7 +1572,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         }
 
     case .text(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
+        ctx.setAlpha(CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         // Multi-tspan Text renders each tspan with its own effective
         // font (family / size / weight / style) and text-decoration on
@@ -1901,7 +1930,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         ctx.restoreGState()
 
     case .textPath(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
+        ctx.setAlpha(CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         let font = resolveFont(family: v.fontFamily,
                                bold: v.fontWeight == "bold",
@@ -2005,17 +2034,24 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         ctx.restoreGState()
 
     case .group(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
+        ctx.setAlpha(CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         // Thread the accumulated element scale (including this group's own
         // transform) so a stroked descendant is counter-scaled by the full
-        // ancestor chain.
-        for child in v.children { drawElement(ctx, child, ancestorVis: effective, elementScale: elemScale) }
+        // ancestor chain — and the accumulated ALPHA for the same reason: a
+        // child must multiply into the ancestors' product, not replace it.
+        for child in v.children {
+            drawElement(ctx, child, ancestorVis: effective, elementScale: elemScale,
+                        ancestorAlpha: baseAlpha)
+        }
 
     case .layer(let v):
-        ctx.setAlpha(CGFloat(v.opacity))
+        ctx.setAlpha(CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
-        for child in v.children { drawElement(ctx, child, ancestorVis: effective, elementScale: elemScale) }
+        for child in v.children {
+            drawElement(ctx, child, ancestorVis: effective, elementScale: elemScale,
+                        ancestorAlpha: baseAlpha)
+        }
 
     case .live(let v):
         // Evaluate the live element, resolving references against the
@@ -2023,7 +2059,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         // top-level evaluate. Per variant we also pick the paint: a
         // reference inherits the resolved target's paint when its own is
         // nil (Fork F3). Mirrors the Rust render arm.
-        ctx.setAlpha(CGFloat(v.opacity))
+        ctx.setAlpha(CGFloat(baseAlpha))
         applyTransform(ctx, v.transform)
         var visiting = VisitSet()
         let ps: BoolPolygonSet
@@ -2077,11 +2113,11 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 ctx.closePath()
             }
             if !outline && liveFill != nil {
-                ctx.setAlpha(CGFloat(v.opacity * fillOp))
+                ctx.setAlpha(CGFloat(baseAlpha * fillOp))
                 ctx.fillPath()
             }
             if outline || liveStroke != nil {
-                ctx.setAlpha(CGFloat(v.opacity * strokeOp))
+                ctx.setAlpha(CGFloat(baseAlpha * strokeOp))
                 // strokeAligned consumes the current path (clip/stroke);
                 // the path must be re-traced if both fill and stroke run.
                 if !outline && liveFill != nil {
