@@ -9,6 +9,11 @@ pub mod tool_consts;
 // build, and it lived in web-gated `tools` while being the only definition,
 // which is how the native arm drifted. `tools::text_measure` re-exports it.
 pub mod text_measure;
+// Caller-owned pixel surfaces: readback / writeback / composite, the services
+// the Painter seam must not grow to provide (ruling 2026-08-31). Crate root,
+// not web-gated: the trait, the luminance law and the memory surface are
+// host-independent; only `surface::web` is behind `feature = "web"`.
+pub mod surface;
 // The extern "C" boundary for a native shell (S-A). Behind `feature = "ffi"`,
 // so the default web build and the wasm target never see it.
 #[cfg(feature = "ffi")]

@@ -26,7 +26,9 @@ use super::{
     StrokeStyle, TextRun,
 };
 use crate::geometry::element::{BlendMode, Color, LineCap, LineJoin, Transform};
-use wasm_bindgen::{JsCast, JsValue};
+use crate::surface::web::WebSurface;
+use crate::surface::PixelSurface;
+use wasm_bindgen::JsValue;
 use web_sys::{CanvasRenderingContext2d, CanvasWindingRule};
 
 /// A [`Painter`] that draws onto a 2D canvas context. See module docs — STUB,
@@ -45,8 +47,10 @@ enum LayerKind {
 }
 
 struct LayerTarget {
-    canvas: web_sys::HtmlCanvasElement,
-    ctx: CanvasRenderingContext2d,
+    /// The layer's offscreen surface — a caller-owned `WebSurface`, so the
+    /// luminance law reaches it through the surface service and not through
+    /// a raw pixel call of this backend's own.
+    surface: WebSurface,
     kind: LayerKind,
     /// ⛔ THE OPEN-GROUP PRODUCT RESTARTS AT 1.0 INSIDE A LAYER (A6 §3.1), so
     /// the parent's stack is SET ASIDE here and restored at the pop. Without
@@ -119,7 +123,7 @@ impl<'a> Canvas2dPainter<'a> {
     /// layer onto the parent, which is invisible in a golden and obvious on
     /// screen.
     fn target(&self) -> &CanvasRenderingContext2d {
-        self.layers.last().map(|l| &l.ctx).unwrap_or(self.base)
+        self.layers.last().map(|l| l.surface.ctx()).unwrap_or(self.base)
     }
 
     /// A6 §3.1: open an isolated layer. A fresh transparent surface the size of
@@ -131,13 +135,8 @@ impl<'a> Canvas2dPainter<'a> {
         if w == 0 || h == 0 {
             return None;
         }
-        let doc = web_sys::window()?.document()?;
-        let el = doc.create_element("canvas").ok()?;
-        let canvas: web_sys::HtmlCanvasElement = el.unchecked_into();
-        canvas.set_width(w);
-        canvas.set_height(h);
-        let ctx: CanvasRenderingContext2d = canvas
-            .get_context("2d").ok()??.unchecked_into();
+        let surface = WebSurface::offscreen(w, h)?;
+        let ctx = surface.ctx();
         // §3.1: the layer opens in the parent's coordinate frame. Replay the
         // open transforms in order; the canvas composes them.
         // ⛔ SEEDED WITH THE FRAME THE BASE CONTEXT ARRIVED IN, when there is
@@ -151,8 +150,7 @@ impl<'a> Canvas2dPainter<'a> {
             let _ = ctx.transform(t.a, t.b, t.c, t.d, t.e, t.f);
         }
         self.layers.push(LayerTarget {
-            canvas,
-            ctx,
+            surface,
             kind,
             // the open-group product restarts at 1.0 inside the layer
             saved_group_alphas: std::mem::take(&mut self.group_alpha_stack),
@@ -420,9 +418,11 @@ impl Painter for Canvas2dPainter<'_> {
         //   AlphaRevealOutsideBbox α_S ← α_S · M inside bbox, unchanged outside
         //
         // BT.601 is normative for the luminance law (§A6), and the promotion is
-        // `canvas::render`'s -- the SAME function the legacy path uses, not a
-        // second implementation that could drift from it.
-        let (w, h) = (layer.canvas.width(), layer.canvas.height());
+        // the surface service's -- the SAME function the legacy path uses, not
+        // a second implementation that could drift from it. (It used to be
+        // reached INSIDE `canvas::render`, a backend depending on the web-only
+        // walk it is meant to replace; `surface` is host-independent.)
+        let (w, h) = layer.surface.size();
         if w == 0 || h == 0 {
             return;
         }
@@ -430,7 +430,7 @@ impl Painter for Canvas2dPainter<'_> {
             // Promote on the MASK surface, in device space, before the blit.
             // get_image_data ignores the ctx transform, which is what we want:
             // this is a per-pixel channel rewrite, not a drawing operation.
-            if crate::canvas::render::promote_mask_to_luminance(&layer.ctx, 0, 0, w, h).is_none() {
+            if crate::surface::promote_to_luminance(&layer.surface, 0, 0, w, h).is_none() {
                 // ⚠️ FAIL SOFT, LIKE LEGACY. If ImageData is unavailable the
                 // legacy path falls back to the raw-alpha composite rather than
                 // dropping the mask; an unmasked element is a worse lie than a
@@ -453,7 +453,7 @@ impl Painter for Canvas2dPainter<'_> {
                 };
                 let _ = parent.set_global_composite_operation(op);
                 let _ = parent.reset_transform();
-                let _ = parent.draw_image_with_html_canvas_element(&layer.canvas, 0.0, 0.0);
+                let _ = parent.draw_image_with_html_canvas_element(layer.surface.canvas(), 0.0, 0.0);
             }
             Mask::AlphaRevealOutsideBbox { bbox } => {
                 // The bbox arrives precomputed (§3.3) as the bounds OF the
@@ -470,7 +470,7 @@ impl Painter for Canvas2dPainter<'_> {
                 parent.clip();
                 let _ = parent.set_global_composite_operation("destination-in");
                 let _ = parent.reset_transform();
-                let _ = parent.draw_image_with_html_canvas_element(&layer.canvas, 0.0, 0.0);
+                let _ = parent.draw_image_with_html_canvas_element(layer.surface.canvas(), 0.0, 0.0);
             }
         }
         let _ = parent.restore();
@@ -510,12 +510,12 @@ impl Painter for Canvas2dPainter<'_> {
         let prev_alpha = parent.global_alpha();
         parent.set_global_alpha(self.group_alpha() * layer_alpha);
         let _ = parent.set_global_composite_operation(
-            crate::canvas::render::blend_mode_css(layer_blend),
+            crate::surface::web::blend_mode_css(layer_blend),
         );
         // the layer already carries the world transform; blit in device space
         let _ = parent.save();
         let _ = parent.reset_transform();
-        let _ = parent.draw_image_with_html_canvas_element(&layer.canvas, 0.0, 0.0);
+        let _ = parent.draw_image_with_html_canvas_element(layer.surface.canvas(), 0.0, 0.0);
         let _ = parent.restore();
         let _ = parent.set_global_composite_operation("source-over");
         parent.set_global_alpha(prev_alpha);
@@ -601,6 +601,7 @@ mod a6_layer_tests {
     use super::*;
     use crate::geometry::element::Color;
     use crate::painter::capability::{Capability, Caps};
+    use wasm_bindgen::JsCast;
     use wasm_bindgen_test::*;
 
     wasm_bindgen_test_configure!(run_in_browser);
