@@ -4806,6 +4806,26 @@ mod ph4_conversion_tests {
                    "…and the converted path must agree with it");
     }
 
+    /// 🔑 THE TAME EXAMPLE, NAMED. The fixture above masks with WHITE artwork,
+    /// for which luminance and raw alpha AGREE — so a promotion that silently
+    /// did nothing would leave it green. A mutation pass (2026-09-01, the law's
+    /// write-back deleted) found exactly that: every legacy-path luminance
+    /// fixture survived and only the painter's died. This one masks with BLACK
+    /// artwork, which raw alpha keeps and luminance cuts.
+    #[wasm_bindgen_test]
+    fn a_black_luminance_mask_cuts_on_the_legacy_path() {
+        let doc = masked(
+            opaque_rect(0.0, 0.0, 8.0, 8.0, Color::BLACK),
+            opaque_rect(0.0, 0.0, 4.0, 8.0, Color::BLACK),
+            true, false,
+        );
+        assert_eq!(scan(&doc, 10, true), "..........",
+                   "legacy LuminanceClipIn reads LUMINANCE: black-opaque artwork keeps \
+                    nothing; `####......` here means raw alpha was composited");
+        assert_eq!(scan(&doc, 10, false), "..........",
+                   "…and the converted path agrees");
+    }
+
     /// ⛔ THE ARTWORK SURFACE MUST ADOPT THE CALLER'S FRAME, and this arm is
     /// here because a mutation pass found nothing else covering it.
     ///
