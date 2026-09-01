@@ -16,6 +16,14 @@ path = "src/main.rs"
 required-features = ["web"]
 
 [[bin]]
+name = "capture_desktop"
+path = "src/bin/capture_desktop.rs"
+# The GUI oracle's eyes. Needs `d2d` for the WIC/D3D11 stack it shares with the
+# Direct2D backend; on any other target it builds to a binary that refuses by
+# name rather than one that silently writes nothing.
+required-features = ["d2d"]
+
+[[bin]]
 name = "svg_roundtrip"
 path = "src/bin/svg_roundtrip.rs"
 
@@ -167,6 +175,11 @@ windows = { version = "0.62", optional = true, features = [
     "Win32_Graphics_Imaging",
     "Win32_Graphics_Dxgi_Common",
     "Win32_System_Com",
+    # For IWICBitmapEncoder::CreateNewFrame, whose second parameter is an
+    # IPropertyBag2. Without it the method is not generated at all and the
+    # failure reads as "no method named CreateNewFrame" -- a missing FEATURE
+    # wearing the costume of a missing API.
+    "Win32_System_Com_StructuredStorage",
     # FOR THE TESTS, NOT FOR PRODUCTION -- and the distinction is worth the line.
     # The swapchain route (surface.rs) receives a DXGI surface the HOST created
     # and reaches its device via IDXGIDeviceSubObject::GetDevice, so shipping

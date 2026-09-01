@@ -580,6 +580,40 @@ int32_t jas_paint_scene(void *surface,
                         float height);
 #endif
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * How many recorded goldens the embedded corpus holds.
+ */
+uintptr_t jas_corpus_len(void);
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * The UTF-8 name of golden `index` (e.g. `ref_gradients.json`), and its length.
+ *
+ * Returns NULL, writing `0` through `out_len`, when `index` is out of range or
+ * `out_len` is NULL. The bytes are `'static` and must not be freed.
+ *
+ * # Safety
+ * `out_len` must be NULL or point to a writable `usize`.
+ */
+const uint8_t *jas_corpus_name(uintptr_t index, uintptr_t *out_len);
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * The JSON bytes of golden `index` — the recorded display list, exactly as
+ * `jas_paint_scene` wants them — and its length.
+ *
+ * Returns NULL, writing `0` through `out_len`, when `index` is out of range or
+ * `out_len` is NULL. The bytes are `'static` and must not be freed.
+ *
+ * # Safety
+ * `out_len` must be NULL or point to a writable `usize`.
+ */
+const uint8_t *jas_corpus_scene(uintptr_t index, uintptr_t *out_len);
+#endif
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif  // __cplusplus

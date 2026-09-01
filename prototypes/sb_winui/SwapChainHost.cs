@@ -585,6 +585,159 @@ internal sealed unsafe class SwapChainHost : IDisposable
     }
 
     /// <summary>
+    /// ⭐ NODE 4 — PAINT THE GOLDENS, not the probe.
+    ///
+    /// Every frame this host has ever presented came from
+    /// <c>jas_paint_probe_surface</c>, which clears to a fixed colour and fills a
+    /// CENTRED SQUARE. It never touches a document, so every green Windows run
+    /// to date drew a square. This walks the RECORDED CORPUS -- the same
+    /// artifact <c>direct2d::replay</c> drives and the conformance lane pins --
+    /// through the real <c>Direct2DPainter</c> onto the back buffer this window
+    /// presents.
+    ///
+    /// ⛔ A REFUSAL IS NOT A FAILURE HERE, AND THE SPLIT IS THE WHOLE DESIGN.
+    /// The core REFUSES a scene it cannot fully draw
+    /// (<c>PaintSceneIncomplete</c>) rather than presenting artwork-missing
+    /// pixels. Two goldens in the corpus land there by design -- they carry a
+    /// non-Normal blend, the backend's one declared gap. So an incomplete is
+    /// TALLIED; anything else is a hard stop.
+    ///
+    /// ⛔ AND THE EXPECTED TALLY IS NOT WRITTEN DOWN ON THIS SIDE. Hardcoding
+    /// "18 of 20" here would make the shell a second source of truth about the
+    /// corpus, which is exactly the drift <c>jas_corpus_len</c> exists to
+    /// prevent -- and it would go stale silently the first time a golden is
+    /// added. The shell REPORTS what happened and names the refusals; the
+    /// assertion about which goldens paint lives in Rust, next to the corpus,
+    /// in `ffi_paint`'s `every_exported_golden_paints_through_the_real_seam`.
+    /// </summary>
+    public bool RenderGoldens()
+    {
+        if (_swapChain is null) { LastStatus = "no swapchain"; return false; }
+
+        var n = (nuint)JasCore.jas_corpus_len();
+        if (n == 0)
+        {
+            // An empty corpus would otherwise present nothing and report a
+            // cheerful "0 refused" -- the vacuous success this harness refuses.
+            LastStatus = "GOLDENS FAILED: the core reports an EMPTY corpus";
+            return false;
+        }
+
+        // How long each golden stays on screen, in presents. At a sync interval
+        // of 1 that is ~16ms apiece. The default holds each for ~200ms, so a
+        // human sees a slideshow rather than a flicker and the session-1 camera
+        // has something to catch.
+        var hold = int.TryParse(Environment.GetEnvironmentVariable("SB_SCENE_HOLD"), out var hv) ? hv : 12;
+
+        // THE FINAL FRAME IS CHOSEN, NOT INHERITED FROM THE LOOP ORDER. A
+        // screenshot is only evidence if it is deterministic, and "whatever the
+        // last golden happened to be" changes the moment a file is added to
+        // testdata/. Refused BY NAME below if it is not in the corpus, rather
+        // than silently falling back to the last one drawn.
+        var finalName = Environment.GetEnvironmentVariable("SB_SCENE_FINAL") ?? "ref_shapes.json";
+
+        var painted = new List<string>();
+        var refused = new List<string>();
+        string? failure = null;
+        nuint finalIndex = 0;
+        var haveFinal = false;
+
+        for (nuint i = 0; i < n && failure is null; i++)
+        {
+            var (name, scene, len) = JasCore.Golden(i);
+            if (name == finalName) { finalIndex = i; haveFinal = true; }
+
+            var rc = PaintOnce(scene, len, hold, ref failure);
+            if (failure is not null) break;
+
+            if (rc == JasCore.PaintOk) { painted.Add(name); }
+            else if (rc == JasCore.PaintSceneIncomplete) { refused.Add(name); }
+            else
+            {
+                // A decode error or a surface fault must NOT be absorbed into
+                // "some scenes refuse". Those two readings have opposite
+                // consequences: one is a known backend gap, the other is this
+                // shell handing the core bad pointers.
+                failure = $"{name}: {JasCore.Explain(rc)}";
+            }
+        }
+
+        if (failure is null && !haveFinal)
+        {
+            failure = $"SB_SCENE_FINAL='{finalName}' is not in the corpus; the "
+                    + $"corpus holds: {string.Join(", ", painted.Concat(refused))}";
+        }
+
+        // Settle on the chosen golden and LEAVE IT UP, so the capture is of a
+        // known frame. Painted again rather than "left over" from the loop: the
+        // loop may have moved past it, and a screenshot of an assumed frame is
+        // not evidence of anything.
+        if (failure is null)
+        {
+            var (name, scene, len) = JasCore.Golden(finalIndex);
+            var rc = PaintOnce(scene, len, hold, ref failure);
+            if (failure is null && rc != JasCore.PaintOk)
+            {
+                failure = $"final frame {name}: {JasCore.Explain(rc)}";
+            }
+        }
+
+        if (failure is not null)
+        {
+            LastStatus = $"GOLDENS FAILED after {painted.Count} painted: {failure}";
+            return false;
+        }
+
+        LastStatus =
+            $"GOLDENS {painted.Count}/{n} painted through {SurfaceLabel()} on {Adapter}; " +
+            $"{refused.Count} refused as INCOMPLETE (declared gap): " +
+            $"{(refused.Count == 0 ? "none" : string.Join(", ", refused))}; " +
+            $"final={finalName}";
+        return true;
+    }
+
+    /// <summary>
+    /// One golden, painted into the back buffer and presented <c>hold</c> times.
+    ///
+    /// The back buffer is re-fetched and re-released around EVERY present, the
+    /// same rule the probe path follows: Rust borrows the surface and addrefs
+    /// nothing, so this side is the only owner and a skipped release leaks a
+    /// buffer reference per frame.
+    /// </summary>
+    private int PaintOnce(IntPtr scene, nuint len, int hold, ref string? failure)
+    {
+        var rc = JasCore.PaintOk;
+        for (var f = 0; f < hold; f++)
+        {
+            _swapChain!.GetBuffer<IDXGISurface>(0, out var back);
+            // GetComInterfaceForObject, not GetIUnknownForObject -- see the
+            // long note in RenderFrame; the wrong pointer corrupts the heap.
+            var ptr = Marshal.GetComInterfaceForObject(back, typeof(IDXGISurface));
+            try
+            {
+                rc = JasCore.jas_paint_scene(ptr, scene, len, _width, _height);
+            }
+            finally
+            {
+                Marshal.Release(ptr);
+            }
+            // A refusal is reported to the caller, which decides whether it is
+            // the declared gap or a fault. Either way there is nothing worth
+            // presenting, so stop rather than push an unpainted buffer.
+            if (rc != JasCore.PaintOk) return rc;
+
+            var hr = _swapChain.Present(1, default);
+            if (hr.Failed) { failure = $"Present 0x{hr.Value:X8}"; return rc; }
+            // Occlusion is NOT fatal here, and that is a deliberate difference
+            // from RenderFrame. That method reports per-frame TIMINGS, which are
+            // meaningless for frames nobody saw. This one reports which goldens
+            // the core could draw -- a fact about the painter, not about the
+            // compositor -- and it stays true behind another window.
+        }
+        return rc;
+    }
+
+    /// <summary>
     /// The surface, stated so it cannot be misread.
     ///
     /// Under no scaling this is one number and reads as it always did. Under
