@@ -144,18 +144,32 @@ pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
     if matches!(elem, Element::Text(_) | Element::TextPath(_) | Element::Live(_)) {
         return true;
     }
-    // OUTLINE MODE — a seam property, in the same family as the
-    // `*_painter_inputs` mirrors below rather than a backend question. There is
-    // no outline lowering on the Painter: `emit_element` paints fill/stroke
-    // from the element's own paints, and outline mode replaces BOTH with a
-    // 1px black stroke and a transparent fill (`render.rs::apply_outline_style`).
-    // Production already guards it at every converted leaf (`let converted = if
-    // outline { false } else ...`); stating it here puts the rule in the router
-    // instead of in five copies at the call sites, and keeps the reference
-    // goldens from modelling a route production never takes.
-    if elem.visibility() == Visibility::Outline {
-        return true;
-    }
+    // ⭐ OUTLINE MODE IS NO LONGER A LEGACY REASON (node 2). This clause used to
+    // read `if elem.visibility() == Visibility::Outline { return true }`, and
+    // its stated ground was that *"there is no outline lowering on the
+    // Painter"*. There is one now -- `emit_outline_body`, ported from
+    // `render.rs::apply_outline_style` -- so the reason is gone rather than
+    // merely inconvenient, and a clause kept past its reason is one nothing
+    // drives.
+    //
+    // ⚠️ ONE PRODUCTION ROUTE CHANGES, AND IT IS NAMED RATHER THAN DISCOVERED.
+    // `render.rs` reads this router in exactly one reachable place --
+    // `draw_masked_element_through_the_seam` (via `subtree_needs_legacy`). Its
+    // SIX leaf routes each guard outline themselves (`let converted = if
+    // outline { false } else ...`) and are untouched.
+    //
+    // ⇒ The single consequence: **a masked element in outline mode now takes
+    // the A6 element bracket instead of the legacy mask composite.** Both
+    // OUTLINE it -- that equivalence is pinned by
+    // `an_outline_element_converts_and_an_outlined_descendant_no_longer_forces_legacy`
+    // -- so the difference between them is only the ratified A6 one (§6.2: a
+    // body that overlaps ITSELF composites differently), which every other
+    // masked element has taken since PH4. This extends that ruling to outlined
+    // ones rather than making a new decision.
+    //
+    // ⭐ AND THE REAL POINT IS THE OTHER CALLER. Any NATIVE walk of a document
+    // through `emit_element` now gets outline mode -- which is how a Windows
+    // app renders it, with `canvas::render` not involved at all.
     // PH2 production-routing mirror: an element whose `*_painter_inputs` would
     // return `None` (a capability the two-paint seam can't reproduce) stays on
     // legacy in production, so the reference goldens must exclude it too — else
@@ -649,6 +663,7 @@ fn emit_masked_element(
     elem: &Element,
     mask: &crate::geometry::element::Mask,
     incoming_alpha: f64,
+    vis: Visibility,
 ) {
     let mask_xf = if mask.linked {
         elem.transform()
@@ -671,14 +686,20 @@ fn emit_masked_element(
     // The body: ancestors ride the paint alpha (this producer FOLDS group
     // alpha rather than emitting `push_group`), the element's own opacity
     // rides the layer above.
-    emit_element_body(p, elem, incoming_alpha);
+    emit_element_body(p, elem, incoming_alpha, vis);
 
     p.push_mask_layer(law);
     let pushed = mask_xf.is_some();
     if let Some(t) = mask_xf {
         p.push_state(*t);
     }
-    emit_element(p, &mask.subtree, 1.0);
+    // ⛔ `Preview`, NOT `vis`. The mask subtree is not part of the picture -- it
+    // is COVERAGE, read for its alpha (or luminance). Outlining it would replace
+    // the artwork that defines the mask with a hairline tracing its silhouette,
+    // which is a different mask, not a differently-drawn one. `render.rs` draws
+    // mask artwork through its own path and never applies the outline style to
+    // it either.
+    emit_element_with_vis(p, &mask.subtree, 1.0, Visibility::Preview);
     if pushed {
         p.pop_state();
     }
@@ -688,7 +709,38 @@ fn emit_masked_element(
 }
 
 pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
-    if elem.visibility() == Visibility::Invisible {
+    // A top-level element inherits nothing, which is `Preview` -- the same seed
+    // `render.rs::draw_element` uses.
+    emit_element_with_vis(p, elem, incoming_alpha, Visibility::Preview);
+}
+
+/// [`emit_element`] carrying the INHERITED visibility from the ancestor chain.
+///
+/// ⭐ NODE 2 -- THE DELTA `render.rs` HAD AND THIS SEAM DID NOT. Visibility is
+/// not a property of the element alone: `draw_element_scaled` computes
+/// `effective = min(ancestor_vis, elem.visibility())`, so a group in outline
+/// mode drags every descendant into outline even where the child's own
+/// visibility is `Preview`. `emit_element` reads only the element in its hand
+/// and therefore could not express that.
+///
+/// ⛔ THAT GAP IS NAMED IN PRODUCTION, not inferred here.
+/// `render.rs::draw_masked_element_through_the_seam`'s condition 1 refuses to
+/// convert anything whose `ancestor_vis` is not `Preview`, in as many words:
+/// *"the seam has no outline lowering and no invisible cap; both are inherited
+/// state this function cannot see from the element alone."* This is that state,
+/// made visible.
+///
+/// `Visibility` orders `Invisible < Outline < Preview`, so `min` gives both
+/// rules at once: an invisible cap outranks outline, and outline outranks
+/// preview in either direction.
+pub fn emit_element_with_vis(
+    p: &mut dyn Painter,
+    elem: &Element,
+    incoming_alpha: f64,
+    ancestor_vis: Visibility,
+) {
+    let vis = ancestor_vis.min(elem.visibility());
+    if vis == Visibility::Invisible {
         return;
     }
     // ⛔ THE PRECONDITION IS ENFORCED, NOT ASSUMED, AND THIS IS THE ONE PLACE.
@@ -704,10 +756,10 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
     // AMENDMENT A6 — an element with an ACTIVE mask is emitted as the element
     // bracket, not as a bare body. See `emit_masked_element` for the derivation.
     if let Some(mask) = active_mask(elem) {
-        emit_masked_element(p, elem, mask, incoming_alpha);
+        emit_masked_element(p, elem, mask, incoming_alpha, vis);
         return;
     }
-    emit_element_body(p, elem, incoming_alpha * elem.opacity());
+    emit_element_body(p, elem, incoming_alpha * elem.opacity(), vis);
 }
 
 /// The element's own paint ops at a GIVEN effective alpha, under its own
@@ -718,7 +770,7 @@ pub fn emit_element(p: &mut dyn Painter, elem: &Element, incoming_alpha: f64) {
 /// `eff` is the final paint-alpha base — already multiplied by whatever opacity
 /// applies. The split is otherwise behavior-neutral: the unmasked call passes
 /// `incoming_alpha * elem.opacity()`, which is exactly what this computed before.
-fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64) {
+fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibility) {
     let pushed = elem.transform().is_some();
     if let Some(t) = elem.transform() {
         p.push_state(*t);
@@ -735,10 +787,22 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64) {
                 // every case. Two guards with the same predicate cannot both be
                 // driven, and the undriven one is the one that rots.
                 for child in children {
-                    emit_element(p, child, eff);
+                    // THE INHERITED VISIBILITY TRAVELS WITH THE ALPHA. Both are
+                    // ancestor state, and a child that read only its own would
+                    // paint a hidden layer or a solid fill under an outlined
+                    // group.
+                    emit_element_with_vis(p, child, eff, vis);
                 }
             }
         }
+        // ⭐ OUTLINE MODE -- the node-2 delta, ported from
+        // `render.rs::apply_outline_style`. It REPLACES both paints rather than
+        // adding one: no fill at all, and a single black 1px butt/miter
+        // hairline with no dash over the element's own geometry. Placed after
+        // the Group arm so a group still recurses (its children each outline
+        // themselves) and before every leaf arm so no leaf can paint its normal
+        // fill and stroke.
+        _ if vis == Visibility::Outline => emit_outline_body(p, elem, eff),
         Element::Line(e) => {
             if let Some(s) = e.stroke.as_ref() {
                 let brush = stroke_brush(s, e.stroke_gradient.as_deref(), tuple_bounds(elem));
@@ -846,6 +910,97 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64) {
 
     if pushed {
         p.pop_state();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Outline mode (node 2 delta)
+// ---------------------------------------------------------------------------
+
+/// The stroke `render.rs::apply_outline_style` installs, as a `StrokeStyle`.
+///
+/// Every field is pinned there, and each one MATTERS because outline mode is a
+/// REPLACEMENT: `set_line_width(1.0)`, `set_line_cap("butt")`,
+/// `set_line_join("miter")`, `set_miter_limit(10.0)`, and — the easiest to
+/// forget — `set_line_dash([])`, which DROPS the element's own dash pattern. An
+/// outline that inherited the element's dash would render a dashed wireframe
+/// for a dashed shape, which is a different picture rather than a missing one.
+///
+/// ⚠️ THE 1.0 IS IN DEVICE-INDEPENDENT DOCUMENT UNITS, exactly as production
+/// writes it, and it is NOT counter-scaled here. `render.rs` counter-scales an
+/// element's OWN stroke against the accumulated element transform; outline mode
+/// sets its width AFTER that, on the raw context, so a scaled element gets a
+/// scaled hairline in production too. Matching that is the point — a "fix" here
+/// would be a divergence from the reference renderer, not an improvement.
+fn outline_stroke_style() -> StrokeStyle {
+    StrokeStyle {
+        width: 1.0,
+        cap: crate::painter::LineCap::Butt,
+        join: crate::painter::LineJoin::Miter,
+        miter: 10.0,
+        dash: Vec::new(),
+    }
+}
+
+/// One black hairline over `elem`'s own geometry, and NEITHER of its paints.
+///
+/// ⛔ THE SHAPE IS THE ELEMENT'S, THE PAINT IS NOT. Outline mode asks "where is
+/// this element" and answers in a fixed style; it must therefore reach the same
+/// geometry the normal arms do (rounded corners, ellipse arcs, winding-free
+/// polylines) while ignoring fill, fill gradient, stroke colour, stroke width,
+/// stroke opacity, dash and alignment.
+///
+/// `Text` / `TextPath` / `Live` fall through silently, and that is not a gap
+/// left open here: [`element_needs_legacy`] still routes all three to legacy
+/// (text needs shaping this seam has no vocabulary for), so this arm is
+/// unreachable for them. Painting a bounding box instead would invent a picture
+/// production does not draw.
+fn emit_outline_body(p: &mut dyn Painter, elem: &Element, eff: f64) {
+    let brush = Brush::Solid(Color::rgb(0.0, 0.0, 0.0));
+    let style = outline_stroke_style();
+    match elem {
+        Element::Line(e) => p.stroke_path(
+            &[
+                PathCommand::MoveTo { x: e.x1, y: e.y1 },
+                PathCommand::LineTo { x: e.x2, y: e.y2 },
+            ],
+            &brush,
+            &style,
+            eff,
+        ),
+        Element::Rect(e) => {
+            if e.rx > 0.0 || e.ry > 0.0 {
+                let path = rounded_rect_path(e.x, e.y, e.width, e.height, e.rx, e.ry);
+                p.stroke_path(&path, &brush, &style, eff);
+            } else {
+                let rect = Rect { x: e.x, y: e.y, w: e.width, h: e.height };
+                // `stroke_rect`, not the path form: outline is always CENTER
+                // aligned (it has no alignment of its own to honour), which is
+                // the one case the normal Rect arm also lowers this way.
+                p.stroke_rect(rect, &brush, &style, eff);
+            }
+        }
+        Element::Ellipse(e) => {
+            let arc = EllipseArc::ellipse(e.cx, e.cy, e.rx, e.ry);
+            p.stroke_ellipse_arc(&arc, &brush, &style, eff);
+        }
+        Element::Polyline(e) => {
+            if !e.points.is_empty() {
+                p.stroke_path(&poly_path(&e.points, false), &brush, &style, eff);
+            }
+        }
+        Element::Polygon(e) => {
+            if !e.points.is_empty() {
+                p.stroke_path(&poly_path(&e.points, true), &brush, &style, eff);
+            }
+        }
+        // The element's own path commands, NOT an outline of its stroke: a
+        // variable-width or brushed path outlines as its SPINE in production
+        // too, because `apply_outline_style` runs before the width machinery.
+        Element::Path(e) => p.stroke_path(&e.d, &brush, &style, eff),
+        // Groups recurse in `emit_element_body` and never reach here.
+        Element::Group(_) | Element::Layer(_) => {}
+        Element::Text(_) | Element::TextPath(_) | Element::Live(_) => {}
     }
 }
 
