@@ -12,7 +12,7 @@ namespace SbWinUi;
 /// silently mangle non-Latin-1 content in both directions. Nothing textual
 /// crosses in this checkpoint, and when it does it will cross as a byte span.
 /// </summary>
-internal static class JasCore
+internal static unsafe class JasCore
 {
     private const string Lib = "jas_dioxus";
 
@@ -39,6 +39,25 @@ internal static class JasCore
     /// kept an offscreen target belonging to the old one.
     /// </summary>
     internal const int PaintDeviceMismatch = 4;
+    /// <summary>
+    /// The scene bytes are not a JSON ARRAY of commands.
+    ///
+    /// A bare object, a string, or a NULL pointer all decode as "valid JSON that
+    /// replays as zero commands" -- complete, drawn nothing, and therefore OK.
+    /// The core refuses by SHAPE so a marshalling slip on this side cannot
+    /// present a blank window at success.
+    /// </summary>
+    internal const int PaintBadScene = 5;
+    /// <summary>
+    /// The painter could not draw part of the scene, so the frame would be
+    /// missing artwork. The core REFUSES rather than presenting a partial
+    /// document. Two goldens in the corpus land here by design: they carry a
+    /// non-Normal blend, which needs an effect graph the Direct2D backend does
+    /// not have. That is a DECLARED gap, not a failure of this shell.
+    /// </summary>
+    internal const int PaintSceneIncomplete = 6;
+    /// <summary>The entry point exists but is a stub.</summary>
+    internal const int PaintNotImplemented = 7;
 
     /// <summary>
     /// Render a paint status for a human.
@@ -54,6 +73,16 @@ internal static class JasCore
         PaintNotASurface => "not an IDXGISurface",
         PaintSizeMismatch => "SIZE/FORMAT MISMATCH -- back buffer and offscreen target disagree; the host resized one and not the other",
         PaintDeviceMismatch => "DEVICE MISMATCH -- back buffer and offscreen target are on different D3D11 devices; the host recreated one after a device loss and kept the other",
+        // ⛔ THESE THREE ARMS ARE THE SAME DEFECT THE `PaintSizeMismatch` COMMENT
+        // ABOVE ALREADY NAMES, AND THEY WERE MISSING. `jas_paint_scene` has
+        // returned 5, 6 and 7 since node 1 landed; without an arm each one fell
+        // through to the HRESULT formatter and was reported as
+        // "HRESULT 0x00000006" -- a positive sentinel dressed up as a COM error,
+        // sending the reader to look for a COM fault that never happened. The
+        // constant and its arm are one change, not two.
+        PaintBadScene => "BAD SCENE -- the bytes are not a JSON array of commands; a marshalling slip, not a paint failure",
+        PaintSceneIncomplete => "SCENE INCOMPLETE -- the painter could not draw part of it, so the core refused rather than present artwork-missing pixels (the declared non-Normal-blend gap does this)",
+        PaintNotImplemented => "NOT IMPLEMENTED -- the entry point is a stub",
         _ => $"HRESULT 0x{rc:X8}",
     };
 
@@ -70,6 +99,74 @@ internal static class JasCore
     /// </summary>
     [DllImport(Lib)]
     internal static extern int jas_paint_probe_surface(IntPtr dxgiSurface, float width, float height);
+
+    /// <summary>
+    /// Paint a RECORDED DISPLAY LIST -- real jas artwork -- into a DXGI surface
+    /// this side owns. The node-1 export, called for the first time here.
+    ///
+    /// <c>scene</c> is a byte span, not a string: BL5 forbids a <c>string</c>
+    /// parameter (the default P/Invoke CharSet is Ansi, cp1252 on this box) and
+    /// the payload is UTF-8 JSON that would be mangled in both directions. It
+    /// points into memory the CORE owns and hands out through
+    /// <see cref="jas_corpus_scene"/>, so nothing here is pinned, copied or
+    /// freed.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_paint_scene(
+        IntPtr dxgiSurface, IntPtr scene, nuint len, float width, float height);
+
+    /// <summary>How many recorded goldens the core carries.</summary>
+    [DllImport(Lib)]
+    internal static extern nuint jas_corpus_len();
+
+    /// <summary>
+    /// The name of golden <c>index</c>, as a pointer into <c>'static</c> core
+    /// memory plus a length. NULL and length 0 when out of range.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern IntPtr jas_corpus_name(nuint index, out nuint len);
+
+    /// <summary>The JSON bytes of golden <c>index</c>. Same ownership rule.</summary>
+    [DllImport(Lib)]
+    internal static extern IntPtr jas_corpus_scene(nuint index, out nuint len);
+
+    /// <summary>
+    /// The golden at <c>index</c>, as this shell wants it: a managed name and
+    /// the raw (pointer, length) pair to hand straight back to
+    /// <see cref="jas_paint_scene"/>.
+    ///
+    /// ⛔ THE BYTES ARE NOT COPIED INTO MANAGED MEMORY, deliberately. Copying
+    /// them to a <c>byte[]</c> and re-pinning would add a second representation
+    /// of the artifact whose whole purpose is that there is only one -- and the
+    /// round trip through a managed encoder is exactly the BL5 mangling this
+    /// boundary refuses elsewhere. The pointer is valid for the life of the
+    /// library.
+    ///
+    /// The NAME is decoded with an EXPLICIT UTF-8 decoder rather than
+    /// <c>Marshal.PtrToStringAnsi</c>: the corpus names are ASCII today, and
+    /// relying on that is how a cp1252 default gets in later.
+    /// </summary>
+    internal static (string Name, IntPtr Scene, nuint Len) Golden(nuint index)
+    {
+        var np = jas_corpus_name(index, out var nlen);
+        if (np == IntPtr.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(index),
+                $"golden {index} is out of range; the core carries {jas_corpus_len()}");
+        }
+        var name = System.Text.Encoding.UTF8.GetString((byte*)np, (int)nlen);
+        var sp = jas_corpus_scene(index, out var slen);
+        if (sp == IntPtr.Zero)
+        {
+            // Name resolved and body did not: that is the core disagreeing with
+            // itself, not a caller error, so it must not be reported as one.
+            throw new InvalidOperationException(
+                $"golden {index} ('{name}') has a name but no body -- the corpus " +
+                "export is inconsistent");
+        }
+        return (name, sp, slen);
+    }
 
     /// <summary>
     /// Paint an offscreen surface and GPU-copy it into the back buffer, both

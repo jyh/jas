@@ -40,6 +40,41 @@ public sealed partial class MainWindow : Window
             AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
         }
 
+        // ⛔ SB_TOPMOST=1 -- BECAUSE THE HARNESS KEPT PHOTOGRAPHING ITS OWN
+        // CONSOLE INSTEAD OF THIS WINDOW.
+        //
+        // verify_window.ps1 starts this app, and then the capture, through
+        // `powershell.exe` scheduled tasks. On Windows 11 the console host is
+        // Windows Terminal, whose window `-WindowStyle Hidden` DOES NOT
+        // suppress -- that switch governs the PowerShell host's own window, not
+        // the terminal that owns it. So a black console lands on the desktop
+        // AFTER this window and covers the canvas. Measured 2026-09-01 across
+        // three consecutive runs: the window reported `GOLDENS 18/20 painted`
+        // every time and the capture showed a black rectangle where the artwork
+        // is, with only a sliver of the blue fill and a green shape visible past
+        // the console's left edge.
+        //
+        // ⭐ AND THE PROBE COULD NEVER HAVE SHOWN THIS. A centred square lands
+        // clear of a console parked at the top-left; a DOCUMENT is authored in
+        // absolute coordinates near the ORIGIN and lands right under it. The
+        // occlusion was invisible for the whole life of this harness and
+        // appeared the first time the payload was real artwork.
+        //
+        // Hiding consoles is whack-a-mole -- there is always another window.
+        // Owning the top of the z-order is not: it is one property, it holds
+        // against anything that appears later, and for a window whose entire
+        // purpose is to be photographed it is the honest setting.
+        //
+        // OPT-IN, so every S-B and S-C timing already on record keeps meaning
+        // what it meant: always-on-top changes nothing about paint or present
+        // cost, but a run is only comparable to another run it shares its flags
+        // with, and that is not this shell's call to make retroactively.
+        if (Environment.GetEnvironmentVariable("SB_TOPMOST") == "1"
+            && AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter op)
+        {
+            op.IsAlwaysOnTop = true;
+        }
+
         // SizeChanged rather than Loaded: a SwapChainPanel has no useful size
         // until it has been laid out, and creating a swapchain at 0x0 fails in a
         // way that reads as a device fault.
@@ -246,7 +281,35 @@ public sealed partial class MainWindow : Window
         {
             JasCore.Bind();
             _host.Attach(Canvas, w, h);
-            var ok = _host.RenderFrame();
+
+            // ⭐ SB_SCENE=goldens SELECTS THE DOCUMENT PATH. Default is the probe,
+            // unchanged and deliberately so: every S-B and S-C measurement on
+            // record was taken through `RenderFrame`, and silently re-pointing it
+            // at a different workload would change what those numbers mean
+            // without changing the label on them. A new capability gets a new
+            // switch; it does not redefine an existing one.
+            //
+            // An UNRECOGNISED value is refused BY NAME rather than falling back
+            // to the probe. A run asked for goldens that quietly drew a square
+            // would report RUSTOK over the wrong workload -- the vacuous-success
+            // shape this shell exists to refuse, and the one a typo produces.
+            var scene = Environment.GetEnvironmentVariable("SB_SCENE");
+            bool ok;
+            if (string.IsNullOrWhiteSpace(scene))
+            {
+                ok = _host.RenderFrame();
+            }
+            else if (string.Equals(scene, "goldens", StringComparison.OrdinalIgnoreCase))
+            {
+                ok = _host.RenderGoldens();
+            }
+            else
+            {
+                StatusLine.Text = $"FAILED - SB_SCENE='{scene}' is not recognised";
+                Report($"RUSTFAIL SB_SCENE='{scene}' is not recognised; use 'goldens' or leave it unset for the probe");
+                return;
+            }
+
             // The status line names the RUST side explicitly, so a reader can
             // tell "the shell ran and Rust refused" from "the shell never got
             // there" without opening a log.
