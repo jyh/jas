@@ -359,7 +359,14 @@ then leaves mask-editing mode.
   needs a two-buffer pipeline with platform-specific pixel readback
   (`CGContext.data` for CoreGraphics, `Cairo_image_surface.get_data` for
   Cairo, `QImage.bits`/`constBits` for QImage) and the same BT.601 luma
-  formula.
+  formula. **DEFERRED by the 2026-09-01 afternoon council (r.6d) with a
+  ripens-when: a consumer that needs luminance masks on a non-web port.**
+  Until then the divergence stands as recorded: a non-white opaque `ClipIn`
+  mask reads differently in JasSwift than in jas_dioxus. On the Rust side
+  the law is host-independent since 2026-09-01 — `crate::surface::
+  promote_to_luminance` runs over any `PixelSurface`, and the browser is
+  only one implementation of that trait — so a native Rust port needs a
+  surface implementation, not a second copy of the law.
 
 - **MASK_PREVIEW thumbnail and "empty-mask glyph"** — currently the
   previews render as `[Mask preview]` placeholder text. The spec calls

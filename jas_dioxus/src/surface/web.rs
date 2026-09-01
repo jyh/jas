@@ -42,8 +42,25 @@ impl CompositeOp {
 /// Map a document blend mode to its Canvas2D `globalCompositeOperation`
 /// keyword. Lives with the surface because compositing is the surface's verb;
 /// `canvas::render` and the web painter both take it from here.
-pub fn blend_mode_css(_mode: BlendMode) -> &'static str {
-    todo!("blend_mode_css moves here from canvas::render")
+pub fn blend_mode_css(mode: BlendMode) -> &'static str {
+    match mode {
+        BlendMode::Normal => "source-over",
+        BlendMode::Multiply => "multiply",
+        BlendMode::Screen => "screen",
+        BlendMode::Overlay => "overlay",
+        BlendMode::Darken => "darken",
+        BlendMode::Lighten => "lighten",
+        BlendMode::ColorDodge => "color-dodge",
+        BlendMode::ColorBurn => "color-burn",
+        BlendMode::HardLight => "hard-light",
+        BlendMode::SoftLight => "soft-light",
+        BlendMode::Difference => "difference",
+        BlendMode::Exclusion => "exclusion",
+        BlendMode::Hue => "hue",
+        BlendMode::Saturation => "saturation",
+        BlendMode::Color => "color",
+        BlendMode::Luminosity => "luminosity",
+    }
 }
 
 /// A canvas the caller owns, with its 2D context.
@@ -57,13 +74,18 @@ impl WebSurface {
     /// A detached `w × h` canvas — never appended to the document, so it
     /// costs no layout and is collected with its owner. `None` when there is
     /// no DOM or the element or its context cannot be made.
-    pub fn offscreen(_w: u32, _h: u32) -> Option<Self> {
-        todo!("WebSurface::offscreen")
+    pub fn offscreen(w: u32, h: u32) -> Option<Self> {
+        let doc = web_sys::window()?.document()?;
+        let canvas: HtmlCanvasElement = doc.create_element("canvas").ok()?.unchecked_into();
+        canvas.set_width(w);
+        canvas.set_height(h);
+        Self::from_canvas(canvas)
     }
 
     /// Wrap an existing canvas. `None` when its 2D context cannot be made.
-    pub fn from_canvas(_canvas: HtmlCanvasElement) -> Option<Self> {
-        todo!("WebSurface::from_canvas")
+    pub fn from_canvas(canvas: HtmlCanvasElement) -> Option<Self> {
+        let ctx: CanvasRenderingContext2d = canvas.get_context("2d").ok()??.unchecked_into();
+        Some(Self { canvas, ctx })
     }
 
     pub fn canvas(&self) -> &HtmlCanvasElement {
@@ -78,14 +100,23 @@ impl WebSurface {
     /// resets its context state, so this touches only the dimension that
     /// actually differs — at the same size it is a no-op and the pixels
     /// survive.
-    pub fn resize(&self, _w: u32, _h: u32) {
-        todo!("WebSurface::resize")
+    pub fn resize(&self, w: u32, h: u32) {
+        if self.canvas.width() != w {
+            self.canvas.set_width(w);
+        }
+        if self.canvas.height() != h {
+            self.canvas.set_height(h);
+        }
     }
 
     /// Identity transform, `source-over`, alpha 1.0, every pixel transparent:
     /// the state a fresh scratch surface starts in.
     pub fn reset(&self) {
-        todo!("WebSurface::reset")
+        let (w, h) = self.size();
+        self.ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+        self.ctx.set_global_composite_operation("source-over").ok();
+        self.ctx.set_global_alpha(1.0);
+        self.ctx.clear_rect(0.0, 0.0, w as f64, h as f64);
     }
 
     /// Composite this surface's pixels onto `dst` in DEVICE space (identity
@@ -93,8 +124,16 @@ impl WebSurface {
     /// clip already set on `dst` still applies — a clip is rasterised into
     /// device space when it is set. `dst`'s transform, alpha and composite
     /// operation are exactly as they were when this returns.
-    pub fn composite_onto(&self, _dst: &CanvasRenderingContext2d, _op: CompositeOp, _alpha: f64) {
-        todo!("WebSurface::composite_onto")
+    pub fn composite_onto(&self, dst: &CanvasRenderingContext2d, op: CompositeOp, alpha: f64) {
+        // save/restore carries the transform, globalAlpha and
+        // globalCompositeOperation — the three things set below — and leaves
+        // any clip the caller set in force for the draw.
+        dst.save();
+        dst.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
+        dst.set_global_alpha(alpha);
+        dst.set_global_composite_operation(op.css()).ok();
+        let _ = dst.draw_image_with_html_canvas_element(&self.canvas, 0.0, 0.0);
+        dst.restore();
     }
 }
 
@@ -103,13 +142,32 @@ impl PixelSurface for WebSurface {
         (self.canvas.width(), self.canvas.height())
     }
 
-    fn read_rgba(&self, _x: u32, _y: u32, _w: u32, _h: u32) -> Option<Vec<u8>> {
-        let _ = (&self.ctx, JsCast::dyn_ref::<HtmlCanvasElement>(&self.canvas));
-        todo!("WebSurface::read_rgba")
+    fn read_rgba(&self, x: u32, y: u32, w: u32, h: u32) -> Option<Vec<u8>> {
+        let (sw, sh) = self.size();
+        if !super::rect_fits(sw, sh, x, y, w, h, None) {
+            return None;
+        }
+        if w == 0 || h == 0 {
+            return Some(Vec::new());
+        }
+        // getImageData ignores the context transform: device space, which is
+        // what a pixel service means by (x, y).
+        let data = self.ctx.get_image_data(x as f64, y as f64, w as f64, h as f64).ok()?;
+        Some(data.data().to_vec())
     }
 
-    fn write_rgba(&self, _x: u32, _y: u32, _w: u32, _h: u32, _rgba: &[u8]) -> Option<()> {
-        todo!("WebSurface::write_rgba")
+    fn write_rgba(&self, x: u32, y: u32, w: u32, h: u32, rgba: &[u8]) -> Option<()> {
+        let (sw, sh) = self.size();
+        if !super::rect_fits(sw, sh, x, y, w, h, Some(rgba.len())) {
+            return None;
+        }
+        if w == 0 || h == 0 {
+            return Some(());
+        }
+        let clamped = wasm_bindgen::Clamped(rgba);
+        let image = web_sys::ImageData::new_with_u8_clamped_array_and_sh(clamped, w, h).ok()?;
+        self.ctx.put_image_data(&image, x as f64, y as f64).ok()?;
+        Some(())
     }
 }
 

@@ -46,8 +46,20 @@ pub trait PixelSurface {
 /// weights, PDF §11's soft-mask convention: a black-opaque mask reads as fully
 /// transparent, white-opaque as fully opaque, gray as partially opaque. Pure;
 /// testable without any surface.
-pub fn promote_bytes_to_luminance(_bytes: &mut [u8]) {
-    todo!("promote_bytes_to_luminance: the law moves here from canvas::render")
+pub fn promote_bytes_to_luminance(bytes: &mut [u8]) {
+    let mut i = 0;
+    while i + 3 < bytes.len() {
+        let r = bytes[i] as f64;
+        let g = bytes[i + 1] as f64;
+        let b = bytes[i + 2] as f64;
+        let a = bytes[i + 3] as f64;
+        // ITU-R BT.601 luma weights; integers would be faster but the f64
+        // form is clear and the loop is readback-bound anyway.
+        let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+        let new_alpha = (lum * a / 255.0).round().clamp(0.0, 255.0) as u8;
+        bytes[i + 3] = new_alpha;
+        i += 4;
+    }
 }
 
 /// Promote the alpha channel of `surface`'s pixels within the `w × h`
@@ -57,13 +69,34 @@ pub fn promote_bytes_to_luminance(_bytes: &mut [u8]) {
 /// surface cannot be read or written (the caller falls back to raw-alpha
 /// masking so the mask still has *some* effect).
 pub fn promote_to_luminance(
-    _surface: &dyn PixelSurface,
-    _x: u32,
-    _y: u32,
-    _w: u32,
-    _h: u32,
+    surface: &dyn PixelSurface,
+    x: u32,
+    y: u32,
+    w: u32,
+    h: u32,
 ) -> Option<()> {
-    todo!("promote_to_luminance: read, apply the law, write back")
+    if w == 0 || h == 0 {
+        return Some(());
+    }
+    let mut bytes = surface.read_rgba(x, y, w, h)?;
+    promote_bytes_to_luminance(&mut bytes);
+    surface.write_rgba(x, y, w, h, &bytes)
+}
+
+/// The `(x, y, w, h)` rectangle lies inside a `sw × sh` surface and `w * h`
+/// pixels carry `bytes` bytes (when `bytes` is given). Shared by every
+/// implementation so the refusal contract cannot drift between hosts.
+pub(crate) fn rect_fits(sw: u32, sh: u32, x: u32, y: u32, w: u32, h: u32, bytes: Option<usize>) -> bool {
+    let inside = x.checked_add(w).is_some_and(|r| r <= sw)
+        && y.checked_add(h).is_some_and(|b| b <= sh);
+    let sized = match bytes {
+        Some(n) => (w as usize)
+            .checked_mul(h as usize)
+            .and_then(|px| px.checked_mul(4))
+            .is_some_and(|need| need == n),
+        None => true,
+    };
+    inside && sized
 }
 
 /// A host-independent RGBA8 raster. The native suite's surface; also the
@@ -77,18 +110,28 @@ pub struct MemorySurface {
 
 impl MemorySurface {
     /// A transparent-black `w × h` surface.
-    pub fn new(_w: u32, _h: u32) -> Self {
-        todo!("MemorySurface::new")
+    pub fn new(w: u32, h: u32) -> Self {
+        Self { w, h, px: RefCell::new(vec![0; (w as usize) * (h as usize) * 4]) }
     }
 
     /// Set every pixel to `rgba`.
-    pub fn fill(&self, _rgba: [u8; 4]) {
-        todo!("MemorySurface::fill")
+    pub fn fill(&self, rgba: [u8; 4]) {
+        for px in self.px.borrow_mut().chunks_exact_mut(4) {
+            px.copy_from_slice(&rgba);
+        }
     }
 
     /// The pixel at `(x, y)`; panics outside the surface (a test accessor).
-    pub fn pixel(&self, _x: u32, _y: u32) -> [u8; 4] {
-        todo!("MemorySurface::pixel")
+    pub fn pixel(&self, x: u32, y: u32) -> [u8; 4] {
+        assert!(x < self.w && y < self.h, "pixel ({x}, {y}) outside {}×{}", self.w, self.h);
+        let i = ((y as usize) * (self.w as usize) + (x as usize)) * 4;
+        let px = self.px.borrow();
+        [px[i], px[i + 1], px[i + 2], px[i + 3]]
+    }
+
+    /// Byte offset of the first byte of row `row` within the rect at `x`.
+    fn offset(&self, x: u32, row: u32) -> usize {
+        ((row as usize) * (self.w as usize) + (x as usize)) * 4
     }
 }
 
@@ -97,13 +140,31 @@ impl PixelSurface for MemorySurface {
         (self.w, self.h)
     }
 
-    fn read_rgba(&self, _x: u32, _y: u32, _w: u32, _h: u32) -> Option<Vec<u8>> {
-        let _ = &self.px;
-        todo!("MemorySurface::read_rgba")
+    fn read_rgba(&self, x: u32, y: u32, w: u32, h: u32) -> Option<Vec<u8>> {
+        if !rect_fits(self.w, self.h, x, y, w, h, None) {
+            return None;
+        }
+        let px = self.px.borrow();
+        let row_bytes = (w as usize) * 4;
+        let mut out = Vec::with_capacity(row_bytes * (h as usize));
+        for row in y..y + h {
+            let o = self.offset(x, row);
+            out.extend_from_slice(&px[o..o + row_bytes]);
+        }
+        Some(out)
     }
 
-    fn write_rgba(&self, _x: u32, _y: u32, _w: u32, _h: u32, _rgba: &[u8]) -> Option<()> {
-        todo!("MemorySurface::write_rgba")
+    fn write_rgba(&self, x: u32, y: u32, w: u32, h: u32, rgba: &[u8]) -> Option<()> {
+        if !rect_fits(self.w, self.h, x, y, w, h, Some(rgba.len())) {
+            return None;
+        }
+        let mut px = self.px.borrow_mut();
+        let row_bytes = (w as usize) * 4;
+        for (i, row) in (y..y + h).enumerate() {
+            let o = self.offset(x, row);
+            px[o..o + row_bytes].copy_from_slice(&rgba[i * row_bytes..(i + 1) * row_bytes]);
+        }
+        Some(())
     }
 }
 

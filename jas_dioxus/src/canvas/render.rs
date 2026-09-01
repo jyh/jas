@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use crate::geometry::live::ElementResolver;
 
 use wasm_bindgen::JsCast;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
+use web_sys::CanvasRenderingContext2d;
 
 use crate::algorithms::calligraphic_outline::{calligraphic_outline, CalligraphicBrush};
 use crate::algorithms::art_along_path::{art_along_path, ArtBrush};
@@ -22,6 +22,8 @@ use crate::tools::tool::HANDLE_DRAW_SIZE;
 // RAII balance for ctx.save()/restore() — see canvas::ctx_guard for the
 // two usage laws and the contract tests.
 use super::ctx_guard::CtxSaveGuard;
+use crate::surface::web::{CompositeOp, WebSurface};
+use crate::surface::PixelSurface;
 
 // ---------------------------------------------------------------------------
 // Brush library lookup (thread-local, set for the duration of render())
@@ -417,28 +419,10 @@ fn css_color(c: &Color) -> String {
 }
 
 /// Map a BlendMode to the Canvas2D `globalCompositeOperation` string.
-/// Canvas2D natively supports all 16 separable / non-separable blend modes
-/// used by the Opacity panel; Normal maps to the default `source-over`.
-pub(crate) fn blend_mode_css(mode: BlendMode) -> &'static str {
-    match mode {
-        BlendMode::Normal      => "source-over",
-        BlendMode::Darken      => "darken",
-        BlendMode::Multiply    => "multiply",
-        BlendMode::ColorBurn   => "color-burn",
-        BlendMode::Lighten     => "lighten",
-        BlendMode::Screen      => "screen",
-        BlendMode::ColorDodge  => "color-dodge",
-        BlendMode::Overlay     => "overlay",
-        BlendMode::SoftLight   => "soft-light",
-        BlendMode::HardLight   => "hard-light",
-        BlendMode::Difference  => "difference",
-        BlendMode::Exclusion   => "exclusion",
-        BlendMode::Hue         => "hue",
-        BlendMode::Saturation  => "saturation",
-        BlendMode::Color       => "color",
-        BlendMode::Luminosity  => "luminosity",
-    }
-}
+// `blend_mode_css` lives with the surface service now (compositing is the
+// surface's verb); re-exported so this file's call sites read as before and
+// the web painter no longer reaches into `canvas/` for it.
+pub(crate) use crate::surface::web::blend_mode_css;
 
 /// Build a CanvasGradient from a `Gradient` and the element's bounding box.
 /// Returns None if the gradient is freeform (rendering deferred to a later
@@ -744,8 +728,29 @@ fn apply_outline_style(ctx: &CanvasRenderingContext2d) {
     ctx.set_miter_limit(10.0);
 }
 
+/// The device-pixel size of the surface the walk paints into. Threaded from
+/// [`render`] down the recursion because the mask composite sizes its scratch
+/// surfaces from it — it used to be read off `ctx.canvas()`, a web handle
+/// the 2026-08-31 Painter ruling deletes at the boundary, and the `None` arm of
+/// that read was a SILENT fall-through to unmasked rendering. A parameter has
+/// no such arm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TargetSize {
+    pub w: u32,
+    pub h: u32,
+}
+
+impl TargetSize {
+    /// The size of a surface the caller owns.
+    pub fn of(surface: &dyn PixelSurface) -> Self {
+        let (w, h) = surface.size();
+        Self { w, h }
+    }
+}
+
 fn draw_element(
     ctx: &CanvasRenderingContext2d,
+    target: TargetSize,
     elem: &Element,
     ancestor_vis: Visibility,
     precision: f64,
@@ -753,7 +758,7 @@ fn draw_element(
     // Top-level / subtree entry: the accumulated element-transform scale
     // starts at 1.0 (the identity). It accumulates down the Group/Layer
     // recursion in draw_element_body.
-    draw_element_scaled(ctx, elem, ancestor_vis, precision, 1.0);
+    draw_element_scaled(ctx, target, elem, ancestor_vis, precision, 1.0);
 }
 
 /// As [draw_element], but carrying the accumulated element-transform scale
@@ -761,6 +766,7 @@ fn draw_element(
 /// [draw_element] seeds this at 1.0.
 fn draw_element_scaled(
     ctx: &CanvasRenderingContext2d,
+    target: TargetSize,
     elem: &Element,
     ancestor_vis: Visibility,
     precision: f64,
@@ -780,11 +786,11 @@ fn draw_element_scaled(
             if draw_masked_element_through_the_seam(ctx, elem, ancestor_vis, element_scale) {
                 return;
             }
-            draw_element_with_mask(ctx, elem, mask, plan, ancestor_vis, precision, element_scale);
+            draw_element_with_mask(ctx, target, elem, mask, plan, ancestor_vis, precision, element_scale);
             return;
         }
     }
-    draw_element_body(ctx, elem, ancestor_vis, precision, element_scale);
+    draw_element_body(ctx, target, elem, ancestor_vis, precision, element_scale);
 }
 
 /// Would production's `counter_scaled_element` change anything the seam would
@@ -1049,12 +1055,12 @@ thread_local! {
     /// canvas when the dimensions change. Kept as a module-level
     /// scratch buffer to avoid allocating a new DOM canvas per
     /// masked element per frame.
-    static MASK_CANVAS: RefCell<Vec<HtmlCanvasElement>> = const { RefCell::new(Vec::new()) };
-    /// Second scratch canvas, used to render the mask subtree in
+    static MASK_CANVAS: RefCell<Vec<WebSurface>> = const { RefCell::new(Vec::new()) };
+    /// Second scratch surface, used to render the mask subtree in
     /// isolation before its alpha is promoted to luminance (see
-    /// [promote_mask_to_luminance]). Only populated when the
-    /// ClipIn path enters the luminance branch.
-    static MASK_LUMA_CANVAS: RefCell<Vec<HtmlCanvasElement>> = const { RefCell::new(Vec::new()) };
+    /// `crate::surface::promote_to_luminance`), and as the isolated artwork
+    /// surface of the alpha-based laws.
+    static MASK_LUMA_CANVAS: RefCell<Vec<WebSurface>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Read the six-component current transform from a Canvas2D context.
@@ -1120,14 +1126,14 @@ fn get_transform_object(ctx: &CanvasRenderingContext2d) -> Option<wasm_bindgen::
 /// Returns ``None`` if the DOM isn't reachable (e.g., non-browser
 /// host or the canvas can't be created). Node is *not* appended
 /// to the document — it lives only in memory.
-fn get_mask_scratch(idx: usize, w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+fn get_mask_scratch(idx: usize, w: u32, h: u32) -> Option<WebSurface> {
     scratch_from_cell(&MASK_CANVAS, idx, w, h)
 }
 
 /// Second scratch canvas, used by the luminance-based mask path
 /// to render the mask subtree in isolation before its alpha is
 /// replaced by luminance.
-fn get_mask_luma_scratch(idx: usize, w: u32, h: u32) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+fn get_mask_luma_scratch(idx: usize, w: u32, h: u32) -> Option<WebSurface> {
     scratch_from_cell(&MASK_LUMA_CANVAS, idx, w, h)
 }
 
@@ -1204,92 +1210,29 @@ thread_local! {
 }
 
 fn scratch_from_cell(
-    cell: &'static std::thread::LocalKey<RefCell<Vec<HtmlCanvasElement>>>,
+    cell: &'static std::thread::LocalKey<RefCell<Vec<WebSurface>>>,
     idx: usize,
     w: u32, h: u32,
-) -> Option<(HtmlCanvasElement, CanvasRenderingContext2d)> {
+) -> Option<WebSurface> {
     // ⛔ D-β's REPAIR AT THE PLUMBING. `idx` is the nesting depth of THIS
     // acquisition, so an inner masked element never receives the buffer an
     // outer one is still drawing into. The pool GROWS to the deepest nesting
     // seen and is then reused — sequential masked elements share index 0, which
     // is the frame cost the original singleton existed to avoid.
-    let canvas: HtmlCanvasElement = cell.with(|c| -> Option<HtmlCanvasElement> {
+    let surface = cell.with(|c| -> Option<WebSurface> {
         if let Some(v) = c.borrow().get(idx).cloned() {
             return Some(v);
         }
-        let window = web_sys::window()?;
-        let doc = window.document()?;
-        let el = doc.create_element("canvas").ok()?;
-        let v: HtmlCanvasElement = el.unchecked_into();
+        let v = WebSurface::offscreen(w, h)?;
         let mut pool = c.borrow_mut();
         while pool.len() <= idx {
             pool.push(v.clone());
         }
         Some(v)
     })?;
-    if canvas.width() != w {
-        canvas.set_width(w);
-    }
-    if canvas.height() != h {
-        canvas.set_height(h);
-    }
-    let ctx: CanvasRenderingContext2d = canvas
-        .get_context("2d").ok()??.unchecked_into();
-    Some((canvas, ctx))
-}
-
-/// Promote the alpha channel of ``ctx``'s pixels within the given
-/// device-space rectangle from raw alpha to luminance-scaled
-/// alpha: ``A' = A * (0.299*R + 0.587*G + 0.114*B) / 255``. This
-/// matches PDF §11's soft-mask convention — a black-opaque mask
-/// reads as fully transparent, a white-opaque mask as fully
-/// opaque, and a gray-opaque mask as partially opaque. Restricted
-/// to the given rect for performance (typical masks occupy a
-/// small fraction of the canvas).
-///
-/// Returns ``true`` on success. On ``None`` returns (ImageData
-/// unavailable) the caller falls back to alpha-based masking so
-/// the user's mask still has *some* effect, just not the
-/// luminance-weighted one.
-pub(crate) fn promote_mask_to_luminance(
-    ctx: &CanvasRenderingContext2d,
-    dx: i32, dy: i32, dw: u32, dh: u32,
-) -> Option<()> {
-    if dw == 0 || dh == 0 {
-        return Some(());
-    }
-    let image_data = ctx
-        .get_image_data(dx as f64, dy as f64, dw as f64, dh as f64)
-        .ok()?;
-    let data = image_data.data();
-    let mut bytes: Vec<u8> = data.to_vec();
-    promote_bytes_to_luminance(&mut bytes);
-    let clamped = wasm_bindgen::Clamped(bytes.as_slice());
-    let new_data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
-        clamped, dw, dh,
-    ).ok()?;
-    ctx.put_image_data(&new_data, dx as f64, dy as f64).ok()?;
-    Some(())
-}
-
-/// Replace each RGBA pixel's alpha channel with
-/// ``A' = A * (0.299*R + 0.587*G + 0.114*B) / 255``. Pure
-/// function, testable without a live canvas.
-fn promote_bytes_to_luminance(bytes: &mut [u8]) {
-    let mut i = 0;
-    while i + 3 < bytes.len() {
-        let r = bytes[i] as f64;
-        let g = bytes[i + 1] as f64;
-        let b = bytes[i + 2] as f64;
-        let a = bytes[i + 3] as f64;
-        // ITU-R BT.601 luma weights; integers would be faster but
-        // the f64 form is clear and the inner loop is
-        // getImageData-bound anyway.
-        let lum = 0.299 * r + 0.587 * g + 0.114 * b;
-        let new_alpha = (lum * a / 255.0).round().clamp(0.0, 255.0) as u8;
-        bytes[i + 3] = new_alpha;
-        i += 4;
-    }
+    // A no-op at the same size (a resize clears the canvas).
+    surface.resize(w, h);
+    Some(surface)
 }
 
 /// Apply the ``ClipIn`` luminance composite on an offscreen
@@ -1315,37 +1258,27 @@ fn apply_clip_in_luminance(
     // Acquiring here would double-count the depth and grow both pools twice as
     // fast for no isolation gained.
     scratch_idx: usize,
-    off_ctx: &CanvasRenderingContext2d,
-    w: u32,
-    h: u32,
+    off: &WebSurface,
+    target: TargetSize,
     mask: &Mask,
     ancestor_vis: Visibility,
     precision: f64,
 ) -> bool {
-    let (luma_canvas, luma_ctx) = match get_mask_luma_scratch(scratch_idx, w, h) {
-        Some(p) => p,
+    let luma = match get_mask_luma_scratch(scratch_idx, target.w, target.h) {
+        Some(s) => s,
         None => return false,
     };
-    luma_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
-    luma_ctx.set_global_composite_operation("source-over").ok();
-    luma_ctx.set_global_alpha(1.0);
-    luma_ctx.clear_rect(0.0, 0.0, w as f64, h as f64);
-    if let Some((a, b, c, d, e, f)) = read_ctx_transform(off_ctx) {
-        luma_ctx.set_transform(a, b, c, d, e, f).ok();
+    luma.reset();
+    if let Some((a, b, c, d, e, f)) = read_ctx_transform(off.ctx()) {
+        luma.ctx().set_transform(a, b, c, d, e, f).ok();
     }
-    draw_element(&luma_ctx, &mask.subtree, ancestor_vis, precision);
-    if promote_mask_to_luminance(&luma_ctx, 0, 0, w, h).is_none() {
+    draw_element(luma.ctx(), target, &mask.subtree, ancestor_vis, precision);
+    if crate::surface::promote_to_luminance(&luma, 0, 0, target.w, target.h).is_none() {
         return false;
     }
-    // Guarded so the identity transform + destination-in are popped on
-    // every exit; the block ends the span before the `true` tail, exactly
-    // where the manual restore() stood (see CtxSaveGuard).
-    {
-        let _ctx_guard = CtxSaveGuard::new(off_ctx);
-        off_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
-        off_ctx.set_global_composite_operation("destination-in").ok();
-        let _ = off_ctx.draw_image_with_html_canvas_element(&luma_canvas, 0.0, 0.0);
-    }
+    // Device-space composite; `off`'s transform and state are as they were
+    // when this returns.
+    luma.composite_onto(off.ctx(), CompositeOp::DestinationIn, 1.0);
     true
 }
 
@@ -1383,35 +1316,28 @@ fn apply_mask_artwork(
     // The CALLER'S depth — same argument as `apply_clip_in_luminance`: this runs
     // inside `draw_element_with_mask`'s lease, at the same nesting level.
     scratch_idx: usize,
-    off_ctx: &CanvasRenderingContext2d,
-    w: u32,
-    h: u32,
+    off: &WebSurface,
+    target: TargetSize,
     mask: &Mask,
     ancestor_vis: Visibility,
     precision: f64,
-    op: &str,
+    op: CompositeOp,
 ) -> bool {
-    let (art_canvas, art_ctx) = match get_mask_luma_scratch(scratch_idx, w, h) {
-        Some(p) => p,
+    let art = match get_mask_luma_scratch(scratch_idx, target.w, target.h) {
+        Some(s) => s,
         None => return false,
     };
-    art_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
-    art_ctx.set_global_composite_operation("source-over").ok();
-    art_ctx.set_global_alpha(1.0);
-    art_ctx.clear_rect(0.0, 0.0, w as f64, h as f64);
+    art.reset();
     // The artwork renders in the frame the CALLER has established, which by
     // this point carries the mask's effective transform.
-    if let Some((a, b, c, d, e, f)) = read_ctx_transform(off_ctx) {
-        art_ctx.set_transform(a, b, c, d, e, f).ok();
+    if let Some((a, b, c, d, e, f)) = read_ctx_transform(off.ctx()) {
+        art.ctx().set_transform(a, b, c, d, e, f).ok();
     }
-    draw_element(&art_ctx, &mask.subtree, ancestor_vis, precision);
-    // Guarded so the identity transform and the composite op pop on exit. Any
-    // clip the caller set survives the reset: a clip is rasterised into device
-    // space when it is set.
-    let _ctx_guard = CtxSaveGuard::new(off_ctx);
-    off_ctx.set_global_composite_operation(op).ok();
-    off_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
-    let _ = off_ctx.draw_image_with_html_canvas_element(&art_canvas, 0.0, 0.0);
+    draw_element(art.ctx(), target, &mask.subtree, ancestor_vis, precision);
+    // Device-space composite under `op`. Any clip the caller set survives: a
+    // clip is rasterised into device space when it is set. `off`'s transform
+    // and state are as they were when this returns.
+    art.composite_onto(off.ctx(), op, 1.0);
     true
 }
 
@@ -1423,6 +1349,7 @@ fn apply_mask_artwork(
 /// device coordinates.
 fn draw_element_with_mask(
     ctx: &CanvasRenderingContext2d,
+    target: TargetSize,
     elem: &Element,
     mask: &Mask,
     plan: MaskPlan,
@@ -1438,31 +1365,22 @@ fn draw_element_with_mask(
     // D-β: take a depth BEFORE anything else, and hold it for the whole call.
     // The lease releases on every exit path, including the early fallbacks.
     let (scratch_idx, _lease) = ScratchLease::acquire();
-    let main_canvas = ctx.canvas();
-    let (w, h) = match &main_canvas {
-        Some(c) => (c.width(), c.height()),
-        None => {
-            // No canvas reachable — fall back to the no-mask path.
-            draw_element_body(ctx, elem, ancestor_vis, precision, element_scale);
-            return;
-        }
-    };
-    if w == 0 || h == 0 {
+    if target.w == 0 || target.h == 0 {
         return;
     }
-    let (off_canvas, off_ctx) = match get_mask_scratch(scratch_idx, w, h) {
-        Some(pair) => pair,
+    let off = match get_mask_scratch(scratch_idx, target.w, target.h) {
+        Some(surface) => surface,
         None => {
-            draw_element_body(ctx, elem, ancestor_vis, precision, element_scale);
+            // No scratch surface can be made (no DOM) — fall back to the
+            // no-mask path rather than draw nothing.
+            draw_element_body(ctx, target, elem, ancestor_vis, precision, element_scale);
             return;
         }
     };
 
     // Reset offscreen state and clear any prior content.
-    off_ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
-    off_ctx.set_global_composite_operation("source-over").ok();
-    off_ctx.set_global_alpha(1.0);
-    off_ctx.clear_rect(0.0, 0.0, w as f64, h as f64);
+    off.reset();
+    let off_ctx = off.ctx();
 
     // Copy the main ctx's current world transform onto the offscreen
     // ctx so ``elem`` renders at the same screen position it would
@@ -1478,7 +1396,7 @@ fn draw_element_with_mask(
     // we don't recurse into ourselves) onto the offscreen canvas. The
     // masked element carries the inherited element-transform scale so its
     // own stroke is counter-scaled like any other.
-    draw_element_body(&off_ctx, elem, ancestor_vis, precision, element_scale);
+    draw_element_body(off_ctx, target, elem, ancestor_vis, precision, element_scale);
 
     // Pass 2: apply the mask's effective transform (per
     // ``effective_mask_transform``), then composite the mask
@@ -1486,7 +1404,7 @@ fn draw_element_with_mask(
     // guarded span exactly where the manual restore() stood — the blit
     // below must run in the popped state.
     {
-        let _ctx_guard = CtxSaveGuard::new(&off_ctx);
+        let _ctx_guard = CtxSaveGuard::new(off_ctx);
         // ⚖️ THE REVEAL LAW'S BBOX CLIP IS SET HERE, BEFORE THE MASK TRANSFORM
         // GOES ON THE CONTEXT — the ruled A6 §3.3 contract (the helm's design
         // word, 2026-08-31): the bbox is the axis-aligned bounds OF the
@@ -1537,7 +1455,7 @@ fn draw_element_with_mask(
                 // *something*.
                 let fell_back = !apply_clip_in_luminance(
                     scratch_idx,
-                    &off_ctx, w, h, mask, ancestor_vis, precision,
+                    &off, target, mask, ancestor_vis, precision,
                 );
                 if fell_back {
                     // ⚠️ CHANGED BY INSPECTION, NOT BY MEASUREMENT, and said so
@@ -1549,8 +1467,8 @@ fn draw_element_with_mask(
                     // that fails soft into an INERT mask is the worse of the two
                     // wrongs it is choosing between.
                     apply_mask_artwork(
-                        scratch_idx, &off_ctx, w, h, mask, ancestor_vis, precision,
-                        "destination-in",
+                        scratch_idx, &off, target, mask, ancestor_vis, precision,
+                        CompositeOp::DestinationIn,
                     );
                 }
             }
@@ -1560,8 +1478,8 @@ fn draw_element_with_mask(
                 // surface, because the artwork's own blend modes would
                 // otherwise clobber the operation; see `apply_mask_artwork`.
                 apply_mask_artwork(
-                    scratch_idx, &off_ctx, w, h, mask, ancestor_vis, precision,
-                    "destination-out",
+                    scratch_idx, &off, target, mask, ancestor_vis, precision,
+                    CompositeOp::DestinationOut,
                 );
             }
             MaskPlan::RevealOutsideBbox => {
@@ -1574,8 +1492,8 @@ fn draw_element_with_mask(
                 // the element remains untouched.
                 if matches!(reveal_bbox, Some((_, _, bw, bh)) if bw > 0.0 && bh > 0.0) {
                     apply_mask_artwork(
-                        scratch_idx, &off_ctx, w, h, mask, ancestor_vis, precision,
-                        "destination-in",
+                        scratch_idx, &off, target, mask, ancestor_vis, precision,
+                        CompositeOp::DestinationIn,
                     );
                 }
                 // Empty-bbox mask: no clip region; the element
@@ -1593,13 +1511,13 @@ fn draw_element_with_mask(
     // it: that both squared the element's own opacity (the body pass already
     // applied it on the scratch) and REPLACED the ancestors' product rather
     // than multiplying into it. See [mask_blit_alpha] for the law.
-    // Guarded: the identity transform + blend state pop when this
-    // function returns, on every path (see CtxSaveGuard).
-    let _ctx_guard = CtxSaveGuard::new(ctx);
-    ctx.set_transform(1.0, 0.0, 0.0, 1.0, 0.0, 0.0).ok();
-    ctx.set_global_alpha(mask_blit_alpha(parent_alpha, elem.opacity()));
-    ctx.set_global_composite_operation(blend_mode_css(elem.mode())).ok();
-    ctx.draw_image_with_html_canvas_element(&off_canvas, 0.0, 0.0).ok();
+    // A device-space composite; `ctx`'s transform, alpha and composite
+    // operation are as they were when it returns.
+    off.composite_onto(
+        ctx,
+        CompositeOp::Blend(elem.mode()),
+        mask_blit_alpha(parent_alpha, elem.opacity()),
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1612,6 +1530,7 @@ fn draw_element_with_mask(
 /// the mask dispatch.
 fn draw_element_body(
     ctx: &CanvasRenderingContext2d,
+    target: TargetSize,
     elem: &Element,
     ancestor_vis: Visibility,
     precision: f64,
@@ -2457,10 +2376,16 @@ fn draw_element_body(
                 }
                 let total = *lengths.last().unwrap_or(&0.0);
                 if total > 0.0 {
+                    // Glyph advances come from the crate's font-metrics
+                    // provider (the same one `Element::bounds` and the text
+                    // pipeline use), not from a query on the painting context:
+                    // a display list cannot answer "how wide is this glyph",
+                    // so the caller-owned service does (ruling 2026-08-31).
+                    let measure = crate::tools::text_measure::make_measurer(&font, e.font_size);
                     let mut offset = e.start_offset * total;
                     for ch in content_str.chars() {
                         let ch_str = ch.to_string();
-                        let ch_width = ctx.measure_text(&ch_str).map(|m: web_sys::TextMetrics| m.width()).unwrap_or(8.0);
+                        let ch_width = measure(&ch_str);
                         let t = (offset + ch_width / 2.0) / total;
                         if t > 1.0 { break; }
                         if t >= 0.0 {
@@ -2489,12 +2414,12 @@ fn draw_element_body(
             // scale so a stroked shape inside this (possibly scaled) group
             // is counter-scaled by the full ancestor chain.
             for child in &g.children {
-                draw_element_scaled(ctx, child, effective, precision, elem_scale);
+                draw_element_scaled(ctx, target, child, effective, precision, elem_scale);
             }
         }
         Element::Layer(l) => {
             for child in &l.children {
-                draw_element_scaled(ctx, child, effective, precision, elem_scale);
+                draw_element_scaled(ctx, target, child, effective, precision, elem_scale);
             }
         }
         Element::Live(v) => {
@@ -3345,11 +3270,13 @@ pub fn render(
     // Layer 1 (canvas background) is now painted by the caller
     // (workspace::app_state::repaint) BEFORE applying the
     // view transform, so the background fills the viewport in
-    // screen-space rather than the document rectangle. The
-    // (width, height) parameters here are now informational only —
-    // the renderer assumes the caller has cleared / filled the
-    // viewport and applied the zoom + pan transform.
-    let _ = (width, height);
+    // screen-space rather than the document rectangle. The renderer assumes
+    // the caller has cleared / filled the viewport and applied the zoom + pan
+    // transform. `(width, height)` is the BACKING-STORE size of the surface
+    // being painted (the caller passes `canvas.width()` / `.height()`), and
+    // it is what the mask composite sizes its device-space scratch surfaces
+    // from — see [`TargetSize`].
+    let target = TargetSize { w: width as u32, h: height as u32 };
 
     // Layer 2: artboard fills (list order, later wins in overlaps).
     draw_artboard_fills(ctx, doc);
@@ -3361,7 +3288,7 @@ pub fn render(
     if let Some(path) = mask_isolation_path {
         if let Some(elem) = doc.get_element(&path.to_vec()) {
             if let Some(mask) = elem.common().mask.as_deref() {
-                draw_element(ctx, &mask.subtree, Visibility::Preview, precision);
+                draw_element(ctx, target, &mask.subtree, Visibility::Preview, precision);
             }
         }
     } else if let Some(iso_path) = layers_isolation_path {
@@ -3377,15 +3304,15 @@ pub fn render(
             let _ctx_guard = CtxSaveGuard::new(ctx);
             ctx.set_global_alpha(0.15);
             for layer in &doc.layers {
-                draw_element(ctx, layer, Visibility::Preview, precision);
+                draw_element(ctx, target, layer, Visibility::Preview, precision);
             }
         }
         if let Some(iso_elem) = doc.get_element(&iso_path.to_vec()) {
-            draw_element(ctx, iso_elem, Visibility::Preview, precision);
+            draw_element(ctx, target, iso_elem, Visibility::Preview, precision);
         }
     } else {
         for layer in &doc.layers {
-            draw_element(ctx, layer, Visibility::Preview, precision);
+            draw_element(ctx, target, layer, Visibility::Preview, precision);
         }
     }
 
@@ -4198,78 +4125,6 @@ mod tests {
         );
     }
 
-    // ── promote_bytes_to_luminance (PDF §11 soft-mask) ─────
-
-    fn pixel(r: u8, g: u8, b: u8, a: u8) -> [u8; 4] { [r, g, b, a] }
-
-    #[test]
-    fn luminance_white_opaque_keeps_alpha() {
-        let mut bytes = pixel(255, 255, 255, 255).to_vec();
-        promote_bytes_to_luminance(&mut bytes);
-        assert_eq!(bytes[3], 255);
-    }
-
-    #[test]
-    fn luminance_black_opaque_drops_to_zero() {
-        let mut bytes = pixel(0, 0, 0, 255).to_vec();
-        promote_bytes_to_luminance(&mut bytes);
-        assert_eq!(bytes[3], 0);
-    }
-
-    #[test]
-    fn luminance_mid_gray_halves_alpha() {
-        // Mid-gray (128,128,128) has luminance ≈ 128. Alpha 255 in,
-        // expect ~128 out.
-        let mut bytes = pixel(128, 128, 128, 255).to_vec();
-        promote_bytes_to_luminance(&mut bytes);
-        // Allow ±1 for rounding.
-        assert!((bytes[3] as i32 - 128).abs() <= 1, "got {}", bytes[3]);
-    }
-
-    #[test]
-    fn luminance_transparent_stays_transparent() {
-        // Regardless of RGB, an alpha-0 pixel must stay alpha-0
-        // (so the mask's "outside rendered region" doesn't
-        // accidentally become opaque).
-        let mut bytes = pixel(255, 255, 255, 0).to_vec();
-        promote_bytes_to_luminance(&mut bytes);
-        assert_eq!(bytes[3], 0);
-    }
-
-    #[test]
-    fn luminance_respects_source_alpha() {
-        // Half-alpha white should end up at half alpha.
-        let mut bytes = pixel(255, 255, 255, 128).to_vec();
-        promote_bytes_to_luminance(&mut bytes);
-        assert_eq!(bytes[3], 128);
-    }
-
-    #[test]
-    fn luminance_bt601_red_weight() {
-        // Pure red (255,0,0) → luminance = 0.299 * 255 ≈ 76.
-        let mut bytes = pixel(255, 0, 0, 255).to_vec();
-        promote_bytes_to_luminance(&mut bytes);
-        assert!((bytes[3] as i32 - 76).abs() <= 1, "got {}", bytes[3]);
-    }
-
-    #[test]
-    fn luminance_bt601_green_weight() {
-        // Pure green → luminance = 0.587 * 255 ≈ 150.
-        let mut bytes = pixel(0, 255, 0, 255).to_vec();
-        promote_bytes_to_luminance(&mut bytes);
-        assert!((bytes[3] as i32 - 150).abs() <= 1, "got {}", bytes[3]);
-    }
-
-    #[test]
-    fn luminance_bt601_blue_weight() {
-        // Pure blue → luminance = 0.114 * 255 ≈ 29.
-        let mut bytes = pixel(0, 0, 255, 255).to_vec();
-        promote_bytes_to_luminance(&mut bytes);
-        assert!((bytes[3] as i32 - 29).abs() <= 1, "got {}", bytes[3]);
-    }
-
-    // ── effective_mask_transform (Track C phase 3) ────────
-
     fn test_transform(e: f64, f: f64) -> Transform {
         // Pure translation by (e, f) for easy identification in tests.
         Transform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e, f }
@@ -4594,8 +4449,7 @@ mod canvas_tests {
     fn a_scratch_canvas_can_be_created_at_all() {
         let got = get_mask_scratch(0, 64, 64);
         assert!(got.is_some(), "no scratch canvas — the rest of this module is vacuous");
-        let (c, _) = got.unwrap();
-        assert_eq!((c.width(), c.height()), (64, 64));
+        assert_eq!(got.unwrap().size(), (64, 64));
     }
 
     /// ⛔ D-β ITSELF, IN THE BROWSER. Before the repair both acquisitions
@@ -4603,10 +4457,10 @@ mod canvas_tests {
     /// outer's half-drawn buffer. This is the test that would have caught it.
     #[wasm_bindgen_test]
     fn nested_scratch_acquisitions_are_distinct_canvases() {
-        let (outer, _) = get_mask_scratch(0, 64, 64).expect("outer scratch");
-        let (inner, _) = get_mask_scratch(1, 64, 64).expect("inner scratch");
+        let outer = get_mask_scratch(0, 64, 64).expect("outer scratch");
+        let inner = get_mask_scratch(1, 64, 64).expect("inner scratch");
         assert!(
-            !outer.is_same_node(Some(inner.as_ref())),
+            !outer.canvas().is_same_node(Some(inner.canvas().as_ref())),
             "D-β: a nested acquisition received the OUTER's canvas — the inner \
              clear_rect would wipe a buffer still being drawn into"
         );
@@ -4617,10 +4471,10 @@ mod canvas_tests {
     /// the frame cost the original singleton existed to avoid.
     #[wasm_bindgen_test]
     fn sequential_acquisitions_at_one_depth_reuse_the_canvas() {
-        let (a, _) = get_mask_scratch(0, 64, 64).expect("first");
-        let (b, _) = get_mask_scratch(0, 64, 64).expect("second");
+        let a = get_mask_scratch(0, 64, 64).expect("first");
+        let b = get_mask_scratch(0, 64, 64).expect("second");
         assert!(
-            a.is_same_node(Some(b.as_ref())),
+            a.canvas().is_same_node(Some(b.canvas().as_ref())),
             "same depth must reuse the same canvas, not allocate a new one"
         );
     }
@@ -4631,15 +4485,14 @@ mod canvas_tests {
     /// must survive.
     #[wasm_bindgen_test]
     fn a_nested_clear_does_not_wipe_the_outer_buffer() {
-        let (_oc, octx) = get_mask_scratch(0, 8, 8).expect("outer");
-        octx.set_fill_style_str("#ff0000");
-        octx.fill_rect(0.0, 0.0, 8.0, 8.0);
+        let outer = get_mask_scratch(0, 8, 8).expect("outer");
+        outer.ctx().set_fill_style_str("#ff0000");
+        outer.ctx().fill_rect(0.0, 0.0, 8.0, 8.0);
 
-        let (_ic, ictx) = get_mask_scratch(1, 8, 8).expect("inner");
-        ictx.clear_rect(0.0, 0.0, 8.0, 8.0); // what the inner call does first
+        let inner = get_mask_scratch(1, 8, 8).expect("inner");
+        inner.reset(); // what the inner call does first
 
-        let data = octx.get_image_data(0.0, 0.0, 1.0, 1.0).expect("readback");
-        let px = data.data();
+        let px = outer.read_rgba(0, 0, 1, 1).expect("readback");
         assert_eq!(
             (px[0], px[3]),
             (255, 255),
@@ -4666,18 +4519,17 @@ mod ph4_conversion_tests {
 
     wasm_bindgen_test_configure!(run_in_browser);
 
-    fn surface(w: u32, h: u32) -> (HtmlCanvasElement, CanvasRenderingContext2d) {
-        let doc = web_sys::window().unwrap().document().unwrap();
-        let c: HtmlCanvasElement = doc.create_element("canvas").unwrap().unchecked_into();
-        c.set_width(w);
-        c.set_height(h);
-        let ctx: CanvasRenderingContext2d =
-            c.get_context("2d").unwrap().unwrap().unchecked_into();
-        (c, ctx)
+    /// A caller-owned surface and (a handle to) its context — the shape
+    /// production has: `render()` is handed a context and the size of the
+    /// surface behind it.
+    fn surface(w: u32, h: u32) -> (WebSurface, CanvasRenderingContext2d) {
+        let s = WebSurface::offscreen(w, h).expect("a DOM is present in the browser lane");
+        let ctx = s.ctx().clone();
+        (s, ctx)
     }
 
-    fn alpha_at(ctx: &CanvasRenderingContext2d, x: f64, y: f64) -> u8 {
-        ctx.get_image_data(x, y, 1.0, 1.0).unwrap().data()[3]
+    fn alpha_at(s: &WebSurface, x: f64, y: f64) -> u8 {
+        s.read_rgba(x as u32, y as u32, 1, 1).expect("in bounds")[3]
     }
 
     fn opaque_rect(x: f64, y: f64, w: f64, h: f64, color: Color) -> Element {
@@ -4730,17 +4582,18 @@ mod ph4_conversion_tests {
     /// [`draw_element_scaled`] routes to today. Returns
     /// `(alpha in the overlap, alpha outside it)`.
     fn render(elem: &Element, parent: f64, before: bool) -> (u8, u8) {
-        let (_c, ctx) = surface(8, 8);
+        let (s, ctx) = surface(8, 8);
+        let target = TargetSize::of(&s);
         ctx.set_global_alpha(parent);
         if before {
             let mask = elem.common().mask.as_deref().unwrap();
             let plan = mask_plan(mask).unwrap();
-            draw_element_with_mask(&ctx, elem, mask, plan, Visibility::Preview, 1.0, 1.0);
+            draw_element_with_mask(&ctx, target, elem, mask, plan, Visibility::Preview, 1.0, 1.0);
         } else {
-            draw_element_scaled(&ctx, elem, Visibility::Preview, 1.0, 1.0);
+            draw_element_scaled(&ctx, target, elem, Visibility::Preview, 1.0, 1.0);
         }
         // x=3 is inside BOTH body rects; x=1 is inside only the first.
-        (alpha_at(&ctx, 3.0, 4.0), alpha_at(&ctx, 1.0, 4.0))
+        (alpha_at(&s, 3.0, 4.0), alpha_at(&s, 1.0, 4.0))
     }
 
     fn close(got: u8, want: u8) -> bool {
@@ -4815,7 +4668,7 @@ mod ph4_conversion_tests {
     /// nothing, so this one pans the view first.
     #[wasm_bindgen_test]
     fn a_converted_masked_element_lands_under_the_view_transform() {
-        let (_c, ctx) = surface(16, 8);
+        let (s, ctx) = surface(16, 8);
         let _ = ctx.translate(8.0, 0.0);
         let doc = Element::Group(GroupElem {
             children: vec![Rc::new(opaque_rect(0.0, 0.0, 4.0, 8.0, Color::BLACK))],
@@ -4830,10 +4683,10 @@ mod ph4_conversion_tests {
             isolated_blending: false,
             knockout_group: false,
         });
-        draw_element_scaled(&ctx, &doc, Visibility::Preview, 1.0, 1.0);
-        assert_eq!(alpha_at(&ctx, 10.0, 4.0), 255,
+        draw_element_scaled(&ctx, TargetSize::of(&s), &doc, Visibility::Preview, 1.0, 1.0);
+        assert_eq!(alpha_at(&s, 10.0, 4.0), 255,
                    "the bracket must open in the frame the context is already in");
-        assert_eq!(alpha_at(&ctx, 2.0, 4.0), 0,
+        assert_eq!(alpha_at(&s, 2.0, 4.0), 0,
                    "…and not at the identity origin, which is where an unframed \
                     layer surface puts it");
     }
@@ -4843,16 +4696,17 @@ mod ph4_conversion_tests {
     /// A scan reads as a picture, so a wrong mask is legible in the failure
     /// message rather than being one integer that differs from another.
     fn scan(elem: &Element, width: u32, before: bool) -> String {
-        let (_c, ctx) = surface(width, 8);
+        let (s, ctx) = surface(width, 8);
+        let target = TargetSize::of(&s);
         if before {
             let m = elem.common().mask.as_deref().unwrap();
             let plan = mask_plan(m).unwrap();
-            draw_element_with_mask(&ctx, elem, m, plan, Visibility::Preview, 1.0, 1.0);
+            draw_element_with_mask(&ctx, target, elem, m, plan, Visibility::Preview, 1.0, 1.0);
         } else {
-            draw_element_scaled(&ctx, elem, Visibility::Preview, 1.0, 1.0);
+            draw_element_scaled(&ctx, target, elem, Visibility::Preview, 1.0, 1.0);
         }
         (0..width)
-            .map(|x| if alpha_at(&ctx, x as f64 + 0.5, 4.0) > 127 { '#' } else { '.' })
+            .map(|x| if alpha_at(&s, x as f64 + 0.5, 4.0) > 127 { '#' } else { '.' })
             .collect()
     }
 
@@ -4963,7 +4817,7 @@ mod ph4_conversion_tests {
     /// months, one function further in. So this one pans the view.
     #[wasm_bindgen_test]
     fn an_inverted_masks_artwork_lands_under_the_view_transform() {
-        let (_c, ctx) = surface(20, 8);
+        let (s, ctx) = surface(20, 8);
         let _ = ctx.translate(8.0, 0.0);
         // Body 0..8, artwork 0..4, inverted => 0..4 erased, 4..8 kept, all
         // shifted +8 by the view: device 12..16 kept, 8..12 erased.
@@ -4974,9 +4828,9 @@ mod ph4_conversion_tests {
         );
         let m = doc.common().mask.as_deref().unwrap();
         let plan = mask_plan(m).unwrap();
-        draw_element_with_mask(&ctx, &doc, m, plan, Visibility::Preview, 1.0, 1.0);
+        draw_element_with_mask(&ctx, TargetSize::of(&s), &doc, m, plan, Visibility::Preview, 1.0, 1.0);
         let ink: String = (0..20)
-            .map(|x| if alpha_at(&ctx, x as f64 + 0.5, 4.0) > 127 { '#' } else { '.' })
+            .map(|x| if alpha_at(&s, x as f64 + 0.5, 4.0) > 127 { '#' } else { '.' })
             .collect();
         assert_eq!(ink, "............####....",
                    "the artwork must erase where the VIEW puts it; an \
@@ -5019,16 +4873,17 @@ mod ph4_conversion_tests {
             linked: false, unlink_transform: Some(rot),
         }));
         let row = |before: bool| -> String {
-            let (_c, ctx) = surface(16, 8);
+            let (s, ctx) = surface(16, 8);
+            let target = TargetSize::of(&s);
             if before {
                 let m = body.common().mask.as_deref().unwrap();
                 let plan = mask_plan(m).unwrap();
-                draw_element_with_mask(&ctx, &body, m, plan, Visibility::Preview, 1.0, 1.0);
+                draw_element_with_mask(&ctx, target, &body, m, plan, Visibility::Preview, 1.0, 1.0);
             } else {
-                draw_element_scaled(&ctx, &body, Visibility::Preview, 1.0, 1.0);
+                draw_element_scaled(&ctx, target, &body, Visibility::Preview, 1.0, 1.0);
             }
             (0..16)
-                .map(|x| if alpha_at(&ctx, x as f64 + 0.5, 1.5) > 127 { '#' } else { '.' })
+                .map(|x| if alpha_at(&s, x as f64 + 0.5, 1.5) > 127 { '#' } else { '.' })
                 .collect()
         };
         assert_eq!(row(true), "##...######...##",
@@ -5129,14 +4984,10 @@ mod ctx_transform_tests {
 
     wasm_bindgen_test_configure!(run_in_browser);
 
-    fn ctx_of(w: u32, h: u32) -> (HtmlCanvasElement, CanvasRenderingContext2d) {
-        let doc = web_sys::window().unwrap().document().unwrap();
-        let c: HtmlCanvasElement = doc.create_element("canvas").unwrap().unchecked_into();
-        c.set_width(w);
-        c.set_height(h);
-        let ctx: CanvasRenderingContext2d =
-            c.get_context("2d").unwrap().unwrap().unchecked_into();
-        (c, ctx)
+    fn ctx_of(w: u32, h: u32) -> (WebSurface, CanvasRenderingContext2d) {
+        let s = WebSurface::offscreen(w, h).expect("a DOM is present in the browser lane");
+        let ctx = s.ctx().clone();
+        (s, ctx)
     }
 
     /// ⛔ THE PROPERTY THIS FILE READ FOR MONTHS IS ABSENT IN CHROME.
@@ -5184,7 +5035,7 @@ mod ctx_transform_tests {
     /// degradation". A degradation that moves the artwork is not one.
     #[wasm_bindgen_test]
     fn a_masked_element_composites_under_the_view_transform() {
-        let (_c, ctx) = ctx_of(16, 8);
+        let (s, ctx) = ctx_of(16, 8);
         // The view transform, exactly as the app applies one before drawing.
         let _ = ctx.translate(8.0, 0.0);
         let mk = |w: f64, col: Color| Element::Rect(RectElem {
@@ -5200,9 +5051,9 @@ mod ctx_transform_tests {
         }));
         let mask = elem.common().mask.as_deref().unwrap().clone();
         let plan = mask_plan(&mask).unwrap();
-        draw_element_with_mask(&ctx, &elem, &mask, plan, Visibility::Preview, 1.0, 1.0);
+        draw_element_with_mask(&ctx, TargetSize::of(&s), &elem, &mask, plan, Visibility::Preview, 1.0, 1.0);
 
-        let alpha = |x: f64| ctx.get_image_data(x, 4.0, 1.0, 1.0).unwrap().data()[3];
+        let alpha = |x: f64| s.read_rgba(x as u32, 4, 1, 1).unwrap()[3];
         assert_eq!(alpha(10.0), 255,
                    "the masked element must land where the VIEW puts it (x=0..4 \
                     in document space, +8 translate => device x=8..12)");
