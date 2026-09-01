@@ -121,6 +121,10 @@
     "jas_dioxus/src/workspace/mod.rs::theme": {
       "kind": "frontend",
       "reason": "Emits CSS strings and baked SVG. Zero tests, and all eight consumers are themselves web-gated views. Leaving it native bought 24 dead-code warnings and not one measurable line -- so this row is a judgement, not a compiler verdict, and is marked as such."
+    },
+    "jas_dioxus/src/surface/mod.rs::web": {
+      "kind": "frontend",
+      "reason": "The browser implementation of the caller-owned pixel-surface service (2026-09-01, the six caller-owned services): WebSurface wraps an HtmlCanvasElement and its 2D context, and is the ONLY place in the crate that reads or writes pixels or composites one canvas onto another. Nothing in it exists without web_sys. Its 12 tests are browser tests by construction and run in the wasm-canvas lane; the host-independent half of the service (PixelSurface, the luminance law, MemorySurface) is UNGATED beside it in surface/mod.rs, with its 16 tests native."
     }
   },
   "items": {

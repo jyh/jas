@@ -93,13 +93,29 @@ mask lifecycle + add_element mask-routing groups)
   children, falls back to layer on missing mask or non-Group subtree,
   content-mode ignores editing_target.
 
-**Rust — `jas_dioxus/src/canvas/render.rs`** (17 tests)
+**Rust — `jas_dioxus/src/canvas/render.rs`**
 - `mask_plan` dispatch (ClipIn / ClipOut / RevealOutsideBbox / None).
 - `effective_mask_transform` linked / unlinked with Some / None
   transforms.
-- `promote_bytes_to_luminance` (8 cases): white-opaque keeps alpha,
+
+**Rust — `jas_dioxus/src/surface/mod.rs`** (the luminance law moved here
+2026-09-01; it is host-independent and the web painter takes it from here
+too)
+- `promote_bytes_to_luminance` (9 cases): white-opaque keeps alpha,
   black-opaque drops to 0, mid-gray halves, transparent stays
-  transparent, source alpha respected, BT.601 per-channel weights.
+  transparent, source alpha respected, BT.601 per-channel weights, a
+  multi-pixel buffer.
+- `promote_to_luminance` over a `PixelSurface` (4 cases): touches ONLY
+  the requested rect, applies the bytes law, a zero rect is a successful
+  no-op, a rect the surface cannot serve is refused without writing.
+- `MemorySurface` (3 cases): round-trips a write, refuses a rect past its
+  edge or a wrong byte count, reports its size.
+- Browser (`surface/web.rs`, wasm-canvas lane, 12 cases): `WebSurface`
+  reads what the context painted, writes land, refuses a rect past the
+  edge; `composite_onto` — destination-in keeps only under the source,
+  destination-out erases under it, Normal honours alpha, lands in device
+  space whatever the destination transform, restores the destination's
+  state; luminance on a real canvas; `reset`; `resize`.
 
 **Rust — `jas_dioxus/src/workspace/app_state.rs`** (~4 tests)
 - `TabState` / `Model` defaults: `editing_target == Content`,
