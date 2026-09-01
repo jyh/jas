@@ -58,6 +58,17 @@ internal static unsafe class JasCore
     internal const int PaintSceneIncomplete = 6;
     /// <summary>The entry point exists but is a stub.</summary>
     internal const int PaintNotImplemented = 7;
+    /// <summary>No session -- distinct from a dead surface.</summary>
+    internal const int PaintNullEngine = 8;
+    /// <summary>
+    /// The document holds an element the native walk cannot draw, so NOTHING
+    /// was drawn. Not the same as <see cref="PaintSceneIncomplete"/>: that one
+    /// is a BACKEND gap, this one is an element still routing to the legacy
+    /// renderer, and the two are fixed in different files.
+    /// </summary>
+    internal const int PaintDocumentIncomplete = 9;
+    /// <summary>The bytes are not parseable as SVG (or not UTF-8).</summary>
+    internal const int PaintBadSvg = 10;
 
     /// <summary>
     /// Render a paint status for a human.
@@ -83,6 +94,9 @@ internal static unsafe class JasCore
         PaintBadScene => "BAD SCENE -- the bytes are not a JSON array of commands; a marshalling slip, not a paint failure",
         PaintSceneIncomplete => "SCENE INCOMPLETE -- the painter could not draw part of it, so the core refused rather than present artwork-missing pixels (the declared non-Normal-blend gap does this)",
         PaintNotImplemented => "NOT IMPLEMENTED -- the entry point is a stub",
+        PaintNullEngine => "NULL ENGINE -- there is no session to paint; the shell never created one, or freed it early",
+        PaintDocumentIncomplete => "DOCUMENT INCOMPLETE -- the document holds an element the native walk cannot draw yet (text, a freeform gradient, a Live element), so NOTHING was drawn rather than part of it",
+        PaintBadSvg => "BAD SVG -- the file is not parseable XML, or not UTF-8. NOT the same as an empty drawing",
         _ => $"HRESULT 0x{rc:X8}",
     };
 
@@ -114,6 +128,37 @@ internal static unsafe class JasCore
     [DllImport(Lib)]
     internal static extern int jas_paint_scene(
         IntPtr dxgiSurface, IntPtr scene, nuint len, float width, float height);
+
+    /// <summary>
+    /// A jas session. Opaque on this side by design (BL1): the shell holds a
+    /// handle and never a document.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern IntPtr jas_engine_new();
+
+    [DllImport(Lib)]
+    internal static extern void jas_engine_free(IntPtr engine);
+
+    /// <summary>
+    /// Open an SVG into the session, replacing whatever it held.
+    ///
+    /// A BYTE SPAN, not a string, and not just for BL5's cp1252 reason: an SVG
+    /// is UTF-8 on disk and the bytes are handed over exactly as read, so the
+    /// core does its own decoding and refuses invalid input by name. A managed
+    /// round trip through <c>File.ReadAllText</c> would silently substitute
+    /// U+FFFD for a bad byte and the core would then parse the SUBSTITUTION.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_load_svg(IntPtr engine, byte[] svg, nuint len);
+
+    /// <summary>
+    /// Paint the session's LIVE document into a DXGI surface -- no display-list
+    /// round trip. Refuses (<see cref="PaintDocumentIncomplete"/>) rather than
+    /// presenting a document with elements missing.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_paint_document(
+        IntPtr engine, IntPtr dxgiSurface, float width, float height);
 
     /// <summary>How many recorded goldens the core carries.</summary>
     [DllImport(Lib)]

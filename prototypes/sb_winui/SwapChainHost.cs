@@ -697,6 +697,104 @@ internal sealed unsafe class SwapChainHost : IDisposable
     }
 
     /// <summary>
+    /// ⭐ OPEN A REAL FILE AND DRAW IT — the whole point of the lane.
+    ///
+    /// The goldens path proves the SEAM: recorded display lists reach the
+    /// presented surface. This proves the PRODUCT: an SVG off disk becomes a
+    /// document in the core, and the core walks it live onto the back buffer
+    /// with no display-list round trip.
+    ///
+    /// ⛔ THE FILE IS READ AS BYTES AND HANDED OVER UNDECODED. `ReadAllText`
+    /// would substitute U+FFFD for any byte the active code page cannot map,
+    /// and the core would then parse the SUBSTITUTION and report success on a
+    /// document that is not the file. The core owns the decoding and refuses
+    /// invalid UTF-8 by name.
+    /// </summary>
+    public bool RenderDocument(string svgPath)
+    {
+        if (_swapChain is null) { LastStatus = "no swapchain"; return false; }
+
+        byte[] bytes;
+        try
+        {
+            bytes = System.IO.File.ReadAllBytes(svgPath);
+        }
+        catch (Exception ex)
+        {
+            // Named as a SHELL failure, not a core one: "could not read the
+            // file" and "the core could not parse it" send a reader to
+            // different places.
+            LastStatus = $"DOCUMENT FAILED: cannot read '{svgPath}': {ex.GetType().Name}";
+            return false;
+        }
+
+        var engine = JasCore.jas_engine_new();
+        if (engine == IntPtr.Zero)
+        {
+            LastStatus = "DOCUMENT FAILED: the core would not create a session";
+            return false;
+        }
+        try
+        {
+            var lrc = JasCore.jas_load_svg(engine, bytes, (nuint)bytes.Length);
+            if (lrc != JasCore.PaintOk)
+            {
+                LastStatus = $"DOCUMENT FAILED to open '{System.IO.Path.GetFileName(svgPath)}': "
+                           + JasCore.Explain(lrc);
+                return false;
+            }
+
+            var hold = int.TryParse(Environment.GetEnvironmentVariable("SB_SCENE_HOLD"), out var hv)
+                ? hv : 12;
+            string? failure = null;
+            var rc = JasCore.PaintOk;
+            for (var f = 0; f < hold; f++)
+            {
+                _swapChain.GetBuffer<IDXGISurface>(0, out var back);
+                var ptr = Marshal.GetComInterfaceForObject(back, typeof(IDXGISurface));
+                try
+                {
+                    rc = JasCore.jas_paint_document(engine, ptr, _width, _height);
+                }
+                finally
+                {
+                    Marshal.Release(ptr);
+                }
+                if (rc != JasCore.PaintOk) break;
+
+                var hr = _swapChain.Present(1, default);
+                if (hr.Failed) { failure = $"Present 0x{hr.Value:X8}"; break; }
+            }
+
+            if (rc != JasCore.PaintOk)
+            {
+                // ⛔ A REFUSAL IS REPORTED AS A REFUSAL, and the buffer was never
+                // touched (the core decides before it draws). Reporting this as
+                // a success with a blank window is the exact failure the core's
+                // refusal exists to prevent; the shell must not undo it.
+                LastStatus = $"DOCUMENT REFUSED '{System.IO.Path.GetFileName(svgPath)}': "
+                           + JasCore.Explain(rc);
+                return false;
+            }
+            if (failure is not null)
+            {
+                LastStatus = $"DOCUMENT FAILED presenting: {failure}";
+                return false;
+            }
+
+            LastStatus = $"DOCUMENT '{System.IO.Path.GetFileName(svgPath)}' "
+                       + $"({bytes.Length} bytes) painted LIVE through {SurfaceLabel()} on {Adapter}";
+            return true;
+        }
+        finally
+        {
+            // Freed on EVERY path including the refusals above: a session leaked
+            // per frame is a leak nobody notices until a long run.
+            JasCore.jas_engine_free(engine);
+        }
+    }
+
+    /// <summary>
     /// One golden, painted into the back buffer and presented <c>hold</c> times.
     ///
     /// The back buffer is re-fetched and re-released around EVERY present, the

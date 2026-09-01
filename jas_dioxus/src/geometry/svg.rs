@@ -2244,11 +2244,30 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
 }
 
 /// Parse an SVG string and return a Document.
+///
+/// ⚠️ A PARSE FAILURE IS INDISTINGUISHABLE FROM AN EMPTY DRAWING HERE — both
+/// give `Document::default()`. That is tolerable for the callers this has
+/// always had (importers that already validated their input, and tests), and it
+/// is NOT tolerable at a boundary, where "the file is malformed" and "the file
+/// is blank" are different things to tell a user. Use
+/// [`try_svg_to_document`] where the difference matters.
 pub fn svg_to_document(svg: &str) -> Document {
-    let root = match parse_xml(svg) {
-        Some(r) => r,
-        None => return Document::default(),
-    };
+    try_svg_to_document(svg).unwrap_or_default()
+}
+
+/// [`svg_to_document`], but `None` when the input is not parseable XML.
+///
+/// ⛔ THE DISTINCTION EXISTS BECAUSE A LOADER THAT CANNOT MAKE IT PRESENTS A
+/// BLANK CANVAS AT SUCCESS. `parse_xml` is private and its `None` was being
+/// swallowed one line later, so a native shell handed a truncated or non-XML
+/// file would have opened an empty document and reported OK — the same
+/// silent-success class the paint seam refuses at every other step.
+///
+/// It does NOT validate SVG beyond well-formedness: a well-formed XML file with
+/// no drawable content legitimately yields an empty `Document`, and saying
+/// otherwise would refuse real blank drawings.
+pub fn try_svg_to_document(svg: &str) -> Option<Document> {
+    let root = parse_xml(svg)?;
     let artboards = parse_artboards(&root);
     let (document_setup, print_preferences) = parse_jas_print_blocks(&root);
     let mut layers: Vec<Element> = Vec::new();
@@ -2321,7 +2340,10 @@ pub fn svg_to_document(svg: &str) -> Document {
         d.artboard_options = crate::document::artboard::ArtboardOptions::default();
         d.document_setup = document_setup;
         d.print_preferences = print_preferences;
-        return d;
+        // Some(...): a well-formed SVG with no drawable layers is an EMPTY
+        // drawing, not a parse failure. Only `parse_xml` returning None is a
+        // failure, and it is handled at the top.
+        return Some(d);
     }
     let doc = Document {
         layers,
@@ -2335,7 +2357,7 @@ pub fn svg_to_document(svg: &str) -> Document {
     };
     // Opacity normalization, then enforce the unique-id invariant
     // (first-pre-order-wins) so the live-reference index never collides.
-    dedupe_element_ids(&normalize_document(&doc))
+    Some(dedupe_element_ids(&normalize_document(&doc)))
 }
 
 /// Parse <inkscape:page> children of any top-level

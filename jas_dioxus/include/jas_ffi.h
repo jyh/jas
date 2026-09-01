@@ -176,6 +176,52 @@
 #define JAS_PAINT_NOT_IMPLEMENTED 7
 #endif
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Caller passed a NULL engine to [`jas_paint_document`].
+ *
+ * Distinct from `JAS_PAINT_NULL_SURFACE` because the two are different
+ * mistakes with different fixes: one is a dead session, the other a dead
+ * buffer, and collapsing them sends the reader to the wrong half of the shell.
+ */
+#define JAS_PAINT_NULL_ENGINE 8
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * ⛔ THE DOCUMENT HOLDS SOMETHING THIS SEAM CANNOT DRAW, so nothing was drawn.
+ *
+ * SEPARATE FROM `JAS_PAINT_SCENE_INCOMPLETE`, and the distinction is the whole
+ * value of the code. Both mean "the frame would be missing artwork", but the
+ * REMEDIES are unrelated:
+ *
+ * * `SCENE_INCOMPLETE` — the BACKEND lacks something (the declared non-Normal
+ *   blend gap). Fixed in `Direct2DPainter`.
+ * * `DOCUMENT_INCOMPLETE` — the ELEMENT still routes to the legacy renderer
+ *   (`element_needs_legacy`): text, a freeform gradient, an un-ported piece of
+ *   the node-2 delta. Fixed in `element_render`, and it shrinks every time a
+ *   slice of the delta lands.
+ *
+ * One code for both would report a backend bug for what is really a
+ * not-yet-ported element, and vice versa.
+ */
+#define JAS_PAINT_DOCUMENT_INCOMPLETE 9
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * The bytes handed to [`jas_load_svg`] are not parseable.
+ *
+ * ⛔ THIS CODE IS THE POINT OF THAT FUNCTION. `svg_to_document` answers
+ * `Document::default()` for a malformed file, which is byte-identical to a
+ * legitimately blank drawing — so a shell built on it would open a truncated
+ * file, show an empty canvas, and report success. Well-formedness is the only
+ * thing checked: a well-formed SVG with nothing drawable IS an empty document
+ * and loads fine.
+ */
+#define JAS_PAINT_BAD_SVG 10
+#endif
+
 /**
  * How many draws one collision-free id gets before the mint is reported
  * failed. 100 — the value every open-coded copy of this loop used before
@@ -578,6 +624,61 @@ int32_t jas_paint_scene(void *surface,
                         uintptr_t len,
                         float width,
                         float height);
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Replace the engine's document with one parsed from SVG bytes.
+ *
+ * ⭐ WHY THIS EXISTS AND WHY IT IS NOT IN THE NODE LIST. `ffi.rs` records that
+ * `jas_load_document` is *"NOT in S-A"* because *"`geometry::test_json` has no
+ * whole-document PARSER — only the writer"*. That is true of test JSON and
+ * **false of SVG**: `geometry::svg::svg_to_document` exists, is not web-gated,
+ * and compiles in the native build. Measured 2026-09-01 over
+ * `test_fixtures/svg/`: **51 of 70 documents parse AND paint completely**
+ * through `emit_element` on `Direct2DPainter`.
+ *
+ * So the distance from "a window that draws recorded goldens" to "a window that
+ * draws a real illustration" was one export over a function already in the
+ * crate.
+ *
+ * ⚠️ WHAT IT DOES **NOT** CATCH, MEASURED NOT ASSUMED: **truncation.**
+ * `parse_xml` is lenient — `"<svg><rect"`, with an unclosed tag, parses as far
+ * as it got and loads as a partial document. So this refuses NON-XML and
+ * NON-UTF-8 only. Detecting truncation belongs in the shared parser, not in a
+ * heuristic at an ABI (which is how a good file gets refused); the limit is
+ * pinned by an arm, so a future tightening reds that arm rather than silently
+ * outdating this comment.
+ *
+ * ⛔ BYTES, NOT A STRING (BL5). The default P/Invoke `CharSet` is `Ansi` —
+ * cp1252 on the box this ships to — and an SVG is UTF-8 that would be mangled
+ * in both directions. Non-UTF-8 input is refused by name rather than
+ * lossily converted, because a mangled `<text>` is a wrong drawing rather than
+ * a missing one.
+ *
+ * # Safety
+ * `engine` must be NULL or a live `JasEngine`. `svg` must be NULL or point to
+ * `len` readable bytes.
+ */
+int32_t jas_load_svg(void *engine, const uint8_t *svg, uintptr_t len);
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Paint the ENGINE'S LIVE DOCUMENT into a caller-owned DXGI surface.
+ *
+ * ⭐ NODE 3, AND IT IS THE ONE THAT REMOVES THE ROUND TRIP. `jas_paint_scene`
+ * takes a RECORDED display list, which means a document must first be walked,
+ * serialised to JSON, and handed back across the boundary to be parsed again.
+ * This walks the live `Document` in place: no serialisation, no parse, and no
+ * second representation to drift.
+ *
+ * # Safety
+ * `engine` must be NULL or a live `JasEngine` from `jas_engine_new`. `surface`
+ * must be NULL or a valid `IDXGISurface` that outlives the call; ownership is
+ * not transferred.
+ */
+int32_t jas_paint_document(void *engine, void *surface, float width, float height);
 #endif
 
 #if (defined(JAS_WITH_D2D) && defined(_WIN32))

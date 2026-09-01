@@ -43,7 +43,10 @@ use windows::Win32::Graphics::Direct2D::Common::{D2D1_COLOR_F, D2D_RECT_F};
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext, ID3D11Resource};
 use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGISurface};
 
+use crate::document::document::Document;
+use crate::painter::capability::Caps;
 use crate::painter::direct2d::painter::Direct2DPainter;
+use crate::painter::element_render::{emit_element, subtree_needs_legacy};
 use crate::painter::direct2d::replay::replay;
 use crate::painter::direct2d::surface::SurfaceTarget;
 
@@ -94,6 +97,37 @@ pub const JAS_PAINT_BAD_SCENE: i32 = 5;
 pub const JAS_PAINT_SCENE_INCOMPLETE: i32 = 6;
 /// Reserved by the RED half of this increment; no shipped path returns it.
 pub const JAS_PAINT_NOT_IMPLEMENTED: i32 = 7;
+/// Caller passed a NULL engine to [`jas_paint_document`].
+///
+/// Distinct from `JAS_PAINT_NULL_SURFACE` because the two are different
+/// mistakes with different fixes: one is a dead session, the other a dead
+/// buffer, and collapsing them sends the reader to the wrong half of the shell.
+pub const JAS_PAINT_NULL_ENGINE: i32 = 8;
+/// ⛔ THE DOCUMENT HOLDS SOMETHING THIS SEAM CANNOT DRAW, so nothing was drawn.
+///
+/// SEPARATE FROM `JAS_PAINT_SCENE_INCOMPLETE`, and the distinction is the whole
+/// value of the code. Both mean "the frame would be missing artwork", but the
+/// REMEDIES are unrelated:
+///
+/// * `SCENE_INCOMPLETE` — the BACKEND lacks something (the declared non-Normal
+///   blend gap). Fixed in `Direct2DPainter`.
+/// * `DOCUMENT_INCOMPLETE` — the ELEMENT still routes to the legacy renderer
+///   (`element_needs_legacy`): text, a freeform gradient, an un-ported piece of
+///   the node-2 delta. Fixed in `element_render`, and it shrinks every time a
+///   slice of the delta lands.
+///
+/// One code for both would report a backend bug for what is really a
+/// not-yet-ported element, and vice versa.
+pub const JAS_PAINT_DOCUMENT_INCOMPLETE: i32 = 9;
+/// The bytes handed to [`jas_load_svg`] are not parseable.
+///
+/// ⛔ THIS CODE IS THE POINT OF THAT FUNCTION. `svg_to_document` answers
+/// `Document::default()` for a malformed file, which is byte-identical to a
+/// legitimately blank drawing — so a shell built on it would open a truncated
+/// file, show an empty canvas, and report success. Well-formedness is the only
+/// thing checked: a well-formed SVG with nothing drawable IS an empty document
+/// and loads fine.
+pub const JAS_PAINT_BAD_SVG: i32 = 10;
 
 // ANY OTHER NON-ZERO RETURN IS THE RAW HRESULT, and that is a repair rather than
 // a design. The first version collapsed every COM failure into a single -3, so
@@ -431,6 +465,201 @@ pub unsafe extern "C" fn jas_paint_scene(
         return JAS_PAINT_SCENE_INCOMPLETE;
     }
     JAS_PAINT_OK
+}
+
+// ---------------------------------------------------------------------------
+// OPENING A FILE — the step between "draws goldens" and "draws YOUR drawing"
+// ---------------------------------------------------------------------------
+
+/// Replace the engine's document with one parsed from SVG bytes.
+///
+/// ⭐ WHY THIS EXISTS AND WHY IT IS NOT IN THE NODE LIST. `ffi.rs` records that
+/// `jas_load_document` is *"NOT in S-A"* because *"`geometry::test_json` has no
+/// whole-document PARSER — only the writer"*. That is true of test JSON and
+/// **false of SVG**: `geometry::svg::svg_to_document` exists, is not web-gated,
+/// and compiles in the native build. Measured 2026-09-01 over
+/// `test_fixtures/svg/`: **51 of 70 documents parse AND paint completely**
+/// through `emit_element` on `Direct2DPainter`.
+///
+/// So the distance from "a window that draws recorded goldens" to "a window that
+/// draws a real illustration" was one export over a function already in the
+/// crate.
+///
+/// ⚠️ WHAT IT DOES **NOT** CATCH, MEASURED NOT ASSUMED: **truncation.**
+/// `parse_xml` is lenient — `"<svg><rect"`, with an unclosed tag, parses as far
+/// as it got and loads as a partial document. So this refuses NON-XML and
+/// NON-UTF-8 only. Detecting truncation belongs in the shared parser, not in a
+/// heuristic at an ABI (which is how a good file gets refused); the limit is
+/// pinned by an arm, so a future tightening reds that arm rather than silently
+/// outdating this comment.
+///
+/// ⛔ BYTES, NOT A STRING (BL5). The default P/Invoke `CharSet` is `Ansi` —
+/// cp1252 on the box this ships to — and an SVG is UTF-8 that would be mangled
+/// in both directions. Non-UTF-8 input is refused by name rather than
+/// lossily converted, because a mangled `<text>` is a wrong drawing rather than
+/// a missing one.
+///
+/// # Safety
+/// `engine` must be NULL or a live `JasEngine`. `svg` must be NULL or point to
+/// `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_load_svg(engine: *mut c_void, svg: *const u8, len: usize) -> i32 {
+    let engine_ptr = engine.cast::<crate::ffi::JasEngine>();
+    let Some(engine) = (unsafe { engine_ptr.as_ref() }) else {
+        return JAS_PAINT_NULL_ENGINE;
+    };
+    // A NULL pointer is a caller error; an EMPTY slice is a zero-byte file,
+    // which is not well-formed XML and refuses below as one. Collapsing them
+    // would let a marshalling bug read as "an empty drawing".
+    if svg.is_null() {
+        return JAS_PAINT_BAD_SVG;
+    }
+    let bytes = unsafe { core::slice::from_raw_parts(svg, len) };
+    let Ok(text) = core::str::from_utf8(bytes) else {
+        return JAS_PAINT_BAD_SVG;
+    };
+    let Some(doc) = crate::geometry::svg::try_svg_to_document(text) else {
+        return JAS_PAINT_BAD_SVG;
+    };
+    engine.replace_document(doc);
+    JAS_PAINT_OK
+}
+
+// ---------------------------------------------------------------------------
+// NODE 3 — PAINT THE LIVE DOCUMENT (no JSON round-trip)
+// ---------------------------------------------------------------------------
+
+/// Would every layer of `doc` paint completely through `emit_element` on a
+/// backend with `caps`? Returns the first element path that would not.
+///
+/// ⛔ THIS EXISTS BECAUSE `emit_element` DROPS SILENTLY. Its contract is that a
+/// legacy-only element paints NOTHING and returns — which is correct for a
+/// reference renderer sitting beside `render.rs`, and catastrophic for a native
+/// walk that is the ONLY renderer. Without this check `jas_paint_document`
+/// would present a document with elements quietly missing and return
+/// `JAS_PAINT_OK`: the same silent-success class as the dropped `CopyResource`
+/// this file already refuses, reached through the element router instead of
+/// through D3D11.
+///
+/// ⭐ AND IT MUST RUN BEFORE ANY PAINTING. Checking as we go would leave a
+/// half-drawn document in the back buffer and then refuse — and the host, which
+/// owns the swapchain, may present it anyway. A refusal is only a refusal if
+/// nothing was written.
+///
+/// `subtree_needs_legacy`, not `element_needs_legacy`: a legacy-only DESCENDANT
+/// is dropped just as silently as a legacy-only root.
+fn first_unpaintable(doc: &Document, caps: Caps) -> Option<usize> {
+    doc.layers
+        .iter()
+        .position(|layer| subtree_needs_legacy(layer, caps))
+}
+
+/// Paint every layer of `doc` into `surface`, or refuse having drawn nothing.
+///
+/// ⛔ THE ORDER IS THE CONTRACT: decide, then draw. See [`first_unpaintable`].
+///
+/// Shared by the extern below and by the tests, which need to supply a
+/// `Document` directly -- `JasEngine` has no whole-document parser (see
+/// `ffi.rs`: "`jas_load_document` is NOT in S-A"), so a test that could only
+/// reach this through the engine could not build an interesting document at
+/// all. Splitting the boundary from the work is what makes the refusal arm
+/// testable, and the refusal is the reason this node is not three lines.
+unsafe fn paint_document_into(
+    surface: *mut c_void,
+    doc: &Document,
+) -> i32 {
+    if surface.is_null() {
+        return JAS_PAINT_NULL_SURFACE;
+    }
+    // BORROWED, not owned -- see `jas_paint_probe_surface`.
+    let surface: &IDXGISurface = match unsafe { IDXGISurface::from_raw_borrowed(&surface) } {
+        Some(s) => s,
+        None => return JAS_PAINT_NOT_A_SURFACE,
+    };
+    let target = match SurfaceTarget::from_dxgi_surface(surface) {
+        Ok(t) => t,
+        Err(e) => return e.code().0,
+    };
+    let rt = target.render_target();
+
+    // ⭐ THE CAPABILITIES COME FROM THE PAINTER THAT WILL DO THE WORK, not from a
+    // constant. Asking a different backend's answers would make the refusal
+    // either too strict (dropping what this one can draw) or too loose (the
+    // silent-drop this whole function exists to prevent).
+    let caps = {
+        let painter = Direct2DPainter::new(rt);
+        Caps::of(&painter)
+    };
+    if first_unpaintable(doc, caps).is_some() {
+        // ⛔ RETURN BEFORE `BeginDraw`. Nothing has touched the surface, which is
+        // what makes this a refusal rather than a report about a frame the host
+        // is about to present anyway.
+        return JAS_PAINT_DOCUMENT_INCOMPLETE;
+    }
+
+    unsafe {
+        rt.BeginDraw();
+        rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        let mut painter = Direct2DPainter::new(rt);
+        for layer in &doc.layers {
+            // The document's layers are siblings at the root: each carries its
+            // own opacity, and there is no enclosing group alpha, so each starts
+            // from 1.0.
+            emit_element(&mut painter, layer, 1.0);
+        }
+        // EndDraw on EVERY path, including the error one: leaving a render
+        // target open poisons the NEXT frame with a failure a frame older.
+        if let Err(e) = rt.EndDraw(None, None) {
+            return e.code().0;
+        }
+    }
+    JAS_PAINT_OK
+}
+
+/// Test seam: the walk against a `Document` this crate built, with no engine.
+#[cfg(test)]
+unsafe fn jas_paint_document_for_test(
+    surface: *mut c_void,
+    doc: &Document,
+    _width: f32,
+    _height: f32,
+) -> i32 {
+    unsafe { paint_document_into(surface, doc) }
+}
+
+/// Paint the ENGINE'S LIVE DOCUMENT into a caller-owned DXGI surface.
+///
+/// ⭐ NODE 3, AND IT IS THE ONE THAT REMOVES THE ROUND TRIP. `jas_paint_scene`
+/// takes a RECORDED display list, which means a document must first be walked,
+/// serialised to JSON, and handed back across the boundary to be parsed again.
+/// This walks the live `Document` in place: no serialisation, no parse, and no
+/// second representation to drift.
+///
+/// # Safety
+/// `engine` must be NULL or a live `JasEngine` from `jas_engine_new`. `surface`
+/// must be NULL or a valid `IDXGISurface` that outlives the call; ownership is
+/// not transferred.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_paint_document(
+    engine: *mut c_void,
+    surface: *mut c_void,
+    width: f32,
+    height: f32,
+) -> i32 {
+    // THE ENGINE IS CHECKED FIRST, and the order is not arbitrary: without a
+    // session there is no document, so reporting a surface problem would send
+    // the reader to the wrong half of the shell.
+    let engine = engine.cast::<crate::ffi::JasEngine>();
+    let Some(engine) = (unsafe { engine.as_ref() }) else {
+        return JAS_PAINT_NULL_ENGINE;
+    };
+    // Same as `jas_paint_scene`: a display list carries absolute document
+    // coordinates, so the extent is not needed to draw correctly today. Kept in
+    // the signature because the first view transform (pan/zoom, or the
+    // DIP-vs-physical scaling booked as jyh/jas#16) needs it, and widening a C
+    // ABI later is a change every caller makes in step.
+    let _ = (width, height);
+    engine.with_document(|doc| unsafe { paint_document_into(surface, doc) })
 }
 
 // ---------------------------------------------------------------------------
@@ -1468,5 +1697,275 @@ mod tests {
             assert!((f * 255.0 - ch as f64).abs() < 1e-9,
                     "{ch} is not exactly representable as f*255, so its rounding                      is the rasteriser's choice and the desktop oracle would                      compare bytes that legitimately differ between backends");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // NODE 3 — the live-document walk, and its refusal
+    // -----------------------------------------------------------------------
+
+    use crate::document::document::Document;
+    use crate::geometry::element::{
+        Color, CommonProps, Element, Fill, Gradient, GradientType, RectElem,
+    };
+    use crate::painter::capability::Caps;
+
+    fn doc_with(layers: Vec<Element>) -> Document {
+        Document { layers, ..Document::default() }
+    }
+
+    fn a_paintable_rect() -> Element {
+        Element::Rect(RectElem {
+            x: 5.0, y: 5.0, width: 60.0, height: 40.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill { color: Color::rgb(0.2, 0.4, 0.8), opacity: 1.0 }),
+            stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        })
+    }
+
+    /// An element the native walk cannot draw.
+    ///
+    /// ⛔ A FREEFORM GRADIENT, DELIBERATELY, AND NOT TEXT. Text is the obvious
+    /// choice and it is the WRONG one: text is legacy only until `measure_text`
+    /// arrives as a caller-owned service, at which point this arm would start
+    /// passing for the wrong reason -- or worse, quietly stop testing anything
+    /// while still going green. A freeform gradient is legacy BY CONTRACT (A5:
+    /// a build-time lowering concern the seam never carries; no backend answer
+    /// unlocks it), so the arm stays meaningful however much of the delta lands.
+    fn an_unpaintable_element() -> Element {
+        let mut r = match a_paintable_rect() {
+            Element::Rect(r) => r,
+            _ => unreachable!(),
+        };
+        r.fill_gradient = Some(Box::new(Gradient {
+            gtype: GradientType::Freeform,
+            ..Gradient::default()
+        }));
+        Element::Rect(r)
+    }
+
+    /// A document of PH1-expressible layers paints, and the surface CHANGES.
+    ///
+    /// "Returned OK" is not the assertion -- a function that did nothing would
+    /// also return OK. The pixels are.
+    #[test]
+    fn a_live_document_reaches_the_surface_the_host_presents() {
+        let (dev, ctx) = warp();
+        let t = tex(&dev, false);
+        let surface: IDXGISurface = t.cast().expect("surface");
+
+        let before = read(&dev, &ctx, &t);
+        let doc = doc_with(vec![a_paintable_rect()]);
+        let rc = unsafe {
+            jas_paint_document_for_test(surface.as_raw(), &doc, W as f32, H as f32)
+        };
+        assert_eq!(rc, JAS_PAINT_OK, "status");
+
+        let after = read(&dev, &ctx, &t);
+        assert_ne!(before, after, "the document must have changed the surface");
+        assert_eq!(rgb_at(&after, 20, 20), (51, 102, 204),
+                   "and it must be THE DOCUMENT'S colour, not merely different");
+    }
+
+    /// ⛔ THE ARM THIS NODE EXISTS FOR. A document holding an element the seam
+    /// cannot draw is REFUSED **and the surface is left untouched**.
+    ///
+    /// Refusing after painting would be no refusal at all: the host owns the
+    /// swapchain and presents whatever is in the back buffer, so a half-drawn
+    /// document would reach the screen with an error code nobody can un-present.
+    /// Asserting the pixels are UNCHANGED is the only way to state that; a status
+    /// code alone cannot.
+    #[test]
+    fn a_document_with_an_unpaintable_element_is_refused_before_anything_is_drawn() {
+        let (dev, ctx) = warp();
+        let t = tex(&dev, false);
+        let surface: IDXGISurface = t.cast().expect("surface");
+
+        let before = read(&dev, &ctx, &t);
+        // The paintable rect comes FIRST, so a walk that painted as it went
+        // would have drawn it before reaching the text. That ordering is the
+        // whole point of the arm.
+        let doc = doc_with(vec![a_paintable_rect(), an_unpaintable_element()]);
+        let rc = unsafe {
+            jas_paint_document_for_test(surface.as_raw(), &doc, W as f32, H as f32)
+        };
+        assert_eq!(rc, JAS_PAINT_DOCUMENT_INCOMPLETE,
+                   "an element that routes to legacy must refuse, not drop silently");
+
+        let after = read(&dev, &ctx, &t);
+        assert_eq!(before, after,
+                   "a refusal that already painted is not a refusal -- the host \
+                    presents the back buffer either way");
+    }
+
+    /// An EMPTY document is complete, not incomplete. Nothing to draw is a
+    /// legitimate state (a new file), and refusing it would make the app unable
+    /// to open one.
+    #[test]
+    fn an_empty_document_is_complete() {
+        let (dev, _ctx) = warp();
+        let t = tex(&dev, false);
+        let surface: IDXGISurface = t.cast().expect("surface");
+        let rc = unsafe {
+            jas_paint_document_for_test(surface.as_raw(), &doc_with(vec![]), W as f32, H as f32)
+        };
+        assert_eq!(rc, JAS_PAINT_OK, "an empty document draws nothing, successfully");
+    }
+
+    /// A NULL engine and a NULL surface are DIFFERENT mistakes and must not
+    /// collapse into one code -- one is a dead session, the other a dead buffer.
+    #[test]
+    fn a_null_engine_and_a_null_surface_are_told_apart() {
+        assert_eq!(
+            unsafe { jas_paint_document(core::ptr::null_mut(), core::ptr::null_mut(), 1.0, 1.0) },
+            JAS_PAINT_NULL_ENGINE,
+            "the engine is checked first: without a session there is nothing to paint"
+        );
+
+        let e = crate::ffi::jas_engine_new();
+        let rc = unsafe { jas_paint_document(e.cast(), core::ptr::null_mut(), 1.0, 1.0) };
+        unsafe { crate::ffi::jas_engine_free(e) };
+        assert_eq!(rc, JAS_PAINT_NULL_SURFACE);
+    }
+
+    /// ⛔ THE ROUTER IS THE MEASURE, AND IT MUST HAVE TEETH IN BOTH DIRECTIONS.
+    /// If `first_unpaintable` answered `None` for everything, the refusal arm
+    /// above could never fire and would be passing over dead machinery.
+    #[test]
+    fn the_completeness_check_distinguishes_the_two_documents() {
+        let caps = Caps::NONE
+            .with(crate::painter::capability::Capability::IsolatedLayers)
+            .with(crate::painter::capability::Capability::MaskLayers);
+        assert_eq!(first_unpaintable(&doc_with(vec![a_paintable_rect()]), caps), None);
+        assert_eq!(
+            first_unpaintable(&doc_with(vec![a_paintable_rect(), an_unpaintable_element()]), caps),
+            Some(1),
+            "and it must name WHICH layer, not merely that one exists"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // OPENING A FILE — and the silent-blank-canvas hole it closes
+    // -----------------------------------------------------------------------
+
+    /// ⛔ THE ARM THIS EXPORT EXISTS FOR. A malformed file must REFUSE, not open
+    /// as an empty drawing.
+    ///
+    /// `svg_to_document` answers `Document::default()` for unparseable input,
+    /// which is byte-identical to a legitimately blank SVG. A shell built on it
+    /// would open a truncated file, show a blank canvas, and report success --
+    /// and the user would conclude their artwork was lost rather than that the
+    /// file was bad. Those are opposite diagnoses.
+    #[test]
+    fn a_malformed_file_is_refused_rather_than_opened_as_a_blank_drawing() {
+        let e = crate::ffi::jas_engine_new();
+        for bad in ["", "not xml at all", "\u{0}\u{1}\u{2}"] {
+            let rc = unsafe { jas_load_svg(e.cast(), bad.as_ptr(), bad.len()) };
+            assert_eq!(rc, JAS_PAINT_BAD_SVG, "input {bad:?} must refuse");
+        }
+
+        // ⛔ AND HERE IS THE LIMIT, PINNED RATHER THAN HIDDEN. A TRUNCATED file
+        // -- `"<svg><rect"`, an unclosed tag -- is ACCEPTED: `parse_xml` is
+        // lenient and parses as far as it got. Measured 2026-09-01; my first
+        // draft of this arm asserted a refusal and was simply wrong.
+        //
+        // So `jas_load_svg` refuses NON-XML and NON-UTF-8, and does NOT detect
+        // truncation. That is a property of the shared parser rather than of
+        // this boundary, and "fixing" it here would mean a heuristic at an ABI
+        // -- which is how a good file gets refused.
+        //
+        // It is stated so the hole is KNOWN rather than found by a user with a
+        // half-copied file, and ASSERTED so that if the parser ever tightens,
+        // this line reds and the doc comment gets corrected instead of quietly
+        // going stale.
+        let truncated = "<svg><rect";
+        assert_eq!(
+            unsafe { jas_load_svg(e.cast(), truncated.as_ptr(), truncated.len()) },
+            JAS_PAINT_OK,
+            "if this now REFUSES, the XML parser gained truncation detection -- \
+             good news, but jas_load_svg's doc comment says it does not, and \
+             that comment must be corrected"
+        );
+        // ⛔ AND NON-UTF-8 IS REFUSED BY NAME, not lossily converted. A mangled
+        // `<text>` is a WRONG drawing, not a missing one.
+        let invalid_utf8: [u8; 4] = [0xff, 0xfe, 0x00, 0x41];
+        assert_eq!(
+            unsafe { jas_load_svg(e.cast(), invalid_utf8.as_ptr(), invalid_utf8.len()) },
+            JAS_PAINT_BAD_SVG
+        );
+        assert_eq!(
+            unsafe { jas_load_svg(e.cast(), core::ptr::null(), 8) },
+            JAS_PAINT_BAD_SVG,
+            "a NULL pointer is a caller error, not an empty file"
+        );
+        unsafe { crate::ffi::jas_engine_free(e) };
+    }
+
+    /// ⛔ THE CONTROL THAT KEEPS THE ARM ABOVE HONEST: a well-formed SVG with
+    /// nothing drawable in it IS an empty document and must LOAD. Without this,
+    /// "refuse everything" would pass every assertion above.
+    #[test]
+    fn a_well_formed_but_empty_drawing_loads_rather_than_refusing() {
+        let e = crate::ffi::jas_engine_new();
+        let empty = r#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
+        assert_eq!(
+            unsafe { jas_load_svg(e.cast(), empty.as_ptr(), empty.len()) },
+            JAS_PAINT_OK,
+            "a blank drawing is a legitimate file, not a malformed one"
+        );
+        unsafe { crate::ffi::jas_engine_free(e) };
+    }
+
+    /// ⭐ END TO END: a real file off disk, opened through the boundary, painted
+    /// through the SAME `jas_paint_document` the shell calls, onto a real
+    /// surface -- and it must put THE FILE'S OWN COLOUR on it.
+    ///
+    /// This is the whole "double-click and draw" path minus the double-click,
+    /// and it is asserted on PIXELS rather than on a status code, because a
+    /// loader that parsed nothing would return OK and paint an empty document
+    /// perfectly successfully.
+    #[test]
+    fn a_real_svg_file_opens_and_paints_its_own_colour_onto_the_surface() {
+        let e = crate::ffi::jas_engine_new();
+        // Authored here rather than read from `test_fixtures/` so the arm states
+        // its own expectation: the colour asserted below is visible in the
+        // source of the thing being drawn.
+        // r##"..."## -- NOT r#"..."#: the payload contains `fill="#`, and `"#`
+        // is exactly what terminates a single-hash raw string.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="90" height="60">
+             <rect x="0" y="0" width="90" height="60" fill="#3366cc"/>
+           </svg>"##;
+        assert_eq!(
+            unsafe { jas_load_svg(e.cast(), svg.as_ptr(), svg.len()) },
+            JAS_PAINT_OK, "load"
+        );
+
+        let (dev, ctx) = warp();
+        let t = tex(&dev, false);
+        let surface: IDXGISurface = t.cast().expect("surface");
+        let rc = unsafe {
+            jas_paint_document(e.cast(), surface.as_raw(), W as f32, H as f32)
+        };
+        assert_eq!(rc, JAS_PAINT_OK, "paint");
+
+        let buf = read(&dev, &ctx, &t);
+        // #3366cc == (51, 102, 204) -- exactly representable as f*255, which is
+        // the one class of colour safe to assert across rasterisers. See
+        // `the_verifier_colour_is_one_the_goldens_actually_paint`.
+        assert_eq!(rgb_at(&buf, W / 2, H / 2), (51, 102, 204),
+                   "the FILE'S colour must be on the surface");
+        unsafe { crate::ffi::jas_engine_free(e) };
+    }
+
+    /// A NULL engine is told apart from a bad file: one is a dead session, the
+    /// other a bad input, and they send the reader to different places.
+    #[test]
+    fn loading_into_a_null_engine_says_so() {
+        let svg = "<svg/>";
+        assert_eq!(
+            unsafe { jas_load_svg(core::ptr::null_mut(), svg.as_ptr(), svg.len()) },
+            JAS_PAINT_NULL_ENGINE
+        );
     }
 }
