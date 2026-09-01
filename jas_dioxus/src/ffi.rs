@@ -176,6 +176,26 @@ impl JasEngine {
         f(self.model.borrow().document())
     }
 
+    /// Open `doc` as the session's document — a NEW model, not a mutation.
+    ///
+    /// ⛔ `Model::new`, NOT `set_document`, AND THE DIFFERENCE IS THE UNDO
+    /// JOURNAL. `set_document` asserts it is inside a transaction (Arc 1 S1c),
+    /// and `set_document_unbracketed` takes a `NonUndoableIntent` whose every
+    /// variant is NARROW and validated — `Selection`, `PreviewReapply`,
+    /// `LiveDrag`, `ActiveLayer`, `TestOnly`. None of them describes "the user
+    /// opened a different file", and widening one to admit it is how a stated
+    /// invariant stops meaning anything.
+    ///
+    /// Opening a file is not an edit to the current document; it REPLACES the
+    /// session. `Model::new` is what every other construction path uses, and it
+    /// drops the undo stack — which is correct: undoing across an open would
+    /// restore artwork from a file the user is no longer editing.
+    ///
+    /// `pub(crate)`, not ABI — the boundary is `ffi_paint::jas_load_svg`.
+    pub(crate) fn replace_document(&self, doc: crate::document::document::Document) {
+        *self.model.borrow_mut() = Model::new(doc, None);
+    }
+
     fn new() -> Self {
         JasEngine {
             model: RefCell::new(Model::default()),

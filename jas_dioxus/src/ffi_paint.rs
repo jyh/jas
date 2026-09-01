@@ -119,6 +119,15 @@ pub const JAS_PAINT_NULL_ENGINE: i32 = 8;
 /// One code for both would report a backend bug for what is really a
 /// not-yet-ported element, and vice versa.
 pub const JAS_PAINT_DOCUMENT_INCOMPLETE: i32 = 9;
+/// The bytes handed to [`jas_load_svg`] are not parseable.
+///
+/// ⛔ THIS CODE IS THE POINT OF THAT FUNCTION. `svg_to_document` answers
+/// `Document::default()` for a malformed file, which is byte-identical to a
+/// legitimately blank drawing — so a shell built on it would open a truncated
+/// file, show an empty canvas, and report success. Well-formedness is the only
+/// thing checked: a well-formed SVG with nothing drawable IS an empty document
+/// and loads fine.
+pub const JAS_PAINT_BAD_SVG: i32 = 10;
 
 // ANY OTHER NON-ZERO RETURN IS THE RAW HRESULT, and that is a repair rather than
 // a design. The first version collapsed every COM failure into a single -3, so
@@ -455,6 +464,64 @@ pub unsafe extern "C" fn jas_paint_scene(
     if !report.is_complete() {
         return JAS_PAINT_SCENE_INCOMPLETE;
     }
+    JAS_PAINT_OK
+}
+
+// ---------------------------------------------------------------------------
+// OPENING A FILE — the step between "draws goldens" and "draws YOUR drawing"
+// ---------------------------------------------------------------------------
+
+/// Replace the engine's document with one parsed from SVG bytes.
+///
+/// ⭐ WHY THIS EXISTS AND WHY IT IS NOT IN THE NODE LIST. `ffi.rs` records that
+/// `jas_load_document` is *"NOT in S-A"* because *"`geometry::test_json` has no
+/// whole-document PARSER — only the writer"*. That is true of test JSON and
+/// **false of SVG**: `geometry::svg::svg_to_document` exists, is not web-gated,
+/// and compiles in the native build. Measured 2026-09-01 over
+/// `test_fixtures/svg/`: **51 of 70 documents parse AND paint completely**
+/// through `emit_element` on `Direct2DPainter`.
+///
+/// So the distance from "a window that draws recorded goldens" to "a window that
+/// draws a real illustration" was one export over a function already in the
+/// crate.
+///
+/// ⚠️ WHAT IT DOES **NOT** CATCH, MEASURED NOT ASSUMED: **truncation.**
+/// `parse_xml` is lenient — `"<svg><rect"`, with an unclosed tag, parses as far
+/// as it got and loads as a partial document. So this refuses NON-XML and
+/// NON-UTF-8 only. Detecting truncation belongs in the shared parser, not in a
+/// heuristic at an ABI (which is how a good file gets refused); the limit is
+/// pinned by an arm, so a future tightening reds that arm rather than silently
+/// outdating this comment.
+///
+/// ⛔ BYTES, NOT A STRING (BL5). The default P/Invoke `CharSet` is `Ansi` —
+/// cp1252 on the box this ships to — and an SVG is UTF-8 that would be mangled
+/// in both directions. Non-UTF-8 input is refused by name rather than
+/// lossily converted, because a mangled `<text>` is a wrong drawing rather than
+/// a missing one.
+///
+/// # Safety
+/// `engine` must be NULL or a live `JasEngine`. `svg` must be NULL or point to
+/// `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_load_svg(engine: *mut c_void, svg: *const u8, len: usize) -> i32 {
+    let engine_ptr = engine.cast::<crate::ffi::JasEngine>();
+    let Some(engine) = (unsafe { engine_ptr.as_ref() }) else {
+        return JAS_PAINT_NULL_ENGINE;
+    };
+    // A NULL pointer is a caller error; an EMPTY slice is a zero-byte file,
+    // which is not well-formed XML and refuses below as one. Collapsing them
+    // would let a marshalling bug read as "an empty drawing".
+    if svg.is_null() {
+        return JAS_PAINT_BAD_SVG;
+    }
+    let bytes = unsafe { core::slice::from_raw_parts(svg, len) };
+    let Ok(text) = core::str::from_utf8(bytes) else {
+        return JAS_PAINT_BAD_SVG;
+    };
+    let Some(doc) = crate::geometry::svg::try_svg_to_document(text) else {
+        return JAS_PAINT_BAD_SVG;
+    };
+    engine.replace_document(doc);
     JAS_PAINT_OK
 }
 
@@ -1775,6 +1842,130 @@ mod tests {
             first_unpaintable(&doc_with(vec![a_paintable_rect(), an_unpaintable_element()]), caps),
             Some(1),
             "and it must name WHICH layer, not merely that one exists"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // OPENING A FILE — and the silent-blank-canvas hole it closes
+    // -----------------------------------------------------------------------
+
+    /// ⛔ THE ARM THIS EXPORT EXISTS FOR. A malformed file must REFUSE, not open
+    /// as an empty drawing.
+    ///
+    /// `svg_to_document` answers `Document::default()` for unparseable input,
+    /// which is byte-identical to a legitimately blank SVG. A shell built on it
+    /// would open a truncated file, show a blank canvas, and report success --
+    /// and the user would conclude their artwork was lost rather than that the
+    /// file was bad. Those are opposite diagnoses.
+    #[test]
+    fn a_malformed_file_is_refused_rather_than_opened_as_a_blank_drawing() {
+        let e = crate::ffi::jas_engine_new();
+        for bad in ["", "not xml at all", "\u{0}\u{1}\u{2}"] {
+            let rc = unsafe { jas_load_svg(e.cast(), bad.as_ptr(), bad.len()) };
+            assert_eq!(rc, JAS_PAINT_BAD_SVG, "input {bad:?} must refuse");
+        }
+
+        // ⛔ AND HERE IS THE LIMIT, PINNED RATHER THAN HIDDEN. A TRUNCATED file
+        // -- `"<svg><rect"`, an unclosed tag -- is ACCEPTED: `parse_xml` is
+        // lenient and parses as far as it got. Measured 2026-09-01; my first
+        // draft of this arm asserted a refusal and was simply wrong.
+        //
+        // So `jas_load_svg` refuses NON-XML and NON-UTF-8, and does NOT detect
+        // truncation. That is a property of the shared parser rather than of
+        // this boundary, and "fixing" it here would mean a heuristic at an ABI
+        // -- which is how a good file gets refused.
+        //
+        // It is stated so the hole is KNOWN rather than found by a user with a
+        // half-copied file, and ASSERTED so that if the parser ever tightens,
+        // this line reds and the doc comment gets corrected instead of quietly
+        // going stale.
+        let truncated = "<svg><rect";
+        assert_eq!(
+            unsafe { jas_load_svg(e.cast(), truncated.as_ptr(), truncated.len()) },
+            JAS_PAINT_OK,
+            "if this now REFUSES, the XML parser gained truncation detection -- \
+             good news, but jas_load_svg's doc comment says it does not, and \
+             that comment must be corrected"
+        );
+        // ⛔ AND NON-UTF-8 IS REFUSED BY NAME, not lossily converted. A mangled
+        // `<text>` is a WRONG drawing, not a missing one.
+        let invalid_utf8: [u8; 4] = [0xff, 0xfe, 0x00, 0x41];
+        assert_eq!(
+            unsafe { jas_load_svg(e.cast(), invalid_utf8.as_ptr(), invalid_utf8.len()) },
+            JAS_PAINT_BAD_SVG
+        );
+        assert_eq!(
+            unsafe { jas_load_svg(e.cast(), core::ptr::null(), 8) },
+            JAS_PAINT_BAD_SVG,
+            "a NULL pointer is a caller error, not an empty file"
+        );
+        unsafe { crate::ffi::jas_engine_free(e) };
+    }
+
+    /// ⛔ THE CONTROL THAT KEEPS THE ARM ABOVE HONEST: a well-formed SVG with
+    /// nothing drawable in it IS an empty document and must LOAD. Without this,
+    /// "refuse everything" would pass every assertion above.
+    #[test]
+    fn a_well_formed_but_empty_drawing_loads_rather_than_refusing() {
+        let e = crate::ffi::jas_engine_new();
+        let empty = r#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
+        assert_eq!(
+            unsafe { jas_load_svg(e.cast(), empty.as_ptr(), empty.len()) },
+            JAS_PAINT_OK,
+            "a blank drawing is a legitimate file, not a malformed one"
+        );
+        unsafe { crate::ffi::jas_engine_free(e) };
+    }
+
+    /// ⭐ END TO END: a real file off disk, opened through the boundary, painted
+    /// through the SAME `jas_paint_document` the shell calls, onto a real
+    /// surface -- and it must put THE FILE'S OWN COLOUR on it.
+    ///
+    /// This is the whole "double-click and draw" path minus the double-click,
+    /// and it is asserted on PIXELS rather than on a status code, because a
+    /// loader that parsed nothing would return OK and paint an empty document
+    /// perfectly successfully.
+    #[test]
+    fn a_real_svg_file_opens_and_paints_its_own_colour_onto_the_surface() {
+        let e = crate::ffi::jas_engine_new();
+        // Authored here rather than read from `test_fixtures/` so the arm states
+        // its own expectation: the colour asserted below is visible in the
+        // source of the thing being drawn.
+        // r##"..."## -- NOT r#"..."#: the payload contains `fill="#`, and `"#`
+        // is exactly what terminates a single-hash raw string.
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" width="90" height="60">
+             <rect x="0" y="0" width="90" height="60" fill="#3366cc"/>
+           </svg>"##;
+        assert_eq!(
+            unsafe { jas_load_svg(e.cast(), svg.as_ptr(), svg.len()) },
+            JAS_PAINT_OK, "load"
+        );
+
+        let (dev, ctx) = warp();
+        let t = tex(&dev, false);
+        let surface: IDXGISurface = t.cast().expect("surface");
+        let rc = unsafe {
+            jas_paint_document(e.cast(), surface.as_raw(), W as f32, H as f32)
+        };
+        assert_eq!(rc, JAS_PAINT_OK, "paint");
+
+        let buf = read(&dev, &ctx, &t);
+        // #3366cc == (51, 102, 204) -- exactly representable as f*255, which is
+        // the one class of colour safe to assert across rasterisers. See
+        // `the_verifier_colour_is_one_the_goldens_actually_paint`.
+        assert_eq!(rgb_at(&buf, W / 2, H / 2), (51, 102, 204),
+                   "the FILE'S colour must be on the surface");
+        unsafe { crate::ffi::jas_engine_free(e) };
+    }
+
+    /// A NULL engine is told apart from a bad file: one is a dead session, the
+    /// other a bad input, and they send the reader to different places.
+    #[test]
+    fn loading_into_a_null_engine_says_so() {
+        let svg = "<svg/>";
+        assert_eq!(
+            unsafe { jas_load_svg(core::ptr::null_mut(), svg.as_ptr(), svg.len()) },
+            JAS_PAINT_NULL_ENGINE
         );
     }
 }
