@@ -176,6 +176,38 @@
 #define JAS_PAINT_NOT_IMPLEMENTED 7
 #endif
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Caller passed a NULL engine to [`jas_paint_document`].
+ *
+ * Distinct from `JAS_PAINT_NULL_SURFACE` because the two are different
+ * mistakes with different fixes: one is a dead session, the other a dead
+ * buffer, and collapsing them sends the reader to the wrong half of the shell.
+ */
+#define JAS_PAINT_NULL_ENGINE 8
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * ⛔ THE DOCUMENT HOLDS SOMETHING THIS SEAM CANNOT DRAW, so nothing was drawn.
+ *
+ * SEPARATE FROM `JAS_PAINT_SCENE_INCOMPLETE`, and the distinction is the whole
+ * value of the code. Both mean "the frame would be missing artwork", but the
+ * REMEDIES are unrelated:
+ *
+ * * `SCENE_INCOMPLETE` — the BACKEND lacks something (the declared non-Normal
+ *   blend gap). Fixed in `Direct2DPainter`.
+ * * `DOCUMENT_INCOMPLETE` — the ELEMENT still routes to the legacy renderer
+ *   (`element_needs_legacy`): text, a freeform gradient, an un-ported piece of
+ *   the node-2 delta. Fixed in `element_render`, and it shrinks every time a
+ *   slice of the delta lands.
+ *
+ * One code for both would report a backend bug for what is really a
+ * not-yet-ported element, and vice versa.
+ */
+#define JAS_PAINT_DOCUMENT_INCOMPLETE 9
+#endif
+
 /**
  * How many draws one collision-free id gets before the mint is reported
  * failed. 100 — the value every open-coded copy of this loop used before
@@ -578,6 +610,24 @@ int32_t jas_paint_scene(void *surface,
                         uintptr_t len,
                         float width,
                         float height);
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Paint the ENGINE'S LIVE DOCUMENT into a caller-owned DXGI surface.
+ *
+ * ⭐ NODE 3, AND IT IS THE ONE THAT REMOVES THE ROUND TRIP. `jas_paint_scene`
+ * takes a RECORDED display list, which means a document must first be walked,
+ * serialised to JSON, and handed back across the boundary to be parsed again.
+ * This walks the live `Document` in place: no serialisation, no parse, and no
+ * second representation to drift.
+ *
+ * # Safety
+ * `engine` must be NULL or a live `JasEngine` from `jas_engine_new`. `surface`
+ * must be NULL or a valid `IDXGISurface` that outlives the call; ownership is
+ * not transferred.
+ */
+int32_t jas_paint_document(void *engine, void *surface, float width, float height);
 #endif
 
 #if (defined(JAS_WITH_D2D) && defined(_WIN32))

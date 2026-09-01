@@ -159,6 +159,23 @@ pub struct JasEngine {
 }
 
 impl JasEngine {
+    /// Run `f` against the session's live document.
+    ///
+    /// ⛔ A CLOSURE, NOT A `&Document` RETURN, and `RefCell` is why: the borrow
+    /// guard would be dropped at the end of the accessor, so a returned
+    /// reference could not outlive it. Handing the borrow to a callback keeps
+    /// the guard alive for exactly the call and cannot be misused.
+    ///
+    /// `pub(crate)` deliberately: this is not ABI. It exists so the paint seam
+    /// (`ffi_paint::jas_paint_document`) can walk the document IN PLACE rather
+    /// than through `jas_document_json` -- which would serialise the whole
+    /// document to test JSON and parse it back on every frame, and would need a
+    /// whole-document PARSER that does not exist (see the note above
+    /// `jas_document_json`).
+    pub(crate) fn with_document<R>(&self, f: impl FnOnce(&crate::document::document::Document) -> R) -> R {
+        f(self.model.borrow().document())
+    }
+
     fn new() -> Self {
         JasEngine {
             model: RefCell::new(Model::default()),
