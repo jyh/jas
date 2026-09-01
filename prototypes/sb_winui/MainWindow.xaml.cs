@@ -303,10 +303,25 @@ public sealed partial class MainWindow : Window
             {
                 ok = _host.RenderGoldens();
             }
+            else if (string.Equals(scene, "document", StringComparison.OrdinalIgnoreCase))
+            {
+                // SB_SVG names the file. Required, and REFUSED BY NAME when
+                // absent rather than defaulting to some sample: a run labelled
+                // "document" that quietly drew a built-in would be the same
+                // mislabelled-experiment class as the unforwarded SB_FRAMES.
+                var svg = Environment.GetEnvironmentVariable("SB_SVG");
+                if (string.IsNullOrWhiteSpace(svg))
+                {
+                    StatusLine.Text = "FAILED - SB_SCENE=document needs SB_SVG";
+                    Report("RUSTFAIL SB_SCENE=document requires SB_SVG=<path to an .svg>");
+                    return;
+                }
+                ok = _host.RenderDocument(svg);
+            }
             else
             {
                 StatusLine.Text = $"FAILED - SB_SCENE='{scene}' is not recognised";
-                Report($"RUSTFAIL SB_SCENE='{scene}' is not recognised; use 'goldens' or leave it unset for the probe");
+                Report($"RUSTFAIL SB_SCENE='{scene}' is not recognised; use 'goldens', 'document', or leave it unset for the probe");
                 return;
             }
 
