@@ -1653,26 +1653,34 @@ fn the_deep_walk_agrees_with_the_shallow_one_on_the_reference_docs() {
     }
 }
 
-/// OUTLINE MODE STAYS LEGACY, and it is not a backend question.
+/// ⭐ OUTLINE MODE CONVERTS NOW — and this arm is the RETIREMENT of its opposite.
 ///
-/// Production replaces both paints with a 1px black stroke on a transparent
-/// fill (`render.rs::apply_outline_style`) and there is no such lowering on the
-/// seam — so a converted outline element would render its NORMAL paints, which
-/// is a wrong picture rather than a missing one. Production already guards this
-/// at every converted leaf; the router carries it so the A6 bracket, which has
-/// no leaf to guard at, inherits the rule instead of re-deriving it.
+/// It used to read `outline_visibility_needs_legacy_on_every_backend`, with this
+/// stated ground: *"there is no such lowering on the seam — so a converted
+/// outline element would render its NORMAL paints, which is a wrong picture
+/// rather than a missing one."*
+///
+/// ⛔ THE GROUND IS GONE, NOT MERELY INCONVENIENT. `emit_outline_body` is that
+/// lowering (node 2, ported from `render.rs::apply_outline_style`), so the
+/// premise the old assertion rested on is false. A clause kept past its reason
+/// is one nothing drives, and a test that pins it turns a stale rule into a
+/// requirement.
+///
+/// What replaces it is the same question asked of the NEW behaviour: does a
+/// masked subtree with an outlined descendant still render CORRECTLY, rather
+/// than merely render?
 #[test]
-fn outline_visibility_needs_legacy_on_every_backend() {
+fn an_outline_element_converts_and_an_outlined_descendant_no_longer_forces_legacy() {
     use crate::geometry::element::Visibility;
     let mut r = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
     r.common_mut().visibility = Visibility::Outline;
-    assert!(element_needs_legacy(&r, all_caps()),
-            "outline mode has no lowering on the seam; no backend answer changes that");
-    assert!(subtree_needs_legacy(&r, all_caps()));
+    assert!(!element_needs_legacy(&r, all_caps()),
+            "the seam has an outline lowering now");
+    assert!(!subtree_needs_legacy(&r, all_caps()));
 
-    // ⛔ AND IT REACHES A DESCENDANT, which is the arm the shallow router
-    // cannot give production: an outline child inside a masked group would be
-    // painted with its normal fill under the bracket.
+    // The descendant case the old arm was really about: an outline child inside
+    // a masked group. It used to force the whole bracket to legacy because the
+    // child would have been painted with its NORMAL fill. Now it is outlined.
     let mut child = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
     child.common_mut().visibility = Visibility::Outline;
     let mut g = GroupElem {
@@ -1686,13 +1694,186 @@ fn outline_visibility_needs_legacy_on_every_backend() {
         clip: true, invert: false, disabled: false, linked: true, unlink_transform: None,
     }));
     let g = Element::Group(g);
-    assert!(!element_needs_legacy(&g, all_caps()), "the group itself is not outline");
-    assert!(subtree_needs_legacy(&g, all_caps()),
-            "an outline DESCENDANT must keep the masked group on legacy");
+    assert!(!subtree_needs_legacy(&g, all_caps()),
+            "an outlined descendant is now lowerable, so it must not force legacy");
 
-    // THE CONTROL: the same shapes at normal visibility convert.
+    // ⛔ AND IT MUST ACTUALLY DRAW AS AN OUTLINE UNDER THE BRACKET, which is the
+    // half "it converts" does not prove. `subtree_needs_legacy` returning false
+    // only says the walk will not bail; if the child then painted its black
+    // FILL we would have traded a missing picture for a wrong one -- exactly the
+    // trade the old arm existed to prevent.
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &g, 1.0);
+    let cmds = rec.commands();
+    let body_fills = cmds.iter()
+        .take_while(|c| !matches!(c, Command::PushMaskLayer { .. }))
+        .filter(|c| matches!(c, Command::FillRect { .. } | Command::FillPath { .. }))
+        .count();
+    assert_eq!(body_fills, 0,
+               "the outlined child must not fill inside the bracket: {cmds:?}");
+
+    // ⭐ AND THE MASK ARTWORK MUST STILL FILL. It is COVERAGE, not picture: an
+    // outline applied to it would replace the shape that defines the mask with a
+    // hairline tracing its silhouette -- a different mask, not a differently
+    // drawn one. This arm is why `emit_masked_element` passes `Preview` for the
+    // subtree rather than the element's own visibility.
+    let mask_fills = cmds.iter()
+        .skip_while(|c| !matches!(c, Command::PushMaskLayer { .. }))
+        .filter(|c| matches!(c, Command::FillRect { .. } | Command::FillPath { .. }))
+        .count();
+    assert!(mask_fills >= 1,
+            "the mask subtree must still paint its coverage: {cmds:?}");
+
+    // THE CONTROL: the same shapes at normal visibility convert and DO fill.
     let mut plain = rect(0.0, 0.0, 10.0, 10.0, fill(Color::BLACK), None);
     plain.common_mut().visibility = Visibility::Preview;
-    assert!(!element_needs_legacy(&plain, all_caps()),
-            "…or this arm refuses everything and measures nothing");
+    assert!(!element_needs_legacy(&plain, all_caps()));
+    let mut rec2 = RecordingPainter::new();
+    emit_element(&mut rec2, &plain, 1.0);
+    assert_eq!(fills(&rec2.commands()), 1,
+               "…or the outline arms above pass because NOTHING ever fills");
+}
+
+// ---------------------------------------------------------------------------
+// NODE 2 — THE OUTLINE DELTA, ported from `canvas::render` (never the reverse)
+// ---------------------------------------------------------------------------
+//
+// `render.rs`'s `apply_outline_style` is the whole lowering: no fill, a BLACK
+// 1px butt/miter stroke with no dash and miter limit 10, at the element's
+// inherited alpha. Its `draw_element_scaled` computes
+// `effective = min(ancestor_vis, elem.visibility())`, so outline is INHERITED —
+// which is exactly the state `emit_element` could not see, and exactly why
+// `draw_masked_element_through_the_seam`'s condition 1 refuses to convert
+// anything whose `ancestor_vis` is not `Preview`.
+
+use super::emit_element_with_vis;
+use crate::geometry::element::Visibility;
+use crate::painter::{Brush, StrokeStyle};
+
+/// The stroke `apply_outline_style` installs, as this seam expresses it.
+fn outline_style_of(cmds: &[Command]) -> Vec<(&Brush, &StrokeStyle, f64)> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::StrokePath { brush, stroke, paint_alpha, .. }
+            | Command::StrokeRect { brush, stroke, paint_alpha, .. } => {
+                Some((brush, stroke, *paint_alpha))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn fills(cmds: &[Command]) -> usize {
+    cmds.iter()
+        .filter(|c| matches!(c,
+            Command::FillPath { .. } | Command::FillRect { .. } | Command::FillEllipseArc { .. }))
+        .count()
+}
+
+fn outline_rect() -> Element {
+    let mut e = rect(10.0, 20.0, 100.0, 60.0,
+                     fill(Color::rgb(0.2, 0.4, 0.8)),
+                     Some(stroke(Color::rgb(1.0, 0.0, 0.0), 7.0)));
+    e.common_mut().visibility = Visibility::Outline;
+    e
+}
+
+/// ⛔ OUTLINE REPLACES BOTH PAINTS, IT DOES NOT ADD ONE. The element below has a
+/// blue fill AND a fat red stroke; outline mode must emit NEITHER, and exactly
+/// one black hairline in their place.
+#[test]
+fn an_outline_element_strokes_a_black_hairline_and_does_not_fill() {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &outline_rect(), 1.0);
+    let cmds = rec.commands();
+
+    assert_eq!(fills(&cmds), 0,
+               "outline mode replaces the fill with `transparent`; it must not paint one");
+
+    let strokes = outline_style_of(&cmds);
+    assert_eq!(strokes.len(), 1, "exactly one stroke, got {}", strokes.len());
+    let (brush, style, alpha) = strokes[0];
+    assert_eq!(*brush, Brush::Solid(Color::rgb(0.0, 0.0, 0.0)),
+               "render.rs sets stroke_style_str('rgb(0,0,0)')");
+    assert_eq!(style.width, 1.0, "set_line_width(1.0)");
+    assert!(style.dash.is_empty(), "set_line_dash([]) -- the element's dash is DROPPED");
+    assert_eq!(alpha, 1.0, "outline carries no stroke opacity of its own");
+}
+
+/// ⭐ THE INHERITED HALF, AND IT IS THE REASON THIS NEEDED A NEW ENTRY POINT.
+/// `render.rs` takes `min(ancestor_vis, own)`, so a group in outline mode drags
+/// every descendant into it — including children whose own visibility is
+/// `Preview`. An `emit_element` that only reads the element in its hand cannot
+/// express that, which is what production's condition 1 refuses over.
+#[test]
+fn outline_is_inherited_by_children_that_are_themselves_preview() {
+    let child = rect(0.0, 0.0, 10.0, 10.0, fill(Color::rgb(1.0, 0.0, 0.0)), None);
+    assert_eq!(child.visibility(), Visibility::Preview, "the child is NOT outline itself");
+
+    let mut g = GroupElem {
+        children: vec![Rc::new(child)],
+        common: common(),
+        isolated_blending: false,
+        knockout_group: false,
+    };
+    g.common.visibility = Visibility::Outline;
+
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Group(g), 1.0);
+    let cmds = rec.commands();
+
+    assert_eq!(fills(&cmds), 0, "the child's fill must be suppressed by the ANCESTOR's mode");
+    assert_eq!(outline_style_of(&cmds).len(), 1, "and it must be outlined instead");
+}
+
+/// The other direction: a `Preview` ancestor does not un-outline a child that
+/// asked for it. `min` is not "the ancestor wins".
+#[test]
+fn a_preview_ancestor_does_not_cancel_a_childs_own_outline() {
+    let g = GroupElem {
+        children: vec![Rc::new(outline_rect())],
+        common: common(),
+        isolated_blending: false,
+        knockout_group: false,
+    };
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Group(g), 1.0);
+    assert_eq!(fills(&rec.commands()), 0, "the child chose outline; the group does not veto it");
+}
+
+/// ⛔ AND AN INVISIBLE CAP STILL STOPS EVERYTHING. `Invisible` orders BELOW
+/// `Outline`, so an invisible ancestor must not be turned into an outlined one
+/// by the new inheritance -- the failure would be a document that draws its
+/// hidden layers as wireframe.
+#[test]
+fn an_invisible_ancestor_still_paints_nothing() {
+    let mut rec = RecordingPainter::new();
+    emit_element_with_vis(&mut rec, &outline_rect(), 1.0, Visibility::Invisible);
+    assert!(rec.commands().is_empty(),
+            "an invisible cap outranks outline: {:?}", rec.commands());
+}
+
+/// The router must stop sending outline elements to legacy -- otherwise the
+/// lowering above is dead code that no production path can reach.
+#[test]
+fn the_router_no_longer_routes_outline_to_legacy() {
+    let caps = Caps::NONE
+        .with(Capability::IsolatedLayers)
+        .with(Capability::MaskLayers);
+    assert!(!element_needs_legacy(&outline_rect(), caps),
+            "outline is lowered on the seam now; routing it to legacy would \
+             leave the lowering unreachable");
+}
+
+/// ⛔ THE ALPHA STILL RIDES. Outline drops the element's own fill/stroke
+/// opacities, but NOT the inherited paint alpha -- `render.rs` uses
+/// `base_alpha * stroke_op` with `stroke_op = 1.0`, and `base_alpha` still
+/// carries every ancestor's opacity.
+#[test]
+fn outline_rides_the_inherited_alpha_but_drops_the_elements_own_paint_opacities() {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &outline_rect(), 0.5);
+    let strokes = outline_style_of(&rec.commands());
+    assert_eq!(strokes.len(), 1);
+    assert_eq!(strokes[0].2, 0.5, "the incoming alpha must survive outline mode");
 }
