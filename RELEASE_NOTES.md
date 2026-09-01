@@ -13,6 +13,44 @@ take it.
 
 ---
 
+## 2026-08-31 — nested opacity compounds, and a masked element is no longer dimmed twice (macOS app)
+
+**Affects:** in the macOS app, every document with **opacity anywhere but on a
+top-level shape** — a group or layer carrying an opacity, or any element with
+both an opacity and a mask. Opaque containers and unmasked top-level shapes are
+unchanged, and so is the browser, which already did both of these correctly.
+
+**What changed.** Two things, both about how opacity accumulates:
+
+1. **A container's opacity now multiplies into its children's.** It used to be
+   set and then *overwritten* by the first descendant that set its own, so a
+   half-opaque shape inside a half-opaque group rendered at 0.5 instead of 0.25.
+   Nesting now compounds as a product at any depth.
+2. **A masked element spends its own opacity once, not twice.** The mask
+   composite applied the element's opacity to the finished layer *and* again to
+   the body inside it, so a 0.5 masked shape rendered at 0.25. It also dropped
+   whatever opacity its containers contributed; that now arrives.
+
+**In numbers**, alpha at the centre of a black shape (255 = fully opaque):
+
+| | before | after (and the spec) |
+|---|---|---|
+| 0.5 shape inside a 0.5 group | 128 | 64 |
+| 0.5 shape inside a 0.5 group inside a 0.5 layer | 128 | 32 |
+| masked 0.5 shape, no container | 64 | 128 |
+| opaque masked shape inside a 0.5 group | 255 | 128 |
+| masked 0.5 shape inside a 0.5 group | 64 | 64 (unchanged) |
+
+**Which way will artwork move?** Both ways, and the last row is why this went
+unnoticed: the two errors *cancelled* whenever an element's opacity equalled its
+container's — the commonest case, and the one every example used. Elsewhere,
+nested containers used to render too **opaque** and masked elements too
+**faint**; both now match the browser.
+
+**Pinned by:** `NestedOpacityTests` (seven arms, five of which were red before
+this change; the two green ones are the unmasked control and the cancelling row,
+kept deliberately).
+
 ## 2026-08-31 — two of the three opacity-mask laws did nothing at all (macOS app)
 
 **Affects:** every document using a **clipping** opacity mask
