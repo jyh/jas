@@ -13,6 +13,47 @@ take it.
 
 ---
 
+## 2026-08-31 — two of the three opacity-mask laws did nothing at all (macOS app)
+
+**Affects:** every document using a **clipping** opacity mask
+(`clip: true, invert: false`) or an **inverted** one (`invert: true`), opened in
+the macOS app. The reveal-outside-bbox law was repaired earlier the same day and
+is unchanged here; the browser had the same defect and was repaired on 08/30.
+
+**What changed.** Both of those laws apply the mask by compositing the mask
+artwork onto the element with a `destination-in` / `destination-out` operation.
+The renderer set that operation and then drew the artwork through the normal
+element path — which sets the blend mode from the element's own blend mode as
+one of its first acts. **The operation was overwritten before anything was
+drawn**, so the artwork painted itself normally instead of masking, and the mask
+had no effect whatsoever. Both laws now render the artwork on its own
+transparency layer and apply it in one step the artwork cannot disturb — the
+same carrier the reveal law already uses.
+
+**In numbers**, measured on a black shape under white artwork covering only its
+left half — `#` is ink, `.` is transparent:
+
+| | before | after (and the spec) |
+|---|---|---|
+| clipping mask (`clip: true`) | `########........` | `####............` |
+| inverted mask (`invert: true`) | `########........` | `....####........` |
+
+**Why it went unnoticed:** for mask artwork that *covers* what it masks — which
+is what every existing example used — an inert mask and a working one leave the
+same picture. It takes artwork covering only part of the element to see any
+difference at all.
+
+**One thing this did NOT fix.** A clipping mask's law is a *luminance* soft mask:
+a black-opaque mask should read as fully transparent, a white one as fully
+opaque, a gray one as partial. The macOS app composites the artwork's **raw
+alpha** instead, so a mask painted in anything but white still differs from the
+browser, which promotes to luminance. This entry moves the arm from doing
+nothing to doing the browser's own fallback; the luminance difference is
+recorded and not yet closed.
+
+**Pinned by:** `MaskCompositeIsolationTests.aClipInMaskErasesWhereTheArtworkIsAbsent`
+and `…anInvertedMaskErasesWhereTheArtworkIs`.
+
 ## 2026-08-31 — a transformed reveal mask clips the box of what it draws (browser)
 
 **Affects:** documents using a **reveal-outside-bbox** opacity mask

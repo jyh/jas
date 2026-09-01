@@ -1142,6 +1142,57 @@ private func elementOpacity(_ e: Element) -> Double {
     }
 }
 
+/// Composite the mask subtree against the element body under ``op``, by way
+/// of an ISOLATED artwork layer. The ONE carrier for all three mask arms —
+/// the Swift counterpart of jas_dioxus's ``apply_mask_artwork``
+/// (``jas_dioxus/src/canvas/render.rs``).
+///
+/// ⛔⛔ IT EXISTS BECAUSE TWO OF THE THREE ARMS DID NOTHING AT ALL IN THE
+/// SHIPPED RENDERER. ``clipIn`` and ``clipOut`` set ``.destinationIn`` /
+/// ``.destinationOut`` on the context and then called ``drawElement``, whose
+/// ``drawElementBody`` sets the blend mode from the element's OWN mode as one
+/// of its first acts — **the operation was clobbered before a single pixel
+/// landed**, so the artwork painted itself over the body instead of
+/// compositing against it. MEASURED 2026-08-31, both arms: `########........`
+/// where the laws say `####............` (clipIn) and `....####........`
+/// (clipOut). The identical defect jas_dioxus repaired on 2026-08-30; the
+/// reveal arm got the repair here in PR #65 because that row needed it, and
+/// these two siblings kept it until MaskCompositeIsolationTests went red.
+///
+/// The isolation is what A6 §3.2's mask bracket requires anyway: the subtree
+/// renders on a fresh transparent surface at alpha 1.0 and normal blend, and
+/// ``op`` is set at BEGIN time, where CoreGraphics applies it to the layer's
+/// composite-back rather than to the artwork's own primitives. The
+/// composite-back covers the whole clip region, not merely where the artwork
+/// drew — which is why a gap in the artwork erases the body beneath it.
+///
+/// 🔑 ONE CARRIER, THREE CALL SITES, ON PURPOSE. jas_dioxus's 08/30 repair
+/// left two BYTE-IDENTICAL inline blocks, and a first-occurrence mutation
+/// anchor then landed on the unreachable one and reported the reachable arm
+/// unkillable. Arms that differ only in an argument should differ only in an
+/// argument.
+///
+/// ⚠️ WHAT THIS IS NOT: ``clipIn``'s law is a LUMINANCE soft mask
+/// (`A' = A · (0.299R + 0.587G + 0.114B)/255`, PDF §11), and this carrier
+/// composites RAW ALPHA. jas_dioxus promotes to luminance
+/// (``promote_bytes_to_luminance``) and falls back to exactly this raw-alpha
+/// composite when it cannot. So a non-white opaque mask still diverges from
+/// Rust here — measured and reported separately; this repair moves the arm
+/// from inert to Rust's own fallback, not yet to Rust's primary path.
+private func compositeMaskArtwork(
+    _ ctx: CGContext,
+    _ mask: Mask,
+    op: CGBlendMode,
+    ancestorVis: Visibility
+) {
+    ctx.setBlendMode(op)
+    ctx.beginTransparencyLayer(auxiliaryInfo: nil)
+    ctx.setBlendMode(.normal)
+    ctx.setAlpha(1.0)
+    drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+    ctx.endTransparencyLayer()
+}
+
 /// Render an element's opacity mask via a CoreGraphics transparency
 /// layer. The element body is drawn on a transparent layer; the
 /// mask subtree is then composited on top according to ``plan``.
@@ -1195,36 +1246,19 @@ private func drawElementWithMask(
     applyTransform(ctx, effectiveMaskTransform(mask, elem))
     switch plan {
     case .clipIn:
-        ctx.setBlendMode(.destinationIn)
-        drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+        // `α_S ← α_S · M` over the whole layer. OPACITY.md §Rendering.
+        compositeMaskArtwork(ctx, mask, op: .destinationIn, ancestorVis: ancestorVis)
     case .clipOut:
-        ctx.setBlendMode(.destinationOut)
-        drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
+        // `α_S ← α_S · (1 − M)` over the whole layer. OPACITY.md §Rendering.
+        compositeMaskArtwork(ctx, mask, op: .destinationOut, ancestorVis: ancestorVis)
     case .revealOutsideBbox:
         // `clip: false, invert: false`: keep the element body at
         // full alpha outside the mask subtree's bounding box; the bbox
         // clip is already on the context (set above, BEFORE the mask
         // transform), so only the ``.destinationIn`` composite runs
         // here. OPACITY.md §Rendering.
-        //
-        // ⛔ THE SUBTREE RENDERS ON ITS OWN TRANSPARENCY LAYER, and the
-        // `.destinationIn` is set at BEGIN time, where it governs the
-        // layer's composite-back. Setting it on the context and then
-        // calling ``drawElement`` did NOTHING: ``drawElementBody`` sets
-        // the blend mode from the element's own mode as one of its
-        // first acts, so the operation was clobbered before a pixel
-        // landed and the artwork painted itself over the body instead
-        // of masking it — the same shipped defect jas_dioxus repaired
-        // on 2026-08-30 (`apply_mask_artwork`), and the mask bracket's
-        // isolation A6 §3.2 requires anyway (fresh transparent surface,
-        // alpha context 1.0).
         if let (_, _, bw, bh) = revealBBox, bw > 0, bh > 0 {
-            ctx.setBlendMode(.destinationIn)
-            ctx.beginTransparencyLayer(auxiliaryInfo: nil)
-            ctx.setBlendMode(.normal)
-            ctx.setAlpha(1.0)
-            drawElement(ctx, mask.subtreeElement, ancestorVis: ancestorVis)
-            ctx.endTransparencyLayer()
+            compositeMaskArtwork(ctx, mask, op: .destinationIn, ancestorVis: ancestorVis)
         }
         // Empty-bbox mask: no clip; element body passes through
         // unmodified (mask has nothing to composite against).
