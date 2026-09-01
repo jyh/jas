@@ -43,6 +43,8 @@ use windows::Win32::Graphics::Direct2D::Common::{D2D1_COLOR_F, D2D_RECT_F};
 use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext, ID3D11Resource};
 use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGISurface};
 
+use crate::painter::direct2d::painter::Direct2DPainter;
+use crate::painter::direct2d::replay::replay;
 use crate::painter::direct2d::surface::SurfaceTarget;
 
 /// Status codes for the spike seam. Deliberately NOT `JasStatus`: that enum is
@@ -77,6 +79,21 @@ pub const JAS_PAINT_SIZE_MISMATCH: i32 = 3;
 /// driver. Refusing here is the difference between a bug report about the GPU and
 /// one about a half-finished device-lost recovery.
 pub const JAS_PAINT_DEVICE_MISMATCH: i32 = 4;
+/// The scene bytes were not valid UTF-8 JSON, or not a JSON array of commands.
+/// Positive, same reason as the sentinels above.
+pub const JAS_PAINT_BAD_SCENE: i32 = 5;
+/// The scene was decoded and replayed, but the painter could not draw every
+/// command in it.
+///
+/// ⛔ THIS IS A REFUSAL, NOT A WARNING, AND THAT IS THE WHOLE POINT. A replay
+/// that silently drops the commands it does not understand paints a PARTIAL
+/// document and returns OK -- the host then presents a frame that is missing
+/// artwork with nothing anywhere reporting it. That is the same class as the
+/// dropped `CopyResource` above: a status truthful about the wrong thing. The
+/// seam refuses instead, and `ReplayReport::unsupported` is the work list.
+pub const JAS_PAINT_SCENE_INCOMPLETE: i32 = 6;
+/// Reserved by the RED half of this increment; no shipped path returns it.
+pub const JAS_PAINT_NOT_IMPLEMENTED: i32 = 7;
 
 // ANY OTHER NON-ZERO RETURN IS THE RAW HRESULT, and that is a repair rather than
 // a design. The first version collapsed every COM failure into a single -3, so
@@ -310,6 +327,109 @@ pub unsafe extern "C" fn jas_paint_probe_offscreen(
         ctx.Flush();
     }
 
+    JAS_PAINT_OK
+}
+
+
+/// Paint a RECORDED DISPLAY LIST into a caller-owned DXGI surface.
+///
+/// ⭐ THE NODE THIS WHOLE LANE WAS MISSING. `jas_paint_probe_surface` above
+/// draws a centred square -- a fixed pattern that proves the SEAM and says
+/// nothing about the document. `Direct2DPainter` (1,163 lines) can draw a real
+/// recorded scene, and `SurfaceTarget` can wrap the buffer the host presents.
+/// Measured 2026-08-31: `SurfaceTarget` was referenced by this file and its own
+/// module and NOWHERE ELSE, and every `Direct2DPainter` test drove a
+/// `HeadlessTarget` (a WIC bitmap) instead. **Two proven halves that had never
+/// been joined** -- so no jas artwork had ever reached the surface a window
+/// presents, on any run, ever.
+///
+/// # Safety
+/// `surface` must be NULL or a valid `IDXGISurface` that outlives the call;
+/// ownership is not transferred. `scene` must be NULL or point to `len` readable
+/// bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_paint_scene(
+    surface: *mut c_void,
+    scene: *const u8,
+    len: usize,
+    width: f32,
+    height: f32,
+) -> i32 {
+    if surface.is_null() {
+        return JAS_PAINT_NULL_SURFACE;
+    }
+    // A NULL pointer is a caller error and an EMPTY slice is a (useless but
+    // legitimate) empty scene. Collapsing them would let a marshalling bug on
+    // the C# side read as "nothing to draw" and present a blank frame at OK.
+    if scene.is_null() {
+        return JAS_PAINT_BAD_SCENE;
+    }
+    let bytes = unsafe { core::slice::from_raw_parts(scene, len) };
+    let value: serde_json::Value = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return JAS_PAINT_BAD_SCENE,
+    };
+    // `replay` walks an ARRAY of commands. A bare object or a string decodes as
+    // valid JSON and would replay as zero commands -- complete, drawn nothing,
+    // and therefore OK. Refused by shape rather than discovered as a blank
+    // window.
+    if !value.is_array() {
+        return JAS_PAINT_BAD_SCENE;
+    }
+
+    // BORROWED, not owned -- see `jas_paint_probe_surface`: `from_raw` here
+    // would hand Rust an owning reference to the host's back buffer and free it
+    // out from under the swapchain on drop.
+    let surface: &IDXGISurface = match unsafe { IDXGISurface::from_raw_borrowed(&surface) } {
+        Some(s) => s,
+        None => return JAS_PAINT_NOT_A_SURFACE,
+    };
+    // ⚠️ `width`/`height` ARE ACCEPTED AND NOT YET USED, and that is stated
+    // rather than hidden behind a silent `_`. A recorded display list carries
+    // ABSOLUTE document coordinates, so nothing here needs the surface extent
+    // to draw correctly today. They are in the signature because the moment
+    // this seam gains a view transform -- pan, zoom, or the DIP-vs-physical
+    // scaling booked as jyh/jas#16 -- it needs them, and widening a C ABI later
+    // is a change every caller has to make in step. Keeping the parameters
+    // costs nothing and keeps that change on one side of the boundary.
+    //
+    // An UNUSED parameter is a claim a reader will test, so: the probe path
+    // above genuinely uses these to centre its square; this path genuinely does
+    // not. Do not "fix" it by scaling the scene to fit -- the display list is
+    // authored in document space and refitting it here would silently disagree
+    // with every other backend.
+    let _ = (width, height);
+
+    let target = match SurfaceTarget::from_dxgi_surface(surface) {
+        Ok(t) => t,
+        Err(e) => return e.code().0,
+    };
+    let rt = target.render_target();
+
+    let report = unsafe {
+        rt.BeginDraw();
+        // Transparent, NOT `PROBE_BG`. The probe's colours are chosen to be
+        // recognisable to the desktop verifier; borrowing them here would make
+        // a scene frame and a probe frame share a background and weaken the one
+        // assertion that distinguishes this path from the square.
+        rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        let mut painter = Direct2DPainter::new(rt);
+        let report = replay(&mut painter, &value);
+        // EndDraw runs on EVERY path, including the incomplete one: leaving a
+        // render target open would poison the next frame with a failure whose
+        // cause is a frame earlier.
+        if let Err(e) = rt.EndDraw(None, None) {
+            return e.code().0;
+        }
+        report
+    };
+
+    // ⛔ THE REFUSAL, and it is the reason this function is not three lines.
+    // `replay` reports what it could not draw instead of throwing; a seam that
+    // ignored that would present a document with artwork missing and return OK.
+    if !report.is_complete() {
+        return JAS_PAINT_SCENE_INCOMPLETE;
+    }
     JAS_PAINT_OK
 }
 
@@ -866,5 +986,190 @@ mod tests {
         assert!(d(PROBE_BG, PROBE_FG) > 300, "probe colours must be far apart");
         assert!(d(PROBE_BG, (0, 0, 0)) > 100, "background must not be near black");
         assert!(d(PROBE_FG, (255, 255, 255)) > 100, "square must not be near white");
+    }
+
+    // ================================================================
+    // THE JOIN: a recorded display list must reach the surface the host
+    // presents. Added 2026-08-31 (flask). Every arm below is HEADLESS on
+    // WARP -- no window, no Smart App Control surface, no .NET SDK.
+    // ================================================================
+
+    /// Load one recorded scene by name from the painter corpus.
+    fn scene_named(name: &str) -> serde_json::Value {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/painter/testdata")
+            .join(name);
+        let txt = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("scene {name}: {e}"));
+        serde_json::from_str(&txt).expect("scene json")
+    }
+
+    /// Wrap a render-target texture as an IDXGISurface pointer for the seam.
+    fn as_surface(t: &ID3D11Texture2D) -> IDXGISurface {
+        t.cast::<IDXGISurface>().expect("texture is a DXGI surface")
+    }
+
+    /// ⭐ THE NODE. A real recorded scene, through the real Direct2D painter,
+    /// into the real `SurfaceTarget` -- the type the host's back buffer becomes.
+    ///
+    /// Before this existed, `SurfaceTarget` was referenced by this file alone and
+    /// every painter test drove a WIC `HeadlessTarget` instead, so no jas artwork
+    /// had ever reached this surface type on any run.
+    #[test]
+    fn a_recorded_scene_reaches_the_surface_the_host_presents() {
+        let (dev, ctx) = warp();
+        let rt = tex(&dev, false);
+        let scene = scene_named("ref_gradients.json");
+        let bytes = serde_json::to_vec(&scene).unwrap();
+
+        let rc = unsafe {
+            jas_paint_scene(
+                as_surface(&rt).as_raw(),
+                bytes.as_ptr(),
+                bytes.len(),
+                W as f32,
+                H as f32,
+            )
+        };
+        assert_eq!(rc, JAS_PAINT_OK, "the scene seam refused a corpus scene");
+
+        // ANTI-VACUITY: a seam that cleared and drew nothing would also return
+        // OK. Assert the surface carries pixels that are NOT the clear colour.
+        let px = read(&dev, &ctx, &rt);
+        let painted = px.chunks(4).filter(|q| q[3] != 0).count();
+        assert!(
+            painted > 0,
+            "the scene path returned OK and painted nothing -- exactly the              silent-success class this seam already refuses elsewhere"
+        );
+    }
+
+    /// ⛔ AND IT MUST NOT BE THE PROBE SQUARE. The strongest way for this
+    /// increment to be fake is for the new export to quietly call the old probe:
+    /// the pixel count above would pass, the return code would pass, and nothing
+    /// would say the document had not been drawn. So drive BOTH paths on
+    /// identical surfaces and require the results to DIFFER.
+    #[test]
+    fn the_scene_path_is_not_the_probe_pattern_wearing_a_new_name() {
+        let (dev, ctx) = warp();
+
+        let probe_tex = tex(&dev, false);
+        let probe_rc = unsafe {
+            jas_paint_probe_surface(as_surface(&probe_tex).as_raw(), W as f32, H as f32)
+        };
+        assert_eq!(probe_rc, JAS_PAINT_OK);
+        let probe_px = read(&dev, &ctx, &probe_tex);
+
+        let scene_tex = tex(&dev, false);
+        let scene = scene_named("ref_gradients.json");
+        let bytes = serde_json::to_vec(&scene).unwrap();
+        let scene_rc = unsafe {
+            jas_paint_scene(
+                as_surface(&scene_tex).as_raw(),
+                bytes.as_ptr(),
+                bytes.len(),
+                W as f32,
+                H as f32,
+            )
+        };
+        assert_eq!(scene_rc, JAS_PAINT_OK);
+        let scene_px = read(&dev, &ctx, &scene_tex);
+
+        assert_ne!(
+            probe_px, scene_px,
+            "the scene path produced the probe pattern byte for byte -- it is              drawing the square, not the document"
+        );
+
+        // ⛔ AND THE BUFFER COMPARISON ALONE IS TOO WEAK -- measured, not
+        // supposed. A mutant that drew the probe SQUARE from inside the scene
+        // path still passed the assertion above, because the two paths clear to
+        // different colours (transparent here, PROBE_BG there) and the
+        // backgrounds differ even when the content is identical. So the
+        // comparison was distinguishing the CLEAR, not the drawing.
+        //
+        // Content, then: the probe is two flat colours by construction. A
+        // gradient scene cannot be. Counting DISTINCT colours separates them on
+        // what was drawn rather than on what it was drawn over.
+        let distinct = |px: &[u8]| {
+            px.chunks(4).map(|q| [q[0], q[1], q[2], q[3]])
+                .collect::<std::collections::HashSet<_>>().len()
+        };
+        let (dp, ds) = (distinct(&probe_px), distinct(&scene_px));
+        assert!(dp <= 2, "the probe should be exactly its two flat colours, got {dp}");
+        assert!(
+            ds > 8,
+            "the scene path produced {ds} distinct colours -- a gradient scene              cannot be that flat, so this is the probe square, not the document"
+        );
+    }
+
+    /// A replay that could not draw every command must REFUSE, not report OK
+    /// over a partial frame. Driven with a fabricated command, the same
+    /// specimen `replay`'s own suite uses.
+    #[test]
+    fn a_scene_the_painter_cannot_fully_draw_is_refused_not_reported_ok() {
+        let (dev, _ctx) = warp();
+        let rt = tex(&dev, false);
+        let scene = serde_json::json!([{ "cmd": "teleport_the_artboard" }]);
+        let bytes = serde_json::to_vec(&scene).unwrap();
+        let rc = unsafe {
+            jas_paint_scene(
+                as_surface(&rt).as_raw(),
+                bytes.as_ptr(),
+                bytes.len(),
+                W as f32,
+                H as f32,
+            )
+        };
+        assert_eq!(
+            rc, JAS_PAINT_SCENE_INCOMPLETE,
+            "an undrawable command must surface as a refusal"
+        );
+    }
+
+    #[test]
+    fn a_null_surface_is_a_status_not_a_crash_on_the_scene_path() {
+        let bytes = b"[]";
+        let rc = unsafe {
+            jas_paint_scene(std::ptr::null_mut(), bytes.as_ptr(), bytes.len(), 8.0, 8.0)
+        };
+        assert_eq!(rc, JAS_PAINT_NULL_SURFACE);
+    }
+
+    #[test]
+    fn a_scene_that_is_not_json_is_refused_by_name() {
+        let (dev, _ctx) = warp();
+        let rt = tex(&dev, false);
+        let junk = b"{ this is not a scene";
+        let rc = unsafe {
+            jas_paint_scene(
+                as_surface(&rt).as_raw(),
+                junk.as_ptr(),
+                junk.len(),
+                W as f32,
+                H as f32,
+            )
+        };
+        assert_eq!(rc, JAS_PAINT_BAD_SCENE);
+    }
+
+    /// A NULL scene pointer is a caller error, not an empty scene. Distinguished
+    /// deliberately: an empty scene is a legitimate (if useless) request, and
+    /// collapsing the two would let a marshalling bug read as "nothing to draw".
+    #[test]
+    fn a_null_scene_pointer_is_refused_rather_than_read_as_empty() {
+        let (dev, _ctx) = warp();
+        let rt = tex(&dev, false);
+        // ⛔ len is NON-ZERO ON PURPOSE, and the first draft's `0` is why this
+        // arm exists in this shape. With len 0 a missing guard still returns
+        // BAD_SCENE -- `from_raw_parts(null, 0)` yields an empty slice in
+        // practice and serde refuses it -- so the mutant SURVIVED: dropping the
+        // null check reddened nothing. It is not decoration, though. A null
+        // pointer is UB for `from_raw_parts` at ANY length, and at a non-zero
+        // length it is the reachable kind: the seam would read 16 bytes from
+        // address zero. Only the guard can answer this, so only this shape
+        // tests it.
+        let rc = unsafe {
+            jas_paint_scene(as_surface(&rt).as_raw(), std::ptr::null(), 16, W as f32, H as f32)
+        };
+        assert_eq!(rc, JAS_PAINT_BAD_SCENE);
     }
 }

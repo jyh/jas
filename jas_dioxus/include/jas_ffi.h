@@ -146,6 +146,36 @@
 #define JAS_PAINT_DEVICE_MISMATCH 4
 #endif
 
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * The scene bytes were not valid UTF-8 JSON, or not a JSON array of commands.
+ * Positive, same reason as the sentinels above.
+ */
+#define JAS_PAINT_BAD_SCENE 5
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * The scene was decoded and replayed, but the painter could not draw every
+ * command in it.
+ *
+ * ⛔ THIS IS A REFUSAL, NOT A WARNING, AND THAT IS THE WHOLE POINT. A replay
+ * that silently drops the commands it does not understand paints a PARTIAL
+ * document and returns OK -- the host then presents a frame that is missing
+ * artwork with nothing anywhere reporting it. That is the same class as the
+ * dropped `CopyResource` above: a status truthful about the wrong thing. The
+ * seam refuses instead, and `ReplayReport::unsupported` is the work list.
+ */
+#define JAS_PAINT_SCENE_INCOMPLETE 6
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Reserved by the RED half of this increment; no shipped path returns it.
+ */
+#define JAS_PAINT_NOT_IMPLEMENTED 7
+#endif
+
 /**
  * How many draws one collision-free id gets before the mint is reported
  * failed. 100 — the value every open-coded copy of this loop used before
@@ -522,6 +552,32 @@ int32_t jas_paint_probe_surface(void *surface, float width, float height);
  * duration of the call. Neither is released here.
  */
 int32_t jas_paint_probe_offscreen(void *back, void *offscreen, float width, float height);
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Paint a RECORDED DISPLAY LIST into a caller-owned DXGI surface.
+ *
+ * ⭐ THE NODE THIS WHOLE LANE WAS MISSING. `jas_paint_probe_surface` above
+ * draws a centred square -- a fixed pattern that proves the SEAM and says
+ * nothing about the document. `Direct2DPainter` (1,163 lines) can draw a real
+ * recorded scene, and `SurfaceTarget` can wrap the buffer the host presents.
+ * Measured 2026-08-31: `SurfaceTarget` was referenced by this file and its own
+ * module and NOWHERE ELSE, and every `Direct2DPainter` test drove a
+ * `HeadlessTarget` (a WIC bitmap) instead. **Two proven halves that had never
+ * been joined** -- so no jas artwork had ever reached the surface a window
+ * presents, on any run, ever.
+ *
+ * # Safety
+ * `surface` must be NULL or a valid `IDXGISurface` that outlives the call;
+ * ownership is not transferred. `scene` must be NULL or point to `len` readable
+ * bytes.
+ */
+int32_t jas_paint_scene(void *surface,
+                        const uint8_t *scene,
+                        uintptr_t len,
+                        float width,
+                        float height);
 #endif
 
 #ifdef __cplusplus
