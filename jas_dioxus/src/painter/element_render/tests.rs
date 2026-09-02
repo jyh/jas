@@ -2991,3 +2991,84 @@ fn a_type_on_path_feature_row_dr_did_not_take_stays_legacy() {
     assert!(element_needs_legacy(&text_path(flat_path(100.0), vec![rotated]), all_caps()),
             "a rotated tspan is not in row DR");
 }
+
+// -- RP3, retired ------------------------------------------------------------
+
+/// ⭐ THE CAPTAIN'S RULING, AS AN ARM: **EXACT ELLIPSE EVERYWHERE.** A
+/// non-centre-aligned ellipse stroke must describe the SAME CONIC a centre one
+/// does -- no bézier ring anywhere above the rasteriser.
+///
+/// ⚖️ THIS ARM IS R4's EXCEPTION BEING SPENT DOWN TO ZERO. RP3 (ruled
+/// 2026-09-01) granted exactly one place where the seam changes WHAT SHAPE is
+/// drawn rather than how ops are expressed, bounded at
+/// `ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION`. The 09/02 council ruling supersedes
+/// it: the approximation belongs at the RASTERISER, invisible above it, and
+/// both live backends can clip to a true ellipse natively. So the exception is
+/// retired rather than re-bounded, and R4 goes back to having none.
+///
+/// ⛔ THE CENTRE CASE IS THE POSITIVE CONTROL. Without it this arm would pass
+/// on a seam that had stopped emitting ellipse arcs altogether.
+#[test]
+fn a_non_centre_ellipse_stroke_describes_the_same_conic_as_a_centre_one() {
+    fn arc_of(align: StrokeAlign) -> crate::painter::EllipseArc {
+        let mut e = plain_ellipse_elem();
+        e.stroke = Some(stroke_aligned(Color::BLACK, 6.0, align));
+        let cmds = ops(&Element::Ellipse(e), 1.0);
+        let arcs: Vec<_> = cmds.iter().filter_map(|c| match c {
+            Command::StrokeEllipseArc { arc, .. } => Some(*arc),
+            _ => None,
+        }).collect();
+        assert!(
+            !cmds.iter().any(|c| matches!(c, Command::StrokePath { .. })),
+            "{align:?}: an ellipse stroke must not lower to a PATH -- that is              the bézier ring the ruling forbids above the rasteriser. Got {cmds:?}"
+        );
+        assert_eq!(arcs.len(), 1, "{align:?}: exactly one stroked arc, got {cmds:?}");
+        arcs[0]
+    }
+
+    let centre = arc_of(StrokeAlign::Center);
+    let inside = arc_of(StrokeAlign::Inside);
+    let outside = arc_of(StrokeAlign::Outside);
+
+    assert_eq!(inside, centre, "an inside stroke describes the same conic");
+    assert_eq!(outside, centre, "and so does an outside one");
+
+    // And it is the ELEMENT's conic, not some derived one: the offset curve of
+    // an ellipse is NOT an ellipse, so a seam that tried to bake the alignment
+    // into the radii would be wrong in a way equality alone would not catch.
+    let e = plain_ellipse_elem();
+    assert_eq!((centre.cx, centre.cy, centre.rx, centre.ry), (e.cx, e.cy, e.rx, e.ry));
+}
+
+/// ⛔ AND THE ALIGNMENT MUST STILL BE CARRIED — retiring the ring must not
+/// quietly retire the alignment with it.
+///
+/// ⚠️ THIS ARM ENCODED THE WRONG DESIGN ON ITS FIRST WRITING, and the red is
+/// what showed me. I first asserted a VISIBLE `push_state · clip · stroke at 2×
+/// · pop_state` in the display list — which is option (a) of my fork, an
+/// ellipse-clip entry that repeals A5. The recommendation I filed and am
+/// building is (c): the align rides the ARC, A5 survives verbatim, and the
+/// clip-then-double happens inside the backend where an exact conic already
+/// lives. Two arms cannot encode two designs, so this one moved to (c).
+///
+/// ⇒ **The display list for an aligned ellipse stroke is ONE command.** The 2×
+/// width and the clip are the backend's business and are not expressible here,
+/// which is precisely what keeps `Painter::clip` path-only.
+#[test]
+fn a_non_centre_ellipse_stroke_carries_its_align_and_nothing_else() {
+    for align in [StrokeAlign::Inside, StrokeAlign::Outside] {
+        let mut e = plain_ellipse_elem();
+        e.stroke = Some(stroke_aligned(Color::BLACK, 6.0, align));
+        let cmds = ops(&Element::Ellipse(e), 1.0);
+
+        assert!(!cmds.iter().any(|c| matches!(c, Command::Clip { .. })),
+                "{align:?}: no clip crosses the seam for an ellipse -- A5 stands: {cmds:?}");
+        let (w, a) = cmds.iter().find_map(|c| match c {
+            Command::StrokeEllipseArc { stroke, align, .. } => Some((stroke.width, *align)),
+            _ => None,
+        }).expect("a stroked arc");
+        assert_eq!(w, 6.0,
+                   "{align:?}: the AUTHORED width crosses, not a doubled one --                     doubling is the backend's half of the lowering");
+        assert_eq!(a, align, "and the align is what tells it to do that half");
+    }
+}
