@@ -444,6 +444,17 @@ impl Painter for Canvas2dPainter<'_> {
         // save/restore can take it off again. The composite's transform, alpha
         // and operation are scoped by `composite_onto`'s own save/restore, which
         // is what retired the manual `prev_alpha` dance that used to live here.
+        //
+        // ⚠️ MEASURED 2026-09-02: DELETING THIS `save()` KILLS NO TEST, AND IT
+        // STAYS ANYWAY. `parent` here is the enclosing ISOLATED LAYER's surface;
+        // a clip leaked onto it lands on a canvas `pop_isolated_layer` then
+        // composites WHOLE (a device-space drawImage, which no clip on the
+        // source affects) and discards, and A6 §3.2 forbids painting in the
+        // window between the two pops. So this is defensive depth whose
+        // unobservability rests on a rule kept somewhere else — which is exactly
+        // the kind of code that must not ALSO be written as if it knew the rule.
+        // See `a_reveal_bbox_mask_does_not_leak_its_clip_onto_the_next_element`
+        // for the surviving mutant, recorded with its reason.
         let _ = parent.save();
         let op = match law {
             Mask::LuminanceClipIn => CompositeOp::DestinationIn,
@@ -849,15 +860,29 @@ mod a6_layer_tests {
                 "multiply of 255 x 128 is 128; got r={r} in ({r},{g},{b},{a})");
     }
 
-    /// ⛔ THE REVEAL-BBOX CLIP MUST NOT ESCAPE THE BRACKET. That arm sets a clip
-    /// on the PARENT under the current transform, and only the bracket's own
-    /// `save`/`restore` takes it off again. A leaked clip is the nastiest shape
-    /// in this file: everything the bracket itself does looks right, and the
-    /// NEXT element silently loses whatever falls outside a rectangle it has no
-    /// relationship to.
+    /// ⛔ THE REVEAL-BBOX BRACKET MUST NOT EAT THE NEXT ELEMENT. A leaked clip is
+    /// the nastiest shape in this file: everything the bracket itself does looks
+    /// right, and the NEXT element silently loses whatever falls outside a
+    /// rectangle it has no relationship to. So the assertion is about a draw
+    /// that happens AFTER the bracket closes, far outside the mask's bbox —
+    /// nothing inside the bracket can state it.
     ///
-    /// 📌 The assertion is therefore about a draw that happens AFTER the bracket
-    /// closes, outside the mask's bbox. Nothing inside the bracket can state it.
+    /// ⛔⛔ AND THIS ARM DOES NOT KILL THE MUTANT IT WAS WRITTEN FOR. I AM SAYING
+    /// SO RATHER THAN LETTING A GREEN STAND IN FOR ONE. Deleting the outer
+    /// `save()` in `pop_mask_layer` leaves this test PASSING, and the reason is
+    /// worth more than the arm: `pop_mask_layer`'s `parent` is the enclosing
+    /// ISOLATED LAYER's surface, not the real target. A clip leaked there lands
+    /// on a canvas that `pop_isolated_layer` composites WHOLE — a device-space
+    /// `drawImage`, which no clip on the source affects — and then discards. A6
+    /// §3.2 forbids painting between `pop_mask_layer` and `pop_isolated_layer`,
+    /// so nothing ever draws into the window where the leak is visible.
+    ///
+    /// ⇒ **the `save()` is DEFENSIVE DEPTH, and §3.2 — not a pixel — is what
+    /// makes it unobservable.** It stays: code that is correct only because a
+    /// rule elsewhere holds should not also be written as if it knew that. The
+    /// mutant is recorded as surviving WITH ITS REASON, which is the honest
+    /// alternative to inventing a fixture for a shape (a bare mask layer with no
+    /// isolated layer around it) that `emit_masked_element` never emits.
     #[wasm_bindgen_test]
     fn a_reveal_bbox_mask_does_not_leak_its_clip_onto_the_next_element() {
         let (_c, ctx) = surface(8, 8);
