@@ -59,8 +59,11 @@ use crate::painter::Painter;
 ///
 /// Each root layer starts from alpha 1.0: the layers are siblings with no
 /// enclosing group, each carrying its own opacity.
-pub fn emit_document(_p: &mut dyn Painter, _doc: &Document, _precision: f64) {
-    todo!("row CV: install the paint context, then walk the layers")
+pub fn emit_document(p: &mut dyn Painter, doc: &Document, precision: f64) {
+    let _paint_context = install_paint_context(rebuild_id_index(doc), precision);
+    for layer in &doc.layers {
+        emit_element(p, layer, 1.0);
+    }
 }
 
 #[cfg(test)]

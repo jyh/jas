@@ -252,6 +252,23 @@ fn ref_groups() -> Vec<Element> {
 /// Render a reference document under one view transform (D2) and return its
 /// canonical JSON.
 fn render_doc(elems: &[Element]) -> String {
+    // ⭐ ROW CV -- THE PAINT CONTEXT IS PINNED, NOT INHERITED. Live geometry
+    // tessellates at the INSTALLED precision, so a golden rendered against
+    // whatever the ambient thread-local happened to hold would be a golden of
+    // the test runner's state. An empty index is deliberate: these reference
+    // documents are self-contained (`ref_live`'s compound shape owns its
+    // operands), and a golden that needed a resolver would be pinning the
+    // fixture's index as much as the lowering. The by-id paths -- Fork F3 and
+    // the dangling-target rule -- are pinned by the assertions below instead.
+    //
+    // 📌 INERT FOR THE FIVE PRE-CV GOLDENS: none contains a live element, and
+    // nothing else reads the context. Their committed bytes are unchanged by
+    // this install, which is what `reference_docs_match_goldens` says on the
+    // very first run after it.
+    let _paint_context = crate::document::id_index::install_paint_context(
+        crate::document::id_index::IdIndex::new(),
+        crate::geometry::live::DEFAULT_PRECISION,
+    );
     let mut rec = RecordingPainter::new();
     // The driver owns the view transform and pushes it as ONE matrix (D2).
     rec.push_state(Transform { a: 1.5, b: 0.0, c: 0.0, d: 1.5, e: 20.0, f: 10.0 });
@@ -277,7 +294,54 @@ fn reference_docs() -> Vec<(&'static str, Vec<Element>)> {
         ("ref_gradients", ref_gradients()),
         ("ref_stroke_styles", ref_stroke_styles()),
         ("ref_groups", ref_groups()),
+        ("ref_live", ref_live()),
     ]
+}
+
+/// ROW CV's display-list lock: live geometry as the walk actually emits it.
+///
+/// Three elements, each pinning something the assertions state separately —
+/// a filled+stroked UNION (one ring neither operand has), a SUBTRACT whose
+/// result is TWO rings emitted into ONE path (the legacy trace opens one path
+/// and closes each ring into it), and a live element under an OUTLINED group
+/// (hairline, no fill). Self-contained: every operand is owned, so nothing here
+/// depends on an installed index.
+///
+/// ⛔ THE SUBTRACT DOES NOT RENDER A HOLE, AND I ALMOST WROTE THAT IT DID.
+/// See `the_subtract_rings_share_an_orientation_so_the_non_zero_fill_is_solid`
+/// below: the fact is MEASURED off these committed bytes, not assumed from the
+/// operation's name.
+fn ref_live() -> Vec<Element> {
+    let union = live_union(
+        overlapping_operands(),
+        fill(Color::rgb(0.9, 0.2, 0.1)),
+        Some(stroke(Color::rgb(0.0, 0.0, 0.4), 2.5)),
+    );
+    let hole = Element::Live(LiveVariant::CompoundShape(CompoundShape {
+        operation: CompoundOperation::SubtractFront,
+        operands: vec![
+            Rc::new(rect(200.0, 0.0, 120.0, 120.0, None, None)),
+            Rc::new(rect(230.0, 30.0, 60.0, 60.0, None, None)),
+        ],
+        fill: fill(Color::rgb(0.1, 0.5, 0.9)),
+        stroke: None,
+        common: common_alpha(0.6),
+    }));
+    let mut outlined = GroupElem {
+        children: vec![Rc::new(live_union(
+            vec![
+                rect(0.0, 200.0, 80.0, 80.0, None, None),
+                rect(40.0, 240.0, 80.0, 80.0, None, None),
+            ],
+            fill(Color::WHITE),
+            None,
+        ))],
+        common: common(),
+        isolated_blending: false,
+        knockout_group: false,
+    };
+    outlined.common.visibility = Visibility::Outline;
+    vec![union, hole, Element::Group(outlined)]
 }
 
 fn golden_path(name: &str) -> String {
@@ -2236,4 +2300,79 @@ fn a_subtree_holding_a_live_element_no_longer_forces_legacy() {
     };
     assert!(!subtree_needs_legacy(&Element::Group(g), caps),
             "a live descendant no longer drags its whole subtree to legacy");
+}
+
+/// ⛔ A MEASURED NEGATIVE, FOUND BY READING THE GOLDEN I HAD JUST GENERATED
+/// RATHER THAN THE COMMENT I HAD JUST WRITTEN. `ref_live`'s `SubtractFront`
+/// evaluates to an outer ring and an inner ring, and I described it as "a ring
+/// with a hole". IT IS NOT ONE. Both rings come out in the SAME rotational
+/// orientation, so under the non-zero rule the inner region has winding ±2 and
+/// FILLS. A hole would need the inner ring reversed (or the even-odd rule).
+///
+/// ⚖️ THIS SEAM IS NEVERTHELESS EXACTLY RIGHT, WHICH IS THE POINT. `render.rs`'s
+/// Live arm traces the identical rings and calls bare `ctx.fill()` — Canvas2D's
+/// default is `"nonzero"` — and `CompoundShape` carries no `fill_rule` field for
+/// either path to consult. So the two walks paint the same solid square, and R4
+/// equivalence holds. The defect, if it is one, is OLDER than this row and lives
+/// in what the boolean evaluator hands back; it is REPORTED, not repaired here,
+/// because repairing it is a rendering change to the shipped web app and needs
+/// its own word.
+///
+/// This test exists so the golden's meaning is stated rather than inferred: if
+/// the evaluator ever starts reversing hole rings, or the fill rule changes,
+/// this reds and says which.
+#[test]
+fn the_subtract_rings_share_an_orientation_so_the_non_zero_fill_is_solid() {
+    /// Twice the signed area — positive and negative are opposite orientations.
+    fn signed_area2(ring: &[(f64, f64)]) -> f64 {
+        let mut a = 0.0;
+        for i in 0..ring.len() {
+            let (x0, y0) = ring[i];
+            let (x1, y1) = ring[(i + 1) % ring.len()];
+            a += x0 * y1 - x1 * y0;
+        }
+        a
+    }
+    let hole = Element::Live(LiveVariant::CompoundShape(CompoundShape {
+        operation: CompoundOperation::SubtractFront,
+        operands: vec![
+            Rc::new(rect(200.0, 0.0, 120.0, 120.0, None, None)),
+            Rc::new(rect(230.0, 30.0, 60.0, 60.0, None, None)),
+        ],
+        fill: fill(Color::WHITE),
+        stroke: None,
+        common: common(),
+    }));
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &hole, 1.0);
+    let cmds = rec.commands();
+    let fills = fill_paths(cmds);
+    assert_eq!(fills.len(), 1, "two rings, ONE path, one fill: {cmds:?}");
+    let winding = cmds.iter().find_map(|c| match c {
+        Command::FillPath { winding, .. } => Some(*winding),
+        _ => None,
+    });
+    assert_eq!(
+        winding, Some(FillRule::NonZero),
+        "the seam must use the rule bare `ctx.fill()` uses, whatever the shape looks like"
+    );
+
+    // Rebuild the rings from the emitted path and compare their orientations.
+    let mut rings: Vec<Vec<(f64, f64)>> = Vec::new();
+    for c in fills[0].0 {
+        match c {
+            PathCommand::MoveTo { x, y } => rings.push(vec![(*x, *y)]),
+            PathCommand::LineTo { x, y } => rings.last_mut().unwrap().push((*x, *y)),
+            _ => {}
+        }
+    }
+    assert_eq!(rings.len(), 2, "an outer ring and an inner one: {rings:?}");
+    let (outer, inner) = (signed_area2(&rings[0]), signed_area2(&rings[1]));
+    assert!(
+        outer * inner > 0.0,
+        "MEASURED: the subtract's rings share an orientation (outer={outer}, \
+         inner={inner}), so the non-zero fill is SOLID and this shape has no \
+         hole on EITHER walk. If this ever flips, the golden below it changed \
+         meaning and both ports must be re-photographed."
+    );
 }

@@ -46,7 +46,7 @@ use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGISurface};
 use crate::document::document::Document;
 use crate::painter::capability::Caps;
 use crate::painter::direct2d::painter::Direct2DPainter;
-use crate::painter::element_render::{emit_element, subtree_needs_legacy};
+use crate::painter::element_render::subtree_needs_legacy;
 use crate::painter::direct2d::replay::replay;
 use crate::painter::direct2d::surface::SurfaceTarget;
 
@@ -601,12 +601,28 @@ unsafe fn paint_document_into(
         rt.BeginDraw();
         rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
         let mut painter = Direct2DPainter::new(rt);
-        for layer in &doc.layers {
-            // The document's layers are siblings at the root: each carries its
-            // own opacity, and there is no enclosing group alpha, so each starts
-            // from 1.0.
-            emit_element(&mut painter, layer, 1.0);
-        }
+        // ⭐ ROW CV -- `emit_document`, NOT A BARE LAYER LOOP. This used to walk
+        // `doc.layers` calling `emit_element` directly, which is the whole walk
+        // MINUS the paint context `canvas::render::render()` installs as its
+        // first act. That was invisible while `Element::Live` was legacy-only
+        // (`first_unpaintable` refused any document carrying one); the moment
+        // row CV let live geometry through the router it became a SILENT DROP --
+        // every by-id reference resolving against an empty index, the document
+        // presenting with its live elements missing, and this function returning
+        // `JAS_PAINT_OK`. See `document::paint`, which owns the install so a
+        // caller cannot forget it.
+        //
+        // ⚠️ `DEFAULT_PRECISION` IS NAMED HERE, AT THE CALL SITE, BECAUSE IT IS A
+        // KNOWN DIVERGENCE AND NOT A DEFAULT WORTH HIDING. The web walk
+        // evaluates live geometry at the Boolean panel's precision; this host
+        // has no such control yet, so a document whose panel is off the default
+        // tessellates differently on the two ports. When the WinUI host grows a
+        // precision it passes it here and the divergence closes.
+        crate::document::paint::emit_document(
+            &mut painter,
+            doc,
+            crate::geometry::live::DEFAULT_PRECISION,
+        );
         // EndDraw on EVERY path, including the error one: leaving a render
         // target open poisons the NEXT frame with a failure a frame older.
         if let Err(e) = rt.EndDraw(None, None) {

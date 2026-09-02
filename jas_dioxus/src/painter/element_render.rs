@@ -140,8 +140,15 @@ pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
     {
         return true;
     }
-    // Text / type-on-path / live geometry.
-    if matches!(elem, Element::Text(_) | Element::TextPath(_) | Element::Live(_)) {
+    // Text / type-on-path. ⭐ LIVE GEOMETRY LEFT THIS CLAUSE IN ROW CV, and the
+    // clause is NARROWED rather than deleted: text is PH3 shaping work this seam
+    // has no vocabulary for, and a wider edit would silently put it on a path
+    // that cannot draw it. The reason live geometry was here — "there is no live
+    // lowering on the Painter" — is gone, not merely inconvenient: `emit_element`
+    // now takes the core's own four `evaluate_with` arms and draws the OUTPUT as
+    // geometry (the helm's 2026-09-01 design word), which is what a Windows app
+    // renders, with `canvas::render` not involved at all.
+    if matches!(elem, Element::Text(_) | Element::TextPath(_)) {
         return true;
     }
     // ⭐ OUTLINE MODE IS NO LONGER A LEGACY REASON (node 2). This clause used to
@@ -904,13 +911,125 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
                 p.draw_text_run(&run, &Brush::Solid(f.color), eff * f.opacity);
             }
         }
+        // ⭐ ROW CV -- LIVE GEOMETRY, ported from `render.rs`'s `Element::Live`
+        // arm. The element IS its evaluated output: one traced path over the
+        // rings, filled and stroked with the live element's own paint. See
+        // [`live_paint`] for where the geometry and the paint come from.
+        Element::Live(v) => {
+            let (rings, live_fill, live_stroke) = live_paint(v);
+            let path = live_rings_path(&rings);
+            // ⛔ EMPTY GEOMETRY EMITS NOTHING AT ALL -- not an empty fill, not a
+            // begin/close pair. `render.rs` guards the whole block on
+            // `ps.iter().any(|r| r.len() >= 2)`, and that guard is the uniform
+            // failure rule's visible half: a dangling reference, an unknown
+            // concept and a cycle all arrive here as an empty ring set.
+            if !path.is_empty() {
+                // ⚖️ NO GRADIENT, AND THAT IS THE MODEL'S ANSWER RATHER THAN A
+                // SIMPLIFICATION: `Element::fill_gradient`/`stroke_gradient`
+                // return `None` for every `Live` variant -- live elements carry
+                // no gradient field at all -- which is why legacy's Live arm
+                // calls `apply_fill(.., None, (0,0,0,0))` and the plain
+                // `apply_stroke`. The bbox below is therefore never read.
+                emit_fill_path(p, &path, FillRule::NonZero, live_fill.as_ref(), None,
+                               (0.0, 0.0, 0.0, 0.0), eff);
+                if let Some(s) = live_stroke.as_ref() {
+                    emit_path_stroke(p, &path, &Brush::Solid(s.color), s, eff);
+                }
+            }
+        }
         // Legacy-only or unhandled in the PH1 reference renderer.
-        Element::TextPath(_) | Element::Live(_) => {}
+        Element::TextPath(_) => {}
     }
 
     if pushed {
         p.pop_state();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Live geometry (row CV)
+// ---------------------------------------------------------------------------
+
+/// The evaluated rings of a live element and the paint to draw them with.
+///
+/// ⭐ THE FOUR ARMS ARE THE CORE'S OWN CONTRACT, NOT A NATIVE GENERATOR. Each
+/// variant's `evaluate_with(precision, resolver, visiting)` is the same call
+/// `canvas::render` makes; nothing here evaluates geometry itself, and nothing
+/// here bakes a snapshot. A cycle guard is a fresh local per top-level evaluate,
+/// exactly as legacy does it.
+///
+/// ⭐ THE AMBIENT STATE COMES FROM THE INSTALLED PAINT CONTEXT. `canvas::render`
+/// has a `precision` parameter threaded down its whole draw stack and a
+/// render-scoped index it installs; `emit_element` has neither and cannot grow
+/// them without changing a ratified signature every backend and caller shares.
+/// Row CV made both ONE install in `document::id_index`, which both walks read
+/// -- see [`crate::document::paint::emit_document`] for the native caller that
+/// performs it, and the module docs there for why a missing install is silent.
+///
+/// ⚖️ FORK F3 IS THE ONE PLACE THE VARIANTS DIFFER: a `Reference` whose own
+/// fill/stroke is unset inherits the RESOLVED TARGET's. The other three carry
+/// their own paint and inherit nothing. Treating the four uniformly would draw
+/// an unpainted instance of a painted master.
+fn live_paint(
+    v: &crate::geometry::live::LiveVariant,
+) -> (crate::algorithms::boolean::PolygonSet, Option<Fill>, Option<Stroke>) {
+    use crate::geometry::live::LiveVariant;
+    let precision = crate::document::id_index::installed_precision();
+    let resolver = crate::document::id_index::InstalledResolver;
+    let mut visiting = crate::geometry::live::VisitSet::new();
+    match v {
+        LiveVariant::CompoundShape(cs) => (
+            cs.evaluate_with(precision, &resolver, &mut visiting),
+            cs.fill.clone(),
+            cs.stroke.clone(),
+        ),
+        LiveVariant::Reference(r) => {
+            let rings = r.evaluate_with(precision, &resolver, &mut visiting);
+            // F3: the resolved target supplies whichever paint the reference
+            // leaves unset. Resolved through the SAME resolver the evaluation
+            // used, so paint and geometry cannot disagree about the target.
+            let target = crate::geometry::live::ElementResolver::resolve(&resolver, &r.target);
+            let fill = r.fill.clone().or_else(|| target.as_ref().and_then(|t| t.fill().cloned()));
+            let stroke =
+                r.stroke.clone().or_else(|| target.as_ref().and_then(|t| t.stroke().cloned()));
+            (rings, fill, stroke)
+        }
+        // A recorded element renders its replayed (derived) geometry, resolved
+        // against its inputs (RECORDED_ELEMENTS.md).
+        LiveVariant::Recorded(rec) => (
+            rec.evaluate_with(precision, &resolver, &mut visiting),
+            rec.fill.clone(),
+            rec.stroke.clone(),
+        ),
+        // A generated element renders its concept's evaluated geometry, resolving
+        // the concept through the resolver's registry (CONCEPTS.md 3b).
+        LiveVariant::Generated(ge) => (
+            ge.evaluate_with(precision, &resolver, &mut visiting),
+            ge.fill.clone(),
+            ge.stroke.clone(),
+        ),
+    }
+}
+
+/// The evaluated rings as ONE path -- the legacy trace, which opens a single
+/// path and closes each ring into it, so a multi-ring result fills with the
+/// non-zero rule as one shape rather than as N overlapping ones.
+///
+/// A ring of fewer than two points is skipped (it has no edge to trace);
+/// `render.rs` skips the same ones with the same test.
+fn live_rings_path(rings: &crate::algorithms::boolean::PolygonSet) -> Vec<PathCommand> {
+    let mut path = Vec::new();
+    for ring in rings {
+        if ring.len() < 2 {
+            continue;
+        }
+        path.push(PathCommand::MoveTo { x: ring[0].0, y: ring[0].1 });
+        for &(x, y) in &ring[1..] {
+            path.push(PathCommand::LineTo { x, y });
+        }
+        path.push(PathCommand::ClosePath);
+    }
+    path
 }
 
 // ---------------------------------------------------------------------------
@@ -950,11 +1069,17 @@ fn outline_stroke_style() -> StrokeStyle {
 /// polylines) while ignoring fill, fill gradient, stroke colour, stroke width,
 /// stroke opacity, dash and alignment.
 ///
-/// `Text` / `TextPath` / `Live` fall through silently, and that is not a gap
-/// left open here: [`element_needs_legacy`] still routes all three to legacy
-/// (text needs shaping this seam has no vocabulary for), so this arm is
-/// unreachable for them. Painting a bounding box instead would invent a picture
-/// production does not draw.
+/// `Text` / `TextPath` fall through silently, and that is not a gap left open
+/// here: [`element_needs_legacy`] still routes both to legacy (text needs
+/// shaping this seam has no vocabulary for), so this arm is unreachable for
+/// them. Painting a bounding box instead would invent a picture production does
+/// not draw.
+///
+/// ⭐ `Live` USED TO BE IN THAT SENTENCE, AND ROW CV TOOK IT OUT. The
+/// justification was the router, and the router no longer routes it away -- so
+/// a fall-through would now be a real hole, not an unreachable arm: an outlined
+/// group holding a live child would drop the child rather than wireframe it.
+/// `render.rs`'s Live arm branches on `outline` like every other arm does.
 fn emit_outline_body(p: &mut dyn Painter, elem: &Element, eff: f64) {
     let brush = Brush::Solid(Color::rgb(0.0, 0.0, 0.0));
     let style = outline_stroke_style();
@@ -1000,7 +1125,22 @@ fn emit_outline_body(p: &mut dyn Painter, elem: &Element, eff: f64) {
         Element::Path(e) => p.stroke_path(&e.d, &brush, &style, eff),
         // Groups recurse in `emit_element_body` and never reach here.
         Element::Group(_) | Element::Layer(_) => {}
-        Element::Text(_) | Element::TextPath(_) | Element::Live(_) => {}
+        // ⭐ ROW CV. The hairline traces the EVALUATED rings -- outline mode asks
+        // "where is this element", and for a live element the answer is its
+        // output, not its operands and not its bounds. Legacy reaches the same
+        // picture from the other side: under `outline` its Live arm calls
+        // `apply_outline_style` INSTEAD of the fill/stroke pair, leaves
+        // `stroke_align` at its `Center` initialiser, and strokes the same
+        // traced path. The element's own paint is dropped entirely, which is
+        // why nothing here reads `live_paint`'s second and third members.
+        Element::Live(v) => {
+            let (rings, _, _) = live_paint(v);
+            let path = live_rings_path(&rings);
+            if !path.is_empty() {
+                p.stroke_path(&path, &brush, &style, eff);
+            }
+        }
+        Element::Text(_) | Element::TextPath(_) => {}
     }
 }
 
