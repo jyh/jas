@@ -79,6 +79,54 @@ pub fn make_measurer(font: &str, font_size: f64) -> Box<dyn Fn(&str) -> f64> {
     }
 }
 
+/// A measurer that answers from REAL font metrics, or `None` when the face
+/// cannot be resolved.
+///
+/// ⭐ ROW DR (2026-09-02). [`make_measurer`] above always answers: in the
+/// browser from a hidden canvas, and on every native build from a **stub** —
+/// `font_size × 0.55` per character. Row DQ measured what that costs the
+/// moment anything POSITIONS text by it:
+///
+/// | string @16 | stub | DirectWrite | error |
+/// |---|---|---|---|
+/// | `"iiii"` | 35.200 | 15.500 | **+127.1 %** |
+/// | `"MMMM"` | 35.200 | 57.469 | **−38.7 %** |
+///
+/// The stub is **width-blind by construction** (it counts characters) and
+/// weight-blind besides. Segmented text advances the pen by it between tspans,
+/// and text-on-path advances by it between GLYPHS, where the error compounds —
+/// 20.590 units of drift by the tenth glyph of `"Hello Path"`, 11 % of the
+/// path, placing every glyph at a wrong point AND a wrong tangent angle.
+///
+/// ⛔ IT RETURNS `Option`, AND THAT IS THE "FAIL CLOSED" HALF OF THE ROW.
+/// [`make_measurer`] answers 0.55-per-char for a family that does not exist —
+/// a confident wrong number. A caller that POSITIONS by it would lay text out
+/// against metrics belonging to no font at all. `None` lets the caller refuse
+/// the element instead, which is what every other seam in this lane does with
+/// a capability it cannot honour.
+///
+/// ⚠️ IT IS NOT A REPLACEMENT FOR [`make_measurer`]. That function keeps its
+/// signature and its callers (the web walk, `Element::bounds`, the text
+/// pipeline), where a total function over an approximate answer is the right
+/// shape. This one is for the callers that must be RIGHT or refuse.
+#[cfg(all(feature = "d2d", windows))]
+pub fn try_make_measurer(font: &str, font_size: f64) -> Option<Box<dyn Fn(&str) -> f64 + 'static>> {
+    let advance = crate::painter::direct2d::text::try_advance_of(font, font_size)?;
+    Some(Box::new(advance))
+}
+
+/// The non-Direct2D answer: there is no real measurer, so there is no measurer.
+///
+/// ⛔ IT REFUSES RATHER THAN FALLING BACK TO [`make_measurer`]. Returning the
+/// stub here would defeat the whole point: the caller asked for metrics it can
+/// position by, and silently handing it the 0.55 approximation is the confident
+/// wrong number this function exists to avoid.
+#[cfg(not(all(feature = "d2d", windows)))]
+pub fn try_make_measurer(font: &str, font_size: f64) -> Option<Box<dyn Fn(&str) -> f64 + 'static>> {
+    let _ = (font, font_size);
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

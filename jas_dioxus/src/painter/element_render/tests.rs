@@ -2581,3 +2581,116 @@ fn a_non_centre_ellipse_stroke_converts_and_rides_the_clip_lowering() {
                    .filter(|c| matches!(c, Command::StrokeEllipseArc { .. })).count(), 1,
                "a CENTRE stroke keeps the exact arc: {:?}", rec2.commands());
 }
+
+// ---------------------------------------------------------------------------
+// ROW DR capability 1 — segmented text (tspans)
+// ---------------------------------------------------------------------------
+
+fn tspan(content: &str, weight: Option<&str>, size: Option<f64>) -> crate::geometry::tspan::Tspan {
+    let mut t = crate::geometry::tspan::Tspan::default_tspan();
+    t.content = content.to_string();
+    t.font_weight = weight.map(|w| w.to_string());
+    t.font_size = size;
+    t
+}
+
+fn segmented(tspans: Vec<crate::geometry::tspan::Tspan>) -> Element {
+    let mut e = crate::geometry::element::TextElem::from_string(
+        10.0, 20.0, "", "sans-serif", 12.0, "normal", "normal", "none", 10.0, 12.0, None, None,
+        common(),
+    );
+    e.fill = fill(Color::BLACK);
+    e.tspans = tspans;
+    Element::Text(e)
+}
+
+/// The x of each recorded FastRun, in order.
+fn run_origins(cmds: &[Command]) -> Vec<f64> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::DrawTextRun { run: crate::painter::TextRun::FastRun { x, .. }, .. } => Some(*x),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ⭐ ROW DR capability 1: a segmented text emits ONE RUN PER TSPAN, and the
+/// second starts where the first ends.
+#[test]
+fn segmented_text_emits_one_run_per_tspan_at_measured_offsets() {
+    let elem = segmented(vec![tspan("Hello ", None, None), tspan("world", Some("bold"), None)]);
+    assert!(!element_needs_legacy(&elem, all_caps()),
+            "feature-free tspans with a resolvable face lower on the seam now");
+
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let xs = run_origins(rec.commands());
+    assert_eq!(xs.len(), 2, "one run per tspan: {:?}", rec.commands());
+    assert_eq!(xs[0], 10.0, "the first run starts at the element's x");
+    assert!(xs[1] > xs[0] + 20.0,
+            "the second run must start a MEASURED distance along ({:?}) -- \
+             equal to the first means the pen never advanced", xs);
+}
+
+/// ⛔⛔ THE MEASURER MUST USE EACH TSPAN'S OWN FONT — AND THIS ARM EXISTS
+/// BECAUSE A MUTATION PASS PROVED THE COMMENT WAS NOT A GUARD.
+///
+/// `emit_segmented_text` says, in as many words, that hoisting one measurer out
+/// of the loop "would reintroduce" the weight-blindness row DQ measured in the
+/// stub. I then wrote a suite in which **a mutant that hoisted the PARENT
+/// font's measurer passed all 3,169 tests** — because both corpus fixtures put
+/// the OVERRIDE on the SECOND tspan, whose width nothing advances by.
+///
+/// ⇒ The fixture has to put the override FIRST. Here tspan[0] is 36pt against a
+/// 12pt parent: measured with its own font it advances ~3× further than measured
+/// with the parent's, so the second run's origin separates the two readings by a
+/// wide margin.
+#[test]
+fn the_pen_advances_by_each_tspans_own_font_not_the_parents() {
+    // tspan[0] is THREE TIMES the parent size; tspan[1] inherits.
+    let elem = segmented(vec![tspan("MMMM", None, Some(36.0)), tspan("x", None, None)]);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let xs = run_origins(rec.commands());
+    assert_eq!(xs.len(), 2);
+
+    // What the parent's 12pt font would have advanced by, for the same text.
+    let parent_advance = crate::text_measure::try_make_measurer("normal normal sans-serif", 12.0)
+        .expect("resolve")("MMMM");
+    let own_advance = crate::text_measure::try_make_measurer("normal normal sans-serif", 36.0)
+        .expect("resolve")("MMMM");
+    assert!(own_advance > parent_advance * 2.0,
+            "the fixture must separate the two readings: own={own_advance:.3} \
+             parent={parent_advance:.3}");
+
+    let actual = xs[1] - xs[0];
+    assert!((actual - own_advance).abs() < 1.0,
+            "the pen advanced {actual:.3}; tspan[0]'s OWN font gives \
+             {own_advance:.3} and the parent's gives {parent_advance:.3} -- \
+             matching the parent means one measurer was hoisted out of the loop");
+}
+
+/// ⛔ AND THE ROUTER STILL REFUSES A TSPAN FEATURE THIS LOWERING DOES NOT CARRY.
+/// The clause narrowed; it did not vanish.
+#[test]
+fn a_tspan_feature_row_dr_did_not_take_still_stays_legacy() {
+    for (label, mutate) in [
+        ("rotate", (|t: &mut crate::geometry::tspan::Tspan| t.rotate = Some(15.0))
+            as fn(&mut crate::geometry::tspan::Tspan)),
+        ("dx", |t: &mut crate::geometry::tspan::Tspan| t.dx = Some(0.5)),
+        ("baseline_shift", |t: &mut crate::geometry::tspan::Tspan| t.baseline_shift = Some(2.0)),
+        ("decoration", |t: &mut crate::geometry::tspan::Tspan| {
+            t.text_decoration = Some(vec!["underline".to_string()])
+        }),
+    ] {
+        let mut second = tspan("world", None, None);
+        mutate(&mut second);
+        let elem = segmented(vec![tspan("Hello ", None, None), second]);
+        assert!(element_needs_legacy(&elem, all_caps()),
+                "a tspan carrying {label} is NOT in row DR and must stay legacy");
+    }
+    // The control: without any of them, it converts -- or the loop above passes
+    // because segmented text is refused wholesale.
+    let plain = segmented(vec![tspan("Hello ", None, None), tspan("world", None, None)]);
+    assert!(!element_needs_legacy(&plain, all_caps()));
+}

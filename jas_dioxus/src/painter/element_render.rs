@@ -343,8 +343,30 @@ pub fn subtree_needs_legacy(elem: &Element, caps: Caps) -> bool {
 /// the feature in order to refuse it, and a refusal that has to be right about
 /// the thing it refuses is the wrong shape for a gate.
 pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
-    !t.render_is_flat()
-        || !t.letter_spacing.is_empty()
+    // ⭐ ROW DR NARROWS THIS AGAIN: SEGMENTED text lowers now, provided every
+    // tspan is feature-free AND a real measurer exists for the font.
+    if !t.render_is_flat() {
+        if t.tspans.iter().any(tspan_needs_legacy) {
+            return true;
+        }
+        // ⛔ FAIL CLOSED ON AN UNRESOLVABLE FACE, AND DO IT HERE — AT THE
+        // ROUTING DECISION, BEFORE ANYTHING IS LAID OUT. A segmented walk
+        // POSITIONS by measured widths, so a missing measurer does not mean
+        // "slightly wrong", it means every run after the first is somewhere
+        // else. `try_make_measurer` refuses rather than falling back to the
+        // 0.55-per-character stub (row DQ: `"iiii"` and `"MMMM"` both 35.200).
+        //
+        // ⭐ AND THIS IS WHAT KEEPS THE WEB BUILD ON LEGACY FOR FREE: off
+        // Direct2D `try_make_measurer` is `None` by construction, so the web
+        // walk keeps the path it has always taken with no cfg here at all.
+        if crate::text_measure::try_make_measurer(
+            &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
+            t.font_size,
+        ).is_none() {
+            return true;
+        }
+    }
+    !t.letter_spacing.is_empty()
         || !t.kerning.is_empty()
         || !t.baseline_shift.is_empty()
         || draws_decoration(t)
@@ -360,6 +382,101 @@ fn draws_decoration(t: &crate::geometry::element::TextElem) -> bool {
     t.text_decoration
         .split_whitespace()
         .any(|tok| tok == "underline" || tok == "line-through")
+}
+
+/// Does this tspan use a feature the segmented lowering does not carry?
+///
+/// ⭐ ROW DR, capability 1. The lowering below carries per-tspan FONT overrides
+/// (family · size · weight · style) and the measured pen advance between runs.
+/// Everything else is refused BY NAME, with the trigger that opens it:
+///
+/// | excluded | why it is out today | what opens it |
+/// |---|---|---|
+/// | `rotate` | needs a per-tspan `push_state` frame around the run | that frame + an angle arm |
+/// | `transform` | same frame, arbitrary matrix | as above |
+/// | `dx` | a leading-edge nudge in em, folded into the pen | arithmetic + a position arm |
+/// | `baseline_shift` | offsets this tspan's baseline only | a baseline arm |
+/// | `text_decoration` | underline/strike are extra primitives per run | a decoration lowering + a pixel arm |
+///
+/// ⛔ `None` MEANS INHERIT, NOT ABSENT, and that distinction is why this reads
+/// `is_some()` rather than testing a value. A tspan's `text_decoration: None`
+/// inherits the parent's tokens — which the parent-level check in
+/// [`text_needs_legacy`] has already refused — while `Some([])` is an explicit
+/// override to nothing. Treating `Some([])` as "has a decoration" is
+/// conservative in the safe direction: it refuses an element that would in fact
+/// have rendered correctly, rather than drawing one that would not.
+fn tspan_needs_legacy(t: &crate::geometry::tspan::Tspan) -> bool {
+    t.rotate.is_some()
+        || t.transform.is_some()
+        || t.dx.is_some()
+        || t.baseline_shift.is_some()
+        || t.text_decoration.is_some()
+}
+
+/// The segmented (multi-tspan) lowering — row DR, capability 1.
+///
+/// Mirrors `canvas::render::draw_segmented_text`: ONE shared baseline at
+/// `y + 0.8 · font_size`, a pen starting at `x`, and per tspan an effective
+/// font assembled from the tspan's overrides falling back to the parent's.
+///
+/// ⛔ THE PEN ADVANCES BY A MEASURED WIDTH, and that is the whole reason this
+/// could not be built before row DR. `measure` here is
+/// [`text_measure::try_make_measurer`] — real DirectWrite advances, resolved
+/// once. The old crate-wide stub answers `font_size × 0.55` per CHARACTER, so
+/// `"iiii"` and `"MMMM"` came back identical and every tspan after the first
+/// landed 10–130 % out of place.
+///
+/// ⚠️ THE MEASURER IS RE-MADE PER TSPAN, not hoisted, because the FONT changes
+/// per tspan — `setup_text_ab_bold_b.svg`'s two runs differ by weight, and a
+/// measurer built once from the parent font would advance the bold run by
+/// regular metrics. That is the exact weight-blindness row DQ flagged in the
+/// stub, and hoisting for speed would reintroduce it.
+fn emit_segmented_text(p: &mut dyn Painter, e: &crate::geometry::element::TextElem, eff: f64) {
+    let Some(f) = e.fill.as_ref() else { return };
+    let parent_bold = e.font_weight == "bold";
+    let parent_italic = e.font_style == "italic" || e.font_style == "oblique";
+    let baseline = e.y + e.font_size * 0.8;
+    let mut cx = e.x;
+
+    for t in &e.tspans {
+        if t.content.is_empty() {
+            continue;
+        }
+        let family = t.font_family.as_deref().unwrap_or(&e.font_family);
+        let size = t.font_size.unwrap_or(e.font_size);
+        let weight = match t.font_weight.as_deref() {
+            Some(w) => w,
+            None => if parent_bold { "bold" } else { "normal" },
+        };
+        let style = match t.font_style.as_deref() {
+            Some(s) => s,
+            None => if parent_italic { "italic" } else { "normal" },
+        };
+        // The same shorthand shape every other FastRun carries: style, weight,
+        // family — the size rides its own field.
+        let font = format!("{style} {weight} {family}");
+        p.draw_text_run(
+            &TextRun::FastRun {
+                font: font.clone(),
+                size,
+                text: t.content.clone(),
+                letter_spacing: 0.0,
+                x: cx,
+                y: baseline,
+            },
+            &Brush::Solid(f.color),
+            eff * f.opacity,
+        );
+        // ⛔ IF THE MEASURER IS GONE, STOP RATHER THAN GUESS. The router
+        // (`text_needs_legacy`) already refused any element whose font will not
+        // resolve, so reaching this is a font that resolved for the parent and
+        // not for a tspan override. Advancing by anything at all would place
+        // every later run wrong; drawing nothing further is the honest failure.
+        let Some(measure) = crate::text_measure::try_make_measurer(&font, size) else {
+            return;
+        };
+        cx += measure(&t.content);
+    }
 }
 
 /// A stroke aligned inside/outside rather than centered (RP3 helper).
@@ -1046,6 +1163,10 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
                 emit_path_stroke(p, &e.d, &brush, s, eff);
             }
         }
+        // ⭐ ROW DR: SEGMENTED text takes the tspan walk; flat keeps the single
+        // run below. The router has already guaranteed both halves are
+        // reachable -- feature-free tspans and a resolvable face.
+        Element::Text(e) if !e.render_is_flat() => emit_segmented_text(p, e, eff),
         Element::Text(e) => {
             // A simplified flat FastRun — proves the text op interleaves in
             // z-order (contract: text rides PH1). The production `render.rs`
