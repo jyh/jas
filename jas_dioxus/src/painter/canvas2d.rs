@@ -1164,18 +1164,37 @@ mod a6_layer_tests {
 // Each arm below names the mutant it kills. Two things it deliberately does NOT
 // do, both recorded rather than papered over:
 //
-//   * **The ellipse arc's generality is not pinned, because nothing produces
-//     it.** `rotation`, `ccw` and a partial sweep survived as mutants, and the
-//     reason is measured, not assumed: production emits only
-//     `EllipseArc::ellipse(..)` (element_render.rs:517, :858, :1109) and EVERY
-//     arc in the whole recorded corpus is `rotation 0, start 0, end 6.2832,
-//     ccw false`. A fixture for a shape neither production nor the corpus can
-//     take is green forever and reads as coverage. ⚠️ It does leave one real
-//     cross-port question open, stated as a negative: `Direct2DPainter` pins
+//   * **The ellipse arc's generality WAS not pinned, and ROW EF PINS IT** —
+//     see `partial_arc_laws` below. The census's reasoning was sound and its
+//     conclusion has been overtaken by a RULING, which is the one thing that
+//     can retire a recorded survivor. As of 09/02 the census's three arc
+//     survivors (`rotation`, `ccw`, a partial sweep) are DEAD.
+//
+//     ⚖️ WHAT CHANGED, since "nothing produces it" is still TRUE. Production
+//     still emits only `EllipseArc::ellipse(..)` and every arc in the recorded
+//     corpus is still `rotation 0, start 0, end 6.2832, ccw false`. What the
+//     census could not know is that the divergence it reported as a negative
+//     — `Direct2DPainter` pinning
 //     `a_partial_arc_paints_nothing_rather_than_a_full_ellipse` while this
-//     backend would draw the arc — a DIVERGENCE that no gate can see today
-//     precisely because no producer emits a partial arc.
-//   * **`draw_text_run` is not pinned, because it is unreachable.**
+//     backend draws the arc — went to the helm and came back RULED (09/02
+//     12:5x): **a partial `EllipseArc` is DRAWN AS THE ARC on every port**, and
+//     a port that cannot draw one REFUSES VISIBLY rather than painting nothing.
+//
+//     ⭐ ⛔ **A RULED CONTRACT IS TESTABLE EVEN WHERE NO PRODUCER REACHES IT,
+//     AND AN UNRULED ONE IS NOT.** That is the whole difference, and it is worth
+//     stating because the census's rule — *a fixture for a shape neither
+//     production nor the corpus can take is green forever and reads as
+//     coverage* — remains correct and still governs `draw_text_run` below. The
+//     distinction is not reachability, which has not moved. It is whether there
+//     is an ANSWER to pin: before the ruling these fixtures would have recorded
+//     THIS backend's incidental behaviour as if it were law, with the other port
+//     doing the opposite and neither being wrong. After it, they pin the
+//     contract, and the arc's unreachability makes them a SPECIFICATION for the
+//     producer that does not exist yet instead of a description of an accident.
+//
+//   * **`draw_text_run` is STILL not pinned, and its two survivors STAY
+//     survived.** No ruling has moved it and it remains unreachable on both
+//     walks. The rule above still applies here in full.
 //     `element_needs_legacy` returns true for Text/TextPath so the web walk
 //     never routes text here, and `first_unpaintable` refuses any document
 //     carrying it on the native walk. Its `letter_spacing` is elided in the body
@@ -1557,5 +1576,223 @@ mod primitive_pixel_laws {
         let px = rgba_at(&ctx, 4.0, 4.0);
         assert_eq!((px.0, px.1, px.2), (0, 0, 0), "multiply of red and blue is black; got {px:?}");
         assert_eq!(px.3, 255, "and it is opaque");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ROW EF — A PARTIAL ARC IS DRAWN AS THE ARC
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚖️ THE RULING (helm 09/02 12:5x), which is what makes these fixtures legal:
+// a partial `EllipseArc` is **DRAWN AS THE ARC on every port** — DV's "exact
+// ellipse everywhere" extends to the sweep — and a port that cannot yet draw
+// one **REFUSES VISIBLY**, never paints nothing silently. `Direct2DPainter`'s
+// `a_partial_arc_paints_nothing_rather_than_a_full_ellipse` was the right
+// refusal of the worse wrong (silently closing an arc into a full ellipse) and
+// is SUPERSEDED by the draw. That port's half is flask's row EG; this module is
+// the Canvas2D half.
+//
+// ⛔⛔ **THESE ARMS ARE GREEN AT HEAD AND THAT IS THE HONEST REPORT.** This
+// backend already drew partial arcs correctly: `build_ellipse` hands every
+// parameter to `ellipse_with_anticlockwise`, which honours all of them. So this
+// row is NOT red-first against a defect, and no red sha was pushed for it —
+// **the receipt is the MUTATION PASS**, which is where the three arms below get
+// their standing. Saying "red-first" of a row that found nothing broken would
+// be the more comfortable sentence and the false one.
+//
+// ⭐ WHAT THESE ARMS ARE FOR, since nothing produces a partial arc: they kill
+// the three survivors PR #79's census recorded and could not then fixture
+// (`rotation`, `ccw`, a partial sweep). The census's rule — a fixture for an
+// input production cannot take is green forever and reads as coverage — has NOT
+// been repealed; it still governs `draw_text_run`. What moved is that there is
+// now a RULED answer to pin, so these fixtures specify the contract for a
+// producer that does not exist yet rather than photographing this backend's
+// accident. See the census header above for the full distinction.
+//
+// ⚖️ EVERY ARM IS A COMPLEMENT PAIR — one input, one flag varied, two opposite
+// pictures, both probed. A single-sided assertion ("the sweep is painted")
+// stays green under a backend that paints the WHOLE ellipse, which is exactly
+// the failure the ruling forbids. Asserting that the far side is EMPTY is what
+// distinguishes "drew the arc" from "drew everything".
+#[cfg(all(test, target_arch = "wasm32"))]
+mod partial_arc_laws {
+    use super::browser_probe::{alpha_at, surface};
+    use super::*;
+    use crate::geometry::element::StrokeAlign;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    const CX: f64 = 32.0;
+    const CY: f64 = 32.0;
+
+    /// Fill `arc` on a fresh 64×64 surface and report the alpha at `probes`.
+    fn filled(arc: EllipseArc, probes: &[(f64, f64)]) -> Vec<u8> {
+        let (_c, ctx) = surface(64, 64);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.fill_ellipse_arc(&arc, FillRule::NonZero, &Brush::Solid(Color::WHITE), 1.0);
+        }
+        probes.iter().map(|&(x, y)| alpha_at(&ctx, x, y)).collect()
+    }
+
+    /// ⛔ A HALF SWEEP PAINTS ITS HALF AND LEAVES THE OTHER ALONE.
+    ///
+    /// Kills the census's `partial sweep` survivor. Canvas angles run from the
+    /// +x axis and increase CLOCKWISE ON SCREEN (the y axis points down), so
+    /// `start 0 → end π`, not counter-clockwise, sweeps through `(cx, cy+ry)`:
+    /// the BOTTOM half. Filling closes the chord, giving a half-disc.
+    ///
+    /// 📌 THE PROBES ARE 12px OFF THE CHORD, not adjacent to it: the chord is a
+    /// hard antialiased edge and a probe sitting on it reads a partial alpha
+    /// that is neither 0 nor 255. Margin computed, not eyeballed — the miter
+    /// arm's first cut in PR #79 went red at HEAD for exactly this.
+    #[wasm_bindgen_test]
+    fn a_partial_arc_paints_its_own_sweep_and_not_the_rest() {
+        let half = EllipseArc {
+            cx: CX, cy: CY, rx: 24.0, ry: 24.0, rotation: 0.0,
+            start: 0.0, end: std::f64::consts::PI, ccw: false,
+        };
+        let got = filled(half, &[(CX, CY + 12.0), (CX, CY - 12.0)]);
+        assert_eq!(got[0], 255, "inside the swept half: expected paint, got {}", got[0]);
+        assert_eq!(got[1], 0,
+                   "outside the sweep: expected NOTHING, got {}. A non-zero \
+                    reading here is the ruling's forbidden failure — an arc \
+                    silently closed into the full ellipse.", got[1]);
+    }
+
+    /// ⛔ `ccw` CHOOSES WHICH HALF THE SAME TWO ANGLES DESCRIBE.
+    ///
+    /// Kills the census's `ccw` survivor. Identical `start`/`end`; only the flag
+    /// moves, and the picture must INVERT. That is stronger than asserting one
+    /// arm: a backend ignoring `ccw` gives both arms the same answer, and the
+    /// two-arm comparison catches it whichever way round the default happens to
+    /// fall.
+    #[wasm_bindgen_test]
+    fn the_ccw_flag_selects_the_complementary_sweep() {
+        let arc = |ccw: bool| EllipseArc {
+            cx: CX, cy: CY, rx: 24.0, ry: 24.0, rotation: 0.0,
+            start: 0.0, end: std::f64::consts::PI, ccw,
+        };
+        let below = (CX, CY + 12.0);
+        let above = (CX, CY - 12.0);
+        let cw = filled(arc(false), &[below, above]);
+        let ccw = filled(arc(true), &[below, above]);
+        assert_eq!((cw[0], cw[1]), (255, 0), "clockwise sweeps the lower half");
+        assert_eq!((ccw[0], ccw[1]), (0, 255), "counter-clockwise sweeps the upper half");
+        // ⚖️ The inversion, stated as one claim: a backend that DROPPED the flag
+        // would make these two equal, whatever value it defaulted to.
+        assert_ne!(cw, ccw, "the flag must change the picture; it did not");
+    }
+
+    /// ⛔⛔ A STROKED ARC PAINTS ALONG ITS SWEEP — AND THE WHOLE OP HAD NO
+    /// WITNESS UNTIL THIS ARM.
+    ///
+    /// Found by mutation while writing the three arms above: replacing
+    /// `stroke_ellipse_arc`'s ENTIRE BODY with `{}` left the browser lane at
+    /// **64/64** and the native suite at **3051/0**. Every stroked circle and
+    /// ellipse in the application could stop being drawn and nothing in this
+    /// repository could say so.
+    ///
+    /// 📌 REACHABLE FROM THREE PRODUCTION SITES, not one: the converted Ellipse
+    /// paint (`emit_shape_paint`'s `ConvGeom::Arc` stroke arm), the direct
+    /// Ellipse arm, and outline mode — `element_render.rs:816`, `:1312`,
+    /// `:1578`.
+    ///
+    /// ⚖️ AND IT BELONGS TO THIS ROW RATHER THAN A FOLLOW-UP, because an op that
+    /// silently paints NOTHING is the precise failure the ruling names: *a port
+    /// that cannot yet draw it REFUSES VISIBLY, never paints nothing silently.*
+    /// PR #79's census counted DECISIONS (which parameter is read) and not OPS
+    /// (whether the call draws at all), so a whole primitive fell between its
+    /// rows. ⇒ **A census of parameters does not cover the function that reads
+    /// them.**
+    ///
+    /// The probes are the same two points the fill arm uses, and the assertion
+    /// is the complement pair again: paint ON the swept edge, nothing on the
+    /// unswept one. A 6px stroke keeps the band comfortably wider than the
+    /// antialiasing fringe at the probe.
+    #[wasm_bindgen_test]
+    fn a_stroked_arc_draws_its_sweep_and_leaves_the_rest_unpainted() {
+        let (_c, ctx) = surface(64, 64);
+        let r = 20.0;
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.stroke_ellipse_arc(
+                &EllipseArc {
+                    cx: CX, cy: CY, rx: r, ry: r, rotation: 0.0,
+                    start: 0.0, end: std::f64::consts::PI, ccw: false,
+                },
+                &Brush::Solid(Color::WHITE),
+                &StrokeStyle {
+                    width: 6.0, cap: LineCap::Butt, join: LineJoin::Miter,
+                    miter: 10.0, dash: Vec::new(),
+                },
+                // ⚖️ CENTRE EXPLICITLY, and it matters to what this arm means.
+                // `StrokeAlign` arrived on this op with flask's #89 (exact
+                // ellipse everywhere), which added an inside/outside branch
+                // that CLIPS and strokes at 2x width. This arm is about the
+                // sweep, not the alignment, so it pins the plain path and
+                // leaves the two aligned branches to whoever owns them —
+                // ⛔ NEITHER OF WHICH HAS A PIXEL ARM HERE.
+                StrokeAlign::Center,
+                1.0,
+            );
+        }
+        // Directly below the centre the swept edge passes through (32, 52);
+        // directly above, the UNswept edge would be at (32, 12).
+        let on_sweep = alpha_at(&ctx, CX, CY + r);
+        let off_sweep = alpha_at(&ctx, CX, CY - r);
+        assert!(on_sweep > 200,
+                "the stroke must land on the swept edge; got {on_sweep}. A 0 \
+                 here means the op painted NOTHING — the mutant this arm \
+                 exists to kill.");
+        assert_eq!(off_sweep, 0,
+                   "and NOT on the edge the sweep never reached; got {off_sweep}");
+
+        // ⚖️ PARITY ARM, and it exists because the OTHER PORT pinned it first.
+        // flask's `a_stroked_partial_arc_draws_no_closing_chord` (row EG(1),
+        // Direct2D) asserts that STROKING a partial arc draws the arc only —
+        // a FILL closes the sweep with a chord back to the start, a stroke
+        // must not. Canvas2D's `ellipse()` leaves the subpath open, so it does
+        // not; that was READ from the spec and is now MEASURED here, on the
+        // same law with the same probe idea (mid-diameter, well inside both
+        // endpoints and 20px from any painted arc).
+        //
+        // ⇒ Found by intersecting the two backends' arc suites and writing the
+        // symmetric difference, which is this seat's standing prescription and
+        // the first time it has actually been carried out across a capability.
+        let chord_seat = alpha_at(&ctx, CX, CY);
+        assert_eq!(chord_seat, 0,
+                   "a STROKED partial arc must draw no closing chord; got \
+                    {chord_seat} at the centre of the diameter");
+    }
+
+    /// ⛔ `rotation` TURNS THE ELLIPSE'S AXES.
+    ///
+    /// Kills the census's `rotation` survivor. ⚠️ THE RADII MUST DIFFER FOR THIS
+    /// ARM TO MEAN ANYTHING: rotating a CIRCLE is the identity, so `rx == ry`
+    /// would make a backend that ignores `rotation` entirely pass — a fixture
+    /// whose input makes the defect and its absence agree, which is this seat's
+    /// standing "tame example" trap. `28 × 10` is deliberately eccentric.
+    ///
+    /// A full sweep is used here so the arm isolates `rotation` from the sweep
+    /// parameters the two arms above already own.
+    #[wasm_bindgen_test]
+    fn an_arc_rotation_turns_the_axes_it_paints_along() {
+        let arc = |rotation: f64| EllipseArc {
+            cx: CX, cy: CY, rx: 28.0, ry: 10.0, rotation,
+            start: 0.0, end: std::f64::consts::TAU, ccw: false,
+        };
+        // Unrotated the long axis is horizontal: (52,32) is inside, (32,52) is
+        // not. Rotated a quarter turn the two swap. Both probes sit 4px inside
+        // the long radius and 10px outside the short one.
+        let far_x = (CX + 20.0, CY);
+        let far_y = (CX, CY + 20.0);
+        let flat = filled(arc(0.0), &[far_x, far_y]);
+        let upright = filled(arc(std::f64::consts::FRAC_PI_2), &[far_x, far_y]);
+        assert_eq!((flat[0], flat[1]), (255, 0),
+                   "unrotated, the 28 radius lies along x");
+        assert_eq!((upright[0], upright[1]), (0, 255),
+                   "rotated a quarter turn, the 28 radius lies along y");
     }
 }
