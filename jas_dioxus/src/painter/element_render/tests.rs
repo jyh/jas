@@ -1325,8 +1325,9 @@ impl crate::painter::Painter for MaskBlind {
         self.0.fill_ellipse_arc(e, w, b, a)
     }
     fn stroke_ellipse_arc(&mut self, e: &crate::painter::EllipseArc, b: &crate::painter::Brush,
-                          s: &crate::painter::StrokeStyle, a: f64) {
-        self.0.stroke_ellipse_arc(e, b, s, a)
+                          s: &crate::painter::StrokeStyle,
+                          al: crate::painter::StrokeAlign, a: f64) {
+        self.0.stroke_ellipse_arc(e, b, s, al, a)
     }
     fn clip(&mut self, p: &[PathCommand], w: FillRule) { self.0.clip(p, w) }
     fn push_state(&mut self, t: Transform) { self.0.push_state(t) }
@@ -2469,7 +2470,7 @@ fn a_ring_with_one_point_is_skipped_and_emits_no_degenerate_path() {
 // RP3 — the non-centre ellipse stroke (ruled 2026-09-01, option (a))
 // ---------------------------------------------------------------------------
 
-use super::{ellipse_bezier_path, ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION, ELLIPSE_KAPPA};
+use super::ELLIPSE_KAPPA;
 
 /// One point on a cubic at parameter `t`.
 fn cubic_at(p0: (f64, f64), c1: (f64, f64), c2: (f64, f64), p3: (f64, f64), t: f64) -> (f64, f64) {
@@ -2479,86 +2480,25 @@ fn cubic_at(p0: (f64, f64), c1: (f64, f64), c2: (f64, f64), p3: (f64, f64), t: f
      a * p0.1 + b * c1.1 + c * c2.1 + d * p3.1)
 }
 
-/// ⭐⭐ RP3's RATIFIED EXCEPTION, PINNED AS A NUMBER.
+
+
+
+/// ⚰️ **RP3's TOMBSTONE.** This arm used to assert the OPPOSITE of what it now
+/// asserts, and the rename is deliberate so the diff shows the exception dying
+/// rather than a test quietly disappearing.
 ///
-/// The 2026-09-01 ruling grants contract R4 **one named exception**: this
-/// lowering changes WHAT SHAPE is drawn, not merely how ops are expressed — the
-/// first and only such licence on this seam. The condition attached to it was
-/// that the error be a MEASURED BOUND rather than an accepted vagueness, and
-/// this arm is that condition.
+/// It read: *"a non-centre stroke cannot be an arc — it needs the clip"*, and
+/// it pinned the four-cubic ring plus a clip at 2× width. The 2026-09-02
+/// council ruling (EXACT ELLIPSE EVERYWHERE) retired that: the align rides the
+/// arc and the backend clips with its own exact conic.
 ///
-/// ⛔ IT SAMPLES BOTH CURVES AND COMPUTES THE WORST CASE. It does not assert the
-/// textbook figure, and it does not assert the control points: either would pass
-/// over a transcription error that still produced a plausible oval. The question
-/// asked is the only one that matters — *how far, at its worst, is this curve
-/// from the ellipse it claims to be?*
+/// ⭐ WHAT SURVIVES UNCHANGED IS THE ROUTING ASSERTION, and it is the reason
+/// this test was converted rather than deleted: a non-centre ellipse must NOT
+/// go to legacy. That claim is independent of how the stroke is expressed, and
+/// deleting the file's only copy of it would have been a silent loss.
 #[test]
-fn the_bezier_ellipse_deviation_is_pinned() {
-    // A circle first: radial distance is directly comparable to the radius.
-    let (cx, cy, r) = (7.0, -3.0, 100.0);
-    let path = ellipse_bezier_path(cx, cy, r, r);
-
-    let mut cur = match path[0] {
-        PathCommand::MoveTo { x, y } => (x, y),
-        ref other => panic!("path must open with a MoveTo, got {other:?}"),
-    };
-    let mut worst: f64 = 0.0;
-    let mut samples = 0usize;
-    for cmd in &path[1..] {
-        let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = *cmd else { continue };
-        let (p0, c1, c2, p3) = (cur, (x1, y1), (x2, y2), (x, y));
-        for i in 0..=200 {
-            let t = i as f64 / 200.0;
-            let (px, py) = cubic_at(p0, c1, c2, p3, t);
-            let d = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
-            worst = worst.max((d - r).abs() / r);
-            samples += 1;
-        }
-        cur = p3;
-    }
-    assert!(samples >= 800, "all four quadrants must be sampled, got {samples}");
-    assert!(worst <= ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION,
-            "worst radial deviation {worst:.3e} exceeds the pinned bound {:.3e} \
-             -- RP3's R4 exception is granted only while this number holds",
-            ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION);
-
-    // ⛔ AND THE BOUND MUST NOT BE SLACK. A ceiling ten times the real error
-    // would let a genuine regression pass while still reading as "pinned";
-    // this holds the constant honest to the measurement it came from.
-    assert!(worst > ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION / 2.0,
-            "worst {worst:.3e} is far under the bound {:.3e} -- the constant has \
-             gone slack and should be tightened to what is actually measured",
-            ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION);
-
-    // The curve must CLOSE, or an inside-stroke clip leaks through the gap.
-    assert!(matches!(path.last(), Some(PathCommand::ClosePath)),
-            "the ring must close: {path:?}");
-}
-
-/// The four endpoints are the ellipse's own extremes, EXACTLY — the
-/// approximation is interior to each quadrant, never at the joins. A lowering
-/// that got kappa wrong would still pass through these, which is why the
-/// deviation arm above exists as well as this one.
-#[test]
-fn the_bezier_ellipse_touches_the_true_extremes_exactly() {
-    let p = ellipse_bezier_path(10.0, 20.0, 30.0, 5.0);
-    let ends: Vec<(f64, f64)> = p.iter().filter_map(|c| match *c {
-        PathCommand::MoveTo { x, y } => Some((x, y)),
-        PathCommand::CurveTo { x, y, .. } => Some((x, y)),
-        _ => None,
-    }).collect();
-    assert_eq!(ends, vec![(40.0, 20.0), (10.0, 25.0), (-20.0, 20.0), (10.0, 15.0), (40.0, 20.0)],
-               "right, bottom, left, top, and back to the start");
-    assert!((ELLIPSE_KAPPA - 4.0 / 3.0 * (2.0_f64.sqrt() - 1.0)).abs() < 1e-15,
-            "kappa is DERIVED, not fitted: 4/3 * (sqrt(2) - 1)");
-}
-
-/// ⭐ THE ROUTING FLIP. A non-centre-stroked ellipse used to be legacy-only; it
-/// now lowers on the seam, and its stroke rides the clip-then-stroke-at-2x path
-/// every other shape already uses.
-#[test]
-fn a_non_centre_ellipse_stroke_converts_and_rides_the_clip_lowering() {
-    let mut e = EllipseElem {
+fn a_non_centre_ellipse_is_lowered_and_keeps_the_exact_conic() {
+    let e = EllipseElem {
         cx: 50.0, cy: 50.0, rx: 40.0, ry: 25.0,
         fill: fill(Color::rgb(0.2, 0.4, 0.8)),
         stroke: Some(stroke_aligned(Color::BLACK, 6.0, StrokeAlign::Inside)),
@@ -2566,39 +2506,20 @@ fn a_non_centre_ellipse_stroke_converts_and_rides_the_clip_lowering() {
     };
     let elem = Element::Ellipse(e.clone());
     assert!(!element_needs_legacy(&elem, all_caps()),
-            "RP3 is lowered now; routing it to legacy leaves the lowering unreachable");
+            "a non-centre ellipse is lowered on the seam; routing it to legacy              leaves the lowering unreachable");
 
     let mut rec = RecordingPainter::new();
     emit_element(&mut rec, &elem, 1.0);
     let cmds = rec.commands();
 
-    // The FILL stays the true conic -- only the stroke pays the approximation.
     assert_eq!(cmds.iter().filter(|c| matches!(c, Command::FillEllipseArc { .. })).count(), 1,
-               "the fill must stay an exact arc: {cmds:?}");
-    assert_eq!(cmds.iter().filter(|c| matches!(c, Command::StrokeEllipseArc { .. })).count(), 0,
-               "a non-centre stroke cannot be an arc -- it needs the clip: {cmds:?}");
-
-    // Inside alignment: clip to the ring, stroke it at 2x.
-    let clips: Vec<_> = cmds.iter().filter_map(|c| match c {
-        Command::Clip { path, .. } => Some(path), _ => None }).collect();
-    assert_eq!(clips.len(), 1, "inside align clips once: {cmds:?}");
-    let strokes: Vec<_> = cmds.iter().filter_map(|c| match c {
-        Command::StrokePath { path, stroke, .. } => Some((path, stroke)), _ => None }).collect();
-    assert_eq!(strokes.len(), 1);
-    assert_eq!(strokes[0].1.width, 12.0, "inside align strokes at 2x width");
-    assert_eq!(clips[0], strokes[0].0,
-               "the clip and the stroke must trace the SAME ring, or the boundary seams");
-
-    // ⛔ AND A CENTRE-ALIGNED ELLIPSE MUST STILL TAKE THE EXACT ARC. Without
-    // this, the change would have quietly degraded every ordinary ellipse in
-    // the corpus to a bezier for no reason at all.
-    e.stroke = Some(stroke(Color::BLACK, 6.0));
-    let mut rec2 = RecordingPainter::new();
-    emit_element(&mut rec2, &Element::Ellipse(e), 1.0);
-    assert_eq!(rec2.commands().iter()
-                   .filter(|c| matches!(c, Command::StrokeEllipseArc { .. })).count(), 1,
-               "a CENTRE stroke keeps the exact arc: {:?}", rec2.commands());
+               "the fill was always an exact arc: {cmds:?}");
+    assert_eq!(cmds.iter().filter(|c| matches!(c, Command::StrokeEllipseArc { .. })).count(), 1,
+               "and NOW SO IS THE STROKE -- this is the line that flipped: {cmds:?}");
+    assert!(!cmds.iter().any(|c| matches!(c, Command::Clip { .. })),
+            "no clip crosses the seam any more -- amendment A5 stands: {cmds:?}");
 }
+
 
 // ---------------------------------------------------------------------------
 // ROW DR capability 1 — segmented text (tspans)
@@ -3071,4 +2992,64 @@ fn a_non_centre_ellipse_stroke_carries_its_align_and_nothing_else() {
                    "{align:?}: the AUTHORED width crosses, not a doubled one --                     doubling is the backend's half of the lowering");
         assert_eq!(a, align, "and the align is what tells it to do that half");
     }
+}
+
+/// ⛔ THE CROSS-LANGUAGE COMPATIBILITY DECISION, PINNED — because a mutant that
+/// emitted `align` UNCONDITIONALLY survived every other arm in this file.
+///
+/// This display list serialises to the corpus JSON the Swift port replays.
+/// Every scene pinned before 2026-09-02 is centre-aligned, so emitting the new
+/// key always would rewrite all of them and red another port's lane over a
+/// value carrying no new information. The rule is: **centre emits nothing, and
+/// only a non-centre align appears.**
+///
+/// Nothing else tested that. The lane that would have caught it is on another
+/// platform and reds a day later, in someone else's PR.
+#[test]
+fn a_centre_align_adds_no_key_to_the_corpus_json() {
+    fn json_of(align: StrokeAlign) -> String {
+        let mut e = plain_ellipse_elem();
+        e.stroke = Some(stroke_aligned(Color::BLACK, 6.0, align));
+        let mut rec = RecordingPainter::new();
+        emit_element(&mut rec, &Element::Ellipse(e), 1.0);
+        rec.to_canonical_json()
+    }
+    assert!(!json_of(StrokeAlign::Center).contains("align"),
+            "a centre stroke must serialise EXACTLY as it did before this node");
+    assert!(json_of(StrokeAlign::Inside).contains("\"align\""),
+            "and a non-centre one must carry the key, or the picture is lost");
+    assert!(json_of(StrokeAlign::Inside).contains("inside"));
+    assert!(json_of(StrokeAlign::Outside).contains("outside"));
+}
+
+/// ⛔ AN OUTLINED ELLIPSE'S GEOMETRY, WHICH NOTHING ASSERTED.
+///
+/// Found by a mutant, not by reading: scaling `rx` by 0.9 in the outline arm of
+/// `emit_element` passed **the entire suite** — 2,728 tests on the native lane,
+/// zero reds. Outline mode drew an ellipse of any size it liked.
+///
+/// It is pre-existing and not RP3's doing (the outline arm predates it), but it
+/// is exactly the shape of the "no pixel can fail" census, and closing it cost
+/// less than writing it up.
+#[test]
+fn an_outlined_ellipse_draws_the_elements_own_conic() {
+    let mut e = plain_ellipse_elem();
+    e.common.visibility = Visibility::Outline;
+    let src = e.clone();
+    let cmds = ops(&Element::Ellipse(e), 1.0);
+
+    let arcs: Vec<_> = cmds.iter().filter_map(|c| match c {
+        Command::StrokeEllipseArc { arc, .. } => Some(*arc),
+        _ => None,
+    }).collect();
+    assert_eq!(arcs.len(), 1, "an outlined ellipse is one stroked arc: {cmds:?}");
+    assert_eq!(
+        (arcs[0].cx, arcs[0].cy, arcs[0].rx, arcs[0].ry),
+        (src.cx, src.cy, src.rx, src.ry),
+        "outline draws the ELEMENT's conic, not a rescaled one",
+    );
+    // An outline is a hairline preview, so it must NOT carry the element's own
+    // paint -- that is what makes it an outline rather than a thin copy.
+    assert!(!cmds.iter().any(|c| matches!(c, Command::FillEllipseArc { .. })),
+            "an outlined ellipse is not filled: {cmds:?}");
 }

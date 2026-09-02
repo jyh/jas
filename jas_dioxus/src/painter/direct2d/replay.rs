@@ -195,7 +195,16 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
                 if cmd == "fill_ellipse_arc" {
                     p.fill_ellipse_arc(&ar, winding(op), &br, a);
                 } else {
-                    p.stroke_ellipse_arc(&ar, &br, &stroke(op.get("stroke").unwrap_or(&Value::Null)), a);
+                    // ⭐ `align` READ BACK FROM THE OP, defaulting to Center.
+                    // The recorder emits the field ONLY when it is non-centre,
+                    // so every corpus scene pinned before 2026-09-02 replays
+                    // exactly as it did -- the default IS the old behaviour.
+                    let align = match op.get("align").and_then(|v| v.as_str()) {
+                        Some("inside") => crate::painter::StrokeAlign::Inside,
+                        Some("outside") => crate::painter::StrokeAlign::Outside,
+                        _ => crate::painter::StrokeAlign::Center,
+                    };
+                    p.stroke_ellipse_arc(&ar, &br, &stroke(op.get("stroke").unwrap_or(&Value::Null)), align, a);
                 }
                 r.drawn += 1;
             }

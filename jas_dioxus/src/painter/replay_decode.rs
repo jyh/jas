@@ -76,6 +76,21 @@ pub(crate) fn winding(v: &Value) -> FillRule {
     }
 }
 
+/// The stroke alignment of an `ellipse_arc` op, **defaulting to Center**.
+///
+/// ⭐ THE DEFAULT IS THE WHOLE COMPATIBILITY STORY. The recorder emits `align`
+/// only when it is NOT centre (council 2026-09-02), so every scene pinned
+/// before then carries no such key and decodes to exactly the behaviour it had.
+/// A reader that has never heard of alignment is not wrong — it is current.
+pub(crate) fn align(v: &Value) -> crate::painter::StrokeAlign {
+    use crate::painter::StrokeAlign as A;
+    match v.get("align").and_then(Value::as_str) {
+        Some("inside") => A::Inside,
+        Some("outside") => A::Outside,
+        _ => A::Center,
+    }
+}
+
 pub(crate) fn stroke(v: &Value) -> StrokeStyle {
     StrokeStyle {
         width: f(v, "width"),
