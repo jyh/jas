@@ -1651,6 +1651,61 @@ mod partial_arc_laws {
         assert_ne!(cw, ccw, "the flag must change the picture; it did not");
     }
 
+    /// ⛔⛔ A STROKED ARC PAINTS ALONG ITS SWEEP — AND THE WHOLE OP HAD NO
+    /// WITNESS UNTIL THIS ARM.
+    ///
+    /// Found by mutation while writing the three arms above: replacing
+    /// `stroke_ellipse_arc`'s ENTIRE BODY with `{}` left the browser lane at
+    /// **64/64** and the native suite at **3051/0**. Every stroked circle and
+    /// ellipse in the application could stop being drawn and nothing in this
+    /// repository could say so.
+    ///
+    /// 📌 REACHABLE FROM THREE PRODUCTION SITES, not one: the converted Ellipse
+    /// paint (`emit_shape_paint`'s `ConvGeom::Arc` stroke arm), the direct
+    /// Ellipse arm, and outline mode — `element_render.rs:816`, `:1312`,
+    /// `:1578`.
+    ///
+    /// ⚖️ AND IT BELONGS TO THIS ROW RATHER THAN A FOLLOW-UP, because an op that
+    /// silently paints NOTHING is the precise failure the ruling names: *a port
+    /// that cannot yet draw it REFUSES VISIBLY, never paints nothing silently.*
+    /// PR #79's census counted DECISIONS (which parameter is read) and not OPS
+    /// (whether the call draws at all), so a whole primitive fell between its
+    /// rows. ⇒ **A census of parameters does not cover the function that reads
+    /// them.**
+    ///
+    /// The probes are the same two points the fill arm uses, and the assertion
+    /// is the complement pair again: paint ON the swept edge, nothing on the
+    /// unswept one. A 6px stroke keeps the band comfortably wider than the
+    /// antialiasing fringe at the probe.
+    #[wasm_bindgen_test]
+    fn a_stroked_arc_draws_its_sweep_and_leaves_the_rest_unpainted() {
+        let (_c, ctx) = surface(64, 64);
+        let r = 20.0;
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.stroke_ellipse_arc(
+                &EllipseArc {
+                    cx: CX, cy: CY, rx: r, ry: r, rotation: 0.0,
+                    start: 0.0, end: std::f64::consts::PI, ccw: false,
+                },
+                &Brush::Solid(Color::WHITE),
+                &StrokeStyle {
+                    width: 6.0, cap: LineCap::Butt, join: LineJoin::Miter,
+                    miter: 10.0, dash: Vec::new(),
+                },
+                1.0,
+            );
+        }
+        // Directly below the centre the swept edge passes through (32, 52);
+        // directly above, the UNswept edge would be at (32, 12).
+        let on_sweep = alpha_at(&ctx, CX, CY + r);
+        let off_sweep = alpha_at(&ctx, CX, CY - r);
+        assert!(on_sweep > 200,
+                "the stroke must land on the swept edge; got {on_sweep}. A 0                  here means the op painted NOTHING — the mutant this arm exists                  to kill.");
+        assert_eq!(off_sweep, 0,
+                   "and NOT on the edge the sweep never reached; got {off_sweep}");
+    }
+
     /// ⛔ `rotation` TURNS THE ELLIPSE'S AXES.
     ///
     /// Kills the census's `rotation` survivor. ⚠️ THE RADII MUST DIFFER FOR THIS
