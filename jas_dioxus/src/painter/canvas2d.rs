@@ -26,7 +26,7 @@ use super::{
     StrokeStyle, TextRun,
 };
 use crate::geometry::element::{BlendMode, Color, LineCap, LineJoin, Transform};
-use crate::surface::web::{CompositeOp, WebSurface};
+use crate::surface::web::{blend_mode_css, CompositeOp, WebSurface};
 use crate::surface::PixelSurface;
 use wasm_bindgen::JsValue;
 use web_sys::{CanvasRenderingContext2d, CanvasWindingRule};
@@ -276,10 +276,12 @@ impl Painter for Canvas2dPainter<'_> {
     /// * `MaskLayers` — push/pop_mask_layer EXECUTE since #55;
     /// * `NonNormalBlend` — and this answer is now LOAD-BEARING, so it is stated
     ///   with where to check it: `push_group` sets the CSS composite operation
-    ///   (`blend_css`), AND `pop_isolated_layer` reads the layer's own blend back
-    ///   out of `LayerKind::Isolated` and composites under it before restoring
-    ///   `source-over`. Both carriers are honoured — the blend reaches a point of
-    ///   USE here, not merely a point of storage.
+    ///   (`surface::web::blend_mode_css`, the one copy), AND `pop_isolated_layer`
+    ///   reads the layer's own blend back out of `LayerKind::Isolated` and
+    ///   composites under it before restoring `source-over`. Both carriers are
+    ///   honoured — the blend reaches a point of USE here, not merely a point of
+    ///   storage, and `a_groups_blend_mode_reaches_the_primitives_inside_it`
+    ///   is where the first carrier is checked in pixels.
     ///
     /// The corpus driver below
     /// ([`tests::every_recorded_scene_replays_through_canvas2d`]) drives all 20
@@ -362,7 +364,7 @@ impl Painter for Canvas2dPainter<'_> {
         // without a read-back. The alpha is a plain multiply on our own stack
         // (non-isolated compound — the contract pin).
         self.target().save();
-        let _ = self.target().set_global_composite_operation(blend_css(blend));
+        let _ = self.target().set_global_composite_operation(blend_mode_css(blend));
         self.group_alpha_stack.push(alpha);
     }
 
@@ -578,26 +580,16 @@ fn join_str(j: LineJoin) -> &'static str {
     match j { LineJoin::Miter => "miter", LineJoin::Round => "round", LineJoin::Bevel => "bevel" }
 }
 
-fn blend_css(mode: BlendMode) -> &'static str {
-    match mode {
-        BlendMode::Normal => "source-over",
-        BlendMode::Darken => "darken",
-        BlendMode::Multiply => "multiply",
-        BlendMode::ColorBurn => "color-burn",
-        BlendMode::Lighten => "lighten",
-        BlendMode::Screen => "screen",
-        BlendMode::ColorDodge => "color-dodge",
-        BlendMode::Overlay => "overlay",
-        BlendMode::SoftLight => "soft-light",
-        BlendMode::HardLight => "hard-light",
-        BlendMode::Difference => "difference",
-        BlendMode::Exclusion => "exclusion",
-        BlendMode::Hue => "hue",
-        BlendMode::Saturation => "saturation",
-        BlendMode::Color => "color",
-        BlendMode::Luminosity => "luminosity",
-    }
-}
+// ⛔ THE BLEND TABLE IS NOT HERE, AND IT USED TO BE. This file carried its own
+// 16-arm `blend_css` — a second, ungated copy of `surface::web::blend_mode_css`,
+// which `canvas::render` already used and which a native test pins across ALL
+// SIXTEEN variants (`blend_mode_css_maps_all_sixteen_variants`). The 2026-09-02
+// census found the duplicate the way it finds everything: a mutant mis-mapping
+// one of its rows survived the entire browser lane, because the only caller of
+// the copy is `push_group` and no pixel test read it. Routing the call site at
+// the one copy puts this backend's blend lowering under a gate that already
+// exists, instead of asking for a seventeenth fixture.
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 // A6 LAYER TESTS — in a real browser, via the harness added in #46.
@@ -608,17 +600,16 @@ fn blend_css(mode: BlendMode) -> &'static str {
 // The law below (§3.3) is the one D-α got wrong: the layer's own alpha applies
 // ONCE, at the composite, times the open-group product.
 // ═══════════════════════════════════════════════════════════════════════════
+/// THE BROWSER PROBE — one copy of the three helpers every pixel arm in this
+/// file needs. They were private to `a6_layer_tests` until the census below
+/// grew a second module that needs exactly the same three; a second copy of a
+/// probe is how two lanes start measuring two different things.
 #[cfg(all(test, target_arch = "wasm32"))]
-mod a6_layer_tests {
-    use super::*;
-    use crate::geometry::element::Color;
-    use crate::painter::capability::{Capability, Caps};
+mod browser_probe {
+    use super::CanvasRenderingContext2d;
     use wasm_bindgen::JsCast;
-    use wasm_bindgen_test::*;
 
-    wasm_bindgen_test_configure!(run_in_browser);
-
-    fn surface(w: u32, h: u32) -> (web_sys::HtmlCanvasElement, CanvasRenderingContext2d) {
+    pub(super) fn surface(w: u32, h: u32) -> (web_sys::HtmlCanvasElement, CanvasRenderingContext2d) {
         let doc = web_sys::window().unwrap().document().unwrap();
         let c: web_sys::HtmlCanvasElement =
             doc.create_element("canvas").unwrap().unchecked_into();
@@ -629,14 +620,25 @@ mod a6_layer_tests {
         (c, ctx)
     }
 
-    fn alpha_at(ctx: &CanvasRenderingContext2d, x: f64, y: f64) -> u8 {
+    pub(super) fn alpha_at(ctx: &CanvasRenderingContext2d, x: f64, y: f64) -> u8 {
         ctx.get_image_data(x, y, 1.0, 1.0).unwrap().data()[3]
     }
 
-    fn rgba_at(ctx: &CanvasRenderingContext2d, x: f64, y: f64) -> (u8, u8, u8, u8) {
+    pub(super) fn rgba_at(ctx: &CanvasRenderingContext2d, x: f64, y: f64) -> (u8, u8, u8, u8) {
         let d = ctx.get_image_data(x, y, 1.0, 1.0).unwrap().data();
         (d[0], d[1], d[2], d[3])
     }
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod a6_layer_tests {
+    use super::browser_probe::{alpha_at, rgba_at, surface};
+    use super::*;
+    use crate::geometry::element::Color;
+    use crate::painter::capability::{Capability, Caps};
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
 
     /// A masked body: red over the whole surface, then a mask bracket whose
     /// artwork is `paint` — run through the REAL bracket, so every assertion
@@ -1105,5 +1107,422 @@ mod a6_layer_tests {
             Caps::of(&p)
         };
         assert_answers_match_the_corpus(&|c: Capability| probe.has(c), &per_scene);
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// THE PRIMITIVE PIXEL LAWS — the "no pixel can fail" census, closed.
+//
+// ⛔ WHY THESE EXIST, AND IT IS A MEASUREMENT, NOT A HUNCH. 2026-09-02: every
+// backend-local decision in this file was driven as a mutant through the whole
+// browser lane, because a display-list golden (`RecordingPainter`, R4) pins what
+// commands CROSS the seam and cannot see what this backend does with them — so
+// a decision below the seam has exactly one possible witness, a browser pixel
+// test. 24 mutants driven, **19 SURVIVED**: the entire primitive layer of this
+// backend — gradients, stroke width, dash, cap, join, miter, the winding rule,
+// curve construction, close-path, the group alpha product, the group blend, the
+// translucent-colour form — could be broken without one test going red.
+//
+// The 15 arms above are all A6: layers and masks. The corpus replay lane says so
+// itself ("⚠️ IT ASSERTS COVERAGE, NOT PIXELS"): all 21 recorded scenes execute
+// on this backend in a real browser and NOT ONE PIXEL of them is read. That is
+// the shape the census found — a lane that runs everything and observes nothing.
+//
+// Each arm below names the mutant it kills. Two things it deliberately does NOT
+// do, both recorded rather than papered over:
+//
+//   * **The ellipse arc's generality is not pinned, because nothing produces
+//     it.** `rotation`, `ccw` and a partial sweep survived as mutants, and the
+//     reason is measured, not assumed: production emits only
+//     `EllipseArc::ellipse(..)` (element_render.rs:517, :858, :1109) and EVERY
+//     arc in the whole recorded corpus is `rotation 0, start 0, end 6.2832,
+//     ccw false`. A fixture for a shape neither production nor the corpus can
+//     take is green forever and reads as coverage. ⚠️ It does leave one real
+//     cross-port question open, stated as a negative: `Direct2DPainter` pins
+//     `a_partial_arc_paints_nothing_rather_than_a_full_ellipse` while this
+//     backend would draw the arc — a DIVERGENCE that no gate can see today
+//     precisely because no producer emits a partial arc.
+//   * **`draw_text_run` is not pinned, because it is unreachable.**
+//     `element_needs_legacy` returns true for Text/TextPath so the web walk
+//     never routes text here, and `first_unpaintable` refuses any document
+//     carrying it on the native walk. Its `letter_spacing` is elided in the body
+//     with a comment saying so. Two mutants (size, baseline anchor) survived and
+//     STAY survived, recorded here.
+// ═══════════════════════════════════════════════════════════════════════════
+#[cfg(all(test, target_arch = "wasm32"))]
+mod primitive_pixel_laws {
+    use super::browser_probe::{alpha_at, rgba_at, surface};
+    use super::*;
+    use crate::painter::ColorStop;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    fn red() -> Color {
+        Color::rgb(1.0, 0.0, 0.0)
+    }
+    fn blue() -> Color {
+        Color::rgb(0.0, 0.0, 1.0)
+    }
+    fn stroke(width: f64, cap: LineCap, join: LineJoin, miter: f64, dash: Vec<f64>) -> StrokeStyle {
+        StrokeStyle { width, cap, join, miter, dash }
+    }
+    fn line(pts: &[(f64, f64)]) -> Vec<PathCommand> {
+        let mut v = vec![PathCommand::MoveTo { x: pts[0].0, y: pts[0].1 }];
+        for (x, y) in &pts[1..] {
+            v.push(PathCommand::LineTo { x: *x, y: *y });
+        }
+        v
+    }
+
+    /// ⛔ A LINEAR GRADIENT'S ENDPOINTS ARRIVE RESOLVED AND MUST BE PLOTTED THE
+    /// WAY ROUND THEY ARRIVED (contract R3: the build site owns `angle`, the
+    /// backend owns nothing but the geometry).
+    ///
+    /// Kills `linear_gradient_endpoints_are_swapped`, which survived the whole
+    /// lane: `create_linear_gradient(x1, y1, x0, y0)` reverses every gradient in
+    /// the application and no test could tell.
+    #[wasm_bindgen_test]
+    fn a_linear_gradients_first_stop_lands_at_the_end_it_was_given() {
+        let (_c, ctx) = surface(16, 4);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.fill_rect(
+                Rect { x: 0.0, y: 0.0, w: 16.0, h: 4.0 },
+                &Brush::Linear(LinearGradient {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 16.0,
+                    y1: 0.0,
+                    stops: vec![
+                        ColorStop { offset: 0.0, color: red() },
+                        ColorStop { offset: 1.0, color: blue() },
+                    ],
+                }),
+                1.0,
+            );
+        }
+        let l = rgba_at(&ctx, 0.0, 2.0);
+        let r = rgba_at(&ctx, 15.0, 2.0);
+        assert!(l.0 > 200 && l.2 < 60, "stop 0 (red) belongs at (x0,y0); got {l:?}");
+        assert!(r.2 > 200 && r.0 < 60, "stop 1 (blue) belongs at (x1,y1); got {r:?}");
+    }
+
+    /// ⛔ A RADIAL GRADIENT'S INNER CIRCLE IS THE ONE THE FIRST STOP PAINTS.
+    /// Production always builds the concentric `r0 = 0` case
+    /// (`element_render::resolve_gradient`), so swapping the radii puts the
+    /// far-end colour at the centre of every radial fill in the application.
+    ///
+    /// Kills `radial_gradient_radii_are_swapped`.
+    #[wasm_bindgen_test]
+    fn a_radial_gradients_first_stop_is_at_its_inner_circle() {
+        let (_c, ctx) = surface(32, 32);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.fill_rect(
+                Rect { x: 0.0, y: 0.0, w: 32.0, h: 32.0 },
+                &Brush::Radial(RadialGradient {
+                    x0: 16.0,
+                    y0: 16.0,
+                    r0: 0.0,
+                    x1: 16.0,
+                    y1: 16.0,
+                    r1: 16.0,
+                    stops: vec![
+                        ColorStop { offset: 0.0, color: red() },
+                        ColorStop { offset: 1.0, color: blue() },
+                    ],
+                }),
+                1.0,
+            );
+        }
+        let centre = rgba_at(&ctx, 16.0, 16.0);
+        let edge = rgba_at(&ctx, 16.0, 31.0);
+        assert!(centre.0 > 200 && centre.2 < 60, "the r0 end is the centre; got {centre:?}");
+        assert!(edge.2 > 200 && edge.0 < 60, "the r1 end is the rim; got {edge:?}");
+    }
+
+    /// ⛔ A STROKE IS AS WIDE AS THE STYLE SAYS. Kills `stroke_width_is_ignored`
+    /// (`set_line_width(1.0)`), which survived: every stroke in the application
+    /// could collapse to a hairline with the lane green.
+    #[wasm_bindgen_test]
+    fn a_stroke_is_as_wide_as_the_style_asked_for() {
+        let (_c, ctx) = surface(16, 16);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.stroke_path(
+                &line(&[(2.0, 8.0), (14.0, 8.0)]),
+                &Brush::Solid(Color::WHITE),
+                &stroke(6.0, LineCap::Butt, LineJoin::Miter, 10.0, Vec::new()),
+                1.0,
+            );
+        }
+        // A 6-wide stroke centred on y = 8 covers y ∈ [5, 11].
+        assert!(alpha_at(&ctx, 8.0, 6.0) > 200, "y=6 is inside a 6-wide stroke");
+        assert_eq!(alpha_at(&ctx, 8.0, 13.0), 0, "y=13 is outside it");
+    }
+
+    /// ⛔ THE MITER LIMIT REACHES THE CONTEXT. Two arms, ONE VARIABLE: the same
+    /// path, width and join, differing only in `miter`. The corner's miter ratio
+    /// is ~16, so a limit of 20 keeps the spike and a limit of 2 bevels it away.
+    ///
+    /// Kills `miter_limit_is_ignored` (`set_miter_limit(10.0)`, the CSS default),
+    /// under which BOTH arms bevel and the first assertion fails.
+    #[wasm_bindgen_test]
+    fn the_miter_limit_decides_whether_a_sharp_corner_keeps_its_spike() {
+        // Apex at (100, 32); each leg rises 6 over 96, so the half-angle is
+        // atan(6/96) = 3.576° and the miter ratio is 1/sin(3.576°) ≈ 16.0.
+        let path = line(&[(4.0, 26.0), (100.0, 32.0), (4.0, 38.0)]);
+        let probe = |miter: f64| -> u8 {
+            let (_c, ctx) = surface(128, 64);
+            {
+                let mut p = Canvas2dPainter::new(&ctx);
+                p.stroke_path(
+                    &path,
+                    &Brush::Solid(Color::WHITE),
+                    &stroke(3.0, LineCap::Butt, LineJoin::Miter, miter, Vec::new()),
+                    1.0,
+                );
+            }
+            // 6px past the apex, on the bisector. The outer miter tip sits
+            // (w/2)/sin(3.576°) ≈ 24px past the apex, so the wedge is still
+            // ~2.2px thick here — thick enough that the probed pixel is FULLY
+            // covered, which is what keeps this arm off an antialiasing edge.
+            // A bevel leaves nothing at all past the apex.
+            alpha_at(&ctx, 106.0, 32.0)
+        };
+        assert!(probe(20.0) > 200, "a limit above the corner's ratio keeps the miter");
+        assert_eq!(probe(2.0), 0, "a limit below it bevels the corner away");
+    }
+
+    /// ⛔ THE DASH PATTERN REACHES THE CONTEXT. Kills
+    /// `dash_pattern_is_never_set`, under which every dashed stroke in the
+    /// application draws solid.
+    #[wasm_bindgen_test]
+    fn a_dashed_stroke_leaves_the_gaps_its_pattern_asks_for() {
+        let (_c, ctx) = surface(24, 8);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.stroke_path(
+                &line(&[(0.0, 4.0), (24.0, 4.0)]),
+                &Brush::Solid(Color::WHITE),
+                &stroke(4.0, LineCap::Butt, LineJoin::Miter, 10.0, vec![4.0, 4.0]),
+                1.0,
+            );
+        }
+        assert!(alpha_at(&ctx, 2.0, 4.0) > 200, "x=2 is inside the first dash");
+        assert_eq!(alpha_at(&ctx, 6.0, 4.0), 0, "x=6 is inside the first gap");
+        assert!(alpha_at(&ctx, 10.0, 4.0) > 200, "x=10 is inside the second dash");
+    }
+
+    /// ⛔ THE LINE CAP REACHES THE CONTEXT, AND ALL THREE VALUES DIFFER.
+    /// Kills `line_cap_collapses_to_butt`.
+    ///
+    /// The segment ends at x = 12 with width 8, so a butt cap stops there, a
+    /// round cap adds a half-disc of radius 4, and a square cap adds a 4-deep
+    /// box. `(13, 8)` separates butt from the other two; `(15, 11)` — 4.24 from
+    /// the end point, just outside the disc — separates round from square.
+    #[wasm_bindgen_test]
+    fn each_line_cap_paints_its_own_shape_past_the_end_point() {
+        let probe = |cap: LineCap, x: f64, y: f64| -> u8 {
+            let (_c, ctx) = surface(24, 24);
+            {
+                let mut p = Canvas2dPainter::new(&ctx);
+                p.stroke_path(
+                    &line(&[(4.0, 8.0), (12.0, 8.0)]),
+                    &Brush::Solid(Color::WHITE),
+                    &stroke(8.0, cap, LineJoin::Miter, 10.0, Vec::new()),
+                    1.0,
+                );
+            }
+            alpha_at(&ctx, x, y)
+        };
+        assert_eq!(probe(LineCap::Butt, 13.0, 8.0), 0, "butt stops at the end point");
+        assert!(probe(LineCap::Round, 13.0, 8.0) > 200, "round reaches past it");
+        assert!(probe(LineCap::Square, 13.0, 8.0) > 200, "square reaches past it");
+        assert_eq!(probe(LineCap::Round, 15.0, 11.0), 0, "the round cap is a disc");
+        assert!(probe(LineCap::Square, 15.0, 11.0) > 200, "the square cap is a box");
+    }
+
+    /// ⛔ THE LINE JOIN REACHES THE CONTEXT, AND ALL THREE VALUES DIFFER.
+    /// Kills `line_join_collapses_to_miter`.
+    ///
+    /// A right-angle corner at (8, 8) with width 16 puts the outer corner at
+    /// (0, 0). Miter fills the square corner; round fills the quarter-disc of
+    /// radius 8; bevel fills only the triangle `x + y ≥ 8`. `(1, 1)` is inside
+    /// the miter and outside both others; `(3, 3)` is inside the round and
+    /// outside the bevel — so the two probes separate all three, with ≥ 0.9px
+    /// of margin at every boundary.
+    #[wasm_bindgen_test]
+    fn each_line_join_paints_its_own_shape_at_the_outer_corner() {
+        let probe = |join: LineJoin, x: f64, y: f64| -> u8 {
+            let (_c, ctx) = surface(48, 48);
+            {
+                let mut p = Canvas2dPainter::new(&ctx);
+                p.stroke_path(
+                    &line(&[(8.0, 40.0), (8.0, 8.0), (40.0, 8.0)]),
+                    &Brush::Solid(Color::WHITE),
+                    &stroke(16.0, LineCap::Butt, join, 10.0, Vec::new()),
+                    1.0,
+                );
+            }
+            alpha_at(&ctx, x, y)
+        };
+        assert!(probe(LineJoin::Miter, 1.0, 1.0) > 200, "the miter fills the corner");
+        assert_eq!(probe(LineJoin::Round, 1.0, 1.0), 0, "the round join is a disc of radius 8");
+        assert_eq!(probe(LineJoin::Bevel, 1.0, 1.0), 0, "the bevel cuts the corner off");
+        assert!(probe(LineJoin::Round, 3.0, 3.0) > 200, "3,3 is inside the disc");
+        assert_eq!(probe(LineJoin::Bevel, 3.0, 3.0), 0, "3,3 is outside the bevel triangle");
+    }
+
+    /// ⛔ A QUADRATIC SEGMENT IS A CURVE, NOT ITS CHORD. Kills
+    /// `quad_to_degrades_to_a_line` — under which the shape below collapses to a
+    /// zero-area sliver and paints nothing at all.
+    #[wasm_bindgen_test]
+    fn a_quadratic_segment_bulges_away_from_its_chord() {
+        let (_c, ctx) = surface(40, 40);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            // Control (20, -10) puts the curve's apex at (20, 10); the closing
+            // line runs along y = 30.
+            let path = vec![
+                PathCommand::MoveTo { x: 2.0, y: 30.0 },
+                PathCommand::QuadTo { x1: 20.0, y1: -10.0, x: 38.0, y: 30.0 },
+                PathCommand::ClosePath,
+            ];
+            p.fill_path(&path, FillRule::NonZero, &Brush::Solid(Color::WHITE), 1.0);
+        }
+        assert!(alpha_at(&ctx, 20.0, 20.0) > 200, "the curve encloses (20,20)");
+        assert_eq!(alpha_at(&ctx, 20.0, 5.0), 0, "and does not reach (20,5)");
+    }
+
+    /// ⛔ `ClosePath` CLOSES THE FIGURE FOR A STROKE. A fill closes each subpath
+    /// implicitly, so only a STROKE can observe this at all — which is why the
+    /// mutant `close_path_is_dropped` survived a lane holding 21 recorded scenes.
+    #[wasm_bindgen_test]
+    fn close_path_strokes_the_edge_back_to_the_start() {
+        let (_c, ctx) = surface(48, 48);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            let mut path = line(&[(8.0, 8.0), (40.0, 8.0), (24.0, 36.0)]);
+            path.push(PathCommand::ClosePath);
+            p.stroke_path(
+                &path,
+                &Brush::Solid(Color::WHITE),
+                &stroke(6.0, LineCap::Butt, LineJoin::Miter, 10.0, Vec::new()),
+                1.0,
+            );
+        }
+        // The midpoint of the CLOSING edge (24,36)→(8,8); 13.9px from the
+        // nearest other edge, so nothing else can paint it.
+        assert!(alpha_at(&ctx, 16.0, 22.0) > 200, "the closing edge is stroked");
+    }
+
+    /// ⛔ THE WINDING RULE REACHES THE CONTEXT (AMENDMENT A3). Two nested
+    /// squares of the SAME orientation: even-odd leaves the middle empty,
+    /// non-zero fills it solid. Kills `even_odd_winding_becomes_non_zero`, under
+    /// which every boolean-op result with a hole fills solid — and the
+    /// even-odd clip that `emit_path_stroke` builds for an outside stroke stops
+    /// being a ring.
+    #[wasm_bindgen_test]
+    fn the_even_odd_rule_leaves_the_hole_that_non_zero_fills() {
+        let path = {
+            let mut v = line(&[(4.0, 4.0), (44.0, 4.0), (44.0, 44.0), (4.0, 44.0)]);
+            v.push(PathCommand::ClosePath);
+            v.extend(line(&[(16.0, 16.0), (32.0, 16.0), (32.0, 32.0), (16.0, 32.0)]));
+            v.push(PathCommand::ClosePath);
+            v
+        };
+        let probe = |rule: FillRule, x: f64, y: f64| -> u8 {
+            let (_c, ctx) = surface(48, 48);
+            {
+                let mut p = Canvas2dPainter::new(&ctx);
+                p.fill_path(&path, rule, &Brush::Solid(Color::WHITE), 1.0);
+            }
+            alpha_at(&ctx, x, y)
+        };
+        assert!(probe(FillRule::NonZero, 24.0, 24.0) > 200, "non-zero fills the middle");
+        assert_eq!(probe(FillRule::EvenOdd, 24.0, 24.0), 0, "even-odd leaves the hole");
+        assert!(probe(FillRule::EvenOdd, 8.0, 24.0) > 200, "and still fills the ring");
+    }
+
+    /// ⛔ A TRANSLUCENT COLOUR CROSSES AS `rgba(...)`, NOT `rgb(...)`. Kills
+    /// `css_colour_drops_the_alpha_form`, which survived: gradient stops carry
+    /// their opacity BAKED INTO THE STOP COLOUR
+    /// (`element_render::resolve_gradient` folds `stop.opacity` in), so this is
+    /// the only carrier a partly-transparent stop has.
+    #[wasm_bindgen_test]
+    fn a_translucent_colour_keeps_its_alpha_across_the_lowering() {
+        let (_c, ctx) = surface(8, 8);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.fill_rect(
+                Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 },
+                &Brush::Solid(Color::WHITE.with_alpha(0.5)),
+                1.0,
+            );
+        }
+        let a = alpha_at(&ctx, 4.0, 4.0);
+        assert!((120..=136).contains(&a), "a 0.5-alpha colour must land near 128, got {a}");
+    }
+
+    /// ⛔ THE OPEN-GROUP PRODUCT MULTIPLIES INTO EVERY PAINT, AND OVERLAPS
+    /// COMPOUND (contract D3 — `push_group` is NON-isolated, so the second fill
+    /// composites against the first). Kills `group_alpha_product_is_ignored`.
+    ///
+    /// ⚖️ THIS IS A PARITY ARM. `Direct2DPainter` has pinned exactly this in
+    /// pixels since B1 (`group_alphas_multiply_and_nest`,
+    /// `overlapping_fills_in_a_group_compound_rather_than_isolate`) and this
+    /// backend had nothing — the census found the two ports' pixel coverage
+    /// nearly DISJOINT, which is the one thing exact functional equivalence
+    /// cannot survive.
+    #[wasm_bindgen_test]
+    fn the_open_group_alphas_multiply_into_a_paint_and_overlaps_compound() {
+        let (_c, ctx) = surface(16, 8);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.push_group(0.5, BlendMode::Normal);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 }, &Brush::Solid(Color::WHITE), 1.0);
+            p.push_group(0.5, BlendMode::Normal);
+            p.fill_rect(Rect { x: 8.0, y: 0.0, w: 8.0, h: 8.0 }, &Brush::Solid(Color::WHITE), 1.0);
+            p.pop_group();
+            // The overlap: a SECOND paint at 0.5 over the first, non-isolated.
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 }, &Brush::Solid(Color::WHITE), 1.0);
+            p.pop_group();
+        }
+        let nested = alpha_at(&ctx, 12.0, 4.0);
+        assert!((60..=68).contains(&nested), "0.5 × 0.5 must land near 64, got {nested}");
+        let compounded = alpha_at(&ctx, 4.0, 4.0);
+        assert!(
+            (188..=196).contains(&compounded),
+            "two 0.5 paints must compound to 0.75 (≈191), not isolate to 128; got {compounded}"
+        );
+    }
+
+    /// ⛔ A GROUP'S BLEND MODE REACHES THE CONTEXT. Kills
+    /// `group_blend_never_reaches_the_context` AND the mutant that mis-mapped
+    /// one row of the blend table.
+    ///
+    /// ⚠️ SAID AS A NEGATIVE: `push_group` has NO PRODUCTION CALLER today —
+    /// `emit_element` folds group alpha and emits none (D3), so the only
+    /// producers are the recorded corpus (`group_blend.json`) and this file.
+    /// The arm is written anyway because the corpus DOES drive it through this
+    /// backend and read nothing, and because the op is part of the frozen
+    /// contract both ports implement.
+    #[wasm_bindgen_test]
+    fn a_groups_blend_mode_reaches_the_primitives_inside_it() {
+        let (_c, ctx) = surface(8, 8);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 }, &Brush::Solid(red()), 1.0);
+            p.push_group(1.0, BlendMode::Multiply);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 }, &Brush::Solid(blue()), 1.0);
+            p.pop_group();
+        }
+        // multiply(red, blue) = black; source-over would leave blue, and the
+        // mis-mapped table would screen them to magenta.
+        let px = rgba_at(&ctx, 4.0, 4.0);
+        assert_eq!((px.0, px.1, px.2), (0, 0, 0), "multiply of red and blue is black; got {px:?}");
+        assert_eq!(px.3, 255, "and it is opaque");
     }
 }
