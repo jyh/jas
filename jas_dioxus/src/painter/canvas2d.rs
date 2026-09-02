@@ -1748,6 +1748,23 @@ mod partial_arc_laws {
                  exists to kill.");
         assert_eq!(off_sweep, 0,
                    "and NOT on the edge the sweep never reached; got {off_sweep}");
+
+        // ⚖️ PARITY ARM, and it exists because the OTHER PORT pinned it first.
+        // flask's `a_stroked_partial_arc_draws_no_closing_chord` (row EG(1),
+        // Direct2D) asserts that STROKING a partial arc draws the arc only —
+        // a FILL closes the sweep with a chord back to the start, a stroke
+        // must not. Canvas2D's `ellipse()` leaves the subpath open, so it does
+        // not; that was READ from the spec and is now MEASURED here, on the
+        // same law with the same probe idea (mid-diameter, well inside both
+        // endpoints and 20px from any painted arc).
+        //
+        // ⇒ Found by intersecting the two backends' arc suites and writing the
+        // symmetric difference, which is this seat's standing prescription and
+        // the first time it has actually been carried out across a capability.
+        let chord_seat = alpha_at(&ctx, CX, CY);
+        assert_eq!(chord_seat, 0,
+                   "a STROKED partial arc must draw no closing chord; got \
+                    {chord_seat} at the centre of the diameter");
     }
 
     /// ⛔ `rotation` TURNS THE ELLIPSE'S AXES.
