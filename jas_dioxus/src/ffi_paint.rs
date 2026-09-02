@@ -1605,13 +1605,22 @@ mod tests {
                        "{name} refused with {rc}, which is not the declared gap");
         }
 
+        // ⭐ `a6_blend.json` LEFT THIS SET ON 2026-09-01 — 18/20 -> 19/20. The
+        // isolated-layer blend is built (`CLSID_D2D1Blend` against a
+        // `CopyFromRenderTarget` backdrop, once at the closing composite), so a
+        // golden carrying `multiply` on `push_isolated_layer` now reaches the
+        // presented surface.
+        //
+        // 📌 THIS ARM IS WHY THAT COULD NOT HAPPEN QUIETLY. It names the set
+        // rather than counting it, so closing a gap REDS the test that asserted
+        // the gap — which is the notice, not a nuisance.
         let names: Vec<&str> = refused.iter().map(|(n, _)| n.as_str()).collect();
-        assert_eq!(names, vec!["a6_blend.json", "group_blend.json"],
+        assert_eq!(names, vec!["group_blend.json"],
                    "the incomplete set changed -- a golden moved in or out of \
                     what a Windows app can show; painted {painted}");
-        assert_eq!(painted, jas_corpus_len() - 2,
+        assert_eq!(painted, jas_corpus_len() - 1,
                    "every other golden must paint, not merely not-refuse");
-        assert!(painted >= 18, "only {painted} goldens reach the surface");
+        assert!(painted >= 19, "only {painted} goldens reach the surface");
     }
 
     /// ⛔ THE COLOUR THE DESKTOP VERIFIER LOOKS FOR, PINNED HERE.

@@ -64,11 +64,35 @@ pub enum Capability {
     /// `push_mask_layer` / `pop_mask_layer` — the mask bracket, legal only
     /// INSIDE an isolated layer (A6 §3.2).
     MaskLayers,
-    /// A blend other than Normal, WHEREVER IT RIDES — `push_group`'s mode or
-    /// `push_isolated_layer`'s. One capability because it is one missing thing:
-    /// the effect graph. It was `NonNormalGroupBlend` until 08/29 and the name
-    /// was the bug — see the module note on FOLDING.
+    /// A blend other than Normal on the ISOLATED-LAYER bracket —
+    /// `push_isolated_layer`'s mode, consumed once at the closing composite.
+    ///
+    /// ⚖️ SPLIT BACK OUT ON 2026-09-01, AND THE HISTORY MATTERS BOTH WAYS.
+    /// It was `NonNormalGroupBlend` until 08/29, when it was merged into one
+    /// capability with the stated reason: *"one capability because it is one
+    /// missing thing: the effect graph."* **That premise held exactly as long
+    /// as neither half was built.** Direct2D now composites a non-Normal
+    /// ISOLATED LAYER (`CLSID_D2D1Blend` against a `CopyFromRenderTarget`
+    /// backdrop) and still cannot blend a NON-ISOLATED group, which needs a
+    /// per-primitive graph — a change to every draw method rather than one
+    /// composite.
+    ///
+    /// ⇒ They are now two different missing things, so one answer can no longer
+    /// be honest about both: leaving them merged forces a backend to say NO to
+    /// what it does, or YES to what it does not. Re-merge them the day the
+    /// group half lands and the original reasoning becomes true again.
+    ///
+    /// ⛔ The 08/29 rename was RIGHT FOR ITS TIME — the name was the bug then
+    /// because one gap wore two names. This is not a reversal of that judgement;
+    /// it is the same judgement applied to a state that has changed.
     NonNormalBlend,
+    /// A blend other than Normal on a NON-ISOLATED group — `push_group`'s mode,
+    /// which applies to every descendant primitive against the LIVE backdrop.
+    ///
+    /// Separate from [`Capability::NonNormalBlend`] because it is a separate
+    /// implementation: per-primitive blending, not one closing composite. See
+    /// that variant's note for why the two were merged and then split.
+    NonNormalGroupBlend,
 }
 
 impl Capability {
@@ -78,10 +102,11 @@ impl Capability {
     /// the corpus produces but this array omits REDS.
     ///
     /// [`index`]: Capability::index
-    pub const ALL: [Capability; 3] = [
+    pub const ALL: [Capability; 4] = [
         Capability::IsolatedLayers,
         Capability::MaskLayers,
         Capability::NonNormalBlend,
+        Capability::NonNormalGroupBlend,
     ];
 
     /// Bit position in [`Caps`]. The match is exhaustive on purpose: a new
@@ -92,6 +117,7 @@ impl Capability {
             Capability::IsolatedLayers => 0,
             Capability::MaskLayers => 1,
             Capability::NonNormalBlend => 2,
+            Capability::NonNormalGroupBlend => 3,
         }
     }
 }
@@ -179,7 +205,12 @@ pub(crate) fn capabilities_of(op: &serde_json::Value) -> Caps {
             Caps::NONE.with(Capability::MaskLayers)
         }
         // A Normal group is the baseline seam; an absent `blend` records Normal.
-        Some("push_group") if non_normal => Caps::NONE.with(Capability::NonNormalBlend),
+        // ⇒ THE GROUP VARIANT, not the layer one. A group is non-isolated, so
+        // its blend rides every descendant primitive against the LIVE backdrop;
+        // the layer's rides one closing composite. Mapping both to a single
+        // capability is what left a backend that had built exactly one of them
+        // unable to answer honestly about either.
+        Some("push_group") if non_normal => Caps::NONE.with(Capability::NonNormalGroupBlend),
         _ => Caps::NONE,
     }
 }
@@ -328,7 +359,9 @@ mod tests {
         );
         assert_eq!(
             super::capabilities_of(&serde_json::json!({ "cmd": "push_group", "blend": "multiply" })),
-            Caps::NONE.with(Capability::NonNormalBlend)
+            Caps::NONE.with(Capability::NonNormalGroupBlend),
+            "a GROUP's blend is the group capability -- it rides every descendant \
+             primitive against the live backdrop, not one closing composite"
         );
     }
 
@@ -388,28 +421,37 @@ mod tests {
                  every layer unroutable on a backend that lacks one");
     }
 
-    /// ⛔ AND THE NAME HAD TO CHANGE, BECAUSE THE FIXTURES SAY IT RIDES TWO OPS.
-    /// It was `NonNormalGroupBlend` until 08/29. The corpus puts a non-Normal
-    /// blend on `push_group` (`group_blend.json`) AND on `push_isolated_layer`
-    /// (`a6_blend.json`) — one missing thing (the effect graph), two carriers. A
-    /// group-only name describes one of them and silently excuses the other,
-    /// which is how the layer site became a SILENT gap the moment a backend
-    /// implemented layers.
+    /// ⛔ A NON-NORMAL BLEND RIDES TWO OPS, AND SINCE 2026-09-01 THEY ARE TWO
+    /// CAPABILITIES — ONE EACH, EXACTLY ONE.
+    ///
+    /// The corpus puts a non-Normal blend on `push_group` (`group_blend.json`)
+    /// and on `push_isolated_layer` (`a6_blend.json`). Until 08/29 those wore
+    /// two names for ONE missing thing, and the group-only name silently excused
+    /// the layer site — so they were merged. Building the layer half falsified
+    /// the merge's own premise, and they are split again.
+    ///
+    /// ⚖️ THE ASSERTION IS THE SAME SHAPE IN BOTH WORLDS and that is the point:
+    /// **each carrier must be OBSERVED, and each must map to its own
+    /// capability.** A merge shows up here as two carriers under one name; a
+    /// wrong split shows up as a carrier under the other's name; a corpus that
+    /// stopped exercising one shows up as an empty set. All three reds.
     #[test]
-    fn a_non_normal_blend_rides_two_different_ops() {
-        let mut carriers: BTreeSet<String> = BTreeSet::new();
-        for op in corpus_ops() {
-            if super::capabilities_of(&op).has(Capability::NonNormalBlend) {
-                carriers.insert(op["cmd"].as_str().unwrap().to_string());
+    fn each_blend_carrier_maps_to_its_own_capability() {
+        let carriers = |cap: Capability| -> Vec<String> {
+            let mut s: BTreeSet<String> = BTreeSet::new();
+            for op in corpus_ops() {
+                if super::capabilities_of(&op).has(cap) {
+                    s.insert(op["cmd"].as_str().unwrap().to_string());
+                }
             }
-        }
-        assert_eq!(
-            carriers.iter().cloned().collect::<Vec<_>>(),
-            vec!["push_group".to_string(), "push_isolated_layer".to_string()],
-            "the blend capability must be OBSERVED on both carriers; if the \
-             corpus ever holds only one, a name naming that one stops being \
-             wrong and the fold becomes invisible again"
-        );
+            s.into_iter().collect()
+        };
+        assert_eq!(carriers(Capability::NonNormalBlend),
+                   vec!["push_isolated_layer".to_string()],
+                   "the LAYER blend must be observed, and ONLY on the layer op");
+        assert_eq!(carriers(Capability::NonNormalGroupBlend),
+                   vec!["push_group".to_string()],
+                   "the GROUP blend must be observed, and ONLY on the group op");
     }
 
     /// `Caps` must round-trip every variant independently — a bit-index

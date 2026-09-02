@@ -215,9 +215,21 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
             "push_group" => {
                 match op.get("blend").and_then(Value::as_str) {
                     Some("normal") | None => { p.push_group(a, BlendMode::Normal); r.drawn += 1; }
-                    // B1: the 15 non-Normal modes need a backdrop snapshot plus
-                    // a CLSID_D2D1Blend graph per primitive. Not built.
-                    Some(_) => r.unsupported.push((cmd.into(), "non-Normal blend needs an effect graph")),
+                    // ⛔ STILL A GAP, AND FOR A REASON THE ISOLATED-LAYER ARM
+                    // BELOW NO LONGER SHARES. A group is NON-ISOLATED by
+                    // contract: its blend applies to every descendant primitive
+                    // against the LIVE backdrop, so it needs a snapshot and a
+                    // `CLSID_D2D1Blend` graph PER PRIMITIVE — a change to every
+                    // draw method, not one composite.
+                    //
+                    // The closing composite of an isolated layer is one image
+                    // against one backdrop, which is why that half could be
+                    // built on its own. Collapsing the two would hide that the
+                    // remaining work is a different size and shape.
+                    Some(_) => r.unsupported.push((
+                        cmd.into(),
+                        "non-Normal blend on a NON-ISOLATED group needs a per-primitive effect graph",
+                    )),
                 }
             }
             "pop_group" => { p.pop_group(); r.drawn += 1; }
@@ -271,16 +283,26 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
                 }
             }
             "pop_mask_layer" => { p.pop_mask_layer(); r.drawn += 1; }
-            // A6 IS IMPLEMENTED IN THIS BACKEND NOW (render-target swap; see
-            // painter::push_isolated_layer). The blend arm mirrors push_group's
-            // exactly: Normal composites with DrawBitmap, and the other fifteen
-            // still need the CLSID_D2D1Blend graph B1 priced. That gap is the
-            // SAME one push_group already declares -- it is a blend gap, not a
-            // layer gap, and collapsing the two would hide which is missing.
+            // ⭐ A6 AND ITS BLEND ARE BOTH IMPLEMENTED IN THIS BACKEND NOW.
+            // The layer is a render-target swap (see
+            // `painter::push_isolated_layer`); the blend is a
+            // `CLSID_D2D1Blend` graph against a `CopyFromRenderTarget`
+            // backdrop, applied ONCE at the closing composite (see
+            // `painter::composite_blended`). That is the whole of what
+            // `pop_isolated_layer`'s contract asks for: "`alpha` and `blend`
+            // are consumed once, at the closing composite."
+            //
+            // ⛔ AN UNKNOWN BLEND NAME IS STILL A GAP, NOT A DEFAULT. Falling
+            // back to `Normal` for a mode this build does not know would render
+            // a plausible wrong picture — the same law the mask-law arm above
+            // follows, and the reason `blend_from_str` returns `Option`.
             "push_isolated_layer" => {
                 match op.get("blend").and_then(Value::as_str) {
-                    Some("normal") | None => { p.push_isolated_layer(a, BlendMode::Normal); r.drawn += 1; }
-                    Some(_) => r.unsupported.push((cmd.into(), "non-Normal blend needs an effect graph")),
+                    None => { p.push_isolated_layer(a, BlendMode::Normal); r.drawn += 1; }
+                    Some(name) => match crate::painter::recording::blend_from_str(name) {
+                        Some(b) => { p.push_isolated_layer(a, b); r.drawn += 1; }
+                        None => r.unsupported.push((cmd.into(), "blend mode not understood")),
+                    },
                 }
             }
             "pop_isolated_layer" => { p.pop_isolated_layer(); r.drawn += 1; }
@@ -383,8 +405,22 @@ mod tests {
         // same with a bbox clip). What remains is the BLEND gap, which
         // push_group already declared before A6 existed and which is not a mask
         // or layer gap at all.
+        // ⭐ THIRD ENTRY RETIRED, 2026-09-01: the ISOLATED-LAYER half of the
+        // blend gap is implemented (`CLSID_D2D1Blend` against a
+        // `CopyFromRenderTarget` backdrop, applied once at the closing
+        // composite — `painter::composite_blended`). `a6_blend.json` now
+        // paints, taking the corpus from 18/20 to 19/20 through the presented
+        // surface.
+        //
+        // ⛔ WHAT REMAINS IS NARROWER AND IS NAMED THAT WAY. The entry used to
+        // read "non-Normal blend needs an effect graph", covering both brackets.
+        // Only the NON-ISOLATED group case is left, and it is a different size
+        // of job — per-primitive blending against the live backdrop, i.e. a
+        // change to every draw method rather than one composite. Leaving the old
+        // wording would have let a reader price the remainder as the half that
+        // is already done.
         const DECLARED: [&str; 1] = [
-            "non-Normal blend needs an effect graph",
+            "non-Normal blend on a NON-ISOLATED group needs a per-primitive effect graph",
         ];
         for (cmd, why) in &r.unsupported {
             assert!(DECLARED.contains(why),
@@ -437,12 +473,16 @@ mod tests {
         // and a gate deleted to let a change through has stopped being a gate.
         // What must hold at every stage is the AGREEMENT below: whatever this
         // backend answers, its report must match it, op for op.
-        assert!(!probe.supports(Capability::NonNormalBlend),
-                "the effect graph is not built (B1: a backdrop snapshot plus a \
-                 CLSID_D2D1Blend graph per blended primitive), and it is a \
-                 DECLARED gap. It rides `push_group` AND `push_isolated_layer`; \
-                 answering yes here would excuse a `blend` that reaches no point \
-                 of use.");
+        assert!(probe.supports(Capability::NonNormalBlend),
+                "the ISOLATED-LAYER blend is built (CLSID_D2D1Blend against a \
+                 CopyFromRenderTarget backdrop, once at the closing composite); \
+                 answering no here would keep the router sending masked \
+                 non-Normal elements to legacy for a backend that can draw them.");
+        assert!(!probe.supports(Capability::NonNormalGroupBlend),
+                "a NON-ISOLATED group's blend rides every descendant primitive \
+                 against the live backdrop and needs a per-primitive graph. It \
+                 is NOT built, and it is a DECLARED gap; answering yes would \
+                 excuse a `blend` that reaches no point of use.");
         // ⛔ COMPUTED FROM THE ANSWERS, NOT PINNED TO A NUMBER. This asserted
         // `== 31` in effect, by counting every op that needs ANY capability —
         // correct only while this backend denied all of them. The moment one
