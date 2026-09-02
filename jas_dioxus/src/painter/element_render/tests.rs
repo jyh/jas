@@ -2749,3 +2749,227 @@ fn segmented_stays_legacy_without_a_real_measurer() {
     assert!(element_needs_legacy(&plain, all_caps()),
             "with no real measurer, segmented text must stay legacy rather than              lay runs out against metrics that do not exist");
 }
+
+// ---------------------------------------------------------------------------
+// ROW DR capability 2 — type on a path
+// ---------------------------------------------------------------------------
+
+fn text_path(d: Vec<PathCommand>, tspans: Vec<crate::geometry::tspan::Tspan>) -> Element {
+    Element::TextPath(crate::geometry::element::TextPathElem {
+        d,
+        tspans,
+        start_offset: 0.0,
+        font_family: "sans-serif".into(),
+        font_size: 16.0,
+        font_weight: "normal".into(),
+        font_style: "normal".into(),
+        // "none" is the CSS keyword for NO decoration -- the same convention row
+        // DA had to learn the hard way, and the same one `draws_decoration_str`
+        // tests for by token.
+        text_decoration: "none".into(),
+        text_transform: String::new(),
+        font_variant: String::new(),
+        baseline_shift: String::new(),
+        line_height: String::new(),
+        letter_spacing: String::new(),
+        xml_lang: String::new(),
+        aa_mode: String::new(),
+        rotate: String::new(),
+        horizontal_scale: String::new(),
+        vertical_scale: String::new(),
+        kerning: String::new(),
+        fill: fill(Color::BLACK),
+        stroke: None,
+        common: common(),
+    })
+}
+
+/// A straight horizontal segment — the simplest possible carrier.
+fn flat_path(len: f64) -> Vec<PathCommand> {
+    vec![
+        PathCommand::MoveTo { x: 0.0, y: 50.0 },
+        PathCommand::LineTo { x: len, y: 50.0 },
+    ]
+}
+
+/// Every `push_state` transform recorded, in order — one per placed glyph.
+fn glyph_frames(cmds: &[Command]) -> Vec<Transform> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::PushState { transform } => Some(*transform),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ⭐ THE STRAIGHT-LINE ARM ROW DQ NAMED, AND IT COMES FIRST DELIBERATELY: on a
+/// horizontal segment the tangent is constant, so a failure here names the
+/// MEASURER and not the tangent maths. Isolating the two is the whole reason
+/// this arm exists beside the curved one.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn glyphs_on_a_straight_path_advance_by_their_own_measured_widths() {
+    let mut t = crate::geometry::tspan::Tspan::default_tspan();
+    t.content = "il".into(); // a narrow glyph then a taller one
+    let elem = text_path(flat_path(400.0), vec![t]);
+    assert!(!element_needs_legacy(&elem, all_caps()),
+            "a single-font, feature-free type-on-path lowers now");
+
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let frames = glyph_frames(rec.commands());
+    assert_eq!(frames.len(), 2, "one frame per glyph: {:?}", rec.commands());
+
+    // The tangent is constant on a straight run, so every frame is a pure
+    // translation: a == 1, b == 0.
+    for f in &frames {
+        assert!((f.a - 1.0).abs() < 1e-6 && f.b.abs() < 1e-6,
+                "a horizontal path must give an unrotated frame, got {f:?}");
+    }
+
+    // ⛔ AND THE SECOND GLYPH SITS A MEASURED DISTANCE ALONG, not a constant.
+    // 'i' is one of the narrowest glyphs there is; the old stub gave every
+    // character font_size * 0.55 = 8.8 at this size.
+    let m = crate::text_measure::try_make_measurer("normal normal sans-serif", 16.0)
+        .expect("resolve");
+    let (wi, wl) = (m("i"), m("l"));
+    // Each glyph is centred on its own span, so the gap between frame origins is
+    // half of each: (wi + wl) / 2.
+    let gap = frames[1].e - frames[0].e;
+    assert!((gap - (wi + wl) / 2.0).abs() < 0.5,
+            "glyph 2 sits {gap:.3} along; its own metrics give {:.3}. The stub \
+             would give 8.800 for BOTH glyphs.", (wi + wl) / 2.0);
+
+    // ⛔⛔ EACH GLYPH SITS ON ITS OWN MIDPOINT, NOT ITS LEADING EDGE — and this
+    // assertion exists because a mutation pass proved nothing else caught it.
+    //
+    // The reference places at `(offset + w/2) / total`, centring the glyph on
+    // the span it occupies. Placing at `offset / total` instead shifts every
+    // glyph half its own width back along the path — and on a curve changes the
+    // tangent each is rotated by. A mutant doing exactly that passed all 3,177
+    // tests: the GAP between consecutive glyphs is identical either way, so only
+    // the FIRST glyph's ABSOLUTE position can see it.
+    //
+    // This path starts at x = 0, so glyph one belongs at half its own width.
+    assert!((frames[0].e - wi / 2.0).abs() < 0.5,
+            "glyph 1 sits at {:.3}; centred on its own span it belongs at {:.3} \
+             (half of 'i'). ~0 means it was placed at its LEADING EDGE and the \
+             whole run is half a glyph out.", frames[0].e, wi / 2.0);
+}
+
+/// ⛔ ON A CURVE THE FRAMES MUST ROTATE, and each differently. A lowering that
+/// placed glyphs at the right points but never read the tangent would pass the
+/// straight-line arm above and fail here — which is exactly why both exist.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn glyphs_on_a_curve_are_rotated_to_the_tangent_and_no_two_alike() {
+    let mut t = crate::geometry::tspan::Tspan::default_tspan();
+    t.content = "Hello Path".into();
+    // text_path_basic.svg's own arch.
+    let arch = vec![
+        PathCommand::MoveTo { x: 0.0, y: 66.6667 },
+        PathCommand::CurveTo {
+            x1: 0.0, y1: 0.0, x2: 133.3333, y2: 0.0, x: 133.3333, y: 66.6667,
+        },
+    ];
+    let elem = text_path(arch, vec![t]);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let frames = glyph_frames(rec.commands());
+    assert!(frames.len() >= 8, "most of the run must fit: {} frames", frames.len());
+
+    // The first glyph climbs, the last descends: their tangents have opposite
+    // vertical sense. That is the arch, and no constant rotation can produce it.
+    // ⛔ THE TANGENT MUST SWEEP, MONOTONICALLY. Measured on this arch at 16pt,
+    // "Hello Path" occupies the early CLIMBING half, so every frame leans the
+    // same way (`b < 0`) while flattening toward the apex: b runs -0.986 to
+    // -0.258 and `e` advances the whole time.
+    //
+    // ⚠️ MY FIRST DRAFT ASSERTED THE LAST GLYPH DESCENDS (`b > 0`) and was
+    // simply wrong — the run covers ~39 % of the path and never reaches the far
+    // side. Asserting the SWEEP instead is both true and stronger: a lowering
+    // that read the tangent once and reused it gives an identical b every time,
+    // which no tolerance can hide.
+    for f in &frames {
+        assert!(f.b < 0.0, "every glyph leans up the climbing half, got b={:.4}", f.b);
+    }
+    for w in frames.windows(2) {
+        assert!(w[1].b > w[0].b,
+                "the tangent must flatten monotonically: {:.4} then {:.4}", w[0].b, w[1].b);
+        assert!(w[1].e > w[0].e,
+                "and the pen must advance: {:.3} then {:.3}", w[0].e, w[1].e);
+    }
+    let sweep = frames.last().unwrap().b - frames.first().unwrap().b;
+    assert!(sweep > 0.5,
+            "the frames must actually rotate across the run (sweep {sweep:.3}); a              tangent read once and reused gives a sweep of 0");
+
+    // ⛔ AND THE FRAMES MUST BE DISTINCT. Identical rotations would mean the
+    // tangent was read once and reused.
+    for w in frames.windows(2) {
+        assert!((w[0].b - w[1].b).abs() > 1e-9 || (w[0].e - w[1].e).abs() > 1e-9,
+                "two consecutive glyph frames are identical: {:?}", w);
+    }
+}
+
+/// ⭐ THE UNION CASE — `text_path_with_tspans.svg`. Per-tspan fonts on a path:
+/// the measurer is needed at RUN granularity to pick each tspan's font AND at
+/// GLYPH granularity to place along the curve, and the pen carries ACROSS runs.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_tspan_font_override_on_a_path_changes_where_later_glyphs_land() {
+    let mk = |second_size: Option<f64>| {
+        let mut a = crate::geometry::tspan::Tspan::default_tspan();
+        a.content = "MMMM".into();
+        a.font_size = second_size; // the FIRST run carries the override
+        let mut b = crate::geometry::tspan::Tspan::default_tspan();
+        b.content = "x".into();
+        text_path(flat_path(2000.0), vec![a, b])
+    };
+    let frames_of = |e: &Element| {
+        let mut rec = RecordingPainter::new();
+        emit_element(&mut rec, e, 1.0);
+        glyph_frames(rec.commands())
+    };
+
+    let plain = frames_of(&mk(None));
+    let big = frames_of(&mk(Some(48.0)));
+    assert_eq!(plain.len(), 5, "MMMM + x");
+    assert_eq!(big.len(), 5);
+
+    // The final glyph belongs to the SECOND tspan, whose font is unchanged; only
+    // the pen it starts from differs, because the FIRST run got wider.
+    let plain_last = plain.last().unwrap().e;
+    let big_last = big.last().unwrap().e;
+    assert!(big_last > plain_last * 2.0,
+            "a 48pt first run must push the final glyph far further along \
+             ({big_last:.3} vs {plain_last:.3}) -- equal means one measurer was \
+             used for every tspan");
+}
+
+/// ⛔ THE ROUTER STILL REFUSES WHAT ROW DR DID NOT TAKE. The clause narrowed.
+#[test]
+fn a_type_on_path_feature_row_dr_did_not_take_stays_legacy() {
+    let mut base = crate::geometry::tspan::Tspan::default_tspan();
+    base.content = "hi".into();
+
+    // An empty path, and empty content, both paint nothing either way.
+    assert!(element_needs_legacy(&text_path(vec![], vec![base.clone()]), all_caps()),
+            "an empty path has nowhere to place glyphs");
+    let empty = crate::geometry::tspan::Tspan::default_tspan();
+    assert!(element_needs_legacy(&text_path(flat_path(100.0), vec![empty]), all_caps()),
+            "empty content places nothing");
+
+    // A real decoration is an extra primitive that must follow the CURVE.
+    let Element::TextPath(mut e) = text_path(flat_path(100.0), vec![base.clone()]) else {
+        unreachable!()
+    };
+    e.text_decoration = "underline".into();
+    assert!(element_needs_legacy(&Element::TextPath(e), all_caps()),
+            "a curved underline is not in row DR");
+
+    // A tspan feature the segmented walk also refuses.
+    let mut rotated = base.clone();
+    rotated.rotate = Some(20.0);
+    assert!(element_needs_legacy(&text_path(flat_path(100.0), vec![rotated]), all_caps()),
+            "a rotated tspan is not in row DR");
+}

@@ -177,8 +177,14 @@ pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
     // four typographic features is explicitly NOT required before it opens —
     // each is a later narrowing step with its own pixel arm, never a silent
     // widening. `TextPath` is untouched: type-on-path is PH3 shaping work.
-    if matches!(elem, Element::TextPath(_)) {
-        return true;
+    // ⭐ ROW DR capability 2: TYPE ON A PATH lowers now, when its run is
+    // single-font, feature-free, and a real measurer exists. The clause narrows;
+    // it does not vanish -- see `text_path_needs_legacy` for the table of what
+    // stays legacy and the trigger that opens each.
+    if let Element::TextPath(tp) = elem {
+        if text_path_needs_legacy(tp) {
+            return true;
+        }
     }
     if let Element::Text(t) = elem {
         if text_needs_legacy(t) {
@@ -476,6 +482,184 @@ fn emit_segmented_text(p: &mut dyn Painter, e: &crate::geometry::element::TextEl
             return;
         };
         cx += measure(&t.content);
+    }
+}
+
+/// Does this type-on-path element use something the lowering does not carry?
+///
+/// ⭐ ROW DR, capability 2. The lowering carries the guide line, the per-glyph
+/// frame, and the measured advance along the path — which is everything
+/// `text_path_basic.svg`, `text_path_with_tspans.svg` and
+/// `locked_all_kinds.svg` use. Everything else is refused BY NAME:
+///
+/// | excluded | why it is out today | what opens it |
+/// |---|---|---|
+/// | per-tspan font overrides | the walk uses ONE font for the whole run; a mixed run needs a measurer per tspan AND a per-tspan advance | the segmented walk's own loop, reused here |
+/// | `letter_spacing` / `kerning` | tracking folds into the advance, which is the very quantity the placement uses | thread it into the measurer + a drift arm |
+/// | `baseline_shift` | offsets the glyph normal to the path, not along it | a normal-offset arm |
+/// | `text_decoration` | an underline must follow the CURVE, not a straight run | a curved-decoration lowering |
+///
+/// ⛔ AND A MISSING MEASURER IS REFUSED HERE TOO, for a sharper reason than in
+/// the segmented case: text-on-path advances the pen PER GLYPH and reads the
+/// path's point AND TANGENT at the accumulated offset. Row DQ measured the stub
+/// drifting 20.590 units by glyph ten of `"Hello Path"` — 11 % of the path —
+/// which does not merely space the glyphs wrongly, it ROTATES them wrongly and
+/// slides the tail off the end of the curve.
+fn text_path_needs_legacy(e: &crate::geometry::element::TextPathElem) -> bool {
+    if e.d.is_empty() || e.content().is_empty() {
+        // Nothing to place. Legacy paints nothing either way, and refusing keeps
+        // the reference goldens from modelling an empty route.
+        return true;
+    }
+    // Per-tspan FONT overrides are carried (row DR capability 2 reuses
+    // capability 1's per-run measurer); the five FEATURES are not, and are
+    // refused by the same predicate the segmented walk uses.
+    if e.tspans.iter().any(tspan_needs_legacy) {
+        return true;
+    }
+    if !e.letter_spacing.is_empty()
+        || !e.kerning.is_empty()
+        || !e.baseline_shift.is_empty()
+        || draws_decoration_str(&e.text_decoration)
+    {
+        return true;
+    }
+    // ⛔ EVERY EFFECTIVE FONT MUST RESOLVE, not just the parent's.
+    // `text_path_with_tspans.svg` puts `font-style="italic"` on its second run,
+    // so a check that only asked about the parent would pass an element whose
+    // second tspan then had no measurer -- and the walk would truncate mid-run.
+    // Asking here refuses the whole element instead, before anything is placed.
+    text_path_fonts(e).any(|(font, size)| {
+        crate::text_measure::try_make_measurer(&font, size).is_none()
+    })
+}
+
+/// The (font, size) each run of a type-on-path element is drawn with: the
+/// tspan's own overrides falling back to the element's. Shared by the router and
+/// the lowering so the two cannot disagree about what will be asked for.
+fn text_path_fonts(
+    e: &crate::geometry::element::TextPathElem,
+) -> impl Iterator<Item = (String, f64)> + '_ {
+    let parent_bold = e.font_weight == "bold";
+    let parent_italic = e.font_style == "italic" || e.font_style == "oblique";
+    e.tspans.iter().filter(|t| !t.content.is_empty()).map(move |t| {
+        let family = t.font_family.as_deref().unwrap_or(&e.font_family);
+        let size = t.font_size.unwrap_or(e.font_size);
+        let weight = match t.font_weight.as_deref() {
+            Some(w) => w,
+            None => if parent_bold { "bold" } else { "normal" },
+        };
+        let style = match t.font_style.as_deref() {
+            Some(st) => st,
+            None => if parent_italic { "italic" } else { "normal" },
+        };
+        (format!("{style} {weight} {family}"), size)
+    })
+}
+
+/// [`draws_decoration`] over a bare string — `TextPathElem` carries the same
+/// CSS field as `TextElem` and the same `"none"` convention.
+fn draws_decoration_str(decoration: &str) -> bool {
+    decoration
+        .split_whitespace()
+        .any(|tok| tok == "underline" || tok == "line-through")
+}
+
+/// Type on a path — row DR, capability 2.
+///
+/// Mirrors `canvas::render`'s `Element::TextPath` arm exactly: the faint guide
+/// line first, then one glyph at a time, each translated to its point on the
+/// curve and rotated to the tangent there.
+///
+/// ⛔ THE PEN IS ARC LENGTH, NOT X. Each glyph is placed at the offset reached
+/// by summing the advances before it, converted to a normalised `t` along the
+/// flattened path. That makes the measurer's accuracy compound: an error does
+/// not shift one glyph, it shifts every glyph after it AND changes the tangent
+/// each is rotated by. Row DQ measured the old stub drifting 20.590 units by
+/// glyph ten.
+fn emit_text_on_path(p: &mut dyn Painter, e: &crate::geometry::element::TextPathElem, eff: f64) {
+    // The guide line, at the same grey the reference uses. Drawn even when the
+    // text cannot be placed, because it is the path itself.
+    let guide = Brush::Solid(Color::new(180.0 / 255.0, 180.0 / 255.0, 180.0 / 255.0, 1.0));
+    p.stroke_path(
+        &e.d,
+        &guide,
+        &StrokeStyle {
+            width: 1.0,
+            cap: crate::geometry::element::LineCap::Butt,
+            join: crate::geometry::element::LineJoin::Miter,
+            miter: 10.0,
+            dash: Vec::new(),
+        },
+        eff * 0.4,
+    );
+
+    let Some(f) = e.fill.as_ref() else { return };
+
+    // Arc length of the flattened path — the denominator every offset is
+    // normalised by.
+    let pts = crate::geometry::element::flatten_path_commands(&e.d);
+    let mut total = 0.0_f64;
+    for i in 1..pts.len() {
+        let (dx, dy) = (pts[i].0 - pts[i - 1].0, pts[i].1 - pts[i - 1].1);
+        total += (dx * dx + dy * dy).sqrt();
+    }
+    if total <= 0.0 {
+        return;
+    }
+
+    // ⭐ ONE RUN PER TSPAN, GLYPHS WITHIN IT — the union row DQ predicted:
+    // `text_path_with_tspans.svg` needs the measurer at RUN granularity (to pick
+    // each tspan's font) and at GLYPH granularity (to place along the curve).
+    // The pen is arc length and carries ACROSS tspans, so a run's font affects
+    // where every later run's glyphs land.
+    let mut offset = e.start_offset * total;
+    let fonts: Vec<(String, f64)> = text_path_fonts(e).collect();
+    for (t, (font, size)) in e.tspans.iter().filter(|t| !t.content.is_empty()).zip(fonts) {
+        let Some(measure) = crate::text_measure::try_make_measurer(&font, size) else {
+            // Unreachable: the router refused any element with an unresolvable
+            // effective font. Stopping rather than guessing keeps that true even
+            // if the two ever disagree.
+            return;
+        };
+        for ch in t.content.chars() {
+        let s = ch.to_string();
+        let w = measure(&s);
+        // The glyph sits at its own MIDPOINT along the path, which is what puts
+        // it visually centred on the curve rather than hanging off its leading
+        // edge.
+        let t = (offset + w / 2.0) / total;
+        if t > 1.0 {
+            break;
+        }
+        if t >= 0.0 {
+            let (px, py) = crate::geometry::measure::path_point_at_offset(&e.d, t);
+            let t2 = ((offset + w) / total).min(1.0);
+            let (px2, py2) = crate::geometry::measure::path_point_at_offset(&e.d, t2);
+            let angle = (py2 - py).atan2(px2 - px);
+            let (sin, cos) = angle.sin_cos();
+            // translate(px,py) · rotate(angle), as one matrix — the seam has no
+            // separate translate/rotate ops and does not need them.
+            p.push_state(super::Transform {
+                a: cos, b: sin, c: -sin, d: cos, e: px, f: py,
+            });
+            p.draw_text_run(
+                &TextRun::FastRun {
+                    font: font.clone(),
+                    size,
+                    text: s,
+                    letter_spacing: 0.0,
+                    // The reference's own offsets inside the glyph frame.
+                    x: -w / 2.0,
+                    y: size * 0.35,
+                },
+                &Brush::Solid(f.color),
+                eff * f.opacity,
+            );
+            p.pop_state();
+        }
+        offset += w;
+        }
     }
 }
 
@@ -1210,8 +1394,9 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
                 }
             }
         }
-        // Legacy-only or unhandled in the PH1 reference renderer.
-        Element::TextPath(_) => {}
+        // ⭐ ROW DR capability 2. The router has already guaranteed a
+        // single-font, feature-free run with a resolvable face.
+        Element::TextPath(tp) => emit_text_on_path(p, tp, eff),
     }
 
     if pushed {
