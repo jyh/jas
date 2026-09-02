@@ -121,6 +121,18 @@ pub struct Direct2DPainter<'a> {
     /// invisible to a display-list golden. Counting the failure keeps the
     /// matching pop balanced and composites nothing. Same law as canvas2d.
     failed_layers: usize,
+    /// ⛔ A TEXT RUN THIS BACKEND COULD NOT DRAW, HELD FOR THE CALLER TO COLLECT.
+    ///
+    /// `Painter::draw_text_run` returns `()` and the trait is FROZEN, so a
+    /// failure inside it has no return path — which is exactly how
+    /// `draw_fast_run`'s `bool` came to be discarded and an unresolvable font
+    /// came to draw nothing while reporting nothing. This field is the return
+    /// path the signature cannot have: the painter records, and `replay` drains
+    /// it into the report through [`take_text_refusal`](Self::take_text_refusal).
+    ///
+    /// Same shape as `failed_layers` above and for the same reason — a failure
+    /// the display list cannot express must still be counted somewhere.
+    text_refusal: Option<&'static str>,
 }
 
 impl<'a> Direct2DPainter<'a> {
@@ -132,7 +144,18 @@ impl<'a> Direct2DPainter<'a> {
             layers: Vec::new(),
             masks: Vec::new(),
             failed_layers: 0,
+            text_refusal: None,
         }
+    }
+
+    /// Take the last text refusal, if the previous `draw_text_run` could not
+    /// draw. Clears it, so one refusal is reported once.
+    ///
+    /// ⚠️ NOT ON THE `Painter` TRAIT, deliberately. The trait is frozen and a
+    /// backend-specific collection point is not contract vocabulary; `replay`
+    /// holds a concrete `&mut Direct2DPainter` and can simply ask.
+    pub fn take_text_refusal(&mut self) -> Option<&'static str> {
+        self.text_refusal.take()
     }
 
     /// Re-composite `body` through `mask` under `law`, onto a fresh surface.
@@ -703,9 +726,21 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let Some(b) = self.brush(brush, a) else { return };
         match run {
             TextRun::FastRun { font, size, text: t, letter_spacing, x, y } => {
-                text::draw_fast_run(&self.rt(), &b, font, *size, t, *letter_spacing, *x, *y);
+                // ⛔ THE RETURN VALUE IS NO LONGER DISCARDED. `draw_fast_run`
+                // has always answered `bool`; dropping it made an unresolvable
+                // family draw nothing and say nothing — the silent-drop class,
+                // in the one op nobody had driven end to end.
+                if !text::draw_fast_run(&self.rt(), &b, font, *size, t, *letter_spacing, *x, *y) {
+                    self.text_refusal =
+                        Some("text run not drawn: the font could not be resolved");
+                }
             }
-            _ => {}
+            // PlacedGlyphs is PH3 shaping and unbuilt. It is recorded as a
+            // refusal for the same reason: a mode that draws nothing must not
+            // be counted as a frame that drew.
+            TextRun::PlacedGlyphs { .. } => {
+                self.text_refusal = Some("text run not drawn: PlacedGlyphs mode not built");
+            }
         }
     }
 

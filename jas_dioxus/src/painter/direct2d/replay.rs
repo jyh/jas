@@ -246,7 +246,19 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
                             y: f(run, "y"),
                         };
                         match op.get("brush").and_then(brush) {
-                            Some(br) => { p.draw_text_run(&tr, &br, a); r.drawn += 1; }
+                            Some(br) => {
+                                p.draw_text_run(&tr, &br, a);
+                                // ⛔ ASK WHETHER IT ACTUALLY DREW. `Painter::draw_text_run`
+                                // returns `()` (the trait is frozen), so "it was called"
+                                // and "it drew" are different facts and only the painter
+                                // knows the second. Counting the call as `drawn` is what
+                                // let an unresolvable font present a document with its
+                                // text missing at `JAS_PAINT_OK`.
+                                match p.take_text_refusal() {
+                                    None => r.drawn += 1,
+                                    Some(why) => r.unsupported.push((cmd.into(), why)),
+                                }
+                            }
                             None => r.unsupported.push((cmd.into(), "brush kind not understood")),
                         }
                     }
@@ -601,5 +613,80 @@ mod tests {
         assert!(r.is_complete(), "gradients still unsupported: {:?}", r.unsupported);
         let px = t.read_bgra().unwrap();
         assert!(px.chunks(4).any(|q| q[3] != 0), "the gradient scene painted nothing");
+    }
+}
+
+#[cfg(test)]
+mod text_refusal_tests {
+    use super::*;
+    use crate::painter::direct2d::device::HeadlessTarget;
+    use serde_json::json;
+
+    fn run_scene(font: &str) -> ReplayReport {
+        let t = HeadlessTarget::new(64, 32).expect("target");
+        let scene = json!([{
+            "cmd": "draw_text_run",
+            "run": { "mode": "fast_run", "font": font, "size": 16.0,
+                     "text": "Hi", "letter_spacing": 0.0, "x": 4.0, "y": 20.0 },
+            "brush": { "kind": "solid",
+                       "color": { "space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 } },
+            "alpha": 1.0
+        }]);
+        unsafe {
+            t.target().BeginDraw();
+            let mut p = Direct2DPainter::new(t.target());
+            let r = replay(&mut p, &scene);
+            let _ = t.target().EndDraw(None, None);
+            r
+        }
+    }
+
+    /// ⛔ A FONT THAT CANNOT BE RESOLVED MUST REACH THE REPORT, NOT VANISH.
+    ///
+    /// `draw_fast_run` has always returned `bool` and `draw_text_run` has always
+    /// DISCARDED it, so a text run whose family DirectWrite cannot find drew
+    /// nothing and said nothing: no gap, no error, no log. Measured 2026-09-01 —
+    /// the seam sends a CSS shorthand (`"normal normal sans-serif"`) that
+    /// `resolve_family` could not parse, so **every** production text run would
+    /// have taken this path the moment the router opened: a document presenting
+    /// with its text missing, at `JAS_PAINT_OK`.
+    ///
+    /// ⭐ AND THE RECORDED CORPUS COULD NEVER HAVE CAUGHT IT. `scene_golden.json`
+    /// carries `"font": "sans-serif"` — the BARE form, which happens to be the
+    /// one this backend wanted — while the live seam builds the shorthand. The
+    /// replay lane was green on a string the seam does not send.
+    #[test]
+    fn an_unresolvable_font_is_reported_as_a_gap_not_drawn_silently() {
+        let r = run_scene("No Such Family At All 12345");
+        assert_eq!(r.drawn, 0, "nothing was drawn, so nothing may be counted drawn");
+        assert_eq!(r.unsupported.len(), 1, "the refusal must reach the report: {r:?}");
+        assert!(r.unsupported[0].1.contains("font"),
+                "the reason must name the font: {:?}", r.unsupported[0]);
+        assert!(!r.is_complete(),
+                "an incomplete report is what becomes JAS_PAINT_SCENE_INCOMPLETE -- \
+                 without it the host presents a document with its text missing at OK");
+    }
+
+    /// ⛔ THE CONTROL, and it is what keeps the arm above honest: a font that
+    /// DOES resolve must still be counted DRAWN. A backend that reported every
+    /// text run as a gap would satisfy the assertion above and be useless.
+    #[test]
+    fn a_resolvable_font_still_draws_and_is_not_reported() {
+        let r = run_scene("sans-serif");
+        assert_eq!(r.drawn, 1, "a resolvable font draws: {r:?}");
+        assert!(r.unsupported.is_empty(), "and reports nothing: {r:?}");
+        assert!(r.is_complete());
+    }
+
+    /// ⭐ AND THE SEAM'S OWN STRING GOES THROUGH THE WHOLE PIPE. This is the
+    /// 0-vs-615 measurement expressed at the REPLAY level rather than the pixel
+    /// level: before row DA this exact scene was counted `drawn` and inked
+    /// nothing.
+    #[test]
+    fn the_shorthand_the_seam_sends_replays_as_drawn() {
+        let r = run_scene("normal normal sans-serif");
+        assert_eq!(r.drawn, 1,
+                   "the CSS shorthand the seam builds must replay as DRAWN: {r:?}");
+        assert!(r.is_complete());
     }
 }

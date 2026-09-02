@@ -1993,4 +1993,93 @@ mod tests {
             JAS_PAINT_NULL_ENGINE
         );
     }
+
+    // -----------------------------------------------------------------------
+    // ROW DA — what the SVG corpus can present, and what still cannot
+    // -----------------------------------------------------------------------
+
+    /// The first capability a layer still needs, or `None` if it paints.
+    fn still_needs(e: &crate::geometry::element::Element, caps: Caps) -> Option<&'static str> {
+        use crate::geometry::element::Element;
+        if crate::painter::element_render::element_needs_legacy(e, caps) {
+            return Some(match e {
+                Element::TextPath(_) => "TEXT-ON-PATH",
+                Element::Text(t) if !t.render_is_flat() => "SEGMENTED-TEXT(tspans)",
+                Element::Text(_) => "TEXT-FEATURE(spacing/kerning/baseline/decoration)",
+                _ => "other",
+            });
+        }
+        if let Some(ch) = e.children() {
+            for c in ch {
+                if let Some(w) = still_needs(c, caps) {
+                    return Some(w);
+                }
+            }
+        }
+        if let Some(m) = e.common().mask.as_ref() {
+            if let Some(w) = still_needs(&m.subtree, caps) {
+                return Some(w);
+            }
+        }
+        None
+    }
+
+    /// ⭐ ROW DA's PREDICTION, HELD AS AN ARM: **flat text flips 4 documents,
+    /// and the 5 that stay are named with the capability they are waiting on.**
+    ///
+    /// ⛔ IT NAMES THEM RATHER THAN COUNTING THEM. "61 of 70" is satisfied by any
+    /// 61; a later narrowing that closed `text_path_basic` while silently
+    /// breaking `text_basic` would keep the count and change the picture. The
+    /// SET is the claim.
+    ///
+    /// ⚠️ AND IT COUNTS **DOCUMENTS**, NOT LAYERS, because that is what a user
+    /// opens. `locked_all_kinds.svg` holds a flat `<text>` AND a `<textPath>`,
+    /// so five documents *contain* newly-paintable flat text while only four
+    /// flip. Counting layers reports 5 and is wrong about what anyone can see.
+    #[test]
+    fn the_svg_corpus_presents_what_row_da_predicted() {
+        let (dev, _ctx) = warp();
+        let t = tex(&dev, false);
+        let surface: IDXGISurface = t.cast().expect("surface");
+        let target = SurfaceTarget::from_dxgi_surface(&surface).expect("target");
+        let caps = Caps::of(&Direct2DPainter::new(target.render_target()));
+
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_fixtures/svg");
+        let mut paths: Vec<_> = std::fs::read_dir(dir)
+            .expect("svg fixtures")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|x| x == "svg").unwrap_or(false))
+            .collect();
+        paths.sort();
+
+        let mut total = 0usize;
+        let mut refusing: Vec<(String, &'static str)> = Vec::new();
+        for path in paths {
+            let txt = std::fs::read_to_string(&path).expect("read");
+            let doc = crate::geometry::svg::svg_to_document(&txt);
+            total += 1;
+            if let Some(why) = doc.layers.iter().find_map(|l| still_needs(l, caps)) {
+                refusing.push((path.file_name().unwrap().to_string_lossy().into_owned(), why));
+            }
+        }
+
+        assert_eq!(total, 70, "the fixture corpus changed size");
+        assert_eq!(
+            refusing,
+            vec![
+                ("locked_all_kinds.svg".to_string(), "TEXT-ON-PATH"),
+                ("setup_text_ab_bold_b.svg".to_string(), "SEGMENTED-TEXT(tspans)"),
+                ("text_path_basic.svg".to_string(), "TEXT-ON-PATH"),
+                ("text_path_with_tspans.svg".to_string(), "TEXT-ON-PATH"),
+                ("text_with_tspans.svg".to_string(), "SEGMENTED-TEXT(tspans)"),
+            ],
+            "the refusing SET changed -- a document moved in or out of what a \
+             Windows app can present. 65 of 70 should now paint (was 61): flat \
+             text flipped complex_document, setup_text_hello, text_basic and \
+             text_xml_space_preserve. Each remaining entry names the capability \
+             it waits on, and each is a LATER narrowing with its own arm."
+        );
+        assert_eq!(total - refusing.len(), 65, "65 of 70 documents present");
+    }
 }

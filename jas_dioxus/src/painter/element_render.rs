@@ -172,8 +172,18 @@ pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
     // now takes the core's own four `evaluate_with` arms and draws the OUTPUT as
     // geometry (the helm's 2026-09-01 design word), which is what a Windows app
     // renders, with `canvas::render` not involved at all.
-    if matches!(elem, Element::Text(_) | Element::TextPath(_)) {
+    // ⭐ ROW DA — THE TEXT CLAUSE NARROWS; IT DOES NOT VANISH. Ruled 2026-09-01:
+    // FLAT FIRST, router narrowed to FLAT-AND-FEATURE-FREE, and parity on the
+    // four typographic features is explicitly NOT required before it opens —
+    // each is a later narrowing step with its own pixel arm, never a silent
+    // widening. `TextPath` is untouched: type-on-path is PH3 shaping work.
+    if matches!(elem, Element::TextPath(_)) {
         return true;
+    }
+    if let Element::Text(t) = elem {
+        if text_needs_legacy(t) {
+            return true;
+        }
     }
     // ⭐ OUTLINE MODE IS NO LONGER A LEGACY REASON (node 2). This clause used to
     // read `if elem.visibility() == Visibility::Outline { return true }`, and
@@ -295,6 +305,61 @@ pub fn subtree_needs_legacy(elem: &Element, caps: Caps) -> bool {
         }
     }
     false
+}
+
+/// ⭐ ROW DA's PREDICATE: does this text element still need the legacy renderer?
+///
+/// The 2026-09-01 ruling opened the router to text that is **flat AND feature
+/// free**, and to nothing else. Each excluded feature is named here with the
+/// trigger that opens it, so the next narrowing step is a diff against a list
+/// rather than a rediscovery.
+///
+/// | excluded | why it is out today | what opens it |
+/// |---|---|---|
+/// | not `render_is_flat()` (tspans) | the seam emits ONE run; segmented text needs per-tspan font, decoration and a shared baseline | a segmented lowering + its own pixel arm |
+/// | `letter_spacing` | `FastRun` carries the field, but the seam hardcodes `0.0`; production computes tracking + kerning together | thread the computed advance + an advance-width arm |
+/// | `kerning` | same computation as above — `render.rs` folds both into ONE uniform advance | as above; they open together because they are one number |
+/// | `baseline_shift` | super/sub re-scale the size AND offset the baseline (`0.7×`, `∓`) | a baseline arm proving the offset and the scale |
+/// | `text_decoration` | underline/strike are extra primitives, not glyph state | a decoration lowering + a pixel arm |
+///
+/// ⛔ "ABSENT" IS NOT THE SAME TEST FOR ALL FOUR, AND ASSUMING IT WAS OPENED THE
+/// ROUTER FOR EXACTLY NOTHING.
+///
+/// Three of these are `#[serde(default)]` `String`s where `""` means "not set".
+/// **`text_decoration` is not**: the SVG parser writes the CSS keyword
+/// `"none"`, which is the explicit statement that there IS no decoration. A
+/// first cut here tested `!is_empty()` on all four, so every plain `<text>` in
+/// the corpus carried `"none"`, read as "has a decoration", and stayed legacy —
+/// **all four documents this row exists to flip kept refusing, and the count
+/// would have been the only thing to notice.**
+///
+/// So decoration is tested the way `render.rs` tests it — for the TOKENS it
+/// acts on (`underline`, `line-through`, split on whitespace), not for
+/// emptiness. That is the authority, not a convention guessed at from the type.
+///
+/// ⚠️ THIS IS DELIBERATELY CONSERVATIVE. A text element carrying any of the
+/// four stays legacy EVEN IF the value would turn out to be a no-op (a
+/// `letter-spacing: 0em`, say). Parsing them to decide would mean implementing
+/// the feature in order to refuse it, and a refusal that has to be right about
+/// the thing it refuses is the wrong shape for a gate.
+pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
+    !t.render_is_flat()
+        || !t.letter_spacing.is_empty()
+        || !t.kerning.is_empty()
+        || !t.baseline_shift.is_empty()
+        || draws_decoration(t)
+}
+
+/// Does this text carry a decoration that would draw an extra primitive?
+///
+/// The same test `render.rs` makes (`text_decoration.split_whitespace()` for
+/// `underline` / `line-through`), so the router refuses exactly what the
+/// renderer would have drawn — no more (which would keep plain text on legacy
+/// forever) and no less (which would drop an underline silently).
+fn draws_decoration(t: &crate::geometry::element::TextElem) -> bool {
+    t.text_decoration
+        .split_whitespace()
+        .any(|tok| tok == "underline" || tok == "line-through")
 }
 
 /// A stroke aligned inside/outside rather than centered (RP3 helper).
