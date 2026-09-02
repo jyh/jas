@@ -18,6 +18,11 @@ pub mod surface;
 // so the default web build and the wasm target never see it.
 #[cfg(feature = "ffi")]
 pub mod ffi;
+// ⭐ ROW DU / NODE 5: the pointer's own entry point. Same gate as `ffi`: it is
+// part of the same C surface, and `jas_dispatch_event` next door is what the
+// tools it drives emit INTO.
+#[cfg(feature = "ffi")]
+pub mod ffi_pointer;
 // Boundary instrumentation for S-C's chatter measurement. Behind the same gate
 // as the surface it counts: a counter that could be compiled without the
 // boundary would be a counter with nothing to count.

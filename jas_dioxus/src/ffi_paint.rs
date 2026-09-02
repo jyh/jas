@@ -678,6 +678,81 @@ pub unsafe extern "C" fn jas_paint_document(
     engine.with_document(|doc| unsafe { paint_document_into(surface, doc) })
 }
 
+/// Paint ONE FRAME: the engine's live document, then the active tool's overlay
+/// on top of it.
+///
+/// ⭐ THE DIFFERENCE FROM `jas_paint_document` IS THE ONLY REASON A SELECTION IS
+/// VISIBLE. That function draws the document alone, so a selected element looks
+/// exactly like an unselected one and a marquee in flight is not on the screen
+/// at all. Node 5 needs the overlay, and node 5's PR 1 is what made the overlay
+/// reachable from a non-web painter.
+///
+/// ⛔ A SEPARATE EXPORT RATHER THAN A BEHAVIOUR CHANGE. `jas_paint_document` is
+/// what the 21/21 golden and 70/70 document receipts were photographed through;
+/// silently adding an overlay to it would change every one of those pictures and
+/// invalidate the receipts without anyone asking. A shell that wants the overlay
+/// says so.
+///
+/// The refusal contract is identical: a document carrying something this backend
+/// cannot draw is refused BEFORE `BeginDraw`, so the surface is never touched.
+///
+/// # Safety
+/// As [`jas_paint_document`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_paint_frame(
+    engine: *mut c_void,
+    surface: *mut c_void,
+    width: f32,
+    height: f32,
+) -> i32 {
+    let engine = engine.cast::<crate::ffi::JasEngine>();
+    let Some(engine) = (unsafe { engine.as_ref() }) else {
+        return JAS_PAINT_NULL_ENGINE;
+    };
+    let _ = (width, height);
+    unsafe { paint_frame_into(surface, engine) }
+}
+
+/// The frame walk, split out for the same reason `paint_document_into` is:
+/// the surface plumbing is one thing and what gets drawn is another.
+unsafe fn paint_frame_into(surface: *mut c_void, engine: &crate::ffi::JasEngine) -> i32 {
+    if surface.is_null() {
+        return JAS_PAINT_NULL_SURFACE;
+    }
+    let surface: &IDXGISurface = match unsafe { IDXGISurface::from_raw_borrowed(&surface) } {
+        Some(s) => s,
+        None => return JAS_PAINT_NOT_A_SURFACE,
+    };
+    let target = match SurfaceTarget::from_dxgi_surface(surface) {
+        Ok(t) => t,
+        Err(e) => return e.code().0,
+    };
+    let rt = target.render_target();
+
+    let caps = {
+        let painter = Direct2DPainter::new(rt);
+        Caps::of(&painter)
+    };
+    // Same refusal, same place: before anything touches the surface. The
+    // OVERLAY is not subject to it -- it is this crate's own drawing, built
+    // from primitives every backend supports, not user content of unknown
+    // shape.
+    if engine.with_document(|doc| first_unpaintable(doc, caps).is_some()) {
+        return JAS_PAINT_DOCUMENT_INCOMPLETE;
+    }
+
+    unsafe {
+        rt.BeginDraw();
+        rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        let mut painter = Direct2DPainter::new(rt);
+        crate::ffi_pointer::emit_frame(engine, &mut painter);
+        if let Err(e) = rt.EndDraw(None, None) {
+            return e.code().0;
+        }
+    }
+    JAS_PAINT_OK
+}
+
 // ---------------------------------------------------------------------------
 // THE EMBEDDED CORPUS, HANDED ACROSS THE BOUNDARY (node 4)
 // ---------------------------------------------------------------------------

@@ -795,6 +795,130 @@ internal sealed unsafe class SwapChainHost : IDisposable
     }
 
     /// <summary>
+    /// ⭐ NODE 5's RECEIPT: open a document, DRIVE A REAL POINTER GESTURE
+    /// through the C ABI, and present the frame WITH THE TOOL OVERLAY on it.
+    ///
+    /// Three things are being shown at once, and the status line reports all
+    /// three so the photograph and the claim are checked by the same run:
+    /// the document drew, the pointer selected something (a COUNT, read back
+    /// from the core), and the overlay is on the screen.
+    ///
+    /// ⛔ THIS METHOD KNOWS NOTHING ABOUT THE DOCUMENT. It does not know where
+    /// the elements are, what a marquee is, or what a click means -- it sends
+    /// a press, some moves and a release in PHYSICAL pixels and asks the core
+    /// what happened. That is BL1 held at the one place it is easiest to break.
+    /// </summary>
+    public bool RenderSelection(string svgPath)
+    {
+        if (_swapChain is null) { LastStatus = "no swapchain"; return false; }
+
+        byte[] bytes;
+        try { bytes = System.IO.File.ReadAllBytes(svgPath); }
+        catch (Exception ex)
+        {
+            LastStatus = $"SELECTION FAILED: cannot read '{svgPath}': {ex.GetType().Name}";
+            return false;
+        }
+
+        var engine = JasCore.jas_engine_new();
+        if (engine == IntPtr.Zero)
+        {
+            LastStatus = "SELECTION FAILED: the core would not create a session";
+            return false;
+        }
+        try
+        {
+            var lrc = JasCore.jas_load_svg(engine, bytes, (nuint)bytes.Length);
+            if (lrc != JasCore.PaintOk)
+            {
+                LastStatus = $"SELECTION FAILED to open '{System.IO.Path.GetFileName(svgPath)}': "
+                           + JasCore.Explain(lrc);
+                return false;
+            }
+
+            // The scale is REPORTED, not applied. See jas_set_dpi_scale.
+            var src = JasCore.jas_set_dpi_scale(engine, _scaleX);
+            if (src != JasCore.PaintOk)
+            {
+                LastStatus = $"SELECTION FAILED: the core refused scale {_scaleX}: "
+                           + JasCore.Explain(src);
+                return false;
+            }
+            var trc = JasCore.jas_set_tool(engine, 0);
+            if (trc != JasCore.PaintOk)
+            {
+                LastStatus = "SELECTION FAILED: the core refused tool 0: " + JasCore.Explain(trc);
+                return false;
+            }
+
+            // A marquee across most of the surface, in PHYSICAL pixels. Held
+            // mid-drag on purpose: the dashed rectangle is only on the screen
+            // while the button is down, and it is half of what this receipt
+            // is for.
+            double x0 = _width * 0.06, y0 = _height * 0.06;
+            double x1 = _width * 0.94, y1 = _height * 0.94;
+            JasCore.jas_pointer_event(engine, JasCore.PointerPress, x0, y0, 0);
+            JasCore.jas_pointer_event(engine, JasCore.PointerMove,
+                (x0 + x1) / 2, (y0 + y1) / 2, JasCore.ModDragging);
+            JasCore.jas_pointer_event(engine, JasCore.PointerMove, x1, y1, JasCore.ModDragging);
+
+            var hold = int.TryParse(Environment.GetEnvironmentVariable("SB_SCENE_HOLD"), out var hv)
+                ? hv : 12;
+            string? failure = null;
+            var rc = JasCore.PaintOk;
+            for (var f = 0; f < hold; f++)
+            {
+                _swapChain.GetBuffer<IDXGISurface>(0, out var back);
+                var ptr = Marshal.GetComInterfaceForObject(back, typeof(IDXGISurface));
+                try { rc = JasCore.jas_paint_frame(engine, ptr, _width, _height); }
+                finally { Marshal.Release(ptr); }
+                if (rc != JasCore.PaintOk) break;
+                var hr = _swapChain.Present(1, default);
+                if (hr.Failed) { failure = $"Present 0x{hr.Value:X8}"; break; }
+            }
+
+            if (rc != JasCore.PaintOk)
+            {
+                LastStatus = $"SELECTION REFUSED '{System.IO.Path.GetFileName(svgPath)}': "
+                           + JasCore.Explain(rc);
+                return false;
+            }
+            if (failure is not null)
+            {
+                LastStatus = $"SELECTION FAILED presenting: {failure}";
+                return false;
+            }
+
+            // Now finish the gesture and ask the core what it selected.
+            JasCore.jas_pointer_event(engine, JasCore.PointerRelease, x1, y1, 0);
+            var n = JasCore.jas_selection_len(engine);
+            if (n == nuint.MaxValue)
+            {
+                LastStatus = "SELECTION FAILED: the core reported no session";
+                return false;
+            }
+            // ⛔ SELECTING NOTHING IS A FAILURE HERE, not a quiet success. A
+            // marquee over the whole document that selects zero elements means
+            // the pointer never reached the tool, and the picture would look
+            // identical either way.
+            if (n == 0)
+            {
+                LastStatus = "SELECTION FAILED: the gesture crossed but selected 0 elements";
+                return false;
+            }
+
+            LastStatus = $"SELECTION '{System.IO.Path.GetFileName(svgPath)}' -- pointer drove "
+                       + $"tool 0 through the C ABI at scale {_scaleX:0.##}: {n} element(s) "
+                       + $"selected, marquee overlay presented through {SurfaceLabel()} on {Adapter}";
+            return true;
+        }
+        finally
+        {
+            JasCore.jas_engine_free(engine);
+        }
+    }
+
+    /// <summary>
     /// One golden, painted into the back buffer and presented <c>hold</c> times.
     ///
     /// The back buffer is re-fetched and re-released around EVERY present, the

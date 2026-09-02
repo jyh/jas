@@ -89,6 +89,30 @@
  */
 #define SMOOTH_SIZE 100.0
 
+/**
+ * Which pointer transition crossed. Values are ABI: the shell sends these
+ * integers, so they are appended to, never renumbered.
+ */
+#define KIND_PRESS 0
+
+#define KIND_MOVE 1
+
+#define KIND_RELEASE 2
+
+/**
+ * Modifier bit flags. ABI, like the kinds above.
+ */
+#define MOD_SHIFT (1 << 0)
+
+#define MOD_ALT (1 << 1)
+
+/**
+ * Whether a button is down during a move. Canvas has no such concept; the
+ * tool trait does (`on_move`'s `dragging`), and the shell is the only thing
+ * that knows.
+ */
+#define MOD_DRAGGING (1 << 2)
+
 #if (defined(JAS_WITH_D2D) && defined(_WIN32))
 /**
  * Status codes for the spike seam. Deliberately NOT `JasStatus`: that enum is
@@ -561,6 +585,81 @@ struct JasBytes jas_widget_tree(struct JasEngine *e,
                                 const uint8_t *ctx_json,
                                 uintptr_t ctx_len);
 
+/**
+ * How many tools the shell may select. Pairs with [`jas_tool_name`].
+ *
+ * # Safety
+ * Takes no pointers; `unsafe` only for ABI uniformity with the rest of the
+ * surface, so a C consumer sees one calling convention.
+ */
+uintptr_t jas_tool_count(void);
+
+/**
+ * The tool id at `index`, as static UTF-8 bytes plus a length.
+ *
+ * ⛔ NO ALLOCATION AND NO `jas_free`. The ids are `&'static str` in this
+ * binary, so the pointer is valid for the process and the shell copies what it
+ * needs -- the same shape `jas_corpus_name` uses, and the reason BL4 has
+ * nothing to say about it. Returns NULL and writes 0 for an index out of
+ * range: a wild pointer is what the fail-closed doctrine is FOR.
+ *
+ * # Safety
+ * `out_len` must be NULL or valid for one `usize` write.
+ */
+const uint8_t *jas_tool_name(uintptr_t index, uintptr_t *out_len);
+
+/**
+ * Select the tool the pointer drives, by index into [`TOOL_IDS`].
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+JasStatus jas_set_tool(struct JasEngine *e, uintptr_t index);
+
+/**
+ * Tell the core the display's physical-pixels-per-DIP.
+ *
+ * ⛔ REFUSED, NOT CLAMPED, on a scale that cannot describe a display. A zero
+ * or negative scale would divide every pointer into infinity or mirror it, and
+ * a NaN would poison every comparison downstream silently -- the kind of bad
+ * input that is far better named at the boundary than debugged at the tool.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+JasStatus jas_set_dpi_scale(struct JasEngine *e, double scale);
+
+/**
+ * ⭐ THE POINTER ITSELF. `x` and `y` are PHYSICAL pixels -- what the shell's
+ * swapchain is sized in -- and this function converts them to DIPs before the
+ * tool sees them. `mods` is a bitmask of `MOD_*`.
+ *
+ * The tool it drives emits document ops through the channel that already
+ * exists; nothing about a marquee, a hit test or a tool mode crosses the
+ * boundary. That is the whole point (BL1).
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+JasStatus jas_pointer_event(struct JasEngine *e, uint32_t kind, double x, double y, uint32_t mods);
+
+/**
+ * How many elements the session currently has selected.
+ *
+ * ⭐ IT EXISTS SO A RECEIPT CAN SAY A NUMBER. A photograph of a marquee proves
+ * the overlay drew; it does not prove the pointer SELECTED anything, and those
+ * are the two halves of node 5. With this the shell's own title bar carries the
+ * count, so the picture and the claim are checked by the same run.
+ *
+ * `usize::MAX` for a null engine -- a count cannot express a refusal, and
+ * returning 0 there would read as "nothing selected", which is a lie about a
+ * session that does not exist.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+uintptr_t jas_selection_len(struct JasEngine *e);
+
 #if (defined(JAS_WITH_D2D) && defined(_WIN32))
 /**
  * Paint the S-B probe pattern into a caller-owned DXGI surface.
@@ -679,6 +778,32 @@ int32_t jas_load_svg(void *engine, const uint8_t *svg, uintptr_t len);
  * not transferred.
  */
 int32_t jas_paint_document(void *engine, void *surface, float width, float height);
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Paint ONE FRAME: the engine's live document, then the active tool's overlay
+ * on top of it.
+ *
+ * ⭐ THE DIFFERENCE FROM `jas_paint_document` IS THE ONLY REASON A SELECTION IS
+ * VISIBLE. That function draws the document alone, so a selected element looks
+ * exactly like an unselected one and a marquee in flight is not on the screen
+ * at all. Node 5 needs the overlay, and node 5's PR 1 is what made the overlay
+ * reachable from a non-web painter.
+ *
+ * ⛔ A SEPARATE EXPORT RATHER THAN A BEHAVIOUR CHANGE. `jas_paint_document` is
+ * what the 21/21 golden and 70/70 document receipts were photographed through;
+ * silently adding an overlay to it would change every one of those pictures and
+ * invalidate the receipts without anyone asking. A shell that wants the overlay
+ * says so.
+ *
+ * The refusal contract is identical: a document carrying something this backend
+ * cannot draw is refused BEFORE `BeginDraw`, so the surface is never touched.
+ *
+ * # Safety
+ * As [`jas_paint_document`].
+ */
+int32_t jas_paint_frame(void *engine, void *surface, float width, float height);
 #endif
 
 #if (defined(JAS_WITH_D2D) && defined(_WIN32))
