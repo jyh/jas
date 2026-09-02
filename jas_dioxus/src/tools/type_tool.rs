@@ -18,9 +18,8 @@
 //!    only collapse to a *single* document-undo step (a snapshot taken
 //!    on first edit).
 
-use web_sys::CanvasRenderingContext2d;
+use crate::painter::overlay_ctx::OverlayCtx;
 
-use crate::canvas::ctx_guard::CtxSaveGuard;
 use crate::document::controller::Controller;
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
@@ -293,7 +292,7 @@ impl TypeTool {
             .and_then(|tsp| session.try_paste_tspans(tsp, text))
             .or_else(|| {
                 let tsp = elem_tspans.as_ref()?;
-                let payload = crate::workspace::clipboard::rich_clipboard_read_matching(text)?;
+                let payload = super::rich_clipboard_read_matching(text)?;
                 Some(crate::geometry::tspan::insert_tspans_at(
                     tsp, session.insertion, &payload))
             });
@@ -592,8 +591,7 @@ impl CanvasTool for TypeTool {
                         if let Some((_, payload)) =
                             self.session.as_ref().unwrap().tspan_clipboard.clone()
                         {
-                            crate::workspace::clipboard::rich_clipboard_write(
-                                text.clone(), payload);
+                            super::rich_clipboard_write(text.clone(), payload);
                         }
                         clipboard_write(text);
                     }
@@ -615,8 +613,7 @@ impl CanvasTool for TypeTool {
                         if let Some((_, payload)) =
                             self.session.as_ref().unwrap().tspan_clipboard.clone()
                         {
-                            crate::workspace::clipboard::rich_clipboard_write(
-                                text.clone(), payload);
+                            super::rich_clipboard_write(text.clone(), payload);
                         }
                         clipboard_write(text);
                         self.ensure_snapshot(model);
@@ -754,7 +751,7 @@ impl CanvasTool for TypeTool {
         self.end_session(model);
     }
 
-    fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
+    fn draw_overlay(&self, model: &Model, ctx: &mut OverlayCtx) {
         // Tool state coords (drag rect, caret position, selection
         // highlights) are stored in document space. The canvas ctx
         // arrives here in viewport (post-restore) space, so apply
@@ -769,9 +766,13 @@ impl CanvasTool for TypeTool {
         // transform compounds on it. The guard pops on every path, so the
         // balance is the type system's job, not the reader's. Bound to a
         // NAMED variable: a bare `_` would drop it on the spot.
-        let _ctx_guard = CtxSaveGuard::new(ctx);
-        ctx.translate(model.view_offset_x, model.view_offset_y).ok();
-        ctx.scale(model.zoom_level, model.zoom_level).ok();
+        // ⭐ ROW DU: the CtxSaveGuard is GONE, not forgotten. It scoped a
+        // canvas save/restore to the end of this body; `OverlayCtx::finish()`
+        // closes every frame `translate`/`scale` opened at exactly that point,
+        // so the balance is still the type system's job -- it just moved into
+        // the facade, where every overlay gets it instead of each remembering.
+        ctx.translate(model.view_offset_x, model.view_offset_y);
+        ctx.scale(model.zoom_level, model.zoom_level);
         // Stroke / line widths are zoom-invariant: divide by the
         // zoom so a 1px screen line stays 1px regardless of
         // zoom_level.
@@ -793,10 +794,9 @@ impl CanvasTool for TypeTool {
                     ctx.set_stroke_style_str("rgb(100,100,100)");
                     ctx.set_line_width(inv_zoom);
                     let dash = 4.0 * inv_zoom;
-                    ctx.set_line_dash(&js_sys::Array::of2(&dash.into(), &dash.into()).into())
-                        .ok();
+                    ctx.set_line_dash(&[dash, dash]);
                     ctx.stroke_rect(rx, ry, rw, rh);
-                    ctx.set_line_dash(&js_sys::Array::new().into()).ok();
+                    ctx.set_line_dash(&[]);
                 }
             }
 

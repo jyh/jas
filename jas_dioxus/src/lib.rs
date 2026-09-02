@@ -57,7 +57,12 @@ pub mod panels;
 // so the instrument of the cross-port prime directive ran in exactly one build
 // configuration. The gate now lives per-submodule and per-function.
 pub mod recorder;
-#[cfg(feature = "web")]
+// ⭐ ROW DU / PR 1: `tools/` is NO LONGER WEB-GATED. Its only web dependency was
+// `CanvasTool::draw_overlay`'s `&CanvasRenderingContext2d` -- one method of
+// fifteen, over 251 drawing call sites and zero input ones. The overlay now
+// draws through `painter::overlay_ctx::OverlayCtx` over a `&mut dyn Painter`,
+// so a native shell can drive the tool seam and a Windows app can take the
+// pointer (row DU, ruled 2026-09-02 option (c)).
 pub mod tools;
 // NOT gated as a whole. Nine of its seventeen submodules are pure data and pure
 // functions -- layout types, the layout-op dispatcher, pane geometry, key-chord
