@@ -678,6 +678,81 @@ pub unsafe extern "C" fn jas_paint_document(
     engine.with_document(|doc| unsafe { paint_document_into(surface, doc) })
 }
 
+/// Paint ONE FRAME: the engine's live document, then the active tool's overlay
+/// on top of it.
+///
+/// ⭐ THE DIFFERENCE FROM `jas_paint_document` IS THE ONLY REASON A SELECTION IS
+/// VISIBLE. That function draws the document alone, so a selected element looks
+/// exactly like an unselected one and a marquee in flight is not on the screen
+/// at all. Node 5 needs the overlay, and node 5's PR 1 is what made the overlay
+/// reachable from a non-web painter.
+///
+/// ⛔ A SEPARATE EXPORT RATHER THAN A BEHAVIOUR CHANGE. `jas_paint_document` is
+/// what the 21/21 golden and 70/70 document receipts were photographed through;
+/// silently adding an overlay to it would change every one of those pictures and
+/// invalidate the receipts without anyone asking. A shell that wants the overlay
+/// says so.
+///
+/// The refusal contract is identical: a document carrying something this backend
+/// cannot draw is refused BEFORE `BeginDraw`, so the surface is never touched.
+///
+/// # Safety
+/// As [`jas_paint_document`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_paint_frame(
+    engine: *mut c_void,
+    surface: *mut c_void,
+    width: f32,
+    height: f32,
+) -> i32 {
+    let engine = engine.cast::<crate::ffi::JasEngine>();
+    let Some(engine) = (unsafe { engine.as_ref() }) else {
+        return JAS_PAINT_NULL_ENGINE;
+    };
+    let _ = (width, height);
+    unsafe { paint_frame_into(surface, engine) }
+}
+
+/// The frame walk, split out for the same reason `paint_document_into` is:
+/// the surface plumbing is one thing and what gets drawn is another.
+unsafe fn paint_frame_into(surface: *mut c_void, engine: &crate::ffi::JasEngine) -> i32 {
+    if surface.is_null() {
+        return JAS_PAINT_NULL_SURFACE;
+    }
+    let surface: &IDXGISurface = match unsafe { IDXGISurface::from_raw_borrowed(&surface) } {
+        Some(s) => s,
+        None => return JAS_PAINT_NOT_A_SURFACE,
+    };
+    let target = match SurfaceTarget::from_dxgi_surface(surface) {
+        Ok(t) => t,
+        Err(e) => return e.code().0,
+    };
+    let rt = target.render_target();
+
+    let caps = {
+        let painter = Direct2DPainter::new(rt);
+        Caps::of(&painter)
+    };
+    // Same refusal, same place: before anything touches the surface. The
+    // OVERLAY is not subject to it -- it is this crate's own drawing, built
+    // from primitives every backend supports, not user content of unknown
+    // shape.
+    if engine.with_document(|doc| first_unpaintable(doc, caps).is_some()) {
+        return JAS_PAINT_DOCUMENT_INCOMPLETE;
+    }
+
+    unsafe {
+        rt.BeginDraw();
+        rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        let mut painter = Direct2DPainter::new(rt);
+        crate::ffi_pointer::emit_frame(engine, &mut painter);
+        if let Err(e) = rt.EndDraw(None, None) {
+            return e.code().0;
+        }
+    }
+    JAS_PAINT_OK
+}
+
 // ---------------------------------------------------------------------------
 // THE EMBEDDED CORPUS, HANDED ACROSS THE BOUNDARY (node 4)
 // ---------------------------------------------------------------------------
@@ -1621,22 +1696,25 @@ mod tests {
                        "{name} refused with {rc}, which is not the declared gap");
         }
 
-        // ⭐ `a6_blend.json` LEFT THIS SET ON 2026-09-01 — 18/20 -> 19/20. The
-        // isolated-layer blend is built (`CLSID_D2D1Blend` against a
-        // `CopyFromRenderTarget` backdrop, once at the closing composite), so a
-        // golden carrying `multiply` on `push_isolated_layer` now reaches the
-        // presented surface.
+        // ⭐⭐ ROW CM's DEFINITION OF DONE, MET 2026-09-02: THE SET IS EMPTY.
+        // EVERY recorded golden reaches the presented surface.
         //
-        // 📌 THIS ARM IS WHY THAT COULD NOT HAPPEN QUIETLY. It names the set
-        // rather than counting it, so closing a gap REDS the test that asserted
-        // the gap — which is the notice, not a nuisance.
+        // The road: 18/20 at first light (node 4) → 19/20 when the isolated
+        // layer blend landed (#75) → all of them here, when the NON-ISOLATED
+        // group blend did. Both blend carriers are drawn now, so this backend
+        // declares no gaps at all.
+        //
+        // ⛔ EMPTY IS ASSERTED AS A SET, NOT A COUNT, and it matters more now
+        // than when the list had entries: a regression would otherwise read as
+        // "20 of 21, close enough". Any entry at all arrives with the golden's
+        // NAME and the status that refused it.
         let names: Vec<&str> = refused.iter().map(|(n, _)| n.as_str()).collect();
-        assert_eq!(names, vec!["group_blend.json"],
-                   "the incomplete set changed -- a golden moved in or out of \
-                    what a Windows app can show; painted {painted}");
-        assert_eq!(painted, jas_corpus_len() - 1,
-                   "every other golden must paint, not merely not-refuse");
-        assert!(painted >= 19, "only {painted} goldens reach the surface");
+        assert_eq!(names, Vec::<&str>::new(),
+                   "a golden left the presentable set -- painted {painted} of {}",
+                   jas_corpus_len());
+        assert_eq!(painted, jas_corpus_len(),
+                   "every golden must paint, not merely not-refuse");
+        assert!(painted >= 20, "only {painted} goldens reach the surface");
     }
 
     /// ⛔ THE COLOUR THE DESKTOP VERIFIER LOOKS FOR, PINNED HERE.
@@ -1992,5 +2070,97 @@ mod tests {
             unsafe { jas_load_svg(core::ptr::null_mut(), svg.as_ptr(), svg.len()) },
             JAS_PAINT_NULL_ENGINE
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // ROW DA — what the SVG corpus can present, and what still cannot
+    // -----------------------------------------------------------------------
+
+    /// The first capability a layer still needs, or `None` if it paints.
+    fn still_needs(e: &crate::geometry::element::Element, caps: Caps) -> Option<&'static str> {
+        use crate::geometry::element::Element;
+        if crate::painter::element_render::element_needs_legacy(e, caps) {
+            return Some(match e {
+                Element::TextPath(_) => "TEXT-ON-PATH",
+                Element::Text(t) if !t.render_is_flat() => "SEGMENTED-TEXT(tspans)",
+                Element::Text(_) => "TEXT-FEATURE(spacing/kerning/baseline/decoration)",
+                _ => "other",
+            });
+        }
+        if let Some(ch) = e.children() {
+            for c in ch {
+                if let Some(w) = still_needs(c, caps) {
+                    return Some(w);
+                }
+            }
+        }
+        if let Some(m) = e.common().mask.as_ref() {
+            if let Some(w) = still_needs(&m.subtree, caps) {
+                return Some(w);
+            }
+        }
+        None
+    }
+
+    /// ⭐ ROW DA's PREDICTION, HELD AS AN ARM: **flat text flips 4 documents,
+    /// and the 5 that stay are named with the capability they are waiting on.**
+    ///
+    /// ⛔ IT NAMES THEM RATHER THAN COUNTING THEM. "61 of 70" is satisfied by any
+    /// 61; a later narrowing that closed `text_path_basic` while silently
+    /// breaking `text_basic` would keep the count and change the picture. The
+    /// SET is the claim.
+    ///
+    /// ⚠️ AND IT COUNTS **DOCUMENTS**, NOT LAYERS, because that is what a user
+    /// opens. `locked_all_kinds.svg` holds a flat `<text>` AND a `<textPath>`,
+    /// so five documents *contain* newly-paintable flat text while only four
+    /// flip. Counting layers reports 5 and is wrong about what anyone can see.
+    #[test]
+    fn the_svg_corpus_presents_what_row_da_predicted() {
+        let (dev, _ctx) = warp();
+        let t = tex(&dev, false);
+        let surface: IDXGISurface = t.cast().expect("surface");
+        let target = SurfaceTarget::from_dxgi_surface(&surface).expect("target");
+        let caps = Caps::of(&Direct2DPainter::new(target.render_target()));
+
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_fixtures/svg");
+        let mut paths: Vec<_> = std::fs::read_dir(dir)
+            .expect("svg fixtures")
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().map(|x| x == "svg").unwrap_or(false))
+            .collect();
+        paths.sort();
+
+        let mut total = 0usize;
+        let mut refusing: Vec<(String, &'static str)> = Vec::new();
+        for path in paths {
+            let txt = std::fs::read_to_string(&path).expect("read");
+            let doc = crate::geometry::svg::svg_to_document(&txt);
+            total += 1;
+            if let Some(why) = doc.layers.iter().find_map(|l| still_needs(l, caps)) {
+                refusing.push((path.file_name().unwrap().to_string_lossy().into_owned(), why));
+            }
+        }
+
+        assert_eq!(total, 70, "the fixture corpus changed size");
+
+        // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
+        // in the SVG corpus now presents through the Windows surface — 70 of 70.
+        //
+        // The road: 51/70 before row CV → 61/70 after CV (LIVE) → 65/70 after
+        // row DA (flat text) → 67/70 after DR capability 1 (segmented) → 70/70
+        // here (type on a path).
+        //
+        // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
+        // matters MORE now than when the list had entries: a later change that
+        // pushed one document back out would otherwise read as "69, close
+        // enough". An empty vec says the corpus is WHOLE, and any entry at all
+        // is a regression that arrives with a name and a capability attached.
+        assert_eq!(
+            refusing,
+            Vec::<(String, &'static str)>::new(),
+            "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
+        );
+        assert_eq!(total - refusing.len(), 70, "the whole corpus presents");
     }
 }

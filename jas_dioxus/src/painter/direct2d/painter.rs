@@ -109,6 +109,19 @@ pub struct Direct2DPainter<'a> {
     frames: Vec<Frame>,
     /// The owned multiply stack. See the module note: NOT a layer.
     group_alphas: Vec<f64>,
+    /// The BLEND of each open `push_group`, parallel to `group_alphas`.
+    ///
+    /// ⭐ ROW CM's last golden. A group is NON-ISOLATED by contract: its blend
+    /// applies to every descendant primitive against the LIVE backdrop, one
+    /// primitive at a time. That is a different job from the isolated layer's
+    /// single closing composite, and it is why this is a stack of MODES rather
+    /// than a surface.
+    ///
+    /// ⛔ THE INNERMOST WINS, not a product. The seam's own contract: "a nested
+    /// `push_group` resets it and leaf primitives inherit the innermost group's
+    /// blend -- matching today, where a Group's own mode is overridden by its
+    /// children." Compounding them would invent a behaviour no port has.
+    group_blends: Vec<BlendMode>,
     /// Open isolated layers, innermost last. Empty is the common case and
     /// costs one `is_empty` per draw.
     layers: Vec<LayerTarget>,
@@ -121,6 +134,18 @@ pub struct Direct2DPainter<'a> {
     /// invisible to a display-list golden. Counting the failure keeps the
     /// matching pop balanced and composites nothing. Same law as canvas2d.
     failed_layers: usize,
+    /// ⛔ A TEXT RUN THIS BACKEND COULD NOT DRAW, HELD FOR THE CALLER TO COLLECT.
+    ///
+    /// `Painter::draw_text_run` returns `()` and the trait is FROZEN, so a
+    /// failure inside it has no return path — which is exactly how
+    /// `draw_fast_run`'s `bool` came to be discarded and an unresolvable font
+    /// came to draw nothing while reporting nothing. This field is the return
+    /// path the signature cannot have: the painter records, and `replay` drains
+    /// it into the report through [`take_text_refusal`](Self::take_text_refusal).
+    ///
+    /// Same shape as `failed_layers` above and for the same reason — a failure
+    /// the display list cannot express must still be counted somewhere.
+    text_refusal: Option<&'static str>,
 }
 
 impl<'a> Direct2DPainter<'a> {
@@ -129,10 +154,22 @@ impl<'a> Direct2DPainter<'a> {
             base_rt: rt,
             frames: Vec::new(),
             group_alphas: Vec::new(),
+            group_blends: Vec::new(),
             layers: Vec::new(),
             masks: Vec::new(),
             failed_layers: 0,
+            text_refusal: None,
         }
+    }
+
+    /// Take the last text refusal, if the previous `draw_text_run` could not
+    /// draw. Clears it, so one refusal is reported once.
+    ///
+    /// ⚠️ NOT ON THE `Painter` TRAIT, deliberately. The trait is frozen and a
+    /// backend-specific collection point is not contract vocabulary; `replay`
+    /// holds a concrete `&mut Direct2DPainter` and can simply ask.
+    pub fn take_text_refusal(&mut self) -> Option<&'static str> {
+        self.text_refusal.take()
     }
 
     /// Re-composite `body` through `mask` under `law`, onto a fresh surface.
@@ -339,6 +376,68 @@ impl<'a> Direct2DPainter<'a> {
         true
     }
 
+    /// The innermost open group's blend, when it is not Normal.
+    ///
+    /// ⚠️ NOT A PRODUCT OVER THE STACK. See `group_blends`: the contract says
+    /// the innermost wins and a nested group RESETS it.
+    fn active_group_blend(&self) -> Option<BlendMode> {
+        match self.group_blends.last() {
+            Some(b) if *b != BlendMode::Normal => Some(*b),
+            _ => None,
+        }
+    }
+
+    /// Draw one primitive, blending it against the LIVE backdrop when a
+    /// non-Normal group is open.
+    ///
+    /// ⭐ ROW CM's last golden, and the shape of the job is the whole point.
+    /// `pop_isolated_layer` blends ONCE, at the close, because a layer is
+    /// isolated: its contents are flattened first and meet the backdrop as one
+    /// image. A GROUP is non-isolated, so each primitive must meet the backdrop
+    /// on its own -- **including the backdrop its siblings just changed**. That
+    /// is what makes two overlapping half-multiplies compound to 0.20 rather
+    /// than flatten to 0.40, and it is asserted by
+    /// `overlapping_primitives_in_a_blended_group_compound_rather_than_isolate`.
+    ///
+    /// ⇒ So this is a surface + composite PER PRIMITIVE. It is the expensive
+    /// shape, and it is the correct one; a spike backend buys correctness here
+    /// and prices speed later.
+    ///
+    /// ⛔ THE BRUSH IS BUILT INSIDE THE CLOSURE, on the scratch target, never
+    /// hoisted. A D2D brush belongs to the render target that created it, so a
+    /// brush made on the parent and used on the scratch is a resource crossing a
+    /// boundary it does not cross -- the same class as the
+    /// `GetIUnknownForObject` heap corruption this lane already found once.
+    fn blended_primitive(&mut self, f: impl FnOnce(&ID2D1RenderTarget)) {
+        let Some(blend) = self.active_group_blend() else {
+            f(&self.rt());
+            return;
+        };
+        let parent = self.rt();
+        let Some((brt, rt)) = self.open_surface() else {
+            // A scratch we cannot make must not silently drop the primitive:
+            // drawing it unblended is a wrong colour, drawing nothing is a
+            // missing shape, and the second is the worse failure here.
+            f(&parent);
+            return;
+        };
+        f(&rt);
+        unsafe { let _ = rt.EndDraw(None, None); }
+        let Ok(bmp) = (unsafe { brt.GetBitmap() }) else { return };
+
+        // The composite runs at identity: the primitive was already drawn under
+        // the parent's transform, so applying it again would double it.
+        let mut saved = Matrix3x2::identity();
+        unsafe { parent.GetTransform(&mut saved) };
+        unsafe { parent.SetTransform(&Matrix3x2::identity()) };
+        if !self.composite_blended(&parent, &bmp, 1.0, blend) {
+            unsafe {
+                parent.DrawBitmap(&bmp, None, 1.0, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None);
+            }
+        }
+        unsafe { parent.SetTransform(&saved) };
+    }
+
     /// THE TARGET EVERY DRAW GOES TO: the innermost open isolated layer, or the
     /// base render target when none is open.
     ///
@@ -386,6 +485,11 @@ impl<'a> Direct2DPainter<'a> {
     }
 
     fn solid(&self, c: Color, alpha: f64) -> Result<ID2D1SolidColorBrush> {
+        Self::solid_on(&self.rt(), c, alpha)
+    }
+
+    /// `solid`, on a NAMED target — see `brush_on` for why that matters.
+    fn solid_on(rt: &ID2D1RenderTarget, c: Color, alpha: f64) -> Result<ID2D1SolidColorBrush> {
         // to_rgba() is the canonical accessor -- Color is an enum over
         // Rgb/Hsb/Cmyk and canvas2d.rs goes through the same call, so both
         // backends see identical numbers rather than each converting.
@@ -398,7 +502,7 @@ impl<'a> Direct2DPainter<'a> {
             // alpha MULTIPLIES it rather than replacing it.
             a: (a * alpha) as f32,
         };
-        unsafe { self.rt().CreateSolidColorBrush(&col, None) }
+        unsafe { rt.CreateSolidColorBrush(&col, None) }
     }
 
     /// GAMMA_2_2, NOT GAMMA_1_0 -- a divergence pin, not a default.
@@ -410,6 +514,13 @@ impl<'a> Direct2DPainter<'a> {
     fn stops(&self, stops: &[crate::painter::ColorStop], alpha: f64)
         -> Option<windows::Win32::Graphics::Direct2D::ID2D1GradientStopCollection>
     {
+        Self::stops_on(&self.rt(), stops, alpha)
+    }
+
+    /// `stops`, on a NAMED target — see `brush_on`.
+    fn stops_on(rt: &ID2D1RenderTarget, stops: &[crate::painter::ColorStop], alpha: f64)
+        -> Option<windows::Win32::Graphics::Direct2D::ID2D1GradientStopCollection>
+    {
         let v: Vec<D2D1_GRADIENT_STOP> = stops.iter().map(|s| {
             let (r, g, b, a) = s.color.to_rgba();
             D2D1_GRADIENT_STOP {
@@ -417,19 +528,29 @@ impl<'a> Direct2DPainter<'a> {
                 color: D2D1_COLOR_F { r: r as f32, g: g as f32, b: b as f32, a: (a * alpha) as f32 },
             }
         }).collect();
-        unsafe { self.rt().CreateGradientStopCollection(&v, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) }.ok()
+        unsafe { rt.CreateGradientStopCollection(&v, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) }.ok()
     }
 
     fn brush(&self, b: &Brush, alpha: f64) -> Option<ID2D1Brush> {
+        Self::brush_on(&self.rt(), b, alpha)
+    }
+
+    /// `brush`, on a NAMED target.
+    ///
+    /// ⛔ A D2D BRUSH BELONGS TO THE RENDER TARGET THAT CREATED IT. The
+    /// per-primitive group-blend path draws onto a scratch surface, so its
+    /// brushes must be created there -- a brush made on the parent and used on
+    /// the scratch is a resource crossing a boundary it does not cross.
+    fn brush_on(rt: &ID2D1RenderTarget, b: &Brush, alpha: f64) -> Option<ID2D1Brush> {
         match b {
-            Brush::Solid(c) => self.solid(*c, alpha).ok().map(|s| s.into()),
+            Brush::Solid(c) => Self::solid_on(rt, *c, alpha).ok().map(|s| s.into()),
             Brush::Linear(g) => {
-                let sc = self.stops(&g.stops, alpha)?;
+                let sc = Self::stops_on(rt, &g.stops, alpha)?;
                 let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
                     startPoint: windows_numerics::Vector2 { X: g.x0 as f32, Y: g.y0 as f32 },
                     endPoint: windows_numerics::Vector2 { X: g.x1 as f32, Y: g.y1 as f32 },
                 };
-                unsafe { self.rt().CreateLinearGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
+                unsafe { rt.CreateLinearGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
             }
             Brush::Radial(g) => {
                 // D2D radial is ONE circle plus an origin offset; the contract
@@ -440,7 +561,7 @@ impl<'a> Direct2DPainter<'a> {
                 if g.r0 != 0.0 {
                     return None;
                 }
-                let sc = self.stops(&g.stops, alpha)?;
+                let sc = Self::stops_on(rt, &g.stops, alpha)?;
                 let props = D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES {
                     center: windows_numerics::Vector2 { X: g.x1 as f32, Y: g.y1 as f32 },
                     gradientOriginOffset: windows_numerics::Vector2 {
@@ -449,15 +570,23 @@ impl<'a> Direct2DPainter<'a> {
                     radiusX: g.r1 as f32,
                     radiusY: g.r1 as f32,
                 };
-                unsafe { self.rt().CreateRadialGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
+                unsafe { rt.CreateRadialGradientBrush(&props, None, &sc) }.ok().map(|b| b.into())
             }
         }
     }
 
     fn stroke_style(&self, s: &StrokeStyle, emit_width: f64) -> Option<ID2D1StrokeStyle> {
+        Self::stroke_style_on(&self.rt(), s, emit_width)
+    }
+
+    /// `stroke_style`, on a NAMED target. A stroke style is a FACTORY resource
+    /// and the scratch shares the parent's factory, so this is uniformity with
+    /// `brush_on` rather than a correctness requirement — but a reader should
+    /// not have to work out which of the two it is at every call site.
+    fn stroke_style_on(rt: &ID2D1RenderTarget, s: &StrokeStyle, emit_width: f64) -> Option<ID2D1StrokeStyle> {
         let props = convert::stroke_properties(s);
         let dashes = convert::dash_multiples(&s.dash, emit_width);
-        let factory = unsafe { self.rt().GetFactory() }.ok()?;
+        let factory = unsafe { rt.GetFactory() }.ok()?;
         unsafe {
             factory
                 .CreateStrokeStyle(&props, if dashes.is_empty() { None } else { Some(&dashes) })
@@ -512,7 +641,17 @@ impl<'a> Painter for Direct2DPainter<'a> {
     /// | `IsolatedLayers` | **yes** | `push_isolated_layer` opens a real surface (a render-target swap, B1's finding: `D2D1_LAYER_PARAMETERS1` serves none of the three mask laws) and `pop_isolated_layer` composites it once at `(group product at the push site) × alpha` |
     /// | `MaskLayers` | **yes** | the mask bracket renders to its own surface and hands its law to the enclosing layer |
     /// | `NonNormalBlend` (the ISOLATED-LAYER bracket) | **yes, since 2026-09-01** | `pop_isolated_layer` snapshots the backdrop (`CopyFromRenderTarget`) and composites through a `CLSID_D2D1Blend` graph, ONCE, exactly as the contract says `alpha` and `blend` are consumed. See `composite_blended`. |
-    /// | `NonNormalGroupBlend` (a NON-ISOLATED group) | **NO — and it stays a declared gap** | a group's blend rides EVERY descendant primitive against the live backdrop, so it needs a per-primitive graph: a change to every draw method, not one composite. |
+    /// | `NonNormalGroupBlend` (a NON-ISOLATED group) | **yes, since 2026-09-02** | `blended_primitive` draws each descendant onto a scratch and composites it through the same blend graph against the LIVE backdrop — per primitive, which is what non-isolated means. |
+    ///
+    /// ⭐ **EVERY ANSWER IS NOW YES, AND THE SPLIT THAT MADE THAT SAYABLE HAS
+    /// SERVED ITS PURPOSE.** `NonNormalBlend` and `NonNormalGroupBlend` were one
+    /// capability until 2026-09-01, split when building the layer half falsified
+    /// the merge's stated premise ("one capability because it is one missing
+    /// thing"). Both halves are built now, so the premise is true again in the
+    /// other direction and the two could honestly be re-merged. **They are left
+    /// split deliberately**: a backend that implements one and not the other is
+    /// a state the fleet has now been in, and the vocabulary should be able to
+    /// say so without a second discovery.
     ///
     /// ⛔ THE THIRD ROW IS NOT A LEFTOVER, IT IS THE CONDITION. The blend gap
     /// must not be folded into the mask/layer answer, and until 08/29 the
@@ -566,26 +705,34 @@ impl<'a> Painter for Direct2DPainter<'a> {
         // inherit a default. That is the same reason the trait method has no
         // default body.
         match cap {
-            C::IsolatedLayers | C::MaskLayers | C::NonNormalBlend => true,
-            C::NonNormalGroupBlend => false,
+            // ⭐ ROW CM's LAST GOLDEN, 2026-09-02: every capability is YES.
+            // `NonNormalGroupBlend` was the last NO, and `blended_primitive`
+            // answers it — per-primitive compositing against the live backdrop.
+            C::IsolatedLayers | C::MaskLayers | C::NonNormalBlend | C::NonNormalGroupBlend => true,
         }
     }
 
     fn fill_rect(&mut self, rect: Rect, brush: &Brush, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
-        if let Some(b) = self.brush(brush, a) {
-            unsafe { self.rt().FillRectangle(&d2d_rect(rect), &b) };
-        }
+        let br = brush.clone();
+        self.blended_primitive(move |rt| {
+            if let Some(b) = Self::brush_on(rt, &br, a) {
+                unsafe { rt.FillRectangle(&d2d_rect(rect), &b) };
+            }
+        });
     }
 
     fn stroke_rect(&mut self, rect: Rect, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
-        if let Some(b) = self.brush(brush, a) {
-            let ss = self.stroke_style(stroke, stroke.width);
-            unsafe {
-                self.rt().DrawRectangle(&d2d_rect(rect), &b, stroke.width as f32, ss.as_ref())
-            };
-        }
+        let (br, st) = (brush.clone(), stroke.clone());
+        self.blended_primitive(move |rt| {
+            if let Some(b) = Self::brush_on(rt, &br, a) {
+                let ss = Self::stroke_style_on(rt, &st, st.width);
+                unsafe {
+                    rt.DrawRectangle(&d2d_rect(rect), &b, st.width as f32, ss.as_ref())
+                };
+            }
+        });
     }
 
     fn push_state(&mut self, transform: Transform) {
@@ -616,53 +763,70 @@ impl<'a> Painter for Direct2DPainter<'a> {
         }
     }
 
+    /// ⭐ ROW CM's LAST GOLDEN. The `debug_assert!` that stood here — *"non-Normal
+    /// blend needs a backdrop snapshot + CLSID_D2D1Blend graph (B1); not built"*
+    /// — is gone because it is built: `blended_primitive` composites each
+    /// descendant primitive against the live backdrop through that graph.
+    ///
+    /// ⛔ THE BLEND IS PUSHED, NOT VALIDATED. Refusing here was right while
+    /// nothing could honour it; keeping the refusal after building the thing it
+    /// refused would be a guard nothing drives.
     fn push_group(&mut self, alpha: f64, blend: BlendMode) {
-        debug_assert!(
-            matches!(blend, BlendMode::Normal),
-            "non-Normal blend needs a backdrop snapshot + CLSID_D2D1Blend graph (B1); \
-             not built, and blend does not reach the seam in production yet"
-        );
         self.group_alphas.push(alpha);
+        self.group_blends.push(blend);
     }
 
     fn pop_group(&mut self) {
         self.group_alphas.pop();
+        self.group_blends.pop();
     }
 
     fn fill_path(&mut self, path: &[PathCommand], winding: FillRule, brush: &Brush, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
-        let Some(b) = self.brush(brush, a) else { return };
-        let Ok(f) = (unsafe { self.rt().GetFactory() }) else { return };
-        if let Ok(Some(g)) = geometry::build(&f, path, winding) {
-            unsafe { self.rt().FillGeometry(&g, &b, None) };
-        }
+        let (br, pth) = (brush.clone(), path.to_vec());
+        self.blended_primitive(move |rt| {
+            let Some(b) = Self::brush_on(rt, &br, a) else { return };
+            let Ok(f) = (unsafe { rt.GetFactory() }) else { return };
+            if let Ok(Some(g)) = geometry::build(&f, &pth, winding) {
+                unsafe { rt.FillGeometry(&g, &b, None) };
+            }
+        });
     }
 
     fn stroke_path(&mut self, path: &[PathCommand], brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
-        let Some(b) = self.brush(brush, a) else { return };
-        let Ok(f) = (unsafe { self.rt().GetFactory() }) else { return };
-        // A stroked path carries no fill rule; NonZero is the contract default
-        // and the rule is irrelevant to stroking.
-        if let Ok(Some(g)) = geometry::build(&f, path, FillRule::NonZero) {
-            let ss = self.stroke_style(stroke, stroke.width);
-            unsafe { self.rt().DrawGeometry(&g, &b, stroke.width as f32, ss.as_ref()) };
-        }
+        let (br, pth, st) = (brush.clone(), path.to_vec(), stroke.clone());
+        self.blended_primitive(move |rt| {
+            let Some(b) = Self::brush_on(rt, &br, a) else { return };
+            let Ok(f) = (unsafe { rt.GetFactory() }) else { return };
+            // A stroked path carries no fill rule; NonZero is the contract
+            // default and the rule is irrelevant to stroking.
+            if let Ok(Some(g)) = geometry::build(&f, &pth, FillRule::NonZero) {
+                let ss = Self::stroke_style_on(rt, &st, st.width);
+                unsafe { rt.DrawGeometry(&g, &b, st.width as f32, ss.as_ref()) };
+            }
+        });
     }
 
     fn fill_ellipse_arc(&mut self, arc: &EllipseArc, _winding: FillRule, brush: &Brush, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
-        let Some(b) = self.brush(brush, a) else { return };
-        let Some(e) = full_ellipse(arc) else { return };
-        unsafe { self.rt().FillEllipse(&e, &b) };
+        let (br, ar) = (brush.clone(), arc.clone());
+        self.blended_primitive(move |rt| {
+            let Some(b) = Self::brush_on(rt, &br, a) else { return };
+            let Some(e) = full_ellipse(&ar) else { return };
+            unsafe { rt.FillEllipse(&e, &b) };
+        });
     }
 
     fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
-        let Some(b) = self.brush(brush, a) else { return };
-        let Some(e) = full_ellipse(arc) else { return };
-        let ss = self.stroke_style(stroke, stroke.width);
-        unsafe { self.rt().DrawEllipse(&e, &b, stroke.width as f32, ss.as_ref()) };
+        let (br, ar, st) = (brush.clone(), arc.clone(), stroke.clone());
+        self.blended_primitive(move |rt| {
+            let Some(b) = Self::brush_on(rt, &br, a) else { return };
+            let Some(e) = full_ellipse(&ar) else { return };
+            let ss = Self::stroke_style_on(rt, &st, st.width);
+            unsafe { rt.DrawEllipse(&e, &b, st.width as f32, ss.as_ref()) };
+        });
     }
 
     /// NESTED, ARBITRARY-PATH CLIP. D2D has no cheap form: `PushAxisAlignedClip`
@@ -703,9 +867,21 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let Some(b) = self.brush(brush, a) else { return };
         match run {
             TextRun::FastRun { font, size, text: t, letter_spacing, x, y } => {
-                text::draw_fast_run(&self.rt(), &b, font, *size, t, *letter_spacing, *x, *y);
+                // ⛔ THE RETURN VALUE IS NO LONGER DISCARDED. `draw_fast_run`
+                // has always answered `bool`; dropping it made an unresolvable
+                // family draw nothing and say nothing — the silent-drop class,
+                // in the one op nobody had driven end to end.
+                if !text::draw_fast_run(&self.rt(), &b, font, *size, t, *letter_spacing, *x, *y) {
+                    self.text_refusal =
+                        Some("text run not drawn: the font could not be resolved");
+                }
             }
-            _ => {}
+            // PlacedGlyphs is PH3 shaping and unbuilt. It is recorded as a
+            // refusal for the same reason: a mode that draws nothing must not
+            // be counted as a frame that drew.
+            TextRun::PlacedGlyphs { .. } => {
+                self.text_refusal = Some("text run not drawn: PlacedGlyphs mode not built");
+            }
         }
     }
 
@@ -1333,6 +1509,178 @@ mod tests {
 
     fn solid_rgb(r: f64, g: f64, b: f64) -> Brush {
         Brush::Solid(Color::new(r, g, b, 1.0))
+    }
+
+/// ⭐ ROW CM's LAST GOLDEN: a NON-ISOLATED group blend.
+    ///
+    /// `group_blend.json` is the one scene that never reached the presented
+    /// surface. Its blend rides `push_group`, which is **non-isolated** by
+    /// contract — the mode applies to every descendant primitive against the
+    /// LIVE backdrop, one primitive at a time. That is what makes it a different
+    /// job from the isolated-layer blend (#75): one composite there, a composite
+    /// PER PRIMITIVE here.
+    ///
+    /// `multiply(0.8, 0.5) = 0.40` → 102, exactly as the isolated arm asserts.
+    /// The two wrong answers are both plausible pictures: **128** means the
+    /// blend was ignored, **204** means the source was dropped.
+    #[test]
+    fn a_non_isolated_group_multiplies_each_primitive_against_the_backdrop() {
+        let buf = draw(4, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_group(1.0, BlendMode::Multiply);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_group();
+        });
+        let [b, g, r, a] = px(&buf, 4, 1, 1);
+        assert_eq!(a, 255, "the composite stays opaque, got alpha {a}");
+        for (name, v) in [("b", b), ("g", g), ("r", r)] {
+            assert!((v as i32 - 102).abs() <= 2,
+                    "{name}: multiply(0.8,0.5) must be ~102, got {v} -- 128 means \
+                     the blend was IGNORED, 204 means the source was dropped");
+        }
+    }
+
+    /// ⛔ THE PROPERTY THAT MAKES A GROUP A GROUP AND NOT A LAYER: it is
+    /// NON-ISOLATED, so each primitive blends against what the PREVIOUS one
+    /// left, not against the group's own start.
+    ///
+    /// Two multiplies of 0.5 over an 0.8 backdrop compound to
+    /// `0.8 · 0.5 · 0.5 = 0.20` → 51. An ISOLATED layer would flatten the two
+    /// first and give `0.8 · 0.5 = 0.40` → 102. **That difference is the whole
+    /// reason `push_group` could not simply reuse `push_isolated_layer`'s
+    /// machinery**, and it is asserted rather than described.
+    #[test]
+    fn overlapping_primitives_in_a_blended_group_compound_rather_than_isolate() {
+        let buf = draw(4, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_group(1.0, BlendMode::Multiply);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_group();
+        });
+        let [b, _, _, a] = px(&buf, 4, 1, 1);
+        assert_eq!(a, 255);
+        assert!((b as i32 - 51).abs() <= 3,
+                "two multiplies must COMPOUND to ~51 (0.20), got {b} -- ~102 means \
+                 the group isolated and flattened them first, which is a layer, \
+                 not a group");
+    }
+
+    /// ⛔ THE NON-COMMUTATIVE ARM, and it exists because the Multiply-only suite
+    /// on the isolated path let a swapped-input mutant live. ColorBurn:
+    /// `1 − min(1, (1−Cb)/Cs)`. Backdrop 0.8 over source 0.5 → 0.60 → 153;
+    /// swapped → 0.375 → 96.
+    #[test]
+    fn a_non_commutative_group_blend_pins_which_input_is_the_backdrop() {
+        let buf = draw(4, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_group(1.0, BlendMode::ColorBurn);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_group();
+        });
+        let [b, _, _, _] = px(&buf, 4, 1, 1);
+        assert!((b as i32 - 153).abs() <= 3,
+                "colour-burn(backdrop 0.8, source 0.5) must be ~153, got {b} -- \
+                 ~96 means INPUTS 0 AND 1 ARE SWAPPED");
+    }
+
+    /// ⛔ GROUP ALPHA STILL COMPOUNDS UNDER A BLEND. `push_group`'s alpha is a
+    /// flat multiply into every descendant's paint alpha (contract D3), and the
+    /// blend must not swallow it: a 0.5-alpha multiply group over an opaque 0.8
+    /// backdrop lands halfway between the backdrop (204) and the blend (102).
+    #[test]
+    fn a_blended_groups_alpha_still_multiplies_into_its_primitives() {
+        let buf = draw(4, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_group(0.5, BlendMode::Multiply);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_group();
+        });
+        let [b, _, _, a] = px(&buf, 4, 1, 1);
+        assert_eq!(a, 255, "an opaque backdrop stays opaque");
+        assert!((b as i32 - 153).abs() <= 4,
+                "a 0.5-alpha multiply group must land ~153, got {b} -- 102 means \
+                 the group alpha was DROPPED, 204 means the blend was");
+    }
+
+    /// A group blend must not paint outside its primitives' coverage.
+    #[test]
+    fn a_group_blend_is_confined_to_what_it_actually_draws() {
+        let buf = draw(8, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_group(1.0, BlendMode::Multiply);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_group();
+        });
+        let [left, _, _, _] = px(&buf, 8, 1, 1);
+        let [right, _, _, ra] = px(&buf, 8, 6, 1);
+        assert!((left as i32 - 102).abs() <= 2, "covered half blends, got {left}");
+        assert!((right as i32 - 204).abs() <= 2,
+                "uncovered half must be untouched backdrop, got {right}");
+        assert_eq!(ra, 255);
+    }
+
+    /// ⛔⛔ A NESTED GROUP RESETS THE BLEND — THE INNERMOST WINS — and this arm
+    /// exists because a mutation pass proved nothing else asserted it.
+    ///
+    /// The seam contract is explicit: *"a nested `push_group` resets it and leaf
+    /// primitives inherit the innermost group's blend — matching today, where a
+    /// Group's own mode is overridden by its children."* A mutant reading the
+    /// OUTERMOST blend instead passed all 3,183 tests, because every other arm
+    /// here opens exactly one group.
+    ///
+    /// Outer `Multiply`, inner `Screen`, over an 0.8 backdrop with an 0.5
+    /// source:
+    /// * screen (correct) — `1 − (1−0.8)(1−0.5)` = **0.90** → 230
+    /// * multiply (the outer, wrong) — **0.40** → 102
+    ///
+    /// 128 levels apart, so no tolerance can confuse them.
+    #[test]
+    fn a_nested_group_resets_the_blend_and_the_innermost_wins() {
+        let buf = draw(4, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_group(1.0, BlendMode::Multiply);
+            p.push_group(1.0, BlendMode::Screen);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_group();
+            p.pop_group();
+        });
+        let [b, _, _, _] = px(&buf, 4, 1, 1);
+        assert!((b as i32 - 230).abs() <= 3,
+                "the INNER screen must win (~230), got {b} -- ~102 means the                  OUTER multiply was used, which is the wrong end of the stack");
+    }
+
+    /// And popping the inner group RESTORES the outer one, rather than clearing
+    /// the stack — the other half of "nested".
+    #[test]
+    fn popping_an_inner_group_restores_the_outer_blend() {
+        let buf = draw(4, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_group(1.0, BlendMode::Multiply);
+            p.push_group(1.0, BlendMode::Screen);
+            p.pop_group(); // back to Multiply
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_group();
+        });
+        let [b, _, _, _] = px(&buf, 4, 1, 1);
+        assert!((b as i32 - 102).abs() <= 3,
+                "after popping the inner Screen the outer Multiply applies (~102),                  got {b} -- ~128 means the stack was cleared, ~230 means Screen                  outlived its group");
+    }
+
+    /// ⛔ AND A NORMAL GROUP MUST NOT TAKE THE NEW PATH AT ALL. It has no blend
+    /// to apply, and routing it through a per-primitive composite would pay a
+    /// surface allocation per draw for nothing.
+    #[test]
+    fn a_normal_group_still_draws_straight_through() {
+        let buf = draw(4, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_group(1.0, BlendMode::Normal);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_group();
+        });
+        let [b, _, _, _] = px(&buf, 4, 1, 1);
+        assert!((b as i32 - 128).abs() <= 2,
+                "a Normal group is plain source-over (~128), got {b}");
     }
 
     /// ⭐ THE BLEND ARITHMETIC, ASSERTED AGAINST THE SPEC AND NOT AGAINST

@@ -226,10 +226,15 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
                     // against one backdrop, which is why that half could be
                     // built on its own. Collapsing the two would hide that the
                     // remaining work is a different size and shape.
-                    Some(_) => r.unsupported.push((
-                        cmd.into(),
-                        "non-Normal blend on a NON-ISOLATED group needs a per-primitive effect graph",
-                    )),
+                    // ⭐ ROW CM's LAST GOLDEN: the per-primitive graph is built.
+                    // `blended_primitive` composites each descendant against the
+                    // LIVE backdrop, which is what non-isolated means — and is
+                    // why two overlapping half-multiplies compound rather than
+                    // flatten.
+                    Some(name) => match crate::painter::recording::blend_from_str(name) {
+                        Some(b) => { p.push_group(a, b); r.drawn += 1; }
+                        None => r.unsupported.push((cmd.into(), "blend mode not understood")),
+                    },
                 }
             }
             "pop_group" => { p.pop_group(); r.drawn += 1; }
@@ -246,7 +251,19 @@ pub fn replay(p: &mut Direct2DPainter, scene: &Value) -> ReplayReport {
                             y: f(run, "y"),
                         };
                         match op.get("brush").and_then(brush) {
-                            Some(br) => { p.draw_text_run(&tr, &br, a); r.drawn += 1; }
+                            Some(br) => {
+                                p.draw_text_run(&tr, &br, a);
+                                // ⛔ ASK WHETHER IT ACTUALLY DREW. `Painter::draw_text_run`
+                                // returns `()` (the trait is frozen), so "it was called"
+                                // and "it drew" are different facts and only the painter
+                                // knows the second. Counting the call as `drawn` is what
+                                // let an unresolvable font present a document with its
+                                // text missing at `JAS_PAINT_OK`.
+                                match p.take_text_refusal() {
+                                    None => r.drawn += 1,
+                                    Some(why) => r.unsupported.push((cmd.into(), why)),
+                                }
+                            }
                             None => r.unsupported.push((cmd.into(), "brush kind not understood")),
                         }
                     }
@@ -448,39 +465,51 @@ mod tests {
         // change to every draw method rather than one composite. Leaving the old
         // wording would have let a reader price the remainder as the half that
         // is already done.
-        const DECLARED: [&str; 1] = [
-            "non-Normal blend on a NON-ISOLATED group needs a per-primitive effect graph",
-        ];
+        // ⭐⭐ FOURTH AND LAST ENTRY RETIRED, 2026-09-02 (row CM's last golden):
+        // the NON-ISOLATED group blend is implemented. `blended_primitive`
+        // composites each descendant primitive against the LIVE backdrop
+        // through the same `CLSID_D2D1Blend` graph — per primitive, which is
+        // what non-isolated means and why two overlapping half-multiplies
+        // COMPOUND (0.20) rather than flatten (0.40).
+        //
+        // ⇒ **THE LIST IS EMPTY. THIS BACKEND DECLARES NO GAPS**, and every one
+        // of the 21 recorded scenes replays complete.
+        //
+        // ⛔ AN EMPTY LIST INVERTS THIS TEST, AND THE INVERSION IS THE HONEST
+        // SHAPE. It used to assert `!r.unsupported.is_empty()` — "a report with
+        // NO gaps means the corpus stopped containing them" — which was exactly
+        // right while a gap existed and is exactly wrong now: the corpus still
+        // contains masks, layers and both blend carriers, and this backend
+        // simply draws them all. So the assertion becomes its opposite: NOTHING
+        // may be refused, and anything that is arrives named.
+        const DECLARED: [&str; 0] = [];
         for (cmd, why) in &r.unsupported {
-            assert!(DECLARED.contains(why),
-                    "UNDECLARED gap: {cmd} -> {why}");
+            assert!(DECLARED.contains(why), "UNDECLARED gap: {cmd} -> {why}");
         }
-        assert!(!r.unsupported.is_empty(),
-                "the A6 scenes contain masks and a non-Normal blend; a report with \
-                 NO gaps means the corpus stopped containing them");
+        assert!(r.unsupported.is_empty(),
+                "this backend declares NO gaps as of row CM's last golden; a                  refusal here is a REGRESSION and arrives with its op and reason:                  {:?}", r.unsupported);
 
-        // ⛔ EVERY DECLARED GAP MUST ACTUALLY FIRE, NOT MERELY BE PERMITTED.
-        // Measured 2026-08-29: DECLARED[2] — the non-Normal blend gap — fired on
-        // NO scene in this corpus. It reads only a `push_group`'s mode, both
-        // `push_group` ops here were `normal`, and the corpus's single
-        // non-Normal blend rode `push_isolated_layer` and landed in the
-        // isolated-layer gap instead. So the arm was unreachable and this test
-        // could not tell that from a backend that handles group blend fine.
-        //
-        // That is the SAME defect this test's own comment celebrates removing
-        // for masks ("the corpus simply contains none, which is itself a stated
-        // limit of this measurement rather than evidence they work") — repaired
-        // for the mask half and left standing for the group-blend half in the
-        // same breath. `group_blend.json` closes it.
-        //
-        // ⇒ THE ASSERTION IS THAT EACH DECLARED REASON IS *OBSERVED*. A declared
-        // gap nothing drives is indistinguishable from one that cannot fire, and
-        // the DECLARED list is where a stale entry would hide longest.
-        for want in DECLARED {
-            assert!(r.unsupported.iter().any(|(_, why)| *why == want),
-                    "DECLARED gap never fired on any scene: {want:?} -- either \
-                     the corpus stopped exercising it or the gap is stale");
+        // ⛔ AND THE CORPUS MUST STILL CONTAIN THE HARD OPS, or "no gaps" would
+        // be satisfied by a corpus that stopped asking. This replaces the old
+        // "every DECLARED gap must fire" arm, which cannot mean anything over an
+        // empty list — the question it was really asking was whether the corpus
+        // still EXERCISES what the backend claims, and that is asked directly.
+        let ops: Vec<String> = scenes().iter()
+            .filter_map(|(_, v)| v.as_array().map(|a| a.iter()
+                .filter_map(|o| o.get("cmd").and_then(Value::as_str).map(str::to_string))
+                .collect::<Vec<_>>()))
+            .flatten().collect();
+        for want in ["push_group", "push_isolated_layer", "push_mask_layer", "draw_text_run"] {
+            assert!(ops.iter().any(|c| c == want),
+                    "the corpus stopped exercising {want}; 'no gaps' would then be                      a statement about an empty question");
         }
+        let non_normal: usize = scenes().iter()
+            .filter_map(|(_, v)| v.as_array())
+            .flat_map(|a| a.iter())
+            .filter(|o| !matches!(o.get("blend").and_then(Value::as_str), Some("normal") | None))
+            .count();
+        assert!(non_normal >= 2,
+                "both blend CARRIERS must still be in the corpus (group and                  isolated layer); found {non_normal} non-Normal blend ops");
 
         // ⚖️ THE CAPABILITY QUERY, HELD AGAINST THIS REPORT (council 08/29,
         // row (e) = (b)). `Direct2DPainter::supports` answers NO to all three
@@ -507,11 +536,10 @@ mod tests {
                  CopyFromRenderTarget backdrop, once at the closing composite); \
                  answering no here would keep the router sending masked \
                  non-Normal elements to legacy for a backend that can draw them.");
-        assert!(!probe.supports(Capability::NonNormalGroupBlend),
-                "a NON-ISOLATED group's blend rides every descendant primitive \
-                 against the live backdrop and needs a per-primitive graph. It \
-                 is NOT built, and it is a DECLARED gap; answering yes would \
-                 excuse a `blend` that reaches no point of use.");
+        assert!(probe.supports(Capability::NonNormalGroupBlend),
+                "the PER-PRIMITIVE group blend is built (`blended_primitive`); \
+                 answering no would keep the router sending non-Normal GROUPS to \
+                 legacy for a backend that draws them.");
         // ⛔ COMPUTED FROM THE ANSWERS, NOT PINNED TO A NUMBER. This asserted
         // `== 31` in effect, by counting every op that needs ANY capability —
         // correct only while this backend denied all of them. The moment one
@@ -528,9 +556,22 @@ mod tests {
                     .filter(|o| !supported.supplies(capabilities_of(o))).count())
                  .unwrap_or(0))
             .sum();
-        assert!(denied_ops > 0, "no recorded op needs a capability this backend \
-                                 denies; the corpus stopped being able to \
-                                 distinguish the backends");
+        // ⭐ THIS ASSERTION INVERTED ON 2026-09-02, and the reason is the same
+        // one that retired the DECLARED list above. It read `denied_ops > 0`,
+        // with the message "the corpus stopped being able to distinguish the
+        // backends" — correct while this backend denied SOMETHING. It now
+        // answers YES to every capability, so `denied_ops == 0` is the truth
+        // and the old form would have to be deleted to let the change through.
+        //
+        // ⛔ A GATE DELETED TO LET A CHANGE THROUGH HAS STOPPED BEING A GATE —
+        // this test says so about itself, one comment up. So it is INVERTED
+        // rather than removed: nothing may be denied, and the agreement below
+        // still holds op for op, which is the arm that actually protects
+        // against a silent discard.
+        assert_eq!(denied_ops, 0,
+                   "this backend answers YES to every capability as of row CM's \
+                    last golden, so no recorded op may carry a denied \
+                    requirement; {denied_ops} do");
         assert_eq!(r.unsupported.len(), denied_ops,
                    "this backend refused {} ops but {denied_ops} recorded ops carry \
                     a requirement it answers NO to -- the stated answers and the \
@@ -601,5 +642,80 @@ mod tests {
         assert!(r.is_complete(), "gradients still unsupported: {:?}", r.unsupported);
         let px = t.read_bgra().unwrap();
         assert!(px.chunks(4).any(|q| q[3] != 0), "the gradient scene painted nothing");
+    }
+}
+
+#[cfg(test)]
+mod text_refusal_tests {
+    use super::*;
+    use crate::painter::direct2d::device::HeadlessTarget;
+    use serde_json::json;
+
+    fn run_scene(font: &str) -> ReplayReport {
+        let t = HeadlessTarget::new(64, 32).expect("target");
+        let scene = json!([{
+            "cmd": "draw_text_run",
+            "run": { "mode": "fast_run", "font": font, "size": 16.0,
+                     "text": "Hi", "letter_spacing": 0.0, "x": 4.0, "y": 20.0 },
+            "brush": { "kind": "solid",
+                       "color": { "space": "rgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 } },
+            "alpha": 1.0
+        }]);
+        unsafe {
+            t.target().BeginDraw();
+            let mut p = Direct2DPainter::new(t.target());
+            let r = replay(&mut p, &scene);
+            let _ = t.target().EndDraw(None, None);
+            r
+        }
+    }
+
+    /// ⛔ A FONT THAT CANNOT BE RESOLVED MUST REACH THE REPORT, NOT VANISH.
+    ///
+    /// `draw_fast_run` has always returned `bool` and `draw_text_run` has always
+    /// DISCARDED it, so a text run whose family DirectWrite cannot find drew
+    /// nothing and said nothing: no gap, no error, no log. Measured 2026-09-01 —
+    /// the seam sends a CSS shorthand (`"normal normal sans-serif"`) that
+    /// `resolve_family` could not parse, so **every** production text run would
+    /// have taken this path the moment the router opened: a document presenting
+    /// with its text missing, at `JAS_PAINT_OK`.
+    ///
+    /// ⭐ AND THE RECORDED CORPUS COULD NEVER HAVE CAUGHT IT. `scene_golden.json`
+    /// carries `"font": "sans-serif"` — the BARE form, which happens to be the
+    /// one this backend wanted — while the live seam builds the shorthand. The
+    /// replay lane was green on a string the seam does not send.
+    #[test]
+    fn an_unresolvable_font_is_reported_as_a_gap_not_drawn_silently() {
+        let r = run_scene("No Such Family At All 12345");
+        assert_eq!(r.drawn, 0, "nothing was drawn, so nothing may be counted drawn");
+        assert_eq!(r.unsupported.len(), 1, "the refusal must reach the report: {r:?}");
+        assert!(r.unsupported[0].1.contains("font"),
+                "the reason must name the font: {:?}", r.unsupported[0]);
+        assert!(!r.is_complete(),
+                "an incomplete report is what becomes JAS_PAINT_SCENE_INCOMPLETE -- \
+                 without it the host presents a document with its text missing at OK");
+    }
+
+    /// ⛔ THE CONTROL, and it is what keeps the arm above honest: a font that
+    /// DOES resolve must still be counted DRAWN. A backend that reported every
+    /// text run as a gap would satisfy the assertion above and be useless.
+    #[test]
+    fn a_resolvable_font_still_draws_and_is_not_reported() {
+        let r = run_scene("sans-serif");
+        assert_eq!(r.drawn, 1, "a resolvable font draws: {r:?}");
+        assert!(r.unsupported.is_empty(), "and reports nothing: {r:?}");
+        assert!(r.is_complete());
+    }
+
+    /// ⭐ AND THE SEAM'S OWN STRING GOES THROUGH THE WHOLE PIPE. This is the
+    /// 0-vs-615 measurement expressed at the REPLAY level rather than the pixel
+    /// level: before row DA this exact scene was counted `drawn` and inked
+    /// nothing.
+    #[test]
+    fn the_shorthand_the_seam_sends_replays_as_drawn() {
+        let r = run_scene("normal normal sans-serif");
+        assert_eq!(r.drawn, 1,
+                   "the CSS shorthand the seam builds must replay as DRAWN: {r:?}");
+        assert!(r.is_complete());
     }
 }

@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 
-use web_sys::CanvasRenderingContext2d;
+use crate::painter::overlay_ctx::OverlayCtx;
 
 use crate::document::model::Model;
 use crate::interpreter::doc_primitives;
@@ -600,7 +600,7 @@ impl CanvasTool for YamlTool {
         true
     }
 
-    fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
+    fn draw_overlay(&self, model: &Model, ctx: &mut OverlayCtx) {
         if self.spec.overlay.is_empty() {
             return;
         }
@@ -776,7 +776,7 @@ pub(crate) fn parse_style(s: &str) -> OverlayStyle {
 /// from the artboard's document-space bounds to viewport pixels via
 /// model.zoom_level + model.view_offset_*.
 fn draw_artboard_resize_handles(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
     model: &crate::document::model::Model,
@@ -831,7 +831,7 @@ fn draw_artboard_resize_handles(
 /// color; refinements (handle previews on the outline, dimension
 /// readout) are phase 2.
 fn draw_artboard_outline_preview(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
     model: &crate::document::model::Model,
@@ -877,7 +877,7 @@ fn draw_artboard_outline_preview(
 }
 
 fn draw_marquee_rect_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
 ) {
@@ -892,18 +892,16 @@ fn draw_marquee_rect_overlay(
     if w <= 0.0 || h <= 0.0 { return; }
     ctx.set_stroke_style_str("#666");
     ctx.set_line_width(1.0);
-    let dash = js_sys::Array::new();
-    dash.push(&wasm_bindgen::JsValue::from_f64(4.0));
-    dash.push(&wasm_bindgen::JsValue::from_f64(2.0));
-    let _ = ctx.set_line_dash(&dash);
+    let dash: [f64; 2] = [4.0, 2.0];
+    ctx.set_line_dash(&dash);
     ctx.stroke_rect(x, y, w, h);
     // Reset dash so subsequent overlays draw solid.
-    let empty = js_sys::Array::new();
-    let _ = ctx.set_line_dash(&empty);
+    let empty: [f64; 0] = [];
+    ctx.set_line_dash(&empty);
 }
 
 fn draw_rect_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
 ) {
@@ -923,16 +921,17 @@ fn draw_rect_overlay(
     let style = parse_style(style_str);
 
     let rounded = rx > 0.0 || ry > 0.0;
-    let build_path = || {
-        if rounded {
-            build_rounded_rect_path(ctx, x, y, width, height, rx, ry);
-        }
-    };
+    // ⭐ ROW DU: this was a CLOSURE over `ctx`, which worked only because a
+    // `CanvasRenderingContext2d` has interior mutability -- a `&self` handle
+    // that mutates. `&mut OverlayCtx` does not, so a closure capturing it
+    // cannot coexist with the `ctx.set_fill_style_str(..)` calls between its
+    // uses. Inlined at both sites: two lines instead of a closure, and the
+    // borrow is obvious rather than fought.
 
     if let Some(fill) = &style.fill {
         ctx.set_fill_style_str(fill);
         if rounded {
-            build_path();
+            build_rounded_rect_path(ctx, x, y, width, height, rx, ry);
             ctx.fill();
         } else {
             ctx.fill_rect(x, y, width, height);
@@ -944,14 +943,11 @@ fn draw_rect_overlay(
             ctx.set_line_width(w);
         }
         if let Some(dash) = &style.stroke_dasharray {
-            let arr = js_sys::Array::new();
-            for d in dash {
-                arr.push(&wasm_bindgen::JsValue::from_f64(*d));
-            }
-            let _ = ctx.set_line_dash(&arr);
+            let arr: Vec<f64> = dash.iter().copied().collect();
+            ctx.set_line_dash(&arr);
         }
         if rounded {
-            build_path();
+            build_rounded_rect_path(ctx, x, y, width, height, rx, ry);
             ctx.stroke();
         } else {
             ctx.stroke_rect(x, y, width, height);
@@ -960,7 +956,7 @@ fn draw_rect_overlay(
         // unexpectedly dashed. CanvasRenderingContext2d is stateful, so
         // reset with an empty array.
         if style.stroke_dasharray.is_some() {
-            let _ = ctx.set_line_dash(&js_sys::Array::new());
+            ctx.set_line_dash(&[]);
         }
     }
 }
@@ -971,7 +967,7 @@ fn draw_rect_overlay(
 /// and any other tool that wants an SVG-style ellipse on the overlay
 /// layer.
 fn draw_ellipse_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
 ) {
@@ -988,14 +984,14 @@ fn draw_ellipse_overlay(
         .unwrap_or("");
     let style = parse_style(style_str);
 
-    let build_path = || {
-        ctx.begin_path();
-        let _ = ctx.ellipse(cx, cy, rx, ry, 0.0, 0.0, std::f64::consts::TAU);
-    };
+    // ⭐ ROW DU: inlined for the same reason as the rect arm above -- a closure
+    // capturing `&mut OverlayCtx` cannot coexist with the style calls between
+    // its uses. Canvas allowed it only through interior mutability.
 
     if let Some(fill) = &style.fill {
         ctx.set_fill_style_str(fill);
-        build_path();
+        ctx.begin_path();
+        ctx.ellipse(cx, cy, rx, ry, 0.0, 0.0, std::f64::consts::TAU);
         ctx.fill();
     }
     if let Some(stroke) = &style.stroke {
@@ -1004,16 +1000,14 @@ fn draw_ellipse_overlay(
             ctx.set_line_width(w);
         }
         if let Some(dash) = &style.stroke_dasharray {
-            let arr = js_sys::Array::new();
-            for d in dash {
-                arr.push(&wasm_bindgen::JsValue::from_f64(*d));
-            }
-            let _ = ctx.set_line_dash(&arr);
+            let arr: Vec<f64> = dash.iter().copied().collect();
+            ctx.set_line_dash(&arr);
         }
-        build_path();
+        ctx.begin_path();
+        ctx.ellipse(cx, cy, rx, ry, 0.0, 0.0, std::f64::consts::TAU);
         ctx.stroke();
         if style.stroke_dasharray.is_some() {
-            let _ = ctx.set_line_dash(&js_sys::Array::new());
+            ctx.set_line_dash(&[]);
         }
     }
 }
@@ -1022,7 +1016,7 @@ fn draw_ellipse_overlay(
 /// string expressions), style (CSS subset). Stroke only — line
 /// overlays don't have a fillable interior.
 fn draw_line_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
 ) {
@@ -1044,18 +1038,15 @@ fn draw_line_overlay(
         ctx.set_line_width(w);
     }
     if let Some(dash) = &style.stroke_dasharray {
-        let arr = js_sys::Array::new();
-        for d in dash {
-            arr.push(&wasm_bindgen::JsValue::from_f64(*d));
-        }
-        let _ = ctx.set_line_dash(&arr);
+        let arr: Vec<f64> = dash.iter().copied().collect();
+        ctx.set_line_dash(&arr);
     }
     ctx.begin_path();
     ctx.move_to(x1, y1);
     ctx.line_to(x2, y2);
     ctx.stroke();
     if style.stroke_dasharray.is_some() {
-        let _ = ctx.set_line_dash(&js_sys::Array::new());
+        ctx.set_line_dash(&[]);
     }
 }
 
@@ -1063,7 +1054,7 @@ fn draw_line_overlay(
 /// point buffer (see `interpreter::point_buffers`). Fields:
 /// `buffer` (the buffer name), `style`. Used by Lasso's overlay.
 fn draw_buffer_polygon_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     model: &Model,
 ) {
@@ -1096,7 +1087,7 @@ fn draw_buffer_polygon_overlay(
 /// back to the first, indicating that a close-at-release would fire
 /// right now (Paintbrush §Overlay → Close-at-release hint).
 fn draw_buffer_polyline_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
     model: &Model,
@@ -1131,11 +1122,8 @@ fn draw_buffer_polyline_overlay(
         ctx.set_line_width(w);
     }
     if let Some(dash) = &style.stroke_dasharray {
-        let arr = js_sys::Array::new();
-        for d in dash {
-            arr.push(&wasm_bindgen::JsValue::from_f64(*d));
-        }
-        let _ = ctx.set_line_dash(&arr);
+        let arr: Vec<f64> = dash.iter().copied().collect();
+        ctx.set_line_dash(&arr);
     }
     ctx.begin_path();
     ctx.move_to(points[0].0, points[0].1);
@@ -1144,7 +1132,7 @@ fn draw_buffer_polyline_overlay(
     }
     ctx.stroke();
     if style.stroke_dasharray.is_some() {
-        let _ = ctx.set_line_dash(&js_sys::Array::new());
+        ctx.set_line_dash(&[]);
     }
 
     // Close-at-release hint: dashed line from current cursor back to
@@ -1162,15 +1150,13 @@ fn draw_buffer_polyline_overlay(
         let (ex, ey) = *points.last().unwrap();
         ctx.set_stroke_style_str(stroke);
         ctx.set_line_width(1.0);
-        let arr = js_sys::Array::new();
-        arr.push(&wasm_bindgen::JsValue::from_f64(4.0));
-        arr.push(&wasm_bindgen::JsValue::from_f64(4.0));
-        let _ = ctx.set_line_dash(&arr);
+        let arr: [f64; 2] = [4.0, 4.0];
+        ctx.set_line_dash(&arr);
         ctx.begin_path();
         ctx.move_to(ex, ey);
         ctx.line_to(sx, sy);
         ctx.stroke();
-        let _ = ctx.set_line_dash(&js_sys::Array::new());
+        ctx.set_line_dash(&[]);
     }
 }
 
@@ -1200,7 +1186,7 @@ fn draw_buffer_polyline_overlay(
 ///   buffer            point buffer name (for drag preview)
 ///   mode              string tool mode (idle / painting / erasing)
 fn draw_oval_cursor_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
     model: &Model,
@@ -1283,15 +1269,13 @@ fn draw_oval_cursor_overlay(
                     }
                     ctx.set_global_alpha(old_alpha);
                 } else if mode == "erasing" {
-                    let arr = js_sys::Array::new();
-                    arr.push(&wasm_bindgen::JsValue::from_f64(3.0));
-                    arr.push(&wasm_bindgen::JsValue::from_f64(3.0));
-                    let _ = ctx.set_line_dash(&arr);
+                    let arr: [f64; 2] = [3.0, 3.0];
+                    ctx.set_line_dash(&arr);
                     for &(px, py) in &pts {
                         draw_oval_path(ctx, px, py, rx, ry, rad);
                         ctx.stroke();
                     }
-                    let _ = ctx.set_line_dash(&js_sys::Array::new());
+                    ctx.set_line_dash(&[]);
                 }
             }
         }
@@ -1302,15 +1286,13 @@ fn draw_oval_cursor_overlay(
     ctx.set_stroke_style_str(&stroke_color);
     ctx.set_line_width(1.0);
     if dashed {
-        let arr = js_sys::Array::new();
-        arr.push(&wasm_bindgen::JsValue::from_f64(4.0));
-        arr.push(&wasm_bindgen::JsValue::from_f64(4.0));
-        let _ = ctx.set_line_dash(&arr);
+        let arr: [f64; 2] = [4.0, 4.0];
+        ctx.set_line_dash(&arr);
     }
     draw_oval_path(ctx, cx, cy, rx, ry, rad);
     ctx.stroke();
     if dashed {
-        let _ = ctx.set_line_dash(&js_sys::Array::new());
+        ctx.set_line_dash(&[]);
     }
     // 1 px screen-space crosshair for precision aiming.
     ctx.begin_path();
@@ -1334,7 +1316,7 @@ fn draw_oval_cursor_overlay(
 ///           state.eyedropper_cache; the renderer parses fill /
 ///           stroke from it).
 fn draw_cursor_color_chip_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
 ) {
@@ -1437,7 +1419,7 @@ fn color_value_to_css(v: &serde_json::Value) -> String {
 /// Build a rotated ellipse path at (cx, cy) and add it to the
 /// current path; caller decides whether to fill or stroke.
 fn draw_oval_path(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     cx: f64, cy: f64, rx: f64, ry: f64, rad: f64,
 ) {
     const SEGMENTS: usize = 24;
@@ -1462,7 +1444,7 @@ fn draw_oval_path(
 ///   mode: string — current tool mode
 ///   marquee_start_x/y, marquee_cur_x/y: marquee rect bounds
 fn draw_partial_selection_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
     model: &crate::document::model::Model,
@@ -1500,7 +1482,7 @@ fn draw_partial_selection_overlay(
                     ctx.set_fill_style_str("white");
                     ctx.set_stroke_style_str(sel_color);
                     ctx.begin_path();
-                    let _ = ctx.arc(vhx, vhy, 3.0, 0.0, std::f64::consts::TAU);
+                    ctx.arc(vhx, vhy, 3.0, 0.0, std::f64::consts::TAU);
                     ctx.fill();
                     ctx.stroke();
                 }
@@ -1544,7 +1526,7 @@ fn draw_partial_selection_overlay(
 ///
 /// Mirrors the inlined overlay logic from the deleted PenTool::draw_overlay.
 fn draw_pen_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
     model: &Model,
@@ -1659,8 +1641,7 @@ fn draw_pen_overlay(
 
         ctx.set_stroke_style_str(preview_color);
         ctx.set_line_width(1.0);
-        let dash = js_sys::Array::of2(&4.0.into(), &4.0.into());
-        let _ = ctx.set_line_dash(&dash);
+        ctx.set_line_dash(&[4.0, 4.0]);
 
         ctx.begin_path();
         ctx.move_to(last.x, last.y);
@@ -1678,7 +1659,7 @@ fn draw_pen_overlay(
             );
         }
         ctx.stroke();
-        let _ = ctx.set_line_dash(&js_sys::Array::new());
+        ctx.set_line_dash(&[]);
     }
 
     // 3. Handle lines + 4. Anchor markers.
@@ -1697,14 +1678,14 @@ fn draw_pen_overlay(
             ctx.set_fill_style_str("white");
             ctx.set_stroke_style_str(handle_color);
             ctx.begin_path();
-            let _ = ctx.arc(
+            ctx.arc(
                 a.hx_in, a.hy_in, handle_r,
                 0.0, std::f64::consts::TAU,
             );
             ctx.fill();
             ctx.stroke();
             ctx.begin_path();
-            let _ = ctx.arc(
+            ctx.arc(
                 a.hx_out, a.hy_out, handle_r,
                 0.0, std::f64::consts::TAU,
             );
@@ -1717,7 +1698,7 @@ fn draw_pen_overlay(
         if anchor_marker == "dot" {
             // Filled circle marker (canonical look).
             ctx.begin_path();
-            let _ = ctx.arc(
+            ctx.arc(
                 a.x, a.y, anchor_dot_r,
                 0.0, std::f64::consts::TAU,
             );
@@ -1742,7 +1723,7 @@ fn draw_pen_overlay(
             ctx.set_stroke_style_str(close_hit_color);
             ctx.set_line_width(2.0);
             ctx.begin_path();
-            let _ = ctx.arc(
+            ctx.arc(
                 first.x, first.y, anchor_half + 2.0,
                 0.0, std::f64::consts::TAU,
             );
@@ -1755,7 +1736,7 @@ fn draw_pen_overlay(
 /// Fields: x1/y1/x2/y2 (the edge endpoints), sides (default 5),
 /// style.
 fn draw_regular_polygon_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
 ) {
@@ -1775,7 +1756,7 @@ fn draw_regular_polygon_overlay(
 /// x1/y1/x2/y2 (box corners), points (default 5 outer vertices),
 /// style.
 fn draw_star_overlay(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
 ) {
@@ -1796,7 +1777,7 @@ fn draw_star_overlay(
 /// the polygon and star overlay types — they differ only in how
 /// points are computed.
 fn draw_closed_polygon_from_points(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     points: &[(f64, f64)],
     render: &serde_json::Value,
 ) {
@@ -1809,18 +1790,21 @@ fn draw_closed_polygon_from_points(
         .unwrap_or("");
     let style = parse_style(style_str);
 
-    let build_path = || {
+    // ⭐ ROW DU: inlined -- a closure capturing `&mut OverlayCtx` cannot coexist
+    // with the style calls between its uses (canvas allowed it only through
+    // interior mutability). Written once as a helper so both arms share it.
+    fn walk(ctx: &mut OverlayCtx, points: &[(f64, f64)]) {
         ctx.begin_path();
         ctx.move_to(points[0].0, points[0].1);
         for p in &points[1..] {
             ctx.line_to(p.0, p.1);
         }
         ctx.close_path();
-    };
+    }
 
     if let Some(fill) = &style.fill {
         ctx.set_fill_style_str(fill);
-        build_path();
+        walk(ctx, points);
         ctx.fill();
     }
     if let Some(stroke) = &style.stroke {
@@ -1829,16 +1813,13 @@ fn draw_closed_polygon_from_points(
             ctx.set_line_width(w);
         }
         if let Some(dash) = &style.stroke_dasharray {
-            let arr = js_sys::Array::new();
-            for d in dash {
-                arr.push(&wasm_bindgen::JsValue::from_f64(*d));
-            }
-            let _ = ctx.set_line_dash(&arr);
+            let arr: Vec<f64> = dash.iter().copied().collect();
+            ctx.set_line_dash(&arr);
         }
-        build_path();
+        walk(ctx, points);
         ctx.stroke();
         if style.stroke_dasharray.is_some() {
-            let _ = ctx.set_line_dash(&js_sys::Array::new());
+            ctx.set_line_dash(&[]);
         }
     }
 }
@@ -1847,7 +1828,7 @@ fn draw_closed_polygon_from_points(
 /// Matches native RoundedRectTool::draw_overlay: max-radius is clamped
 /// to half the shorter side so the arcs don't overlap on small rects.
 fn build_rounded_rect_path(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     x: f64,
     y: f64,
     w: f64,
@@ -1921,7 +1902,7 @@ fn resolve_overlay_reference_point(
 /// overlay: 12 px crosshair + 2 px center dot, color #4A9EFF.
 /// Hidden when there is no selection.
 fn draw_reference_point_cross(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
     model: &Model,
@@ -1954,7 +1935,7 @@ fn draw_reference_point_cross(
     // Center dot.
     ctx.set_fill_style_str(COLOR);
     ctx.begin_path();
-    let _ = ctx.arc(rx, ry, DOT, 0.0, std::f64::consts::TAU);
+    ctx.arc(rx, ry, DOT, 0.0, std::f64::consts::TAU);
     ctx.fill();
 }
 
@@ -1964,7 +1945,7 @@ fn draw_reference_point_cross(
 /// dict, then composes the matrix via algorithms::transform_apply
 /// and draws the union bbox of the selection under that matrix.
 fn draw_bbox_ghost(
-    ctx: &CanvasRenderingContext2d,
+    ctx: &mut OverlayCtx,
     render: &serde_json::Value,
     eval_ctx: &serde_json::Value,
     model: &Model,
@@ -2085,10 +2066,8 @@ fn draw_bbox_ghost(
 
     ctx.set_stroke_style_str("#4A9EFF");
     ctx.set_line_width(1.0);
-    let dash = js_sys::Array::new();
-    dash.push(&wasm_bindgen::JsValue::from_f64(4.0));
-    dash.push(&wasm_bindgen::JsValue::from_f64(2.0));
-    let _ = ctx.set_line_dash(&dash);
+    let dash: [f64; 2] = [4.0, 2.0];
+    ctx.set_line_dash(&dash);
     ctx.begin_path();
     let c0 = to_screen(corners[0]);
     ctx.move_to(c0.0, c0.1);
@@ -2099,7 +2078,7 @@ fn draw_bbox_ghost(
     ctx.close_path();
     ctx.stroke();
     // Reset dash so subsequent native strokes aren't unexpectedly dashed.
-    let _ = ctx.set_line_dash(&js_sys::Array::new());
+    ctx.set_line_dash(&[]);
 }
 
 #[cfg(test)]

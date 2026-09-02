@@ -156,6 +156,18 @@ pub struct JasEngine {
     /// served — the state a DELTA needs. Enrolled by [`jas_bind_values`]:
     /// reading a panel's values is what tells the engine it is open.
     registry: RefCell<PanelRegistry>,
+    /// ⭐ ROW DU: physical pixels per DIP, as the shell's display reports it.
+    ///
+    /// ⛔ IT LIVES HERE, NOT IN THE SHELL. The shell sends the physical pixels
+    /// its swapchain is sized in, and the DIP -> document conversion happens
+    /// on this side. Letting C# divide would put a display-scale bug -- the
+    /// single most common Windows-app defect there is -- on the far side of the
+    /// boundary, which is what BL1 exists to prevent.
+    dpi_scale: std::cell::Cell<f64>,
+    /// The tool the pointer drives, by index into `ffi_pointer::TOOL_IDS`.
+    /// Built lazily: a `YamlTool` costs a workspace lookup and a state-store
+    /// init, and most engines never take a pointer at all.
+    tool: RefCell<Option<(usize, Box<dyn crate::tools::tool::CanvasTool>)>>,
 }
 
 impl JasEngine {
@@ -192,6 +204,27 @@ impl JasEngine {
     /// restore artwork from a file the user is no longer editing.
     ///
     /// `pub(crate)`, not ABI — the boundary is `ffi_paint::jas_load_svg`.
+    /// Run `f` against the session's live model, mutably. Same closure shape
+    /// and same reason as [`Self::with_document`]: the `RefCell` guard must
+    /// outlive the call, so it cannot be handed back.
+    /// Read-only twin of [`Self::with_model_mut`]. The overlay walk needs the
+    /// MODEL (view transform, tool-visible state), not just the document.
+    pub(crate) fn with_model<R>(&self, f: impl FnOnce(&Model) -> R) -> R {
+        f(&self.model.borrow())
+    }
+
+    pub(crate) fn with_model_mut<R>(&self, f: impl FnOnce(&mut Model) -> R) -> R {
+        f(&mut self.model.borrow_mut())
+    }
+
+    pub(crate) fn dpi_scale(&self) -> f64 { self.dpi_scale.get() }
+    pub(crate) fn set_dpi_scale(&self, s: f64) { self.dpi_scale.set(s); }
+    pub(crate) fn tool_slot(
+        &self,
+    ) -> std::cell::RefMut<'_, Option<(usize, Box<dyn crate::tools::tool::CanvasTool>)>> {
+        self.tool.borrow_mut()
+    }
+
     pub(crate) fn replace_document(&self, doc: crate::document::document::Document) {
         *self.model.borrow_mut() = Model::new(doc, None);
     }
@@ -202,6 +235,8 @@ impl JasEngine {
             last_error: RefCell::new(None),
             panel: RefCell::new(PanelState::default()),
             registry: RefCell::new(PanelRegistry::default()),
+            dpi_scale: std::cell::Cell::new(1.0),
+            tool: RefCell::new(None),
         }
     }
 }

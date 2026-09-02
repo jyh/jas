@@ -66,6 +66,10 @@ pub enum Crossing {
     /// The S-C.2 write path: one control's new value in, the changed bind rows
     /// out. Counted like any other crossing -- a tick's cost is what it is.
     PanelEvent = 9,
+    /// ⭐ ROW DU / NODE 5: a pointer transition. Counted like any other
+    /// crossing -- and this one arrives at MOUSEMOVE RATES, so its cost is the
+    /// one most worth having on the ledger rather than estimated.
+    PointerEvent = 10,
 }
 
 impl Crossing {
@@ -82,6 +86,7 @@ impl Crossing {
         "jas_widget_tree",
         "jas_bind_values",
         "jas_panel_event",
+        "jas_pointer_event",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -91,7 +96,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 10;
+    pub(crate) const COUNT: usize = 11;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -109,6 +114,7 @@ impl Crossing {
         Crossing::WidgetTree,
         Crossing::BindValues,
         Crossing::PanelEvent,
+        Crossing::PointerEvent,
     ];
 
     pub fn name(self) -> &'static str {

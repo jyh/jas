@@ -318,10 +318,24 @@ public sealed partial class MainWindow : Window
                 }
                 ok = _host.RenderDocument(svg);
             }
+            else if (string.Equals(scene, "selection", StringComparison.OrdinalIgnoreCase))
+            {
+                // ⭐ NODE 5. Same SB_SVG contract as `document`, same refusal
+                // when it is missing -- a run labelled "selection" that quietly
+                // drew a built-in would be the mislabelled-experiment shape.
+                var svg = Environment.GetEnvironmentVariable("SB_SVG");
+                if (string.IsNullOrWhiteSpace(svg))
+                {
+                    StatusLine.Text = "FAILED - SB_SCENE=selection needs SB_SVG";
+                    Report("RUSTFAIL SB_SCENE=selection requires SB_SVG=<path to an .svg>");
+                    return;
+                }
+                ok = _host.RenderSelection(svg);
+            }
             else
             {
                 StatusLine.Text = $"FAILED - SB_SCENE='{scene}' is not recognised";
-                Report($"RUSTFAIL SB_SCENE='{scene}' is not recognised; use 'goldens', 'document', or leave it unset for the probe");
+                Report($"RUSTFAIL SB_SCENE='{scene}' is not recognised; use 'goldens', 'document', 'selection', or leave it unset for the probe");
                 return;
             }
 

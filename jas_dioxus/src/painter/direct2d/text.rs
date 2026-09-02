@@ -41,10 +41,79 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows::Win32::Graphics::DirectWrite::{
     DWriteCreateFactory, IDWriteFactory, IDWriteFontFace, DWRITE_FACTORY_TYPE_SHARED,
-    DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_WEIGHT_NORMAL,
+    DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE, DWRITE_FONT_STYLE_ITALIC,
+    DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STYLE_OBLIQUE, DWRITE_FONT_WEIGHT,
+    DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_WEIGHT_LIGHT, DWRITE_FONT_WEIGHT_NORMAL,
     DWRITE_GLYPH_RUN, DWRITE_MEASURING_MODE_NATURAL,
 };
 use windows_numerics::Vector2;
+
+/// The three parts of a `TextRun::FastRun`'s `font` field.
+///
+/// ⛔ THAT FIELD IS A CSS FONT SHORTHAND MINUS THE SIZE, and this backend did
+/// not know it. Measured 2026-09-01: the seam builds
+/// `format!("{style} {weight} {family}")` and `Canvas2dPainter` consumes it as
+/// `set_font("{size}px {font}")` — valid CSS, and it works. Direct2D passed the
+/// WHOLE string to [`resolve_family`], which matches a bare family, so
+/// `"normal normal sans-serif"` resolved to nothing and drew **0 pixels** where
+/// `"sans-serif"` drew **615**. The seam and Canvas2D agreed; this backend was
+/// the odd one out.
+///
+/// ⚖️ The contract is therefore the OTHER TWO, not a preference of mine: two
+/// independent consumers already read the field one way.
+#[derive(Debug, PartialEq)]
+pub struct FontSpec<'a> {
+    pub family: &'a str,
+    pub weight: DWRITE_FONT_WEIGHT,
+    pub style: DWRITE_FONT_STYLE,
+}
+
+/// Parse `"{style} {weight} {family}"`, honouring style and weight rather than
+/// dropping them.
+///
+/// ⚠️ THE FAMILY IS THE TAIL, NOT THE LAST WORD. `"normal normal Times New
+/// Roman"` has a three-word family; splitting on whitespace and taking the last
+/// token would resolve `"Roman"` — a family that does not exist, which fails
+/// closed here but would be an invisible typeface change on a system where it
+/// did. So leading tokens are consumed ONLY while they are recognised keywords,
+/// and everything from the first unrecognised token onward is the family.
+///
+/// An absent style/weight is `normal`, which is what CSS means by omitting them.
+pub fn parse_font_spec(font: &str) -> FontSpec<'_> {
+    let mut style = DWRITE_FONT_STYLE_NORMAL;
+    let mut weight = DWRITE_FONT_WEIGHT_NORMAL;
+    let mut rest = font.trim();
+    loop {
+        let (head, tail) = match rest.split_once(char::is_whitespace) {
+            Some((h, t)) => (h, t.trim_start()),
+            // The last token is always the family, never a keyword: a font
+            // named only `"bold"` is a family called bold.
+            None => break,
+        };
+        match head {
+            "italic" => style = DWRITE_FONT_STYLE_ITALIC,
+            "oblique" => style = DWRITE_FONT_STYLE_OBLIQUE,
+            "bold" => weight = DWRITE_FONT_WEIGHT_BOLD,
+            "bolder" => weight = DWRITE_FONT_WEIGHT_BOLD,
+            "lighter" => weight = DWRITE_FONT_WEIGHT_LIGHT,
+            "normal" => {}
+            // A numeric CSS weight (100..900). DirectWrite's enum IS that
+            // number, so no table is needed and none is invented.
+            n if n.len() == 3 && n.chars().all(|c| c.is_ascii_digit()) => {
+                if let Ok(v) = n.parse::<i32>() {
+                    if (100..=900).contains(&v) {
+                        weight = DWRITE_FONT_WEIGHT(v);
+                    }
+                }
+            }
+            // ⇒ NOT A KEYWORD, SO THE FAMILY STARTS HERE. Everything left,
+            // spaces included.
+            _ => break,
+        }
+        rest = tail;
+    }
+    FontSpec { family: resolve_family(rest), weight, style }
+}
 
 /// CSS generic → a real Windows family.
 ///
@@ -75,7 +144,8 @@ fn factory() -> Result<IDWriteFactory> {
 }
 
 /// Resolve a family name to a font face via the system collection.
-fn font_face(family: &str) -> Result<IDWriteFontFace> {
+fn font_face(spec: &FontSpec) -> Result<IDWriteFontFace> {
+    let family = spec.family;
     let f = factory()?;
     unsafe {
         // windows-rs 0.62 uses the out-param form here, not a return value.
@@ -92,9 +162,10 @@ fn font_face(family: &str) -> Result<IDWriteFontFace> {
             return Err(windows::core::Error::from_hresult(E_FAIL));
         }
         let fam = coll.GetFontFamily(idx)?;
-        let font = fam.GetFirstMatchingFont(
-            DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        )?;
+        // ⇒ THE PARSED WEIGHT AND STYLE, not three hardcoded NORMALs. Dropping
+        // them is why `<text font-weight="bold">` rendered regular here while
+        // rendering bold everywhere else -- a wrong picture, not a missing one.
+        let font = fam.GetFirstMatchingFont(spec.weight, DWRITE_FONT_STRETCH_NORMAL, spec.style)?;
         font.CreateFontFace()
     }
 }
@@ -132,7 +203,7 @@ pub fn draw_fast_run(
     if text.is_empty() {
         return true;
     }
-    let Ok(face) = font_face(resolve_family(font)) else { return false };
+    let Ok(face) = font_face(&parse_font_spec(font)) else { return false };
     let units = utf16(text);
     let mut codepoints: Vec<u32> = text.chars().map(|c| c as u32).collect();
     let mut glyphs = vec![0u16; codepoints.len()];
@@ -186,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_real_family_resolves_to_a_font_face() {
-        match font_face("Segoe UI") {
+        match font_face(&parse_font_spec("Segoe UI")) {
             Ok(_) => {}
             Err(e) => panic!("Segoe UI should exist on Windows: {e:?}"),
         }
@@ -196,7 +267,7 @@ mod tests {
     /// fallback renders the document in the wrong typeface on one platform only.
     #[test]
     fn a_missing_family_is_an_error_not_a_substitution() {
-        assert!(font_face("NoSuchFamily-jas-b1").is_err());
+        assert!(font_face(&parse_font_spec("NoSuchFamily-jas-b1")).is_err());
     }
 
     /// Advances must scale with size and respond to letter spacing. This does
@@ -204,7 +275,7 @@ mod tests {
     /// arithmetic is the arithmetic.
     #[test]
     fn advances_scale_with_size_and_letter_spacing() {
-        let face = font_face("Segoe UI").expect("face");
+        let face = font_face(&parse_font_spec("Segoe UI")).expect("face");
         let mut cps: Vec<u32> = "AV".chars().map(|c| c as u32).collect();
         let mut g = vec![0u16; cps.len()];
         unsafe { face.GetGlyphIndices(cps.as_mut_ptr(), cps.len() as u32, g.as_mut_ptr()).unwrap() };
@@ -216,5 +287,316 @@ mod tests {
 
         let spaced = advances_from_directwrite(&face, &g, 16.0, 3.0).unwrap();
         assert!((spaced[0] - a16[0] - 3.0).abs() < 1e-3, "letter spacing adds per glyph");
+    }
+}
+
+#[cfg(test)]
+mod shorthand_tests {
+    use super::*;
+
+    /// ⭐ THE 0-vs-615 TABLE, KEPT AS A FIXTURE.
+    ///
+    /// The measurement that opened row DA: the same call, one field changed.
+    /// `"normal normal sans-serif"` is what the seam actually sends and it drew
+    /// **zero** pixels; `"sans-serif"` drew **615**. Both must now resolve to the
+    /// same family, which is the whole of the fix.
+    #[test]
+    fn the_shorthand_and_the_bare_family_resolve_alike() {
+        let bare = parse_font_spec("sans-serif");
+        let shorthand = parse_font_spec("normal normal sans-serif");
+        assert_eq!(bare.family, "Segoe UI");
+        assert_eq!(shorthand.family, bare.family,
+                   "the seam sends the shorthand; it must reach the same family as \
+                    the bare form, or text draws nothing at all");
+        assert_eq!(shorthand.weight, bare.weight);
+        assert_eq!(shorthand.style, bare.style);
+    }
+
+    /// ⛔ THE FAMILY IS THE TAIL, NOT THE LAST WORD. A multi-word family is the
+    /// case a naive `split_whitespace().last()` gets wrong, and it gets it wrong
+    /// SILENTLY on a system where the last word happens to name a real family.
+    #[test]
+    fn a_multi_word_family_survives_the_parse() {
+        assert_eq!(parse_font_spec("normal normal Times New Roman").family, "Times New Roman");
+        assert_eq!(parse_font_spec("italic bold Segoe UI").family, "Segoe UI");
+        assert_eq!(parse_font_spec("serif").family, "Times New Roman", "generics still map");
+    }
+
+    /// Style and weight are HONOURED, not dropped. Dropping them rendered a bold
+    /// document in regular here and bold everywhere else.
+    #[test]
+    fn style_and_weight_are_parsed_not_discarded() {
+        let b = parse_font_spec("normal bold Arial");
+        assert_eq!(b.weight, DWRITE_FONT_WEIGHT_BOLD);
+        assert_eq!(b.style, DWRITE_FONT_STYLE_NORMAL);
+
+        let i = parse_font_spec("italic normal Arial");
+        assert_eq!(i.style, DWRITE_FONT_STYLE_ITALIC);
+        assert_eq!(i.weight, DWRITE_FONT_WEIGHT_NORMAL);
+
+        let both = parse_font_spec("oblique 700 Arial");
+        assert_eq!(both.style, DWRITE_FONT_STYLE_OBLIQUE);
+        assert_eq!(both.weight, DWRITE_FONT_WEIGHT(700),
+                   "a numeric CSS weight IS DirectWrite's enum value; no table is invented");
+    }
+
+    /// ⛔ A FAMILY THAT LOOKS LIKE A KEYWORD IS STILL A FAMILY when it is the
+    /// only token. Consuming it would leave an EMPTY family, which resolves to
+    /// nothing and draws nothing — the failure this whole row is about, reached
+    /// through the parser instead of through the caller.
+    #[test]
+    fn a_lone_keyword_is_a_family_not_a_modifier() {
+        assert_eq!(parse_font_spec("bold").family, "bold");
+        assert_eq!(parse_font_spec("bold").weight, DWRITE_FONT_WEIGHT_NORMAL);
+        assert!(!parse_font_spec("normal normal sans-serif").family.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod pixel_tests {
+    use super::*;
+    use crate::geometry::element::Color;
+    use crate::painter::direct2d::device::HeadlessTarget;
+    use crate::painter::direct2d::painter::Direct2DPainter;
+    use crate::painter::{Brush, Painter, TextRun};
+
+    const W: u32 = 220;
+    const H: u32 = 60;
+
+    fn render(font: &str, text: &str) -> Vec<u8> {
+        let t = HeadlessTarget::new(W, H).expect("target");
+        unsafe {
+            t.target().BeginDraw();
+            t.target().Clear(None);
+            let mut p = Direct2DPainter::new(t.target());
+            p.draw_text_run(
+                &TextRun::FastRun {
+                    font: font.into(), size: 32.0, text: text.into(),
+                    letter_spacing: 0.0, x: 4.0, y: 44.0,
+                },
+                &Brush::Solid(Color::new(0.0, 0.0, 0.0, 1.0)),
+                1.0,
+            );
+            let _ = t.target().EndDraw(None, None);
+        }
+        t.read_bgra().expect("readback")
+    }
+
+    fn ink(font: &str, text: &str) -> usize {
+        render(font, text).chunks_exact(4).filter(|px| px[3] > 32).count()
+    }
+
+    /// The x of the right-most inked column: where the pen ended up.
+    fn right_edge(font: &str, text: &str) -> u32 {
+        let buf = render(font, text);
+        (0..W)
+            .filter(|x| (0..H).any(|y| buf[(((y * W + x) * 4) + 3) as usize] > 32))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// ⭐ THE ROW-DA MEASUREMENT, NOW AN ARM. The shorthand the seam sends must
+    /// put ink on a surface. Before the parser it put down ZERO.
+    #[test]
+    fn the_seams_own_font_string_puts_ink_on_the_surface() {
+        let n = ink("normal normal sans-serif", "Hello");
+        assert!(n > 100,
+                "the shorthand the seam actually sends inked {n} pixels -- 0 means the \
+                 family did not resolve and text is silently absent");
+    }
+
+    /// ⛔ THE CONTROL IN THE OTHER DIRECTION. A family that genuinely does not
+    /// exist must still ink NOTHING — otherwise the arm above would pass on a
+    /// backend that fell back to a default font, which is the "wrong typeface on
+    /// one platform only" failure `font_face` already refuses by name.
+    #[test]
+    fn an_unresolvable_family_still_inks_nothing() {
+        assert_eq!(ink("No Such Family At All 12345", "Hello"), 0,
+                   "a missing family must fail closed, never fall back silently");
+    }
+
+    /// WEIGHT REACHES THE GLYPHS. Bold is not merely parsed — it is a different
+    /// face, and a different face inks a different number of pixels.
+    #[test]
+    fn bold_reaches_directwrite_and_changes_the_pixels() {
+        let regular = ink("normal normal sans-serif", "Hello");
+        let bold = ink("normal bold sans-serif", "Hello");
+        assert!(regular > 100 && bold > 100, "both must draw: {regular} / {bold}");
+        assert!(bold > regular,
+                "bold must ink MORE than regular ({bold} vs {regular}) -- equal means the \
+                 weight was parsed and then dropped before GetFirstMatchingFont");
+    }
+
+    /// STYLE REACHES THE GLYPHS too, by the same argument.
+    #[test]
+    fn italic_reaches_directwrite_and_changes_the_pixels() {
+        let upright = ink("normal normal sans-serif", "Hello");
+        let italic = ink("italic normal sans-serif", "Hello");
+        assert!(upright > 100 && italic > 100, "both draw: {upright} / {italic}");
+        assert_ne!(upright, italic,
+                   "italic must differ from upright -- identical means the style was \
+                    parsed and then dropped");
+    }
+
+    /// ⛔ RUNS OF SPACES MUST ADVANCE THE PEN — the `xml:space="preserve"` arm.
+    ///
+    /// Its own test because `text_xml_space_preserve.svg` is one of the four
+    /// documents this row flips, and whitespace is exactly what a glyph pipeline
+    /// drops without noticing: **spaces ink no pixels**, so the ink COUNT cannot
+    /// see them. Only the position of what follows can, which is why this
+    /// measures the right edge instead.
+    #[test]
+    fn preserved_runs_of_spaces_advance_the_pen() {
+        let narrow = right_edge("normal normal sans-serif", "A B");
+        let wide = right_edge("normal normal sans-serif", "A   B");
+        assert!(narrow > 0 && wide > 0, "both must draw: {narrow} / {wide}");
+        assert!(wide > narrow,
+                "three preserved spaces must push the 'B' further right than one \
+                 ({wide} vs {narrow}) -- equal means the run was collapsed");
+    }
+}
+
+/// A closure giving the exact advance width of a string in `font` at `size`,
+/// or `None` when the face cannot be resolved.
+///
+/// ⭐ ROW DR: THE METRICS WERE ALWAYS HERE — this is the exposure, not new
+/// capability. `advances_from_directwrite` has computed exact per-glyph
+/// advances from the font's design metrics since B1; nothing outside this
+/// module could reach them, so every painter-generic caller fell back to
+/// `text_measure`'s 0.55-per-character stub.
+///
+/// ⛔ THE FACE IS RESOLVED ONCE, NOT PER CALL. A measurer is asked for every
+/// tspan and, on a path, for every GLYPH; resolving the family inside the
+/// closure would put a system-font-collection lookup in that loop. It also
+/// makes the failure happen at the right moment: an unresolvable family is
+/// `None` HERE, before a caller has committed to laying anything out.
+pub fn try_advance_of(font: &str, size: f64) -> Option<impl Fn(&str) -> f64 + 'static> {
+    let face = font_face(&parse_font_spec(font)).ok()?;
+    Some(move |text: &str| {
+        if text.is_empty() {
+            return 0.0;
+        }
+        let mut cps: Vec<u32> = text.chars().map(|c| c as u32).collect();
+        let mut glyphs = vec![0u16; cps.len()];
+        unsafe {
+            if face
+                .GetGlyphIndices(cps.as_mut_ptr(), cps.len() as u32, glyphs.as_mut_ptr())
+                .is_err()
+            {
+                return 0.0;
+            }
+        }
+        // letter_spacing 0.0: tracking is one of the four features row DA left
+        // on legacy, so a measurer that added it would be answering about a
+        // route nothing takes.
+        advances_from_directwrite(&face, &glyphs, size, 0.0)
+            .map(|a| a.iter().map(|x| *x as f64).sum())
+            .unwrap_or(0.0)
+    })
+}
+
+#[cfg(test)]
+mod measurer_tests {
+    use super::*;
+    use crate::text_measure::{make_measurer, try_make_measurer};
+
+    /// ⭐ ROW DR's ADVANCE TABLE, PINNED — `"Hello Path"` at 21.3333, the exact
+    /// content and size of `text_path_basic.svg`.
+    ///
+    /// ⛔ THE ASSERTION IS THE CUMULATIVE PEN, NOT THE PER-GLYPH WIDTH, because
+    /// that is what text-on-path actually uses: each glyph is placed at the
+    /// ACCUMULATED offset, so an error there compounds and — on a curve — lands
+    /// every later glyph at a wrong point AND a wrong tangent angle.
+    ///
+    /// Row DQ measured the stub drifting **20.590 units** by glyph ten. The row
+    /// sets the bar at **≤ 1 px at glyph ten**; the real measurer must be
+    /// exactly DirectWrite's own sum, so the tolerance here is arithmetic
+    /// slack, not a fudge factor.
+    #[test]
+    fn the_hello_path_advance_table_drifts_under_one_pixel_at_glyph_ten() {
+        let font = "normal normal sans-serif";
+        let size = 21.3333_f64;
+        let m = try_make_measurer(font, size).expect("sans-serif must resolve");
+
+        // The pen, accumulated per character exactly as the text-on-path walk
+        // does it.
+        let mut pen = 0.0_f64;
+        let mut widths = Vec::new();
+        for ch in "Hello Path".chars() {
+            let w = m(&ch.to_string());
+            widths.push(w);
+            pen += w;
+        }
+        assert_eq!(widths.len(), 10, "ten glyphs");
+
+        // The whole run measured in ONE call must equal the sum of the parts:
+        // a measurer that disagreed with itself would place glyphs one way and
+        // size the run another.
+        let whole = m("Hello Path");
+        assert!((whole - pen).abs() <= 1.0,
+                "per-glyph pen {pen:.3} and whole-run {whole:.3} disagree by more \
+                 than a pixel at glyph ten");
+
+        // ⛔ AND IT MUST NOT BE THE STUB. That is the entire point of the row:
+        // the stub answers 11.733 for EVERY character, so its pen reaches
+        // 117.333 where the real one reaches ~97.
+        let stub_pen: f64 = "Hello Path".chars().map(|c| make_measurer(font, size)(&c.to_string())).sum();
+        assert!((stub_pen - pen).abs() > 15.0,
+                "the real pen {pen:.3} must differ sharply from the stub's \
+                 {stub_pen:.3} -- equal means try_make_measurer fell back");
+
+        // ⛔ AND IT MUST BE GLYPH-AWARE, which is the property the stub lacks by
+        // construction. 'l' is a narrow glyph and 'H' a wide one; the stub gives
+        // them the same number.
+        let narrow = m("l");
+        let wide = m("H");
+        assert!(wide > narrow * 2.0,
+                "'H' ({wide:.3}) must be far wider than 'l' ({narrow:.3}) -- equal \
+                 or close means the measurer is counting characters, not glyphs");
+    }
+
+    /// ⛔ FAIL CLOSED. An unresolvable family yields NO measurer, rather than a
+    /// confident wrong number.
+    ///
+    /// `make_measurer` answers 0.55-per-char for a font that does not exist; a
+    /// caller that POSITIONS by that lays text out against metrics belonging to
+    /// no font at all. `None` lets the caller refuse the element instead, which
+    /// is what every other seam in this lane does with a capability it cannot
+    /// honour.
+    #[test]
+    fn an_unresolvable_family_yields_no_measurer_at_all() {
+        assert!(try_make_measurer("No Such Family At All 12345", 16.0).is_none(),
+                "an unresolvable face must fail closed");
+        // The control in the other direction: a real family DOES yield one, or
+        // the arm above passes on a function that always refuses.
+        assert!(try_make_measurer("normal normal sans-serif", 16.0).is_some(),
+                "the seam's own CSS shorthand must resolve (row DA)");
+        assert!(try_make_measurer("serif", 16.0).is_some(), "a bare generic too");
+    }
+
+    /// ⭐ THE PER-RUN RIGHT-EDGE ARM row DR names — the segmented case.
+    ///
+    /// Two runs laid end to end: the second starts where the first ends. With
+    /// real metrics `"iiii"` advances 15.5 at 16pt; with the stub, 35.2. The
+    /// arm asserts the SECOND RUN'S ORIGIN, because that is what a segmented
+    /// walk computes and what an ink count cannot see — two runs at the wrong
+    /// offsets ink almost exactly as many pixels as two at the right ones.
+    #[test]
+    fn the_per_run_right_edge_is_the_real_advance_not_the_stub() {
+        let font = "normal normal sans-serif";
+        let m = try_make_measurer(font, 16.0).expect("resolve");
+
+        let narrow = m("iiii");
+        let wide = m("MMMM");
+        // The stub gives BOTH 35.200. Real advances differ by ~3.7x.
+        assert!(wide > narrow * 3.0,
+                "'MMMM' ({wide:.3}) must be far wider than 'iiii' ({narrow:.3}); \
+                 the stub returns 35.200 for both");
+        // And the second run's origin is the first run's advance -- stated as
+        // the quantity the walk actually uses.
+        let second_origin = narrow;
+        assert!((second_origin - 35.2).abs() > 10.0,
+                "the second run must start at the REAL advance ({second_origin:.3}), \
+                 not the stub's 35.2");
     }
 }

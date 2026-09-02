@@ -2031,13 +2031,45 @@ fn the_router_no_longer_routes_live_to_legacy_and_text_still_is() {
         "live geometry is lowered on the seam now; routing it to legacy would \
          leave the lowering unreachable and the native walk blind"
     );
-    let text = Element::Text(crate::geometry::element::TextElem::from_string(
+    // ⭐ AND THE TEXT CLAUSE HAS NARROWED AGAIN — row DA, 2026-09-01. This arm
+    // used to assert that ALL text stayed legacy, with the message "the clause
+    // must narrow, not vanish". DA is that narrowing: FLAT AND FEATURE-FREE text
+    // converts; everything else still does not. The arm keeps its intent by
+    // asserting BOTH SIDES of the new boundary rather than one side of the old.
+    let flat = Element::Text(crate::geometry::element::TextElem::from_string(
         1.0, 2.0, "hi", "Arial", 12.0, "normal", "normal", "none", 10.0, 12.0, None, None,
         common(),
     ));
     assert!(
-        element_needs_legacy(&text, caps),
-        "text is PH3 shaping work, NOT this row: the clause must narrow, not vanish"
+        !element_needs_legacy(&flat, caps),
+        "flat, feature-free text lowers on the seam now (row DA); routing it to \
+         legacy would leave the lowering unreachable and the Windows app blind \
+         to every plain <text> in the corpus"
+    );
+
+    // ⛔ "none" IS THE ABSENT VALUE FOR DECORATION, and this element proves the
+    // arm above is not passing by accident: `from_string` is handed "none",
+    // which a naive `!is_empty()` reads as "has a decoration" -- the bug that
+    // kept all four DA documents refusing on the first cut.
+    let mut underlined = match flat.clone() {
+        Element::Text(t) => t,
+        _ => unreachable!(),
+    };
+    underlined.text_decoration = "underline".into();
+    assert!(
+        element_needs_legacy(&Element::Text(underlined), caps),
+        "a REAL decoration is an extra primitive and stays legacy -- the clause \
+         narrowed, it did not vanish"
+    );
+
+    let mut tracked = match flat {
+        Element::Text(t) => t,
+        _ => unreachable!(),
+    };
+    tracked.letter_spacing = "0.025em".into();
+    assert!(
+        element_needs_legacy(&Element::Text(tracked), caps),
+        "tracking is one of the four features DA explicitly did NOT take"
     );
 }
 
@@ -2431,4 +2463,531 @@ fn a_ring_with_one_point_is_skipped_and_emits_no_degenerate_path() {
          hand the backend a degenerate fill: {:?}",
         rec.commands()
     );
+}
+
+// ---------------------------------------------------------------------------
+// RP3 — the non-centre ellipse stroke (ruled 2026-09-01, option (a))
+// ---------------------------------------------------------------------------
+
+use super::{ellipse_bezier_path, ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION, ELLIPSE_KAPPA};
+
+/// One point on a cubic at parameter `t`.
+fn cubic_at(p0: (f64, f64), c1: (f64, f64), c2: (f64, f64), p3: (f64, f64), t: f64) -> (f64, f64) {
+    let u = 1.0 - t;
+    let (a, b, c, d) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+    (a * p0.0 + b * c1.0 + c * c2.0 + d * p3.0,
+     a * p0.1 + b * c1.1 + c * c2.1 + d * p3.1)
+}
+
+/// ⭐⭐ RP3's RATIFIED EXCEPTION, PINNED AS A NUMBER.
+///
+/// The 2026-09-01 ruling grants contract R4 **one named exception**: this
+/// lowering changes WHAT SHAPE is drawn, not merely how ops are expressed — the
+/// first and only such licence on this seam. The condition attached to it was
+/// that the error be a MEASURED BOUND rather than an accepted vagueness, and
+/// this arm is that condition.
+///
+/// ⛔ IT SAMPLES BOTH CURVES AND COMPUTES THE WORST CASE. It does not assert the
+/// textbook figure, and it does not assert the control points: either would pass
+/// over a transcription error that still produced a plausible oval. The question
+/// asked is the only one that matters — *how far, at its worst, is this curve
+/// from the ellipse it claims to be?*
+#[test]
+fn the_bezier_ellipse_deviation_is_pinned() {
+    // A circle first: radial distance is directly comparable to the radius.
+    let (cx, cy, r) = (7.0, -3.0, 100.0);
+    let path = ellipse_bezier_path(cx, cy, r, r);
+
+    let mut cur = match path[0] {
+        PathCommand::MoveTo { x, y } => (x, y),
+        ref other => panic!("path must open with a MoveTo, got {other:?}"),
+    };
+    let mut worst: f64 = 0.0;
+    let mut samples = 0usize;
+    for cmd in &path[1..] {
+        let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = *cmd else { continue };
+        let (p0, c1, c2, p3) = (cur, (x1, y1), (x2, y2), (x, y));
+        for i in 0..=200 {
+            let t = i as f64 / 200.0;
+            let (px, py) = cubic_at(p0, c1, c2, p3, t);
+            let d = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
+            worst = worst.max((d - r).abs() / r);
+            samples += 1;
+        }
+        cur = p3;
+    }
+    assert!(samples >= 800, "all four quadrants must be sampled, got {samples}");
+    assert!(worst <= ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION,
+            "worst radial deviation {worst:.3e} exceeds the pinned bound {:.3e} \
+             -- RP3's R4 exception is granted only while this number holds",
+            ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION);
+
+    // ⛔ AND THE BOUND MUST NOT BE SLACK. A ceiling ten times the real error
+    // would let a genuine regression pass while still reading as "pinned";
+    // this holds the constant honest to the measurement it came from.
+    assert!(worst > ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION / 2.0,
+            "worst {worst:.3e} is far under the bound {:.3e} -- the constant has \
+             gone slack and should be tightened to what is actually measured",
+            ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION);
+
+    // The curve must CLOSE, or an inside-stroke clip leaks through the gap.
+    assert!(matches!(path.last(), Some(PathCommand::ClosePath)),
+            "the ring must close: {path:?}");
+}
+
+/// The four endpoints are the ellipse's own extremes, EXACTLY — the
+/// approximation is interior to each quadrant, never at the joins. A lowering
+/// that got kappa wrong would still pass through these, which is why the
+/// deviation arm above exists as well as this one.
+#[test]
+fn the_bezier_ellipse_touches_the_true_extremes_exactly() {
+    let p = ellipse_bezier_path(10.0, 20.0, 30.0, 5.0);
+    let ends: Vec<(f64, f64)> = p.iter().filter_map(|c| match *c {
+        PathCommand::MoveTo { x, y } => Some((x, y)),
+        PathCommand::CurveTo { x, y, .. } => Some((x, y)),
+        _ => None,
+    }).collect();
+    assert_eq!(ends, vec![(40.0, 20.0), (10.0, 25.0), (-20.0, 20.0), (10.0, 15.0), (40.0, 20.0)],
+               "right, bottom, left, top, and back to the start");
+    assert!((ELLIPSE_KAPPA - 4.0 / 3.0 * (2.0_f64.sqrt() - 1.0)).abs() < 1e-15,
+            "kappa is DERIVED, not fitted: 4/3 * (sqrt(2) - 1)");
+}
+
+/// ⭐ THE ROUTING FLIP. A non-centre-stroked ellipse used to be legacy-only; it
+/// now lowers on the seam, and its stroke rides the clip-then-stroke-at-2x path
+/// every other shape already uses.
+#[test]
+fn a_non_centre_ellipse_stroke_converts_and_rides_the_clip_lowering() {
+    let mut e = EllipseElem {
+        cx: 50.0, cy: 50.0, rx: 40.0, ry: 25.0,
+        fill: fill(Color::rgb(0.2, 0.4, 0.8)),
+        stroke: Some(stroke_aligned(Color::BLACK, 6.0, StrokeAlign::Inside)),
+        common: common(), fill_gradient: None, stroke_gradient: None,
+    };
+    let elem = Element::Ellipse(e.clone());
+    assert!(!element_needs_legacy(&elem, all_caps()),
+            "RP3 is lowered now; routing it to legacy leaves the lowering unreachable");
+
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let cmds = rec.commands();
+
+    // The FILL stays the true conic -- only the stroke pays the approximation.
+    assert_eq!(cmds.iter().filter(|c| matches!(c, Command::FillEllipseArc { .. })).count(), 1,
+               "the fill must stay an exact arc: {cmds:?}");
+    assert_eq!(cmds.iter().filter(|c| matches!(c, Command::StrokeEllipseArc { .. })).count(), 0,
+               "a non-centre stroke cannot be an arc -- it needs the clip: {cmds:?}");
+
+    // Inside alignment: clip to the ring, stroke it at 2x.
+    let clips: Vec<_> = cmds.iter().filter_map(|c| match c {
+        Command::Clip { path, .. } => Some(path), _ => None }).collect();
+    assert_eq!(clips.len(), 1, "inside align clips once: {cmds:?}");
+    let strokes: Vec<_> = cmds.iter().filter_map(|c| match c {
+        Command::StrokePath { path, stroke, .. } => Some((path, stroke)), _ => None }).collect();
+    assert_eq!(strokes.len(), 1);
+    assert_eq!(strokes[0].1.width, 12.0, "inside align strokes at 2x width");
+    assert_eq!(clips[0], strokes[0].0,
+               "the clip and the stroke must trace the SAME ring, or the boundary seams");
+
+    // ⛔ AND A CENTRE-ALIGNED ELLIPSE MUST STILL TAKE THE EXACT ARC. Without
+    // this, the change would have quietly degraded every ordinary ellipse in
+    // the corpus to a bezier for no reason at all.
+    e.stroke = Some(stroke(Color::BLACK, 6.0));
+    let mut rec2 = RecordingPainter::new();
+    emit_element(&mut rec2, &Element::Ellipse(e), 1.0);
+    assert_eq!(rec2.commands().iter()
+                   .filter(|c| matches!(c, Command::StrokeEllipseArc { .. })).count(), 1,
+               "a CENTRE stroke keeps the exact arc: {:?}", rec2.commands());
+}
+
+// ---------------------------------------------------------------------------
+// ROW DR capability 1 — segmented text (tspans)
+// ---------------------------------------------------------------------------
+
+fn tspan(content: &str, weight: Option<&str>, size: Option<f64>) -> crate::geometry::tspan::Tspan {
+    let mut t = crate::geometry::tspan::Tspan::default_tspan();
+    t.content = content.to_string();
+    t.font_weight = weight.map(|w| w.to_string());
+    t.font_size = size;
+    t
+}
+
+fn segmented(tspans: Vec<crate::geometry::tspan::Tspan>) -> Element {
+    let mut e = crate::geometry::element::TextElem::from_string(
+        10.0, 20.0, "", "sans-serif", 12.0, "normal", "normal", "none", 10.0, 12.0, None, None,
+        common(),
+    );
+    e.fill = fill(Color::BLACK);
+    e.tspans = tspans;
+    Element::Text(e)
+}
+
+/// The x of each recorded FastRun, in order.
+fn run_origins(cmds: &[Command]) -> Vec<f64> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::DrawTextRun { run: crate::painter::TextRun::FastRun { x, .. }, .. } => Some(*x),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ⭐ ROW DR capability 1: a segmented text emits ONE RUN PER TSPAN, and the
+/// second starts where the first ends.
+///
+/// ⛔ GATED ON THE BACKEND THAT HAS A REAL MEASURER, and the gate is the POINT
+/// rather than a convenience. Row DR routes segmented text on the presence of
+/// `try_make_measurer`, which is `None` off Direct2D BY CONSTRUCTION — so on
+/// every other platform the correct behaviour is to REFUSE, and that is
+/// asserted by `segmented_stays_legacy_without_a_real_measurer` below.
+///
+/// 📌 Measured the hard way: the first cut of these arms was ungated and went
+/// green on this box while failing on the ubuntu and macOS lanes. Tests written
+/// where the author is are exactly the class this seat keeps finding in other
+/// people's instruments.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn segmented_text_emits_one_run_per_tspan_at_measured_offsets() {
+    let elem = segmented(vec![tspan("Hello ", None, None), tspan("world", Some("bold"), None)]);
+    assert!(!element_needs_legacy(&elem, all_caps()),
+            "feature-free tspans with a resolvable face lower on the seam now");
+
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let xs = run_origins(rec.commands());
+    assert_eq!(xs.len(), 2, "one run per tspan: {:?}", rec.commands());
+    assert_eq!(xs[0], 10.0, "the first run starts at the element's x");
+    assert!(xs[1] > xs[0] + 20.0,
+            "the second run must start a MEASURED distance along ({:?}) -- \
+             equal to the first means the pen never advanced", xs);
+}
+
+/// ⛔⛔ THE MEASURER MUST USE EACH TSPAN'S OWN FONT — AND THIS ARM EXISTS
+/// BECAUSE A MUTATION PASS PROVED THE COMMENT WAS NOT A GUARD.
+///
+/// `emit_segmented_text` says, in as many words, that hoisting one measurer out
+/// of the loop "would reintroduce" the weight-blindness row DQ measured in the
+/// stub. I then wrote a suite in which **a mutant that hoisted the PARENT
+/// font's measurer passed all 3,169 tests** — because both corpus fixtures put
+/// the OVERRIDE on the SECOND tspan, whose width nothing advances by.
+///
+/// ⇒ The fixture has to put the override FIRST. Here tspan[0] is 36pt against a
+/// 12pt parent: measured with its own font it advances ~3× further than measured
+/// with the parent's, so the second run's origin separates the two readings by a
+/// wide margin.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn the_pen_advances_by_each_tspans_own_font_not_the_parents() {
+    // tspan[0] is THREE TIMES the parent size; tspan[1] inherits.
+    let elem = segmented(vec![tspan("MMMM", None, Some(36.0)), tspan("x", None, None)]);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let xs = run_origins(rec.commands());
+    assert_eq!(xs.len(), 2);
+
+    // What the parent's 12pt font would have advanced by, for the same text.
+    let parent_advance = crate::text_measure::try_make_measurer("normal normal sans-serif", 12.0)
+        .expect("resolve")("MMMM");
+    let own_advance = crate::text_measure::try_make_measurer("normal normal sans-serif", 36.0)
+        .expect("resolve")("MMMM");
+    assert!(own_advance > parent_advance * 2.0,
+            "the fixture must separate the two readings: own={own_advance:.3} \
+             parent={parent_advance:.3}");
+
+    let actual = xs[1] - xs[0];
+    assert!((actual - own_advance).abs() < 1.0,
+            "the pen advanced {actual:.3}; tspan[0]'s OWN font gives \
+             {own_advance:.3} and the parent's gives {parent_advance:.3} -- \
+             matching the parent means one measurer was hoisted out of the loop");
+}
+
+/// ⛔ AND THE ROUTER STILL REFUSES A TSPAN FEATURE THIS LOWERING DOES NOT CARRY.
+/// The clause narrowed; it did not vanish.
+#[test]
+fn a_tspan_feature_row_dr_did_not_take_still_stays_legacy() {
+    for (label, mutate) in [
+        ("rotate", (|t: &mut crate::geometry::tspan::Tspan| t.rotate = Some(15.0))
+            as fn(&mut crate::geometry::tspan::Tspan)),
+        ("dx", |t: &mut crate::geometry::tspan::Tspan| t.dx = Some(0.5)),
+        ("baseline_shift", |t: &mut crate::geometry::tspan::Tspan| t.baseline_shift = Some(2.0)),
+        ("decoration", |t: &mut crate::geometry::tspan::Tspan| {
+            t.text_decoration = Some(vec!["underline".to_string()])
+        }),
+    ] {
+        let mut second = tspan("world", Some("bold"), None);
+        mutate(&mut second);
+        let elem = segmented(vec![tspan("Hello ", None, None), second]);
+        assert!(element_needs_legacy(&elem, all_caps()),
+                "a tspan carrying {label} is NOT in row DR and must stay legacy");
+    }
+    // ⛔ THE CONTROL IS PLATFORM-DEPENDENT AND SO IT IS SPLIT OUT, not deleted:
+    // "a feature-free segmented text converts" is true only where a real
+    // measurer exists. Both halves are asserted, one per platform, below.
+}
+
+/// ⛔ "FEATURE-FREE" DOES NOT MEAN "NO OVERRIDES AT ALL". `render_is_flat()` is
+/// true when EVERY tspan has no overrides, so a two-tspan text with none is
+/// still FLAT and never reaches the segmented walk. The fixtures below give the
+/// second tspan a benign FONT override -- exactly what the corpus does
+/// (`text_with_tspans.svg`, `setup_text_ab_bold_b.svg` both use
+/// `font-weight="bold"`) -- which makes them genuinely segmented while carrying
+/// none of the five features row DR left on legacy.
+///
+/// 📌 Found by running the non-d2d lane locally after CI red: my first
+/// "feature-free segmented" fixture had no overrides, so it was flat, converted
+/// as flat, and the arm asserting it stays legacy failed for a reason that had
+/// nothing to do with the measurer.
+///
+/// The control for the arm above, where a real measurer exists: without any of
+/// those features a segmented text DOES convert — or that loop would be passing
+/// because segmented text is refused wholesale.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_feature_free_segmented_text_converts_where_a_measurer_exists() {
+    let plain = segmented(vec![tspan("Hello ", None, None), tspan("world", Some("bold"), None)]);
+    assert!(!matches!(&plain, Element::Text(t) if t.render_is_flat()),
+            "the fixture must actually BE segmented, or this arm tests the flat path");
+    assert!(!element_needs_legacy(&plain, all_caps()));
+}
+
+/// ⛔ AND THE OTHER SIDE OF THE SAME RULE: with NO real measurer, segmented text
+/// STAYS LEGACY.
+///
+/// This is row DR's fail-closed law expressed as a platform property rather than
+/// as a `cfg` nobody checks. A segmented walk POSITIONS by measured widths, so a
+/// backend without metrics must not attempt it — and off Direct2D
+/// `try_make_measurer` is `None` by construction, which is what keeps the web
+/// build on its legacy path with no `cfg` in the router at all.
+#[cfg(not(all(feature = "d2d", windows)))]
+#[test]
+fn segmented_stays_legacy_without_a_real_measurer() {
+    let plain = segmented(vec![tspan("Hello ", None, None), tspan("world", Some("bold"), None)]);
+    assert!(!matches!(&plain, Element::Text(t) if t.render_is_flat()),
+            "the fixture must actually BE segmented, or this arm tests the flat path");
+    assert!(element_needs_legacy(&plain, all_caps()),
+            "with no real measurer, segmented text must stay legacy rather than              lay runs out against metrics that do not exist");
+}
+
+// ---------------------------------------------------------------------------
+// ROW DR capability 2 — type on a path
+// ---------------------------------------------------------------------------
+
+fn text_path(d: Vec<PathCommand>, tspans: Vec<crate::geometry::tspan::Tspan>) -> Element {
+    Element::TextPath(crate::geometry::element::TextPathElem {
+        d,
+        tspans,
+        start_offset: 0.0,
+        font_family: "sans-serif".into(),
+        font_size: 16.0,
+        font_weight: "normal".into(),
+        font_style: "normal".into(),
+        // "none" is the CSS keyword for NO decoration -- the same convention row
+        // DA had to learn the hard way, and the same one `draws_decoration_str`
+        // tests for by token.
+        text_decoration: "none".into(),
+        text_transform: String::new(),
+        font_variant: String::new(),
+        baseline_shift: String::new(),
+        line_height: String::new(),
+        letter_spacing: String::new(),
+        xml_lang: String::new(),
+        aa_mode: String::new(),
+        rotate: String::new(),
+        horizontal_scale: String::new(),
+        vertical_scale: String::new(),
+        kerning: String::new(),
+        fill: fill(Color::BLACK),
+        stroke: None,
+        common: common(),
+    })
+}
+
+/// A straight horizontal segment — the simplest possible carrier.
+fn flat_path(len: f64) -> Vec<PathCommand> {
+    vec![
+        PathCommand::MoveTo { x: 0.0, y: 50.0 },
+        PathCommand::LineTo { x: len, y: 50.0 },
+    ]
+}
+
+/// Every `push_state` transform recorded, in order — one per placed glyph.
+fn glyph_frames(cmds: &[Command]) -> Vec<Transform> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::PushState { transform } => Some(*transform),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ⭐ THE STRAIGHT-LINE ARM ROW DQ NAMED, AND IT COMES FIRST DELIBERATELY: on a
+/// horizontal segment the tangent is constant, so a failure here names the
+/// MEASURER and not the tangent maths. Isolating the two is the whole reason
+/// this arm exists beside the curved one.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn glyphs_on_a_straight_path_advance_by_their_own_measured_widths() {
+    let mut t = crate::geometry::tspan::Tspan::default_tspan();
+    t.content = "il".into(); // a narrow glyph then a taller one
+    let elem = text_path(flat_path(400.0), vec![t]);
+    assert!(!element_needs_legacy(&elem, all_caps()),
+            "a single-font, feature-free type-on-path lowers now");
+
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let frames = glyph_frames(rec.commands());
+    assert_eq!(frames.len(), 2, "one frame per glyph: {:?}", rec.commands());
+
+    // The tangent is constant on a straight run, so every frame is a pure
+    // translation: a == 1, b == 0.
+    for f in &frames {
+        assert!((f.a - 1.0).abs() < 1e-6 && f.b.abs() < 1e-6,
+                "a horizontal path must give an unrotated frame, got {f:?}");
+    }
+
+    // ⛔ AND THE SECOND GLYPH SITS A MEASURED DISTANCE ALONG, not a constant.
+    // 'i' is one of the narrowest glyphs there is; the old stub gave every
+    // character font_size * 0.55 = 8.8 at this size.
+    let m = crate::text_measure::try_make_measurer("normal normal sans-serif", 16.0)
+        .expect("resolve");
+    let (wi, wl) = (m("i"), m("l"));
+    // Each glyph is centred on its own span, so the gap between frame origins is
+    // half of each: (wi + wl) / 2.
+    let gap = frames[1].e - frames[0].e;
+    assert!((gap - (wi + wl) / 2.0).abs() < 0.5,
+            "glyph 2 sits {gap:.3} along; its own metrics give {:.3}. The stub \
+             would give 8.800 for BOTH glyphs.", (wi + wl) / 2.0);
+
+    // ⛔⛔ EACH GLYPH SITS ON ITS OWN MIDPOINT, NOT ITS LEADING EDGE — and this
+    // assertion exists because a mutation pass proved nothing else caught it.
+    //
+    // The reference places at `(offset + w/2) / total`, centring the glyph on
+    // the span it occupies. Placing at `offset / total` instead shifts every
+    // glyph half its own width back along the path — and on a curve changes the
+    // tangent each is rotated by. A mutant doing exactly that passed all 3,177
+    // tests: the GAP between consecutive glyphs is identical either way, so only
+    // the FIRST glyph's ABSOLUTE position can see it.
+    //
+    // This path starts at x = 0, so glyph one belongs at half its own width.
+    assert!((frames[0].e - wi / 2.0).abs() < 0.5,
+            "glyph 1 sits at {:.3}; centred on its own span it belongs at {:.3} \
+             (half of 'i'). ~0 means it was placed at its LEADING EDGE and the \
+             whole run is half a glyph out.", frames[0].e, wi / 2.0);
+}
+
+/// ⛔ ON A CURVE THE FRAMES MUST ROTATE, and each differently. A lowering that
+/// placed glyphs at the right points but never read the tangent would pass the
+/// straight-line arm above and fail here — which is exactly why both exist.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn glyphs_on_a_curve_are_rotated_to_the_tangent_and_no_two_alike() {
+    let mut t = crate::geometry::tspan::Tspan::default_tspan();
+    t.content = "Hello Path".into();
+    // text_path_basic.svg's own arch.
+    let arch = vec![
+        PathCommand::MoveTo { x: 0.0, y: 66.6667 },
+        PathCommand::CurveTo {
+            x1: 0.0, y1: 0.0, x2: 133.3333, y2: 0.0, x: 133.3333, y: 66.6667,
+        },
+    ];
+    let elem = text_path(arch, vec![t]);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let frames = glyph_frames(rec.commands());
+    assert!(frames.len() >= 8, "most of the run must fit: {} frames", frames.len());
+
+    // The first glyph climbs, the last descends: their tangents have opposite
+    // vertical sense. That is the arch, and no constant rotation can produce it.
+    // ⛔ THE TANGENT MUST SWEEP, MONOTONICALLY. Measured on this arch at 16pt,
+    // "Hello Path" occupies the early CLIMBING half, so every frame leans the
+    // same way (`b < 0`) while flattening toward the apex: b runs -0.986 to
+    // -0.258 and `e` advances the whole time.
+    //
+    // ⚠️ MY FIRST DRAFT ASSERTED THE LAST GLYPH DESCENDS (`b > 0`) and was
+    // simply wrong — the run covers ~39 % of the path and never reaches the far
+    // side. Asserting the SWEEP instead is both true and stronger: a lowering
+    // that read the tangent once and reused it gives an identical b every time,
+    // which no tolerance can hide.
+    for f in &frames {
+        assert!(f.b < 0.0, "every glyph leans up the climbing half, got b={:.4}", f.b);
+    }
+    for w in frames.windows(2) {
+        assert!(w[1].b > w[0].b,
+                "the tangent must flatten monotonically: {:.4} then {:.4}", w[0].b, w[1].b);
+        assert!(w[1].e > w[0].e,
+                "and the pen must advance: {:.3} then {:.3}", w[0].e, w[1].e);
+    }
+    let sweep = frames.last().unwrap().b - frames.first().unwrap().b;
+    assert!(sweep > 0.5,
+            "the frames must actually rotate across the run (sweep {sweep:.3}); a              tangent read once and reused gives a sweep of 0");
+
+    // ⛔ AND THE FRAMES MUST BE DISTINCT. Identical rotations would mean the
+    // tangent was read once and reused.
+    for w in frames.windows(2) {
+        assert!((w[0].b - w[1].b).abs() > 1e-9 || (w[0].e - w[1].e).abs() > 1e-9,
+                "two consecutive glyph frames are identical: {:?}", w);
+    }
+}
+
+/// ⭐ THE UNION CASE — `text_path_with_tspans.svg`. Per-tspan fonts on a path:
+/// the measurer is needed at RUN granularity to pick each tspan's font AND at
+/// GLYPH granularity to place along the curve, and the pen carries ACROSS runs.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_tspan_font_override_on_a_path_changes_where_later_glyphs_land() {
+    let mk = |second_size: Option<f64>| {
+        let mut a = crate::geometry::tspan::Tspan::default_tspan();
+        a.content = "MMMM".into();
+        a.font_size = second_size; // the FIRST run carries the override
+        let mut b = crate::geometry::tspan::Tspan::default_tspan();
+        b.content = "x".into();
+        text_path(flat_path(2000.0), vec![a, b])
+    };
+    let frames_of = |e: &Element| {
+        let mut rec = RecordingPainter::new();
+        emit_element(&mut rec, e, 1.0);
+        glyph_frames(rec.commands())
+    };
+
+    let plain = frames_of(&mk(None));
+    let big = frames_of(&mk(Some(48.0)));
+    assert_eq!(plain.len(), 5, "MMMM + x");
+    assert_eq!(big.len(), 5);
+
+    // The final glyph belongs to the SECOND tspan, whose font is unchanged; only
+    // the pen it starts from differs, because the FIRST run got wider.
+    let plain_last = plain.last().unwrap().e;
+    let big_last = big.last().unwrap().e;
+    assert!(big_last > plain_last * 2.0,
+            "a 48pt first run must push the final glyph far further along \
+             ({big_last:.3} vs {plain_last:.3}) -- equal means one measurer was \
+             used for every tspan");
+}
+
+/// ⛔ THE ROUTER STILL REFUSES WHAT ROW DR DID NOT TAKE. The clause narrowed.
+#[test]
+fn a_type_on_path_feature_row_dr_did_not_take_stays_legacy() {
+    let mut base = crate::geometry::tspan::Tspan::default_tspan();
+    base.content = "hi".into();
+
+    // An empty path, and empty content, both paint nothing either way.
+    assert!(element_needs_legacy(&text_path(vec![], vec![base.clone()]), all_caps()),
+            "an empty path has nowhere to place glyphs");
+    let empty = crate::geometry::tspan::Tspan::default_tspan();
+    assert!(element_needs_legacy(&text_path(flat_path(100.0), vec![empty]), all_caps()),
+            "empty content places nothing");
+
+    // A real decoration is an extra primitive that must follow the CURVE.
+    let Element::TextPath(mut e) = text_path(flat_path(100.0), vec![base.clone()]) else {
+        unreachable!()
+    };
+    e.text_decoration = "underline".into();
+    assert!(element_needs_legacy(&Element::TextPath(e), all_caps()),
+            "a curved underline is not in row DR");
+
+    // A tspan feature the segmented walk also refuses.
+    let mut rotated = base.clone();
+    rotated.rotate = Some(20.0);
+    assert!(element_needs_legacy(&text_path(flat_path(100.0), vec![rotated]), all_caps()),
+            "a rotated tspan is not in row DR");
 }

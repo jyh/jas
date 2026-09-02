@@ -16,6 +16,30 @@
 //!    the way `render.rs` does (a folded multiply, D3: the `globalAlpha`
 //!    getter dies), so a future PH2 driver can adopt it wholesale.
 //!
+//!    ## ⚖️ R4's ONE NAMED EXCEPTION (ruled 2026-09-01 — RP3, option (a))
+//!
+//!    "Display-list-equivalent" means the same PICTURE from different OPS. Every
+//!    lowering here obeys that literally — a rounded rect becomes a path, an
+//!    aligned stroke becomes clip-then-stroke — and each draws the identical
+//!    shape by another route. **RP3 is the single exception, and it is
+//!    enumerated here so it stays single.**
+//!
+//!    A non-centre-aligned ELLIPSE stroke lowers to a four-cubic ring
+//!    ([`ellipse_bezier_path`]), because alignment needs a CLIP and
+//!    `Painter::clip` takes a path (contract A5) while an `EllipseArc` is not
+//!    one. That ring is not the conic: it deviates by at most
+//!    [`ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION`] of the radius. ⇒ **the only place
+//!    on this seam where what is DRAWN changes, rather than how it is
+//!    expressed.**
+//!
+//!    ⛔ THE LICENCE IS BOUNDED, AND THE BOUND IS A TEST, NOT A SENTENCE.
+//!    `tests::the_bezier_ellipse_deviation_is_pinned` samples both curves and
+//!    computes the worst radial error, and it fails in BOTH directions — too
+//!    large reds, and *too slack* reds too, so the constant cannot quietly grow
+//!    to cover a regression. The exception buys a non-centre STROKE and nothing
+//!    else: the fill keeps the exact conic, and no other element acquires a
+//!    right to approximate by citing this one.
+//!
 //! 2. **The capability router** [`element_needs_legacy`] — which takes the
 //!    BACKEND's answers, not only the element — and the byte-identical
 //!    leaf-paint helper [`line_painter_inputs`] — the PH3 production slice.
@@ -148,8 +172,24 @@ pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
     // now takes the core's own four `evaluate_with` arms and draws the OUTPUT as
     // geometry (the helm's 2026-09-01 design word), which is what a Windows app
     // renders, with `canvas::render` not involved at all.
-    if matches!(elem, Element::Text(_) | Element::TextPath(_)) {
-        return true;
+    // ⭐ ROW DA — THE TEXT CLAUSE NARROWS; IT DOES NOT VANISH. Ruled 2026-09-01:
+    // FLAT FIRST, router narrowed to FLAT-AND-FEATURE-FREE, and parity on the
+    // four typographic features is explicitly NOT required before it opens —
+    // each is a later narrowing step with its own pixel arm, never a silent
+    // widening. `TextPath` is untouched: type-on-path is PH3 shaping work.
+    // ⭐ ROW DR capability 2: TYPE ON A PATH lowers now, when its run is
+    // single-font, feature-free, and a real measurer exists. The clause narrows;
+    // it does not vanish -- see `text_path_needs_legacy` for the table of what
+    // stays legacy and the trigger that opens each.
+    if let Element::TextPath(tp) = elem {
+        if text_path_needs_legacy(tp) {
+            return true;
+        }
+    }
+    if let Element::Text(t) = elem {
+        if text_needs_legacy(t) {
+            return true;
+        }
     }
     // ⭐ OUTLINE MODE IS NO LONGER A LEGACY REASON (node 2). This clause used to
     // read `if elem.visibility() == Visibility::Outline { return true }`, and
@@ -181,10 +221,36 @@ pub fn element_needs_legacy(elem: &Element, caps: Caps) -> bool {
     // return `None` (a capability the two-paint seam can't reproduce) stays on
     // legacy in production, so the reference goldens must exclude it too — else
     // they would model a route production never takes.
+    //
+    // ⚠️ THE MIRROR IS NO LONGER EXACT FOR ELLIPSES, and that is stated rather
+    // than left for a reader to trip over. Since RP3 (2026-09-01) a non-centre
+    // ellipse stroke converts HERE and still returns `None` from
+    // `ellipse_painter_inputs` — deliberately: the native walk has no
+    // arc-with-alignment primitive and takes the four-cubic ring, while the web
+    // leaf sits beside a real `ctx.ellipse()` and would spend R4's one exception
+    // to gain nothing. See `ellipse_painter_inputs` for the full argument.
     match elem {
-        // RP3: an ellipse arc carries no align and can't be a clip path, so a
-        // non-center circle/ellipse stroke stays legacy.
-        Element::Ellipse(e) => stroke_non_center(e.stroke.as_ref()),
+        // ⭐ RP3 IS LOWERED NOW (ruled 2026-09-01, option (a)) — this clause
+        // used to read `Element::Ellipse(e) => stroke_non_center(e.stroke)`,
+        // on the ground that *"an ellipse arc carries no align and can't be a
+        // clip path"*. The first half is still true and the second is answered:
+        // the non-centre stroke rides `ellipse_bezier_path`, a four-cubic ring
+        // that CAN be a clip path, through the same `emit_path_stroke` every
+        // other shape uses.
+        //
+        // ⚖️ IT IS CONTRACT R4's ONE NAMED EXCEPTION, and the citation belongs
+        // here because this is where a reader asks why. Every other lowering on
+        // this seam changes how ops are EXPRESSED; this one changes WHAT SHAPE
+        // is drawn, by at most `ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION` of the
+        // radius. The licence was granted on the condition that the error be a
+        // MEASURED BOUND rather than a prose "close enough" —
+        // `tests::the_bezier_ellipse_deviation_is_pinned` is that condition,
+        // and it fails in BOTH directions so the bound cannot silently go slack.
+        //
+        // ⛔ The exception is exactly this wide. It buys a non-centre STROKE and
+        // nothing else: the fill keeps the exact conic, and no other element
+        // gains a right to approximate by pointing at this one.
+        Element::Ellipse(_) => false,
         // The legacy Rect arm expands anchor-aligned dashing into sub-paths.
         Element::Rect(e) => e.stroke.as_ref().map(expands_anchor_dash).unwrap_or(false),
         // RP2 (set stroke brush → filled outline), variable width, arrowheads,
@@ -245,6 +311,356 @@ pub fn subtree_needs_legacy(elem: &Element, caps: Caps) -> bool {
         }
     }
     false
+}
+
+/// ⭐ ROW DA's PREDICATE: does this text element still need the legacy renderer?
+///
+/// The 2026-09-01 ruling opened the router to text that is **flat AND feature
+/// free**, and to nothing else. Each excluded feature is named here with the
+/// trigger that opens it, so the next narrowing step is a diff against a list
+/// rather than a rediscovery.
+///
+/// | excluded | why it is out today | what opens it |
+/// |---|---|---|
+/// | not `render_is_flat()` (tspans) | the seam emits ONE run; segmented text needs per-tspan font, decoration and a shared baseline | a segmented lowering + its own pixel arm |
+/// | `letter_spacing` | `FastRun` carries the field, but the seam hardcodes `0.0`; production computes tracking + kerning together | thread the computed advance + an advance-width arm |
+/// | `kerning` | same computation as above — `render.rs` folds both into ONE uniform advance | as above; they open together because they are one number |
+/// | `baseline_shift` | super/sub re-scale the size AND offset the baseline (`0.7×`, `∓`) | a baseline arm proving the offset and the scale |
+/// | `text_decoration` | underline/strike are extra primitives, not glyph state | a decoration lowering + a pixel arm |
+///
+/// ⛔ "ABSENT" IS NOT THE SAME TEST FOR ALL FOUR, AND ASSUMING IT WAS OPENED THE
+/// ROUTER FOR EXACTLY NOTHING.
+///
+/// Three of these are `#[serde(default)]` `String`s where `""` means "not set".
+/// **`text_decoration` is not**: the SVG parser writes the CSS keyword
+/// `"none"`, which is the explicit statement that there IS no decoration. A
+/// first cut here tested `!is_empty()` on all four, so every plain `<text>` in
+/// the corpus carried `"none"`, read as "has a decoration", and stayed legacy —
+/// **all four documents this row exists to flip kept refusing, and the count
+/// would have been the only thing to notice.**
+///
+/// So decoration is tested the way `render.rs` tests it — for the TOKENS it
+/// acts on (`underline`, `line-through`, split on whitespace), not for
+/// emptiness. That is the authority, not a convention guessed at from the type.
+///
+/// ⚠️ THIS IS DELIBERATELY CONSERVATIVE. A text element carrying any of the
+/// four stays legacy EVEN IF the value would turn out to be a no-op (a
+/// `letter-spacing: 0em`, say). Parsing them to decide would mean implementing
+/// the feature in order to refuse it, and a refusal that has to be right about
+/// the thing it refuses is the wrong shape for a gate.
+pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
+    // ⭐ ROW DR NARROWS THIS AGAIN: SEGMENTED text lowers now, provided every
+    // tspan is feature-free AND a real measurer exists for the font.
+    if !t.render_is_flat() {
+        if t.tspans.iter().any(tspan_needs_legacy) {
+            return true;
+        }
+        // ⛔ FAIL CLOSED ON AN UNRESOLVABLE FACE, AND DO IT HERE — AT THE
+        // ROUTING DECISION, BEFORE ANYTHING IS LAID OUT. A segmented walk
+        // POSITIONS by measured widths, so a missing measurer does not mean
+        // "slightly wrong", it means every run after the first is somewhere
+        // else. `try_make_measurer` refuses rather than falling back to the
+        // 0.55-per-character stub (row DQ: `"iiii"` and `"MMMM"` both 35.200).
+        //
+        // ⭐ AND THIS IS WHAT KEEPS THE WEB BUILD ON LEGACY FOR FREE: off
+        // Direct2D `try_make_measurer` is `None` by construction, so the web
+        // walk keeps the path it has always taken with no cfg here at all.
+        if crate::text_measure::try_make_measurer(
+            &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
+            t.font_size,
+        ).is_none() {
+            return true;
+        }
+    }
+    !t.letter_spacing.is_empty()
+        || !t.kerning.is_empty()
+        || !t.baseline_shift.is_empty()
+        || draws_decoration(t)
+}
+
+/// Does this text carry a decoration that would draw an extra primitive?
+///
+/// The same test `render.rs` makes (`text_decoration.split_whitespace()` for
+/// `underline` / `line-through`), so the router refuses exactly what the
+/// renderer would have drawn — no more (which would keep plain text on legacy
+/// forever) and no less (which would drop an underline silently).
+fn draws_decoration(t: &crate::geometry::element::TextElem) -> bool {
+    t.text_decoration
+        .split_whitespace()
+        .any(|tok| tok == "underline" || tok == "line-through")
+}
+
+/// Does this tspan use a feature the segmented lowering does not carry?
+///
+/// ⭐ ROW DR, capability 1. The lowering below carries per-tspan FONT overrides
+/// (family · size · weight · style) and the measured pen advance between runs.
+/// Everything else is refused BY NAME, with the trigger that opens it:
+///
+/// | excluded | why it is out today | what opens it |
+/// |---|---|---|
+/// | `rotate` | needs a per-tspan `push_state` frame around the run | that frame + an angle arm |
+/// | `transform` | same frame, arbitrary matrix | as above |
+/// | `dx` | a leading-edge nudge in em, folded into the pen | arithmetic + a position arm |
+/// | `baseline_shift` | offsets this tspan's baseline only | a baseline arm |
+/// | `text_decoration` | underline/strike are extra primitives per run | a decoration lowering + a pixel arm |
+///
+/// ⛔ `None` MEANS INHERIT, NOT ABSENT, and that distinction is why this reads
+/// `is_some()` rather than testing a value. A tspan's `text_decoration: None`
+/// inherits the parent's tokens — which the parent-level check in
+/// [`text_needs_legacy`] has already refused — while `Some([])` is an explicit
+/// override to nothing. Treating `Some([])` as "has a decoration" is
+/// conservative in the safe direction: it refuses an element that would in fact
+/// have rendered correctly, rather than drawing one that would not.
+fn tspan_needs_legacy(t: &crate::geometry::tspan::Tspan) -> bool {
+    t.rotate.is_some()
+        || t.transform.is_some()
+        || t.dx.is_some()
+        || t.baseline_shift.is_some()
+        || t.text_decoration.is_some()
+}
+
+/// The segmented (multi-tspan) lowering — row DR, capability 1.
+///
+/// Mirrors `canvas::render::draw_segmented_text`: ONE shared baseline at
+/// `y + 0.8 · font_size`, a pen starting at `x`, and per tspan an effective
+/// font assembled from the tspan's overrides falling back to the parent's.
+///
+/// ⛔ THE PEN ADVANCES BY A MEASURED WIDTH, and that is the whole reason this
+/// could not be built before row DR. `measure` here is
+/// [`text_measure::try_make_measurer`] — real DirectWrite advances, resolved
+/// once. The old crate-wide stub answers `font_size × 0.55` per CHARACTER, so
+/// `"iiii"` and `"MMMM"` came back identical and every tspan after the first
+/// landed 10–130 % out of place.
+///
+/// ⚠️ THE MEASURER IS RE-MADE PER TSPAN, not hoisted, because the FONT changes
+/// per tspan — `setup_text_ab_bold_b.svg`'s two runs differ by weight, and a
+/// measurer built once from the parent font would advance the bold run by
+/// regular metrics. That is the exact weight-blindness row DQ flagged in the
+/// stub, and hoisting for speed would reintroduce it.
+fn emit_segmented_text(p: &mut dyn Painter, e: &crate::geometry::element::TextElem, eff: f64) {
+    let Some(f) = e.fill.as_ref() else { return };
+    let parent_bold = e.font_weight == "bold";
+    let parent_italic = e.font_style == "italic" || e.font_style == "oblique";
+    let baseline = e.y + e.font_size * 0.8;
+    let mut cx = e.x;
+
+    for t in &e.tspans {
+        if t.content.is_empty() {
+            continue;
+        }
+        let family = t.font_family.as_deref().unwrap_or(&e.font_family);
+        let size = t.font_size.unwrap_or(e.font_size);
+        let weight = match t.font_weight.as_deref() {
+            Some(w) => w,
+            None => if parent_bold { "bold" } else { "normal" },
+        };
+        let style = match t.font_style.as_deref() {
+            Some(s) => s,
+            None => if parent_italic { "italic" } else { "normal" },
+        };
+        // The same shorthand shape every other FastRun carries: style, weight,
+        // family — the size rides its own field.
+        let font = format!("{style} {weight} {family}");
+        p.draw_text_run(
+            &TextRun::FastRun {
+                font: font.clone(),
+                size,
+                text: t.content.clone(),
+                letter_spacing: 0.0,
+                x: cx,
+                y: baseline,
+            },
+            &Brush::Solid(f.color),
+            eff * f.opacity,
+        );
+        // ⛔ IF THE MEASURER IS GONE, STOP RATHER THAN GUESS. The router
+        // (`text_needs_legacy`) already refused any element whose font will not
+        // resolve, so reaching this is a font that resolved for the parent and
+        // not for a tspan override. Advancing by anything at all would place
+        // every later run wrong; drawing nothing further is the honest failure.
+        let Some(measure) = crate::text_measure::try_make_measurer(&font, size) else {
+            return;
+        };
+        cx += measure(&t.content);
+    }
+}
+
+/// Does this type-on-path element use something the lowering does not carry?
+///
+/// ⭐ ROW DR, capability 2. The lowering carries the guide line, the per-glyph
+/// frame, and the measured advance along the path — which is everything
+/// `text_path_basic.svg`, `text_path_with_tspans.svg` and
+/// `locked_all_kinds.svg` use. Everything else is refused BY NAME:
+///
+/// | excluded | why it is out today | what opens it |
+/// |---|---|---|
+/// | per-tspan font overrides | the walk uses ONE font for the whole run; a mixed run needs a measurer per tspan AND a per-tspan advance | the segmented walk's own loop, reused here |
+/// | `letter_spacing` / `kerning` | tracking folds into the advance, which is the very quantity the placement uses | thread it into the measurer + a drift arm |
+/// | `baseline_shift` | offsets the glyph normal to the path, not along it | a normal-offset arm |
+/// | `text_decoration` | an underline must follow the CURVE, not a straight run | a curved-decoration lowering |
+///
+/// ⛔ AND A MISSING MEASURER IS REFUSED HERE TOO, for a sharper reason than in
+/// the segmented case: text-on-path advances the pen PER GLYPH and reads the
+/// path's point AND TANGENT at the accumulated offset. Row DQ measured the stub
+/// drifting 20.590 units by glyph ten of `"Hello Path"` — 11 % of the path —
+/// which does not merely space the glyphs wrongly, it ROTATES them wrongly and
+/// slides the tail off the end of the curve.
+fn text_path_needs_legacy(e: &crate::geometry::element::TextPathElem) -> bool {
+    if e.d.is_empty() || e.content().is_empty() {
+        // Nothing to place. Legacy paints nothing either way, and refusing keeps
+        // the reference goldens from modelling an empty route.
+        return true;
+    }
+    // Per-tspan FONT overrides are carried (row DR capability 2 reuses
+    // capability 1's per-run measurer); the five FEATURES are not, and are
+    // refused by the same predicate the segmented walk uses.
+    if e.tspans.iter().any(tspan_needs_legacy) {
+        return true;
+    }
+    if !e.letter_spacing.is_empty()
+        || !e.kerning.is_empty()
+        || !e.baseline_shift.is_empty()
+        || draws_decoration_str(&e.text_decoration)
+    {
+        return true;
+    }
+    // ⛔ EVERY EFFECTIVE FONT MUST RESOLVE, not just the parent's.
+    // `text_path_with_tspans.svg` puts `font-style="italic"` on its second run,
+    // so a check that only asked about the parent would pass an element whose
+    // second tspan then had no measurer -- and the walk would truncate mid-run.
+    // Asking here refuses the whole element instead, before anything is placed.
+    text_path_fonts(e).any(|(font, size)| {
+        crate::text_measure::try_make_measurer(&font, size).is_none()
+    })
+}
+
+/// The (font, size) each run of a type-on-path element is drawn with: the
+/// tspan's own overrides falling back to the element's. Shared by the router and
+/// the lowering so the two cannot disagree about what will be asked for.
+fn text_path_fonts(
+    e: &crate::geometry::element::TextPathElem,
+) -> impl Iterator<Item = (String, f64)> + '_ {
+    let parent_bold = e.font_weight == "bold";
+    let parent_italic = e.font_style == "italic" || e.font_style == "oblique";
+    e.tspans.iter().filter(|t| !t.content.is_empty()).map(move |t| {
+        let family = t.font_family.as_deref().unwrap_or(&e.font_family);
+        let size = t.font_size.unwrap_or(e.font_size);
+        let weight = match t.font_weight.as_deref() {
+            Some(w) => w,
+            None => if parent_bold { "bold" } else { "normal" },
+        };
+        let style = match t.font_style.as_deref() {
+            Some(st) => st,
+            None => if parent_italic { "italic" } else { "normal" },
+        };
+        (format!("{style} {weight} {family}"), size)
+    })
+}
+
+/// [`draws_decoration`] over a bare string — `TextPathElem` carries the same
+/// CSS field as `TextElem` and the same `"none"` convention.
+fn draws_decoration_str(decoration: &str) -> bool {
+    decoration
+        .split_whitespace()
+        .any(|tok| tok == "underline" || tok == "line-through")
+}
+
+/// Type on a path — row DR, capability 2.
+///
+/// Mirrors `canvas::render`'s `Element::TextPath` arm exactly: the faint guide
+/// line first, then one glyph at a time, each translated to its point on the
+/// curve and rotated to the tangent there.
+///
+/// ⛔ THE PEN IS ARC LENGTH, NOT X. Each glyph is placed at the offset reached
+/// by summing the advances before it, converted to a normalised `t` along the
+/// flattened path. That makes the measurer's accuracy compound: an error does
+/// not shift one glyph, it shifts every glyph after it AND changes the tangent
+/// each is rotated by. Row DQ measured the old stub drifting 20.590 units by
+/// glyph ten.
+fn emit_text_on_path(p: &mut dyn Painter, e: &crate::geometry::element::TextPathElem, eff: f64) {
+    // The guide line, at the same grey the reference uses. Drawn even when the
+    // text cannot be placed, because it is the path itself.
+    let guide = Brush::Solid(Color::new(180.0 / 255.0, 180.0 / 255.0, 180.0 / 255.0, 1.0));
+    p.stroke_path(
+        &e.d,
+        &guide,
+        &StrokeStyle {
+            width: 1.0,
+            cap: crate::geometry::element::LineCap::Butt,
+            join: crate::geometry::element::LineJoin::Miter,
+            miter: 10.0,
+            dash: Vec::new(),
+        },
+        eff * 0.4,
+    );
+
+    let Some(f) = e.fill.as_ref() else { return };
+
+    // Arc length of the flattened path — the denominator every offset is
+    // normalised by.
+    let pts = crate::geometry::element::flatten_path_commands(&e.d);
+    let mut total = 0.0_f64;
+    for i in 1..pts.len() {
+        let (dx, dy) = (pts[i].0 - pts[i - 1].0, pts[i].1 - pts[i - 1].1);
+        total += (dx * dx + dy * dy).sqrt();
+    }
+    if total <= 0.0 {
+        return;
+    }
+
+    // ⭐ ONE RUN PER TSPAN, GLYPHS WITHIN IT — the union row DQ predicted:
+    // `text_path_with_tspans.svg` needs the measurer at RUN granularity (to pick
+    // each tspan's font) and at GLYPH granularity (to place along the curve).
+    // The pen is arc length and carries ACROSS tspans, so a run's font affects
+    // where every later run's glyphs land.
+    let mut offset = e.start_offset * total;
+    let fonts: Vec<(String, f64)> = text_path_fonts(e).collect();
+    for (t, (font, size)) in e.tspans.iter().filter(|t| !t.content.is_empty()).zip(fonts) {
+        let Some(measure) = crate::text_measure::try_make_measurer(&font, size) else {
+            // Unreachable: the router refused any element with an unresolvable
+            // effective font. Stopping rather than guessing keeps that true even
+            // if the two ever disagree.
+            return;
+        };
+        for ch in t.content.chars() {
+        let s = ch.to_string();
+        let w = measure(&s);
+        // The glyph sits at its own MIDPOINT along the path, which is what puts
+        // it visually centred on the curve rather than hanging off its leading
+        // edge.
+        let t = (offset + w / 2.0) / total;
+        if t > 1.0 {
+            break;
+        }
+        if t >= 0.0 {
+            let (px, py) = crate::geometry::measure::path_point_at_offset(&e.d, t);
+            let t2 = ((offset + w) / total).min(1.0);
+            let (px2, py2) = crate::geometry::measure::path_point_at_offset(&e.d, t2);
+            let angle = (py2 - py).atan2(px2 - px);
+            let (sin, cos) = angle.sin_cos();
+            // translate(px,py) · rotate(angle), as one matrix — the seam has no
+            // separate translate/rotate ops and does not need them.
+            p.push_state(super::Transform {
+                a: cos, b: sin, c: -sin, d: cos, e: px, f: py,
+            });
+            p.draw_text_run(
+                &TextRun::FastRun {
+                    font: font.clone(),
+                    size,
+                    text: s,
+                    letter_spacing: 0.0,
+                    // The reference's own offsets inside the glyph frame.
+                    x: -w / 2.0,
+                    y: size * 0.35,
+                },
+                &Brush::Solid(f.color),
+                eff * f.opacity,
+            );
+            p.pop_state();
+        }
+        offset += w;
+        }
+    }
 }
 
 /// A stroke aligned inside/outside rather than centered (RP3 helper).
@@ -502,10 +918,30 @@ pub fn rect_painter_inputs(e: &RectElem, bbox: (f64, f64, f64, f64)) -> Option<S
     })
 }
 
-/// Convertible [`Ellipse`](Element::Ellipse) inputs, or `None`. RP3: a
-/// non-center stroke stays legacy (an ellipse arc cannot carry the
-/// inside/outside clip). Equal radii come through here too -- the circle
-/// twin was deleted with the circle kind on 2026-07-30.
+/// Convertible [`Ellipse`](Element::Ellipse) inputs, or `None`. Equal radii come
+/// through here too -- the circle twin was deleted with the circle kind on
+/// 2026-07-30.
+///
+/// ⚖️ RP3: A NON-CENTRE STROKE STILL STAYS LEGACY **HERE**, AND THAT IS NO
+/// LONGER THE SAME ANSWER [`element_needs_legacy`] GIVES. The 2026-09-01 ruling
+/// lowered the non-centre ellipse stroke on the REFERENCE renderer, through a
+/// four-cubic ring that can be a clip path; this function feeds a DIFFERENT
+/// consumer -- `render.rs`'s per-leaf conversion -- and returns
+/// [`ConvGeom::Arc`], which by construction cannot carry the inside/outside
+/// clip.
+///
+/// ⇒ **The divergence is deliberate and each side is right for its consumer.**
+/// The native walk has no arc-with-alignment primitive, so it takes the ring
+/// and pays [`ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION`]. The web leaf sits beside a
+/// legacy path with a REAL `ctx.ellipse()` that draws the exact conic, so
+/// converting it here would spend R4's one exception to gain nothing --
+/// approximating a shape the caller can already draw perfectly.
+///
+/// ⛔ SO THE "PH2 PRODUCTION-ROUTING MIRROR" COMMENT ON THE ROUTER IS NO LONGER
+/// EXACT FOR ELLIPSES, and saying so is the point of this note: a reader who
+/// assumed the two agreed would look for a bug on whichever side they checked
+/// second. Making them agree means giving this function a `Path` geom, which is
+/// a change to what the WEB app renders and was not asked for by the ruling.
 pub fn ellipse_painter_inputs(e: &EllipseElem, bbox: (f64, f64, f64, f64)) -> Option<ShapePaint> {
     if is_freeform(e.fill_gradient.as_deref()) || is_freeform(e.stroke_gradient.as_deref()) {
         return None;
@@ -861,7 +1297,24 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
             }
             if let Some(s) = e.stroke.as_ref() {
                 let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
-                p.stroke_ellipse_arc(&arc, &brush, &stroke_style(s, s.width), eff * s.opacity);
+                // ⭐ RP3 (ruled 2026-09-01, option (a)). A CENTRE stroke keeps
+                // the exact conic; an inside/outside one cannot, because
+                // alignment lowers as clip-then-stroke-at-2× and
+                // `Painter::clip` takes a PATH (contract A5). So the
+                // non-centre case — and only it — rides the four-cubic ring.
+                //
+                // ⚠️ The fill above deliberately stays `fill_ellipse_arc`: it
+                // has no need of a path and therefore no reason to degrade.
+                // The two differ along the shared boundary by at most
+                // `ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION` — 0.027pt at a 100pt
+                // radius, sub-pixel at any scale this app presents at.
+                if s.align == StrokeAlign::Center {
+                    p.stroke_ellipse_arc(&arc, &brush, &stroke_style(s, s.width), eff * s.opacity);
+                } else {
+                    emit_path_stroke(
+                        p, &ellipse_bezier_path(e.cx, e.cy, e.rx, e.ry), &brush, s, eff,
+                    );
+                }
             }
         }
         Element::Polyline(e) => {
@@ -894,6 +1347,10 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
                 emit_path_stroke(p, &e.d, &brush, s, eff);
             }
         }
+        // ⭐ ROW DR: SEGMENTED text takes the tspan walk; flat keeps the single
+        // run below. The router has already guaranteed both halves are
+        // reachable -- feature-free tspans and a resolvable face.
+        Element::Text(e) if !e.render_is_flat() => emit_segmented_text(p, e, eff),
         Element::Text(e) => {
             // A simplified flat FastRun — proves the text op interleaves in
             // z-order (contract: text rides PH1). The production `render.rs`
@@ -947,8 +1404,9 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
                 }
             }
         }
-        // Legacy-only or unhandled in the PH1 reference renderer.
-        Element::TextPath(_) => {}
+        // ⭐ ROW DR capability 2. The router has already guaranteed a
+        // single-font, feature-free run with a resolvable face.
+        Element::TextPath(tp) => emit_text_on_path(p, tp, eff),
     }
 
     if pushed {
@@ -1304,6 +1762,70 @@ fn resolve_gradient(g: &Gradient, bbox: (f64, f64, f64, f64)) -> Option<Brush> {
 // ---------------------------------------------------------------------------
 // Geometry helpers
 // ---------------------------------------------------------------------------
+
+/// The circle/ellipse Bézier constant, `4/3 · (√2 − 1)`.
+///
+/// The value that makes a cubic meet a quarter-arc at both ends WITH MATCHING
+/// TANGENTS. It is not a fitted constant and not a tuning knob: it falls out of
+/// requiring the curve to pass through the arc's endpoints with the right
+/// derivative, which is why the same digits appear in `geometry::pdf` and
+/// `canvas::arrowheads` — three sites, one derivation.
+pub(crate) const ELLIPSE_KAPPA: f64 = 0.5522847498307933;
+
+/// ⭐ THE MAXIMUM RADIAL DEVIATION of [`ellipse_bezier_path`] from the true
+/// ellipse, as a FRACTION OF THE RADIUS — **RP3's ratified exception, expressed
+/// as a number instead of as a shrug.**
+///
+/// ⚖️ WHY A CONSTANT AND NOT A COMMENT. The 2026-09-01 ruling on RP3 grants
+/// contract R4 **one named exception**: this is the only place in the seam where
+/// the lowering changes WHAT SHAPE is drawn rather than how ops are expressed.
+/// A licence that broad is safe only while it is BOUNDED, so the bound is
+/// enforced by [`tests::the_bezier_ellipse_deviation_is_pinned`] rather than
+/// asserted here — a prose "close enough" is exactly what the ruling refused.
+///
+/// **Measured, not quoted:** the test samples both curves densely and computes
+/// the worst radial error. `2.8e-4` is the ceiling it holds to; the classic
+/// four-arc figure is ≈`2.7e-4`, so the margin is the last digit and nothing
+/// more. At a 100pt radius that is **0.027pt** — well under a device pixel at
+/// any scale this app presents at, and the reason the exception is grantable.
+pub(crate) const ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION: f64 = 2.8e-4;
+
+/// A closed four-cubic approximation of the ellipse, as path commands.
+///
+/// ⛔ IT EXISTS BECAUSE ALIGNMENT NEEDS A **CLIP PATH**, AND AN ARC IS NOT ONE.
+/// `emit_path_stroke` lowers inside/outside alignment as clip-then-stroke-at-2×,
+/// and `Painter::clip` takes `&[PathCommand]` (contract A5: clip is path-only).
+/// An `EllipseArc` cannot be handed to it, which is precisely why a non-centre
+/// ellipse stroke stayed on the legacy path — `element_needs_legacy` said so in
+/// one line for months.
+///
+/// ⚖️ THE FILL IS DELIBERATELY **NOT** ROUTED THROUGH THIS. `fill_ellipse_arc`
+/// draws the true conic and stays exact; only the stroke, which cannot be
+/// expressed without a path, pays the approximation. The two therefore disagree
+/// by at most [`ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION`] along the shared boundary
+/// — sub-pixel, and preferable to degrading a fill that has no need to degrade.
+pub(crate) fn ellipse_bezier_path(cx: f64, cy: f64, rx: f64, ry: f64) -> Vec<PathCommand> {
+    let ox = rx * ELLIPSE_KAPPA;
+    let oy = ry * ELLIPSE_KAPPA;
+    vec![
+        PathCommand::MoveTo { x: cx + rx, y: cy },
+        // Quadrants in +y-then-−x order, matching `geometry::pdf::emit_circle`
+        // so a reader comparing the two sees one shape, not two conventions.
+        PathCommand::CurveTo {
+            x1: cx + rx, y1: cy + oy, x2: cx + ox, y2: cy + ry, x: cx, y: cy + ry,
+        },
+        PathCommand::CurveTo {
+            x1: cx - ox, y1: cy + ry, x2: cx - rx, y2: cy + oy, x: cx - rx, y: cy,
+        },
+        PathCommand::CurveTo {
+            x1: cx - rx, y1: cy - oy, x2: cx - ox, y2: cy - ry, x: cx, y: cy - ry,
+        },
+        PathCommand::CurveTo {
+            x1: cx + ox, y1: cy - ry, x2: cx + rx, y2: cy - oy, x: cx + rx, y: cy,
+        },
+        PathCommand::ClosePath,
+    ]
+}
 
 fn rounded_rect_path(x: f64, y: f64, w: f64, h: f64, rx_in: f64, ry_in: f64) -> Vec<PathCommand> {
     if rx_in <= 0.0 && ry_in <= 0.0 {
