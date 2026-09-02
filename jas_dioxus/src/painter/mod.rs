@@ -154,7 +154,7 @@ mod tests;
 // The Path IR is REUSED, not reinvented (contract D5). Styles reuse the
 // existing typed enums so the seam speaks the document's own vocabulary.
 pub use crate::geometry::element::{
-    BlendMode, Color, FillRule, LineCap, LineJoin, PathCommand, Transform,
+    BlendMode, Color, FillRule, LineCap, LineJoin, PathCommand, StrokeAlign, Transform,
 };
 
 // ---------------------------------------------------------------------------
@@ -443,8 +443,27 @@ pub trait Painter {
     /// `winding` per AMENDMENT A3 (RATIFIED 2026-07-23).
     fn fill_ellipse_arc(&mut self, arc: &EllipseArc, winding: FillRule, brush: &Brush, paint_alpha: f64);
 
-    /// Stroke an ellipse arc.
-    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64);
+    /// Stroke an ellipse arc, at `align`.
+    ///
+    /// ⭐ THE ALIGN IS HERE AND NOT LOWERED BY THE CALLER — council 2026-09-02,
+    /// **EXACT ELLIPSE EVERYWHERE**. A path stroke still lowers its alignment
+    /// caller-side into clip-then-stroke-at-2× (contract A5), because a path
+    /// clip is expressible here. An ELLIPSE cannot take that route without
+    /// becoming a bézier ring, and the ring is not the conic: it was contract
+    /// R4's one named exception (RP3, 2026-09-01), bounded at 2.8e-4 of the
+    /// radius.
+    ///
+    /// ⛔ AND AMENDMENT A5 SURVIVES VERBATIM. The alternative was an
+    /// ellipse-clip entry, which A5 forbids BY NAME ("There is no ellipse-clip
+    /// entry"). Carrying the align on the stroke instead adds nothing to
+    /// clipping: a backend does the clip internally, with its own exact conic
+    /// (Direct2D already builds a geometry and `PushLayer`s it; Canvas2D has
+    /// `ellipse()` + `clip()`), so the approximation does not move — **it
+    /// disappears, and R4 goes back to zero named exceptions.**
+    ///
+    /// The width passed is the AUTHORED width. Doubling for a non-centre align
+    /// is the backend's half of the lowering, exactly as the clip is.
+    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, align: StrokeAlign, paint_alpha: f64);
 
     /// Intersect the clip region with `path` under `winding`. Undone by the
     /// enclosing [`pop_state`](Painter::pop_state) (clip is part of saved

@@ -45,6 +45,7 @@ use windows::Win32::Graphics::Direct2D::Common::{
 use windows::Win32::Graphics::Direct2D::{
     ID2D1Brush, ID2D1RenderTarget, ID2D1SolidColorBrush, ID2D1StrokeStyle,
     D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_ELLIPSE, D2D1_EXTEND_MODE_CLAMP,
+    ID2D1Geometry,
     D2D1_GAMMA_2_2, D2D1_LAYER_OPTIONS_NONE, D2D1_LAYER_PARAMETERS,
     D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES, D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES,
 };
@@ -52,7 +53,7 @@ use windows_numerics::Matrix3x2;
 
 use super::{convert, geometry, text};
 use crate::geometry::element::Color;
-use crate::painter::{
+use crate::painter::{StrokeAlign, 
     BlendMode, Brush, EllipseArc, FillRule, Mask, Painter, PathCommand, Rect, StrokeStyle,
     TextRun, Transform,
 };
@@ -818,14 +819,72 @@ impl<'a> Painter for Direct2DPainter<'a> {
         });
     }
 
-    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
+    /// ⭐ THE ALIGNMENT IS DONE HERE, ON THE TRUE CONIC (council 2026-09-02,
+    /// EXACT ELLIPSE EVERYWHERE). It used to be lowered by the caller into a
+    /// four-cubic bézier ring — contract R4's one named exception, RP3 — because
+    /// `Painter::clip` is path-only (amendment A5) and an `EllipseArc` is not a
+    /// path. D2D has `CreateEllipseGeometry`, which IS the conic, so the
+    /// exception retires rather than being re-bounded.
+    ///
+    /// The clip and the 2× width are this backend's half of the lowering, done
+    /// inside ONE `blended_primitive` closure so the blend machinery sees a
+    /// single primitive rather than a half-open layer.
+    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, align: StrokeAlign, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
         let (br, ar, st) = (brush.clone(), arc.clone(), stroke.clone());
         self.blended_primitive(move |rt| {
             let Some(b) = Self::brush_on(rt, &br, a) else { return };
             let Some(e) = full_ellipse(&ar) else { return };
-            let ss = Self::stroke_style_on(rt, &st, st.width);
-            unsafe { rt.DrawEllipse(&e, &b, st.width as f32, ss.as_ref()) };
+            if align == StrokeAlign::Center {
+                let ss = Self::stroke_style_on(rt, &st, st.width);
+                unsafe { rt.DrawEllipse(&e, &b, st.width as f32, ss.as_ref()) };
+                return;
+            }
+            // ⛔ A FAILED CLIP MUST NOT FALL THROUGH TO AN UNCLIPPED STROKE.
+            // Drawing the full-width ring where an inside stroke was asked for
+            // is a picture that looks almost right, which is the failure this
+            // backend refuses everywhere else. Nothing drawn is the honest
+            // outcome, and it matches `full_ellipse`'s own None above.
+            let Ok(f) = (unsafe { rt.GetFactory() }) else { return };
+            let Ok(el) = (unsafe { f.CreateEllipseGeometry(&e) }) else { return };
+            let mask: ID2D1Geometry = if align == StrokeAlign::Outside {
+                // The outside region is the even-odd complement: a huge rect
+                // GROUPED with the ellipse under ALTERNATE fill. Amendment A5's
+                // own note describes this compound for the path case; here the
+                // ellipse half of it stays an exact conic.
+                let big = D2D_RECT_F {
+                    left: -1.0e7, top: -1.0e7, right: 1.0e7, bottom: 1.0e7,
+                };
+                let Ok(rect) = (unsafe { f.CreateRectangleGeometry(&big) }) else { return };
+                let parts: [Option<ID2D1Geometry>; 2] =
+                    [Some(rect.into()), Some(el.into())];
+                let Ok(g) = (unsafe {
+                    // The seam already owns the winding->D2D mapping; reuse it rather
+                    // than naming a raw constant a second time.
+                    f.CreateGeometryGroup(convert::fill_mode(FillRule::EvenOdd), &parts)
+                }) else { return };
+                g.into()
+            } else {
+                el.into()
+            };
+            let params = D2D1_LAYER_PARAMETERS {
+                contentBounds: D2D_RECT_F {
+                    left: f32::MIN, top: f32::MIN, right: f32::MAX, bottom: f32::MAX,
+                },
+                geometricMask: unsafe { std::mem::transmute_copy(&mask) },
+                maskAntialiasMode: D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
+                maskTransform: Matrix3x2::identity(),
+                opacity: 1.0,
+                opacityBrush: std::mem::ManuallyDrop::new(None),
+                layerOptions: D2D1_LAYER_OPTIONS_NONE,
+            };
+            let w2 = st.width * 2.0;
+            let ss = Self::stroke_style_on(rt, &st, w2);
+            unsafe {
+                rt.PushLayer(&params, None);
+                rt.DrawEllipse(&e, &b, w2 as f32, ss.as_ref());
+                rt.PopLayer();
+            }
         });
     }
 

@@ -30,7 +30,7 @@
 //! source; if ever bitten, raise precision or snap authored coords. This is a
 //! named corner case, not an open-ended defer.
 
-use super::{
+use super::{StrokeAlign, 
     BlendMode, Brush, ColorStop, EllipseArc, FillRule, LinearGradient, Mask, Painter, PathCommand,
     RadialGradient, Rect, StrokeStyle, TextRun, Transform,
 };
@@ -48,7 +48,7 @@ pub enum Command {
     FillRect { rect: Rect, brush: Brush, paint_alpha: f64 },
     StrokeRect { rect: Rect, brush: Brush, stroke: StrokeStyle, paint_alpha: f64 },
     FillEllipseArc { arc: EllipseArc, winding: FillRule, brush: Brush, paint_alpha: f64 },
-    StrokeEllipseArc { arc: EllipseArc, brush: Brush, stroke: StrokeStyle, paint_alpha: f64 },
+    StrokeEllipseArc { arc: EllipseArc, brush: Brush, stroke: StrokeStyle, align: StrokeAlign, paint_alpha: f64 },
     Clip { path: Vec<PathCommand>, winding: FillRule },
     PushState { transform: Transform },
     PopState,
@@ -125,8 +125,8 @@ impl Painter for RecordingPainter {
     fn fill_ellipse_arc(&mut self, arc: &EllipseArc, winding: FillRule, brush: &Brush, paint_alpha: f64) {
         self.commands.push(Command::FillEllipseArc { arc: *arc, winding, brush: brush.clone(), paint_alpha });
     }
-    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
-        self.commands.push(Command::StrokeEllipseArc { arc: *arc, brush: brush.clone(), stroke: stroke.clone(), paint_alpha });
+    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, align: StrokeAlign, paint_alpha: f64) {
+        self.commands.push(Command::StrokeEllipseArc { arc: *arc, brush: brush.clone(), stroke: stroke.clone(), align, paint_alpha });
     }
     fn clip(&mut self, path: &[PathCommand], winding: FillRule) {
         self.commands.push(Command::Clip { path: path.to_vec(), winding });
@@ -460,11 +460,27 @@ fn command_to_json(cmd: &Command) -> J {
             ("arc", ellipse_json(arc)), ("winding", J::Str(winding_str(*winding).into())),
             ("brush", brush_json(brush)), ("alpha", J::F(*paint_alpha)),
         ]),
-        Command::StrokeEllipseArc { arc, brush, stroke, paint_alpha } => J::Obj(vec![
-            ("cmd", J::Str("stroke_ellipse_arc".into())),
-            ("arc", ellipse_json(arc)), ("brush", brush_json(brush)),
-            ("stroke", stroke_json(stroke)), ("alpha", J::F(*paint_alpha)),
-        ]),
+        // ⛔ `align` IS EMITTED ONLY WHEN IT IS NOT CENTER, and that is not
+        // tidiness -- this JSON is the CROSS-LANGUAGE CORPUS FORMAT. Every
+        // pinned golden today is centre-aligned, so an unconditional field
+        // would rewrite all of them and red the Swift lane over a value that
+        // carries no new information. Additive by construction: a reader that
+        // has never seen `align` sees exactly the bytes it saw before.
+        Command::StrokeEllipseArc { arc, brush, stroke, align, paint_alpha } => {
+            let mut f = vec![
+                ("cmd", J::Str("stroke_ellipse_arc".into())),
+                ("arc", ellipse_json(arc)), ("brush", brush_json(brush)),
+                ("stroke", stroke_json(stroke)), ("alpha", J::F(*paint_alpha)),
+            ];
+            if *align != StrokeAlign::Center {
+                f.push(("align", J::Str(match align {
+                    StrokeAlign::Inside => "inside".into(),
+                    StrokeAlign::Outside => "outside".into(),
+                    StrokeAlign::Center => unreachable!("guarded above"),
+                })));
+            }
+            J::Obj(f)
+        }
         Command::Clip { path, winding } => J::Obj(vec![
             ("cmd", J::Str("clip".into())),
             ("path", path_json(path)), ("winding", J::Str(winding_str(*winding).into())),

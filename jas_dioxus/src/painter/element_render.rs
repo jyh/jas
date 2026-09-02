@@ -16,29 +16,36 @@
 //!    the way `render.rs` does (a folded multiply, D3: the `globalAlpha`
 //!    getter dies), so a future PH2 driver can adopt it wholesale.
 //!
-//!    ## ⚖️ R4's ONE NAMED EXCEPTION (ruled 2026-09-01 — RP3, option (a))
+//!    ## ⚖️ R4 HAS **ZERO** NAMED EXCEPTIONS (council 2026-09-02)
 //!
 //!    "Display-list-equivalent" means the same PICTURE from different OPS. Every
 //!    lowering here obeys that literally — a rounded rect becomes a path, an
 //!    aligned stroke becomes clip-then-stroke — and each draws the identical
-//!    shape by another route. **RP3 is the single exception, and it is
-//!    enumerated here so it stays single.**
+//!    shape by another route.
 //!
-//!    A non-centre-aligned ELLIPSE stroke lowers to a four-cubic ring
-//!    ([`ellipse_bezier_path`]), because alignment needs a CLIP and
-//!    `Painter::clip` takes a path (contract A5) while an `EllipseArc` is not
-//!    one. That ring is not the conic: it deviates by at most
-//!    [`ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION`] of the radius. ⇒ **the only place
-//!    on this seam where what is DRAWN changes, rather than how it is
-//!    expressed.**
+//!    ⚰️ **RP3 WAS THE ONE EXCEPTION AND IT IS RETIRED.** From 2026-09-01 a
+//!    non-centre-aligned ELLIPSE stroke lowered to a four-cubic bézier ring,
+//!    because alignment needs a CLIP and `Painter::clip` is path-only
+//!    (amendment A5) while an `EllipseArc` is not a path. That ring was not the
+//!    conic — it deviated by up to 2.8e-4 of the radius — and it was the only
+//!    place on this seam where what is DRAWN changed rather than how it was
+//!    expressed.
 //!
-//!    ⛔ THE LICENCE IS BOUNDED, AND THE BOUND IS A TEST, NOT A SENTENCE.
-//!    `tests::the_bezier_ellipse_deviation_is_pinned` samples both curves and
-//!    computes the worst radial error, and it fails in BOTH directions — too
-//!    large reds, and *too slack* reds too, so the constant cannot quietly grow
-//!    to cover a regression. The exception buys a non-centre STROKE and nothing
-//!    else: the fill keeps the exact conic, and no other element acquires a
-//!    right to approximate by citing this one.
+//!    The Captain's ruling of 2026-09-02 — **EXACT ELLIPSE EVERYWHERE**: the
+//!    model keeps a true ellipse on every port and any approximation belongs at
+//!    the RASTERISER, invisible above it — is satisfied by carrying the align on
+//!    [`Painter::stroke_ellipse_arc`] instead. The backend then clips with its
+//!    own exact conic (Direct2D `CreateEllipseGeometry`, Canvas2D `ellipse()`),
+//!    so **the approximation did not move — it disappeared**, and the ring, its
+//!    deviation constant and the two tests that bounded it are deleted.
+//!
+//!    ⛔ AND AMENDMENT A5 SURVIVES VERBATIM. The alternative was an ellipse-clip
+//!    entry, which A5 forbids BY NAME. Carrying the align on the stroke adds
+//!    nothing to clipping, so the invariant A5 states is untouched — the reason
+//!    that route was chosen over the obvious one.
+//!
+//!    ⇒ **Nothing on this seam approximates a shape now. If a future lowering
+//!    wants to, it needs its own ruling — there is no precedent here to cite.**
 //!
 //! 2. **The capability router** [`element_needs_legacy`] — which takes the
 //!    BACKEND's answers, not only the element — and the byte-identical
@@ -813,7 +820,7 @@ pub fn emit_shape_paint(p: &mut dyn Painter, sp: &ShapePaint, base_alpha: f64) {
     if let Some(s) = sp.stroke.as_ref() {
         let alpha = base_alpha * s.op;
         match &sp.geom {
-            ConvGeom::Arc(arc) => p.stroke_ellipse_arc(arc, &s.brush, &s.style, alpha),
+            ConvGeom::Arc(arc) => p.stroke_ellipse_arc(arc, &s.brush, &s.style, s.align, alpha),
             ConvGeom::Path(path) => {
                 emit_aligned_path_stroke(p, path, &s.brush, &s.style, s.align, alpha)
             }
@@ -1297,24 +1304,26 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
             }
             if let Some(s) = e.stroke.as_ref() {
                 let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
-                // ⭐ RP3 (ruled 2026-09-01, option (a)). A CENTRE stroke keeps
-                // the exact conic; an inside/outside one cannot, because
-                // alignment lowers as clip-then-stroke-at-2× and
-                // `Painter::clip` takes a PATH (contract A5). So the
-                // non-centre case — and only it — rides the four-cubic ring.
+                // ⭐⭐ RP3 IS RETIRED HERE (council 2026-09-02, EXACT ELLIPSE
+                // EVERYWHERE). This clause used to branch: a CENTRE stroke kept
+                // the exact conic and an inside/outside one rode a four-cubic
+                // bézier ring, because alignment lowers as clip-then-stroke-at-2×
+                // and `Painter::clip` takes a PATH (amendment A5). That ring was
+                // contract R4's single named exception — the one place on this
+                // seam where what is DRAWN changed rather than how it was
+                // expressed, bounded at `ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION`.
                 //
-                // ⚠️ The fill above deliberately stays `fill_ellipse_arc`: it
-                // has no need of a path and therefore no reason to degrade.
-                // The two differ along the shared boundary by at most
-                // `ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION` — 0.027pt at a 100pt
-                // radius, sub-pixel at any scale this app presents at.
-                if s.align == StrokeAlign::Center {
-                    p.stroke_ellipse_arc(&arc, &brush, &stroke_style(s, s.width), eff * s.opacity);
-                } else {
-                    emit_path_stroke(
-                        p, &ellipse_bezier_path(e.cx, e.cy, e.rx, e.ry), &brush, s, eff,
-                    );
-                }
+                // ⇒ **THERE IS NO BRANCH NOW.** The align rides the arc and the
+                // backend does the clip with its own exact conic, so every
+                // ellipse stroke — centre or not — is the true ellipse.
+                // **R4 is back to ZERO named exceptions.**
+                //
+                // ⛔ AND A5 SURVIVES VERBATIM: nothing was added to clipping.
+                // The alternative was an ellipse-clip entry, which A5 forbids by
+                // name. See `Painter::stroke_ellipse_arc` for the full argument.
+                p.stroke_ellipse_arc(
+                    &arc, &brush, &stroke_style(s, s.width), s.align, eff * s.opacity,
+                );
             }
         }
         Element::Polyline(e) => {
@@ -1575,7 +1584,9 @@ fn emit_outline_body(p: &mut dyn Painter, elem: &Element, eff: f64) {
         }
         Element::Ellipse(e) => {
             let arc = EllipseArc::ellipse(e.cx, e.cy, e.rx, e.ry);
-            p.stroke_ellipse_arc(&arc, &brush, &style, eff);
+            // Outline mode has no alignment of its own to honour -- see the
+            // Rect arm just above, which says the same thing.
+            p.stroke_ellipse_arc(&arc, &brush, &style, StrokeAlign::Center, eff);
         }
         Element::Polyline(e) => {
             if !e.points.is_empty() {
@@ -1770,62 +1781,16 @@ fn resolve_gradient(g: &Gradient, bbox: (f64, f64, f64, f64)) -> Option<Brush> {
 /// requiring the curve to pass through the arc's endpoints with the right
 /// derivative, which is why the same digits appear in `geometry::pdf` and
 /// `canvas::arrowheads` — three sites, one derivation.
+// ⚰️ UNUSED SINCE RP3 RETIRED (council 2026-09-02): its only consumer was
+// `ellipse_bezier_path`, deleted with the exception it served. Kept rather than
+// deleted because `canvas::arrowheads` and `geometry::pdf` each carry their OWN
+// copy of this literal, and this is the crate's one DERIVED copy -- its test
+// checks it against 4/3·(√2−1). The consolidation is available, not taken here:
+// RP3's scope is the ellipse stroke, not three call sites' constants.
+#[allow(dead_code)]
 pub(crate) const ELLIPSE_KAPPA: f64 = 0.5522847498307933;
 
-/// ⭐ THE MAXIMUM RADIAL DEVIATION of [`ellipse_bezier_path`] from the true
-/// ellipse, as a FRACTION OF THE RADIUS — **RP3's ratified exception, expressed
-/// as a number instead of as a shrug.**
-///
-/// ⚖️ WHY A CONSTANT AND NOT A COMMENT. The 2026-09-01 ruling on RP3 grants
-/// contract R4 **one named exception**: this is the only place in the seam where
-/// the lowering changes WHAT SHAPE is drawn rather than how ops are expressed.
-/// A licence that broad is safe only while it is BOUNDED, so the bound is
-/// enforced by [`tests::the_bezier_ellipse_deviation_is_pinned`] rather than
-/// asserted here — a prose "close enough" is exactly what the ruling refused.
-///
-/// **Measured, not quoted:** the test samples both curves densely and computes
-/// the worst radial error. `2.8e-4` is the ceiling it holds to; the classic
-/// four-arc figure is ≈`2.7e-4`, so the margin is the last digit and nothing
-/// more. At a 100pt radius that is **0.027pt** — well under a device pixel at
-/// any scale this app presents at, and the reason the exception is grantable.
-pub(crate) const ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION: f64 = 2.8e-4;
 
-/// A closed four-cubic approximation of the ellipse, as path commands.
-///
-/// ⛔ IT EXISTS BECAUSE ALIGNMENT NEEDS A **CLIP PATH**, AND AN ARC IS NOT ONE.
-/// `emit_path_stroke` lowers inside/outside alignment as clip-then-stroke-at-2×,
-/// and `Painter::clip` takes `&[PathCommand]` (contract A5: clip is path-only).
-/// An `EllipseArc` cannot be handed to it, which is precisely why a non-centre
-/// ellipse stroke stayed on the legacy path — `element_needs_legacy` said so in
-/// one line for months.
-///
-/// ⚖️ THE FILL IS DELIBERATELY **NOT** ROUTED THROUGH THIS. `fill_ellipse_arc`
-/// draws the true conic and stays exact; only the stroke, which cannot be
-/// expressed without a path, pays the approximation. The two therefore disagree
-/// by at most [`ELLIPSE_BEZIER_MAX_RADIAL_DEVIATION`] along the shared boundary
-/// — sub-pixel, and preferable to degrading a fill that has no need to degrade.
-pub(crate) fn ellipse_bezier_path(cx: f64, cy: f64, rx: f64, ry: f64) -> Vec<PathCommand> {
-    let ox = rx * ELLIPSE_KAPPA;
-    let oy = ry * ELLIPSE_KAPPA;
-    vec![
-        PathCommand::MoveTo { x: cx + rx, y: cy },
-        // Quadrants in +y-then-−x order, matching `geometry::pdf::emit_circle`
-        // so a reader comparing the two sees one shape, not two conventions.
-        PathCommand::CurveTo {
-            x1: cx + rx, y1: cy + oy, x2: cx + ox, y2: cy + ry, x: cx, y: cy + ry,
-        },
-        PathCommand::CurveTo {
-            x1: cx - ox, y1: cy + ry, x2: cx - rx, y2: cy + oy, x: cx - rx, y: cy,
-        },
-        PathCommand::CurveTo {
-            x1: cx - rx, y1: cy - oy, x2: cx - ox, y2: cy - ry, x: cx, y: cy - ry,
-        },
-        PathCommand::CurveTo {
-            x1: cx + ox, y1: cy - ry, x2: cx + rx, y2: cy - oy, x: cx + rx, y: cy,
-        },
-        PathCommand::ClosePath,
-    ]
-}
 
 fn rounded_rect_path(x: f64, y: f64, w: f64, h: f64, rx_in: f64, ry_in: f64) -> Vec<PathCommand> {
     if rx_in <= 0.0 && ry_in <= 0.0 {

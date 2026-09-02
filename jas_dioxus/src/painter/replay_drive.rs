@@ -63,7 +63,7 @@ pub(crate) fn drive(p: &mut dyn Painter, ops: &[Value]) -> DriveReport {
                 &d::arc(op.get("arc").unwrap()), d::winding(op), &b, a)).is_some(),
             "stroke_ellipse_arc" => br.map(|b| p.stroke_ellipse_arc(
                 &d::arc(op.get("arc").unwrap()), &b,
-                &d::stroke(op.get("stroke").unwrap()), a)).is_some(),
+                &d::stroke(op.get("stroke").unwrap()), d::align(op), a)).is_some(),
             "clip" => { p.clip(&d::path(op.get("path").unwrap()), d::winding(op)); true }
             "push_state" => { p.push_state(d::transform(op.get("transform").unwrap())); true }
             "pop_state" => { p.pop_state(); true }

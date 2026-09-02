@@ -7,7 +7,7 @@
 //! It keeps a single call counter so the optimizer cannot delete the build loop
 //! entirely (the bench reads the count via `black_box`).
 
-use super::{
+use super::{StrokeAlign, 
     BlendMode, Brush, EllipseArc, FillRule, Mask, Painter, PathCommand, Rect, StrokeStyle, TextRun,
     Transform,
 };
@@ -50,7 +50,7 @@ impl Painter for NoOpPainter {
     fn fill_ellipse_arc(&mut self, _arc: &EllipseArc, _winding: FillRule, _brush: &Brush, _paint_alpha: f64) {
         self.calls += 1;
     }
-    fn stroke_ellipse_arc(&mut self, _arc: &EllipseArc, _brush: &Brush, _stroke: &StrokeStyle, _paint_alpha: f64) {
+    fn stroke_ellipse_arc(&mut self, _arc: &EllipseArc, _brush: &Brush, _stroke: &StrokeStyle, _align: StrokeAlign, _paint_alpha: f64) {
         self.calls += 1;
     }
     fn clip(&mut self, _path: &[PathCommand], _winding: FillRule) {

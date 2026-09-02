@@ -33,7 +33,7 @@
 //! nothing would be an overlay that silently stopped drawing.
 
 use crate::geometry::element::{Color, LineCap, LineJoin, PathCommand};
-use crate::painter::{Brush, EllipseArc, FillRule, Painter, Rect, StrokeStyle, Transform};
+use crate::painter::{StrokeAlign, Brush, EllipseArc, FillRule, Painter, Rect, StrokeStyle, Transform};
 
 /// Parse the CSS colour forms the tool overlays actually use.
 ///
@@ -232,7 +232,7 @@ impl<'a> OverlayCtx<'a> {
         let c = self.stroke_color;
         let st = self.stroke_style();
         if let Some(arc) = self.pending_arc {
-            self.p.stroke_ellipse_arc(&arc, &Brush::Solid(c), &st, self.alpha);
+            self.p.stroke_ellipse_arc(&arc, &Brush::Solid(c), &st, StrokeAlign::Center, self.alpha);
         }
         if !self.path.is_empty() {
             self.p.stroke_path(&self.path, &Brush::Solid(c), &st, self.alpha);
