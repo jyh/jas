@@ -2026,13 +2026,45 @@ fn the_router_no_longer_routes_live_to_legacy_and_text_still_is() {
         "live geometry is lowered on the seam now; routing it to legacy would \
          leave the lowering unreachable and the native walk blind"
     );
-    let text = Element::Text(crate::geometry::element::TextElem::from_string(
+    // ⭐ AND THE TEXT CLAUSE HAS NARROWED AGAIN — row DA, 2026-09-01. This arm
+    // used to assert that ALL text stayed legacy, with the message "the clause
+    // must narrow, not vanish". DA is that narrowing: FLAT AND FEATURE-FREE text
+    // converts; everything else still does not. The arm keeps its intent by
+    // asserting BOTH SIDES of the new boundary rather than one side of the old.
+    let flat = Element::Text(crate::geometry::element::TextElem::from_string(
         1.0, 2.0, "hi", "Arial", 12.0, "normal", "normal", "none", 10.0, 12.0, None, None,
         common(),
     ));
     assert!(
-        element_needs_legacy(&text, caps),
-        "text is PH3 shaping work, NOT this row: the clause must narrow, not vanish"
+        !element_needs_legacy(&flat, caps),
+        "flat, feature-free text lowers on the seam now (row DA); routing it to \
+         legacy would leave the lowering unreachable and the Windows app blind \
+         to every plain <text> in the corpus"
+    );
+
+    // ⛔ "none" IS THE ABSENT VALUE FOR DECORATION, and this element proves the
+    // arm above is not passing by accident: `from_string` is handed "none",
+    // which a naive `!is_empty()` reads as "has a decoration" -- the bug that
+    // kept all four DA documents refusing on the first cut.
+    let mut underlined = match flat.clone() {
+        Element::Text(t) => t,
+        _ => unreachable!(),
+    };
+    underlined.text_decoration = "underline".into();
+    assert!(
+        element_needs_legacy(&Element::Text(underlined), caps),
+        "a REAL decoration is an extra primitive and stays legacy -- the clause \
+         narrowed, it did not vanish"
+    );
+
+    let mut tracked = match flat {
+        Element::Text(t) => t,
+        _ => unreachable!(),
+    };
+    tracked.letter_spacing = "0.025em".into();
+    assert!(
+        element_needs_legacy(&Element::Text(tracked), caps),
+        "tracking is one of the four features DA explicitly did NOT take"
     );
 }
 
