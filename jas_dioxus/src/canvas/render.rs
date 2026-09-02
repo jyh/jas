@@ -78,35 +78,38 @@ pub fn register_brush_libraries(libs: serde_json::Value) -> BrushLibsGuard {
 // this web-gated module — keeping `--no-default-features` (the cross-language
 // harness driver) compiling. They are re-exported here so existing
 // `canvas::render::{IdIndex, rebuild_id_index, incremental_update_index}`
-// references keep working. The render-scoped INSTALLATION below
-// (`CURRENT_REF_INDEX`, `install_ref_index`, `RenderResolver`) stays here: it
-// is paint-only.
+// references keep working.
 pub use crate::document::id_index::{incremental_update_index, rebuild_id_index, IdIndex};
 
-thread_local! {
-    static CURRENT_REF_INDEX: RefCell<IdIndex> = RefCell::new(IdIndex::new());
+// ⭐ ROW CV — THE INSTALL MOVED TO CORE, AND THIS IS THE DELEGATION.
+// `CURRENT_REF_INDEX`, its guard and `RenderResolver` used to be declared here,
+// on the ground that installing an index is paint-only and paint is `canvas`.
+// `painter::element_render::emit_element` is a paint that is NOT web-gated, and
+// on Windows it is the only one — so the state both walks read has to live
+// where both can reach it (`document::id_index`). A SECOND thread-local for the
+// native walk would let the two paints resolve one id to two different
+// elements, which is exactly the divergence exact functional equivalence
+// forbids. These names stay as the canvas-side spelling; the state is one.
+pub use crate::document::id_index::{
+    install_paint_context, InstalledResolver as RenderResolver, PaintContextGuard as RefIndexGuard,
+};
+
+/// Install an already-built `index` for this render at `precision`, returning a
+/// guard that restores the prior context on drop (so nested renders nest
+/// safely). This is the Phase-4b paint entry: the caller passes the Model's
+/// persistent index (an O(1) rpds clone) — no per-paint rebuild.
+///
+/// ⚖️ `precision` IS PART OF THE INSTALL, NOT A SEPARATE ARGUMENT THE LIVE ARMS
+/// CARRY. Both walks evaluate live geometry against the same ambient context
+/// (LIVE_ELEMENTS.md §2); the legacy arms below still take their own
+/// `precision` parameter down the draw stack and pass it explicitly, which is
+/// unchanged — this is what the NATIVE walk, which has no such parameter, reads.
+pub fn install_ref_index(index: IdIndex, precision: f64) -> RefIndexGuard {
+    install_paint_context(index, precision)
 }
 
-/// Restores the prior index on drop, so nested renders nest safely.
-pub struct RefIndexGuard {
-    prior: IdIndex,
-}
-impl Drop for RefIndexGuard {
-    fn drop(&mut self) {
-        CURRENT_REF_INDEX.with(|c| *c.borrow_mut() = std::mem::take(&mut self.prior));
-    }
-}
-
-/// Install an already-built `index` for this render and return a guard that
-/// restores the prior index on drop (so nested renders nest safely). This is
-/// the Phase-4b paint entry: the caller passes the Model's persistent index
-/// (an O(1) rpds clone) — no per-paint rebuild.
-pub fn install_ref_index(index: IdIndex) -> RefIndexGuard {
-    let prior = CURRENT_REF_INDEX.with(|c| c.replace(index));
-    RefIndexGuard { prior }
-}
-
-/// Build the index from `doc` and install it for this render, returning a
+/// Build the index from `doc` and install it for this render at
+/// [`DEFAULT_PRECISION`](crate::geometry::live::DEFAULT_PRECISION), returning a
 /// restore guard. Retained for tests that don't have a precomputed index
 /// (the resolver/symbols fixtures); the hot paint path uses
 /// [`install_ref_index`] with the Model's persistent index instead.
@@ -115,30 +118,7 @@ pub fn install_ref_index(index: IdIndex) -> RefIndexGuard {
 // build-and-install used by those tests.
 #[allow(dead_code)]
 pub fn register_ref_index(doc: &Document) -> RefIndexGuard {
-    install_ref_index(rebuild_id_index(doc))
-}
-
-/// Zero-sized resolver reading the render-scoped index; passed to
-/// `evaluate_with` so the live render arms resolve references.
-struct RenderResolver;
-impl crate::geometry::live::ElementResolver for RenderResolver {
-    fn resolve(
-        &self,
-        id: &crate::geometry::live::ElementRef,
-    ) -> Option<std::rc::Rc<Element>> {
-        CURRENT_REF_INDEX.with(|c| c.borrow().get(&id.0).cloned())
-    }
-
-    /// Resolve a concept pack from the bundled workspace registry so a
-    /// `Generated` instance renders its concept's geometry on canvas
-    /// (CONCEPTS.md 3b). Shared with the hit-test resolver so paint and
-    /// selection cannot disagree about a concept's geometry.
-    fn resolve_concept(
-        &self,
-        concept_id: &str,
-    ) -> Option<crate::geometry::live::ConceptDef> {
-        crate::geometry::live::workspace_concept(concept_id)
-    }
+    install_ref_index(rebuild_id_index(doc), crate::geometry::live::DEFAULT_PRECISION)
 }
 
 /// Look up a brush by its "<library>/<brush>" slug in the current
@@ -3258,7 +3238,11 @@ pub fn render(
     // references resolve and display (REFERENCE_GRAPH.md §2.4 Phase 4b). The
     // clone is O(1) (rpds structure sharing); paint never rebuilds it. The
     // gate in the Model guarantees this equals rebuild_id_index(doc).
-    let _ref_index_guard = install_ref_index(id_index.clone());
+    // ⚖️ AND THE PRECISION RIDES WITH IT (row CV): the same ambient evaluation
+    // context the NATIVE walk reads, installed once here rather than existing
+    // only as this walk's `precision` parameter — which `emit_element` has no
+    // way to be handed.
+    let _ref_index_guard = install_ref_index(id_index.clone(), precision);
     // Phase 4c: generation-epoch the reference-geometry recompute cache. The
     // model generation is bumped on every mutation / undo / redo, so this
     // drops the cache on any edit while preserving it across no-edit repaints
@@ -3614,7 +3598,7 @@ mod tests {
         // The persistent map equals itself rebuilt (the gate's equality used by
         // the Model) — and a fresh install resolves identically.
         assert!(index == rebuild_id_index(&doc), "rebuild is deterministic");
-        let _guard = install_ref_index(index);
+        let _guard = install_ref_index(index, crate::geometry::live::DEFAULT_PRECISION);
         use crate::geometry::live::ElementRef;
         assert!(RenderResolver.resolve(&ElementRef("r1".into())).is_some());
         assert!(RenderResolver.resolve(&ElementRef("m1".into())).is_some());
