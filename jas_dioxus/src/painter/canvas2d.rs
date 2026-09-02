@@ -26,7 +26,7 @@ use super::{
     StrokeStyle, TextRun,
 };
 use crate::geometry::element::{BlendMode, Color, LineCap, LineJoin, Transform};
-use crate::surface::web::WebSurface;
+use crate::surface::web::{CompositeOp, WebSurface};
 use crate::surface::PixelSurface;
 use wasm_bindgen::JsValue;
 use web_sys::{CanvasRenderingContext2d, CanvasWindingRule};
@@ -439,43 +439,42 @@ impl Painter for Canvas2dPainter<'_> {
         }
 
         let parent = self.target();
-        let prev_alpha = parent.global_alpha();
-        // The mask application is not an alpha-weighted blit: it is a channel
-        // update, so it runs at 1.0 whatever the open groups carry.
-        parent.set_global_alpha(1.0);
+        // ⛔ THE OUTER save/restore IS FOR THE CLIP, AND FOR NOTHING ELSE NOW.
+        // The bbox arm sets a clip under the CURRENT transform, and only a
+        // save/restore can take it off again. The composite's transform, alpha
+        // and operation are scoped by `composite_onto`'s own save/restore, which
+        // is what retired the manual `prev_alpha` dance that used to live here.
         let _ = parent.save();
-        match law {
-            Mask::LuminanceClipIn | Mask::AlphaClipOut => {
-                let op = if matches!(law, Mask::AlphaClipOut) {
-                    "destination-out"
-                } else {
-                    "destination-in"
-                };
-                let _ = parent.set_global_composite_operation(op);
-                let _ = parent.reset_transform();
-                let _ = parent.draw_image_with_html_canvas_element(layer.surface.canvas(), 0.0, 0.0);
-            }
+        let op = match law {
+            Mask::LuminanceClipIn => CompositeOp::DestinationIn,
+            Mask::AlphaClipOut => CompositeOp::DestinationOut,
             Mask::AlphaRevealOutsideBbox { bbox } => {
                 // The bbox arrives precomputed (§3.3) as the bounds OF the
                 // transformed mask subtree, already in THIS frame — the frame
                 // the layer was pushed in, where the clip is applied (the
                 // ruled contract, 2026-08-31).
                 // Clip UNDER the current transform so the rect lands where the
-                // document says, then reset for the device-space blit -- a clip
-                // is rasterised into device space when it is set, so it still
-                // holds after the reset. Outside the clip the parent's alpha is
-                // untouched, which is the whole point of this law.
+                // document says; the service resets to device space for the
+                // blit, and a clip is rasterised into device space when it is
+                // SET, so it still holds after that reset. Outside the clip the
+                // parent's alpha is untouched, which is the whole point of this
+                // law.
                 let _ = parent.begin_path();
                 parent.rect(bbox.x, bbox.y, bbox.w, bbox.h);
                 parent.clip();
-                let _ = parent.set_global_composite_operation("destination-in");
-                let _ = parent.reset_transform();
-                let _ = parent.draw_image_with_html_canvas_element(layer.surface.canvas(), 0.0, 0.0);
+                CompositeOp::DestinationIn
             }
-        }
+        };
+        // ⚖️ ALPHA 1.0, AND IT IS NOT A DEFAULT: a mask application is a CHANNEL
+        // UPDATE, not an alpha-weighted blit, so it runs at 1.0 whatever the
+        // open groups carry.
+        layer.surface.composite_onto(parent, op, 1.0);
         let _ = parent.restore();
+        // The parent's operation is forced back rather than merely restored,
+        // exactly as before this refactor: `restore()` above already returns it,
+        // and this line is kept because changing it would be a behaviour change
+        // dressed as a cleanup.
         let _ = parent.set_global_composite_operation("source-over");
-        parent.set_global_alpha(prev_alpha);
     }
 
     fn push_isolated_layer(&mut self, alpha: f64, blend: BlendMode) {
@@ -506,19 +505,21 @@ impl Painter for Canvas2dPainter<'_> {
         self.group_alpha_stack = layer.saved_group_alphas;
         let parent = self.target();
         // A6 §3.3: effective alpha = open-group product AT THE PUSH SITE × the
-        // layer's own alpha, applied ONCE, under the layer's blend.
-        let prev_alpha = parent.global_alpha();
-        parent.set_global_alpha(self.group_alpha() * layer_alpha);
-        let _ = parent.set_global_composite_operation(
-            crate::surface::web::blend_mode_css(layer_blend),
+        // layer's own alpha, applied ONCE, under the layer's blend. The layer
+        // already carries the world transform, so the blit is in device space --
+        // which is what the service does, and why it is the service.
+        //
+        // ⚖️ `CompositeOp::Blend(mode).css()` IS `blend_mode_css(mode)`, the same
+        // function this site used to call directly; the enum is not a second
+        // vocabulary, it is the one place the three composite kinds are named.
+        layer.surface.composite_onto(
+            parent,
+            CompositeOp::Blend(layer_blend),
+            self.group_alpha() * layer_alpha,
         );
-        // the layer already carries the world transform; blit in device space
-        let _ = parent.save();
-        let _ = parent.reset_transform();
-        let _ = parent.draw_image_with_html_canvas_element(layer.surface.canvas(), 0.0, 0.0);
-        let _ = parent.restore();
+        // Forced back rather than merely restored, exactly as before this
+        // refactor -- see the note in `pop_mask_layer`.
         let _ = parent.set_global_composite_operation("source-over");
-        parent.set_global_alpha(prev_alpha);
     }
 
     fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64) {
