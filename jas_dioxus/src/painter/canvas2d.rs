@@ -792,6 +792,98 @@ mod a6_layer_tests {
                    "control: an opaque white luminance mask must keep the element");
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // ROW CW — TWO ARMS A MUTATION PASS DEMANDED, AND THEY ARE OLDER THAN THE
+    // ROW THAT FOUND THEM.
+    //
+    // Routing the three hand-rolled blits through `WebSurface::composite_onto`
+    // was behaviour-preserving, so its evidence had to be a MUTATION pass
+    // rather than a red. Two mutants survived the whole browser lane:
+    //
+    //   - the isolated layer composited `Normal` instead of its own blend
+    //   - the outer `save()` in `pop_mask_layer` was deleted (the reveal-bbox
+    //     clip then escapes the bracket, and `restore()` pops the caller's state)
+    //
+    // ⚖️ AND BOTH SURVIVED AGAINST THE PRE-REFACTOR CODE TOO — driven there as
+    // the control, because "a mutant survived my change" and "a mutant survives
+    // this code" are different claims and only the second one is true. These are
+    // PRE-EXISTING holes the refactor's evidence requirement EXPOSED, which is
+    // the argument for driving mutants at a refactor at all.
+    //
+    // 📌 The first is the same family flask reported one PR earlier on the
+    // Direct2D side: a Multiply-only suite could not tell a commutative blend
+    // from a swapped one. Neither backend's layer blend had a pixel that could
+    // fail. Both do now.
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// ⛔ THE ISOLATED LAYER'S BLEND MUST REACH THE COMPOSITE. `push_isolated_layer`
+    /// carries `(alpha, blend)` and A6 §3.3 spends both ONCE, at the closing
+    /// composite. A backend that opened the layer and closed it `source-over`
+    /// would draw a plausible picture with the blend silently discarded — and
+    /// until this arm, would have passed every test in this file.
+    ///
+    /// ⚖️ MULTIPLY IS DISCRIMINATING HERE ONLY BECAUSE OF THE COLOURS. Backdrop
+    /// RED (255,0,0) under a mid-grey (128,128,128) source: `multiply` gives
+    /// (128,0,0), `source-over` gives (128,128,128). The green channel is the
+    /// whole assertion, and it is 128 apart — a fixture whose backdrop was grey
+    /// would agree under both and prove nothing.
+    #[wasm_bindgen_test]
+    fn an_isolated_layers_blend_reaches_its_closing_composite() {
+        let (_c, ctx) = surface(8, 8);
+        let mut p = Canvas2dPainter::new(&ctx);
+        // The backdrop, painted straight onto the target.
+        p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 },
+                    &Brush::Solid(Color::rgb(1.0, 0.0, 0.0)), 1.0);
+        // A layer carrying MULTIPLY, whose body is a mid grey.
+        p.push_isolated_layer(1.0, BlendMode::Multiply);
+        p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 },
+                    &Brush::Solid(Color::rgb(128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0)), 1.0);
+        p.pop_isolated_layer();
+
+        let (r, g, b, a) = rgba_at(&ctx, 4.0, 4.0);
+        assert_eq!(a, 255, "the composite must land at all");
+        assert!(g <= 4 && b <= 4,
+                "the layer closed SOURCE-OVER: multiply against a red backdrop \
+                 zeroes green and blue, and this pixel is ({r},{g},{b},{a})");
+        assert!((120..=136).contains(&r),
+                "multiply of 255 x 128 is 128; got r={r} in ({r},{g},{b},{a})");
+    }
+
+    /// ⛔ THE REVEAL-BBOX CLIP MUST NOT ESCAPE THE BRACKET. That arm sets a clip
+    /// on the PARENT under the current transform, and only the bracket's own
+    /// `save`/`restore` takes it off again. A leaked clip is the nastiest shape
+    /// in this file: everything the bracket itself does looks right, and the
+    /// NEXT element silently loses whatever falls outside a rectangle it has no
+    /// relationship to.
+    ///
+    /// 📌 The assertion is therefore about a draw that happens AFTER the bracket
+    /// closes, outside the mask's bbox. Nothing inside the bracket can state it.
+    #[wasm_bindgen_test]
+    fn a_reveal_bbox_mask_does_not_leak_its_clip_onto_the_next_element() {
+        let (_c, ctx) = surface(8, 8);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            // A masked element confined to the TOP-LEFT 2x2 by its bbox.
+            p.push_isolated_layer(1.0, BlendMode::Normal);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 2.0, h: 2.0 },
+                        &Brush::Solid(Color::rgb(1.0, 0.0, 0.0)), 1.0);
+            p.push_mask_layer(Mask::AlphaRevealOutsideBbox {
+                bbox: Rect { x: 0.0, y: 0.0, w: 2.0, h: 2.0 },
+            });
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 2.0, h: 2.0 },
+                        &Brush::Solid(Color::rgb(1.0, 1.0, 1.0)), 1.0);
+            p.pop_mask_layer();
+            p.pop_isolated_layer();
+
+            // ...and now a SECOND element, far outside that bbox.
+            p.fill_rect(Rect { x: 5.0, y: 5.0, w: 3.0, h: 3.0 },
+                        &Brush::Solid(Color::rgb(0.0, 0.0, 1.0)), 1.0);
+        }
+        assert_eq!(alpha_at(&ctx, 6.0, 6.0), 255,
+                   "the mask's bbox clip escaped its bracket and ate the NEXT \
+                    element, which is drawn nowhere near it");
+    }
+
     /// ⛔ THE jas ASYMMETRY, AND IT IS THE WHOLE REASON THE ENUM HAS THREE
     /// VARIANTS: `LuminanceClipIn` reads LUMINANCE, the others read RAW ALPHA.
     /// A BLACK, FULLY OPAQUE mask is the discriminating fixture — raw alpha says
