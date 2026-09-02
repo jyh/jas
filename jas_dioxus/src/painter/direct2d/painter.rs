@@ -23,8 +23,17 @@
 
 use windows::core::{Interface, Result};
 use windows::Win32::Graphics::Direct2D::{
-    ID2D1Bitmap, ID2D1BitmapRenderTarget, ID2D1DeviceContext, CLSID_D2D1LuminanceToAlpha,
-    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, D2D1_INTERPOLATION_MODE_LINEAR,
+    ID2D1Bitmap, ID2D1BitmapRenderTarget, ID2D1DeviceContext, CLSID_D2D1Blend,
+    CLSID_D2D1LuminanceToAlpha, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+    D2D1_BLEND_PROP_MODE, D2D1_INTERPOLATION_MODE_LINEAR, D2D1_PROPERTY_TYPE_ENUM,
+};
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D1_BLEND_MODE, D2D1_BLEND_MODE_COLOR, D2D1_BLEND_MODE_COLOR_BURN,
+    D2D1_BLEND_MODE_COLOR_DODGE, D2D1_BLEND_MODE_DARKEN, D2D1_BLEND_MODE_DIFFERENCE,
+    D2D1_BLEND_MODE_EXCLUSION, D2D1_BLEND_MODE_HARD_LIGHT, D2D1_BLEND_MODE_HUE,
+    D2D1_BLEND_MODE_LIGHTEN, D2D1_BLEND_MODE_LUMINOSITY, D2D1_BLEND_MODE_MULTIPLY,
+    D2D1_BLEND_MODE_OVERLAY, D2D1_BLEND_MODE_SATURATION, D2D1_BLEND_MODE_SCREEN,
+    D2D1_BLEND_MODE_SOFT_LIGHT,
 };
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_COMPOSITE_MODE_DESTINATION_OUT, D2D1_COMPOSITE_MODE_SOURCE_IN,
@@ -204,6 +213,132 @@ impl<'a> Direct2DPainter<'a> {
         unsafe { brt.GetBitmap() }.ok()
     }
 
+    /// The D2D effect mode for one of the fifteen non-Normal blends.
+    ///
+    /// ⛔ `Normal` IS DELIBERATELY ABSENT — it returns `None`, and the caller
+    /// takes the plain `DrawBitmap` path. There is no D2D "normal" blend mode
+    /// (source-over is not in that enum), so a mapping that invented one would
+    /// have to pick a wrong answer and hide it behind a total function.
+    ///
+    /// jas's sixteen are a SUBSET of D2D's twenty-six; every line below is the
+    /// same law under the same name in the W3C compositing spec, which is what
+    /// both vocabularies are derived from.
+    fn d2d_blend_mode(blend: BlendMode) -> Option<D2D1_BLEND_MODE> {
+        Some(match blend {
+            BlendMode::Normal => return None,
+            BlendMode::Multiply => D2D1_BLEND_MODE_MULTIPLY,
+            BlendMode::Screen => D2D1_BLEND_MODE_SCREEN,
+            BlendMode::Darken => D2D1_BLEND_MODE_DARKEN,
+            BlendMode::Lighten => D2D1_BLEND_MODE_LIGHTEN,
+            BlendMode::ColorBurn => D2D1_BLEND_MODE_COLOR_BURN,
+            BlendMode::ColorDodge => D2D1_BLEND_MODE_COLOR_DODGE,
+            BlendMode::Overlay => D2D1_BLEND_MODE_OVERLAY,
+            BlendMode::SoftLight => D2D1_BLEND_MODE_SOFT_LIGHT,
+            BlendMode::HardLight => D2D1_BLEND_MODE_HARD_LIGHT,
+            BlendMode::Difference => D2D1_BLEND_MODE_DIFFERENCE,
+            BlendMode::Exclusion => D2D1_BLEND_MODE_EXCLUSION,
+            BlendMode::Hue => D2D1_BLEND_MODE_HUE,
+            BlendMode::Saturation => D2D1_BLEND_MODE_SATURATION,
+            BlendMode::Color => D2D1_BLEND_MODE_COLOR,
+            BlendMode::Luminosity => D2D1_BLEND_MODE_LUMINOSITY,
+        })
+    }
+
+    /// A snapshot of `parent`'s current pixels — the BACKDROP a blend needs.
+    ///
+    /// ⛔ A BLEND IS A FUNCTION OF TWO IMAGES AND ONE OF THEM IS ALREADY ON THE
+    /// TARGET. That is the whole reason non-Normal blend stayed unbuilt here:
+    /// every other composite in this backend is a one-way write, and this is the
+    /// only one that has to READ what is underneath. `CopyFromRenderTarget` is
+    /// that read; it copies DEVICE pixels, so like the closing blit it is only
+    /// correct at identity.
+    fn snapshot(&self, parent: &ID2D1RenderTarget) -> Option<ID2D1Bitmap> {
+        let dc: ID2D1DeviceContext = parent.cast().ok()?;
+        let brt = unsafe {
+            dc.CreateCompatibleRenderTarget(None, None, None, Default::default())
+        }.ok()?;
+        let bmp = unsafe { brt.GetBitmap() }.ok()?;
+        unsafe { bmp.CopyFromRenderTarget(None, parent, None) }.ok()?;
+        Some(bmp)
+    }
+
+    /// Composite `body` onto `parent` under a non-Normal `blend`, at `eff`.
+    ///
+    /// ⚖️ THE ALPHA MODULATES THE RESULT, NOT THE SOURCE, and getting that
+    /// backwards is the one arithmetic trap here. W3C compositing gives
+    /// `Cr = (1 - as)·Cb + as·Blend(Cb, Cs)` — the layer alpha weights the
+    /// BLENDED colour against the backdrop. Pre-multiplying it into `Cs` and
+    /// then blending gives `Blend(Cb, as·Cs)`, which for a 0.5-alpha multiply
+    /// over 0.8 yields 0.20 where the right answer is 0.60: a plausible picture
+    /// and the wrong one.
+    ///
+    /// So: blend at FULL strength into a scratch surface, then source-over that
+    /// result at `eff`. Because the parent still holds `Cb`, that composite IS
+    /// the formula above — no separate lerp is needed and none is written.
+    ///
+    /// Returns `false` on any failure so the caller can fall back rather than
+    /// drop the layer entirely.
+    fn composite_blended(
+        &self,
+        parent: &ID2D1RenderTarget,
+        body: &ID2D1Bitmap,
+        eff: f32,
+        blend: BlendMode,
+    ) -> bool {
+        let Some(mode) = Self::d2d_blend_mode(blend) else { return false };
+        let Some(backdrop) = self.snapshot(parent) else { return false };
+        let Ok(dc) = parent.cast::<ID2D1DeviceContext>() else { return false };
+        let Ok(brt) = (unsafe {
+            dc.CreateCompatibleRenderTarget(None, None, None, Default::default())
+        }) else { return false };
+        let Ok(rt) = brt.cast::<ID2D1RenderTarget>() else { return false };
+        let Ok(scratch) = rt.cast::<ID2D1DeviceContext>() else { return false };
+
+        let ok = (|| -> Option<()> {
+            unsafe {
+                rt.BeginDraw();
+                // Identity: both inputs are already device-space bitmaps.
+                rt.SetTransform(&Matrix3x2::identity());
+                rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+            }
+            let fx = unsafe { scratch.CreateEffect(&CLSID_D2D1Blend) }.ok()?;
+            unsafe {
+                // ⛔ INPUT 0 IS THE DESTINATION (the backdrop), INPUT 1 THE
+                // SOURCE. Swapping them is invisible for Multiply and Screen —
+                // both commutative — and WRONG for ColorBurn, Overlay,
+                // HardLight and the rest of the separable set. A Multiply-only
+                // corpus structurally cannot catch it, which is why the order is
+                // stated here rather than left to the reader.
+                fx.SetInput(0, &backdrop, true);
+                fx.SetInput(1, body, true);
+                fx.SetValue(
+                    D2D1_BLEND_PROP_MODE.0 as u32,
+                    D2D1_PROPERTY_TYPE_ENUM,
+                    &mode.0.to_le_bytes(),
+                ).ok()?;
+                let out = fx.GetOutput().ok()?;
+                scratch.DrawImage(
+                    &out, None, None,
+                    D2D1_INTERPOLATION_MODE_LINEAR,
+                    D2D1_COMPOSITE_MODE_SOURCE_OVER,
+                );
+            }
+            Some(())
+        })();
+        unsafe { let _ = rt.EndDraw(None, None); }
+        if ok.is_none() { return false; }
+
+        let Ok(blended) = (unsafe { brt.GetBitmap() }) else { return false };
+        unsafe {
+            parent.DrawBitmap(
+                &blended, None, eff,
+                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                None,
+            );
+        }
+        true
+    }
+
     /// THE TARGET EVERY DRAW GOES TO: the innermost open isolated layer, or the
     /// base render target when none is open.
     ///
@@ -376,7 +511,8 @@ impl<'a> Painter for Direct2DPainter<'a> {
     /// |---|---|---|
     /// | `IsolatedLayers` | **yes** | `push_isolated_layer` opens a real surface (a render-target swap, B1's finding: `D2D1_LAYER_PARAMETERS1` serves none of the three mask laws) and `pop_isolated_layer` composites it once at `(group product at the push site) × alpha` |
     /// | `MaskLayers` | **yes** | the mask bracket renders to its own surface and hands its law to the enclosing layer |
-    /// | `NonNormalBlend` | **NO — and it STAYS a declared gap** | the 15 non-Normal modes need a backdrop snapshot plus a `CLSID_D2D1Blend` graph per blended primitive. Not built. |
+    /// | `NonNormalBlend` (the ISOLATED-LAYER bracket) | **yes, since 2026-09-01** | `pop_isolated_layer` snapshots the backdrop (`CopyFromRenderTarget`) and composites through a `CLSID_D2D1Blend` graph, ONCE, exactly as the contract says `alpha` and `blend` are consumed. See `composite_blended`. |
+    /// | `NonNormalGroupBlend` (a NON-ISOLATED group) | **NO — and it stays a declared gap** | a group's blend rides EVERY descendant primitive against the live backdrop, so it needs a per-primitive graph: a change to every draw method, not one composite. |
     ///
     /// ⛔ THE THIRD ROW IS NOT A LEFTOVER, IT IS THE CONDITION. The blend gap
     /// must not be folded into the mask/layer answer, and until 08/29 the
@@ -396,9 +532,24 @@ impl<'a> Painter for Direct2DPainter<'a> {
     /// field nothing reads — silently, in the path that SHIPS. One instrument
     /// saw it and one did not, and the blind one is the one in production.
     ///
-    /// ⇒ So `NonNormalBlend` is denied here, the router keeps a non-Normal-mode
-    /// masked element on legacy for this backend, and the replay lane asserts
-    /// that this answer and this backend's actual report agree op for op.
+    /// ⭐ AND THE THIRD ROW HAS NOW FLIPPED — 2026-09-01. The isolated-layer
+    /// blend is built, so `NonNormalBlend` answers **yes** and the router will
+    /// route a masked element carrying `multiply` here. `LayerTarget.blend` is
+    /// no longer "stored and read by nothing": `pop_isolated_layer` reads it.
+    ///
+    /// ⛔ THE CAPABILITY HAD TO BE SPLIT FOR THAT ANSWER TO BE HONEST. It
+    /// covered *"a blend other than Normal, WHEREVER IT RIDES"* — one name for
+    /// `push_group`'s mode and `push_isolated_layer`'s — on the stated ground
+    /// that it was *"one missing thing: the effect graph."* Building one half
+    /// falsified that: a single answer would have to claim the group blend this
+    /// backend still cannot do, or deny the layer blend it now does. The paragraph
+    /// above is exactly why the second is not acceptable — a blend reaching a
+    /// field nothing reads, silently, in the path that ships.
+    ///
+    /// ⇒ So `NonNormalGroupBlend` is denied here, the router keeps a
+    /// non-Normal-mode GROUP on legacy for this backend, and the replay lane
+    /// asserts that these answers and this backend's actual report agree op for
+    /// op — which is the arm that caught the flip and forced the split.
     ///
     /// ⚠️ WHAT CHANGES ON SCREEN, said out loud: a masked element under an alpha
     /// ancestor now renders through the A6 bracket here. HEAD's legacy path gave
@@ -415,8 +566,8 @@ impl<'a> Painter for Direct2DPainter<'a> {
         // inherit a default. That is the same reason the trait method has no
         // default body.
         match cap {
-            C::IsolatedLayers | C::MaskLayers => true,
-            C::NonNormalBlend => false,
+            C::IsolatedLayers | C::MaskLayers | C::NonNormalBlend => true,
+            C::NonNormalGroupBlend => false,
         }
     }
 
@@ -660,14 +811,29 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let mut saved = Matrix3x2::identity();
         unsafe { parent.GetTransform(&mut saved) };
         unsafe { parent.SetTransform(&Matrix3x2::identity()) };
-        unsafe {
-            parent.DrawBitmap(
-                &bmp,
-                None,
-                eff,
-                D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
-                None,
-            );
+        // ⭐ A NON-NORMAL BLEND TAKES THE EFFECT GRAPH; Normal keeps the plain
+        // blit it has always had.
+        //
+        // ⚠️ THE FALLBACK IS DELIBERATE AND IT IS NOT SILENT-BY-ACCIDENT. If the
+        // graph cannot be built the layer still composites source-over, which is
+        // the WRONG picture — but the alternative is an element that VANISHES,
+        // and a missing element is the worse of the two failures here (it is the
+        // one that reads as "the document is fine and empty"). Reaching this at
+        // all means a device fault, not a routing decision: `replay`'s
+        // declared-gap report is what tells a caller which modes are supported,
+        // and it answers before a frame is ever drawn.
+        let blended = layer.blend != BlendMode::Normal
+            && self.composite_blended(&parent, &bmp, eff, layer.blend);
+        if !blended {
+            unsafe {
+                parent.DrawBitmap(
+                    &bmp,
+                    None,
+                    eff,
+                    D2D1_BITMAP_INTERPOLATION_MODE_LINEAR,
+                    None,
+                );
+            }
         }
         unsafe { parent.SetTransform(&saved) };
     }
@@ -1159,5 +1325,130 @@ mod tests {
         let right = px(&buf, 16, 12, 8);
         assert_eq!(left[3], 0, "clip_out must REMOVE the masked half, got alpha {}", left[3]);
         assert!(right[3] > 200, "and must KEEP the unmasked half, got alpha {}", right[3]);
+    }
+
+    // -----------------------------------------------------------------------
+    // (b) THE ISOLATED-LAYER BLEND — closing a6_blend.json
+    // -----------------------------------------------------------------------
+
+    fn solid_rgb(r: f64, g: f64, b: f64) -> Brush {
+        Brush::Solid(Color::new(r, g, b, 1.0))
+    }
+
+    /// ⭐ THE BLEND ARITHMETIC, ASSERTED AGAINST THE SPEC AND NOT AGAINST
+    /// WHATEVER D2D HAPPENS TO RETURN.
+    ///
+    /// `multiply(Cb, Cs) = Cb x Cs` (W3C compositing §blend-multiply). An opaque
+    /// 0.8 backdrop under an opaque 0.5 source must give 0.40 — **not** 0.5
+    /// (which is what a `DrawBitmap` source-over produces, i.e. the blend being
+    /// silently ignored) and not 0.8 (the source being dropped).
+    ///
+    /// ⛔ THE TWO WRONG ANSWERS ARE BOTH PLAUSIBLE PICTURES, which is exactly
+    /// why this asserts a NUMBER rather than "something changed".
+    #[test]
+    fn an_isolated_layer_multiplies_against_the_backdrop() {
+        let buf = draw(4, 4, |p| {
+            // Backdrop: opaque 0.8 grey, drawn straight onto the base target.
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            // Source: an isolated layer holding opaque 0.5 grey, multiplied in.
+            p.push_isolated_layer(1.0, BlendMode::Multiply);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_isolated_layer();
+        });
+        let [b, g, r, a] = px(&buf, 4, 1, 1);
+        assert_eq!(a, 255, "the composite must stay opaque, got alpha {a}");
+        // 0.8 * 0.5 = 0.40 -> 102. Tolerance 2 for the 8-bit round trip.
+        for (name, v) in [("b", b), ("g", g), ("r", r)] {
+            assert!((v as i32 - 102).abs() <= 2,
+                    "{name}: multiply(0.8,0.5) must be ~102 (0.40), got {v} \
+                     -- 128 means the blend was IGNORED, 204 means the source was dropped");
+        }
+    }
+
+    /// ⛔⛔ THE ARM THAT GIVES THE INPUT ORDER TEETH — AND IT EXISTS BECAUSE A
+    /// MUTATION PASS PROVED THE COMMENT WAS NOT A GUARD.
+    ///
+    /// `composite_blended` says, in as many words, that swapping inputs 0 and 1
+    /// "is invisible for Multiply and Screen — both commutative — and WRONG for
+    /// ColorBurn, Overlay, HardLight". I then wrote a Multiply-only test suite.
+    /// Measured 2026-09-01: **a mutant that swapped the two inputs passed all
+    /// 22 tests.** I had written the warning and left nothing able to enforce it.
+    ///
+    /// ColorBurn is NOT commutative: `B(Cb,Cs) = 1 - min(1, (1-Cb)/Cs)`.
+    /// * right way round — `Cb=0.8, Cs=0.5` → `1 - 0.2/0.5` = **0.60** → 153
+    /// * swapped        — `Cb=0.5, Cs=0.8` → `1 - 0.5/0.8` = **0.375** → 96
+    ///
+    /// Fifty-seven levels apart, so the arm cannot be satisfied by the wrong
+    /// pairing. ⇒ **A comment naming a hazard does not test for it; only an
+    /// asymmetric fixture does.**
+    #[test]
+    fn a_non_commutative_blend_pins_which_input_is_the_backdrop() {
+        let buf = draw(4, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_isolated_layer(1.0, BlendMode::ColorBurn);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_isolated_layer();
+        });
+        let [b, _, _, a] = px(&buf, 4, 1, 1);
+        assert_eq!(a, 255);
+        assert!((b as i32 - 153).abs() <= 3,
+                "colour-burn(backdrop 0.8, source 0.5) must be ~153 (0.60), got {b} \
+                 -- ~96 means INPUTS 0 AND 1 ARE SWAPPED, 204 means the blend was ignored");
+    }
+
+    /// ⛔ THE CONTROL. The SAME scene with `Normal` must NOT be 102 — otherwise
+    /// the arm above could be passing on a painter that multiplies everything,
+    /// or on one that ignores the mode entirely and happens to land there.
+    #[test]
+    fn the_same_layer_under_normal_is_not_the_multiplied_answer() {
+        let buf = draw(4, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_isolated_layer(1.0, BlendMode::Normal);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_isolated_layer();
+        });
+        let [b, _, _, a] = px(&buf, 4, 1, 1);
+        assert_eq!(a, 255);
+        // Normal = source over = the source itself, 0.5 -> 128.
+        assert!((b as i32 - 128).abs() <= 2,
+                "Normal must still be plain source-over (~128), got {b}");
+    }
+
+    /// ⛔ THE LAYER'S OWN ALPHA STILL APPLIES ONCE, UNDER A BLEND TOO. D-alpha's
+    /// repair must not be undone by the new path: a half-alpha multiply layer
+    /// over an opaque backdrop is the blended colour composited at 0.5, i.e.
+    /// halfway between the backdrop (204) and the blend result (102) -> ~153.
+    #[test]
+    fn a_blended_layers_alpha_is_applied_once_not_twice_and_not_dropped() {
+        let buf = draw(4, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_isolated_layer(0.5, BlendMode::Multiply);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_isolated_layer();
+        });
+        let [b, _, _, a] = px(&buf, 4, 1, 1);
+        assert_eq!(a, 255, "opaque backdrop stays opaque");
+        assert!((b as i32 - 153).abs() <= 3,
+                "0.5-alpha multiply over 0.8 must be ~153; got {b} \
+                 -- 102 means the alpha was DROPPED, ~178 means it applied twice");
+    }
+
+    /// A blend must not paint OUTSIDE the layer's own coverage. The backdrop is
+    /// full-bleed and the layer covers only the left half; the right half must
+    /// be untouched backdrop.
+    #[test]
+    fn a_blend_is_confined_to_the_layers_coverage() {
+        let buf = draw(8, 4, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 4.0 }, &solid_rgb(0.8, 0.8, 0.8), 1.0);
+            p.push_isolated_layer(1.0, BlendMode::Multiply);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 4.0, h: 4.0 }, &solid_rgb(0.5, 0.5, 0.5), 1.0);
+            p.pop_isolated_layer();
+        });
+        let [left, _, _, _] = px(&buf, 8, 1, 1);
+        let [right, _, _, ra] = px(&buf, 8, 6, 1);
+        assert!((left as i32 - 102).abs() <= 2, "covered half blends, got {left}");
+        assert!((right as i32 - 204).abs() <= 2,
+                "uncovered half must be untouched backdrop (~204), got {right}");
+        assert_eq!(ra, 255);
     }
 }

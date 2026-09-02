@@ -351,6 +351,40 @@ fn transform_json(t: &Transform) -> J {
     ])
 }
 
+/// The inverse of [`blend_str`], for anything that READS a recorded scene.
+///
+/// ⛔ IT LIVES HERE, BESIDE ITS INVERSE, ON PURPOSE. `direct2d::replay` is the
+/// first reader that needs more than `"normal"`, and the obvious place to put
+/// this was there — which would make TWO independent spellings of a
+/// sixteen-arm kebab-case vocabulary, in two files, with nothing comparing
+/// them. The first `color-burn`/`color_burn` slip would then be a scene that
+/// replays as `Normal` on one backend and refuses on another, silently.
+/// `blend_names_round_trip` is what keeps that impossible.
+pub fn blend_from_str(s: &str) -> Option<BlendMode> {
+    Some(match s {
+        "normal" => BlendMode::Normal,
+        "darken" => BlendMode::Darken,
+        "multiply" => BlendMode::Multiply,
+        "color-burn" => BlendMode::ColorBurn,
+        "lighten" => BlendMode::Lighten,
+        "screen" => BlendMode::Screen,
+        "color-dodge" => BlendMode::ColorDodge,
+        "overlay" => BlendMode::Overlay,
+        "soft-light" => BlendMode::SoftLight,
+        "hard-light" => BlendMode::HardLight,
+        "difference" => BlendMode::Difference,
+        "exclusion" => BlendMode::Exclusion,
+        "hue" => BlendMode::Hue,
+        "saturation" => BlendMode::Saturation,
+        "color" => BlendMode::Color,
+        "luminosity" => BlendMode::Luminosity,
+        // An UNKNOWN name is `None`, never a default. Substituting `Normal`
+        // would render a plausible wrong picture for a mode this build does not
+        // know — the same failure the mask-law arm refuses one file over.
+        _ => return None,
+    })
+}
+
 fn blend_str(m: BlendMode) -> &'static str {
     match m {
         BlendMode::Normal => "normal", BlendMode::Darken => "darken", BlendMode::Multiply => "multiply",
@@ -560,6 +594,40 @@ mod float_law {
 mod a6_tests {
     use super::*;
     use crate::painter::{BlendMode, Painter};
+
+    /// ⛔ EVERY blend name round-trips, and the list is walked EXHAUSTIVELY
+    /// rather than sampled.
+    ///
+    /// This is the arm that makes `blend_from_str` safe to live beside its
+    /// inverse instead of being re-spelled by each reader. A sampled test
+    /// (`multiply` and `normal`, say) would pass over a `color_burn` typo in
+    /// either direction — and that scene would then replay as a *different
+    /// blend* on the backend that misread it, which is a wrong picture nothing
+    /// reports.
+    ///
+    /// The `ALL` list is checked against the enum by the exhaustive `match` in
+    /// `blend_str` itself: adding a variant there without adding it here leaves
+    /// the count assertion below to catch it.
+    #[test]
+    fn blend_names_round_trip() {
+        const ALL: [BlendMode; 16] = [
+            BlendMode::Normal, BlendMode::Darken, BlendMode::Multiply,
+            BlendMode::ColorBurn, BlendMode::Lighten, BlendMode::Screen,
+            BlendMode::ColorDodge, BlendMode::Overlay, BlendMode::SoftLight,
+            BlendMode::HardLight, BlendMode::Difference, BlendMode::Exclusion,
+            BlendMode::Hue, BlendMode::Saturation, BlendMode::Color,
+            BlendMode::Luminosity,
+        ];
+        let mut seen = std::collections::BTreeSet::new();
+        for m in ALL {
+            let s = blend_str(m);
+            assert_eq!(blend_from_str(s), Some(m), "{s} did not round-trip");
+            assert!(seen.insert(s), "two modes share the name {s}");
+        }
+        assert_eq!(seen.len(), 16, "a BlendMode variant is missing from ALL");
+        assert_eq!(blend_from_str("no-such-mode"), None,
+                   "an unknown name must be None, never a silent Normal");
+    }
 
     /// AMENDMENT A6 (ratified 2026-08-27): the isolated-layer bracket is part of
     /// the seam vocabulary and must record in order, like every other bracket.
