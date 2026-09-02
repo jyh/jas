@@ -25,7 +25,7 @@ use super::{
     Brush, EllipseArc, FillRule, LinearGradient, Mask, Painter, PathCommand, RadialGradient, Rect,
     StrokeStyle, TextRun,
 };
-use crate::geometry::element::{BlendMode, Color, LineCap, LineJoin, Transform};
+use crate::geometry::element::{BlendMode, Color, LineCap, LineJoin, StrokeAlign, Transform};
 use crate::surface::web::{blend_mode_css, CompositeOp, WebSurface};
 use crate::surface::PixelSurface;
 use wasm_bindgen::JsValue;
@@ -333,7 +333,40 @@ impl Painter for Canvas2dPainter<'_> {
         self.target().fill_with_canvas_winding_rule(winding(w));
     }
 
-    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
+    /// ⭐ THE ALIGNMENT IS DONE HERE, ON THE TRUE CONIC (council 2026-09-02,
+    /// EXACT ELLIPSE EVERYWHERE). It used to be lowered by the caller into a
+    /// four-cubic bézier ring, which was contract R4's one named exception;
+    /// canvas has `ellipse()`, which IS the conic, so nothing is approximated.
+    ///
+    /// Inside/outside is the same trick a path stroke uses — clip, then stroke
+    /// at 2× width so half the pen lands outside the clip and is discarded —
+    /// except the clip region is built from `ellipse()` rather than from a
+    /// path approximating one.
+    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, align: StrokeAlign, paint_alpha: f64) {
+        if align != StrokeAlign::Center {
+            self.target().save();
+            self.build_ellipse(arc);
+            if align == StrokeAlign::Outside {
+                // ⛔ THE OUTSIDE REGION IS THE EVEN-ODD COMPLEMENT, and it is
+                // built the way amendment A5's own note describes the
+                // outside-stroke trick: a huge rect plus the shape, clipped
+                // even-odd. The ELLIPSE half of that compound is still exact —
+                // which is the whole point — and the rect half is exact by
+                // construction.
+                self.target().rect(-1.0e7, -1.0e7, 2.0e7, 2.0e7);
+                self.target().clip_with_canvas_winding_rule(CanvasWindingRule::Evenodd);
+            } else {
+                self.target().clip_with_canvas_winding_rule(CanvasWindingRule::Nonzero);
+            }
+            self.build_ellipse(arc);
+            self.set_stroke_brush(brush);
+            self.apply_stroke_style(stroke);
+            self.target().set_line_width(stroke.width * 2.0);
+            self.apply_alpha(paint_alpha);
+            self.target().stroke();
+            self.target().restore();
+            return;
+        }
         self.build_ellipse(arc);
         self.set_stroke_brush(brush);
         self.apply_stroke_style(stroke);

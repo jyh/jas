@@ -2,7 +2,7 @@
 //! Shared by the proof test (via `RecordingPainter`) and the R10 bench (via
 //! `NoOpPainter`) so both drive the SAME lowering code.
 
-use super::{Brush, ColorStop, EllipseArc, LinearGradient, Mask, Painter, PathCommand, Rect, StrokeStyle, TextRun};
+use super::{StrokeAlign, Brush, ColorStop, EllipseArc, LinearGradient, Mask, Painter, PathCommand, Rect, StrokeStyle, TextRun};
 use crate::geometry::element::{BlendMode, Color, FillRule, LineCap, LineJoin, Transform};
 
 fn demo_stroke(width: f64) -> StrokeStyle {
@@ -33,7 +33,7 @@ pub fn build_proof_scene(p: &mut impl Painter) {
     //    A2). This is the refuter's missing-circle case.
     let circle = EllipseArc::circle(200.0, 120.0, 40.0);
     p.fill_ellipse_arc(&circle, FillRule::NonZero, &Brush::Solid(Color::rgb(0.9, 0.3, 0.1)), 1.0);
-    p.stroke_ellipse_arc(&circle, &Brush::Solid(Color::BLACK), &demo_stroke(2.0), 1.0);
+    p.stroke_ellipse_arc(&circle, &Brush::Solid(Color::BLACK), &demo_stroke(2.0), StrokeAlign::Center, 1.0);
 
     // 3) A push_group with alpha (non-isolated) wrapping a stroked bezier path
     //    painted with a LINEAR-GRADIENT brush.
@@ -175,7 +175,7 @@ pub fn build_synthetic_scene(p: &mut impl Painter, n: usize) {
         p.fill_ellipse_arc(&c, FillRule::NonZero, &grad, 1.0);
 
         // stroke_ellipse_arc
-        p.stroke_ellipse_arc(&c, &solid, &stroke, 1.0);
+        p.stroke_ellipse_arc(&c, &solid, &stroke, StrokeAlign::Center, 1.0);
 
         // draw_text_run (fast run)
         p.draw_text_run(
