@@ -1618,6 +1618,7 @@ mod primitive_pixel_laws {
 mod partial_arc_laws {
     use super::browser_probe::{alpha_at, surface};
     use super::*;
+    use crate::geometry::element::StrokeAlign;
     use wasm_bindgen_test::*;
 
     wasm_bindgen_test_configure!(run_in_browser);
@@ -1726,6 +1727,14 @@ mod partial_arc_laws {
                     width: 6.0, cap: LineCap::Butt, join: LineJoin::Miter,
                     miter: 10.0, dash: Vec::new(),
                 },
+                // ⚖️ CENTRE EXPLICITLY, and it matters to what this arm means.
+                // `StrokeAlign` arrived on this op with flask's #89 (exact
+                // ellipse everywhere), which added an inside/outside branch
+                // that CLIPS and strokes at 2x width. This arm is about the
+                // sweep, not the alignment, so it pins the plain path and
+                // leaves the two aligned branches to whoever owns them —
+                // ⛔ NEITHER OF WHICH HAS A PIXEL ARM HERE.
+                StrokeAlign::Center,
                 1.0,
             );
         }
