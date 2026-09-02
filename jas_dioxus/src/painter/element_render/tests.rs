@@ -2616,6 +2616,18 @@ fn run_origins(cmds: &[Command]) -> Vec<f64> {
 
 /// ⭐ ROW DR capability 1: a segmented text emits ONE RUN PER TSPAN, and the
 /// second starts where the first ends.
+///
+/// ⛔ GATED ON THE BACKEND THAT HAS A REAL MEASURER, and the gate is the POINT
+/// rather than a convenience. Row DR routes segmented text on the presence of
+/// `try_make_measurer`, which is `None` off Direct2D BY CONSTRUCTION — so on
+/// every other platform the correct behaviour is to REFUSE, and that is
+/// asserted by `segmented_stays_legacy_without_a_real_measurer` below.
+///
+/// 📌 Measured the hard way: the first cut of these arms was ungated and went
+/// green on this box while failing on the ubuntu and macOS lanes. Tests written
+/// where the author is are exactly the class this seat keeps finding in other
+/// people's instruments.
+#[cfg(all(feature = "d2d", windows))]
 #[test]
 fn segmented_text_emits_one_run_per_tspan_at_measured_offsets() {
     let elem = segmented(vec![tspan("Hello ", None, None), tspan("world", Some("bold"), None)]);
@@ -2645,6 +2657,7 @@ fn segmented_text_emits_one_run_per_tspan_at_measured_offsets() {
 /// 12pt parent: measured with its own font it advances ~3× further than measured
 /// with the parent's, so the second run's origin separates the two readings by a
 /// wide margin.
+#[cfg(all(feature = "d2d", windows))]
 #[test]
 fn the_pen_advances_by_each_tspans_own_font_not_the_parents() {
     // tspan[0] is THREE TIMES the parent size; tspan[1] inherits.
@@ -2683,14 +2696,56 @@ fn a_tspan_feature_row_dr_did_not_take_still_stays_legacy() {
             t.text_decoration = Some(vec!["underline".to_string()])
         }),
     ] {
-        let mut second = tspan("world", None, None);
+        let mut second = tspan("world", Some("bold"), None);
         mutate(&mut second);
         let elem = segmented(vec![tspan("Hello ", None, None), second]);
         assert!(element_needs_legacy(&elem, all_caps()),
                 "a tspan carrying {label} is NOT in row DR and must stay legacy");
     }
-    // The control: without any of them, it converts -- or the loop above passes
-    // because segmented text is refused wholesale.
-    let plain = segmented(vec![tspan("Hello ", None, None), tspan("world", None, None)]);
+    // ⛔ THE CONTROL IS PLATFORM-DEPENDENT AND SO IT IS SPLIT OUT, not deleted:
+    // "a feature-free segmented text converts" is true only where a real
+    // measurer exists. Both halves are asserted, one per platform, below.
+}
+
+/// ⛔ "FEATURE-FREE" DOES NOT MEAN "NO OVERRIDES AT ALL". `render_is_flat()` is
+/// true when EVERY tspan has no overrides, so a two-tspan text with none is
+/// still FLAT and never reaches the segmented walk. The fixtures below give the
+/// second tspan a benign FONT override -- exactly what the corpus does
+/// (`text_with_tspans.svg`, `setup_text_ab_bold_b.svg` both use
+/// `font-weight="bold"`) -- which makes them genuinely segmented while carrying
+/// none of the five features row DR left on legacy.
+///
+/// 📌 Found by running the non-d2d lane locally after CI red: my first
+/// "feature-free segmented" fixture had no overrides, so it was flat, converted
+/// as flat, and the arm asserting it stays legacy failed for a reason that had
+/// nothing to do with the measurer.
+///
+/// The control for the arm above, where a real measurer exists: without any of
+/// those features a segmented text DOES convert — or that loop would be passing
+/// because segmented text is refused wholesale.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_feature_free_segmented_text_converts_where_a_measurer_exists() {
+    let plain = segmented(vec![tspan("Hello ", None, None), tspan("world", Some("bold"), None)]);
+    assert!(!matches!(&plain, Element::Text(t) if t.render_is_flat()),
+            "the fixture must actually BE segmented, or this arm tests the flat path");
     assert!(!element_needs_legacy(&plain, all_caps()));
+}
+
+/// ⛔ AND THE OTHER SIDE OF THE SAME RULE: with NO real measurer, segmented text
+/// STAYS LEGACY.
+///
+/// This is row DR's fail-closed law expressed as a platform property rather than
+/// as a `cfg` nobody checks. A segmented walk POSITIONS by measured widths, so a
+/// backend without metrics must not attempt it — and off Direct2D
+/// `try_make_measurer` is `None` by construction, which is what keeps the web
+/// build on its legacy path with no `cfg` in the router at all.
+#[cfg(not(all(feature = "d2d", windows)))]
+#[test]
+fn segmented_stays_legacy_without_a_real_measurer() {
+    let plain = segmented(vec![tspan("Hello ", None, None), tspan("world", Some("bold"), None)]);
+    assert!(!matches!(&plain, Element::Text(t) if t.render_is_flat()),
+            "the fixture must actually BE segmented, or this arm tests the flat path");
+    assert!(element_needs_legacy(&plain, all_caps()),
+            "with no real measurer, segmented text must stay legacy rather than              lay runs out against metrics that do not exist");
 }
