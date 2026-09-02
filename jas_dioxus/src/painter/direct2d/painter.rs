@@ -1310,6 +1310,128 @@ mod tests {
         assert_eq!(px(&buf, 16, 14, 14), [0, 0, 0, 0], "the cut-off corner stays clear");
     }
 
+    // -- ROW EG(2): THE GRADIENT HOLE, CLOSED -------------------------------
+    //
+    // ⭐ jas NAMED THIS BY READING, ON THE OTHER BACKEND, BEFORE I MEASURED IT:
+    // "Nothing in the corpus compares gradient pixels, so picking the wrong one
+    // would never go red." The Direct2D census confirmed it as a number -- ALL
+    // SIX gradient mutants survived the whole 2,732-test native suite.
+    //
+    // ⛔ THE SPANS ARE DELIBERATELY NARROWER THAN THE SURFACE. D2D clamps
+    // outside the gradient span (D2D1_EXTEND_MODE_CLAMP), so a pixel beyond the
+    // span carries the stop colour EXACTLY. Sampling inside the ramp instead
+    // would mean asserting an interpolated value, and an interpolated value is
+    // not exactly representable in 8 bits -- the trap that cost this lane a
+    // WARP-vs-hardware false green once already.
+
+    fn stops_rb() -> Vec<crate::painter::ColorStop> {
+        vec![
+            crate::painter::ColorStop { offset: 0.0, color: Color::rgb(1.0, 0.0, 0.0) },
+            crate::painter::ColorStop { offset: 1.0, color: Color::rgb(0.0, 0.0, 1.0) },
+        ]
+    }
+
+    /// A linear gradient runs from its START to its END, in that order and
+    /// along the axis its endpoints describe.
+    #[test]
+    fn a_linear_gradient_runs_from_its_start_point_to_its_end_point() {
+        let g = Brush::Linear(crate::painter::LinearGradient {
+            x0: 4.0, y0: 8.0, x1: 12.0, y1: 8.0, stops: stops_rb(),
+        });
+        let buf = draw(16, 16, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 }, &g, 1.0)
+        });
+        // BGRA. Left of the span clamps to the first stop, right of it the last.
+        assert_eq!(px(&buf, 16, 1, 8), [0, 0, 255, 255], "before the span: the FIRST stop");
+        assert_eq!(px(&buf, 16, 14, 8), [255, 0, 0, 255], "after it: the LAST stop");
+        // ⛔ AND THE SPAN STARTS WHERE x0 SAYS. The two clamp assertions above
+        // hold for ANY span inside [4,12], so on their own they cannot see a
+        // start point read from the wrong field -- a mutant that took X from
+        // `y0` survived exactly them. x = 3 is still clamped and x = 4 is not:
+        // that pair pins the edge itself.
+        assert_eq!(px(&buf, 16, 3, 8), [0, 0, 255, 255], "x=3 is outside the span");
+        assert_ne!(px(&buf, 16, 4, 8), [0, 0, 255, 255],
+                   "x=4 IS the span's start, so the ramp has begun there");
+        // ⛔ AND THE AXIS: the ramp is horizontal, so a vertical move must not
+        // change the colour. Without this, reading x from y passes the two
+        // assertions above on a gradient running the wrong way.
+        assert_eq!(px(&buf, 16, 1, 2), px(&buf, 16, 1, 13),
+                   "a horizontal ramp is constant down a column");
+    }
+
+    /// A radial gradient is centred on its OUTER circle and carries the inner
+    /// circle's offset -- the two are different fields and swapping them is a
+    /// plausible picture.
+    #[test]
+    fn a_radial_gradient_uses_the_outer_radius_and_the_origin_offset() {
+        let g = Brush::Radial(crate::painter::RadialGradient {
+            x0: 5.0, y0: 8.0, r0: 0.0, x1: 8.0, y1: 8.0, r1: 6.0, stops: stops_rb(),
+        });
+        let buf = draw(16, 16, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 }, &g, 1.0)
+        });
+        // Outside r1 = 6 from (8,8): clamped to the last stop, exactly.
+        assert_eq!(px(&buf, 16, 0, 0), [255, 0, 0, 255], "beyond the outer radius");
+        // ⛔ THE OFFSET ORIGIN MAKES THE FIELD ASYMMETRIC. The focus sits LEFT
+        // of centre, so the ramp is stretched to its right: a point equally far
+        // either side of (8,8) is NOT the same colour. Zero the offset and this
+        // is the assertion that fails.
+        // ⚠️ "REDDER ON THE LEFT" IS NOT ENOUGH, MEASURED: with the offset
+        // zeroed the field is still redder on the left of this sample pair,
+        // just less so, and that mutant survived the weaker assertion. What
+        // distinguishes them is WHERE THE FOCUS SITS -- the reddest point is at
+        // x = 5 (the inner circle) and NOT at the centre.
+        let focus = px(&buf, 16, 5, 8)[0];
+        let centre = px(&buf, 16, 8, 8)[0];
+        assert!(focus < centre,
+                "the focus at x=5 is nearer the first stop than the centre is;                  zero the origin offset and the centre becomes the extreme                  (focus {focus} vs centre {centre})");
+    }
+
+    /// The paint alpha multiplies every gradient STOP, exactly as it multiplies
+    /// a solid colour.
+    #[test]
+    fn a_gradient_honours_the_paint_alpha() {
+        let g = Brush::Linear(crate::painter::LinearGradient {
+            x0: 4.0, y0: 8.0, x1: 12.0, y1: 8.0, stops: stops_rb(),
+        });
+        let opaque = draw(16, 16, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 }, &g, 1.0)
+        });
+        let half = draw(16, 16, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 }, &g, 0.5)
+        });
+        assert_eq!(px(&opaque, 16, 1, 8)[3], 255, "the control is opaque");
+        assert_eq!(px(&half, 16, 1, 8)[3], 128,
+                   "half alpha reaches the STOPS, not only solid brushes");
+    }
+
+    /// ⛔ GRADIENTS INTERPOLATE IN sRGB (`D2D1_GAMMA_2_2`), NOT LINEARLY.
+    ///
+    /// The file already called this "a divergence pin, not a default" -- CSS
+    /// interpolates gamma-encoded and `D2D1_GAMMA_1_0` does not, so the wrong
+    /// one is a visibly different ramp on every gradient the app draws. **It
+    /// was a pin in prose only: the census mutant that swapped it survived all
+    /// 2,732 tests.**
+    ///
+    /// ⚠️ A THRESHOLD, NOT AN EQUALITY, AND DELIBERATELY SO. A gradient midpoint
+    /// is an interpolated value and not exactly representable in 8 bits, so
+    /// pinning the exact byte would be the WARP-vs-hardware trap this lane has
+    /// already paid for once. Measured here: sRGB gives 144 at the midpoint and
+    /// linear gives 197 -- about fifty apart, so a threshold between them is
+    /// robust to a device that rounds differently.
+    #[test]
+    fn a_gradient_interpolates_in_srgb_and_not_linearly() {
+        let g = Brush::Linear(crate::painter::LinearGradient {
+            x0: 4.0, y0: 8.0, x1: 12.0, y1: 8.0, stops: stops_rb(),
+        });
+        let buf = draw(16, 16, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 }, &g, 1.0)
+        });
+        let mid = px(&buf, 16, 8, 8)[0];
+        assert!(mid < 170,
+                "sRGB interpolation puts the midpoint near 144; LINEAR puts it                  near 197 (got {mid})");
+    }
+
     /// A full-sweep ellipse fills. This is 100% of the recorded traffic.
     #[test]
     fn fill_ellipse_arc_paints_a_full_circle() {
