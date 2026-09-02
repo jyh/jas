@@ -307,10 +307,15 @@ fn reference_docs() -> Vec<(&'static str, Vec<Element>)> {
 /// (hairline, no fill). Self-contained: every operand is owned, so nothing here
 /// depends on an installed index.
 ///
-/// ⛔ THE SUBTRACT DOES NOT RENDER A HOLE, AND I ALMOST WROTE THAT IT DID.
-/// See `the_subtract_rings_share_an_orientation_so_the_non_zero_fill_is_solid`
-/// below: the fact is MEASURED off these committed bytes, not assumed from the
-/// operation's name.
+/// ⛔ THE SUBTRACT DOES RENDER A HOLE, AND UNTIL ROW EH IT DID NOT. This
+/// comment read "THE SUBTRACT DOES NOT RENDER A HOLE" on 09/02, which was a
+/// true report of the tree and a false report of the contract: the rings are
+/// co-oriented, so the non-zero rule the walks were using filled the cutter's
+/// interior. The rule is the algorithm layer's to declare (BOOLEAN.md clause
+/// 4) and it declares EVEN-ODD. See
+/// `the_subtract_rings_are_co_oriented_and_are_read_under_the_declared_even_odd_rule`
+/// below: both halves are MEASURED off these committed bytes -- the shared
+/// orientation and the declared rule -- not assumed from the operation's name.
 fn ref_live() -> Vec<Element> {
     let union = live_union(
         overlapping_operands(),

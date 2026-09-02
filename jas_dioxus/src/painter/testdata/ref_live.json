@@ -47,7 +47,7 @@
     }, {
       "op": "Z"
     }],
-    "winding": "nonzero",
+    "winding": "evenodd",
     "brush": {
       "kind": "solid",
       "color": {
@@ -155,7 +155,7 @@
     }, {
       "op": "Z"
     }],
-    "winding": "nonzero",
+    "winding": "evenodd",
     "brush": {
       "kind": "solid",
       "color": {

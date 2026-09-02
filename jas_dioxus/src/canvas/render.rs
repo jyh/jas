@@ -744,6 +744,25 @@ fn draw_element(
 /// As [draw_element], but carrying the accumulated element-transform scale
 /// from the ancestor chain (see [accumulate_element_scale]). The public
 /// [draw_element] seeds this at 1.0.
+/// Fill the current path under a DECLARED fill rule -- the one lowering of
+/// `FillRule` onto the canvas API in this file.
+///
+/// ⛔ IT IS A FUNCTION BECAUSE THE BARE CALL IS THE BUG. `ctx.fill()` means
+/// non-zero, silently and by specification, so every site that fills without
+/// naming a rule has SILENTLY CHOSEN one. Two arms in this file did:
+/// `PathFillRuleRenderTests`'s Swift siblings found three more on that port,
+/// and row EH found this file's `Element::Live` arm. Routing both arms through
+/// one function makes the choice impossible to make by omission -- the
+/// parameter has to be supplied, and a reader can see what it was.
+fn fill_under_rule(ctx: &CanvasRenderingContext2d, rule: crate::geometry::element::FillRule) {
+    match rule {
+        crate::geometry::element::FillRule::NonZero => ctx.fill(),
+        crate::geometry::element::FillRule::EvenOdd => {
+            ctx.fill_with_canvas_winding_rule(web_sys::CanvasWindingRule::Evenodd)
+        }
+    }
+}
+
 fn draw_element_scaled(
     ctx: &CanvasRenderingContext2d,
     target: TargetSize,
@@ -1891,12 +1910,7 @@ fn draw_element_body(
                 ctx.begin_path();
                 build_path(ctx, &e.d);
                 ctx.set_global_alpha(base_alpha * fill_op);
-                match e.fill_rule {
-                    crate::geometry::element::FillRule::NonZero => ctx.fill(),
-                    crate::geometry::element::FillRule::EvenOdd => ctx.fill_with_canvas_winding_rule(
-                        web_sys::CanvasWindingRule::Evenodd,
-                    ),
-                }
+                fill_under_rule(ctx, e.fill_rule);
             }
             // Brushed stroke — when stroke_brush resolves to a known
             // Calligraphic brush, draw its variable-width outline as a
@@ -2459,7 +2473,20 @@ fn draw_element_body(
                 }
                 if !outline && live_fill.is_some() {
                     ctx.set_global_alpha(base_alpha * fill_op);
-                    ctx.fill();
+                    // ⛔ ROW EH. NOT a bare `ctx.fill()`, which means non-zero:
+                    // these rings are the algorithm layer's own output and it
+                    // declares them EVEN-ODD (BOOLEAN.md clause 4). The bare
+                    // call stood here until 09/02 and refilled every hole a
+                    // `SubtractFront` cut. A live element carries no
+                    // `fill_rule` field to consult -- that is why the 07/26
+                    // fill-rule wave, which stamps the constant onto the Path
+                    // ELEMENT the destructive boolean emits, could not reach
+                    // this arm -- so the rule comes from the constant directly.
+                    fill_under_rule(
+                        ctx,
+                        crate::geometry::element::FillRule::from(
+                            crate::algorithms::boolean::RESULT_FILL_RULE),
+                    );
                 }
                 if outline || live_stroke.is_some() {
                     ctx.set_global_alpha(base_alpha * stroke_op);
@@ -5106,9 +5133,11 @@ mod ctx_transform_tests {
 // — so the parity claim is written as one assertion over two arms rather than
 // as two tests that happen to expect the same number.
 #[cfg(all(test, target_arch = "wasm32"))]
-mod live_fill_rule_tests {
+mod fill_rule_pixel_tests {
     use super::*;
-    use crate::geometry::element::{CommonProps, Fill, RectElem};
+    use crate::geometry::element::{
+        CommonProps, Fill, FillRule, PathElem, RectElem, Stroke, StrokeWidthPoint,
+    };
     use crate::geometry::live::{CompoundOperation, CompoundShape, LiveVariant};
     use std::rc::Rc;
     use wasm_bindgen_test::*;
@@ -5224,6 +5253,84 @@ mod live_fill_rule_tests {
                    "the two walks must paint the same picture for the same \
                     element: legacy {legacy_hole}/{legacy_ring} vs painter \
                     {painter_hole}/{painter_ring}");
+    }
+
+    /// ⛔⛔ AND THE SIBLING ARM, WHICH THIS ROW'S MUTATION PASS FOUND UNGUARDED.
+    ///
+    /// This test is NOT about live geometry. It is here because corrupting
+    /// `fill_under_rule(ctx, e.fill_rule)` — the LEGACY `Element::Path` fill,
+    /// the one the 2026-07-26 fill-rule wave installed — to pass a constant
+    /// `NonZero` left **every test in this repository green**: 60/60 in the
+    /// browser and 3033/0 native. An even-odd path could render as non-zero on
+    /// the shipped web app and nothing could say so.
+    ///
+    /// ⚖️ AND THE OTHER PORT PINS IT SIX TIMES. `PathFillRuleRenderTests.swift`
+    /// exists for exactly this lowering on exactly these branches, and its own
+    /// header explains why Rust needs it too: `path_painter_inputs` returns
+    /// `None` for a stroke brush, a variable-width profile and anchor-aligned
+    /// dashes, so in Rust all three land on this single fill. That sentence was
+    /// true and had no test under it. ⇒ **two ports can both be well tested and
+    /// share no tested property** — measured again, on the arm next door to the
+    /// one this row was sent to fix.
+    ///
+    /// 📌 REACHABLE, not hypothetical: `apply_destructive_boolean` stamps
+    /// `RESULT_FILL_RULE` (even-odd) onto every multi-ring result it emits, so
+    /// giving one of those a variable-width profile is an ordinary edit.
+    ///
+    /// ⚠️ NOT RED AT THE ROW'S HEAD — it is green before and after the repair.
+    /// It is red only against the mutant, and it is labelled that way rather
+    /// than counted as one of this row's reds.
+    #[wasm_bindgen_test]
+    fn the_legacy_path_arm_fills_under_the_rule_the_element_declares() {
+        // The donut: outer 0…100 square, concentric 25…75 cutter, co-oriented.
+        let donut = |rule: FillRule| -> (u8, u8) {
+            let mut d = vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 100.0, y: 0.0 },
+                PathCommand::LineTo { x: 100.0, y: 100.0 },
+                PathCommand::LineTo { x: 0.0, y: 100.0 },
+                PathCommand::ClosePath,
+            ];
+            d.extend([
+                PathCommand::MoveTo { x: 25.0, y: 25.0 },
+                PathCommand::LineTo { x: 75.0, y: 25.0 },
+                PathCommand::LineTo { x: 75.0, y: 75.0 },
+                PathCommand::LineTo { x: 25.0, y: 75.0 },
+                PathCommand::ClosePath,
+            ]);
+            let e = Element::Path(PathElem {
+                d,
+                fill: Some(Fill { color: Color::BLACK, opacity: 1.0 }),
+                stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+                // ⛔ THE PROFILE IS THE INSTRUMENT, not decoration: it is what
+                // makes `path_painter_inputs` return None, which is what routes
+                // this element to the LEGACY fill instead of the painter seam.
+                // Without it the test would silently measure the other walk.
+                width_points: vec![
+                    StrokeWidthPoint { t: 0.0, width_left: 0.5, width_right: 0.5 },
+                    StrokeWidthPoint { t: 1.0, width_left: 0.5, width_right: 0.5 },
+                ],
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+                fill_rule: rule,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+            });
+            let (s, ctx) = surface(SIZE, SIZE);
+            draw_element_scaled(&ctx, TargetSize::of(&s), &e, Visibility::Preview, 1.0, 1.0);
+            (alpha_at(&s, HOLE.0, HOLE.1), alpha_at(&s, RING.0, RING.1))
+        };
+
+        let (eo_hole, eo_ring) = donut(FillRule::EvenOdd);
+        let (nz_hole, _) = donut(FillRule::NonZero);
+
+        assert_eq!(eo_ring, 255, "POSITIVE CONTROL: the ring must be painted");
+        assert_eq!(eo_hole, 0, "an even-odd path keeps its hole on the legacy arm");
+        // ⚖️ BOTH RULES, ONE INPUT. Asserting only the even-odd case would stay
+        // green under a lowering that answered "even-odd" to everything, which
+        // is the mirror of the bug. The pair is what pins the DISCRIMINATION.
+        assert_eq!(nz_hole, 255, "and a non-zero path is NOT rewritten to even-odd");
     }
 
     /// ⛔ THE UNCHANGED HALF, ASSERTED — because a fix that reads every live

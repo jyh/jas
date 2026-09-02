@@ -2114,7 +2114,18 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
             }
             if !outline && liveFill != nil {
                 ctx.setAlpha(CGFloat(baseAlpha * fillOp))
-                ctx.fillPath()
+                // ⛔ ROW EH. NOT a bare `ctx.fillPath()`, which means winding:
+                // these rings are the algorithm layer's own output and it
+                // declares them EVEN-ODD (BOOLEAN.md clause 4,
+                // `boolResultFillRule`). The bare call stood here until 09/02
+                // and refilled every hole a subtractFront cut. A live compound
+                // carries no `fillRule` slot -- which is why the 07/26
+                // fill-rule wave, whose remedy was to stamp the constant onto
+                // the Path ELEMENT the destructive boolean emits, could not
+                // reach this arm; `PathFillRuleRenderTests` pins that arm and
+                // `LiveFillRuleRenderTests` pins this one. Derived from the
+                // constant so the two cannot drift.
+                ctx.fillPath(using: cgFillRule(FillRule(boolResultFillRule)))
             }
             if outline || liveStroke != nil {
                 ctx.setAlpha(CGFloat(baseAlpha * strokeOp))

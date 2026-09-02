@@ -930,7 +930,17 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
                 // no gradient field at all -- which is why legacy's Live arm
                 // calls `apply_fill(.., None, (0,0,0,0))` and the plain
                 // `apply_stroke`. The bbox below is therefore never read.
-                emit_fill_path(p, &path, FillRule::NonZero, live_fill.as_ref(), None,
+                // ⛔ ROW EH -- THE RULE COMES FROM THE PRODUCER, NOT FROM THE
+                // RENDERER. These rings are the algorithm layer's own output,
+                // and BOOLEAN.md's carried-rule law (clause 4) declares such a
+                // result EVEN-ODD. `FillRule::NonZero` stood here until 09/02
+                // and refilled every hole a `SubtractFront` cut: the cutter's
+                // interior sits inside two co-oriented rings, so its winding is
+                // ±2. Derived from the constant rather than spelled, so the two
+                // cannot drift.
+                emit_fill_path(p, &path,
+                               FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE),
+                               live_fill.as_ref(), None,
                                (0.0, 0.0, 0.0, 0.0), eff);
                 if let Some(s) = live_stroke.as_ref() {
                     emit_path_stroke(p, &path, &Brush::Solid(s.color), s, eff);
