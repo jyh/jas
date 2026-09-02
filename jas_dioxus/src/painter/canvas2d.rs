@@ -1701,7 +1701,9 @@ mod partial_arc_laws {
         let on_sweep = alpha_at(&ctx, CX, CY + r);
         let off_sweep = alpha_at(&ctx, CX, CY - r);
         assert!(on_sweep > 200,
-                "the stroke must land on the swept edge; got {on_sweep}. A 0                  here means the op painted NOTHING — the mutant this arm exists                  to kill.");
+                "the stroke must land on the swept edge; got {on_sweep}. A 0 \
+                 here means the op painted NOTHING — the mutant this arm \
+                 exists to kill.");
         assert_eq!(off_sweep, 0,
                    "and NOT on the edge the sweep never reached; got {off_sweep}");
     }
