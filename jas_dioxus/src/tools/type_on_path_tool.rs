@@ -11,9 +11,8 @@
 //! Editing semantics, undo handling, and keyboard routing match
 //! [`TypeTool`]; only the layout/hit-test is different.
 
-use web_sys::CanvasRenderingContext2d;
+use crate::painter::overlay_ctx::OverlayCtx;
 
-use crate::canvas::ctx_guard::CtxSaveGuard;
 use crate::document::controller::Controller;
 use crate::document::document::ElementSelection;
 use crate::document::model::Model;
@@ -265,7 +264,7 @@ impl TypeOnPathTool {
             .and_then(|tsp| session.try_paste_tspans(tsp, text))
             .or_else(|| {
                 let tsp = elem_tspans.as_ref()?;
-                let payload = crate::workspace::clipboard::rich_clipboard_read_matching(text)?;
+                let payload = super::rich_clipboard_read_matching(text)?;
                 Some(crate::geometry::tspan::insert_tspans_at(
                     tsp, session.insertion, &payload))
             });
@@ -596,8 +595,7 @@ impl CanvasTool for TypeOnPathTool {
                         if let Some((_, payload)) =
                             self.session.as_ref().unwrap().tspan_clipboard.clone()
                         {
-                            crate::workspace::clipboard::rich_clipboard_write(
-                                text.clone(), payload);
+                            super::rich_clipboard_write(text.clone(), payload);
                         }
                         clipboard_write(text);
                     }
@@ -619,8 +617,7 @@ impl CanvasTool for TypeOnPathTool {
                         if let Some((_, payload)) =
                             self.session.as_ref().unwrap().tspan_clipboard.clone()
                         {
-                            crate::workspace::clipboard::rich_clipboard_write(
-                                text.clone(), payload);
+                            super::rich_clipboard_write(text.clone(), payload);
                         }
                         clipboard_write(text);
                         self.ensure_snapshot(model);
@@ -728,7 +725,7 @@ impl CanvasTool for TypeOnPathTool {
         self.end_session(model);
     }
 
-    fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d) {
+    fn draw_overlay(&self, model: &Model, ctx: &mut OverlayCtx) {
         // Drag-create preview curve.
         if self.session.is_none()
             && let State::DragCreate {
@@ -741,7 +738,7 @@ impl CanvasTool for TypeOnPathTool {
             {
                 ctx.set_stroke_style_str("rgb(100,100,100)");
                 ctx.set_line_width(1.0);
-                ctx.set_line_dash(&js_sys::Array::of2(&4.0.into(), &4.0.into()).into()).ok();
+                ctx.set_line_dash(&[]);
                 ctx.begin_path();
                 ctx.move_to(*start_x, *start_y);
                 if let Some((cx, cy)) = control {
@@ -750,7 +747,7 @@ impl CanvasTool for TypeOnPathTool {
                     ctx.line_to(*cur_x, *cur_y);
                 }
                 ctx.stroke();
-                ctx.set_line_dash(&js_sys::Array::new().into()).ok();
+                ctx.set_line_dash(&[]);
             }
 
         // Offset handles for selected TextPaths (unchanged from old behavior).
@@ -794,9 +791,13 @@ impl CanvasTool for TypeOnPathTool {
                 // Per-glyph frame, RAII-scoped to this loop iteration (the
                 // `continue` above sits BEFORE the save, so the guarded span
                 // is exactly the former save/restore span).
-                let _ctx_guard = CtxSaveGuard::new(ctx);
-                ctx.translate(g.cx, g.cy).ok();
-                ctx.rotate(g.angle).ok();
+        // ⭐ ROW DU: the CtxSaveGuard is GONE, not forgotten. It scoped a
+        // canvas save/restore to the end of this body; `OverlayCtx::finish()`
+        // closes every frame `translate`/`scale` opened at exactly that point,
+        // so the balance is still the type system's job -- it just moved into
+        // the facade, where every overlay gets it instead of each remembering.
+                ctx.translate(g.cx, g.cy);
+                ctx.rotate(g.angle);
                 ctx.fill_rect(-g.width / 2.0, -tp.font_size * 0.8, g.width, tp.font_size);
             }
         }
@@ -805,9 +806,13 @@ impl CanvasTool for TypeOnPathTool {
         if cursor_visible(session.blink_epoch_ms)
             && let Some((cx, cy, angle)) = lay.cursor_pos(session.insertion) {
                 // The caret's rotated frame pops at the end of this branch.
-                let _ctx_guard = CtxSaveGuard::new(ctx);
-                ctx.translate(cx, cy).ok();
-                ctx.rotate(angle).ok();
+        // ⭐ ROW DU: the CtxSaveGuard is GONE, not forgotten. It scoped a
+        // canvas save/restore to the end of this body; `OverlayCtx::finish()`
+        // closes every frame `translate`/`scale` opened at exactly that point,
+        // so the balance is still the type system's job -- it just moved into
+        // the facade, where every overlay gets it instead of each remembering.
+                ctx.translate(cx, cy);
+                ctx.rotate(angle);
                 ctx.set_stroke_style_str(&caret_color);
                 ctx.set_line_width(1.5);
                 ctx.begin_path();

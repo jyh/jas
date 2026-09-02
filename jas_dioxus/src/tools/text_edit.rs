@@ -569,7 +569,7 @@ impl TextEditSession {
                         // Identity-omission: drop fields that match the
                         // parent's effective value. See TSPAN.md step 3.
                         if let Some(e) = elem {
-                            crate::workspace::app_state::identity_omit_tspan(
+                            crate::geometry::tspan::identity_omit_tspan(
                                 &mut split[i], e);
                         }
                     }

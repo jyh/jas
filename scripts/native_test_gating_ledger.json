@@ -61,11 +61,6 @@
       "kind": "frontend",
       "reason": "The capture hooks themselves, installed into the Dioxus event seams."
     },
-    "jas_dioxus/src/lib.rs::tools": {
-      "kind": "debt",
-      "reason": "The tool implementations import web_sys, but 268 tests live here -- the largest single block of natively-invisible verification in the crate -- and the tool LAWS (hit radius, drag threshold, paste offset, and the pointer state machines) are document behaviour every port must agree on. Two extractions have already been made from this module for exactly this reason and both were forced by a defect: tool_consts (the scalars) and text_measure (the width law, after the native arm reimplemented it wrongly twice over).",
-      "blocked_by": "yaml_tool.rs's overlay-drawing path. MEASURED 2026-08-05 by ungating `pub mod tools` and reading a native build: 54 errors across 12 files. The trait separation this row used to call unmeasured IS clean -- tools/tool.rs has exactly one web binding (`use web_sys::CanvasRenderingContext2d`) used by exactly one method (`draw_overlay`), and all three CanvasTool implementors live in files that stay gated. But separating the trait buys NOTHING, because recorder::replay::build_gesture_tool constructs a concrete crate::tools::yaml_tool::YamlTool, and yaml_tool.rs alone carries 38 of the 54 errors -- js_sys/wasm_bindgen JsValue calls setting canvas dash patterns, all inside overlay drawing helpers, in a 7043-line file. Ungating also cascades into workspace::clipboard (6), crate::canvas (2) and workspace::app_state (1). The 7 gesture rows come home when yaml_tool's overlay path is split from its gesture seam, not when the trait is."
-    },
     "jas_dioxus/src/painter/mod.rs::canvas2d": {
       "kind": "frontend",
       "reason": "The Canvas2D backend of the Painter contract. It IS a web backend; the Direct2D backend beside it is its native counterpart and carries its own tests (37, running natively under feature d2d)."

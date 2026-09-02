@@ -7,7 +7,7 @@
 //! Each tool implements the CanvasTool trait and receives events from the
 //! canvas. Tools own their interaction state and draw overlays.
 
-use web_sys::CanvasRenderingContext2d;
+use crate::painter::overlay_ctx::OverlayCtx;
 
 use crate::document::model::Model;
 
@@ -236,7 +236,7 @@ pub trait CanvasTool {
     fn on_press(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, alt: bool);
     fn on_move(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, alt: bool, dragging: bool);
     fn on_release(&mut self, model: &mut Model, x: f64, y: f64, shift: bool, alt: bool);
-    fn draw_overlay(&self, model: &Model, ctx: &CanvasRenderingContext2d);
+    fn draw_overlay(&self, model: &Model, ctx: &mut OverlayCtx);
 
     fn on_double_click(&mut self, _model: &mut Model, _x: f64, _y: f64) {}
     fn on_key(&mut self, _model: &mut Model, _key: &str) -> bool { false }
