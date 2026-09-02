@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A LIVE ELEMENT WITH A COLOUR THE ORACLE CAN SEE.
+
+  Authored for the row-CV photograph, and the reason is measured rather than
+  assumed: every `data-jas-live` element in test_fixtures/svg is BLACK, and a
+  black assertion on a desktop full of black window chrome proves nothing.
+
+  The blue master lives in <defs>, and masters are NEVER painted directly
+  (document.symbols is not in layers). So BLUE ON SCREEN CAN ONLY COME FROM THE
+  <use> RESOLVING AND DRAWING — which is exactly the claim the photograph makes.
+  The red rect is the control: it proves the walk ran at all, so "blue absent"
+  reads as "the live element did not draw" rather than "nothing drew".
+-->
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 300 140" width="300" height="140">
+  <defs>
+    <rect x="0" y="0" width="80" height="80" fill="rgb(0,0,255)" stroke="none" id="m1"/>
+  </defs>
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
+    <rect x="10" y="30" width="80" height="80" fill="rgb(255,0,0)" stroke="none"/>
+    <use href="#m1" id="i1" data-jas-instance-transform="matrix(1,0,0,1,120,30)"/>
+  </g>
+</svg>
