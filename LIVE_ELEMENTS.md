@@ -76,6 +76,22 @@ the seam the future named-parameter schema (§6) hangs off.
   output as document elements, and today `CompoundShape::expand` copies one `common`,
   id and all, into every output ring, so multi-ring expand must mint fresh per-element
   ids — a real follow-up, `live.rs` `expand`.)
+- **Where `context` actually lives (row CV, 2026-09-01).** The ambient context is
+  not passed down a parameter chain any more; it is an **installed, render-scoped
+  object** — `document::id_index::PaintContext { index, precision }`, installed by
+  whichever walk is painting and restored by its guard. There is exactly **one**
+  installation, read by both paints. That is not tidiness: `canvas::render` (web)
+  and `painter::element_render::emit_element` (native, and on Windows the *only*
+  paint) would otherwise each carry their own, and two contexts can resolve the
+  same `common.id` to two different elements — the one divergence exact functional
+  equivalence across ports cannot survive. Precision rides *with* the index because
+  it is the same kind of thing: this section's own `context`.
+  ⛔ **A walk that installs nothing is not an error — it is silence.** Every by-id
+  reference resolves against an empty index, and the uniform failure rule below
+  turns that into an empty result rather than a complaint. The document paints with
+  its live elements missing and the walk reports success. So the install belongs to
+  the *document walk* (`canvas::render::render`, `document::paint::emit_document`),
+  never to a caller trusted to remember it.
 - **Graph membership** — a Live element is a node in the dependency graph
   (`deps`/`rdeps`/`dangling`/`cycles`/`topo_order`, `REFERENCE_GRAPH.md` §2.6).
   Recompute is **intended** to follow `topo_order` once an incremental scheduler is
@@ -323,6 +339,14 @@ shipped and some not:
   cached recompute, `expand`/`release` (CompoundShape only), and stable identity —
   pinned across the four native apps via shared `live_compound` / `live_reference` /
   `dependency_index` fixtures (Flask's JS engine has no live/boolean/reference subsystem).
+- **Shipped off the web, since row CV (2026-09-01):** a Live element renders on the
+  **native** Painter seam as its evaluated output drawn as geometry — the same four
+  `evaluate_with` arms, Fork F3's reference paint inheritance, outline mode, and the
+  uniform failure rule (an uncompletable generator paints nothing). Never a baked
+  snapshot and never a native-specific generator; the Painter trait did not grow.
+  ⚠️ The native document walk evaluates at `DEFAULT_PRECISION` because no native host
+  has a precision control yet, while the web walk uses the Boolean panel's — **a
+  known, named divergence**, closed when a host passes its own.
 - **Not built:** a generic named-parameter bag; the **recorded** provenance (needs
   the op-log spine); the **declared** provenance and concept-pack runtime (needs the
   expression-language extension); the **fitter** beyond the existing deterministic
