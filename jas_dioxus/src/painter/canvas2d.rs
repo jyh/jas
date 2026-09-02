@@ -26,7 +26,7 @@ use super::{
     StrokeStyle, TextRun,
 };
 use crate::geometry::element::{BlendMode, Color, LineCap, LineJoin, Transform};
-use crate::surface::web::WebSurface;
+use crate::surface::web::{CompositeOp, WebSurface};
 use crate::surface::PixelSurface;
 use wasm_bindgen::JsValue;
 use web_sys::{CanvasRenderingContext2d, CanvasWindingRule};
@@ -439,43 +439,53 @@ impl Painter for Canvas2dPainter<'_> {
         }
 
         let parent = self.target();
-        let prev_alpha = parent.global_alpha();
-        // The mask application is not an alpha-weighted blit: it is a channel
-        // update, so it runs at 1.0 whatever the open groups carry.
-        parent.set_global_alpha(1.0);
+        // ⛔ THE OUTER save/restore IS FOR THE CLIP, AND FOR NOTHING ELSE NOW.
+        // The bbox arm sets a clip under the CURRENT transform, and only a
+        // save/restore can take it off again. The composite's transform, alpha
+        // and operation are scoped by `composite_onto`'s own save/restore, which
+        // is what retired the manual `prev_alpha` dance that used to live here.
+        //
+        // ⚠️ MEASURED 2026-09-02: DELETING THIS `save()` KILLS NO TEST, AND IT
+        // STAYS ANYWAY. `parent` here is the enclosing ISOLATED LAYER's surface;
+        // a clip leaked onto it lands on a canvas `pop_isolated_layer` then
+        // composites WHOLE (a device-space drawImage, which no clip on the
+        // source affects) and discards, and A6 §3.2 forbids painting in the
+        // window between the two pops. So this is defensive depth whose
+        // unobservability rests on a rule kept somewhere else — which is exactly
+        // the kind of code that must not ALSO be written as if it knew the rule.
+        // See `a_reveal_bbox_mask_does_not_leak_its_clip_onto_the_next_element`
+        // for the surviving mutant, recorded with its reason.
         let _ = parent.save();
-        match law {
-            Mask::LuminanceClipIn | Mask::AlphaClipOut => {
-                let op = if matches!(law, Mask::AlphaClipOut) {
-                    "destination-out"
-                } else {
-                    "destination-in"
-                };
-                let _ = parent.set_global_composite_operation(op);
-                let _ = parent.reset_transform();
-                let _ = parent.draw_image_with_html_canvas_element(layer.surface.canvas(), 0.0, 0.0);
-            }
+        let op = match law {
+            Mask::LuminanceClipIn => CompositeOp::DestinationIn,
+            Mask::AlphaClipOut => CompositeOp::DestinationOut,
             Mask::AlphaRevealOutsideBbox { bbox } => {
                 // The bbox arrives precomputed (§3.3) as the bounds OF the
                 // transformed mask subtree, already in THIS frame — the frame
                 // the layer was pushed in, where the clip is applied (the
                 // ruled contract, 2026-08-31).
                 // Clip UNDER the current transform so the rect lands where the
-                // document says, then reset for the device-space blit -- a clip
-                // is rasterised into device space when it is set, so it still
-                // holds after the reset. Outside the clip the parent's alpha is
-                // untouched, which is the whole point of this law.
+                // document says; the service resets to device space for the
+                // blit, and a clip is rasterised into device space when it is
+                // SET, so it still holds after that reset. Outside the clip the
+                // parent's alpha is untouched, which is the whole point of this
+                // law.
                 let _ = parent.begin_path();
                 parent.rect(bbox.x, bbox.y, bbox.w, bbox.h);
                 parent.clip();
-                let _ = parent.set_global_composite_operation("destination-in");
-                let _ = parent.reset_transform();
-                let _ = parent.draw_image_with_html_canvas_element(layer.surface.canvas(), 0.0, 0.0);
+                CompositeOp::DestinationIn
             }
-        }
+        };
+        // ⚖️ ALPHA 1.0, AND IT IS NOT A DEFAULT: a mask application is a CHANNEL
+        // UPDATE, not an alpha-weighted blit, so it runs at 1.0 whatever the
+        // open groups carry.
+        layer.surface.composite_onto(parent, op, 1.0);
         let _ = parent.restore();
+        // The parent's operation is forced back rather than merely restored,
+        // exactly as before this refactor: `restore()` above already returns it,
+        // and this line is kept because changing it would be a behaviour change
+        // dressed as a cleanup.
         let _ = parent.set_global_composite_operation("source-over");
-        parent.set_global_alpha(prev_alpha);
     }
 
     fn push_isolated_layer(&mut self, alpha: f64, blend: BlendMode) {
@@ -506,19 +516,21 @@ impl Painter for Canvas2dPainter<'_> {
         self.group_alpha_stack = layer.saved_group_alphas;
         let parent = self.target();
         // A6 §3.3: effective alpha = open-group product AT THE PUSH SITE × the
-        // layer's own alpha, applied ONCE, under the layer's blend.
-        let prev_alpha = parent.global_alpha();
-        parent.set_global_alpha(self.group_alpha() * layer_alpha);
-        let _ = parent.set_global_composite_operation(
-            crate::surface::web::blend_mode_css(layer_blend),
+        // layer's own alpha, applied ONCE, under the layer's blend. The layer
+        // already carries the world transform, so the blit is in device space --
+        // which is what the service does, and why it is the service.
+        //
+        // ⚖️ `CompositeOp::Blend(mode).css()` IS `blend_mode_css(mode)`, the same
+        // function this site used to call directly; the enum is not a second
+        // vocabulary, it is the one place the three composite kinds are named.
+        layer.surface.composite_onto(
+            parent,
+            CompositeOp::Blend(layer_blend),
+            self.group_alpha() * layer_alpha,
         );
-        // the layer already carries the world transform; blit in device space
-        let _ = parent.save();
-        let _ = parent.reset_transform();
-        let _ = parent.draw_image_with_html_canvas_element(layer.surface.canvas(), 0.0, 0.0);
-        let _ = parent.restore();
+        // Forced back rather than merely restored, exactly as before this
+        // refactor -- see the note in `pop_mask_layer`.
         let _ = parent.set_global_composite_operation("source-over");
-        parent.set_global_alpha(prev_alpha);
     }
 
     fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64) {
@@ -789,6 +801,112 @@ mod a6_layer_tests {
         let (_c, ctx) = masked(Mask::LuminanceClipIn, |p| white(p, 0.0, 8.0));
         assert_eq!(alpha_at(&ctx, 4.0, 4.0), 255,
                    "control: an opaque white luminance mask must keep the element");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // ROW CW — TWO ARMS A MUTATION PASS DEMANDED, AND THEY ARE OLDER THAN THE
+    // ROW THAT FOUND THEM.
+    //
+    // Routing the three hand-rolled blits through `WebSurface::composite_onto`
+    // was behaviour-preserving, so its evidence had to be a MUTATION pass
+    // rather than a red. Two mutants survived the whole browser lane:
+    //
+    //   - the isolated layer composited `Normal` instead of its own blend
+    //   - the outer `save()` in `pop_mask_layer` was deleted (the reveal-bbox
+    //     clip then escapes the bracket, and `restore()` pops the caller's state)
+    //
+    // ⚖️ AND BOTH SURVIVED AGAINST THE PRE-REFACTOR CODE TOO — driven there as
+    // the control, because "a mutant survived my change" and "a mutant survives
+    // this code" are different claims and only the second one is true. These are
+    // PRE-EXISTING holes the refactor's evidence requirement EXPOSED, which is
+    // the argument for driving mutants at a refactor at all.
+    //
+    // 📌 The first is the same family flask reported one PR earlier on the
+    // Direct2D side: a Multiply-only suite could not tell a commutative blend
+    // from a swapped one. Neither backend's layer blend had a pixel that could
+    // fail. Both do now.
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// ⛔ THE ISOLATED LAYER'S BLEND MUST REACH THE COMPOSITE. `push_isolated_layer`
+    /// carries `(alpha, blend)` and A6 §3.3 spends both ONCE, at the closing
+    /// composite. A backend that opened the layer and closed it `source-over`
+    /// would draw a plausible picture with the blend silently discarded — and
+    /// until this arm, would have passed every test in this file.
+    ///
+    /// ⚖️ MULTIPLY IS DISCRIMINATING HERE ONLY BECAUSE OF THE COLOURS. Backdrop
+    /// RED (255,0,0) under a mid-grey (128,128,128) source: `multiply` gives
+    /// (128,0,0), `source-over` gives (128,128,128). The green channel is the
+    /// whole assertion, and it is 128 apart — a fixture whose backdrop was grey
+    /// would agree under both and prove nothing.
+    #[wasm_bindgen_test]
+    fn an_isolated_layers_blend_reaches_its_closing_composite() {
+        let (_c, ctx) = surface(8, 8);
+        let mut p = Canvas2dPainter::new(&ctx);
+        // The backdrop, painted straight onto the target.
+        p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 },
+                    &Brush::Solid(Color::rgb(1.0, 0.0, 0.0)), 1.0);
+        // A layer carrying MULTIPLY, whose body is a mid grey.
+        p.push_isolated_layer(1.0, BlendMode::Multiply);
+        p.fill_rect(Rect { x: 0.0, y: 0.0, w: 8.0, h: 8.0 },
+                    &Brush::Solid(Color::rgb(128.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0)), 1.0);
+        p.pop_isolated_layer();
+
+        let (r, g, b, a) = rgba_at(&ctx, 4.0, 4.0);
+        assert_eq!(a, 255, "the composite must land at all");
+        assert!(g <= 4 && b <= 4,
+                "the layer closed SOURCE-OVER: multiply against a red backdrop \
+                 zeroes green and blue, and this pixel is ({r},{g},{b},{a})");
+        assert!((120..=136).contains(&r),
+                "multiply of 255 x 128 is 128; got r={r} in ({r},{g},{b},{a})");
+    }
+
+    /// ⛔ THE REVEAL-BBOX BRACKET MUST NOT EAT THE NEXT ELEMENT. A leaked clip is
+    /// the nastiest shape in this file: everything the bracket itself does looks
+    /// right, and the NEXT element silently loses whatever falls outside a
+    /// rectangle it has no relationship to. So the assertion is about a draw
+    /// that happens AFTER the bracket closes, far outside the mask's bbox —
+    /// nothing inside the bracket can state it.
+    ///
+    /// ⛔⛔ AND THIS ARM DOES NOT KILL THE MUTANT IT WAS WRITTEN FOR. I AM SAYING
+    /// SO RATHER THAN LETTING A GREEN STAND IN FOR ONE. Deleting the outer
+    /// `save()` in `pop_mask_layer` leaves this test PASSING, and the reason is
+    /// worth more than the arm: `pop_mask_layer`'s `parent` is the enclosing
+    /// ISOLATED LAYER's surface, not the real target. A clip leaked there lands
+    /// on a canvas that `pop_isolated_layer` composites WHOLE — a device-space
+    /// `drawImage`, which no clip on the source affects — and then discards. A6
+    /// §3.2 forbids painting between `pop_mask_layer` and `pop_isolated_layer`,
+    /// so nothing ever draws into the window where the leak is visible.
+    ///
+    /// ⇒ **the `save()` is DEFENSIVE DEPTH, and §3.2 — not a pixel — is what
+    /// makes it unobservable.** It stays: code that is correct only because a
+    /// rule elsewhere holds should not also be written as if it knew that. The
+    /// mutant is recorded as surviving WITH ITS REASON, which is the honest
+    /// alternative to inventing a fixture for a shape (a bare mask layer with no
+    /// isolated layer around it) that `emit_masked_element` never emits.
+    #[wasm_bindgen_test]
+    fn a_reveal_bbox_mask_does_not_leak_its_clip_onto_the_next_element() {
+        let (_c, ctx) = surface(8, 8);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            // A masked element confined to the TOP-LEFT 2x2 by its bbox.
+            p.push_isolated_layer(1.0, BlendMode::Normal);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 2.0, h: 2.0 },
+                        &Brush::Solid(Color::rgb(1.0, 0.0, 0.0)), 1.0);
+            p.push_mask_layer(Mask::AlphaRevealOutsideBbox {
+                bbox: Rect { x: 0.0, y: 0.0, w: 2.0, h: 2.0 },
+            });
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 2.0, h: 2.0 },
+                        &Brush::Solid(Color::rgb(1.0, 1.0, 1.0)), 1.0);
+            p.pop_mask_layer();
+            p.pop_isolated_layer();
+
+            // ...and now a SECOND element, far outside that bbox.
+            p.fill_rect(Rect { x: 5.0, y: 5.0, w: 3.0, h: 3.0 },
+                        &Brush::Solid(Color::rgb(0.0, 0.0, 1.0)), 1.0);
+        }
+        assert_eq!(alpha_at(&ctx, 6.0, 6.0), 255,
+                   "the mask's bbox clip escaped its bracket and ate the NEXT \
+                    element, which is drawn nowhere near it");
     }
 
     /// ⛔ THE jas ASYMMETRY, AND IT IS THE WHOLE REASON THE ENUM HAS THREE
