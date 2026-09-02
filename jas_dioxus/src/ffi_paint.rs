@@ -2067,19 +2067,20 @@ mod tests {
         assert_eq!(total, 70, "the fixture corpus changed size");
         assert_eq!(
             refusing,
+            // ⭐ ROW DR, capability 1 (2026-09-02): the two SEGMENTED documents
+            // flipped, 65 -> 67. TEXT-ON-PATH is the ONLY capability left
+            // between this app and the whole corpus.
             vec![
                 ("locked_all_kinds.svg".to_string(), "TEXT-ON-PATH"),
-                ("setup_text_ab_bold_b.svg".to_string(), "SEGMENTED-TEXT(tspans)"),
                 ("text_path_basic.svg".to_string(), "TEXT-ON-PATH"),
                 ("text_path_with_tspans.svg".to_string(), "TEXT-ON-PATH"),
-                ("text_with_tspans.svg".to_string(), "SEGMENTED-TEXT(tspans)"),
             ],
             "the refusing SET changed -- a document moved in or out of what a \
-             Windows app can present. 65 of 70 should now paint (was 61): flat \
-             text flipped complex_document, setup_text_hello, text_basic and \
-             text_xml_space_preserve. Each remaining entry names the capability \
-             it waits on, and each is a LATER narrowing with its own arm."
+             Windows app can present. 67 of 70 should now paint: row DA flipped \
+             the four flat-text documents, row DR capability 1 flipped the two \
+             segmented ones (setup_text_ab_bold_b, text_with_tspans). Each \
+             remaining entry names the capability it waits on."
         );
-        assert_eq!(total - refusing.len(), 65, "65 of 70 documents present");
+        assert_eq!(total - refusing.len(), 67, "67 of 70 documents present");
     }
 }

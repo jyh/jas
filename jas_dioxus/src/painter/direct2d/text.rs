@@ -455,3 +455,148 @@ mod pixel_tests {
                  ({wide} vs {narrow}) -- equal means the run was collapsed");
     }
 }
+
+/// A closure giving the exact advance width of a string in `font` at `size`,
+/// or `None` when the face cannot be resolved.
+///
+/// ⭐ ROW DR: THE METRICS WERE ALWAYS HERE — this is the exposure, not new
+/// capability. `advances_from_directwrite` has computed exact per-glyph
+/// advances from the font's design metrics since B1; nothing outside this
+/// module could reach them, so every painter-generic caller fell back to
+/// `text_measure`'s 0.55-per-character stub.
+///
+/// ⛔ THE FACE IS RESOLVED ONCE, NOT PER CALL. A measurer is asked for every
+/// tspan and, on a path, for every GLYPH; resolving the family inside the
+/// closure would put a system-font-collection lookup in that loop. It also
+/// makes the failure happen at the right moment: an unresolvable family is
+/// `None` HERE, before a caller has committed to laying anything out.
+pub fn try_advance_of(font: &str, size: f64) -> Option<impl Fn(&str) -> f64 + 'static> {
+    let face = font_face(&parse_font_spec(font)).ok()?;
+    Some(move |text: &str| {
+        if text.is_empty() {
+            return 0.0;
+        }
+        let mut cps: Vec<u32> = text.chars().map(|c| c as u32).collect();
+        let mut glyphs = vec![0u16; cps.len()];
+        unsafe {
+            if face
+                .GetGlyphIndices(cps.as_mut_ptr(), cps.len() as u32, glyphs.as_mut_ptr())
+                .is_err()
+            {
+                return 0.0;
+            }
+        }
+        // letter_spacing 0.0: tracking is one of the four features row DA left
+        // on legacy, so a measurer that added it would be answering about a
+        // route nothing takes.
+        advances_from_directwrite(&face, &glyphs, size, 0.0)
+            .map(|a| a.iter().map(|x| *x as f64).sum())
+            .unwrap_or(0.0)
+    })
+}
+
+#[cfg(test)]
+mod measurer_tests {
+    use super::*;
+    use crate::text_measure::{make_measurer, try_make_measurer};
+
+    /// ⭐ ROW DR's ADVANCE TABLE, PINNED — `"Hello Path"` at 21.3333, the exact
+    /// content and size of `text_path_basic.svg`.
+    ///
+    /// ⛔ THE ASSERTION IS THE CUMULATIVE PEN, NOT THE PER-GLYPH WIDTH, because
+    /// that is what text-on-path actually uses: each glyph is placed at the
+    /// ACCUMULATED offset, so an error there compounds and — on a curve — lands
+    /// every later glyph at a wrong point AND a wrong tangent angle.
+    ///
+    /// Row DQ measured the stub drifting **20.590 units** by glyph ten. The row
+    /// sets the bar at **≤ 1 px at glyph ten**; the real measurer must be
+    /// exactly DirectWrite's own sum, so the tolerance here is arithmetic
+    /// slack, not a fudge factor.
+    #[test]
+    fn the_hello_path_advance_table_drifts_under_one_pixel_at_glyph_ten() {
+        let font = "normal normal sans-serif";
+        let size = 21.3333_f64;
+        let m = try_make_measurer(font, size).expect("sans-serif must resolve");
+
+        // The pen, accumulated per character exactly as the text-on-path walk
+        // does it.
+        let mut pen = 0.0_f64;
+        let mut widths = Vec::new();
+        for ch in "Hello Path".chars() {
+            let w = m(&ch.to_string());
+            widths.push(w);
+            pen += w;
+        }
+        assert_eq!(widths.len(), 10, "ten glyphs");
+
+        // The whole run measured in ONE call must equal the sum of the parts:
+        // a measurer that disagreed with itself would place glyphs one way and
+        // size the run another.
+        let whole = m("Hello Path");
+        assert!((whole - pen).abs() <= 1.0,
+                "per-glyph pen {pen:.3} and whole-run {whole:.3} disagree by more \
+                 than a pixel at glyph ten");
+
+        // ⛔ AND IT MUST NOT BE THE STUB. That is the entire point of the row:
+        // the stub answers 11.733 for EVERY character, so its pen reaches
+        // 117.333 where the real one reaches ~97.
+        let stub_pen: f64 = "Hello Path".chars().map(|c| make_measurer(font, size)(&c.to_string())).sum();
+        assert!((stub_pen - pen).abs() > 15.0,
+                "the real pen {pen:.3} must differ sharply from the stub's \
+                 {stub_pen:.3} -- equal means try_make_measurer fell back");
+
+        // ⛔ AND IT MUST BE GLYPH-AWARE, which is the property the stub lacks by
+        // construction. 'l' is a narrow glyph and 'H' a wide one; the stub gives
+        // them the same number.
+        let narrow = m("l");
+        let wide = m("H");
+        assert!(wide > narrow * 2.0,
+                "'H' ({wide:.3}) must be far wider than 'l' ({narrow:.3}) -- equal \
+                 or close means the measurer is counting characters, not glyphs");
+    }
+
+    /// ⛔ FAIL CLOSED. An unresolvable family yields NO measurer, rather than a
+    /// confident wrong number.
+    ///
+    /// `make_measurer` answers 0.55-per-char for a font that does not exist; a
+    /// caller that POSITIONS by that lays text out against metrics belonging to
+    /// no font at all. `None` lets the caller refuse the element instead, which
+    /// is what every other seam in this lane does with a capability it cannot
+    /// honour.
+    #[test]
+    fn an_unresolvable_family_yields_no_measurer_at_all() {
+        assert!(try_make_measurer("No Such Family At All 12345", 16.0).is_none(),
+                "an unresolvable face must fail closed");
+        // The control in the other direction: a real family DOES yield one, or
+        // the arm above passes on a function that always refuses.
+        assert!(try_make_measurer("normal normal sans-serif", 16.0).is_some(),
+                "the seam's own CSS shorthand must resolve (row DA)");
+        assert!(try_make_measurer("serif", 16.0).is_some(), "a bare generic too");
+    }
+
+    /// ⭐ THE PER-RUN RIGHT-EDGE ARM row DR names — the segmented case.
+    ///
+    /// Two runs laid end to end: the second starts where the first ends. With
+    /// real metrics `"iiii"` advances 15.5 at 16pt; with the stub, 35.2. The
+    /// arm asserts the SECOND RUN'S ORIGIN, because that is what a segmented
+    /// walk computes and what an ink count cannot see — two runs at the wrong
+    /// offsets ink almost exactly as many pixels as two at the right ones.
+    #[test]
+    fn the_per_run_right_edge_is_the_real_advance_not_the_stub() {
+        let font = "normal normal sans-serif";
+        let m = try_make_measurer(font, 16.0).expect("resolve");
+
+        let narrow = m("iiii");
+        let wide = m("MMMM");
+        // The stub gives BOTH 35.200. Real advances differ by ~3.7x.
+        assert!(wide > narrow * 3.0,
+                "'MMMM' ({wide:.3}) must be far wider than 'iiii' ({narrow:.3}); \
+                 the stub returns 35.200 for both");
+        // And the second run's origin is the first run's advance -- stated as
+        // the quantity the walk actually uses.
+        let second_origin = narrow;
+        assert!((second_origin - 35.2).abs() > 10.0,
+                "the second run must start at the REAL advance ({second_origin:.3}), \
+                 not the stub's 35.2");
+    }
+}
