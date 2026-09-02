@@ -809,13 +809,32 @@ impl<'a> Painter for Direct2DPainter<'a> {
         });
     }
 
+    /// ⭐ ROW EG(1): A PARTIAL ARC IS DRAWN AS THE ARC. This used to `return`
+    /// on `full_ellipse`'s `None` — a deliberate refusal at the time, because
+    /// silently closing an arc into a disc is the "looks almost right" failure
+    /// and no golden compares pixels to catch it. The 2026-09-02 ruling settles
+    /// it the other way on every port: draw the arc.
+    ///
+    /// A FILL closes the arc with a straight line back to its start — a CHORD,
+    /// which is what canvas's `ellipse(); fill()` produces. `geometry::arc`
+    /// carries that as its `close` flag.
     fn fill_ellipse_arc(&mut self, arc: &EllipseArc, _winding: FillRule, brush: &Brush, paint_alpha: f64) {
         let a = self.effective_alpha(paint_alpha);
         let (br, ar) = (brush.clone(), arc.clone());
         self.blended_primitive(move |rt| {
             let Some(b) = Self::brush_on(rt, &br, a) else { return };
-            let Some(e) = full_ellipse(&ar) else { return };
-            unsafe { rt.FillEllipse(&e, &b) };
+            if let Some(e) = full_ellipse(&ar) {
+                unsafe { rt.FillEllipse(&e, &b) };
+                return;
+            }
+            let Ok(f) = (unsafe { rt.GetFactory() }) else { return };
+            // ⚠️ `true` HERE IS INTENT, NOT A SWITCH: `FillGeometry` closes an
+            // open figure implicitly, so flipping this flag changes no pixel and
+            // a mutant that flips it survives. It is passed truthfully anyway —
+            // the geometry a fill wants IS the closed one, and a reader should
+            // not have to know D2D's implicit-close rule to see that.
+            let Ok(Some(g)) = geometry::arc(&f, &ar, true) else { return };
+            unsafe { rt.FillGeometry(&g, &b, None) };
         });
     }
 
@@ -834,7 +853,22 @@ impl<'a> Painter for Direct2DPainter<'a> {
         let (br, ar, st) = (brush.clone(), arc.clone(), stroke.clone());
         self.blended_primitive(move |rt| {
             let Some(b) = Self::brush_on(rt, &br, a) else { return };
-            let Some(e) = full_ellipse(&ar) else { return };
+            let Some(e) = full_ellipse(&ar) else {
+                // ⭐ ROW EG(1): a PARTIAL arc strokes as the arc. `close: false`
+                // -- stroking must not draw the chord a fill closes with, or
+                // every partial arc grows a bar across its mouth.
+                //
+                // ⚠️ ALIGNMENT IS NOT HONOURED ON A PARTIAL ARC AND THAT IS
+                // STATED, NOT HIDDEN: inside/outside is clip-then-stroke-at-2×,
+                // and an OPEN figure has no inside to clip to. No corpus scene
+                // strokes a partial arc off-centre today; when one does, this is
+                // the line that has to answer for it. Centre is drawn exactly.
+                let Ok(f) = (unsafe { rt.GetFactory() }) else { return };
+                let Ok(Some(g)) = geometry::arc(&f, &ar, false) else { return };
+                let ss = Self::stroke_style_on(rt, &st, st.width);
+                unsafe { rt.DrawGeometry(&g, &b, st.width as f32, ss.as_ref()) };
+                return;
+            };
             if align == StrokeAlign::Center {
                 let ss = Self::stroke_style_on(rt, &st, st.width);
                 unsafe { rt.DrawEllipse(&e, &b, st.width as f32, ss.as_ref()) };
@@ -1288,19 +1322,139 @@ mod tests {
         assert_eq!(px(&buf, 16, 0, 0), [0, 0, 0, 0], "corner outside the circle");
     }
 
-    /// THE REFUSAL THAT MATTERS MORE THAN THE DRAW. A partial arc must paint
-    /// NOTHING rather than silently closing into a full ellipse -- an arc drawn
-    /// as a disc is the "looks almost right" failure, and no golden compares
-    /// pixels to catch it.
+    /// ⭐ ROW EG(1), THE PARTIAL-ARC RULING: **a partial arc is DRAWN AS THE
+    /// ARC**, on every port.
+    ///
+    /// ⚰️ THIS ARM REPLACES A REFUSAL PIN, and the swap is the point. It used to
+    /// read *"a partial arc must paint NOTHING"* and asserted an all-transparent
+    /// buffer — a defensible pin when nothing could draw an arc, but it pinned
+    /// the ABSENCE of a feature, so it would have gone on passing forever while
+    /// the arc stayed undrawn.
+    ///
+    /// ⛔ WHAT SURVIVES FROM IT IS THE PART THAT WAS ALWAYS RIGHT: **never a
+    /// full disc.** An arc silently closed into a disc is the "looks almost
+    /// right" failure, and the assertion below still catches it — from the
+    /// other side, by naming a pixel that must stay clear.
+    ///
+    /// The sweep 0→π on a y-down surface is the LOWER half. Three points, and
+    /// each one is load-bearing: inside the sweep must paint, outside the sweep
+    /// must not (that is the "never a disc" half), and outside the radius must
+    /// not (or a bug that filled the bounding box would pass the first two).
     #[test]
-    fn a_partial_arc_paints_nothing_rather_than_a_full_ellipse() {
+    fn a_partial_arc_is_drawn_as_the_arc_and_never_as_a_full_disc() {
         let half = EllipseArc {
             cx: 8.0, cy: 8.0, rx: 6.0, ry: 6.0, rotation: 0.0,
             start: 0.0, end: std::f64::consts::PI, ccw: false,
         };
         let buf = draw(16, 16, |p| p.fill_ellipse_arc(&half, FillRule::NonZero, &red(), 1.0));
-        assert!(buf.chunks(4).all(|q| q == [0, 0, 0, 0]),
-                "a partial arc must not become a disc");
+
+        assert_eq!(px(&buf, 16, 8, 11), [0, 0, 255, 255],
+                   "inside the swept half: painted");
+        assert_eq!(px(&buf, 16, 8, 5), [0, 0, 0, 0],
+                   "the UNSWEPT half stays clear -- this is 'never a full disc'");
+        assert_eq!(px(&buf, 16, 0, 15), [0, 0, 0, 0],
+                   "and outside the radius stays clear, so a filled bbox cannot pass");
+    }
+
+    /// ⭐ ROW EG(1), THE STROKE HALF: **a stroked partial arc has no chord.**
+    ///
+    /// ⛔ THIS IS THE ARM THAT MAKES `close` EARN ITS PARAMETER. Filling a
+    /// partial arc closes it with a line back to the start; stroking must not
+    /// draw that line, or every partial arc wears a bar across its mouth. Both
+    /// pictures are plausible in a display list and only one is right, so the
+    /// difference is asserted in PIXELS rather than trusted to a flag.
+    ///
+    /// The chord of a 0→π sweep is the horizontal diameter at y = cy. A point
+    /// ON that line but away from the arc itself must stay clear.
+    #[test]
+    fn a_stroked_partial_arc_draws_no_closing_chord() {
+        let half = EllipseArc {
+            cx: 8.0, cy: 8.0, rx: 6.0, ry: 6.0, rotation: 0.0,
+            start: 0.0, end: std::f64::consts::PI, ccw: false,
+        };
+        // ⚠️ WIDTH 4, NOT 2, AND THE REASON IS ANTIALIASING. At width 2 the
+        // band's edge falls inside the sample pixel and it reads [0,0,235,235]
+        // -- 92% coverage, which is the arc being drawn correctly, not a
+        // failure. A sample point must sit wholly INSIDE the ink for an
+        // equality assertion to mean what it says.
+        let st = StrokeStyle {
+            width: 4.0, cap: LineCap::Butt, join: LineJoin::Miter,
+            miter: 10.0, dash: vec![],
+        };
+        let buf = draw(16, 16, |p| {
+            p.stroke_ellipse_arc(&half, &red(), &st, StrokeAlign::Center, 1.0)
+        });
+
+        // The arc itself, at its lowest point (cx, cy + r): the band spans
+        // y 12..16, so this pixel is fully covered.
+        assert_eq!(px(&buf, 16, 8, 14), [0, 0, 255, 255], "the arc is stroked");
+        // ⛔ THE CHORD'S SEAT: mid-diameter, y = cy, well inside both endpoints.
+        assert_eq!(px(&buf, 16, 8, 8), [0, 0, 0, 0],
+                   "no closing chord -- a stroked arc is OPEN");
+        // And the unswept half is still untouched.
+        assert_eq!(px(&buf, 16, 8, 2), [0, 0, 0, 0], "the unswept half stays clear");
+    }
+
+    /// ⭐ A SWEEP GREATER THAN π, which is a DIFFERENT arc from the same two
+    /// endpoints — the case `arcSize` exists to disambiguate.
+    ///
+    /// ⛔ WRITTEN BECAUSE A MUTANT SURVIVED. Forcing `arcSize` to SMALL passed
+    /// every other arm here, because the half-circle fixture sweeps exactly π —
+    /// the boundary, where SMALL and LARGE describe the same arc. *An arm that
+    /// exercises a feature in only one configuration cannot see an error in the
+    /// others*, and π was the one configuration that could not tell.
+    ///
+    /// 0 → 3π/2 clockwise on a y-down surface leaves the UPPER-RIGHT quadrant
+    /// unswept. Its chord runs (8,2)→(14,8), i.e. the line y = x − 6.
+    #[test]
+    fn a_sweep_past_half_a_turn_takes_the_long_way_round() {
+        let three_quarters = EllipseArc {
+            cx: 8.0, cy: 8.0, rx: 6.0, ry: 6.0, rotation: 0.0,
+            start: 0.0, end: 3.0 * std::f64::consts::FRAC_PI_2, ccw: false,
+        };
+        let buf = draw(16, 16, |p| {
+            p.fill_ellipse_arc(&three_quarters, FillRule::NonZero, &red(), 1.0)
+        });
+
+        // Inside the swept three-quarters, well clear of the chord.
+        assert_eq!(px(&buf, 16, 5, 11), [0, 0, 255, 255], "the long way IS swept");
+        // ⛔ (12,4) is inside the circle and ABOVE the chord (4 < 12−6), so it
+        // lies in the unswept quadrant. Take the SHORT arc instead and this
+        // pixel is the one that fills.
+        assert_eq!(px(&buf, 16, 12, 4), [0, 0, 0, 0],
+                   "the unswept quadrant stays clear -- a SMALL arc would fill it");
+    }
+
+    /// ⭐ A ROTATED PARTIAL ARC HONOURS ITS ROTATION.
+    ///
+    /// ⛔ WRITTEN BECAUSE A MUTANT SURVIVED: zeroing `rotationAngle` passed all
+    /// 79 arms in this backend. Rotation matters MORE than it looks, because
+    /// `full_ellipse` refuses a rotated arc — so since row EG(1) every rotated
+    /// ellipse reaches the screen through this builder and nothing was
+    /// asserting the angle it drew at.
+    ///
+    /// rx 6 / ry 2 rotated a quarter turn puts the LONG axis vertical. At three
+    /// pixels below centre the shape is ~1.7px wide either side of x = 8; drop
+    /// the rotation and the same point is far outside a 2px-tall ellipse.
+    #[test]
+    fn a_rotated_partial_arc_is_drawn_at_its_rotation() {
+        let rotated = EllipseArc {
+            cx: 8.0, cy: 8.0, rx: 6.0, ry: 2.0,
+            rotation: std::f64::consts::FRAC_PI_2,
+            start: 0.0, end: std::f64::consts::PI, ccw: false,
+        };
+        let buf = draw(16, 16, |p| {
+            p.fill_ellipse_arc(&rotated, FillRule::NonZero, &red(), 1.0)
+        });
+        // The shape is a narrow vertical sliver: only x = 6,7 carry ink.
+        assert_eq!(px(&buf, 16, 7, 11), [0, 0, 255, 255], "the sliver is drawn");
+        // ⛔ AND THE PIXEL THAT ACTUALLY DISCRIMINATES. My first attempt
+        // asserted only the line above and the mutant SURVIVED: x = 7 is
+        // painted either way. Measured, the zeroed-rotation case makes D2D
+        // rescale the radii to reach endpoints it otherwise cannot, and it
+        // floods x = 0..7 on every row. This point is the difference.
+        assert_eq!(px(&buf, 16, 3, 8), [0, 0, 0, 0],
+                   "far from the sliver -- an unrotated fit floods this");
     }
 
     /// The corpus rounds to 4 decimals, so a full sweep arrives as 6.2832 --
@@ -1859,3 +2013,4 @@ mod tests {
         assert_eq!(ra, 255);
     }
 }
+

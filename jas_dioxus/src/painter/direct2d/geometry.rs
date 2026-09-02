@@ -29,17 +29,19 @@
 use windows::core::Result;
 use windows::Win32::Graphics::Direct2D::Common::{
     D2D1_BEZIER_SEGMENT, D2D1_FIGURE_BEGIN_FILLED, D2D1_FIGURE_END_CLOSED,
-    D2D1_FIGURE_END_OPEN,
+    D2D1_FIGURE_END_OPEN, D2D_SIZE_F,
 };
 // D2D1_QUADRATIC_BEZIER_SEGMENT is in the Direct2D root, not ::Common --
 // unlike its cubic sibling, which is in Common. Not a pattern, just the header.
 use windows::Win32::Graphics::Direct2D::{
-    ID2D1Factory, ID2D1PathGeometry, D2D1_QUADRATIC_BEZIER_SEGMENT,
+    ID2D1Factory, ID2D1PathGeometry, D2D1_ARC_SEGMENT, D2D1_ARC_SIZE_LARGE,
+    D2D1_ARC_SIZE_SMALL, D2D1_QUADRATIC_BEZIER_SEGMENT, D2D1_SWEEP_DIRECTION_CLOCKWISE,
+    D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
 };
 use windows_numerics::Vector2;
 
 use super::convert;
-use crate::painter::{FillRule, PathCommand};
+use crate::painter::{EllipseArc, FillRule, PathCommand};
 
 fn v(x: f64, y: f64) -> Vector2 {
     Vector2 { X: x as f32, Y: y as f32 }
@@ -216,11 +218,44 @@ pub fn build(factory: &ID2D1Factory, path: &[PathCommand], winding: FillRule)
 mod tests {
     use super::*;
     use crate::painter::direct2d::device::HeadlessTarget;
+    use crate::painter::EllipseArc;
 
     fn factory() -> (HeadlessTarget, ID2D1Factory) {
         let t = HeadlessTarget::new(4, 4).unwrap();
         let f = unsafe { t.target().GetFactory() }.unwrap();
         (t, f)
+    }
+
+    /// ⛔ **THE 6.2832 TOLERANCE, ASSERTED WHERE IT STILL DISCRIMINATES.**
+    ///
+    /// Row EG(1) says keep that tolerance, and this arm is why it needed a NEW
+    /// home. A PIXEL test used to protect it: with a tolerance tuned to f64, a
+    /// corpus-rounded full sweep counted as PARTIAL, the backend refused to
+    /// draw, and the centre pixel came back empty. **Making the partial case
+    /// DRAW removed that discrimination** — a 6.2832 arc and a true circle fill
+    /// the same disc to within 1.5e-5 of a radian, which no pixel can see.
+    ///
+    /// ⇒ So it is pinned at the seam that still has an opinion: this builder
+    /// REFUSES a sweep that is a full turn to the corpus's own precision,
+    /// because a full turn belongs to `full_ellipse`, which is exact and
+    /// cheaper. Tighten 5e-5 to f64 precision and this returns `Some`.
+    ///
+    /// **A mutant that tightened it to 1e-9 survived every arm in the backend.
+    /// That surviving mutant is the only reason this test exists.**
+    #[test]
+    fn a_corpus_rounded_full_sweep_is_not_this_builders_business() {
+        let (_t, f) = factory();
+        let rounded = EllipseArc {
+            cx: 8.0, cy: 8.0, rx: 6.0, ry: 6.0, rotation: 0.0,
+            start: 0.0, end: 6.2832, ccw: false,
+        };
+        assert!(arc(&f, &rounded, true).expect("builds").is_none(),
+                "6.2832 is how the corpus spells a FULL circle -- the partial                  builder must decline it to full_ellipse");
+
+        // The positive control: a genuinely partial sweep IS its business.
+        let half = EllipseArc { end: std::f64::consts::PI, ..rounded };
+        assert!(arc(&f, &half, true).expect("builds").is_some(),
+                "a real partial arc must still build, or this arm proves nothing");
     }
 
     /// A closed triangle builds, and its bounds are what the points say. Bounds
@@ -333,5 +368,70 @@ mod tests {
             },
         ];
         let _ = build(&f, &p, FillRule::NonZero);
+    }
+}
+
+/// ⭐ ROW EG(1): a PARTIAL ellipse arc as an exact D2D geometry.
+///
+/// `AddArc` takes a true conic — centre, radii, rotation, sweep — so nothing is
+/// approximated here. That matters beyond tidiness: the Captain's 2026-09-02
+/// ruling puts any approximation at the RASTERISER and nowhere above it, and a
+/// bézier-flattened arc here would be the same mistake RP3 just retired one
+/// function over.
+///
+/// ⛔ `close` IS THE FILL/STROKE DIFFERENCE AND IT IS NOT COSMETIC. Filling a
+/// partial arc closes it with a straight line back to the start — a CHORD — and
+/// that is what canvas does with `ellipse(); fill()`. Stroking must NOT draw
+/// that line, or every partial arc grows a bar across its mouth. One flag, two
+/// genuinely different pictures.
+///
+/// Returns `None` for a sweep that is not a partial arc (zero, or a full turn):
+/// a full sweep belongs to `full_ellipse`, which is exact and cheaper.
+pub fn arc(factory: &ID2D1Factory, a: &EllipseArc, close: bool)
+    -> Result<Option<ID2D1PathGeometry>>
+{
+    const TAU: f64 = std::f64::consts::TAU;
+    // The SWEPT magnitude, normalised the way canvas defines it: `ccw` picks
+    // the direction and the remainder wraps into [0, TAU).
+    let raw = if a.ccw { a.start - a.end } else { a.end - a.start };
+    let sweep = raw.rem_euclid(TAU);
+    // ⚠️ THE SAME 5e-5 TOLERANCE `full_ellipse` USES, and for the same reason:
+    // the corpus emits 4 decimals, so a full turn arrives as 6.2832. Anything
+    // that close to a full turn is NOT this function's business.
+    if sweep <= 5e-5 || (TAU - sweep) <= 5e-5 {
+        return Ok(None);
+    }
+
+    let pt = |ang: f64| {
+        let (sa, ca) = (ang.sin(), ang.cos());
+        let (x, y) = (a.rx * ca, a.ry * sa);
+        let (sr, cr) = (a.rotation.sin(), a.rotation.cos());
+        v(a.cx + x * cr - y * sr, a.cy + x * sr + y * cr)
+    };
+
+    unsafe {
+        let geo = factory.CreatePathGeometry()?;
+        let sink = geo.Open()?;
+        sink.BeginFigure(pt(a.start), D2D1_FIGURE_BEGIN_FILLED);
+        sink.AddArc(&D2D1_ARC_SEGMENT {
+            point: pt(a.end),
+            size: D2D_SIZE_F { width: a.rx as f32, height: a.ry as f32 },
+            rotationAngle: a.rotation.to_degrees() as f32,
+            sweepDirection: if a.ccw {
+                D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE
+            } else {
+                D2D1_SWEEP_DIRECTION_CLOCKWISE
+            },
+            // An arc segment names two endpoints, and two points on an ellipse
+            // admit TWO arcs. This is what says which.
+            arcSize: if sweep > std::f64::consts::PI {
+                D2D1_ARC_SIZE_LARGE
+            } else {
+                D2D1_ARC_SIZE_SMALL
+            },
+        });
+        sink.EndFigure(if close { D2D1_FIGURE_END_CLOSED } else { D2D1_FIGURE_END_OPEN });
+        sink.Close()?;
+        Ok(Some(geo))
     }
 }
