@@ -165,6 +165,48 @@ pub unsafe extern "C" fn jas_pointer_event(
     JasStatus::Ok
 }
 
+/// How many elements the session currently has selected.
+///
+/// ⭐ IT EXISTS SO A RECEIPT CAN SAY A NUMBER. A photograph of a marquee proves
+/// the overlay drew; it does not prove the pointer SELECTED anything, and those
+/// are the two halves of node 5. With this the shell's own title bar carries the
+/// count, so the picture and the claim are checked by the same run.
+///
+/// `usize::MAX` for a null engine -- a count cannot express a refusal, and
+/// returning 0 there would read as "nothing selected", which is a lie about a
+/// session that does not exist.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_selection_len(e: *mut JasEngine) -> usize {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return usize::MAX };
+    engine.with_document(|d| d.selection.len())
+}
+
+/// ⭐ ONE FRAME: the document, then the active tool's overlay on top of it.
+///
+/// ⛔ PAINTER-GENERIC ON PURPOSE, and that is what makes it testable. The D2D
+/// export below (`ffi_paint::jas_paint_frame`) needs a GPU surface and cannot
+/// run in a unit test; this function needs only a `Painter`, so a
+/// `RecordingPainter` can read back exactly what a frame contains and assert
+/// that the overlay is in it and lands AFTER the document.
+///
+/// The overlay is skipped, not faked, when no tool has been selected -- a
+/// frame with no tool is a document, which is what `jas_paint_document` has
+/// always drawn.
+pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter) {
+    engine.with_document(|doc| {
+        crate::document::paint::emit_document(p, doc, crate::geometry::live::DEFAULT_PRECISION);
+    });
+    let mut slot = engine.tool_slot();
+    if let Some((_, tool)) = slot.as_mut() {
+        let mut ctx = crate::painter::overlay_ctx::OverlayCtx::new(p);
+        engine.with_model(|m| tool.draw_overlay(m, &mut ctx));
+        ctx.finish();
+    }
+}
+
 /// Build a `YamlTool` from the embedded workspace bundle -- the same path the
 /// running app uses.
 fn build_tool(id: &str) -> Option<Box<dyn CanvasTool>> {
@@ -184,7 +226,14 @@ mod tests {
     fn seed(e: *mut JasEngine) {
         let rect = Element::Rect(RectElem {
             x: 20.0, y: 30.0, width: 100.0, height: 80.0,
-            rx: 0.0, ry: 0.0, fill: None, stroke: None,
+            rx: 0.0, ry: 0.0,
+            // ⛔ A REAL FILL. A rect with `fill: None, stroke: None` hit-tests
+            // exactly the same and paints NOTHING, so the frame arm below saw
+            // an empty document and could not tell a working walk from a dead
+            // one. It cost me one red to notice.
+            fill: Some(crate::geometry::element::Fill::new(
+                crate::geometry::element::Color::rgb(0.8, 0.16, 0.16))),
+            stroke: None,
             fill_gradient: None, stroke_gradient: None,
             common: CommonProps { name: Some("R".to_string()), ..Default::default() },
         });
@@ -207,7 +256,10 @@ mod tests {
     fn seed_two(e: *mut JasEngine) {
         let mk = |x: f64, name: &str| Element::Rect(RectElem {
             x, y: 30.0, width: 100.0, height: 80.0,
-            rx: 0.0, ry: 0.0, fill: None, stroke: None,
+            rx: 0.0, ry: 0.0,
+            fill: Some(crate::geometry::element::Fill::new(
+                crate::geometry::element::Color::rgb(0.8, 0.16, 0.16))),
+            stroke: None,
             fill_gradient: None, stroke_gradient: None,
             common: CommonProps { name: Some(name.to_string()), ..Default::default() },
         });
@@ -388,6 +440,65 @@ mod tests {
         assert_eq!(drag_from_inside(0), 1, "a plain drag MOVES the one element");
         assert_eq!(drag_from_inside(MOD_ALT), 2,
                    "an alt-drag DUPLICATES it -- so the alt bit crossed, and                     crossed as alt rather than as shift");
+    }
+
+    /// ⭐ A FRAME CARRIES THE OVERLAY, AND CARRIES IT ON TOP.
+    ///
+    /// This is what makes a live selection PHOTOGRAPHABLE: `jas_paint_document`
+    /// draws the document alone, so a selected element looked exactly like an
+    /// unselected one. Asserted through a `RecordingPainter` rather than a GPU
+    /// surface, which is why the law is testable at all.
+    #[test]
+    fn a_frame_draws_the_document_then_the_overlay_on_top() {
+        use crate::painter::recording::RecordingPainter;
+
+        let e = jas_engine_new();
+        seed(e);
+
+        // No tool yet: a frame is exactly a document.
+        let mut bare = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut bare);
+        let doc_only = bare.commands().len();
+        assert!(doc_only > 0, "the seeded rect must draw");
+
+        // Now a marquee is in flight.
+        unsafe {
+            jas_set_tool(e, 0);
+            jas_pointer_event(e, KIND_PRESS, 10.0, 20.0, 0);
+            jas_pointer_event(e, KIND_MOVE, 140.0, 120.0, MOD_DRAGGING);
+        }
+        let mut framed = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut framed);
+        let cmds = framed.commands().to_vec();
+
+        assert!(cmds.len() > doc_only,
+                "the frame must carry MORE than the document: {} vs {}",
+                cmds.len(), doc_only);
+        // ⛔ AND ON TOP, NOT UNDERNEATH. An overlay painted first is an overlay
+        // the document covers -- a frame that looks right in a display list and
+        // wrong on a screen.
+        assert_eq!(&cmds[..doc_only], &bare.commands()[..doc_only],
+                   "the document half is unchanged and comes FIRST");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// ⛔ A COUNT CANNOT EXPRESS A REFUSAL, so a null engine does not return 0.
+    #[test]
+    fn the_selection_count_crosses_and_a_null_engine_is_not_zero() {
+        assert_eq!(unsafe { jas_selection_len(std::ptr::null_mut()) }, usize::MAX,
+                   "0 there would read as 'nothing selected' about a session                     that does not exist");
+        let e = jas_engine_new();
+        seed(e);
+        assert_eq!(unsafe { jas_selection_len(e) }, 0);
+        unsafe {
+            jas_set_tool(e, 0);
+            jas_pointer_event(e, KIND_PRESS, 10.0, 20.0, 0);
+            jas_pointer_event(e, KIND_MOVE, 140.0, 120.0, MOD_DRAGGING);
+            jas_pointer_event(e, KIND_RELEASE, 140.0, 120.0, 0);
+        }
+        assert_eq!(unsafe { jas_selection_len(e) }, 1,
+                   "and it reports what the gesture actually did");
+        unsafe { jas_engine_free(e) };
     }
 
     /// ⛔ BL5: NO STRING CROSSES. The tool list is read back by INDEX, as

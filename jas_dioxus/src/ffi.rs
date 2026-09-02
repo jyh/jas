@@ -207,6 +207,12 @@ impl JasEngine {
     /// Run `f` against the session's live model, mutably. Same closure shape
     /// and same reason as [`Self::with_document`]: the `RefCell` guard must
     /// outlive the call, so it cannot be handed back.
+    /// Read-only twin of [`Self::with_model_mut`]. The overlay walk needs the
+    /// MODEL (view transform, tool-visible state), not just the document.
+    pub(crate) fn with_model<R>(&self, f: impl FnOnce(&Model) -> R) -> R {
+        f(&self.model.borrow())
+    }
+
     pub(crate) fn with_model_mut<R>(&self, f: impl FnOnce(&mut Model) -> R) -> R {
         f(&mut self.model.borrow_mut())
     }

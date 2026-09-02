@@ -643,6 +643,23 @@ JasStatus jas_set_dpi_scale(struct JasEngine *e, double scale);
  */
 JasStatus jas_pointer_event(struct JasEngine *e, uint32_t kind, double x, double y, uint32_t mods);
 
+/**
+ * How many elements the session currently has selected.
+ *
+ * ⭐ IT EXISTS SO A RECEIPT CAN SAY A NUMBER. A photograph of a marquee proves
+ * the overlay drew; it does not prove the pointer SELECTED anything, and those
+ * are the two halves of node 5. With this the shell's own title bar carries the
+ * count, so the picture and the claim are checked by the same run.
+ *
+ * `usize::MAX` for a null engine -- a count cannot express a refusal, and
+ * returning 0 there would read as "nothing selected", which is a lie about a
+ * session that does not exist.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+uintptr_t jas_selection_len(struct JasEngine *e);
+
 #if (defined(JAS_WITH_D2D) && defined(_WIN32))
 /**
  * Paint the S-B probe pattern into a caller-owned DXGI surface.
@@ -761,6 +778,32 @@ int32_t jas_load_svg(void *engine, const uint8_t *svg, uintptr_t len);
  * not transferred.
  */
 int32_t jas_paint_document(void *engine, void *surface, float width, float height);
+#endif
+
+#if (defined(JAS_WITH_D2D) && defined(_WIN32))
+/**
+ * Paint ONE FRAME: the engine's live document, then the active tool's overlay
+ * on top of it.
+ *
+ * ⭐ THE DIFFERENCE FROM `jas_paint_document` IS THE ONLY REASON A SELECTION IS
+ * VISIBLE. That function draws the document alone, so a selected element looks
+ * exactly like an unselected one and a marquee in flight is not on the screen
+ * at all. Node 5 needs the overlay, and node 5's PR 1 is what made the overlay
+ * reachable from a non-web painter.
+ *
+ * ⛔ A SEPARATE EXPORT RATHER THAN A BEHAVIOUR CHANGE. `jas_paint_document` is
+ * what the 21/21 golden and 70/70 document receipts were photographed through;
+ * silently adding an overlay to it would change every one of those pictures and
+ * invalidate the receipts without anyone asking. A shell that wants the overlay
+ * says so.
+ *
+ * The refusal contract is identical: a document carrying something this backend
+ * cannot draw is refused BEFORE `BeginDraw`, so the surface is never touched.
+ *
+ * # Safety
+ * As [`jas_paint_document`].
+ */
+int32_t jas_paint_frame(void *engine, void *surface, float width, float height);
 #endif
 
 #if (defined(JAS_WITH_D2D) && defined(_WIN32))

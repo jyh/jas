@@ -160,6 +160,86 @@ internal static unsafe class JasCore
     internal static extern int jas_paint_document(
         IntPtr engine, IntPtr dxgiSurface, float width, float height);
 
+    /// <summary>
+    /// Paint ONE FRAME: the session's live document, then the ACTIVE TOOL'S
+    /// OVERLAY on top of it.
+    ///
+    /// This is the call that makes a selection visible. <see
+    /// cref="jas_paint_document"/> draws the document alone, so a selected
+    /// element looks exactly like an unselected one and a marquee in flight is
+    /// not on the screen at all. Kept separate from it deliberately: the golden
+    /// and document receipts were photographed through that one, and quietly
+    /// adding an overlay would change every one of those pictures.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_paint_frame(
+        IntPtr engine, IntPtr dxgiSurface, float width, float height);
+
+    // -- node 5: the pointer ------------------------------------------------
+    //
+    // ⛔ SCALARS ONLY (BL5). Not one string parameter in this group: the tool
+    // is chosen by INDEX, the modifiers are bit flags, and the coordinates are
+    // doubles. Nothing here can be mangled by a cp1252 marshalling default.
+    //
+    // ⛔ AND THIS SHELL DOES NOT KNOW WHAT A CLICK MEANS. It sends WHERE the
+    // pointer went; hit-testing, marquee state, tool modes and the ops that
+    // result all live in the core. That is BL1, and it is the whole reason
+    // there is a pointer entry point at all rather than C# computing ops.
+
+    internal const uint PointerPress = 0;
+    internal const uint PointerMove = 1;
+    internal const uint PointerRelease = 2;
+
+    internal const uint ModShift = 1u << 0;
+    internal const uint ModAlt = 1u << 1;
+    internal const uint ModDragging = 1u << 2;
+
+    /// <summary>
+    /// One pointer transition. <paramref name="x"/> and <paramref name="y"/>
+    /// are PHYSICAL pixels -- what the swapchain is sized in -- and the core
+    /// converts to DIPs itself using the scale set below.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_pointer_event(
+        IntPtr engine, uint kind, double x, double y, uint mods);
+
+    /// <summary>
+    /// Tell the core this display's physical-pixels-per-DIP.
+    ///
+    /// ⛔ THE SHELL REPORTS IT AND DOES NOT APPLY IT. Dividing here would put
+    /// the single most common Windows-app defect on this side of the boundary,
+    /// where no Rust test can see it.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_set_dpi_scale(IntPtr engine, double scale);
+
+    /// <summary>Select the tool the pointer drives, by index.</summary>
+    [DllImport(Lib)]
+    internal static extern int jas_set_tool(IntPtr engine, nuint index);
+
+    /// <summary>How many tools the core offers.</summary>
+    [DllImport(Lib)]
+    internal static extern nuint jas_tool_count();
+
+    /// <summary>
+    /// The tool id at <c>index</c>: a pointer into <c>'static</c> core memory
+    /// plus a length, exactly like <see cref="jas_corpus_name"/>. Nothing is
+    /// allocated, so nothing is freed. NULL and 0 when out of range.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern IntPtr jas_tool_name(nuint index, out nuint len);
+
+    /// <summary>
+    /// How many elements the session has selected.
+    ///
+    /// ⛔ <c>nuint.MaxValue</c> FOR A NULL SESSION, not 0. A count cannot
+    /// express a refusal, and 0 there would read as "nothing selected" about a
+    /// session that does not exist -- which is exactly the vacuous success this
+    /// shell keeps refusing everywhere else.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern nuint jas_selection_len(IntPtr engine);
+
     /// <summary>How many recorded goldens the core carries.</summary>
     [DllImport(Lib)]
     internal static extern nuint jas_corpus_len();
