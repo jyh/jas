@@ -2065,22 +2065,24 @@ mod tests {
         }
 
         assert_eq!(total, 70, "the fixture corpus changed size");
+
+        // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
+        // in the SVG corpus now presents through the Windows surface — 70 of 70.
+        //
+        // The road: 51/70 before row CV → 61/70 after CV (LIVE) → 65/70 after
+        // row DA (flat text) → 67/70 after DR capability 1 (segmented) → 70/70
+        // here (type on a path).
+        //
+        // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
+        // matters MORE now than when the list had entries: a later change that
+        // pushed one document back out would otherwise read as "69, close
+        // enough". An empty vec says the corpus is WHOLE, and any entry at all
+        // is a regression that arrives with a name and a capability attached.
         assert_eq!(
             refusing,
-            // ⭐ ROW DR, capability 1 (2026-09-02): the two SEGMENTED documents
-            // flipped, 65 -> 67. TEXT-ON-PATH is the ONLY capability left
-            // between this app and the whole corpus.
-            vec![
-                ("locked_all_kinds.svg".to_string(), "TEXT-ON-PATH"),
-                ("text_path_basic.svg".to_string(), "TEXT-ON-PATH"),
-                ("text_path_with_tspans.svg".to_string(), "TEXT-ON-PATH"),
-            ],
-            "the refusing SET changed -- a document moved in or out of what a \
-             Windows app can present. 67 of 70 should now paint: row DA flipped \
-             the four flat-text documents, row DR capability 1 flipped the two \
-             segmented ones (setup_text_ab_bold_b, text_with_tspans). Each \
-             remaining entry names the capability it waits on."
+            Vec::<(String, &'static str)>::new(),
+            "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 67, "67 of 70 documents present");
+        assert_eq!(total - refusing.len(), 70, "the whole corpus presents");
     }
 }
